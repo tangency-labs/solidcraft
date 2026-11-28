@@ -1909,19 +1909,104 @@ struct CacheEntry {
     change: Option<(u64, CachedEval<Change>)>,
 }
 
+/// Returns a cache-safe copy of `state` whose bodies detach `NamingOrigin` / `copy_of` chains
+/// whenever exact face names can be materialized without meshing, plus the retained body bytes of
+/// any earlier `ModelState`s still pinned by bodies that could not be detached.
+fn detach_state_for_cache(state: &Arc<ModelState>) -> (Arc<ModelState>, usize) {
+    let needs_copy = state
+        .bodies
+        .iter()
+        .any(|b| b.names.retains_ancestors() || b.cuts.try_lock().is_ok_and(|c| !c.is_empty()) || b.sections.try_lock().is_ok_and(|s| !s.is_empty()));
+    let cached = if needs_copy {
+        let mut detached = (**state).clone();
+        for b in &mut detached.bodies {
+            b.cuts = Arc::default();
+            b.sections = Arc::default();
+            let keep_made = b.names.origin.as_ref().is_some_and(|o| o.feature.shell_piece_order);
+            if let Some(cell) = crate::naming::try_detach_for_cache(b) {
+                b.names = cell;
+                if !keep_made {
+                    b.made = crate::lineage::Made::Before;
+                }
+            }
+        }
+        Arc::new(detached)
+    } else {
+        state.clone()
+    };
+    let pinned = pinned_ancestor_bytes(&cached);
+    (cached, pinned)
+}
+
+/// Retained body bytes of earlier `ModelState`s still reachable through un-detached `NameCell`
+/// origins or `copy_of` chains on `state`.
+fn pinned_ancestor_bytes(state: &ModelState) -> usize {
+    let mut seen_states = std::collections::HashSet::new();
+    let mut seen_solids: std::collections::HashSet<usize> = state.bodies.iter().map(|b| b.body.solid_id()).collect();
+    let mut pending_states: Vec<Arc<ModelState>> = Vec::new();
+    let mut pending_copies: Vec<Arc<ModelBody>> = Vec::new();
+    let mut bytes = 0usize;
+    for b in &state.bodies {
+        if let Some(o) = &b.names.origin {
+            pending_states.push(o.before.clone());
+        }
+        if let Some(src) = b.names.copy_source() {
+            pending_copies.push(src.clone());
+        }
+    }
+    while !pending_states.is_empty() || !pending_copies.is_empty() {
+        while let Some(copy) = pending_copies.pop() {
+            if seen_solids.insert(copy.body.solid_id()) {
+                bytes = bytes.saturating_add(if copy.bytes > 0 { copy.bytes } else { copy.body.retained_bytes() });
+            }
+            if let Some(o) = &copy.names.origin {
+                pending_states.push(o.before.clone());
+            }
+            if let Some(src) = copy.names.copy_source() {
+                pending_copies.push(src.clone());
+            }
+        }
+        while let Some(ancestor) = pending_states.pop() {
+            if !seen_states.insert(Arc::as_ptr(&ancestor) as usize) {
+                continue;
+            }
+            for b in &ancestor.bodies {
+                if seen_solids.insert(b.body.solid_id()) {
+                    bytes = bytes.saturating_add(if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() });
+                }
+                if let Some(o) = &b.names.origin {
+                    pending_states.push(o.before.clone());
+                }
+                if let Some(src) = b.names.copy_source() {
+                    pending_copies.push(src.clone());
+                }
+            }
+        }
+    }
+    bytes
+}
+
 impl CacheEntry {
     /// Stores the entry in `cache`, and its whole result in `kept`.
     fn put(self, cache: &std::sync::Mutex<EvalCache>, kept: &KeptSlot) {
         if let Some(k) = &kept.0 {
             k.put(self.key, &self.whole);
         }
+        let (cached_state, pinned_bytes) = detach_state_for_cache(&self.whole.state);
+        let whole = self.whole.with(cached_state);
         if let Ok(mut m) = cache.lock() {
-            let ms = self.whole.ms;
+            let ms = whole.ms;
             if let Some((k, change)) = self.change {
                 let bytes = change.state.retained_bytes();
                 m.changes.put(k, change, bytes, ms);
             }
-            m.states.put(self.key, self.whole, self.bytes, ms);
+            let total_bytes = self.bytes.saturating_add(pinned_bytes);
+            // Never pin an un-detached multi-state ancestor chain past the cache budget:
+            // `Store::put` keeps at least one entry, which would otherwise retain an entire
+            // superseded timeline through `NamingOrigin::before`.
+            if pinned_bytes == 0 || total_bytes <= m.states.budget {
+                m.states.put(self.key, whole, total_bytes, ms);
+            }
         }
     }
 }
@@ -2509,7 +2594,7 @@ impl ImportHeal {
 struct ImportDigests {
     steps: std::collections::HashMap<u64, (Arc<str>, u64)>,
     /// An import kept as records: its records and their digest, computed once per records.
-    records: std::collections::HashMap<u64, (Arc<kernel::ImportRecords>, u64)>,
+    records: std::collections::HashMap<u64, (kernel::SharedRecords, u64)>,
     meshes: std::collections::HashMap<u64, Vec<MeshDigest>>,
     /// The parts SMLib's checks of an import healed once they ended (after the import was
     /// first shown: [`Model::settle_import_checks`]), by import feature, with the digest of the
@@ -2596,8 +2681,8 @@ impl ImportDigests {
         self.steps.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
     }
 
-    fn records_digest(&self, id: u64, records: &Arc<kernel::ImportRecords>) -> Option<u64> {
-        self.records.get(&id).filter(|(r, _)| Arc::ptr_eq(r, records)).map(|(_, digest)| *digest)
+    fn records_digest(&self, id: u64, records: &kernel::SharedRecords) -> Option<u64> {
+        self.records.get(&id).filter(|(r, _)| kernel::SharedRecords::ptr_eq(r, records)).map(|(_, digest)| *digest)
     }
 
     fn mesh(&self, id: u64, index: usize, mesh: &crate::MeshData) -> Option<u64> {
@@ -2623,7 +2708,14 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
 /// An import's records digested as their serialised form; records that will not serialise
 /// digest as nothing (their evaluation fails and says why).
 fn records_digest(records: &kernel::ImportRecords) -> u64 {
-    step_text_digest(&kernel::records_text(records).unwrap_or_default())
+    match records.digest() {
+        Ok(d) => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.digested += 1);
+            d.hash
+        }
+        Err(_) => step_text_digest(""),
+    }
 }
 
 fn step_text_digest(text: &str) -> u64 {
@@ -4490,6 +4582,19 @@ fn import_blocked_names(before: &ModelState, made: &[ModelBody]) -> Arc<[String]
     blocked.into()
 }
 
+/// Copies a body produced by feature `f` for an [`EvalCache`] change entry without retaining the
+/// superseded `before` naming chain or auxiliary cut/section caches. Replaying a change always
+/// re-stamps non-saved, non-transfer bodies in [`ModelState::stamp`].
+fn strip_change_body(b: &ModelBody, f: &Feature) -> ModelBody {
+    let mut copy = b.clone();
+    copy.cuts = Arc::default();
+    copy.sections = Arc::default();
+    if !copy.names.is_saved() && !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
+        copy.names = crate::naming::NameCell::default();
+    }
+    copy
+}
+
 impl Relative {
     /// `after`'s bodies as a change of `before`'s by feature `f`, which read the bodies `read`:
     /// every body it did not read stands where it stood, each body it read is kept, changed under
@@ -4517,13 +4622,13 @@ impl Relative {
             }
             let fate = match next.next_if(|b| b.name == x.name) {
                 Some(b) if same(b) => Fate::Kept,
-                Some(b) => Fate::Changed(Box::new(b.clone())),
+                Some(b) => Fate::Changed(Box::new(strip_change_body(b, f))),
                 None => Fate::Removed,
             };
             changed |= !matches!(fate, Fate::Kept);
             fates.push((x.name.clone(), fate));
         }
-        let made: Vec<ModelBody> = next.cloned().collect();
+        let made: Vec<ModelBody> = next.map(|b| strip_change_body(b, f)).collect();
         // Each in its own slot: a body numbered from the counter can come out with a name stored
         // in another.
         let stored = |(k, b): (usize, &ModelBody)| f.body_names.get(k) == Some(&b.name) && !names.contains(b.name.as_str());
@@ -4741,7 +4846,7 @@ impl ModelState {
                     }
                     from = j + 1;
                 }
-                None => bodies.push(Changed::Made(Box::new(b.clone()))),
+                None => bodies.push(Changed::Made(Box::new(strip_change_body(b, f)))),
             }
         }
         let only_read = untouched.iter().enumerate().all(|(j, u)| *u || read.bodies.contains(&j));
@@ -6759,7 +6864,7 @@ impl Model {
         self.note_states();
         self.placement_inputs = None;
         self.fingerprinted = None;
-        self.placement_local = true;
+        self.placement_local = false;
         let driven_meta = doc.driven_params();
         let has_driven = !driven_meta.is_empty();
         let param_defs = if has_driven { doc.param_defs() } else { Vec::new() };
@@ -6784,6 +6889,15 @@ impl Model {
         let base_shared_ctx = shared_context_digest(doc, &base_vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
+        // Bodies already held by the session before this evaluation keep their kernel forms
+        // untouched while a scratch copy evaluates (#19629).
+        let kept_before: std::collections::HashSet<usize> = self
+            .results
+            .iter()
+            .map(|r| &r.state)
+            .chain(rolled_results.values().map(|(_, _, r)| &r.state))
+            .flat_map(|s| s.bodies.iter().map(|b| b.body.solid_id()))
+            .collect();
         self.context = base_ctx;
         let prev_import_digests = std::mem::take(&mut self.import_digests);
         self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
@@ -6862,7 +6976,6 @@ impl Model {
         // back to the refused feature, which then fails with the check's error, as it would have.
         let mut checks = overlap::Checks::new(validation);
         let has_capture = doc.has_capture_position_timeline();
-        self.placement_local &= !has_capture;
         let mut stepper = CaptureStepper::new(doc, &base_vals);
         let mut resolved_joints: BTreeMap<u64, crate::CapturedJoint> = BTreeMap::new();
         let mut start = 0;
@@ -6929,7 +7042,6 @@ impl Model {
                 {
                     failed.insert(r.id, (r.name.clone(), e.clone()));
                 }
-                self.placement_local = self.placement_local && placement_reuse::local_geometry(f, feature_component);
                 let rolled_back = i >= marker;
                 // Retain at most one active result per rolled-back feature, even across several
                 // marker moves. Build the map anew so deleted features release their states too.
@@ -7066,6 +7178,57 @@ impl Model {
                     checks.refuse(i, c.failure.clone());
                 }
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
+                // An active result hidden by the marker, or evaluated ahead on these same inputs
+                // (the same chain of definitions from the start). Checked before `self.cache` so
+                // rolling the history marker forward reuses this model's live `Arc<ModelState>`
+                // instead of a detached cache copy. Changed inputs never reuse it.
+                if checks.refused_at(i).is_none()
+                    && let Some(r) = rolled
+                        .as_ref()
+                        .filter(|_| moved.is_empty())
+                        .filter(|(comp, _)| *comp == Some(key.reached))
+                        .map(|(_, r)| r)
+                        .filter(current)
+                        .or_else(|| {
+                            primed.iter().filter(|_| moved.is_empty()).find_map(|p| {
+                                // posed where that model evaluated it, not only here
+                                let posed_there = pose.is_none_or(|pose| p.poses.get(&f.id) == Some(&pose));
+                                let comp_ok = p.component_keys.get(&f.id) == Some(&key.reached);
+                                p.results.get(&f.id).filter(current).filter(|_| posed_there && comp_ok)
+                            })
+                        })
+                        .filter(|r| r.error.is_some() || legacy_current(eval_doc, f, &state, &r.state))
+                {
+                    if let Some(k) = kept {
+                        k.put(
+                            key.whole,
+                            &CachedEval {
+                                error: r.error.clone(),
+                                error_code: r.error_code.clone(),
+                                warning: r.warning.clone(),
+                                import_report: r.import_report.clone(),
+                                repair: r.repair.clone(),
+                                lost_projections: r.lost_projections.clone(),
+                                ms: r.ms,
+                                state: r.state.clone(),
+                            },
+                        );
+                    }
+                    restored += 1;
+                    component_keys.insert(f.id, key.reached);
+                    let before_rolled = stepper.is_some().then(|| state.clone());
+                    if r.error.is_none() {
+                        state = r.state.clone();
+                    }
+                    reuse &= r.error.is_some() == unkept_error;
+                    let ok = r.error.is_none();
+                    let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
+                    out.push(FeatureResult { state: state.clone(), unkept: false, unkept_error: false, warning, ..r.clone() });
+                    if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
+                        s.advance(&mut resolved_joints, vals, f, before_rolled, &state);
+                    }
+                    continue;
+                }
                 if !self.no_cache
                     && let Some(c) = self
                         .cache
@@ -7118,39 +7281,6 @@ impl Model {
                     });
                     if ok && let (Some(s), Some(before_cache)) = (stepper.as_mut(), before_cache.as_ref()) {
                         s.advance(&mut resolved_joints, vals, f, before_cache, &state);
-                    }
-                    continue;
-                }
-                // An active result hidden by the marker, or evaluated ahead on these same inputs
-                // (the same chain of definitions from the start). Changed inputs never reuse it.
-                if let Some(r) = rolled
-                    .as_ref()
-                    .filter(|_| moved.is_empty())
-                    .filter(|(comp, _)| *comp == Some(key.reached))
-                    .map(|(_, r)| r)
-                    .filter(current)
-                    .or_else(|| {
-                        primed.iter().filter(|_| moved.is_empty()).find_map(|p| {
-                            // posed where that model evaluated it, not only here
-                            let posed_there = pose.is_none_or(|pose| p.poses.get(&f.id) == Some(&pose));
-                            let comp_ok = p.component_keys.get(&f.id) == Some(&key.reached);
-                            p.results.get(&f.id).filter(current).filter(|_| posed_there && comp_ok)
-                        })
-                    })
-                    .filter(|r| r.error.is_some() || legacy_current(eval_doc, f, &state, &r.state))
-                {
-                    restored += 1;
-                    component_keys.insert(f.id, key.reached);
-                    let before_rolled = stepper.is_some().then(|| state.clone());
-                    if r.error.is_none() {
-                        state = r.state.clone();
-                    }
-                    reuse &= r.error.is_some() == unkept_error;
-                    let ok = r.error.is_none();
-                    let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
-                    out.push(FeatureResult { state: state.clone(), unkept: false, unkept_error: false, warning, ..r.clone() });
-                    if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
-                        s.advance(&mut resolved_joints, vals, f, before_rolled, &state);
                     }
                     continue;
                 }
@@ -7431,6 +7561,19 @@ impl Model {
                         if let Some(s) = stepper.as_mut() {
                             s.advance(&mut resolved_joints, vals, f, &before, &state);
                         }
+                        // Release kernel forms of bodies newly built in this pass once a later
+                        // feature supersedes them so long timelines do not keep every intermediate
+                        // SMLib/ops form live simultaneously.
+                        for prev in &before.bodies {
+                            let mut cur = Some(&prev.body);
+                            while let Some(body) = cur {
+                                let id = body.solid_id();
+                                if !kept_before.contains(&id) && !state.bodies.iter().any(|b| b.body.solid_id() == id) {
+                                    body.release_kernel_form();
+                                }
+                                cur = body.rounds().map(|(earlier, _)| earlier);
+                            }
+                        }
                         // A window opening the design can show what is built so far.
                         watched.offer_with(i + 1, || {
                             if let Some(s) = stepper.as_mut() {
@@ -7519,7 +7662,14 @@ impl Model {
             self.param_errors = base_perr;
         }
         self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
-        self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
+        self.placement_local = !has_capture && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none()) && {
+            let mut prev = &*self.empty;
+            doc.features.iter().zip(&out).all(|(f, r)| {
+                let ok = placement_reuse::placement_local_feature(doc, f, prev, &r.state, feature_component);
+                prev = &r.state;
+                ok
+            })
+        };
         self.poses = poses;
         self.component_keys = component_keys;
         self.results = out;
@@ -21285,7 +21435,7 @@ fn eval_feature_kind(
             let (imp, digest) = match prepared_import {
                 Some((imp, digest)) => (imp.clone(), digest.clone()),
                 None => match records {
-                    Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
+                    Some(r) => (kernel::records_import_shared(r)?, r.digest()?.sha256.clone()),
                     None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
                 },
             };
@@ -23752,6 +23902,145 @@ mod migrated_placement_digest_tests {
 
         assert_ne!(mirror_lost, mirror_ok, "mirror digest must invalidate when migration stops resolving");
         assert_ne!(pattern_lost, pattern_ok, "pattern digest must invalidate when migration stops resolving");
+    }
+}
+
+#[cfg(test)]
+mod cache_retention_tests {
+    use super::*;
+
+    fn multi_feature_plate() -> Document {
+        let mut doc = Document::new("cache retention");
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "80".into(),
+                width: "40".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(5.0, 5.0, 10.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "5".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            Some("Boss1"),
+        )
+        .unwrap();
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(25.0, 5.0, 10.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "5".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            Some("Boss2"),
+        )
+        .unwrap();
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(60.0, 15.0, -1.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "12".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            Some("Slot"),
+        )
+        .unwrap();
+        doc
+    }
+
+    #[test]
+    fn eval_cache_does_not_pin_evicted_model_state_chains() {
+        let doc = multi_feature_plate();
+        let mut model = Model::new();
+        *model.cache.lock().unwrap() = EvalCache::with_budget(1);
+        model.evaluate(&doc);
+
+        assert_eq!(model.results.len(), 4);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        assert!(model.state().bodies[0].names.origin.is_some(), "live model retains naming origin");
+        for r in &model.results[..3] {
+            for b in &r.state.bodies {
+                assert!(!b.body.holds_kernel_form(), "superseded intermediate body `{}` should release kernel form", b.name);
+            }
+        }
+
+        let live_names = crate::naming::face_names(&model.state().bodies[0]);
+        let cache = model.cache.clone();
+        {
+            let guard = cache.lock().unwrap();
+            assert_eq!(guard.len(), 1, "budget=1 keeps only one cached state");
+            for stored in guard.states.map.values() {
+                for b in &stored.value.state.bodies {
+                    assert!(!b.names.retains_ancestors(), "cached state must detach naming origin");
+                    assert!(b.names.cached_names().is_some(), "detached cached state must keep resolved names");
+                }
+            }
+            for stored in guard.changes.map.values() {
+                if let Change::Model(mc) = &stored.value.state {
+                    for changed in mc.bodies.iter() {
+                        if let Changed::Made(b) = changed {
+                            assert!(!b.names.retains_ancestors(), "cached change body must not retain naming origin");
+                        }
+                    }
+                    if let Some(rel) = &mc.relative {
+                        for (_, fate) in &rel.read {
+                            if let Fate::Changed(b) = fate {
+                                assert!(!b.names.retains_ancestors(), "relative change body must not retain naming origin");
+                            }
+                        }
+                        for b in &rel.made {
+                            assert!(!b.names.retains_ancestors(), "relative made body must not retain naming origin");
+                        }
+                    }
+                }
+            }
+        }
+
+        let weak_states: Vec<_> = model.results.iter().map(|r| Arc::downgrade(&r.state)).collect();
+        drop(model);
+        for (i, weak) in weak_states.iter().enumerate() {
+            assert!(weak.upgrade().is_none(), "state {i} must not stay pinned by EvalCache");
+        }
+
+        // Re-evaluating with the shared cache preserves exact persistent face names.
+        let mut replay = Model::new();
+        replay.cache = cache;
+        replay.evaluate(&doc);
+        assert!(replay.results.iter().all(|r| r.error.is_none()));
+        assert_eq!(crate::naming::face_names(&replay.state().bodies[0]), live_names);
+    }
+
+    #[test]
+    fn release_left_releases_intermediate_states_and_keeps_active_state() {
+        let doc = multi_feature_plate();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        for r in &model.results {
+            for b in &r.state.bodies {
+                b.body.smlib().unwrap();
+            }
+        }
+        model.release_left();
+        for r in &model.results[..model.results.len() - 1] {
+            for b in &r.state.bodies {
+                assert!(!b.body.holds_kernel_form(), "intermediate feature `{}` should release kernel form", r.name);
+            }
+        }
+        assert!(model.state().bodies[0].body.holds_kernel_form(), "active shown state keeps its kernel form");
     }
 }
 

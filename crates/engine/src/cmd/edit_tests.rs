@@ -3844,3 +3844,34 @@ fn timeline_edit_refuses_face_and_profile_picks_past_history_marker() {
     assert!(result.error.is_none(), "{:?}", result.error);
     assert!(result.warning.is_none(), "{:?}", result.warning);
 }
+
+/// Repeated `timeline.dependents` calls followed by `timeline.delete` must not pin superseded
+/// alternate timelines or historical intermediate kernel forms in `EvalCache`.
+#[test]
+fn repeated_dependents_checks_do_not_pin_superseded_timelines_before_delete() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [5, 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join", "name": "BossA"}));
+    run(&mut s, "solid.box", json!({"corner": [25, 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join", "name": "BossB"}));
+    run(&mut s, "solid.box", json!({"corner": [45, 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join", "name": "BossC"}));
+    run(&mut s, "solid.box", json!({"corner": [65, 15, -1], "length": 10, "width": 10, "height": 12, "operation": "cut", "name": "Slot"}));
+
+    *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+    s.model.results[0].state.bodies[0].body.smlib().unwrap();
+
+    for feature in ["BossA", "BossB", "BossC"] {
+        let report = run(&mut s, "timeline.dependents", json!({"feature": feature}));
+        assert_eq!(report, json!({"deleted_with_it": [], "would_fail": []}), "{feature}: {report}");
+        assert!(s.model.cache.lock().unwrap().len() <= 1);
+    }
+    assert!(
+        !s.model.results[0].state.bodies[0].body.holds_kernel_form(),
+        "intermediate historical body should release its kernel form after release_left"
+    );
+
+    let deleted = run(&mut s, "timeline.delete", json!({"features": ["BossB"]}));
+    assert!(deleted.get("failing").is_none(), "delete should succeed with 0 errors: {deleted}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 32_000.0).abs() < 1e-3, "expected 32000 mm3 after deleting BossB, got {volume}");
+}

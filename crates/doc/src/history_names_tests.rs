@@ -382,7 +382,7 @@ fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
 
     // A face made only of an unnamed tool's faces has no exact name.
     let unnamed = Operand::Made(vec![Vec::new()]);
-    let one = OperandNames { operand: &unnamed, body: None, names: Arc::default(), edges: OnceLock::new() };
+    let one = OperandNames { operand: &unnamed, body: None, names: Arc::default(), edges: OnceLock::new(), no_mesh: false };
     let only = FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face: 0 }], change: solidcraft_kernel::history::Change::Kept };
     assert!(from_origins(&only, &[one], 1).is_none());
 }

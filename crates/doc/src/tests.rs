@@ -5970,6 +5970,213 @@ fn asymmetric_profile_and_old_designs_preserve_face_names() {
     }
 }
 
+/// [`SharedRecords`] serialises identically to raw [`solidcraft_kernel::ImportRecords`],
+/// short-circuits [`PartialEq`] on [`std::sync::Arc::ptr_eq`], and produces the exact same
+/// SHA-256 payload digest as [`crate::config::payload_digest`] on [`solidcraft_kernel::records_text`].
+#[test]
+fn shared_records_in_feature_import_wire_format_digest_and_ptr_eq() {
+    let body = solidcraft_kernel::RecordBody {
+        name: "Tri".into(),
+        path: vec!["Root".into(), "Tri".into()],
+        instance: Some("Tri:1".into()),
+        color: Some([0.25, 0.5, 0.75]),
+        paint: None,
+        hidden: false,
+        placement: None,
+        brep: None,
+        face_origin: Vec::new(),
+        mesh: Some(solidcraft_kernel::RecordMesh {
+            positions: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]],
+            triangles: vec![[0, 1, 2]],
+        }),
+        copy_of: None,
+        sheet: false,
+    };
+    let raw = solidcraft_kernel::ImportRecords::new(vec![body.clone()], Vec::new(), vec!["note".into()], "FreeCAD".into());
+    let shared = SharedRecords::new(raw.clone());
+
+    // Streaming SHA-256 matches `config::payload_digest(&records_text(&raw))` bit-for-bit.
+    let text = solidcraft_kernel::records_text(&raw).unwrap();
+    assert_eq!(shared.digest().unwrap().sha256, crate::config::payload_digest(&text));
+
+    // Wire format inside `FeatureKind::Import` is identical to raw `ImportRecords` JSON.
+    let kind =
+        FeatureKind::Import { file: "tri.FCStd".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: Some(shared.clone()) };
+    let encoded = serde_json::to_value(&kind).unwrap();
+    assert_eq!(encoded["records"], serde_json::to_value(&raw).unwrap());
+    let decoded: FeatureKind = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, kind);
+
+    // `Document` equality short-circuits via `SharedRecords` `Arc::ptr_eq`, even with NaN data.
+    let mut nan_body = body;
+    nan_body.mesh =
+        Some(solidcraft_kernel::RecordMesh { positions: vec![[f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], triangles: vec![[0, 1, 2]] });
+    let nan_raw = solidcraft_kernel::ImportRecords::new(vec![nan_body], Vec::new(), Vec::new(), String::new());
+    let mut doc = Document::new("NaN records");
+    doc.add_feature(
+        FeatureKind::Import {
+            file: "nan.FCStd".into(),
+            step: "".into(),
+            components: Vec::new(),
+            skip: Vec::new(),
+            records: Some(SharedRecords::new(nan_raw.clone())),
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(doc, doc.clone(), "cloning shares the Arc so Document::eq short-circuits");
+
+    let mut separate = doc.clone();
+    if let FeatureKind::Import { records, .. } = &mut separate.features[0].kind {
+        *records = Some(SharedRecords::new(nan_raw));
+    }
+    assert_ne!(doc, separate, "distinct Arcs fall back to value comparison where NaN != NaN");
+}
+
+/// [`Document::painted`] and [`Document::painted_for_link`] resolve body colours, opacities,
+/// look names, imported face paints and authored face overrides identically to per-body lookups
+/// across root and child components.
+#[test]
+fn painted_with_faces_matches_per_body_appearance_resolution() {
+    use crate::appearance::{FaceLook, Look};
+
+    let mut doc = Document::new("Painted");
+    let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+    let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+
+    let add_box = |doc: &mut Document, comp: u64, x: f64| {
+        let kind: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "box",
+            "corner": [x, 0.0, 0.0],
+            "length": "10",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body"
+        }))
+        .unwrap();
+        let id = doc.add_feature(kind, None).unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+    };
+
+    add_box(&mut doc, 0, 0.0);
+    add_box(&mut doc, comp_a, 20.0);
+    add_box(&mut doc, comp_b, 40.0);
+    add_box(&mut doc, 0, 60.0);
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let mut state = (*model.state()).clone();
+    assert_eq!(state.bodies.len(), 4);
+
+    let name0 = state.bodies[0].name.clone();
+    let name1 = state.bodies[1].name.clone();
+    let name2 = state.bodies[2].name.clone();
+    let name3 = state.bodies[3].name.clone();
+
+    // Give body 3 imported colour + face paint so both authored and imported paths are exercised.
+    let imported_paint = solidcraft_kernel::Paint {
+        opacity: 0.65,
+        faces: vec![
+            solidcraft_kernel::FacePaint { face: 0, color: [0.1, 0.2, 0.3], opacity: 0.9, name: Some("ImpFace0".into()) },
+            solidcraft_kernel::FacePaint { face: 1, color: [0.4, 0.5, 0.6], opacity: 0.8, name: None },
+        ],
+        name: Some("ImpBody".into()),
+        layer: None,
+    };
+    state.bodies[3].body = state.bodies[3].body.clone().with_color(Some([0.2, 0.3, 0.4])).with_paint(Some(imported_paint));
+
+    // Body 0: explicit body look + two overrides on face 0 (later wins) + one on face 1.
+    doc.appearances.bodies.insert(name0.clone(), Look::custom([10, 20, 30], 0.8));
+    // Component A (owns body 1): named component look.
+    doc.appearances.components.insert(comp_a, Look { name: "Aluminum - Satin".into(), color: [180, 185, 190], opacity: 1.0, pbr: None });
+    // Body 2 (in comp_b): physical material fallback.
+    doc.materials.insert(name2.clone(), "Copper".into());
+
+    let f0_names = crate::naming::face_names(&state.bodies[0]);
+    let f0_pts = state.bodies[0].body.faces(0.01).unwrap();
+    let f1_names = crate::naming::face_names(&state.bodies[1]);
+    let f1_pts = state.bodies[1].body.faces(0.01).unwrap();
+    let f3_names = crate::naming::face_names(&state.bodies[3]);
+    let f3_pts = state.bodies[3].body.faces(0.01).unwrap();
+
+    doc.appearances.faces.push(FaceLook {
+        body: name0.clone(),
+        point: f0_pts[0].centroid,
+        look: Look::custom([255, 0, 0], 1.0),
+        name: Some(f0_names[0].clone()),
+        strict_name: false,
+        certificate: None,
+    });
+    doc.appearances.faces.push(FaceLook {
+        body: name0.clone(),
+        point: f0_pts[1].centroid,
+        look: Look::custom([0, 255, 0], 0.7),
+        name: Some(f0_names[1].clone()),
+        strict_name: false,
+        certificate: None,
+    });
+    // Overwrite face 0 on body 0 with a later override to verify last-write-wins ordering.
+    doc.appearances.faces.push(FaceLook {
+        body: name0.clone(),
+        point: f0_pts[0].centroid,
+        look: Look::custom([0, 0, 255], 0.5),
+        name: Some(f0_names[0].clone()),
+        strict_name: false,
+        certificate: None,
+    });
+    doc.appearances.faces.push(FaceLook {
+        body: name1.clone(),
+        point: f1_pts[0].centroid,
+        look: Look::custom([200, 100, 50], 1.0),
+        name: Some(f1_names[0].clone()),
+        strict_name: false,
+        certificate: None,
+    });
+    doc.appearances.faces.push(FaceLook {
+        body: name3.clone(),
+        point: f3_pts[0].centroid,
+        look: Look::custom([250, 240, 10], 0.4),
+        name: Some(f3_names[0].clone()),
+        strict_name: false,
+        certificate: None,
+    });
+
+    for authored in [true, false] {
+        let out = if authored { doc.painted(&state) } else { doc.painted_for_link(&state) };
+        assert_eq!(out.bodies.len(), state.bodies.len());
+        for (orig, got) in state.bodies.iter().zip(&out.bodies) {
+            let expected_color = doc.body_color(orig);
+            let expected_face_colors = if authored { doc.face_colors(orig) } else { doc.imported_face_colors(orig) };
+            let expected_faces: Vec<solidcraft_kernel::FacePaint> = expected_face_colors
+                .into_iter()
+                .map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32, name: l.file_name() })
+                .collect();
+            let expected_opacity = doc.model_body_opacity(orig) as f32;
+            let expected_name = expected_color.and_then(|_| doc.model_display_look(orig)).and_then(|l| l.file_name());
+            let expected_layer = doc.model_body_folder(orig);
+            let expected_paint =
+                solidcraft_kernel::Paint { opacity: expected_opacity, faces: expected_faces, name: expected_name, layer: expected_layer };
+            assert_eq!(got.body.color(), expected_color, "body {} (authored={authored})", orig.name);
+            assert_eq!(got.body.paint(), Some(&expected_paint), "body {} paint (authored={authored})", orig.name);
+        }
+    }
+
+    // Sanity-check precedence and authored-vs-link behaviour directly.
+    let painted = doc.painted(&state);
+    let linked = doc.painted_for_link(&state);
+    let b0_faces = &painted.bodies[0].body.paint().unwrap().faces;
+    assert_eq!(b0_faces.len(), 2);
+    assert_eq!(b0_faces.iter().find(|f| f.face == 0).unwrap().color, [0.0, 0.0, 1.0]);
+    assert_eq!(painted.bodies[1].body.paint().unwrap().name.as_deref(), Some("Aluminum - Satin"));
+    assert!(painted.bodies[2].body.color().is_some());
+    assert_eq!(painted.bodies[3].body.paint().unwrap().faces.iter().find(|f| f.face == 0).unwrap().color, Look::custom([250, 240, 10], 0.4).rgb());
+    assert_eq!(
+        linked.bodies[3].body.paint().unwrap().faces.iter().find(|f| f.face == 0).unwrap().color,
+        Look::imported([26, 51, 77], 0.9, Some("ImpFace0")).rgb()
+    );
+}
+
 /// #14426: a named driven sketch dimension is exposed as a read-only parameter to downstream
 /// features and parameters, recomputes downstream geometry when the driving sketch changes, and
 /// participates in incremental caching and `.sc` JSON serialization.

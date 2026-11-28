@@ -4,7 +4,7 @@
 //! broken one fails its import with the reason, never a panic.
 
 use super::super::{IDENTITY, StepNode, step_import};
-use super::{ImportRecords, RecordBody, records_import, records_noted};
+use super::{ImportRecords, RecordBody, RecordMesh, SharedRecords, records_import, records_noted, records_text};
 use crate::measure;
 use solidcore_record::brep::{self, Brep};
 
@@ -39,7 +39,7 @@ fn kept(text: &str) -> ImportRecords {
         left_out: Vec::new(),
         children: Vec::new(),
     }];
-    ImportRecords { bodies, tree, warnings: Vec::new(), system: String::new() }
+    ImportRecords::new(bodies, tree, Vec::new(), String::new())
 }
 
 #[test]
@@ -416,6 +416,305 @@ fn a_small_cylinder_imported_with_coarse_distance_accuracy_meshes() {
     }
 }
 
+/// [`SharedRecords`] serialises identically to [`ImportRecords`] and short-circuits [`PartialEq`]
+/// on [`std::sync::Arc::ptr_eq`], falling back to value comparison for distinct allocations.
+#[test]
+fn shared_records_wire_compatible_and_ptr_eq_short_circuit() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut raw = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    raw.warnings = vec!["note".into()];
+    raw.system = "FreeCAD".into();
+    let shared = SharedRecords::new(raw.clone());
+
+    // Wire-compatibility: identical JSON bytes to raw `ImportRecords`.
+    let raw_json = serde_json::to_string(&raw).unwrap();
+    let shared_json = serde_json::to_string(&shared).unwrap();
+    assert_eq!(shared_json, raw_json);
+    let decoded: SharedRecords = serde_json::from_str(&raw_json).unwrap();
+    assert_eq!(*decoded, raw);
+    assert_eq!(shared, decoded);
+    assert!(!SharedRecords::ptr_eq(&shared, &decoded));
+
+    let mut changed = raw.clone();
+    changed.system = "Rhino".into();
+    assert_ne!(shared, SharedRecords::new(changed));
+
+    // Deterministic proof of `Arc::ptr_eq` short-circuit: NaN != NaN under value comparison, so
+    // `nan_a == nan_a_clone` can only hold when pointer equality short-circuits.
+    let nan_body = RecordBody {
+        name: "NaN".into(),
+        path: Vec::new(),
+        instance: None,
+        color: None,
+        paint: None,
+        hidden: false,
+        placement: None,
+        brep: None,
+        face_origin: Vec::new(),
+        mesh: Some(RecordMesh { positions: vec![[f64::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], triangles: vec![[0, 1, 2]] }),
+        copy_of: None,
+        sheet: false,
+    };
+    let nan_raw = ImportRecords::new(vec![nan_body], Vec::new(), Vec::new(), String::new());
+    let nan_a = SharedRecords::new(nan_raw.clone());
+    let nan_a_clone = nan_a.clone();
+    let nan_b = SharedRecords::new(nan_raw);
+    assert!(SharedRecords::ptr_eq(&nan_a, &nan_a_clone));
+    assert_eq!(nan_a, nan_a_clone);
+    assert_ne!(nan_a, nan_b);
+}
+
+/// The zero-allocation streaming digest on [`ImportRecords`] matches
+/// `text_key(&serde_json::to_string(r))` and SHA-256 of the serialised bytes bit-for-bit, caches
+/// lazily, starts fresh on [`Clone`], and refreshes after [`ImportRecords::invalidate_digest`].
+#[test]
+fn streaming_digest_matches_serialized_text_key_and_sha256_bit_for_bit() {
+    use sha2::{Digest, Sha256};
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut records = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    records.bodies[0].path = vec!["Asm".into(), "Washer".into()];
+    records.bodies[0].instance = Some("Washer:1".into());
+    records.bodies[0].color = Some([0.2, 0.4, 0.6]);
+    records.bodies[0].paint = Some(crate::Paint {
+        opacity: 0.9,
+        faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.2], opacity: 0.75, name: Some("Red".into()) }],
+        name: Some("Blue".into()),
+        layer: None,
+    });
+    let mut copy = records.bodies[0].clone();
+    copy.name = "WasherCopy".into();
+    copy.brep = None;
+    copy.face_origin = Vec::new();
+    copy.copy_of = Some(0);
+    copy.placement = Some([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [10.0, 20.0, 30.0, 1.0]]);
+    let mesh = RecordBody {
+        name: "Tri".into(),
+        path: Vec::new(),
+        instance: None,
+        color: None,
+        paint: None,
+        hidden: true,
+        placement: None,
+        brep: None,
+        face_origin: Vec::new(),
+        mesh: Some(RecordMesh { positions: vec![[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [0.0, 5.0, 0.0]], triangles: vec![[0, 1, 2]] }),
+        copy_of: None,
+        sheet: false,
+    };
+    records.bodies.push(copy);
+    records.bodies.push(mesh);
+    records.warnings = vec!["first warning".into()];
+    records.system = "FreeCAD".into();
+
+    let text = records_text(&records).unwrap();
+    let (want_hash, want_len) = super::super::text_key(&text);
+    let want_sha = format!("{:x}", Sha256::digest(text.as_bytes()));
+
+    let first = records.digest().unwrap();
+    assert_eq!(first.hash, want_hash);
+    assert_eq!(first.bytes, want_len);
+    assert_eq!(first.sha256, want_sha);
+    assert!(std::ptr::eq(first, records.digest().unwrap()), "subsequent calls return the cached digest");
+
+    // Cloning does not carry a stale cache into a mutated clone.
+    let mut cloned = records.clone();
+    cloned.warnings.push("clone note".into());
+    let cloned_text = records_text(&cloned).unwrap();
+    let cloned_digest = cloned.digest().unwrap();
+    assert_eq!((cloned_digest.hash, cloned_digest.bytes), super::super::text_key(&cloned_text));
+    assert_eq!(cloned_digest.sha256, format!("{:x}", Sha256::digest(cloned_text.as_bytes())));
+    assert_ne!(cloned_digest.sha256, want_sha);
+
+    // Mutating in place and calling `invalidate_digest` recomputes accurately.
+    records.warnings.push("mutated note".into());
+    records.invalidate_digest();
+    let mutated_text = records_text(&records).unwrap();
+    let mutated_digest = records.digest().unwrap();
+    assert_eq!((mutated_digest.hash, mutated_digest.bytes), super::super::text_key(&mutated_text));
+    assert_eq!(mutated_digest.sha256, format!("{:x}", Sha256::digest(mutated_text.as_bytes())));
+}
+
+/// Parallel two-pass [`records_import`] preserves exact body ordering, geometry, transformed copy
+/// placements, warning order, solid counts and product-tree renumbering.
+#[test]
+fn parallel_records_import_preserves_order_geometry_copies_and_placements() {
+    use super::super::LeftOut;
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let washer_rec = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    let cone_rec = kept(&std::fs::read_to_string(dir.join("cone_point.step")).unwrap());
+    let cyl_rec = kept(&std::fs::read_to_string(dir.join("cylinder_seam.step")).unwrap());
+
+    let washer_ref = measure(&records_import(&washer_rec).unwrap().bodies[0].body).unwrap();
+    let cone_ref = measure(&records_import(&cone_rec).unwrap().bodies[0].body).unwrap();
+    let cyl_ref = measure(&records_import(&cyl_rec).unwrap().bodies[0].body).unwrap();
+
+    let translate = |dx: f64, dy: f64, dz: f64| [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [dx, dy, dz, 1.0]];
+    // 90° CCW about Z followed by +25 mm along Y: (x, y, z) -> (-y, x + 25, z).
+    let rot_z_90_y25 = [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 25.0, 0.0, 1.0]];
+
+    let mut b0 = washer_rec.bodies[0].clone();
+    b0.name = "Washer0".into();
+    b0.color = Some([0.1, 0.2, 0.3]);
+
+    let mut b1 = cone_rec.bodies[0].clone();
+    b1.name = "Cone1".into();
+    b1.placement = Some(translate(10.0, 0.0, 0.0));
+
+    let mut b2_broken = washer_rec.bodies[0].clone();
+    b2_broken.name = "Broken2".into();
+    b2_broken.face_origin.pop();
+
+    let mut b3_nan = cyl_rec.bodies[0].clone();
+    b3_nan.name = "CylNan3".into();
+    b3_nan.placement = Some([[f64::NAN; 4]; 4]);
+
+    let b4_washer_copy =
+        RecordBody { name: "WasherCopy4".into(), brep: None, face_origin: Vec::new(), copy_of: Some(0), placement: Some(rot_z_90_y25), ..b0.clone() };
+
+    let b5_cyl_copy = RecordBody {
+        name: "CylCopy5".into(),
+        brep: None,
+        face_origin: Vec::new(),
+        copy_of: Some(3),
+        placement: Some(translate(0.0, 0.0, 40.0)),
+        ..cyl_rec.bodies[0].clone()
+    };
+
+    let b6_broken_copy =
+        RecordBody { name: "BrokenCopy6".into(), brep: None, face_origin: Vec::new(), copy_of: Some(2), placement: None, ..b0.clone() };
+
+    let b7_washer_id =
+        RecordBody { name: "WasherIdentity7".into(), brep: None, face_origin: Vec::new(), copy_of: Some(0), placement: Some(IDENTITY), ..b0.clone() };
+
+    let tree = vec![StepNode {
+        name: "Asm".into(),
+        transform: IDENTITY,
+        bodies: (0..8).collect(),
+        items: Vec::new(),
+        left_out: Vec::new(),
+        children: Vec::new(),
+    }];
+    let records = ImportRecords::new(
+        vec![b0, b1, b2_broken, b3_nan, b4_washer_copy, b5_cyl_copy, b6_broken_copy, b7_washer_id],
+        tree,
+        Vec::new(),
+        String::new(),
+    );
+    let imp = records_import(&records).unwrap();
+
+    // Exact imported order and source items: [0, 1, 4, 5, 7].
+    let names: Vec<&str> = imp.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, vec!["Washer0", "Cone1", "WasherCopy4", "CylCopy5", "WasherIdentity7"]);
+    let items: Vec<u64> = imp.bodies.iter().map(|b| b.source_item).collect();
+    assert_eq!(items, vec![0, 1, 0, 3, 0]);
+    assert_eq!((imp.report.parts, imp.report.solids), (4, 3));
+
+    // Exact warning order matches failing indices 2, 3, 6.
+    assert_eq!(imp.warnings.len(), 3, "{:?}", imp.warnings);
+    assert!(imp.warnings[0].contains("Broken2") && imp.warnings[0].contains("face origins"), "{:?}", imp.warnings);
+    assert!(imp.warnings[1].contains("CylNan3") && imp.warnings[1].contains("not finite"), "{:?}", imp.warnings);
+    assert!(imp.warnings[2].contains("BrokenCopy6") && imp.warnings[2].contains("was not imported"), "{:?}", imp.warnings);
+
+    // Tree renumbering and left-out slots preserved deterministically.
+    assert_eq!(imp.tree[0].bodies, vec![0, 1, 2, 3, 4]);
+    assert_eq!(imp.tree[0].left_out, vec![LeftOut { at: 2, item: 2 }, LeftOut { at: 3, item: 3 }, LeftOut { at: 6, item: 6 }]);
+
+    // Verify exact volumes and transformed centroids against single-body reference imports.
+    let m0 = measure(&imp.bodies[0].body).unwrap();
+    let m1 = measure(&imp.bodies[1].body).unwrap();
+    let m2 = measure(&imp.bodies[2].body).unwrap();
+    let m3 = measure(&imp.bodies[3].body).unwrap();
+    let m4 = measure(&imp.bodies[4].body).unwrap();
+
+    assert!((m0.volume - washer_ref.volume).abs() < 1e-9);
+    assert!((m0.centroid.x - washer_ref.centroid.x).abs() < 1e-9);
+    assert!((m1.volume - cone_ref.volume).abs() < 1e-9);
+    assert!((m1.centroid.x - (cone_ref.centroid.x + 10.0)).abs() < 1e-9);
+    assert!((m2.volume - washer_ref.volume).abs() < 1e-9);
+    assert!((m2.centroid.x - (-washer_ref.centroid.y)).abs() < 1e-9);
+    assert!((m2.centroid.y - (washer_ref.centroid.x + 25.0)).abs() < 1e-9);
+    assert!((m2.centroid.z - washer_ref.centroid.z).abs() < 1e-9);
+    assert!((m3.volume - cyl_ref.volume).abs() < 1e-9);
+    assert!((m3.centroid.z - (cyl_ref.centroid.z + 40.0)).abs() < 1e-9);
+    assert!((m4.volume - washer_ref.volume).abs() < 1e-9);
+    assert!((m4.centroid.x - washer_ref.centroid.x).abs() < 1e-9);
+    assert!((m4.centroid.y - washer_ref.centroid.y).abs() < 1e-9);
+}
+
+#[test]
+fn native_records_from_bodies_round_trip_exactly_without_smlib() {
+    use solidcore_record::Vec3;
+    let paint = crate::Paint {
+        opacity: 0.75,
+        faces: vec![crate::FacePaint { face: 2, color: [0.1, 0.5, 0.9], opacity: 0.5, name: Some("Accent".into()) }],
+        name: Some("ShellBlue".into()),
+        layer: None,
+    };
+    let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap().with_color(Some([0.2, 0.4, 0.6])).with_paint(Some(paint));
+    let cyl = crate::cylinder(Vec3::new(40.0, 0.0, 0.0), Vec3::Z, 5.0, 12.0).unwrap();
+    let inputs = [super::NativeRecordBody { name: "Plate".into(), body: &bx }, super::NativeRecordBody { name: "Pin".into(), body: &cyl }];
+    let (records, imp) = super::records_from_bodies("Bracket", &inputs).unwrap();
+    assert!(records.native);
+    assert_eq!(records.bodies.len(), 2);
+    assert_eq!(imp.bodies.len(), 2);
+    assert_eq!(imp.tree.len(), 1);
+    assert_eq!(imp.tree[0].name, "Bracket");
+    assert_eq!(imp.tree[0].bodies, vec![0, 1]);
+    assert_eq!(imp.tree[0].items, vec![0, 1]);
+    assert_eq!((imp.report.parts, imp.report.solids, imp.report.single_root), (2, 2, true));
+    // Cached lookup hits without re-importing.
+    let shared = super::records_import_shared(&records).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&shared, &imp));
+    // JSON round-trip and cold records_import restore identical records, face order, colour and paint.
+    let text = records_text(&records).unwrap();
+    let decoded: ImportRecords = serde_json::from_str(&text).unwrap();
+    assert_eq!(decoded, *records);
+    let cold = records_import(&decoded).unwrap();
+    assert_eq!(cold.bodies.len(), imp.bodies.len());
+    assert_eq!(cold.tree, imp.tree);
+    assert_eq!(cold.report, imp.report);
+    for (a, b) in imp.bodies.iter().zip(&cold.bodies) {
+        assert_eq!(a.body.record(), b.body.record());
+        assert_eq!(a.face_origin, b.face_origin);
+        assert_eq!(a.body.color(), b.body.color());
+        assert_eq!(a.body.paint(), b.body.paint());
+        assert_eq!(a.body.face_sources(), b.body.face_sources());
+        assert_eq!(a.closed, b.closed);
+        assert!(!b.body.holds_kernel_form(), "native records restore without calling SMLib");
+    }
+    // Hostile native records are still validated structurally and geometrically.
+    let mut broken = decoded.clone();
+    broken.bodies[0].face_origin.pop();
+    let imp_broken = records_import(&broken).unwrap();
+    assert_eq!(imp_broken.bodies.len(), 1);
+    assert!(imp_broken.warnings.iter().any(|w| w.contains("face origins")));
+
+    let mut bad_idx = decoded.clone();
+    bad_idx.bodies[0].brep.as_mut().unwrap().edges[0].vertices[0] = 999;
+    let imp_bad = records_import(&bad_idx).unwrap();
+    assert_eq!(imp_bad.bodies.len(), 1);
+    assert!(imp_bad.warnings.iter().any(|w| w.contains("invalid")));
+
+    // Structurally valid records whose geometry disagrees are refused identically with or without
+    // `native: true`; the intact sibling body still restores without SMLib when `native: true`.
+    let mut disagree_native = decoded;
+    let bad_brep = disagree_native.bodies[0].brep.as_mut().unwrap();
+    bad_brep.vertices[0].point[2] += 0.5;
+    solidcore_ops::record_check::validate(bad_brep).expect("mutated record must remain structurally valid");
+    let mut disagree_plain = disagree_native.clone();
+    disagree_plain.native = false;
+    let imp_disagree_native = records_import(&disagree_native).unwrap();
+    let imp_disagree_plain = records_import(&disagree_plain).unwrap();
+    assert_eq!(imp_disagree_native.bodies.len(), 1);
+    assert_eq!(imp_disagree_plain.bodies.len(), 1);
+    assert!(!imp_disagree_native.bodies[0].body.holds_kernel_form(), "good native sibling still restores without SMLib");
+    assert_eq!(imp_disagree_native.warnings, imp_disagree_plain.warnings);
+    assert_eq!(imp_disagree_native.report, imp_disagree_plain.report);
+    assert!(imp_disagree_native.warnings.iter().any(|w| w.contains("geometry disagrees")));
+}
+
 #[test]
 fn parallel_records_import_matches_serial_and_respects_cancellation() {
     use std::sync::Arc;
@@ -423,7 +722,7 @@ fn parallel_records_import_matches_serial_and_respects_cancellation() {
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
     let parts = ["cone_point", "cylinder_seam", "dome", "washer"];
-    let mut combined = ImportRecords { bodies: Vec::new(), tree: Vec::new(), warnings: vec!["header note".into()], system: "test".into() };
+    let mut combined = ImportRecords::new(Vec::new(), Vec::new(), vec!["header note".into()], "test".into());
     let mut indices = Vec::new();
     for (idx, part) in parts.iter().enumerate() {
         let mut r = kept(&std::fs::read_to_string(dir.join(format!("{part}.step"))).unwrap());

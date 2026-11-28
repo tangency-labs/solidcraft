@@ -116,7 +116,7 @@ fn import_reads_key(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
 
 enum ImportPayload {
     Step { step: Arc<str>, digest: u64 },
-    Records { records: Arc<kernel::ImportRecords>, digest: u64 },
+    Records { records: kernel::SharedRecords, digest: u64 },
 }
 
 impl ImportPayload {
@@ -125,7 +125,7 @@ impl ImportPayload {
             (Self::Step { step: a, digest: da }, Self::Step { step: b, digest: db }) => {
                 da == db && a.len() == b.len() && (Arc::ptr_eq(a, b) || a.as_ref() == b.as_ref())
             }
-            (Self::Records { records: a, digest: da }, Self::Records { records: b, digest: db }) => da == db && (Arc::ptr_eq(a, b) || a == b),
+            (Self::Records { records: a, digest: da }, Self::Records { records: b, digest: db }) => da == db && a == b,
             _ => false,
         }
     }
@@ -245,8 +245,7 @@ pub(super) fn prefetch_imports(
                 if kernel::watch::cancelled() {
                     return None;
                 }
-                let text = kernel::records_text(records).ok()?;
-                let digest = crate::config::payload_digest(&text);
+                let digest = records.digest().ok()?.sha256.clone();
                 Some((imp, digest))
             }
         }
@@ -665,11 +664,11 @@ mod tests {
         kernel::step_export(&[&solid], name).unwrap().into()
     }
 
-    fn records_box(origin: Vec3, size: Vec3, name: &str) -> Arc<kernel::ImportRecords> {
+    fn records_box(origin: Vec3, size: Vec3, name: &str) -> kernel::SharedRecords {
         let brep = kernel::box_solid(origin, origin + size).unwrap().record().clone();
         let face_origin = (0..brep.faces.len() as u64).collect();
-        Arc::new(kernel::ImportRecords {
-            bodies: vec![kernel::RecordBody {
+        kernel::SharedRecords::new(kernel::ImportRecords::new(
+            vec![kernel::RecordBody {
                 name: name.into(),
                 path: Vec::new(),
                 instance: None,
@@ -683,7 +682,7 @@ mod tests {
                 copy_of: None,
                 mesh: None,
             }],
-            tree: vec![kernel::StepNode {
+            vec![kernel::StepNode {
                 name: name.into(),
                 transform: crate::IDENTITY,
                 bodies: vec![0],
@@ -691,9 +690,9 @@ mod tests {
                 left_out: Vec::new(),
                 children: Vec::new(),
             }],
-            warnings: Vec::new(),
-            system: "test".into(),
-        })
+            Vec::new(),
+            "test".into(),
+        ))
     }
 
     /// Cold multi-component assembly combining STEP imports (including duplicate payloads, name

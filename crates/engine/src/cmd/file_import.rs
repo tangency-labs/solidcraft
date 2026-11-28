@@ -470,7 +470,11 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
         .iter()
         .enumerate()
         .filter_map(|(i, f)| match &f.kind {
-            FeatureKind::Import { step, components, .. } if !f.suppressed && !step.is_empty() && !components.is_empty() => Some(i),
+            FeatureKind::Import { step, components, records, .. }
+                if !f.suppressed && !components.is_empty() && (!step.is_empty() || records.is_some()) =>
+            {
+                Some(i)
+            }
             _ => None,
         })
         .collect();
@@ -482,43 +486,68 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
     #[cfg(target_arch = "wasm32")]
     let cores = 1usize;
     if targets.len() > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
-        // Deduplicate identical STEP payloads so shared imports decode once across worker threads.
-        let mut unique_steps: Vec<std::sync::Arc<str>> = Vec::new();
-        let mut by_key: HashMap<(u64, usize), Vec<usize>> = HashMap::new();
+        enum RealignPayload {
+            Step(std::sync::Arc<str>),
+            Records(solidcraft_doc::SharedRecords),
+        }
+        // Deduplicate identical STEP or records payloads so shared imports decode once across worker threads.
+        let mut unique: Vec<RealignPayload> = Vec::new();
+        let mut by_key: HashMap<(u8, u64, usize), Vec<usize>> = HashMap::new();
         let mut target_job: Vec<usize> = Vec::with_capacity(targets.len());
         for &idx in &targets {
-            let FeatureKind::Import { step, .. } = &doc.features[idx].kind else { continue };
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            step.hash(&mut h);
-            let key = (h.finish(), step.len());
+            let FeatureKind::Import { step, records, .. } = &doc.features[idx].kind else { continue };
+            let (key, payload) = match records {
+                Some(r) => {
+                    let (hash, len) = r.digest().map_or((0, 0), |d| (d.hash, d.bytes));
+                    ((1u8, hash, len), RealignPayload::Records(r.clone()))
+                }
+                None => {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    step.hash(&mut h);
+                    ((0u8, h.finish(), step.len()), RealignPayload::Step(step.clone()))
+                }
+            };
             let found = by_key.get(&key).and_then(|jobs| {
-                jobs.iter().copied().find(|&j| std::sync::Arc::ptr_eq(&unique_steps[j], step) || unique_steps[j].as_ref() == step.as_ref())
+                jobs.iter().copied().find(|&j| match (&unique[j], &payload) {
+                    (RealignPayload::Step(a), RealignPayload::Step(b)) => std::sync::Arc::ptr_eq(a, b) || a.as_ref() == b.as_ref(),
+                    (RealignPayload::Records(a), RealignPayload::Records(b)) => a == b,
+                    _ => false,
+                })
             });
             let job = match found {
                 Some(j) => j,
                 None => {
-                    let j = unique_steps.len();
-                    unique_steps.push(step.clone());
+                    let j = unique.len();
+                    unique.push(payload);
                     by_key.entry(key).or_default().push(j);
                     j
                 }
             };
             target_job.push(job);
         }
-        let decoded: Vec<Option<std::sync::Arc<StepImport>>> = if unique_steps.len() > 1 {
-            let outer = cores.min(16).min(unique_steps.len());
+        let decoded: Vec<Option<std::sync::Arc<StepImport>>> = if unique.len() > 1 {
+            let outer = cores.min(16).min(unique.len());
             let inner = (cores / outer.max(1)).clamp(1, 8);
-            solidcraft_kernel::map_on_threads(&unique_steps, outer, |step| {
+            solidcraft_kernel::map_on_threads(&unique, outer, |payload| {
                 if solidcraft_kernel::watch::cancelled() {
                     return None;
                 }
-                solidcraft_doc::kernel::step_import_shared_with_workers(step, inner).ok()
+                match payload {
+                    RealignPayload::Step(step) => solidcraft_doc::kernel::step_import_shared_with_workers(step, inner).ok(),
+                    RealignPayload::Records(r) => solidcraft_doc::kernel::records_import_shared_with_workers(r, inner).ok(),
+                }
             })
             .into_iter()
             .map(Option::flatten)
             .collect()
         } else {
-            unique_steps.iter().map(|step| solidcraft_doc::kernel::step_import_shared(step).ok()).collect()
+            unique
+                .iter()
+                .map(|payload| match payload {
+                    RealignPayload::Step(step) => solidcraft_doc::kernel::step_import_shared(step).ok(),
+                    RealignPayload::Records(r) => solidcraft_doc::kernel::records_import_shared(r).ok(),
+                })
+                .collect()
         };
         let mut reads = Vec::with_capacity(targets.len());
         for (&idx, job) in targets.iter().zip(target_job) {
@@ -535,9 +564,14 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
     let mut reads = Vec::with_capacity(targets.len());
     for idx in targets {
         let f = &mut doc.features[idx];
-        let FeatureKind::Import { step, .. } = &f.kind else { continue };
+        let FeatureKind::Import { step, records, .. } = &f.kind else { continue };
         // A file that doesn't read fails the feature when it is evaluated, which reports it.
-        let Ok(imp) = solidcraft_doc::kernel::step_import_shared(step) else { continue };
+        let Ok(imp) = (match records {
+            Some(r) => solidcraft_doc::kernel::records_import_shared(r),
+            None => solidcraft_doc::kernel::step_import_shared(step),
+        }) else {
+            continue;
+        };
         if realign_import(f, &imp) {
             log::info!("{}: the stored body names follow this version's numbering of the file's bodies", f.name);
         }

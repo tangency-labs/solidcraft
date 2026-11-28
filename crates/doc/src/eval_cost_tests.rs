@@ -8718,6 +8718,792 @@ fn body_transfer_cache_invalidates_when_destination_component_is_added() {
     assert!(cached.last_recomputed >= 1);
 }
 
+/// Compare `reused` against a cold `no_cache` evaluation of `doc` bit-for-bit on world bodies,
+/// placement transforms, mesh vertices, normals, and triangle topology.
+fn assert_world_bit_exact(doc: &Document, reused: &Model, label: &str) {
+    assert!(reused.results.iter().all(|r| r.error.is_none()), "{label}: reused errors: {:?}", reused.results.iter().find(|r| r.error.is_some()));
+    let mut cold = Model::new();
+    cold.no_cache = true;
+    cold.evaluate(doc);
+    assert!(cold.results.iter().all(|r| r.error.is_none()), "{label}: cold errors: {:?}", cold.results.iter().find(|r| r.error.is_some()));
+
+    let actual = world_state(doc, &reused.state()).unwrap();
+    let expected = world_state(doc, &cold.state()).unwrap();
+    assert_eq!(actual.bodies.len(), expected.bodies.len(), "{label}: world body count");
+    for (a, b) in actual.bodies.iter().zip(&expected.bodies) {
+        assert_eq!(a.name, b.name, "{label}: body name");
+        assert_eq!(a.component, b.component, "{label}: body component for {}", a.name);
+        assert_eq!(
+            a.source_transform.map(|col| col.map(f64::to_bits)),
+            b.source_transform.map(|col| col.map(f64::to_bits)),
+            "{label}: world transform for {}",
+            a.name
+        );
+        let (ma, mb) = (a.mesh(), b.mesh());
+        assert_eq!(ma.positions.len(), mb.positions.len(), "{label}: vertex count for {}", a.name);
+        assert!(
+            ma.positions
+                .iter()
+                .zip(&mb.positions)
+                .all(|(p, q)| p.x.to_bits() == q.x.to_bits() && p.y.to_bits() == q.y.to_bits() && p.z.to_bits() == q.z.to_bits()),
+            "{label}: bit-exact mesh positions for {}",
+            a.name
+        );
+        assert!(
+            ma.normals
+                .iter()
+                .zip(&mb.normals)
+                .all(|(p, q)| p.x.to_bits() == q.x.to_bits() && p.y.to_bits() == q.y.to_bits() && p.z.to_bits() == q.z.to_bits()),
+            "{label}: bit-exact mesh normals for {}",
+            a.name
+        );
+        assert_eq!(ma.triangles, mb.triangles, "{label}: triangle indices for {}", a.name);
+    }
+}
+
+fn rect_sketch(plane: PlaneRef, a: Vec2, c: Vec2) -> FeatureKind {
+    let mut sk = Sketch::new();
+    let p = [a, Vec2::new(c.x, a.y), c, Vec2::new(a.x, c.y)].map(|q| sk.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    FeatureKind::Sketch { plane, sketch: sk }
+}
+
+/// Real component-local parametric features (extrude, cut hole, rectangular pattern, fillet,
+/// chamfer, shell, move, scale, mirror) hit the `Model::evaluate_shared` placement-only reuse
+/// fast path across revolute joint drives and occurrence transforms with bit-exact world
+/// geometry, and invalidate cleanly when a parametric input changes.
+#[test]
+fn shared_evaluation_reuses_component_local_parametric_features_across_joint_drives() {
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+
+    let mut doc = Document::new("parametric placement reuse");
+    let base = doc.add_component(Some("Base"), 0).unwrap();
+    let arm = doc.add_component(Some("Arm"), 0).unwrap();
+    let arm_occ = doc.occurrences.iter_mut().find(|o| o.component == arm).unwrap();
+    arm_occ.grounded = false;
+    let arm_occ_id = arm_occ.id;
+
+    // Base component: Sketch -> Extrude -> Cylinder Cut -> Rectangular Pattern -> Fillet -> Chamfer -> Box + Shell.
+    let base_sk =
+        doc.add_feature(rect_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, Vec2::new(40.0, 30.0)), Some("BaseSketch")).unwrap();
+    doc.feature_mut(base_sk).unwrap().component = base;
+
+    let base_ext = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                sketch: SketchId(base_sk),
+                profiles: ProfileSel::All,
+                extent: serde_json::from_value(serde_json::json!({"distance": "12"})).unwrap(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                thin: None,
+            },
+            Some("BaseExtrude"),
+        )
+        .unwrap();
+    let f = doc.feature_mut(base_ext).unwrap();
+    f.component = base;
+    f.body_names = vec!["BasePlate".into()];
+
+    let base_cut = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(10.0, 15.0, -1.0)),
+                axis: dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "14".into(),
+                operation: Operation::Cut,
+                references: Vec::new(),
+            },
+            Some("BaseHole"),
+        )
+        .unwrap();
+    doc.feature_mut(base_cut).unwrap().component = base;
+
+    let base_pat = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(base_cut)],
+                pattern: serde_json::from_value(serde_json::json!({
+                    "type": "rectangular",
+                    "dir1": [1.0, 0.0, 0.0],
+                    "count1": "2",
+                    "spacing1": "20"
+                }))
+                .unwrap(),
+                bodies: Vec::new(),
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            Some("BaseHolePattern"),
+        )
+        .unwrap();
+    doc.feature_mut(base_pat).unwrap().component = base;
+
+    let base_fillet = doc
+        .add_feature(
+            FeatureKind::Fillet {
+                edges: vec![Position(Vec3::new(20.0, 0.0, 12.0))],
+                radius: "1.5".into(),
+                body: Some("BasePlate".into()),
+                style: FilletStyle::Constant,
+                fit: Default::default(),
+                corner: Default::default(),
+                setbacks: Vec::new(),
+                turn: Default::default(),
+                tangent_chain: false,
+                edge_radii: Vec::new(),
+            },
+            Some("BaseFillet"),
+        )
+        .unwrap();
+    doc.feature_mut(base_fillet).unwrap().component = base;
+
+    let base_chamfer = doc
+        .add_feature(
+            FeatureKind::Chamfer {
+                edges: vec![Position(Vec3::new(20.0, 30.0, 12.0))],
+                distance: "1".into(),
+                distance2: None,
+                angle: None,
+                flip: false,
+                body: Some("BasePlate".into()),
+                tangent_chain: false,
+            },
+            Some("BaseChamfer"),
+        )
+        .unwrap();
+    doc.feature_mut(base_chamfer).unwrap().component = base;
+
+    let cup_box = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(60.0, 0.0, 0.0)),
+                length: "20".into(),
+                width: "20".into(),
+                height: "12".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BaseCupBox"),
+        )
+        .unwrap();
+    let f = doc.feature_mut(cup_box).unwrap();
+    f.component = base;
+    f.body_names = vec!["BaseCup".into()];
+
+    let cup_shell = doc
+        .add_feature(
+            FeatureKind::Shell {
+                faces: vec![FacePick(Vec3::new(70.0, 10.0, 12.0))],
+                thickness: "2".into(),
+                body: Some("BaseCup".into()),
+                direction: String::new(),
+                tangent_chain: false,
+            },
+            Some("BaseCupShell"),
+        )
+        .unwrap();
+    doc.feature_mut(cup_shell).unwrap().component = base;
+
+    // Arm component: Box -> Hole -> Fillet -> Chamfer -> Move (copy) -> Scale -> Mirror.
+    let arm_box = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "30".into(),
+                width: "20".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("ArmBarBox"),
+        )
+        .unwrap();
+    let f = doc.feature_mut(arm_box).unwrap();
+    f.component = arm;
+    f.body_names = vec!["ArmBar".into()];
+
+    let arm_hole = doc
+        .add_feature(
+            FeatureKind::Hole {
+                position: FacePick(Vec3::new(15.0, 10.0, 10.0)),
+                at: None,
+                direction: dir_expr(Vec3::new(0.0, 0.0, -1.0)),
+                diameter: "6".into(),
+                depth: None,
+                hole: HoleKind::Simple,
+                points: None,
+                thread: None,
+                thread_depth: None,
+                hand: Default::default(),
+                thread_class: None,
+                modeled: false,
+                ease_out: None,
+                to: None,
+                references: Vec::new(),
+                old_surface_start: false,
+                hardware: None,
+            },
+            Some("ArmHole"),
+        )
+        .unwrap();
+    doc.feature_mut(arm_hole).unwrap().component = arm;
+
+    let arm_fillet = doc
+        .add_feature(
+            FeatureKind::Fillet {
+                edges: vec![Position(Vec3::new(15.0, 0.0, 10.0))],
+                radius: "1.5".into(),
+                body: Some("ArmBar".into()),
+                style: FilletStyle::Constant,
+                fit: Default::default(),
+                corner: Default::default(),
+                setbacks: Vec::new(),
+                turn: Default::default(),
+                tangent_chain: false,
+                edge_radii: Vec::new(),
+            },
+            Some("ArmFillet"),
+        )
+        .unwrap();
+    doc.feature_mut(arm_fillet).unwrap().component = arm;
+
+    let arm_chamfer = doc
+        .add_feature(
+            FeatureKind::Chamfer {
+                edges: vec![Position(Vec3::new(15.0, 20.0, 10.0))],
+                distance: "1".into(),
+                distance2: None,
+                angle: None,
+                flip: false,
+                body: Some("ArmBar".into()),
+                tangent_chain: false,
+            },
+            Some("ArmChamfer"),
+        )
+        .unwrap();
+    doc.feature_mut(arm_chamfer).unwrap().component = arm;
+
+    let arm_move = doc
+        .add_feature(
+            FeatureKind::Move {
+                bodies: vec!["ArmBar".into()],
+                translate: ["0".into(), "40".into(), "0".into()],
+                rotate_axis: None,
+                rotate_about: None,
+                origin: None,
+                angle: None,
+                copy: true,
+                copy_frames: Vec::new(),
+                carry: Vec::new(),
+                leave: Vec::new(),
+            },
+            Some("ArmCopy"),
+        )
+        .unwrap();
+    let f = doc.feature_mut(arm_move).unwrap();
+    f.component = arm;
+    f.body_names = vec!["ArmCopyBody".into()];
+
+    let arm_scale = doc
+        .add_feature(
+            FeatureKind::Scale {
+                bodies: vec!["ArmCopyBody".into()],
+                origin: Position(Vec3::ZERO),
+                about: Some(ScaleAbout::Centre),
+                factor: "0.8".into(),
+                factors: None,
+            },
+            Some("ArmScale"),
+        )
+        .unwrap();
+    doc.feature_mut(arm_scale).unwrap().component = arm;
+
+    let arm_mirror = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["ArmCopyBody".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            Some("ArmMirror"),
+        )
+        .unwrap();
+    doc.feature_mut(arm_mirror).unwrap().component = arm;
+
+    // Revolute joint driving the Arm occurrence relative to the root frame.
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "Elbow".into(),
+        kind: JointKind::Revolute,
+        a: JointOrigin::new(0, Snap::Frame { origin: Vec3::new(0.0, 0.0, 12.0), z: Vec3::Z, x: Some(Vec3::X) }),
+        b: JointOrigin::new(arm_occ_id, Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: Some(Vec3::X) }),
+        values: vec![0.0],
+        limits: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        offset_xy: [0.0; 2],
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+        dynamics: Vec::new(),
+    });
+
+    let mut doc = Arc::new(doc);
+    let mut model = Model::new();
+    assert!(model.evaluate_shared(&doc), "initial evaluation must run");
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let proven_state = model.state();
+
+    for deg in [15.0_f64, 45.0, 90.0, 135.0, -30.0] {
+        let d = Arc::make_mut(&mut doc);
+        d.assembly.joints[0].values[0] = deg.to_radians();
+        let solution = joints::solve(d, &model.state());
+        assert!(solution.errors.is_empty() && solution.conflicts.is_empty(), "deg={deg}: {solution:?}");
+        d.apply_joint_solution(&solution);
+
+        assert!(!model.evaluate_shared(&doc), "joint drive to {deg} deg must hit placement-only reuse fast path");
+        assert_eq!(model.last_recomputed, 0);
+        assert!(Arc::ptr_eq(&proven_state, &model.state()), "reused ModelState Arc must stay identical");
+        assert!(model.is_current(&doc), "reused model must stay current at {deg} deg");
+        assert_world_bit_exact(&doc, &model, &format!("joint drive {deg} deg"));
+    }
+
+    // Direct occurrence transform on Base also hits placement-only reuse.
+    place(Arc::make_mut(&mut doc), base, rigid(Vec3::new(25.0, -10.0, 5.0), Vec3::ZERO, Vec3::Z, 0.4));
+    assert!(!model.evaluate_shared(&doc), "direct occurrence move must hit placement-only reuse");
+    assert!(Arc::ptr_eq(&proven_state, &model.state()));
+    assert_world_bit_exact(&doc, &model, "direct Base move");
+
+    // Editing a parametric dimension invalidates the retained proof and re-evaluates, then re-proves.
+    let FeatureKind::Fillet { radius, .. } = &mut Arc::make_mut(&mut doc).feature_mut(base_fillet).unwrap().kind else {
+        panic!("expected fillet");
+    };
+    *radius = "2.25".into();
+    assert!(model.evaluate_shared(&doc), "fillet radius edit must invalidate placement-only reuse");
+    assert!(!Arc::ptr_eq(&proven_state, &model.state()));
+    assert_world_bit_exact(&doc, &model, "after fillet edit");
+
+    let next_proven = model.state();
+    place(Arc::make_mut(&mut doc), base, rigid(Vec3::new(-5.0, 15.0, 2.0), Vec3::ZERO, Vec3::Z, -0.25));
+    assert!(!model.evaluate_shared(&doc), "placement move after geometry edit must reuse the new proof");
+    assert!(Arc::ptr_eq(&next_proven, &model.state()));
+    assert_world_bit_exact(&doc, &model, "move after fillet edit");
+}
+
+/// Every cross-component dependency (foreign cut target, foreign sketch, From Object on a foreign
+/// face, foreign combine tool, foreign fillet body, mirror referencing another placement,
+/// cross-component sketch projection, pattern replaying a foreign feature) must conservatively
+/// fall back to ordinary evaluation (`evaluate_shared` returns `true`) and match cold evaluation
+/// bit-for-bit.
+#[test]
+fn shared_evaluation_falls_back_on_cross_component_parametric_dependencies() {
+    // 1. Cross-component Box Cut (plate in Plate, cutter in Tools).
+    {
+        let mut doc = Document::new("cross-component cut");
+        let plate = doc.add_component(Some("Plate"), 0).unwrap();
+        let tools = doc.add_component(Some("Tools"), 0).unwrap();
+        let body = plate_with_holes(&mut doc, plate, tools, 1);
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        assert!((volume(&model, &body) - 384.0).abs() < 1e-6);
+
+        place(Arc::make_mut(&mut doc), plate, rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        assert!(model.evaluate_shared(&doc), "cross-component cut must fall back to ordinary evaluation");
+        assert!((volume(&model, &body) - 392.0).abs() < 1e-6);
+        assert_world_bit_exact(&doc, &model, "cross-component cut");
+    }
+
+    // 2. Cross-component Extrude referencing a sketch owned by another component.
+    {
+        let mut doc = Document::new("cross-component extrude sketch");
+        let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+        let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+        let sk = doc.add_feature(rect_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::ZERO, Vec2::new(10.0, 10.0)), None).unwrap();
+        doc.feature_mut(sk).unwrap().component = comp_a;
+        let ext = doc
+            .add_feature(
+                FeatureKind::Extrude {
+                    sketch: SketchId(sk),
+                    profiles: ProfileSel::All,
+                    extent: serde_json::from_value(serde_json::json!({"distance": "5"})).unwrap(),
+                    operation: Operation::NewBody,
+                    targets: Vec::new(),
+                    thin: None,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(ext).unwrap().component = comp_b;
+
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        place(Arc::make_mut(&mut doc), comp_b, rigid(Vec3::new(15.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        assert!(model.evaluate_shared(&doc), "extrude of foreign sketch must fall back");
+        assert_world_bit_exact(&doc, &model, "cross-component extrude sketch");
+    }
+
+    // 3. Cross-component Extrude with From Object on another component's face.
+    {
+        let mut doc = Document::new("cross-component from object");
+        let (plate, _other, _extrude) = extrude_from_the_plate(&mut doc);
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        place(Arc::make_mut(&mut doc), plate, rigid(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::Z, 0.0));
+        assert!(model.evaluate_shared(&doc), "extrude with From Object on foreign component must fall back");
+        assert_world_bit_exact(&doc, &model, "cross-component from object");
+    }
+
+    // 4. Cross-component Combine (target in CompA, tool in CompB).
+    {
+        let mut doc = Document::new("cross-component combine");
+        let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+        let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+        let target_id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "10".into(),
+                    width: "10".into(),
+                    height: "4".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(target_id).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["PlateA".into()];
+
+        let tool_id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(4.0, 4.0, -1.0)),
+                    length: "2".into(),
+                    width: "2".into(),
+                    height: "6".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(tool_id).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["ToolB".into()];
+
+        let combine_id = doc
+            .add_feature(
+                FeatureKind::Combine {
+                    target: "PlateA".into(),
+                    tools: vec!["ToolB".into()],
+                    operation: Operation::Cut,
+                    keep_tools: true,
+                    offset: None,
+                    offset_edges: OffsetEdges::Sharp,
+                    offset_faces: Vec::new(),
+                    offset_radius: None,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(combine_id).unwrap().component = comp_a;
+
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        place(Arc::make_mut(&mut doc), comp_b, rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        assert!(model.evaluate_shared(&doc), "cross-component combine must fall back");
+        assert_world_bit_exact(&doc, &model, "cross-component combine");
+    }
+
+    // 5. Cross-component Fillet (feature in CompB targeting CompA's body).
+    {
+        let mut doc = Document::new("cross-component fillet");
+        let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+        let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+        let box_id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "20".into(),
+                    width: "20".into(),
+                    height: "10".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(box_id).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["BlockA".into()];
+
+        let fillet_id = doc
+            .add_feature(
+                FeatureKind::Fillet {
+                    edges: vec![Position(Vec3::new(10.0, 0.0, 10.0))],
+                    radius: "1.5".into(),
+                    body: Some("BlockA".into()),
+                    style: FilletStyle::Constant,
+                    fit: Default::default(),
+                    corner: Default::default(),
+                    setbacks: Vec::new(),
+                    turn: Default::default(),
+                    tangent_chain: false,
+                    edge_radii: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(fillet_id).unwrap().component = comp_b;
+
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        place(Arc::make_mut(&mut doc), comp_b, rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        assert!(model.evaluate_shared(&doc), "fillet targeting a foreign body must fall back");
+        assert_world_bit_exact(&doc, &model, "cross-component fillet");
+    }
+
+    // 6. Mirror referencing an occurrence placement (`placements` non-empty).
+    {
+        let mut doc = Document::new("mirror with placement");
+        let part = doc.add_component(Some("Part"), 0).unwrap();
+        let occ = doc.occurrence_of(part).unwrap().id;
+        place(&mut doc, part, rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        let box_id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "5".into(),
+                    width: "5".into(),
+                    height: "5".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(box_id).unwrap();
+        f.component = part;
+        f.body_names = vec!["Cube".into()];
+
+        doc.add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["Cube".into()],
+                combine: false,
+                placements: vec![vec![occ]],
+            },
+            None,
+        )
+        .unwrap();
+
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        place(Arc::make_mut(&mut doc), part, rigid(Vec3::new(25.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        assert!(model.evaluate_shared(&doc), "mirror with placement path must fall back");
+        assert_world_bit_exact(&doc, &model, "mirror with placement");
+    }
+
+    // 7. Cross-component Sketch projection on a turned occurrence.
+    {
+        let (doc, _, comp, _, _, _) = sketch_on_a_turned_occurrence();
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        place(Arc::make_mut(&mut doc), comp, rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_3));
+        assert!(model.evaluate_shared(&doc), "sketch with cross-component face anchor and link must fall back");
+        assert_world_bit_exact(&doc, &model, "cross-component sketch projection");
+    }
+
+    // 8. Pattern replaying a feature owned by another component.
+    {
+        let mut doc = Document::new("cross-component feature pattern");
+        let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+        let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+        let _body = plate_with_holes(&mut doc, comp_a, comp_a, 1);
+        let cut_id = doc.features.last().unwrap().id;
+        let pat_id = doc
+            .add_feature(
+                FeatureKind::Pattern {
+                    features: vec![FeatureId(cut_id)],
+                    pattern: serde_json::from_value(serde_json::json!({
+                        "type": "rectangular",
+                        "dir1": [1.0, 0.0, 0.0],
+                        "count1": "2",
+                        "spacing1": "3"
+                    }))
+                    .unwrap(),
+                    bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
+                    join: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(pat_id).unwrap().component = comp_b;
+
+        let mut doc = Arc::new(doc);
+        let mut model = Model::new();
+        assert!(model.evaluate_shared(&doc));
+        place(Arc::make_mut(&mut doc), comp_b, rigid(Vec3::new(2.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        assert!(model.evaluate_shared(&doc), "pattern replaying a foreign component's feature must fall back");
+        assert_world_bit_exact(&doc, &model, "cross-component feature pattern");
+    }
+}
+
+/// Timing benchmark comparing cold/full re-evaluation and warm ordinary `Model::evaluate`
+/// against `Model::evaluate_shared` placement-only reuse on a 12-component parametric assembly
+/// (each component: Box + Cut + Fillet + Chamfer) driven across 20 motion steps.
+#[test]
+#[ignore]
+fn bench_placement_reuse_parametric() {
+    let mut doc = Document::new("12-component parametric assembly");
+    let mut comps = Vec::with_capacity(12);
+    for i in 0..12 {
+        let comp = doc.add_component(Some(&format!("Part{i}")), 0).unwrap();
+        comps.push(comp);
+        place(&mut doc, comp, rigid(Vec3::new(50.0 * i as f64, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+
+        let body_name = format!("PartBody{i}");
+        let bx = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "30".into(),
+                    width: "20".into(),
+                    height: "12".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                Some(&format!("Box{i}")),
+            )
+            .unwrap();
+        let f = doc.feature_mut(bx).unwrap();
+        f.component = comp;
+        f.body_names = vec![body_name.clone()];
+
+        let cut = doc
+            .add_feature(
+                FeatureKind::Cylinder {
+                    base: point_expr(Vec3::new(15.0, 10.0, -1.0)),
+                    axis: dir_expr(Vec3::Z),
+                    radius: "4".into(),
+                    height: "14".into(),
+                    operation: Operation::Cut,
+                    references: Vec::new(),
+                },
+                Some(&format!("Cut{i}")),
+            )
+            .unwrap();
+        doc.feature_mut(cut).unwrap().component = comp;
+
+        let fil = doc
+            .add_feature(
+                FeatureKind::Fillet {
+                    edges: vec![Position(Vec3::new(15.0, 0.0, 12.0))],
+                    radius: "1.5".into(),
+                    body: Some(body_name.clone().into()),
+                    style: FilletStyle::Constant,
+                    fit: Default::default(),
+                    corner: Default::default(),
+                    setbacks: Vec::new(),
+                    turn: Default::default(),
+                    tangent_chain: false,
+                    edge_radii: Vec::new(),
+                },
+                Some(&format!("Fillet{i}")),
+            )
+            .unwrap();
+        doc.feature_mut(fil).unwrap().component = comp;
+
+        let chf = doc
+            .add_feature(
+                FeatureKind::Chamfer {
+                    edges: vec![Position(Vec3::new(15.0, 20.0, 12.0))],
+                    distance: "1".into(),
+                    distance2: None,
+                    angle: None,
+                    flip: false,
+                    body: Some(body_name.into()),
+                    tangent_chain: false,
+                },
+                Some(&format!("Chamfer{i}")),
+            )
+            .unwrap();
+        doc.feature_mut(chf).unwrap().component = comp;
+    }
+
+    let base_doc = Arc::new(doc);
+    let steps: Vec<Arc<Document>> = (1..=20)
+        .map(|step| {
+            let mut d = (*base_doc).clone();
+            let angle = 0.08 * step as f64;
+            for (i, &comp) in comps.iter().enumerate() {
+                place(&mut d, comp, rigid(Vec3::new(50.0 * i as f64, 2.0 * step as f64, 0.5 * step as f64), Vec3::ZERO, Vec3::Z, angle));
+            }
+            Arc::new(d)
+        })
+        .collect();
+
+    // Cold/full re-evaluation (no_cache = true) across 20 steps.
+    let mut cold_model = Model::new();
+    cold_model.no_cache = true;
+    let t_cold = std::time::Instant::now();
+    for step_doc in &steps {
+        cold_model.evaluate(step_doc);
+    }
+    let cold_ms = t_cold.elapsed().as_secs_f64() * 1000.0;
+
+    // Warm ordinary Model::evaluate across 20 steps.
+    let mut warm_model = Model::new();
+    warm_model.evaluate(&base_doc);
+    let t_warm = std::time::Instant::now();
+    for step_doc in &steps {
+        warm_model.evaluate(step_doc);
+    }
+    let warm_ms = t_warm.elapsed().as_secs_f64() * 1000.0;
+
+    // Shared placement-only reuse across 20 steps.
+    let mut shared_model = Model::new();
+    assert!(shared_model.evaluate_shared(&base_doc));
+    let proven = shared_model.state();
+    let t_shared = std::time::Instant::now();
+    for (idx, step_doc) in steps.iter().enumerate() {
+        assert!(!shared_model.evaluate_shared(step_doc), "step {idx} must hit placement-only reuse");
+    }
+    let shared_ms = t_shared.elapsed().as_secs_f64() * 1000.0;
+
+    assert!(Arc::ptr_eq(&proven, &shared_model.state()));
+    assert_world_bit_exact(steps.last().unwrap(), &shared_model, "bench final step");
+    eprintln!(
+        "bench_placement_reuse_parametric (12 parametric components x 20 steps): cold={cold_ms:.2} ms, warm_eval={warm_ms:.2} ms, evaluate_shared={shared_ms:.3} ms (vs cold: {:.1}x, vs warm: {:.1}x)",
+        cold_ms / shared_ms.max(1e-6),
+        warm_ms / shared_ms.max(1e-6),
+    );
+}
+
 // ---- sketch helpers
 
 fn add_circle_sketch(doc: &mut Document, comp: u64, plane: PlaneRef, center: Vec2, radius: f64, id_name: &str) -> u64 {

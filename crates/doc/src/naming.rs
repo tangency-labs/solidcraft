@@ -256,6 +256,22 @@ impl NameCell {
     pub(crate) fn is_saved(&self) -> bool {
         self.saved
     }
+    /// Already-computed face names, without forcing lazy naming or meshing.
+    pub(crate) fn cached_names(&self) -> Option<Arc<Names>> {
+        self.names.get().cloned()
+    }
+    /// Already-computed edge names for `body`, without meshing.
+    pub(crate) fn cached_edge_names(&self, body: &solidcraft_kernel::Body) -> Option<Arc<EdgeNameIndex>> {
+        self.edge_names.get().filter(|(cached, _)| cached.same_shape(body)).map(|(_, index)| index.clone())
+    }
+    /// Whether this cell retains an earlier `ModelState` or source `ModelBody`.
+    pub(crate) fn retains_ancestors(&self) -> bool {
+        self.origin.is_some() || self.copy_of.is_some()
+    }
+    /// The body this cell copies its names from, if any.
+    pub(crate) fn copy_source(&self) -> Option<&Arc<ModelBody>> {
+        self.copy_of.as_ref()
+    }
     fn detach_ancestors(&mut self, pending: &mut Vec<NamingAncestor>) {
         if let Some(origin) = self.origin.take().and_then(Arc::into_inner) {
             pending.push(NamingAncestor::State(origin.before));
@@ -802,6 +818,70 @@ fn warm_chain(b: &ModelBody, ready: fn(&ModelBody) -> bool, name: fn(&ModelBody)
     for p in chain.iter().rev().step_by(WARM_STEP) {
         name(p);
     }
+}
+
+/// Materializes `b`'s exact face names without meshing, caching them into `b.names.names`.
+fn resolve_names_no_mesh(b: &ModelBody, limit: usize) -> Option<Arc<Names>> {
+    if let Some(known) = b.names.names.get() {
+        return Some(known.clone());
+    }
+    if limit == 0 {
+        return None;
+    }
+    if let Some(source) = b.names.copy_of.as_ref() {
+        let known = resolve_names_no_mesh(source, limit - 1)?;
+        let _ = b.names.names.set(known.clone());
+        return Some(known);
+    }
+    let o = b.names.origin.as_ref()?;
+    if o.depth >= MAX_DEPTH {
+        if b.body.is_mesh() {
+            return None;
+        }
+        let fallback = Arc::new(Names::unverified((0..b.body.face_count()).map(|k| format!("{}:face:{k}", b.name)).collect(), &[], None));
+        let _ = b.names.names.set(fallback.clone());
+        return Some(fallback);
+    }
+    let lineage = b.names.lineage.as_ref()?;
+    let derived = Arc::new(crate::history_names::derive_exact_no_mesh(b, o, lineage)?);
+    let _ = b.names.names.set(derived.clone());
+    Some(derived)
+}
+
+/// Returns a detached `NameCell` for storing `b` inside `EvalCache` without pinning
+/// `NamingOrigin::before` or `copy_of` chains, when `b`'s exact names can be materialized
+/// without meshing and no downstream compatibility path needs its live `origin`.
+pub(crate) fn try_detach_for_cache(b: &ModelBody) -> Option<NameCell> {
+    if !b.names.retains_ancestors() || b.frame_member_line.is_some() {
+        return None;
+    }
+    if let Some(o) = b.names.origin.as_ref()
+        && matches!(o.feature.kind, FeatureKind::FrameMember { .. } | FeatureKind::Align { .. } | FeatureKind::Move { copy: false, .. })
+    {
+        return None;
+    }
+    resolve_names_no_mesh(b, 16)?;
+    let cached_construction = b.names.cached_construction.or_else(|| {
+        let o = b.names.origin.as_ref()?;
+        (o.feature.id == b.feature
+            && matches!(
+                &o.feature.kind,
+                FeatureKind::Box { operation: crate::Operation::NewBody, .. } | FeatureKind::Extrude { operation: crate::Operation::NewBody, .. }
+            )
+            && o.before.body(&b.name).is_none())
+        .then_some(o.feature.id)
+    });
+    Some(NameCell {
+        origin: None,
+        cached_construction,
+        lineage: None,
+        names: b.names.names.clone(),
+        edge_names: b.names.edge_names.clone(),
+        vertex_names: b.names.vertex_names.clone(),
+        copy_of: None,
+        saved_depth: b.names.depth(),
+        saved: true,
+    })
 }
 
 /// A body's names, with what finding them again needs: from the history of the feature that
@@ -1531,37 +1611,46 @@ pub fn has_tie_numbered_link_face(name: &str, feature: u64) -> bool {
 pub fn carried_face_names(part: &ModelState, imported: &[solidcraft_kernel::ImportedBody]) -> Vec<Vec<String>> {
     let solids: Vec<&ModelBody> = part.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
     let indices: Vec<OnceLock<Option<FaceIndex>>> = solids.iter().map(|_| OnceLock::new()).collect();
-    imported
-        .iter()
-        .map(|read| {
-            let probe = ModelBody::new(String::new(), read.body.clone(), 0);
-            let points: Vec<Option<Vec3>> = face_spots(&probe).into_iter().map(|s| s.map(|s| s.point)).collect();
-            let best = solids
-                .iter()
-                .zip(&indices)
-                .filter_map(|(b, index)| {
-                    let tol = (b.body.size() * 2e-3).max(1e-3);
-                    let near = b.outline_bounds().inflated(tol);
-                    if !points.iter().flatten().any(|p| near.contains(*p)) {
-                        return None;
-                    }
-                    // Like face_name_at_body, a body too large to index is left unnamed.
-                    let index = index
-                        .get_or_init(|| {
-                            let mesh = b.mesh();
-                            (mesh.triangles.len() <= 2_000_000 && face_count(b) <= 50_000).then(|| FaceIndex::new(&mesh, face_count(b)))
-                        })
-                        .as_ref()?;
-                    let hits: Vec<Option<usize>> = points.iter().map(|p| p.and_then(|p| index.face_at(p, tol))).collect();
-                    Some((hits.iter().flatten().count(), *b, hits))
-                })
-                .filter(|(n, ..)| *n > 0)
-                .max_by_key(|(n, b, _)| (*n, b.name == read.name));
-            let Some((_, b, hits)) = best else { return Vec::new() };
-            let names = face_names(b);
-            hits.into_iter().map(|h| h.and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
-        })
-        .collect()
+    let carry = |read: &solidcraft_kernel::ImportedBody| -> Vec<String> {
+        // Exact B-rep match: when records were preserved directly without a STEP round-trip,
+        // face indices agree 1:1 with no tessellation or spatial lookup needed.
+        if let Some(exact) = solids.iter().filter(|b| b.body.record() == read.body.record()).max_by_key(|b| b.name == read.name) {
+            if exact.names.cached_names().is_none() && exact.names.origin.is_none() && exact.names.copy_of.is_none() {
+                return (0..exact.body.face_count()).map(|k| format!("{}:face:{k}", exact.name)).collect();
+            }
+            return face_names(exact).as_ref().clone();
+        }
+        let probe = ModelBody::new(String::new(), read.body.clone(), 0);
+        let points: Vec<Option<Vec3>> = face_spots(&probe).into_iter().map(|s| s.map(|s| s.point)).collect();
+        let best = solids
+            .iter()
+            .zip(&indices)
+            .filter_map(|(b, index)| {
+                let tol = (b.body.size() * 2e-3).max(1e-3);
+                let near = b.outline_bounds().inflated(tol);
+                if !points.iter().flatten().any(|p| near.contains(*p)) {
+                    return None;
+                }
+                // Like face_name_at_body, a body too large to index is left unnamed.
+                let index = index
+                    .get_or_init(|| {
+                        let mesh = b.mesh();
+                        (mesh.triangles.len() <= 2_000_000 && face_count(b) <= 50_000).then(|| FaceIndex::new(&mesh, face_count(b)))
+                    })
+                    .as_ref()?;
+                let hits: Vec<Option<usize>> = points.iter().map(|p| p.and_then(|p| index.face_at(p, tol))).collect();
+                Some((hits.iter().flatten().count(), *b, hits))
+            })
+            .filter(|(n, ..)| *n > 0)
+            .max_by_key(|(n, b, _)| (*n, b.name == read.name));
+        let Some((_, b, hits)) = best else { return Vec::new() };
+        let names = face_names(b);
+        hits.into_iter().map(|h| h.and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
+    };
+    if imported.len() <= 1 {
+        return imported.iter().map(carry).collect();
+    }
+    solidcraft_kernel::map_on_threads(imported, 16, carry).into_iter().map(Option::unwrap_or_default).collect()
 }
 
 /// Where a face is, for a script: a point that lies on it and picks it, and the plane, cylinder,
@@ -2039,6 +2128,28 @@ mod tests {
         let body2_faces = face_names(&mb2);
         assert!(body2_faces.contains(&names[0]), "expected a face belonging to Body2, got '{}'", names[0]);
         Ok(())
+    }
+
+    #[test]
+    fn carried_face_names_matches_exact_brep_records_without_meshing() {
+        let a = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let b = solidcraft_kernel::cylinder(Vec3::new(30.0, 0.0, 0.0), Vec3::Z, 4.0, 12.0).unwrap();
+        let mut plate = ModelBody::new("Plate".into(), a.clone(), 1);
+        plate.names = NameCell::known(Arc::new((0..a.face_count()).map(|k| format!("F1:face:{k}")).collect()));
+        let mut pin = ModelBody::new("Pin".into(), b.clone(), 2);
+        pin.names = NameCell::known(Arc::new((0..b.face_count()).map(|k| format!("F2:face:{k}")).collect()));
+        let st = ModelState::default().with_bodies(vec![plate, pin]);
+        assert!(st.bodies.iter().all(|mb| mb.cached_mesh().is_none()));
+        let inputs = [
+            solidcraft_kernel::NativeRecordBody { name: "Plate".into(), body: &a },
+            solidcraft_kernel::NativeRecordBody { name: "Pin".into(), body: &b },
+        ];
+        let (_, imp) = solidcraft_kernel::records_from_bodies("Part", &inputs).unwrap();
+        let carried = carried_face_names(&st, &imp.bodies);
+        assert_eq!(carried.len(), 2);
+        assert_eq!(carried[0], *face_names(&st.bodies[0]));
+        assert_eq!(carried[1], *face_names(&st.bodies[1]));
+        assert!(st.bodies.iter().all(|mb| mb.cached_mesh().is_none()), "exact-record matching must not trigger reference meshing");
     }
 
     fn naive_edge_names(b: &ModelBody) -> Vec<String> {

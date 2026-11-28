@@ -1307,11 +1307,23 @@ explicitly supported local inputs. Session opening and refresh use this entry po
 reach, occurrence movement, scratch sessions and Undo/Redo share its decision. Joint solving,
 motion traces, view revision and world placement still follow the normal refresh path.
 
-Eligibility is computed during ordinary evaluation with its existing feature-owner index.
-The initial supported set is new-body boxes/cylinders/spheres/tori, embedded STEP/mesh imports,
-sketches on explicit local planes without links or 3D wires, and new-body extrudes of their own
-component's sketches without To Object, From Object or Through All. Other features, attachments,
-failed/skipped/stale results, primed evaluation and `no_cache` retain ordinary evaluation.
+Eligibility is computed during ordinary evaluation with its existing feature-owner index and
+per-feature before/after model states. The supported set covers component-local parametric
+features whose inputs and targets stay strictly inside their own component: boxes, cylinders
+(without reference edges), spheres, tori and cones (new-body and component-local join/cut/intersect),
+embedded STEP/mesh imports, sketches on explicit local planes without links or 3D wires,
+extrudes (without To/From Object or picked placements), revolves (without To Object or external
+axes), sweeps and lofts over own sketches/bodies, fillets, chamfers, shells, drafts (on local
+neutral planes), holes (without To Object or reference edges), patterns and mirrors (without
+component patterns, picked placements, external axes or foreign sources), moves (without model
+rotation axes), scales (fixed origin or centre), splits (local plane, own sketch or own tool
+bodies), combines of own bodies, local sheet-metal features (`SheetBase`, `SheetContour`,
+`SheetFlange`, `SheetHem`, `SheetPerforate`, `SheetFold`, `SheetPath`, `SheetTab`, `SheetBead`,
+`SheetUnfold`; excluding world-placement conversions), and local frame features (`FrameMember`
+without cross-component pairs, `FrameMemberTurn`, `FrameTrim` on own members/local planes,
+`FrameCope` on own bodies). Any cross-component reference, external plane/face/axis, foreign
+boolean target, `CapturePosition`, unclassified feature, failed/skipped/stale result, primed
+evaluation, singular occurrence transform or `no_cache` conservatively retains ordinary evaluation.
 The borrowed-document `evaluate` invalidates the retained proof. A saved model establishes a
 shared-input proof on its first ordinary refresh; this does not change saved model formats.
 Renaming results and adopting solved sketches also invalidate it: result labels and

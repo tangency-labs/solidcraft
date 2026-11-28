@@ -85,12 +85,17 @@ pub(super) struct Checks {
     refused: HashMap<usize, Failure>,
 }
 
+/// Most feature checks running beside the evaluation at once. Leaving one slot of SMLib's
+/// 8-kernel pool for the evaluation thread prevents high-core machines from multiplying peak live
+/// B-rep memory and thrashing the kernel pool by dropping warm `CheckMemo` instances.
+const MAX_OVERLAP_CHECKS: usize = 7;
+
 impl Checks {
     pub fn new(validation: kernel::Validation) -> Checks {
         let cores = std::thread::available_parallelism().map_or(1, usize::from);
         Checks {
             on: validation == kernel::Validation::EachFeature && cores > 1,
-            most: cores.saturating_sub(1).max(1),
+            most: cores.saturating_sub(1).clamp(1, MAX_OVERLAP_CHECKS),
             running: VecDeque::new(),
             held: Vec::new(),
             refused: HashMap::new(),
@@ -572,5 +577,11 @@ mod tests {
         c.store(2, entry(12), &cache, &kept);
         assert!(c.settle(true, &cache, &kept).is_none());
         assert_eq!(cache.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn overlap_checks_are_capped_to_pool_size() {
+        let c = Checks::new(kernel::Validation::EachFeature);
+        assert!(c.most >= 1 && c.most <= MAX_OVERLAP_CHECKS, "most={} exceeds cap {}", c.most, MAX_OVERLAP_CHECKS);
     }
 }

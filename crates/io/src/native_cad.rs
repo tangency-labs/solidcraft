@@ -655,7 +655,7 @@ fn traced_records(
     } else {
         assembly::placed(ir, product, unplaced, &layers, &mut warnings)
     };
-    (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
+    (ImportRecords::new(bodies, tree, warnings, system.to_string()), origins)
 }
 
 /// `records` with each B-rep the kernel cannot build replaced by the mesh the file shows it with,
@@ -676,6 +676,7 @@ fn meshes_for_refused(
         .filter(|i| i.kind == solidcraft_kernel::IssueKind::NotImported)
         .filter_map(|i| Some((usize::try_from(i.item?).ok()?, i.detail.clone())))
         .collect();
+    let mut changed = false;
     for (k, why) in refused {
         let (Some(r), Some(origin)) = (records.bodies.get_mut(k), origins.get(k)) else { continue };
         if r.copy_of.is_some() || r.brep.is_none() {
@@ -693,6 +694,10 @@ fn meshes_for_refused(
         r.sheet = false;
         r.paint = r.paint.take().map(|p| solidcraft_kernel::Paint { faces: Vec::new(), ..p });
         records.warnings.push(format!("{why}; it came in as the mesh the file shows it with"));
+        changed = true;
+    }
+    if changed {
+        records.invalidate_digest();
     }
     records
 }

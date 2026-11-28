@@ -418,17 +418,27 @@ fn generic_name(n: &str) -> bool {
 
 /// The name an imported body gets under the `names` choice; the solid's name when the chosen
 /// one is missing or says nothing.
-fn body_name(b: &solidcraft_kernel::ImportedBody, names: StepNames) -> String {
+fn choose_body_name(name: &str, common_face_name: Option<&String>, path: &[String], instance: Option<&String>, names: StepNames) -> String {
     let usable = |n: &&String| !generic_name(n);
     let chosen = match names {
-        StepNames::Auto if b.name.trim().eq_ignore_ascii_case("none") => b.common_face_name.as_ref().filter(usable),
-        StepNames::Auto if !generic_name(&b.name) => Some(&b.name),
-        StepNames::Auto => b.path.iter().rev().find(usable).or_else(|| b.instance.as_ref().filter(usable)),
+        StepNames::Auto if name.trim().eq_ignore_ascii_case("none") => common_face_name.filter(usable),
+        StepNames::Auto if !generic_name(name) => None,
+        StepNames::Auto => path.iter().rev().find(usable).or_else(|| instance.filter(usable)),
         StepNames::Solid => None,
-        StepNames::Product => b.path.last().filter(usable),
-        StepNames::Instance => b.instance.as_ref().filter(usable).or(b.path.last().filter(usable)),
+        StepNames::Product => path.last().filter(usable),
+        StepNames::Instance => instance.filter(usable).or(path.last().filter(usable)),
     };
-    chosen.cloned().unwrap_or_else(|| b.name.clone())
+    chosen.cloned().unwrap_or_else(|| name.to_string())
+}
+
+fn body_name(b: &solidcraft_kernel::ImportedBody, names: StepNames) -> String {
+    choose_body_name(&b.name, b.common_face_name.as_ref(), &b.path, b.instance.as_ref(), names)
+}
+
+/// The body names `records` produces under `names`, read directly from the stored metadata without
+/// rebuilding any B-rep bodies.
+pub fn records_body_names(records: &solidcraft_kernel::ImportRecords, names: StepNames) -> Vec<String> {
+    records.bodies.iter().map(|b| choose_body_name(&b.name, None, &b.path, b.instance.as_ref(), names)).collect()
 }
 
 /// A name a flattened body should not keep: one [`generic_name`] gives up on, a name an exporting
@@ -713,8 +723,7 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
 /// the one cadmpeg detects in the contents, not the file's name.
 fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Result<StepFeature> {
     let RecordsRead { records, warnings: decode_warnings, freecad, preprocessor, description } = read;
-    let text = solidcraft_kernel::records_text(&records)?;
-    design::check_step_importable(&text)?;
+    design::check_step_importable_bytes(records.digest()?.bytes)?;
     let mut imp = solidcraft_kernel::records_import_shared(&records)?;
     // The rest of a STEP header, which the records do not keep, as a STEP import has it: with the
     // program (the records' `system`) it says whether the file has Y up. A copy, so the shared
@@ -754,9 +763,48 @@ fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Re
             step: "".into(),
             components: imp.tree.clone(),
             skip,
-            records: Some(std::sync::Arc::new(records)),
+            records: Some(solidcraft_kernel::SharedRecords::new(records)),
         },
         warnings: decode_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
+        import: imp,
+    })
+}
+
+/// Package SolidCraft's own evaluated B-rep bodies directly into an Import feature keeping native
+/// B-rep records (no STEP export/re-import round-trip), matching [`step_import_feature`]'s naming,
+/// size limits and shared-import caching.
+pub fn native_records_import_feature(design_name: &str, bodies: &[solidcraft_kernel::NativeRecordBody<'_>], file: &str) -> Result<StepFeature> {
+    let _span = solidcraft_profile::span("import", "native_records_import_feature");
+    let (records, imp) = solidcraft_kernel::records_from_bodies(design_name, bodies)?;
+    design::check_step_importable_bytes(records.digest()?.bytes)?;
+    if imp.bodies.is_empty() {
+        return Err(IoError::Invalid(format!("{file}: no bodies could be made of this file")));
+    }
+    let stem = std::path::Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Import".into());
+    let body_names: Vec<String> = imp.bodies.iter().map(|b| body_name(b, StepNames::default())).collect();
+    let invisible: Vec<bool> = imp.bodies.iter().map(|b| b.hidden).collect();
+    let name = match (imp.tree.as_slice(), body_names.as_slice()) {
+        ([root], _) if !generic_name(&root.name) => root.name.clone(),
+        (_, [only]) if !generic_name(only) => only.clone(),
+        _ => stem,
+    };
+    let file_name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    Ok(StepFeature {
+        name,
+        body_names,
+        invisible,
+        kind: solidcraft_doc::FeatureKind::Import {
+            file: file_name,
+            step: "".into(),
+            components: imp.tree.clone(),
+            skip: Vec::new(),
+            records: Some(records),
+        },
+        warnings: Vec::new(),
         import: imp,
     })
 }
@@ -1961,8 +2009,8 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
             _ => Ok(None),
         })
         .collect::<std::result::Result<_, _>>()?;
-    for (b, framed) in local.bodies.iter().zip(&framed) {
-        let comp = doc.model_body_component(b);
+    let owners = doc.model_body_components(local);
+    for ((b, framed), comp) in local.bodies.iter().zip(&framed).zip(owners) {
         let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
         p.bodies.push(ExportBody { name: b.name.clone(), body: framed.as_ref().unwrap_or(&b.body), color: b.body.color() });
     }

@@ -191,7 +191,12 @@ impl PackageWriter {
 /// its format, not the design file's (#2721): a STEP within the import limit is imported, and
 /// the design file limit applies to the design that is saved, which refuses it there.
 pub fn check_step_importable(step: &str) -> Result<()> {
-    crate::limits::check(crate::limits::Kind::Step, step.len() as u64).map_err(|e| IoError::Invalid(format!("STEP {e}")))?;
+    check_step_importable_bytes(step.len())
+}
+
+/// [`check_step_importable`] from a known serialised UTF-8 byte length, without allocating text.
+pub fn check_step_importable_bytes(bytes: usize) -> Result<()> {
+    crate::limits::check(crate::limits::Kind::Step, bytes as u64).map_err(|e| IoError::Invalid(format!("STEP {e}")))?;
     Ok(())
 }
 
@@ -1435,7 +1440,7 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
                     if records.is_some() {
                         return Err(invalid("ambiguous embedded import records and blob"));
                     }
-                    *records = Some(records_parts.get(reader, value)?);
+                    *records = Some(solidcraft_kernel::SharedRecords::from(records_parts.get(reader, value)?));
                 }
             }
             FeatureKind::MeshImport { meshes, .. } => {
@@ -2459,14 +2464,14 @@ mod tests {
             left_out: Vec::new(),
             children: Vec::new(),
         }];
-        let records = Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree, warnings: Vec::new(), system: "FreeCAD".into() });
+        let records = Arc::new(solidcraft_kernel::ImportRecords::new(vec![body], tree, Vec::new(), "FreeCAD".into()));
         let mut doc = Document::new("Records");
         let kind = FeatureKind::Import {
             file: "block.FCStd".into(),
             step: "".into(),
             components: Vec::new(),
             skip: Vec::new(),
-            records: Some(records.clone()),
+            records: Some(records.clone().into()),
         };
         doc.add_feature(kind, None).unwrap();
         let volume = |doc: &Document| {
@@ -3562,11 +3567,15 @@ mod tests {
             copy_of: None,
             mesh: None,
         };
-        let records =
-            Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree: Vec::new(), warnings: Vec::new(), system: String::new() });
+        let records = Arc::new(solidcraft_kernel::ImportRecords::new(vec![body], Vec::new(), Vec::new(), String::new()));
         let mut doc = document();
-        let kind =
-            FeatureKind::Import { file: "block.FCStd".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: Some(records) };
+        let kind = FeatureKind::Import {
+            file: "block.FCStd".into(),
+            step: "".into(),
+            components: Vec::new(),
+            skip: Vec::new(),
+            records: Some(records.into()),
+        };
         doc.add_feature(kind, Some("Imported block")).unwrap();
         let entries = parts(&write_design_container(&doc).unwrap());
         let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
@@ -3677,12 +3686,18 @@ mod tests {
             copy_of: None,
             sheet: false,
         };
-        solidcraft_kernel::ImportRecords { bodies: vec![tiny; count], tree: Vec::new(), warnings: Vec::new(), system: system.into() }
+        solidcraft_kernel::ImportRecords::new(vec![tiny; count], Vec::new(), Vec::new(), system.into())
     }
 
     /// An import kept as these records.
     fn records_import(records: &Arc<solidcraft_kernel::ImportRecords>) -> FeatureKind {
-        FeatureKind::Import { file: "many.FCStd".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: Some(records.clone()) }
+        FeatureKind::Import {
+            file: "many.FCStd".into(),
+            step: "".into(),
+            components: Vec::new(),
+            skip: Vec::new(),
+            records: Some(records.clone().into()),
+        }
     }
 
     /// The parts of a design made a newer build's, by a container format this build does not know.
@@ -3692,7 +3707,10 @@ mod tests {
 
     /// The records of each import of a design, by feature.
     fn read_records(doc: &Document) -> Vec<Option<&Arc<solidcraft_kernel::ImportRecords>>> {
-        doc.features.iter().map(|f| if let FeatureKind::Import { records, .. } = &f.kind { records.as_ref() } else { None }).collect()
+        doc.features
+            .iter()
+            .map(|f| if let FeatureKind::Import { records, .. } = &f.kind { records.as_ref().map(|r| r.as_arc()) } else { None })
+            .collect()
     }
 
     /// Imports with the same records name one records part, since parts are named by their

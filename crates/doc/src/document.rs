@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::Continuity;
+pub use solidcraft_kernel::SharedRecords;
 use solidcraft_sketch::Sketch;
 
 use crate::construct::{AxisDef, GeoRef, PointDef};
@@ -3283,7 +3284,7 @@ pub enum FeatureKind {
         /// through cadmpeg's neutral model), `step` then empty; shared like `step`. Designs
         /// from before `format/v60/import-records.rs` have none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
+        records: Option<SharedRecords>,
     },
     /// Rebuild a closed mesh as a solid with analytic faces where certified and planar facets otherwise.
     MeshConvert {
@@ -5966,16 +5967,25 @@ impl Document {
 
     fn painted_with_faces(&self, state: &crate::ModelState, authored_faces: bool) -> crate::ModelState {
         let mut st = state.clone();
-        for b in &mut st.bodies {
-            let c = self.body_color(b);
-            let face_colors = if authored_faces { self.face_colors(b) } else { self.imported_face_colors(b) };
+        let owners = self.model_body_components(state);
+        let face_overrides = authored_faces.then(|| self.face_overrides_by_body());
+        for (b, owner) in st.bodies.iter_mut().zip(owners) {
+            let look = self.model_body_look_in(b, owner);
+            let c = look.as_ref().map(|l| l.rgb()).or_else(|| b.body.color()).or_else(|| b.imported.as_ref().and_then(|i| i.color));
+            let face_colors = match &face_overrides {
+                Some(by_body) => {
+                    let overrides = by_body.get(b.definition_name()).map_or(&[][..], Vec::as_slice);
+                    self.face_colors_with_overrides(b, overrides)
+                }
+                None => self.imported_face_colors(b),
+            };
             let faces: Vec<solidcraft_kernel::FacePaint> = face_colors
                 .into_iter()
                 .map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32, name: l.file_name() })
                 .collect();
-            let opacity = self.model_body_opacity(b) as f32;
+            let opacity = Self::body_opacity_with_look(b, look.as_ref()) as f32;
             // The look's name goes with its colour (a STEP `COLOUR_RGB` name), so it comes back on import.
-            let name = c.and_then(|_| self.model_display_look(b)).and_then(|l| l.file_name());
+            let name = c.and_then(|_| Self::display_look_with_look(b, look)).and_then(|l| l.file_name());
             // The browser folder it sits in goes as its layer (a STEP layer), so it comes back as a folder.
             let layer = self.model_body_folder(b);
             let paint = solidcraft_kernel::Paint { opacity, faces, name, layer };

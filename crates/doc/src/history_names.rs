@@ -141,6 +141,38 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
     })
 }
 
+/// Exact history face names for `b` without meshing, sampling geometry, or forcing uncomputed
+/// ancestor names. Returns `None` when any operand's names or cached edge names are not ready,
+/// when any face falls back to geometric naming, or when tied pieces require kernel face centres.
+pub(crate) fn derive_exact_no_mesh(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Option<Names> {
+    if b.body.is_mesh() {
+        return None;
+    }
+    let h = &lineage.history;
+    if h.faces.len() != b.body.face_count() || h.edges.len() != b.body.edge_count() {
+        return None;
+    }
+    let operands: Vec<OperandNames> = lineage.operands.iter().map(|op| OperandNames::new_no_mesh(op, o)).collect::<Option<_>>()?;
+    let fid = o.feature.id;
+    let named: Vec<Named> = h.faces.iter().map(|f| from_origins(f, &operands, fid)).collect::<Option<_>>()?;
+    let needed_centres = std::cell::Cell::new(false);
+    let centres = || {
+        needed_centres.set(true);
+        Vec::new()
+    };
+    let parents: Vec<(String, bool)> = named.iter().map(|n| (n.name.clone(), n.verified)).collect();
+    let names = qualify_at(named, &adjacency(h), by_place(&o.feature, &centres));
+    if needed_centres.get() {
+        return None;
+    }
+    let names = fold_cap_pieces(names, &parents, &lineage.cap_pieces);
+    let names = match lineage.pieces.as_deref() {
+        Some(pieces) => split_pieces(names, &parents, pieces, fid, &centres),
+        None => names,
+    };
+    (!needed_centres.get()).then_some(names)
+}
+
 /// What starts the role of a piece of a Split Face (`F7:split:in`): no face has it.
 const SPLIT_ROLE: &str = "split:";
 
@@ -283,6 +315,8 @@ struct OperandNames<'a> {
     names: Arc<Names>,
     /// Its edges' names, worked out on first use (for the faces that blend them).
     edges: OnceLock<Vec<String>>,
+    /// When true, never force meshing or uncomputed edge/face names.
+    no_mesh: bool,
 }
 
 impl<'a> OperandNames<'a> {
@@ -290,15 +324,15 @@ impl<'a> OperandNames<'a> {
         match operand {
             Operand::Body(name) | Operand::Copy { body: name, .. } | Operand::Inner(name) => {
                 let body = o.before.body(name)?;
-                Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
+                Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new(), no_mesh: false })
             }
             Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } | Operand::Grown { body: None, .. } => {
-                Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new() })
+                Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new(), no_mesh: false })
             }
             // Grown from a body before the feature: named after its faces.
             Operand::Grown { body: Some(name), .. } => {
                 let body = o.before.body(name)?;
-                Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
+                Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new(), no_mesh: false })
             }
             Operand::Stage(stage) => {
                 let body = &stage.body;
@@ -312,7 +346,32 @@ impl<'a> OperandNames<'a> {
                         }))
                     })
                     .clone();
-                Some(OperandNames { operand, body: Some(body.clone()), names, edges: OnceLock::new() })
+                Some(OperandNames { operand, body: Some(body.clone()), names, edges: OnceLock::new(), no_mesh: false })
+            }
+        }
+    }
+
+    fn new_no_mesh(operand: &'a Operand, o: &NamingOrigin) -> Option<OperandNames<'a>> {
+        match operand {
+            Operand::Body(name) | Operand::Copy { body: name, .. } | Operand::Inner(name) | Operand::Grown { body: Some(name), .. } => {
+                let body = o.before.body(name)?;
+                let names = body.names.cached_names()?;
+                Some(OperandNames { operand, names, body: Some(body.clone()), edges: OnceLock::new(), no_mesh: true })
+            }
+            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } | Operand::Grown { body: None, .. } => {
+                Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new(), no_mesh: true })
+            }
+            Operand::Stage(stage) => {
+                let body = &stage.body;
+                let names = match stage.names.get() {
+                    Some(known) => known.clone(),
+                    None => {
+                        let derived = Arc::new(derive_exact_no_mesh(body, o, &stage.lineage)?);
+                        let _ = stage.names.set(derived.clone());
+                        derived
+                    }
+                };
+                Some(OperandNames { operand, body: Some(body.clone()), names, edges: OnceLock::new(), no_mesh: true })
             }
         }
     }
@@ -399,13 +458,18 @@ impl<'a> OperandNames<'a> {
         match self.operand {
             Operand::Body(_) | Operand::Stage(_) => {
                 let body = self.body.as_ref()?;
-                let names = self.edges.get_or_init(|| crate::naming::edge_names(body));
+                let name = if self.no_mesh {
+                    body.names.cached_edge_names(&body.body)?.names.get(edge)?.clone()
+                } else {
+                    let names = self.edges.get_or_init(|| crate::naming::edge_names(body));
+                    names.get(edge)?.clone()
+                };
                 let verified = if body.body.is_mesh() {
                     false
                 } else {
                     body.body.record().edges.get(edge).map(|e| e.uses.iter().all(|u| self.names.verified(u.face as usize))).unwrap_or(false)
                 };
-                Some((names.get(edge)?.clone(), verified))
+                Some((name, verified))
             }
             Operand::Copy { .. }
             | Operand::Inner(_)

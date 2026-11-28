@@ -56,26 +56,99 @@ pub(super) struct Noted {
 }
 
 impl Noted {
+    fn note_body(&mut self, body: &kernel::Body, witness: Option<&Weak<ModelState>>) {
+        let mut cur = Some(body);
+        let mut direct = witness;
+        while let Some(b) = cur {
+            match self.forms.entry(b.solid_id()) {
+                Entry::Vacant(forms) => {
+                    forms.insert(NotedForm { forms: b.kernel_forms(), witness: direct.cloned() }).forms.tell(&self.made_again);
+                }
+                // Another body has the address of one that is gone, or going.
+                Entry::Occupied(mut forms) if !forms.get().forms.of(b) => {
+                    forms.insert(NotedForm { forms: b.kernel_forms(), witness: direct.cloned() });
+                    forms.get().forms.tell(&self.made_again);
+                }
+                Entry::Occupied(mut forms) => {
+                    if let Some(w) = direct {
+                        forms.get_mut().witness = Some(w.clone());
+                    }
+                }
+            }
+            direct = None;
+            cur = b.rounds().map(|(earlier, _)| earlier);
+        }
+    }
+
     fn note<'a>(&mut self, states: impl Iterator<Item = &'a Arc<ModelState>>) {
+        let mut ancestors: Vec<Arc<ModelState>> = Vec::new();
         for state in states {
             let Entry::Vacant(new) = self.states.entry(Arc::as_ptr(state) as usize) else { continue };
             let weak = Arc::downgrade(state);
             new.insert(weak.clone());
             self.fresh = true;
             for b in &state.bodies {
-                match self.forms.entry(b.body.solid_id()) {
-                    Entry::Vacant(forms) => {
-                        forms.insert(NotedForm { forms: b.body.kernel_forms(), witness: Some(weak.clone()) }).forms.tell(&self.made_again);
-                    }
-                    // Another body has the address of one that is gone, or going.
-                    Entry::Occupied(mut forms) if !forms.get().forms.of(&b.body) => {
-                        forms.insert(NotedForm { forms: b.body.kernel_forms(), witness: Some(weak.clone()) });
-                        forms.get().forms.tell(&self.made_again);
-                    }
-                    Entry::Occupied(mut forms) => {
-                        if forms.get().witness.as_ref().is_none_or(|w| w.strong_count() == 0) {
-                            forms.get_mut().witness = Some(weak.clone());
+                self.note_body(&b.body, Some(&weak));
+                if let Ok(cuts) = b.cuts.try_lock() {
+                    for cut in cuts.iter() {
+                        if let Some(left) = &cut.left {
+                            self.note_body(&left.body, None);
                         }
+                    }
+                }
+                if let Ok(sections) = b.sections.try_lock() {
+                    for (_, section) in sections.iter() {
+                        if let Some(sec) = section {
+                            self.note_body(&sec.body, None);
+                        }
+                    }
+                }
+                if let Some(origin) = &b.names.origin
+                    && !self.states.contains_key(&(Arc::as_ptr(&origin.before) as usize))
+                {
+                    ancestors.push(origin.before.clone());
+                }
+                if let Some(copy) = b.names.copy_source() {
+                    self.note_body(&copy.body, None);
+                    if let Some(origin) = &copy.names.origin
+                        && !self.states.contains_key(&(Arc::as_ptr(&origin.before) as usize))
+                    {
+                        ancestors.push(origin.before.clone());
+                    }
+                }
+            }
+        }
+        while let Some(state) = ancestors.pop() {
+            let Entry::Vacant(new) = self.states.entry(Arc::as_ptr(&state) as usize) else { continue };
+            new.insert(Arc::downgrade(&state));
+            self.fresh = true;
+            for b in &state.bodies {
+                self.note_body(&b.body, None);
+                if let Ok(cuts) = b.cuts.try_lock() {
+                    for cut in cuts.iter() {
+                        if let Some(left) = &cut.left {
+                            self.note_body(&left.body, None);
+                        }
+                    }
+                }
+                if let Ok(sections) = b.sections.try_lock() {
+                    for (_, section) in sections.iter() {
+                        if let Some(sec) = section {
+                            self.note_body(&sec.body, None);
+                        }
+                    }
+                }
+                if let Some(origin) = &b.names.origin
+                    && !self.states.contains_key(&(Arc::as_ptr(&origin.before) as usize))
+                {
+                    ancestors.push(origin.before.clone());
+                }
+                if let Some(copy) = b.names.copy_source() {
+                    self.note_body(&copy.body, None);
+                    if let Some(origin) = &copy.names.origin
+                        && !self.states.contains_key(&(Arc::as_ptr(&origin.before) as usize))
+                    {
+                        ancestors.push(origin.before.clone());
                     }
                 }
             }
@@ -91,15 +164,17 @@ impl Noted {
 }
 
 impl Model {
-    /// The states this model holds: after every feature, and of the features the history marker
+    /// Every state this model holds: after every feature, and of the features the history marker
     /// hides ([`Model::rolled_results`]).
-    fn held_states(&self) -> impl Iterator<Item = &Arc<ModelState>> {
+    fn all_states(&self) -> impl Iterator<Item = &Arc<ModelState>> {
         self.results.iter().map(|r| &r.state).chain(self.rolled_results.values().map(|(_, _, r)| &r.state))
     }
 
-    /// The addresses of the states this model holds, in one order whatever order they are held in.
-    fn held_now(&self) -> Vec<usize> {
-        let mut held: Vec<usize> = self.held_states().map(|s| Arc::as_ptr(s) as usize).collect();
+    /// The addresses of the states whose bodies keep their kernel forms (the active shown state
+    /// and any results kept behind the history marker), in one order whatever order they are held in.
+    fn held_now(&self, shown: &Arc<ModelState>) -> Vec<usize> {
+        let mut held: Vec<usize> =
+            std::iter::once(shown).chain(self.rolled_results.values().map(|(_, _, r)| &r.state)).map(|s| Arc::as_ptr(s) as usize).collect();
         held.sort_unstable();
         held
     }
@@ -109,18 +184,19 @@ impl Model {
     /// after it.
     pub(super) fn note_states(&self) {
         if let Ok(mut cache) = self.cache.lock() {
-            cache.noted.note(self.held_states());
+            cache.noted.note(self.all_states());
         }
     }
 
     /// Lets go of the kernel forms ([`kernel::KernelForms::release`]) of the noted bodies this
-    /// model does not hold: those of its own earlier states and of the states its copies
-    /// evaluated, wherever the cache still keeps them. For the model a session shows, never for
-    /// a copy, whose session still holds the bodies the copy started from; a second session on
-    /// the same cache would let go of the first one's model. A body another model still uses (a
-    /// preview on screen, work ahead on another thread) makes its form again on its next use,
-    /// which costs that use the time and changes nothing else, and is let go again by the next
-    /// call.
+    /// model no longer shows: its superseded intermediate states, earlier states, and states its
+    /// copies evaluated, wherever the cache still keeps them. Only the active shown state and
+    /// results kept behind the history marker retain kernel forms. For the model a session shows,
+    /// never for a copy, whose session still holds the bodies the copy started from; a second
+    /// session on the same cache would let go of the first one's model. A body another model still
+    /// uses (a preview on screen, work ahead on another thread) makes its form again on its next
+    /// use, which costs that use the time and changes nothing else, and is let go again by the
+    /// next call.
     ///
     /// No form is let go and no body looked at unless something happened since the last call:
     /// the model holds other states, a state was noted, or a body that was asked to let its
@@ -129,10 +205,10 @@ impl Model {
     /// only solids whose witness left the model scan held states to re-verify or release them.
     pub fn release_left(&self) {
         let _span = solidcraft_profile::span("doc", "release");
-        let held_now = self.held_now();
         let shown = self.state();
-        let mut held_addrs: HashSet<usize> = held_now.iter().copied().collect();
-        held_addrs.insert(Arc::as_ptr(&shown) as usize);
+        let shown_stale = self.results.iter().rev().find(|r| !r.skipped).is_some_and(|r| r.stale);
+        let held_now = self.held_now(&shown);
+        let held_addrs: HashSet<usize> = held_now.iter().copied().collect();
         let Ok(mut cache) = self.cache.lock() else { return };
         let noted = &mut cache.noted;
         let made_again = noted.made_again.load(Ordering::Acquire);
@@ -160,13 +236,17 @@ impl Model {
             return;
         }
         let mut found_witnesses: Vec<(usize, Weak<ModelState>)> = Vec::new();
-        for state in std::iter::once(&shown).chain(self.held_states()) {
+        for (state, skip_witness) in std::iter::once((&shown, shown_stale)).chain(self.rolled_results.values().map(|(_, _, r)| (&r.state, false))) {
             #[cfg(test)]
             super::cost_tests::count(|c| c.release_states_scanned += 1);
             for b in &state.bodies {
                 let id = b.body.solid_id();
                 if unresolved.remove(&id).is_some() {
-                    found_witnesses.push((id, Arc::downgrade(state)));
+                    // Do not attach a `Weak` witness to a stale live-drag state, or `Arc::make_mut`
+                    // on the next live frame would reallocate instead of swapping in place.
+                    if !skip_witness {
+                        found_witnesses.push((id, Arc::downgrade(state)));
+                    }
                     if unresolved.is_empty() {
                         break;
                     }

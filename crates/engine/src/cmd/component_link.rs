@@ -1068,6 +1068,7 @@ pub(super) fn read_left_out_bodies(
                         } else {
                             let (next_names, next_inherited, removed) = realign_changed_body_count(
                                 "",
+                                None,
                                 "",
                                 solidcraft_io::StepNames::default(),
                                 &f.body_names,
@@ -1365,6 +1366,16 @@ fn unchanged_read(
         .map(|r| (r.warnings.clone(), r.properties.clone(), r.metadata.clone()))
 }
 
+fn import_source_digest(step: &str, records: Option<&solidcraft_kernel::ImportRecords>) -> u64 {
+    match records {
+        Some(r) => {
+            let key = r.digest().map_or((0, 0), |d| (d.hash, d.bytes));
+            digest(&(1u8, step.as_bytes(), key))
+        }
+        None => digest(&(0u8, step.as_bytes())),
+    }
+}
+
 fn remember_read_parts(
     file: &Path,
     configuration: Option<SelectedConfiguration>,
@@ -1376,7 +1387,7 @@ fn remember_read_parts(
     metadata: &solidcraft_doc::Metadata,
     meshes: &[MeshData],
 ) {
-    let FeatureKind::Import { step, .. } = kind else { return };
+    let FeatureKind::Import { step, records, .. } = kind else { return };
     let file = absolute(file);
     let Ok(mut reads) = READS.lock() else { return };
     reads.retain(|r| r.file != file || r.configuration != configuration);
@@ -1387,7 +1398,7 @@ fn remember_read_parts(
         file,
         configuration,
         bytes,
-        step: digest(step.as_bytes()),
+        step: import_source_digest(step, records.as_deref()),
         faces: digest(faces),
         warnings: warnings.to_vec(),
         properties: properties.to_vec(),
@@ -1498,14 +1509,23 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>, any: bool) -> Option<S
     Some(digest)
 }
 
-/// Drop cached file digests after SolidCraft writes a file, invalidating any path aliases and
-/// preventing an overlapping [`file_sha256`] read from publishing a stale digest under the same
-/// timestamp tick and size.
-pub(super) fn forget_file_digests() {
+#[cfg(test)]
+static FILE_DIGEST_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn clear_file_digests() {
     if let Ok(mut digests) = DIGESTS.lock() {
         digests.0 = digests.0.wrapping_add(1);
         digests.1.clear();
     }
+}
+
+/// Drop cached file digests after SolidCraft writes a file, invalidating any path aliases and
+/// preventing an overlapping [`file_sha256`] read from publishing a stale digest under the same
+/// timestamp tick and size.
+pub(super) fn forget_file_digests() {
+    #[cfg(test)]
+    let _guard = FILE_DIGEST_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    clear_file_digests();
 }
 
 /// Only STEP has a source link; other formats accepted by Insert STEP keep their old behaviour.
@@ -1716,9 +1736,7 @@ fn parse_design_bytes(source: &Source, bytes: &[u8]) -> Result<(Document, Option
     let shown = source.shown();
     let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
     if solidcraft_io::is_design_container(bytes) {
-        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
-        let saved = reader.geometry();
-        Ok((reader.read_document().map_err(fail)?, saved))
+        solidcraft_io::read_design_with_model(bytes).map_err(fail)
     } else {
         Ok((solidcraft_io::read_design(bytes).map_err(fail)?, None))
     }
@@ -1865,6 +1883,7 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
 /// format with its own reader (FreeCAD, Rhino, IGES). The text is STEP whatever the design came
 /// from: a design an importer plugin wrote from `part.FCStd` is linked as `part.FCStd`, and routing
 /// that STEP by the name sent it to the FreeCAD reader, which refused it.
+#[cfg(test)]
 fn step_label(shown: &str) -> String {
     if solidcraft_io::is_native_cad_path(shown) || solidcraft_io::is_iges_path(shown) {
         Path::new(shown).with_extension("step").to_string_lossy().into_owned()
@@ -1881,45 +1900,71 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
         return Err(EngineError::Other(format!("{shown}: the design has a feature that fails ({e}); fix it before linking it")));
     }
     let world = part.world_state()?;
-    let solids: Vec<String> = world.bodies.iter().filter(|b| !b.body.is_mesh()).map(|b| b.name.clone()).collect();
-    if solids.is_empty() {
+    if !world.bodies.iter().any(|b| !b.body.is_mesh()) {
         return Err(EngineError::Other(format!("{shown}: the design has no solid bodies to link")));
     }
-    let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
-        .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let mut feature = solidcraft_io::step_import_feature(&step, &step_label(shown)).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    let painted = part.doc.painted_for_link(&world);
+    // Package each evaluated solid body's exact B-rep record directly into native import records
+    // instead of round-tripping through STEP export + re-import and tessellating every face in
+    // `carried_face_names` (#21375). Multi-lump bodies split into one record per lump using exact
+    // lump history so face names, per-face paint and thread-split warnings match STEP.
+    let mut record_bodies: Vec<(String, solidcraft_kernel::Body)> = Vec::new();
+    let mut faces: Vec<Vec<String>> = Vec::new();
+    let mut sources: Vec<&solidcraft_doc::ModelBody> = Vec::new();
+    for (source, painted_b) in world.bodies.iter().zip(&painted.bodies) {
+        if source.body.is_mesh() {
+            continue;
+        }
+        let source_faces = solidcraft_doc::naming::face_names(source);
+        let multi_lump = painted_b.body.record().material_regions().len() >= 2;
+        let lumps = if multi_lump { painted_b.body.lumps().map_err(|e| EngineError::Other(format!("{shown}: {e}")))? } else { Vec::new() };
+        if lumps.len() <= 1 {
+            record_bodies.push((source.name.clone(), painted_b.body.clone()));
+            faces.push(source_faces.as_ref().clone());
+            sources.push(source);
+            continue;
+        }
+        let body_color = painted_b.body.color();
+        let body_paint = painted_b.body.paint();
+        for lump in lumps {
+            let origin_faces: Vec<Option<usize>> = match lump.history() {
+                Some(history) if history.faces.len() == lump.face_count() => history
+                    .faces
+                    .iter()
+                    .map(|prov| match prov.origins.as_slice() {
+                        [solidcraft_kernel::history::FaceOrigin::Face { operand: 0, face }] => Some(*face),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => vec![None; lump.face_count()],
+            };
+            let carried: Vec<String> = origin_faces.iter().map(|orig| orig.and_then(|i| source_faces.get(i)).cloned().unwrap_or_default()).collect();
+            let lump_paint = body_paint.map(|paint| {
+                let by_orig: std::collections::HashMap<usize, &solidcraft_kernel::FacePaint> = paint.faces.iter().map(|fp| (fp.face, fp)).collect();
+                let remapped = origin_faces
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, orig)| {
+                        let orig = (*orig)?;
+                        let fp = by_orig.get(&orig)?;
+                        Some(solidcraft_kernel::FacePaint { face: i, color: fp.color, opacity: fp.opacity, name: fp.name.clone() })
+                    })
+                    .collect();
+                solidcraft_kernel::Paint { opacity: paint.opacity, faces: remapped, name: paint.name.clone(), layer: paint.layer.clone() }
+            });
+            record_bodies.push((source.name.clone(), lump.with_color(body_color).with_paint(lump_paint)));
+            faces.push(carried);
+            sources.push(source);
+        }
+    }
+    let inputs: Vec<solidcraft_kernel::NativeRecordBody<'_>> =
+        record_bodies.iter().map(|(body_name, body)| solidcraft_kernel::NativeRecordBody { name: body_name.clone(), body }).collect();
+    let mut feature = solidcraft_io::native_records_import_feature(&name, &inputs, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     let meshes: Vec<MeshData> = world.bodies.iter().filter(|b| b.body.is_mesh()).map(|b| super::file::mesh_data(&part.doc, b, &b.mesh())).collect();
-    // The STEP text keeps no face names: carry the design's own, so references into the linked
-    // bodies follow them as they do inside the design (#3330).
-    let faces = solidcraft_doc::naming::carried_face_names(&world, &feature.import.bodies);
-    let mut sources = Vec::new();
-    let mut properties = feature
-        .import
-        .bodies
+    let mut properties: Vec<SourceProperties> = sources
         .iter()
         .zip(&faces)
-        .map(|(read, carried)| {
-            // STEP can split a source body into several lumps. Match its carried source
-            // face names rather than assuming source and imported body orders agree.
-            let source = world
-                .bodies
-                .iter()
-                .find(|b| b.name == read.name)
-                .or_else(|| {
-                    world
-                        .bodies
-                        .iter()
-                        .filter(|b| !b.body.is_mesh())
-                        .filter_map(|b| {
-                            let names = solidcraft_doc::naming::face_names(b);
-                            let count = carried.iter().filter(|n| !n.is_empty() && names.contains(n)).count();
-                            (count > 0).then_some((count, b))
-                        })
-                        .max_by_key(|(count, _)| *count)
-                        .map(|(_, b)| b)
-                })
-                .ok_or_else(|| EngineError::Other(format!("{shown}: cannot match linked body {} to its source properties", read.name)))?;
-            sources.push(source);
+        .map(|(source, carried)| {
             let key = source.definition_name();
             let material = part.doc.body_material(key);
             let definition = if solidcraft_doc::material_density(&material).is_none() { part.doc.user_material(&material).cloned() } else { None };
@@ -1938,9 +1983,9 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
                 .filter_map(|(index, look)| names.get(index).map(|name| (name.clone(), look)))
                 .collect();
             let faces = carried.iter().enumerate().filter_map(|(index, name)| authored.get(name).map(|look| (index, look.clone()))).collect();
-            Ok(SourceProperties { material, definition, appearance, faces, threads: Vec::new() })
+            SourceProperties { material, definition, appearance, faces, threads: Vec::new() }
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect();
     let mut counts = std::collections::HashMap::new();
     for source in &sources {
         counts.entry(source.name.as_str()).and_modify(|n: &mut usize| *n = n.saturating_add(1)).or_insert(1);
@@ -2914,6 +2959,7 @@ fn apply_evaluated_link(
                 } else {
                     let (next_names, next_inherited, removed) = realign_changed_body_count(
                         &old.0,
+                        old.1.as_deref(),
                         &file.display().to_string(),
                         naming,
                         &old_names,
@@ -2924,7 +2970,7 @@ fn apply_evaluated_link(
                     f.body_names = next_names;
                     realigned = Some((next_inherited, removed));
                 }
-            } else if let Some(order) = moved_bodies(&old.0, &file.display().to_string(), naming, &eval.body_names) {
+            } else if let Some(order) = moved_bodies(&old.0, old.1.as_deref(), &file.display().to_string(), naming, &eval.body_names) {
                 f.body_names = reordered(&old_names, &order);
                 moved = Some(order);
             } else if f.body_names.is_empty() && !old_names.is_empty() {
@@ -3091,7 +3137,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|f| digest(f.link_faces.as_slice()));
         if let Some(known) = kept_faces.and_then(|faces| {
             let meshes = link_meshes(s, *comp, link.feature);
-            unchanged_read(file, selected_configuration(link), *bytes_hash, digest(old.0.as_bytes()), faces, meshes)
+            unchanged_read(file, selected_configuration(link), *bytes_hash, import_source_digest(&old.0, old.1.as_deref()), faces, meshes)
         }) {
             native_cached[slot] = Some(known);
             continue;
@@ -3282,7 +3328,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     .map(|f| digest(f.link_faces.as_slice()));
                 if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
                     let meshes = link_meshes(s, comp, link.feature);
-                    unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces, meshes)
+                    unchanged_read(
+                        &file,
+                        selected_configuration(&link),
+                        digest(bytes.as_slice()),
+                        import_source_digest(&old.0, old.1.as_deref()),
+                        faces,
+                        meshes,
+                    )
                 }) {
                     if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
                         kept.file_sha256 = Some(read);
@@ -3507,7 +3560,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// What an Import feature's bodies are made from: its STEP text and its records.
-type ImportSource = (std::sync::Arc<str>, Option<std::sync::Arc<solidcraft_doc::kernel::ImportRecords>>);
+type ImportSource = (std::sync::Arc<str>, Option<solidcraft_doc::SharedRecords>);
 
 /// Whether two Import features make their bodies from the same source.
 fn same_import_source(a: &FeatureKind, b: &FeatureKind) -> bool {
@@ -3663,20 +3716,37 @@ fn tie_numbered_joint_warnings(s: &Session, cname: &str, sides: &[TieNumberedJoi
     out
 }
 
+/// The body names the link's previous import payload produced, read directly from stored
+/// `ImportRecords` metadata when present (without rebuilding geometry) or from stored STEP text.
+fn old_source_body_names(
+    old_step: &str,
+    old_records: Option<&solidcraft_kernel::ImportRecords>,
+    file: &str,
+    naming: solidcraft_io::StepNames,
+) -> Option<Vec<String>> {
+    if let Some(records) = old_records {
+        return Some(solidcraft_io::records_body_names(records, naming));
+    }
+    (!old_step.is_empty()).then(|| solidcraft_io::step_import_feature_named(old_step.as_bytes(), file, naming).ok().map(|f| f.body_names)).flatten()
+}
+
 /// Where each body of a link's design was when the link last read it, for a design that kept
 /// its number of bodies but lists them in another order (#21371): `order[j]` is the place the
-/// design's body `j` had then. `step` is the STEP the link keeps from that read, which names the
-/// bodies as the design did when read with `names` (the link's own naming for a STEP link, the
-/// default for a design); `now` are the names the design gives its bodies now. A body the
-/// design still has is found by its name; the bodies it has new take the places of the ones it no
-/// longer has, in order. `None` when nothing moved, and when the old STEP can't be read or its
-/// names, or the new ones, can't tell the bodies apart: the bodies then keep their places.
-fn moved_bodies(step: &str, file: &str, names: solidcraft_io::StepNames, now: &[String]) -> Option<Vec<usize>> {
-    if step.is_empty() {
-        return None;
-    }
-    // A second read of the STEP text: the link keeps no other record of the old names.
-    let was = solidcraft_io::step_import_feature_named(step.as_bytes(), file, names).ok()?.body_names;
+/// design's body `j` had then. `step` / `old_records` is the payload the link keeps from that
+/// read, which names the bodies as the design did when read with `names` (the link's own naming
+/// for a STEP link, the default for a design); `now` are the names the design gives its bodies
+/// now. A body the design still has is found by its name; the bodies it has new take the places
+/// of the ones it no longer has, in order. `None` when nothing moved, and when the old payload
+/// can't be read or its names, or the new ones, can't tell the bodies apart: the bodies then keep
+/// their places.
+fn moved_bodies(
+    step: &str,
+    old_records: Option<&solidcraft_kernel::ImportRecords>,
+    file: &str,
+    names: solidcraft_io::StepNames,
+    now: &[String],
+) -> Option<Vec<usize>> {
+    let was = old_source_body_names(step, old_records, file, names)?;
     let places: std::collections::HashMap<&str, usize> = was.iter().enumerate().map(|(k, n)| (n.as_str(), k)).collect();
     let distinct = now.iter().collect::<std::collections::HashSet<_>>().len() == now.len();
     if was.len() != now.len() || places.len() != was.len() || !distinct {
@@ -3780,6 +3850,7 @@ fn realign_unpinned_inherited(doc: &Document, old_inherited: &[LinkedBodyPropert
 /// Returns `(next_body_names, next_inherited, removed_body_names)`.
 fn realign_changed_body_count(
     old_step: &str,
+    old_records: Option<&solidcraft_kernel::ImportRecords>,
     file: &str,
     naming: solidcraft_io::StepNames,
     old_names: &[String],
@@ -3787,10 +3858,7 @@ fn realign_changed_body_count(
     new_names: &[String],
     other_bodies: &std::collections::HashSet<String>,
 ) -> (Vec<String>, Vec<LinkedBodyProperties>, Vec<String>) {
-    let old_source: Option<Vec<String>> = (!old_step.is_empty())
-        .then(|| solidcraft_io::step_import_feature_named(old_step.as_bytes(), file, naming).ok().map(|f| f.body_names))
-        .flatten()
-        .filter(|was| was.len() == old_names.len());
+    let old_source: Option<Vec<String>> = old_source_body_names(old_step, old_records, file, naming).filter(|was| was.len() == old_names.len());
     let places = old_source.as_deref().map_or_else(|| unique_name_slots(old_names), unique_name_slots);
     let mut new_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for name in new_names {
@@ -3963,12 +4031,13 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
                     inherited = next_inherited;
                 }
             } else {
-                let old_step = match &f.kind {
-                    FeatureKind::Import { step, .. } => step.as_ref(),
-                    _ => "",
+                let (old_step, old_records) = match &f.kind {
+                    FeatureKind::Import { step, records, .. } => (step.as_ref(), records.as_deref()),
+                    _ => ("", None),
                 };
                 let (next_names, next_inherited, gone) = realign_changed_body_count(
                     old_step,
+                    old_records,
                     &file.display().to_string(),
                     solidcraft_io::StepNames::default(),
                     &old_names,
@@ -3980,9 +4049,10 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
                 inherited = next_inherited;
                 removed = gone;
             }
-        } else if let FeatureKind::Import { step, .. } = &f.kind
+        } else if let FeatureKind::Import { step, records, .. } = &f.kind
             && !same_import_source(&f.kind, &sf.kind)
-            && let Some(order) = moved_bodies(step, &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
+            && let Some(order) =
+                moved_bodies(step, records.as_deref(), &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
         {
             // The names, and what the link last took from each body, stay with their bodies (#21371).
             f.body_names = reordered(&old_names, &order);
@@ -6651,7 +6721,10 @@ mod tests {
         save_box(&part_a, 45.0);
         save_step_box(&step, 20.0, [200.0, 0.0, 0.0]);
         std::fs::remove_file(&gone).unwrap();
-        forget_file_digests();
+        // Hold the digest-cache test lock across the cold + warm listings so parallel `file.save`
+        // tests calling `forget_file_digests()` cannot wipe `DIGESTS` between the two calls.
+        let _digest_guard = FILE_DIGEST_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_file_digests();
 
         FILE_HASH_COMPUTED.with(|n| n.replace(0));
         let listed = run(&mut s, "component.links", json!({}));
@@ -6682,6 +6755,7 @@ mod tests {
         let cached = run(&mut s, "component.links", json!({}));
         assert_eq!(FILE_HASH_COMPUTED.with(std::cell::Cell::get), 0);
         assert_eq!(cached, listed);
+        drop(_digest_guard);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -7075,6 +7149,186 @@ mod tests {
         assert_eq!(
             component_materials(&deferred_relink, comp),
             std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Titanium".into())])
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #21375: `component.insert_design` of a saved `.sc` part built on a STEP import keeps its
+    /// evaluated bodies as native B-rep records directly — no STEP export/re-import round-trip
+    /// and no serial reference meshing in `carried_face_names` — while preserving exact geometry,
+    /// face names, materials, appearances, placement transforms, cold reload and Update Links.
+    #[test]
+    fn insert_design_of_step_backed_part_uses_native_records_without_step_roundtrip_or_meshing() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-native-records-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let step_file = dir.join("base.step");
+        let part_file = dir.join("part.sc");
+        let asm_file = dir.join("assembly.sc");
+
+        // Build a multi-body STEP source, import it into a part, add a parametric hole cut,
+        // assign material + appearance, and save with a trusted model cache.
+        {
+            let mut seed = Session::default();
+            run(&mut seed, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Chassis"}));
+            run(&mut seed, "solid.cylinder", json!({"base": [60, 15, 0], "radius": 5, "height": 12, "body_name": "Boss"}));
+            run(&mut seed, "file.export", json!({"path": step_file}));
+        }
+        let mut part = Session::default();
+        run(&mut part, "file.insert_step", json!({"path": step_file}));
+        run(
+            &mut part,
+            "solid.cylinder",
+            json!({"base": [20, 15, -1], "diameter": 8, "height": 12, "operation": "cut", "targets": ["Chassis"], "name": "MountHole"}),
+        );
+        run(&mut part, "material.assign", json!({"bodies": ["Chassis"], "material": "Aluminum"}));
+        part.doc_mut().appearances.bodies.insert("Chassis".into(), solidcraft_doc::appearance::Look::custom([30, 60, 90], 0.8));
+        run(&mut part, "file.save", json!({"path": part_file}));
+        let expected_world = part.world_state().unwrap();
+        let expected_volume = volume(&mut part);
+        let expected_faces: std::collections::BTreeMap<String, Vec<String>> = expected_world
+            .bodies
+            .iter()
+            .filter(|b| !b.body.is_mesh())
+            .map(|b| (b.name.clone(), solidcraft_doc::naming::face_names(b).as_ref().clone()))
+            .collect();
+
+        // Insert into an assembly with a placement transform.
+        let mut s = Session::default();
+        let inserted =
+            run(&mut s, "component.insert_design", json!({"path": part_file, "translate": [100, 25, 0], "axis": [0, 0, 1], "angle": "90 deg"}));
+        let comp = inserted["component"].as_u64().unwrap();
+        let feat_id = inserted["feature"].as_u64().unwrap();
+
+        // Stored payload is native ImportRecords with empty STEP text (no STEP round-trip).
+        let feat = s.doc.feature(feat_id).unwrap();
+        match &feat.kind {
+            FeatureKind::Import { step, records: Some(records), components, .. } => {
+                assert!(step.is_empty(), "linked design should not embed STEP text");
+                assert!(records.native, "linked design should store native B-rep records");
+                assert_eq!(records.bodies.len(), 2);
+                assert!(!components.is_empty(), "root product tree stays populated for realignment");
+            }
+            other => panic!("expected Import with native records, got {other:?}"),
+        }
+
+        // No body was tessellated during insert_design (carried_face_names meshing bypassed).
+        let st = s.model.state();
+        assert_eq!(st.bodies.len(), 2);
+        assert!(st.bodies.iter().all(|b| b.cached_mesh().is_none()), "insert_design must not tessellate bodies");
+
+        // Exact carried face names, materials, appearances and volume match the source design.
+        assert_eq!(feat.link_faces.len(), 2);
+        for (slot, b) in st.bodies.iter().enumerate() {
+            assert_eq!(&feat.link_faces[slot], &expected_faces[&b.name]);
+            assert!(!feat.link_faces[slot].is_empty() && feat.link_faces[slot].iter().all(|n| !n.is_empty()));
+        }
+        assert_eq!(s.doc.body_material("Chassis"), "Aluminum");
+        assert_eq!(s.doc.appearances.bodies.get("Chassis").map(|l| l.color), Some([30, 60, 90]));
+        assert!((volume(&mut s) - expected_volume).abs() < 1e-6);
+
+        // Save + reopen (with model cache) AND cache-less JSON reopen restore identical state.
+        run(&mut s, "file.save", json!({"path": asm_file}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path": asm_file}));
+        assert!((volume(&mut reopened) - expected_volume).abs() < 1e-6);
+        assert_eq!(reopened.doc.body_material("Chassis"), "Aluminum");
+
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!(cold.model.state().bodies.iter().all(|b| !b.body.holds_kernel_form()), "cold native records restore without SMLib");
+        assert!((volume(&mut cold) - expected_volume).abs() < 1e-6);
+        assert_eq!(cold.doc.body_material("Chassis"), "Aluminum");
+
+        // Update Links recognizes unchanged bytes with zero re-evaluation, then picks up edits.
+        let before_eval = EVALUATED.with(std::cell::Cell::get);
+        assert_eq!(run(&mut s, "component.update_links", json!({}))["unchanged"], json!(["part"]));
+        assert_eq!(EVALUATED.with(std::cell::Cell::get), before_eval);
+
+        run(
+            &mut part,
+            "solid.cylinder",
+            json!({"base": [10, 15, -1], "diameter": 4, "height": 12, "operation": "cut", "targets": ["Chassis"], "name": "SecondHole"}),
+        );
+        run(&mut part, "file.save", json!({"path": part_file}));
+        let edited_volume = volume(&mut part);
+        assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"], json!(["part"]));
+        assert!((volume(&mut s) - edited_volume).abs() < 1e-6);
+        assert_eq!(s.doc.links[&comp].feature, feat_id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Opening a `.sc` design whose stored import records set `native: true` on a structurally
+    /// valid B-rep with disagreeing geometry refuses the body the exact same way as without the
+    /// `native` flag: a file cannot bypass `record_check::agreement` by setting `native: true`.
+    #[test]
+    fn opening_sc_with_native_true_refuses_disagreeing_geometry_same_as_without_flag() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-native-agreement-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part_file = dir.join("part.sc");
+        let native_sc = dir.join("disagree_native.sc");
+        let plain_sc = dir.join("disagree_plain.sc");
+
+        save_box(&part_file, 10.0);
+        let mut asm = Session::default();
+        let inserted = run(&mut asm, "component.insert_design", json!({"path": &part_file}));
+        let feat_id = inserted["feature"].as_u64().unwrap();
+
+        let mut records = match &asm.doc.feature(feat_id).unwrap().kind {
+            FeatureKind::Import { records: Some(r), .. } => (**r).clone(),
+            other => panic!("expected Import with records, got {other:?}"),
+        };
+        // Move a vertex off its incident edge curves so the B-rep stays structurally valid
+        // (`record_check::validate`) while failing geometric agreement (`record_check::agreement`).
+        records.bodies[0].brep.as_mut().unwrap().vertices[0].point[2] += 0.5;
+
+        let mut doc_native = (*asm.doc).clone();
+        let mut native_records = records.clone();
+        native_records.native = true;
+        if let Some(FeatureKind::Import { records: slot, .. }) = doc_native.feature_mut(feat_id).map(|f| &mut f.kind) {
+            *slot = Some(solidcraft_kernel::SharedRecords::new(native_records));
+        }
+
+        let mut doc_plain = (*asm.doc).clone();
+        let mut plain_records = records;
+        plain_records.native = false;
+        if let Some(FeatureKind::Import { records: slot, .. }) = doc_plain.feature_mut(feat_id).map(|f| &mut f.kind) {
+            *slot = Some(solidcraft_kernel::SharedRecords::new(plain_records));
+        }
+
+        std::fs::write(&native_sc, solidcraft_io::write_design_container(&doc_native).unwrap()).unwrap();
+        std::fs::write(&plain_sc, solidcraft_io::write_design_container(&doc_plain).unwrap()).unwrap();
+
+        let mut opened_native = Session::default();
+        run(&mut opened_native, "doc.open", json!({"path": &native_sc}));
+        let mut opened_plain = Session::default();
+        run(&mut opened_plain, "doc.open", json!({"path": &plain_sc}));
+
+        assert!(
+            matches!(&opened_native.doc.feature(feat_id).unwrap().kind, FeatureKind::Import { records: Some(r), .. } if r.native),
+            "reopened .sc must carry native: true from disk"
+        );
+        assert!(
+            matches!(&opened_plain.doc.feature(feat_id).unwrap().kind, FeatureKind::Import { records: Some(r), .. } if !r.native),
+            "reopened .sc must carry native: false from disk"
+        );
+        assert!(opened_native.model.state().bodies.is_empty(), "native: true must refuse disagreeing geometry");
+        assert!(opened_plain.model.state().bodies.is_empty(), "native: false must refuse disagreeing geometry");
+
+        let res_native = opened_native.model.results.iter().find(|r| r.id == feat_id).unwrap();
+        let res_plain = opened_plain.model.results.iter().find(|r| r.id == feat_id).unwrap();
+        let warn_native = res_native.warning.as_deref().expect("warning on refused native record");
+        let warn_plain = res_plain.warning.as_deref().expect("warning on refused non-native record");
+        assert!(warn_native.contains("geometry disagrees"), "expected geometry disagreement warning, got: {warn_native}");
+        assert_eq!(warn_native, warn_plain, "native: true must refuse disagreeing geometry the same as native: false");
+        assert_eq!(res_native.import_report, res_plain.import_report);
+        let report = res_native.import_report.as_ref().expect("import report on refused record");
+        assert_eq!(report.solids, 0);
+        assert!(
+            report.issues.iter().any(|i| i.kind == solidcraft_kernel::IssueKind::NotImported && i.detail.contains("geometry disagrees")),
+            "{:?}",
+            report.issues
         );
 
         let _ = std::fs::remove_dir_all(&dir);
