@@ -892,8 +892,7 @@ fn a_silhouette_on_a_surface_within_its_bound_is_bounded_by_it() {
     .unwrap();
     let sil = silhouette_pieces(&d);
     assert!(!sil.is_empty());
-    let alone =
-        super::silhouettes(&def, &identity(0, [0.; 3]), &view, &Options::default()).unwrap();
+    let alone = silhouettes(&def, &identity(0, [0.; 3]), &view, &Options::default()).unwrap();
     assert!(!alone.is_empty());
     let bounded = CurveAccuracy::Bounded {
         max_deviation_mm: eps,
