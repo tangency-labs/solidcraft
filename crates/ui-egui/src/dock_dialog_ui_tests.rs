@@ -181,3 +181,58 @@ fn a_dragged_dialog_stays_while_open_and_the_next_opens_docked() {
         assert!((again.min - rest.min).length() < 2.0, "the next opens docked: {rest:?} -> {again:?}");
     }
 }
+
+/// One frame in which `key` is pressed, with no frame of its own before or after it.
+fn press(h: &mut crate::scenario::Harness, key: egui::Key, modifiers: egui::Modifiers) {
+    h.frame_with(vec![egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers }]);
+}
+
+/// #22388: a dragged dialog keeps its place only while it is open. A dialog closed and replaced on
+/// the very next frame opens docked: OK, then Repeat Last Command at once; Esc, then Repeat at once;
+/// and Cancel with another command started before the next frame.
+#[test]
+fn a_dragged_dialog_is_forgotten_when_the_next_opens_on_the_next_frame() {
+    use crate::scenario::Harness;
+    use serde_json::json;
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        for close in ["ok", "escape", "start"] {
+            let mut h = Harness::new();
+            h.call("ui.set", json!({"layout":mode}));
+            h.call("ui.resize", json!({"width":1400.0,"height":900.0}));
+            h.step(&json!({"start":"solid.box"})).unwrap();
+            h.frames(6);
+            let rest = h.app.viewport.dialog_rect.unwrap();
+            let title = crate::scenario::handle_at("dialog:title").unwrap();
+            h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x-300.0,"y1":title.y+60.0,"steps":8}));
+            h.frames(10);
+            let moved = h.app.viewport.dialog_rect.unwrap();
+            assert!((moved.min - rest.min - egui::vec2(-300.0, 60.0)).length() < 2.0, "{mode:?} {close}: stays while open: {rest:?} -> {moved:?}");
+            match close {
+                "ok" => {
+                    press(&mut h, egui::Key::Enter, egui::Modifiers::NONE);
+                    for _ in 0..120 {
+                        if h.app.dialog.is_none() {
+                            break;
+                        }
+                        h.frame();
+                    }
+                    assert!(h.app.dialog.is_none(), "{mode:?}: OK closes the dialog");
+                    press(&mut h, egui::Key::R, egui::Modifiers::SHIFT);
+                }
+                "escape" => {
+                    press(&mut h, egui::Key::Escape, egui::Modifiers::NONE);
+                    assert!(h.app.dialog.is_none(), "{mode:?}: Esc closes the dialog");
+                    press(&mut h, egui::Key::R, egui::Modifiers::SHIFT);
+                }
+                _ => {
+                    crate::dialogs::cancel(&mut h.app);
+                    h.app.start("solid.box");
+                }
+            }
+            h.frames(6);
+            assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "{mode:?} {close}: the next dialog is open");
+            let again = h.app.viewport.dialog_rect.unwrap();
+            assert!((again.min - rest.min).length() < 2.0, "{mode:?} {close}: the next opens docked: {rest:?} -> {again:?}");
+        }
+    }
+}

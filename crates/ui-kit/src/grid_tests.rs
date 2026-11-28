@@ -326,6 +326,25 @@ fn typing_edits_enter_commits_and_moves_escape_cancels() {
 }
 
 #[test]
+fn escape_closes_a_cell_text_menu_before_cancelling_its_draft() {
+    let (ctx, mut sheet) = focused(1);
+    press(&ctx, &mut sheet, Key::F2, Modifiers::NONE);
+    frame(&ctx, &mut sheet, vec![Event::Text("uncommitted draft".into())]);
+    let expected = Grid::editing(&ctx, Grid::state_of("g")).unwrap();
+    run(&ctx, &mut sheet, key_with(Key::F10, Modifiers::SHIFT), Modifiers::SHIFT);
+    frame(&ctx, &mut sheet, vec![]);
+    assert!(crate::Menu::any_open(&ctx));
+    let out = press(&ctx, &mut sheet, Key::Escape, Modifiers::NONE);
+    assert!(out.cancelled.is_none(), "menu Escape must preserve the pending draft");
+    assert_eq!(Grid::editing(&ctx, Grid::state_of("g")), Some(expected));
+    assert!(!crate::Menu::any_open(&ctx));
+    let out = press(&ctx, &mut sheet, Key::Escape, Modifiers::NONE);
+    assert!(out.cancelled.is_some(), "the next Escape still cancels the edit");
+    assert!(Grid::editing(&ctx, Grid::state_of("g")).is_none());
+    assert_eq!(sheet.cell(0, 0), "name0");
+}
+
+#[test]
 fn ctrl_enter_writes_one_value_to_every_selected_cell() {
     let (ctx, mut sheet) = focused(3);
     // From Note (read-only) down and left: the range holds every column, the cursor is on Name.

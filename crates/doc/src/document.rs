@@ -2227,8 +2227,10 @@ pub enum FeatureKind {
         #[walk(angle = "Entry chamfer angle")]
         entry_chamfer_angle: Option<Expr>,
     },
-    /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
-    /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
+    /// A helical coil: a circular, square or triangular section swept `turns` times about `axis`,
+    /// rising `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or
+    /// outside). A picked circular edge, round face or flat end face (`axis_ref`) can give the
+    /// diameter when `diameter` is absent.
     Coil {
         #[serde(with = "point_expr")]
         #[walk(placement)]
@@ -3889,6 +3891,9 @@ pub enum CoilSection {
     #[default]
     Circular,
     Square,
+    /// An equilateral triangle of side `section_size`, its point toward the axis: a thread-like
+    /// groove when cut, or a thread when joined.
+    Triangle,
 }
 
 /// Where a coil's wire ends: in a plane through the axis, or square to the wire.
