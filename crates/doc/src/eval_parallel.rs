@@ -22,8 +22,8 @@ use solidcraft_kernel as kernel;
 
 use super::{
     CachedEval, Change, ComponentDigests, Document, EvalCache, EvalKey, EvalValidationGuard, Feature, FeatureKind, FeatureResult, FrameBodies,
-    IMPORT_HEALS, ImportDigests, ModelState, Primed, ReplayHistory, SourceStates, Value, absorb_sheet_cuts, append_warning, check_kept, copy_instances,
-    eval_feature, fingerprint, naming_feature, note_cut_cavity, note_join_apart, now, overlap, own_copies, own_inputs, param_names,
+    IMPORT_HEALS, ImportDigests, ModelState, Primed, ReplayHistory, SourceStates, Value, absorb_sheet_cuts, append_warning, check_kept,
+    copy_instances, eval_feature, fingerprint, naming_feature, note_cut_cavity, note_join_apart, now, overlap, own_copies, own_inputs, param_names,
     track_altered_sheets, with_named_face_points,
 };
 
@@ -147,6 +147,7 @@ pub(super) fn prefetch_imports(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     prev_results: &[FeatureResult],
+    subset_imports: &BTreeSet<u64>,
     prev_import_digests: &ImportDigests,
     import_digests: &ImportDigests,
     cache: &Mutex<EvalCache>,
@@ -171,7 +172,7 @@ pub(super) fn prefetch_imports(
     let mut by_digest: HashMap<(u8, u64, usize), Vec<usize>> = HashMap::new();
     let cache_guard = cache.lock().ok();
     for (i, f) in doc.features.iter().enumerate().take(limit) {
-        if f.suppressed {
+        if f.suppressed || subset_imports.contains(&f.id) {
             continue;
         }
         let FeatureKind::Import { step, records, .. } = &f.kind else {
@@ -305,6 +306,7 @@ pub(super) fn prefetch_components(
     vals: &BTreeMap<String, Value>,
     param_errors: &BTreeMap<String, String>,
     prev_results: &[FeatureResult],
+    subset_imports: &BTreeSet<u64>,
     empty: &Arc<ModelState>,
     frame_bodies: &Arc<Mutex<FrameBodies>>,
     cache: &Mutex<EvalCache>,
@@ -363,6 +365,10 @@ pub(super) fn prefetch_components(
     for (i, f) in doc.features.iter().enumerate().take(limit) {
         if f.suppressed {
             reserved.extend(f.body_names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(str::to_string));
+            continue;
+        }
+        if subset_imports.contains(&f.id) {
+            blocked_components.insert(f.component);
             continue;
         }
         if i < first_cold {
@@ -531,6 +537,7 @@ fn eval_component_chain(
                         None,
                         prepared_imports.get(f.id),
                         &history,
+                        None,
                         Some(&before_states),
                     );
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = None);

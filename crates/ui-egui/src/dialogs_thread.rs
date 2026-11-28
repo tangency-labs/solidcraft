@@ -508,13 +508,15 @@ pub(crate) fn rows(
     // How far in from the end it starts at the thread starts: a plain stretch at that end.
     enter |= crate::ui_kit::expr_row_positive(ui, "Offset", &mut o.offset);
 
+    // A custom thread takes no chamfered tip (ISO 4753's is for ISO metric threads). Cleared
+    // here, outside the Ends section, so a tip chosen before Custom is cleared even while that
+    // section is collapsed (its chamfer rows are hidden for Custom, so it could not be undone).
+    if f == ThreadForm::Custom {
+        o.tip = ThreadTip::None;
+    }
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
         // The start, a free end: plain or chamfered; and with it chamfered, every other free end
         // the thread reaches too (a stud's two ends, ISO 4753), the command's `tip: both`.
-        // A custom thread takes no chamfered tip (ISO 4753's is for ISO metric threads).
-        if f == ThreadForm::Custom {
-            o.tip = ThreadTip::None;
-        }
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
         if f != ThreadForm::Custom {
             choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);

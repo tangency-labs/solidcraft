@@ -19,7 +19,7 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::cutting_line::SectionKind;
-use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind};
+use solidcraft_doc::drawing::dimension::Dimension;
 use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, HiddenBody, Pose, Shows, StudyStep, ViewConfiguration};
@@ -999,8 +999,8 @@ pub(crate) struct ViewOnSheet {
 
 /// Where the view of `dimension` puts what it draws on its sheet, as the sheet draws it: its frame,
 /// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
-/// an occurrence move not captured yet is left out). A full section can place distances between
-/// named model faces. Edges made by the cut have no model references yet (#13046).
+/// an occurrence move not captured yet is left out). A full section places what points at the model
+/// as any view does; the edges its cut makes have no model references (#13046).
 /// A missing or unsupported view, or one with nothing to measure, returns
 /// [`crate::drawing_scene::NOT_DRAWN`]. A view that draws no model edges, a flat
 /// pattern view ([`no_model_edges`]), has no place for what points at the model
@@ -1014,10 +1014,7 @@ pub(crate) fn dimension_view_on_sheet(s: &Session, d: &Drawing, dimension: &Dime
     if d.view(id).and_then(no_model_edges).is_some() {
         return Err(NO_PLACE);
     }
-    if not_drawable_apart(&view).is_some()
-        || not_cut_yet(&view).is_some()
-        || (view.cut.is_some() && !matches!(dimension.kind, DimensionKind::Faces { .. }))
-    {
+    if not_drawable_apart(&view).is_some() || not_cut_yet(&view).is_some() {
         return Err(NOT_DRAWN);
     }
     let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;

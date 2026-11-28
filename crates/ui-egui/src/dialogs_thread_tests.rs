@@ -958,6 +958,24 @@ fn a_thread_can_be_chamfered_at_both_ends() {
     assert!(params(&h).get("tip").is_none());
 }
 
+/// Review of #23393: a tip chamfered before Custom is chosen is cleared even with the Ends
+/// section collapsed, where its rows are hidden, so the custom thread is never sent a tip.
+#[test]
+fn choosing_custom_with_the_ends_collapsed_clears_a_chamfered_tip() {
+    let mut h = shaft();
+    choose(&mut h, "Start", "Chamfer");
+    assert_eq!(params(&h)["tip"], "start");
+    click(&mut h, &["dialog:section:Ends"]);
+    // Custom is last in a long list, below the popup's fold; the window draws the form it holds.
+    match &mut h.app.dialog.as_mut().unwrap().kind {
+        Kind::Thread { options, .. } => options.form = ThreadForm::Custom,
+        k => panic!("{k:?}"),
+    }
+    h.frames(2);
+    assert_eq!(options(&h).tip, ThreadTip::None);
+    assert!(params(&h).get("tip").is_none(), "{}", params(&h));
+}
+
 /// #23145: a typed offset goes into the command and a blank one stays out, and with one the end to
 /// start from can be picked even on a Full thread. An offset that comes to 0 is none, as the
 /// command takes it; one that can't be worked out, or is negative, counts as given.
