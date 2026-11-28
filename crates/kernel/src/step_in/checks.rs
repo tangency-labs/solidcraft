@@ -446,7 +446,14 @@ fn run(
             })
         })
     }));
-    shared.finish(settled.unwrap_or_else(|_| Settled { issues: Arc::default(), stopped: true, heals: None }));
+    let mut settled = settled.unwrap_or_else(|_| Settled { issues: Arc::default(), stopped: true, heals: None });
+    // A Cancel can arrive after the last check returned but before this settlement: the run is
+    // stopped, and nothing it found is kept.
+    if shared.stop.is_stopped() {
+        settled.stopped = true;
+        settled.heals = None;
+    }
+    shared.finish(settled);
 }
 
 /// Held for writing by a test that keeps the check runs open ([`ImportChecks::hold_open_for_tests`]).
@@ -725,7 +732,9 @@ impl ImportChecks {
     pub fn issues(&self) -> Option<Arc<Vec<ImportIssue>>> {
         match &self.0 {
             None => Some(Arc::default()),
-            Some(h) => h.0.settled().map(|s| s.issues),
+            // A stopped run keeps nothing it found, but it has ended: `Some` with no issues, not
+            // `None`, which would still say it is running.
+            Some(h) => h.0.settled().map(|s| if s.stopped { Arc::default() } else { s.issues }),
         }
     }
 

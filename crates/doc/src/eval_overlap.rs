@@ -146,6 +146,16 @@ impl CheckCancel {
     }
 }
 
+/// Counts a check as done when its worker ends, whether it passed, refused, was stopped or
+/// panicked. It is created only by the branch that runs the check, so it counts once.
+struct Finished(Arc<CheckCancel>);
+
+impl Drop for Finished {
+    fn drop(&mut self) {
+        self.0.finished();
+    }
+}
+
 pub(super) struct Checks {
     on: bool,
     /// Most checks running at once: the cores beside the evaluation's own.
@@ -229,9 +239,13 @@ impl Checks {
         let shared = Arc::new(Mutex::new(Some(check)));
         let taken = shared.clone();
         let stop = self.cancel.stop.clone();
+        let finished = self.cancel.clone();
         let started = kernel::kernel_thread("feature-check").spawn(move || {
             stop.within(|| match taken.lock().ok().and_then(|mut c| c.take()) {
-                Some(check) => check(),
+                Some(check) => {
+                    let _finished = Finished(finished.clone());
+                    check()
+                }
                 None => Ok(()),
             })
         });
@@ -241,7 +255,10 @@ impl Checks {
                 Ok(())
             }
             Err(_) => self.cancel.stop.within(|| match shared.lock().ok().and_then(|mut c| c.take()) {
-                Some(check) => check(),
+                Some(check) => {
+                    let _finished = Finished(self.cancel.clone());
+                    check()
+                }
                 None => Ok(()),
             }),
         }
@@ -269,7 +286,6 @@ impl Checks {
             let from = self.running.front().map_or(0, |r| r.index);
             while let Some(r) = self.running.pop_front() {
                 let _ = r.done.join();
-                self.cancel.finished();
             }
             self.held.clear();
             return Some(Settlement::Cancelled { from });
@@ -283,7 +299,6 @@ impl Checks {
                 Ok(check) => check,
                 Err(_) => Err(kernel::KernelError::Internal(format!("{}: the check's thread stopped", r.index))),
             };
-            self.cancel.finished();
             // A cancel that arrived while the check was being joined: it wins over a refusal.
             if self.cancel.cancelled() {
                 self.running.clear();

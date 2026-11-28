@@ -4689,7 +4689,8 @@ fn a_cancelled_import_check_keeps_nothing_it_found() {
     let r = model.result(import).expect("the import is still there");
     assert!(r.import_report.as_ref().is_none_or(|i| i.issues.is_empty()), "nothing it found is kept: {:?}", r.import_report);
     assert!(r.warning.as_deref().is_none_or(|w| !w.contains("would need repair")), "{:?}", r.warning);
-    assert!(!r.stale, "the import is the one that was read");
+    assert!(r.stale, "the import is evaluated again, so a replacement check runs");
+    assert!(model.saved_if_checked(&doc).is_none(), "no model until it is checked again");
 }
 
 /// The operations panel's Cancel of the SMLib checks of the last features' bodies: the batch

@@ -65,6 +65,9 @@ pub struct Row {
     pub steps: Option<(usize, usize)>,
     /// The steps are bytes (a file read or written): the bar says how far in per cent.
     pub percent: bool,
+    /// `steps` counts completed units (a batch's checks), not the step under way: the bar says
+    /// `done / total`, including `0 / total`.
+    pub completed: bool,
     /// Waiting for the one before it.
     pub queued: bool,
     /// Done, and waiting for the person to finish what they are doing (or for its design's tab)
@@ -127,6 +130,7 @@ impl Row {
             label,
             steps: None,
             percent: false,
+            completed: false,
             queued: false,
             waiting: false,
             cancelling: false,
@@ -172,6 +176,9 @@ impl Row {
         let (done, total) = self.steps.filter(|(_, total)| *total > 1)?;
         if self.percent {
             return Some(format!("{}%", (done.min(total) as f64 * 100.0 / total as f64).floor()));
+        }
+        if self.completed {
+            return Some(format!("{} / {total}", done.min(total)));
         }
         Some(format!("{} / {total}", (done + 1).min(total)))
     }
@@ -342,8 +349,10 @@ fn import_check_row(id: u64, run: u64, progress: solidcraft_engine::kernel::Impo
 /// batch, how many feature checks ended of how many started.
 fn feature_check_row(progress: solidcraft_engine::doc::FeatureChecksProgress) -> Row {
     Row {
-        // One check: the bar's stripe says it is running.
+        // One check: the bar's stripe says it is running. The count is completed checks, not
+        // the one under way.
         steps: (progress.total > 1).then_some((progress.done, progress.total)),
+        completed: true,
         cancelling: progress.cancelling,
         cancel: Some(Cancel::FeatureChecks),
         ..Row::new(format!("feature-check:{}", progress.serial), solidcraft_ui_text::tr("operations.feature_check").to_string())
@@ -917,6 +926,13 @@ mod tests {
         assert_eq!(row("a", Some((0, 1))).status(), None, "one step: just the bar");
         assert_eq!(row("a", None).fraction(), None);
         assert_eq!(row("a", Some((5, 0))).fraction(), None, "hostile counts");
+        // Completed counts say how many are done, including none.
+        let mut completed = row("a", Some((2, 12)));
+        completed.completed = true;
+        assert_eq!(completed.status().as_deref(), Some("2 / 12"));
+        let mut none = row("a", Some((0, 12)));
+        none.completed = true;
+        assert_eq!(none.status().as_deref(), Some("0 / 12"));
     }
 
     /// A history command computing off the window thread shows as a row with its command's name
@@ -1044,6 +1060,7 @@ mod tests {
         let row = feature_check_row(FeatureChecksProgress { serial: 9, done: 2, total: 5, cancelling: false });
         assert_eq!((row.key.as_str(), row.label.as_str()), ("feature-check:9", solidcraft_ui_text::tr("operations.feature_check")));
         assert_eq!(row.steps, Some((2, 5)));
+        assert_eq!(row.status().as_deref(), Some("2 / 5"), "completed checks, not the one under way");
         assert!(row.cancellable() && !row.cancelling);
         let one = feature_check_row(FeatureChecksProgress { serial: 9, done: 0, total: 1, cancelling: true });
         assert_eq!(one.steps, None, "one check: the stripe says it runs");

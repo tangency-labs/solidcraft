@@ -6117,6 +6117,10 @@ impl Model {
             // operation): what it found is incomplete and no part was healed, so none of it is
             // kept. The import stays as read, and a later evaluation checks it again.
             if run.stopped() {
+                // Nothing it found is kept, and the import's own result must be evaluated again
+                // so a replacement check runs: a current result would reuse the cancelled one.
+                held.release(r.id);
+                r.stale = true;
                 let as_read = kernel::ImportReport { checks: Default::default(), ..(**report).clone() };
                 r.import_report = (!as_read.issues.is_empty()).then(|| Arc::new(as_read));
                 continue;
