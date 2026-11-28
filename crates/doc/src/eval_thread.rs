@@ -887,6 +887,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     // A default form keeps historical inference (`Tr20x4`), but never opts into Unified.
     // New Unified Thread features store their form explicitly at command creation.
     let form = (*form != ThreadForm::Metric).then_some(*form);
+    let designation = designation.as_deref().map(|text| doc.eval_thread_designation(text, vals));
     let ask = ThreadAsk {
         form,
         designation: designation.as_deref(),

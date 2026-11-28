@@ -3175,6 +3175,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         to: None,
         references: Vec::new(),
         old_surface_start: false,
+        auto_thread_diameter: false,
         hardware: None,
     };
     let (work, threads) = marking_work(&mut doc, hole);
@@ -3320,6 +3321,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         to: None,
         references: Vec::new(),
         old_surface_start: false,
+        auto_thread_diameter: false,
         hardware: None,
     };
     let (work, threads) = marking_work(&mut doc, hole);

@@ -279,6 +279,16 @@ impl Document {
         self.text_params.iter().find(|p| p.name == name)
     }
 
+    /// Resolve a thread size with the sketch text evaluator, preserving literal designations.
+    pub fn eval_thread_designation(&self, source: &str, vals: &BTreeMap<String, Value>) -> String {
+        if crate::parse_tapped_thread(source).is_some()
+            || crate::thread_forms::ThreadForm::of_designation(source).is_some_and(|form| form.parse(source, 1).is_ok())
+        {
+            return source.to_string();
+        }
+        self.eval_words(source, vals).unwrap_or_else(|_| source.to_string())
+    }
+
     /// The words a words expression comes to in this design, number parameters from `vals`.
     pub fn eval_words(&self, e: &str, vals: &BTreeMap<String, Value>) -> Result<String> {
         eval(e, &|n, show| match (self.text_param(n), vals.get(n)) {

@@ -2419,3 +2419,69 @@ fn a_thread_goes_on_a_body_of_its_own_component() {
     let on: Vec<String> = s.model.state().threads.iter().map(|t| t.body.clone()).collect();
     assert_eq!(on, [body_of(&s, "Stud B")]);
 }
+
+#[test]
+fn thread_designation_follows_text_parameters_and_configuration_rows() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"size_name", "expression":"M5", "unit":"text"}));
+    run(&mut s, "parameters.add", json!({"name":"stock_radius", "expression":"2.5 mm"}));
+    run(&mut s, "solid.cylinder", json!({"radius":"stock_radius", "height":10}));
+    run(&mut s, "solid.thread", json!({"face":[2.5,0,5], "designation":"size_name + ''"}));
+    let check = |s: &Session, designation: &str, major: f64, pitch: f64| {
+        let state = s.model.state();
+        let t = &state.threads[0];
+        assert_eq!(t.designation, designation);
+        assert!((t.major_diameter - major).abs() < 1e-9);
+        assert!((t.pitch - pitch).abs() < 1e-9);
+    };
+    check(&s, "M5", 5.0, 0.8);
+    run(&mut s, "parameters.change", json!({"name":"size_name", "expression":"M5x0.5"}));
+    check(&s, "M5x0.5", 5.0, 0.5);
+    // Configure both the stock and designation so the thread continues to fit its face.
+    run(&mut s, "config.configure", json!({"params":["size_name", "stock_radius"]}));
+    run(&mut s, "config.row", json!({"name":"Six", "values":{"size_name":"M6", "stock_radius":"3 mm"}}));
+    run(&mut s, "config.activate", json!({"row":"Six"}));
+    check(&s, "M6", 6.0, 1.0);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened, "M6", 6.0, 1.0);
+}
+
+#[test]
+fn thread_designation_evaluates_text_and_preserves_literal_sizes() {
+    for designation in ["M5", "size_name", "'M' + '5'"] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name":"size_name", "expression":"M5", "unit":"text"}));
+        run(&mut s, "solid.cylinder", json!({"radius":2.5, "height":10}));
+        run(&mut s, "solid.thread", json!({"face":[2.5,0,5], "designation":designation}));
+        assert_eq!(s.model.state().threads[0].designation, "M5");
+    }
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"size_name", "expression":"unknown_size", "unit":"text"}));
+    run(&mut s, "solid.cylinder", json!({"radius":2.5, "height":10}));
+    let error = s.execute("solid.thread", &json!({"face":[2.5,0,5], "designation":"size_name"})).unwrap_err().to_string();
+    assert!(error.contains("unknown metric thread"), "{error}");
+    assert!(error.contains("unknown_size"), "{error}");
+}
+
+#[test]
+fn tapped_hole_designation_follows_text_parameter_and_drill_size() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"size_name", "expression":"M5", "unit":"text"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+    run(&mut s, "solid.hole", json!({"position":[10,10,10],"thread":"size_name","depth":8}));
+    let check = |s: &Session, major: f64, pitch: f64| {
+        let state = s.model.state();
+        assert_eq!(state.threads.len(), 1);
+        assert!((state.threads[0].major_diameter - major).abs() < 1e-9);
+        assert!((state.threads[0].pitch - pitch).abs() < 1e-9);
+    };
+    check(&s, 5.0, 0.8);
+    run(&mut s, "parameters.change", json!({"name":"size_name", "expression":"M6"}));
+    check(&s, 6.0, 1.0);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened, 6.0, 1.0);
+    run(&mut s, "config.configure", json!({"params":["size_name"]}));
+    run(&mut s, "config.row", json!({"name":"Small", "values":{"size_name":"M5"}}));
+    run(&mut s, "config.activate", json!({"row":"Small"}));
+    check(&s, 5.0, 0.8);
+}

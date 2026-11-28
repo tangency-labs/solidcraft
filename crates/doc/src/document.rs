@@ -1362,6 +1362,9 @@ pub enum FeatureKind {
         /// A cosmetic thread in the holes (e.g. "M6x1").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread: Option<String>,
+        /// Follow the evaluated thread's tap drill instead of the saved initial diameter.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        auto_thread_diameter: bool,
         /// Threaded depth from the cylindrical wall's entry; `None` = its full useful length.
         /// Independent of the drill depth and excluding the drill point and entry recess.
         #[serde(default, skip_serializing_if = "Option::is_none")]

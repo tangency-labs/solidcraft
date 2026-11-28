@@ -391,7 +391,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "shared options apply to every face, automatic size fits each independently; ",
             "cosmetic replies include threads for faces and retain thread as the first; ",
             "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
-            "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1), optionally then an ISO 965-1 tolerance class after a hyphen, \"M8-6g\", \"M8x1-6H\", \"M10x1.25-5g6g\" (e, f, g or h on a shaft, G or H in a hole; kept in the callout, refused on the wrong side, changes no geometry); ",
+            "designation?: a literal size or a sketch text expression (size_name, or 'M' + number(Size)); evaluated on every rebuild; the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1), optionally then an ISO 965-1 tolerance class after a hyphen, \"M8-6g\", \"M8x1-6H\", \"M10x1.25-5g6g\" (e, f, g or h on a shaft, G or H in a hole; kept in the callout, refused on the wrong side, changes no geometry); ",
             "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
             "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); ",
@@ -5137,6 +5137,7 @@ pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware:
         _ => None,
     };
     let thread = str_(p, "thread").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let evaluated_thread = thread.as_deref().map(|t| s.doc.eval_thread_designation(t, &s.doc.param_values().0));
     let hand = match str_(p, "hand") {
         None | Some("right") => solidcraft_doc::thread_forms::ThreadHand::Right,
         Some("left") => solidcraft_doc::thread_forms::ThreadHand::Left,
@@ -5145,7 +5146,7 @@ pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware:
     if thread.is_none() && hand != solidcraft_doc::thread_forms::ThreadHand::Right {
         return Err(bad(cmd, "`hand` needs `thread` (a tapped hole)"));
     }
-    if let Some(t) = &thread
+    if let Some(t) = &evaluated_thread
         && solidcraft_doc::parse_tapped_thread(t).is_none()
     {
         return Err(bad(
@@ -5157,7 +5158,7 @@ pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware:
     }
     // The tolerance class the thread's standard gives (#16336): checked here, saved as written.
     let thread_class = str_(p, "thread_class").map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
-    match (&thread_class, thread.as_deref().and_then(solidcraft_doc::parse_tapped_thread)) {
+    match (&thread_class, evaluated_thread.as_deref().and_then(solidcraft_doc::parse_tapped_thread)) {
         (None, _) => {}
         (Some(_), None) => return Err(bad(cmd, "`thread_class` needs `thread` (a tapped hole)")),
         (Some(class), Some(tapped)) => tapped.check_class(class).map_err(|e| bad(cmd, e))?,
@@ -5274,7 +5275,10 @@ pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware:
     if matches!(p.get("diameter"), Some(Value::Number(_))) && expr(p, "diameter").is_none() {
         return Err(bad(cmd, format!("`diameter` {}", expr_problem(p.get("diameter")))));
     }
-    let diameter = match (expr(p, "diameter"), &thread, str_(p, "clearance")) {
+    let auto_thread_diameter = expr(p, "diameter").is_none()
+        && str_(p, "clearance").is_none()
+        && thread.as_deref().is_some_and(|t| solidcraft_doc::parse_tapped_thread(t).is_none());
+    let diameter = match (expr(p, "diameter"), &evaluated_thread, str_(p, "clearance")) {
         (Some(d), _, _) => d,
         (None, _, Some(c)) => {
             let fit = str_(p, "fit").unwrap_or("normal").to_ascii_lowercase();
@@ -5294,7 +5298,7 @@ pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware:
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     // A tapped hole drilled to another size than the tap maker's: from the thread's minor
     // diameter to 5% over that drill.
-    if let (Some(t), Some(_)) = (&thread, expr(p, "diameter"))
+    if let (Some(t), Some(_)) = (&evaluated_thread, expr(p, "diameter"))
         && let Some(size) = solidcraft_doc::parse_tapped_thread(t)
     {
         let given = s.doc.eval(&diameter, Kind::Length).map_err(|e| bad(cmd, format!("`diameter`: {e}")))?;
@@ -5427,6 +5431,7 @@ pub(super) fn hole_with(s: &mut Session, p: &Value, cmd: &'static str, hardware:
             to: to.map(FacePick),
             references,
             old_surface_start,
+            auto_thread_diameter,
             hardware,
         },
     )
@@ -6025,6 +6030,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     }
     use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let evaluated_designation = designation.as_deref().map(|text| s.doc.eval_thread_designation(text, &s.doc.param_values().0));
     // Resolve and store the form at creation or redefinition, including an inferred Unified
     // designation. Evaluation must not reinterpret an older Thread that saved no form.
     let form = match str_(p, "form") {
@@ -6034,7 +6040,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
                 format!("unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"),
             )
         })?,
-        None => designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
+        None => evaluated_designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
     };
     if let Some(why) = form.refused() {
         return Err(bad(cmd, why));
@@ -6043,7 +6049,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => 1,
         Some(v) => v.as_u64().filter(|n| (1..=8).contains(n)).ok_or_else(|| bad(cmd, "`starts` must be a whole number from 1 to 8"))? as u32,
     };
-    if let Some(t) = &designation {
+    if let Some(t) = &evaluated_designation {
         form.parse(t, starts).map_err(|e| bad(cmd, e))?;
     }
     let hand = match str_(p, "hand") {

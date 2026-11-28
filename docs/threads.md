@@ -67,6 +67,19 @@ buttress the ISO 2902 middle pitch of each diameter (Tr8x1.5 to Tr130x14; buttre
 the series DIN 513-2 shares; Acme ASME B1.5's preferred sizes (1/4-16 to 5-2). Buttress inch has
 no size table here: its pitch is always given.
 
+**Sizes from parameters.** `solid.thread` also accepts a text parameter or text expression
+in `designation`, using the same text expressions as `sketch.text`. For example, add
+`size_name` with `parameters.add`, `unit: "text"`, and `expression: "M5"`, then pass
+`designation: "size_name"`. The thread keeps the expression and evaluates it on every
+rebuild. Changing the parameter to `M6`, including through a configuration row, changes
+the thread to M6. Expressions such as `"'M' + number(size, 0)"` work too. A literal
+such as `"M8x1"` keeps its existing meaning. An unknown evaluated size is refused with
+the evaluated text in the existing error message. The cylindrical face must still fit
+the selected size.
+
+Tapped holes accept the same text expressions in their `thread` field. Their bore and
+thread follow the evaluated size when parameters or configurations change.
+
 **Unified inch (ASME B1.1).** Designations are `<size>-<TPI> UNC|UNF|UNEF|UN`,
 optionally followed by `-<class>`, for example `1/4-20 UNC-2A`, `#10-32 UNF`,
 `0.25-32 UNEF-3A` or `3/8-20 UN`. Size is the major diameter in inches, either

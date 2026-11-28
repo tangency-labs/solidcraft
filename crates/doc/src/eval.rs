@@ -2168,6 +2168,12 @@ fn param_names(f: &Feature) -> Vec<String> {
     if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
         names.extend(joints.iter().flat_map(|cj| cj.exprs.iter().flatten()).flat_map(|e| expr::references(e)));
     }
+    match &f.kind {
+        FeatureKind::Thread { designation: Some(e), .. } | FeatureKind::Hole { thread: Some(e), .. } => {
+            names.extend(crate::text_params::references(e));
+        }
+        _ => {}
+    }
     names.sort();
     names.dedup();
     names
@@ -11535,10 +11541,23 @@ struct HoleTool {
     point_role: Option<String>,
 }
 
+/// The saved drill size, or the current tap drill of a thread driven by a text expression.
+fn hole_diameter(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, saved: &crate::Expr) -> Result<crate::Expr> {
+    if let FeatureKind::Hole { thread: Some(source), auto_thread_diameter: true, .. } = &f.kind {
+        let text = doc.eval_thread_designation(source, vals);
+        let size = crate::parse_tapped_thread(&text).ok_or_else(|| {
+            DocError::Invalid(format!("unknown tapped thread `{text}` (ISO metric or a catalogued UNC/UNF, G, Rp, Rc or NPT size)"))
+        })?;
+        return Ok(crate::Expr::new(format!("{} mm", size.tap_drill)));
+    }
+    Ok(saved.clone())
+}
+
 /// The cutting tools of a hole feature at every spot, each with its exact geometry when it is a
 /// straight cylinder (see [`hole_tools_and_prisms`]).
 fn hole_feature_tools(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<Vec<HoleTool>> {
     let FeatureKind::Hole { diameter, depth, hole, to, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
+    let diameter = hole_diameter(doc, vals, f, diameter)?;
     // A hole at sketch points is drilled in its sketch's frame: the bodies it cuts are met where
     // they are shown, so a body of another, moved component is drilled only where the hole
     // reaches it there (#17623).
@@ -11555,7 +11574,7 @@ fn hole_feature_tools(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
         let depth = hole_depth_to(st, &spot.at, dir, &to.map(Vec3::from), depth)?;
         let prefix = spot.point.map(hole_point_role);
         tools.extend(
-            hole_tools_and_prisms(vals, st, &spot.at, dir, diameter, &depth, hole, kept_inside, mesh_scope)?
+            hole_tools_and_prisms(vals, st, &spot.at, dir, &diameter, &depth, hole, kept_inside, mesh_scope)?
                 .into_iter()
                 .map(|(tool, prism)| HoleTool { traced: tool.with_part_prefix(prefix.as_deref()), prism, point_role: prefix.clone() }),
         );
@@ -16419,6 +16438,7 @@ fn replay(
         let mut probe_boxes = Vec::new();
         let mut probe_rays = Vec::new();
         if let FeatureKind::Hole { diameter, depth, hole, to, .. } = &src.kind {
+            let diameter = hole_diameter(doc, vals, src, diameter)?;
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot. It meets its bodies where its sketch's frame
@@ -16485,7 +16505,7 @@ fn replay(
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     reach_of.push(depth.as_ref().map_or(Ok(f64::INFINITY), |e| val(vals, e, Kind::Length))?);
-                    let reach = hole_reach(vals, st, &at, d, diameter, &depth, hole, !from_inside, mesh_scope)?;
+                    let reach = hole_reach(vals, st, &at, d, &diameter, &depth, hole, !from_inside, mesh_scope)?;
                     let tools = match built.as_ref().filter(|b| movable && b.dir == d && b.depth == depth && b.reach.moves_to(&reach)) {
                         Some(b) => {
                             let to_here = translation(at - b.at);
@@ -16496,7 +16516,7 @@ fn replay(
                         }
                         None => {
                             let tools: Vec<Traced> =
-                                hole_tools_reaching(vals, st, &at, d, diameter, &depth, hole, &reach)?.into_iter().map(|(tool, _)| tool).collect();
+                                hole_tools_reaching(vals, st, &at, d, &diameter, &depth, hole, &reach)?.into_iter().map(|(tool, _)| tool).collect();
                             if movable {
                                 built = Some(HoleBuilt { at, dir: d, depth: depth.clone(), reach, tools: tools.clone() });
                             }
@@ -16645,7 +16665,7 @@ fn replay(
         let mut unthreaded = 0;
         for (on, reach) in axes.iter().zip(&reaches) {
             if let Some((_, d)) = on.first() {
-                unthreaded += hole_threads(vals, st, src, f.id, on.iter().map(|(at, _)| *at), *d, reach, true)?;
+                unthreaded += hole_threads(doc, vals, st, src, f.id, on.iter().map(|(at, _)| *at), *d, reach, true)?;
             }
         }
         if unthreaded > 0 {
@@ -16726,7 +16746,7 @@ fn replay(
             let mut unthreaded = 0;
             for (on, reach) in entry.axes.iter().zip(&entry.reaches) {
                 if let Some((_, d)) = on.first() {
-                    unthreaded += hole_threads(vals, st, entry.src, scoped.id, on.iter().map(|(at, _)| *at), *d, reach, true)?;
+                    unthreaded += hole_threads(doc, vals, st, entry.src, scoped.id, on.iter().map(|(at, _)| *at), *d, reach, true)?;
                 }
             }
             if unthreaded > 0 {
@@ -17198,6 +17218,7 @@ mod surface;
 /// is left unthreaded and counted in the result.
 #[allow(clippy::too_many_arguments)]
 fn hole_threads(
+    doc: &Document,
     vals: &BTreeMap<String, Value>,
     st: &mut ModelState,
     src: &Feature,
@@ -17208,9 +17229,12 @@ fn hole_threads(
     copy: bool,
 ) -> Result<usize> {
     let FeatureKind::Hole { thread: Some(d), thread_depth, diameter, hand, modeled, ease_out, .. } = &src.kind else { return Ok(0) };
+    let evaluated = doc.eval_thread_designation(d, vals);
+    let d = evaluated.as_str();
     let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
     // Find the bore beyond any entry recess, including shallow and through holes.
-    let r = val(vals, diameter, Kind::Length)? / 2.0;
+    let diameter = hole_diameter(doc, vals, src, diameter)?;
+    let r = val(vals, &diameter, Kind::Length)? / 2.0;
     // A pipe thread's wall must be found: no fallback place on a guessed wall.
     let pipe = crate::parse_tapped_thread(d).is_some_and(|t| {
         matches!(
@@ -18776,7 +18800,8 @@ fn eval_feature_kind(
             }
             // A class the command would refuse (a hand-edited file) fails the hole, saying why.
             // An unknown thread fails where the thread is cut, with its own reason.
-            match (thread_class, thread) {
+            let evaluated_thread = thread.as_deref().map(|t| doc.eval_thread_designation(t, vals));
+            match (thread_class, &evaluated_thread) {
                 (None, _) => {}
                 (Some(_), None) => return Err(DocError::Invalid("a thread class needs a tapped hole".into())),
                 (Some(class), Some(t)) => {
@@ -18851,7 +18876,7 @@ fn eval_feature_kind(
             } else {
                 apply_beside_sheet_cut(doc, st, f, tools, Operation::Cut, &[], &handled)?;
             }
-            hole_threads(vals, st, f, f.id, spots.iter().map(|spot| spot.at), dir, &reaches, false)?;
+            hole_threads(doc, vals, st, f, f.id, spots.iter().map(|spot| spot.at), dir, &reaches, false)?;
             Ok(())
         }
         FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st, warning),

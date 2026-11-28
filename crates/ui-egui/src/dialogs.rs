@@ -10097,6 +10097,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Not in the Hole window yet: an edit keeps it (`timeline.redefine`).
             thread_class: _,
             old_surface_start: _,
+            auto_thread_diameter: _,
             // A hole with hardware is edited in the Hardware window (above).
             hardware: _,
         } => {
