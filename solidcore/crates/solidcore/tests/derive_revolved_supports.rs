@@ -894,11 +894,19 @@ fn a_reader_takes_a_torus_labels_own_numbers_only_where_the_form_is_off_the_toru
                     .unwrap_or_else(|e| panic!("{at}: {e}"));
                     if arc >= 60.0 {
                         assert!(lies, "{at}: the form lies on the torus found in it");
+                        // a tube of radius 1 at 26 from the axis, away from the origin, is found
+                        // 1e-12 to 4e-12 off its parametrisation (margin 1.7 to 2.8): not proved
+                        let unproved = major == 26.0 && minor == 1.0 && origin.length() != 0.0;
+                        assert_eq!(stands, !unproved, "{at}: the form proves the torus found");
                     }
                     match own {
                         _ if stands => assert!(own.is_none(), "{at}: the torus found is kept"),
                         Some(torus) => {
                             assert_eq!(AnalyticSupport::of(&torus), Some(label), "{at}");
+                            assert!(
+                                AnalyticSupport::proved_on(&k, &torus, &form).unwrap(),
+                                "{at}: the label's torus is not proved on the form"
+                            );
                             let size = origin.length() + major + minor;
                             let d = form.natural_uv_domain();
                             for (a, b) in [(0.0, 0.4567), (0.4567, 0.7654), (0.9, 0.1)] {
