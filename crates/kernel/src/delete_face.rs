@@ -486,7 +486,8 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                             "to remove a tangent chain of rounds, select all the round faces. Include face {f} if it should go too, or take off the feature that made it in the timeline"
                         )
                     };
-                    return Err(fail(format!("face {by} ({}), borders face {f}, {}: {reason}", surface_kind(&rec, by), surface_kind(&rec, f))));
+                    let refused = fail(format!("face {by} ({}), borders face {f}, {}: {reason}", surface_kind(&rec, by), surface_kind(&rec, f)));
+                    return Ok(delete_rounds(body, &del, refused));
                 }
             }
         }
@@ -909,6 +910,13 @@ fn heal_by_wedge(
     Ok(Some(result.with_history(History { operands: 1, faces, edges }, &[body])?))
 }
 
+/// A selection the planar healer refuses (`refused`) because a neighbour is curved goes to
+/// solidcore's fillet removal, one face or a chain; `refused` stands when that finds no
+/// removable fillet, and its other errors are its own.
+fn delete_rounds(body: &Body, del: &BTreeSet<usize>, refused: KernelError) -> Result<Body> {
+    delete_fillet_chain(body, del)?.ok_or(refused)
+}
+
 /// Retain the identity of every surviving face, including supports that ran on to the sharp
 /// edges. An edge that used to bound the removed chain is now the meeting of its supports.
 fn delete_fillet_chain(body: &Body, selected: &BTreeSet<usize>) -> Result<Option<Body>> {
@@ -992,6 +1000,24 @@ mod tests {
             .collect();
         assert_eq!(kept, supports);
         assert!(history.edges.iter().any(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Meet { .. }])));
+    }
+
+    #[test]
+    fn a_stopped_round_chain_removal_keeps_its_own_error() {
+        let ball = crate::sphere(Vec3::ZERO, 5.0).unwrap();
+        let upper = box_solid(Vec3::new(-6.0, -6.0, 0.0), Vec3::new(6.0, 6.0, 6.0)).unwrap();
+        let half = boolean(&ball, &upper, BoolOp::Intersect).unwrap().unwrap();
+        let rim = crate::tangent_chain(&half, &[Vec3::new(0.0, 5.0, 0.0)]).unwrap();
+        let rounded = fillet(&half, &rim, 1.0).unwrap();
+        let record = crate::brep_record(&rounded).unwrap();
+        let rounds: Vec<usize> = (0..record.faces.len())
+            .filter(|&f| !matches!(crate::offset::surf_of(&record, f), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Sphere { .. })))
+            .collect();
+        assert_eq!(rounds.len(), 2, "{rounds:?}");
+        let stop = solidcraft_smlib::stop::Stop::new();
+        stop.stop();
+        let err = stop.within(|| delete_faces(&rounded, &rounds)).unwrap_err();
+        assert!(matches!(&err, crate::KernelError::Failed(why) if why.contains("cancelled")), "{err}");
     }
 
     fn step_roundtrip(body: &crate::Body) -> crate::Body {
@@ -1568,5 +1594,68 @@ mod tests {
             }
             Ok(b) => panic!("PROBE-OK check={:?} volume={:?}", crate::failing_check(&b), b.volume_at(1e-8)),
         }
+    }
+
+    /// A round beside a curved neighbour goes to fillet removal: the sharp boss comes back.
+    #[test]
+    fn deleting_a_round_beside_a_cylinder_gives_the_sharp_boss() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let boss = cylinder(Vec3::new(20.0, 15.0, 5.0), Vec3::Z, 5.0, 8.0).unwrap();
+        let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let sharp = 6000.0 + 200.0 * std::f64::consts::PI;
+        let round_at = |b: &crate::Body| {
+            let record = crate::brep_record(b).unwrap();
+            (0..record.faces.len())
+                .filter(|i| {
+                    !matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Cylinder { .. }))
+                })
+                .collect::<Vec<usize>>()
+        };
+        for edge in [Vec3::new(25.0, 15.0, 5.0), Vec3::new(25.0, 15.0, 13.0)] {
+            let rounded = fillet(&bossed, &[edge], 1.0).unwrap();
+            let round = round_at(&rounded);
+            assert_eq!(round.len(), 1, "{edge:?}: {round:?}");
+            let back = delete_faces(&rounded, &round).unwrap();
+            // Exact, not the meshed volume: a 1e-3 chord loses ~0.06 on the Ø10 boss.
+            let v = back.volume_at(1e-3).unwrap();
+            assert!((v - sharp).abs() < 1e-6 * sharp, "{edge:?}: {v}");
+            assert_eq!(back.face_count(), 8, "{edge:?}");
+            assert_eq!(back.unmeshed_faces(), 0);
+        }
+    }
+
+    #[test]
+    fn deleting_a_round_on_a_small_boss_gives_the_sharp_boss() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(0.4, 0.3, 0.05)).unwrap();
+        let boss = cylinder(Vec3::new(0.2, 0.15, 0.05), Vec3::Z, 0.05, 0.08).unwrap();
+        let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let sharp = 0.006 + 0.0002 * std::f64::consts::PI;
+        let rounded = fillet(&bossed, &[Vec3::new(0.25, 0.15, 0.05)], 0.01).unwrap();
+        let record = crate::brep_record(&rounded).unwrap();
+        let round: Vec<usize> = (0..record.faces.len())
+            .filter(|i| {
+                !matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Cylinder { .. }))
+            })
+            .collect();
+        assert_eq!(round.len(), 1, "{round:?}");
+        let back = delete_faces(&rounded, &round).unwrap();
+        let v = back.volume_at(1e-9).unwrap();
+        assert!((v - sharp).abs() < 1e-6 * sharp, "{v}");
+        assert_eq!(back.face_count(), 8);
+    }
+
+    /// A chamfer beside a curved neighbour is refused with the curved-neighbour text.
+    #[test]
+    fn a_chamfer_beside_a_cylinder_is_still_refused() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let pin = cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 3.0, 7.0).unwrap();
+        let holed = boolean(&plate, &pin, BoolOp::Cut).unwrap().unwrap();
+        let chamfered = chamfer(&holed, &[Vec3::new(23.0, 15.0, 5.0)], 1.0).unwrap();
+        let record = crate::brep_record(&chamfered).unwrap();
+        let cone: Vec<usize> =
+            (0..record.faces.len()).filter(|i| matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Cone { .. }))).collect();
+        assert_eq!(cone.len(), 1, "{cone:?}");
+        let e = delete_faces(&chamfered, &cone).unwrap_err().to_string();
+        assert!(e.contains("select all the round faces"), "{e}");
     }
 }
