@@ -4180,11 +4180,15 @@ impl SolveApp {
         self.home.open = false;
         documents::prepare_open(self);
         let params = self.load_params(path, options);
+        self.docs.camera_recalled = false;
         let r = self.run("doc.open", params)?;
         // An opened design comes up at the home view, not at the angle the design before it
-        // was left at: `prepare_open` keeps the camera when it reuses a blank design.
-        self.cam.set_view(StandardView::Iso);
-        self.fit_view();
+        // was left at: `prepare_open` keeps the camera when it reuses a blank design. One that
+        // got back the camera it was closed with keeps that (#23271).
+        if !self.docs.camera_recalled {
+            self.cam.set_view(StandardView::Iso);
+            self.fit_view();
+        }
         stand_up::offer(self, path, &[], Some(&r));
         // The import's warnings, as the desktop's open says them (`file_load`), before the
         // notices that follow it there too.

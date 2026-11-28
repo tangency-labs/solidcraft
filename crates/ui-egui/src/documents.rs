@@ -1288,22 +1288,30 @@ pub fn remember_all_views(app: &mut SolveApp) {
 
 /// The browser's shell keeps the remembered views in the browser's storage: `saved` is what it
 /// kept last time (none: nothing yet). From now on the views are remembered in memory, and
-/// [`take_changed_view_memory`] gives them back to keep.
+/// [`view_memory_to_save`] gives them back to keep.
 pub fn use_host_view_memory(app: &mut SolveApp, saved: Option<&str>) {
     app.docs.view_memory = crate::view_memory::Store::Host(crate::view_memory::Host::load(saved));
 }
 
-/// The remembered views to keep in the host's storage, once after each change: `saved_now` (what
-/// the storage holds now, which another page of the app may have changed) with this page's
-/// changes on top.
-pub fn take_changed_view_memory(app: &mut SolveApp, saved_now: Option<&str>) -> Option<String> {
+/// The remembered views to keep in the host's storage: `saved_now` (what the storage holds now,
+/// which another page of the app may have changed) with this page's changes on top. The host then
+/// says whether its storage took them ([`view_memory_saved`]).
+pub fn view_memory_to_save(app: &mut SolveApp, saved_now: Option<&str>) -> Option<String> {
     match &mut app.docs.view_memory {
-        crate::view_memory::Store::Host(host) => host.take_changed(saved_now),
+        crate::view_memory::Store::Host(host) => host.pending_text(saved_now),
         _ => None,
     }
 }
 
-/// Whether views were remembered since the host last took them ([`take_changed_view_memory`]).
+/// Whether the host's storage took what [`view_memory_to_save`] gave; if not, the changes stay
+/// and are tried again with the next one.
+pub fn view_memory_saved(app: &mut SolveApp, taken: bool) {
+    if let crate::view_memory::Store::Host(host) = &mut app.docs.view_memory {
+        host.saved(taken);
+    }
+}
+
+/// Whether there are remembered views for the host to save now ([`view_memory_to_save`]).
 pub fn view_memory_changed(app: &SolveApp) -> bool {
     matches!(&app.docs.view_memory, crate::view_memory::Store::Host(host) if host.changed())
 }
@@ -6469,9 +6477,10 @@ mod tests {
     /// lose them.
     #[test]
     fn a_design_opened_again_shows_the_camera_it_was_closed_with() {
-        // The window's own open (the desktop, and the browser's files window), and `doc.open`
-        // run as a command (the browser's programs).
-        for (browser, command) in [(false, false), (true, false), (true, true)] {
+        // How the design opens: the window's own open (the desktop, and the browser's files window
+        // for a design), `doc.open` run as a command (the browser's programs), or read here and now
+        // (`open_path_with`: the browser's files that aren't designs).
+        for (browser, open) in [(false, "window"), (true, "window"), (true, "command"), (true, "here")] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.preferences.design_reopen_views = true;
@@ -6493,11 +6502,16 @@ mod tests {
             assert_ne!(h.app.session.path.as_deref(), Some(path.as_str()), "closed");
             assert_eq!(view_memory_changed(&h.app), browser, "the browser's page has views to keep");
             // As in a new session: the app frames its first view in the frame the design lands in.
-            if command {
-                h.app.fitted = false;
-                crate::control::execute(&mut h.app, "doc.open", json!({"path": path})).unwrap();
-            } else {
-                h.app.open_path_async(&path);
+            match open {
+                "command" => {
+                    h.app.fitted = false;
+                    crate::control::execute(&mut h.app, "doc.open", json!({"path": path})).unwrap();
+                }
+                "here" => {
+                    h.app.fitted = false;
+                    h.app.open_path_with(&path, &Default::default()).unwrap();
+                }
+                _ => h.app.open_path_async(&path),
             }
             for _ in 0..2000 {
                 if h.app.session.path.as_deref() == Some(path.as_str()) {
@@ -6513,7 +6527,7 @@ mod tests {
             assert_eq!(
                 (shown.yaw, shown.pitch, shown.distance, shown.target),
                 (camera.yaw, camera.pitch, camera.distance, camera.target),
-                "browser: {browser}, command: {command}"
+                "browser: {browser}, open: {open}"
             );
         }
     }

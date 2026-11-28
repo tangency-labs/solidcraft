@@ -49,6 +49,7 @@ impl Store {
         if let Store::Host(host) = self {
             put(&mut host.entries, path, views.clone());
             host.changed.push((path.to_owned(), views));
+            host.failed = false;
             return Ok(());
         }
         match self.folder() {
@@ -66,37 +67,50 @@ impl Store {
     }
 }
 
-/// The remembered views a host keeps itself: it loads them with [`Host::load`] and saves them
-/// when [`Host::take_changed`] gives them.
+/// The remembered views a host keeps itself: it loads them with [`Host::load`], saves what
+/// [`Host::pending_text`] gives and says with [`Host::saved`] whether its storage took it.
 #[derive(Default)]
 pub struct Host {
     entries: Vec<(String, Value)>,
-    /// What was remembered since the host last took them, oldest first.
+    /// What was remembered and not yet taken by the host's storage, oldest first.
     changed: Vec<(String, Value)>,
+    /// The storage refused the last save (full, or not there): it is tried again with the next
+    /// change, not every frame.
+    failed: bool,
 }
 
 impl Host {
     /// The remembered views from what the host saved (none, damaged or foreign: none).
     pub fn load(saved: Option<&str>) -> Host {
-        Host { entries: parse_saved(saved), changed: Vec::new() }
+        Host { entries: parse_saved(saved), changed: Vec::new(), failed: false }
     }
 
-    /// Whether something was remembered since the host last took them.
+    /// Whether there is something to save now.
     pub fn changed(&self) -> bool {
-        !self.changed.is_empty()
+        !self.changed.is_empty() && !self.failed
     }
 
-    /// The text to save, once after each change: what is saved now (`saved_now`, which another
-    /// page of the app may have changed since) with this page's changes on top.
-    pub fn take_changed(&mut self, saved_now: Option<&str>) -> Option<String> {
+    /// The text to save: what is saved now (`saved_now`, which another page of the app may have
+    /// changed since) with every change of this page on top that the storage hasn't taken yet.
+    pub fn pending_text(&mut self, saved_now: Option<&str>) -> Option<String> {
         if self.changed.is_empty() {
             return None;
         }
         self.entries = parse_saved(saved_now);
-        for (path, views) in std::mem::take(&mut self.changed) {
-            put(&mut self.entries, &path, views);
+        for (path, views) in &self.changed {
+            put(&mut self.entries, path, views.clone());
         }
         Some(to_text(&self.entries))
+    }
+
+    /// Whether the storage took the text [`Self::pending_text`] gave. If it did, those changes are
+    /// kept; if not, they stay for the next try, so the latest camera of a closed design isn't
+    /// lost.
+    pub fn saved(&mut self, taken: bool) {
+        if taken {
+            self.changed.clear();
+        }
+        self.failed = !taken;
     }
 }
 
@@ -408,23 +422,33 @@ mod tests {
     }
 
     /// #23271: the browser keeps the remembered views in its own storage. What one page remembers
-    /// is given to keep once, on top of what another page of the app stored meanwhile.
+    /// is saved on top of what another page of the app stored meanwhile, and stays to be saved
+    /// until the storage takes it.
     #[test]
     fn a_host_keeps_the_views_and_another_pages_too() {
         let mut store = Store::Host(Host::load(None));
         assert_eq!(store.recall("/opfs/a.sc"), None, "nothing yet");
         let host = host_of(&mut store).unwrap();
-        assert!(!host.changed() && host.take_changed(None).is_none(), "nothing to keep");
+        assert!(!host.changed() && host.pending_text(None).is_none(), "nothing to keep");
         store.remember("/opfs/a.sc", set_with_render().to_json()).unwrap();
         assert_eq!(ViewSet::from_json(&store.recall("/opfs/a.sc").unwrap()), Some(set_with_render()), "shown again in this page at once");
-        // Another page stored its own design meanwhile.
+        // Another page stored its own design meanwhile, and the storage is full.
         let other = to_text(&[("/opfs/b.sc".to_owned(), ViewSet::new().to_json())]);
         let host = host_of(&mut store).unwrap();
         assert!(host.changed());
-        let kept = host.take_changed(Some(&other)).unwrap();
-        assert!(host.take_changed(Some(&kept)).is_none(), "kept once");
+        assert!(host.pending_text(Some(&other)).is_some());
+        host.saved(false);
+        assert!(!host.changed(), "not tried again every frame");
+        // The next change tries again, with the one the storage refused.
+        store.remember("/opfs/c.sc", ViewSet::new().to_json()).unwrap();
+        let host = host_of(&mut store).unwrap();
+        assert!(host.changed());
+        let kept = host.pending_text(Some(&other)).unwrap();
+        host.saved(true);
+        assert!(!host.changed() && host.pending_text(Some(&kept)).is_none(), "kept once");
         let next = Store::Host(Host::load(Some(&kept)));
         assert_eq!(ViewSet::from_json(&next.recall("/opfs/a.sc").unwrap()), Some(set_with_render()), "the next page gets them back");
+        assert!(next.recall("/opfs/c.sc").is_some(), "with the later change");
         assert!(next.recall("/opfs/b.sc").is_some(), "the other page's stay");
         for hostile in ["", "not json", "{\"path\": 1}", "[1, null]"] {
             assert_eq!(Store::Host(Host::load(Some(hostile))).recall("/opfs/a.sc"), None, "{hostile}");

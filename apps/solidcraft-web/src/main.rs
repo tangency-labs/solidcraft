@@ -589,17 +589,23 @@ mod web {
         /// The designs' remembered views go to the browser's storage once they change: a design
         /// closed, or the page going away ([`keep_when_hidden`], #23271). Other pages of the app
         /// keep theirs in the same entry, so what is stored now is read first and this page's
-        /// changes go on top.
+        /// changes go on top. Changes the storage refuses (full) stay, and go with the next one.
         fn store_view_memory(&mut self) {
-            if !solidcraft_ui_egui::documents::view_memory_changed(&self.app) {
+            use solidcraft_ui_egui::documents::{view_memory_changed, view_memory_saved, view_memory_to_save};
+            if !view_memory_changed(&self.app) {
                 return;
             }
-            let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else { return };
+            let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
+                view_memory_saved(&mut self.app, false);
+                return;
+            };
             let key = crate::view_memory_key();
             let saved = storage.get_item(&key).ok().flatten();
-            let Some(text) = solidcraft_ui_egui::documents::take_changed_view_memory(&mut self.app, saved.as_deref()) else { return };
-            if storage.set_item(&key, &text).is_err() {
-                log::warn!("the browser's storage did not take the designs' remembered views");
+            let Some(text) = view_memory_to_save(&mut self.app, saved.as_deref()) else { return };
+            let taken = storage.set_item(&key, &text).is_ok();
+            view_memory_saved(&mut self.app, taken);
+            if !taken {
+                log::warn!("the browser's storage did not take the designs' remembered views; they are saved again with the next change");
             }
         }
 
