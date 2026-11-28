@@ -2348,6 +2348,21 @@ fn finishing_a_partly_read_assembly_reuses_its_placed_parts() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn ready_step_parts_and_work_ahead_fit_in_two_windows() {
+    let text = boxes_step(3 * MAX_WINDOW, "work ahead");
+    let mut reading = StepReading::with_workers(&text, 2).unwrap();
+    let ex = reading.rd.ex.clone();
+    parallel::with_queue(&ex, 2, 0, |queue| {
+        let queue = queue.expect("the STEP worker pool");
+        assert!(reading.rd.convert_window(false, Some(queue)));
+        assert_eq!(reading.rd.bodies.len(), MAX_WINDOW);
+        assert!(queue.peak_ahead > MAX_WINDOW, "workers can start parts beyond the current window");
+        assert!(queue.peak_ahead <= 2 * MAX_WINDOW, "{} parts ahead of publication", queue.peak_ahead);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn cancelling_a_large_read_discards_work_ahead_and_allows_retry() {
     use std::sync::atomic::{AtomicBool, Ordering};
     struct CancelAtWindow(AtomicBool);
