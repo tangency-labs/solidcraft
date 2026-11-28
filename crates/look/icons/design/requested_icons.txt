@@ -222,6 +222,7 @@ measure	false
 merge_lines	false
 mesh_body	false
 mesh_export	false
+mesh_import	false
 mesh_reduce	false
 min_radius	false
 mirror	false
@@ -390,6 +391,7 @@ surface_extrude	false
 surface_fair	false
 surface_fillet	false
 surface_loft	false
+surface_morph	false
 surface_offset	false
 surface_patch	false
 surface_reverse_normal	false

@@ -22,6 +22,7 @@
 // A comparison that is not true takes the refusing branch, so a NaN is refused too.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+use crate::math::det;
 use crate::math::Vec2;
 
 /// Below this length a vector has no direction.
@@ -89,7 +90,7 @@ fn cross(a: Vec2, b: Vec2) -> f64 {
     a.x * b.y - a.y * b.x
 }
 fn len(a: Vec2) -> f64 {
-    a.x.hypot(a.y)
+    det::hypot(a.x, a.y)
 }
 fn len2(a: Vec2) -> f64 {
     dot(a, a)
@@ -105,7 +106,7 @@ fn normalized(a: Vec2) -> Option<Vec2> {
     (l > EPS && l.is_finite()).then(|| div(a, l))
 }
 fn angle(a: Vec2) -> f64 {
-    a.y.atan2(a.x)
+    det::atan2(a.y, a.x)
 }
 
 /// The conic from `a` to `b` with control `apex` and shape `rho`, at `t` in [0, 1].
@@ -123,7 +124,7 @@ pub fn ellipse_point(c: Vec2, m: Vec2, r: f64, t: f64) -> Vec2 {
     let u = m - c;
     let a = len(u).max(1e-12);
     let v = div(Vec2::new(-u.y, u.x), a) * r;
-    c + u * t.cos() + v * t.sin()
+    c + u * det::cos(t) + v * det::sin(t)
 }
 
 /// A rational quadratic spline whose inner knots are all double, as the projection of a stretch
@@ -243,7 +244,7 @@ pub fn round_conics(geom: Vec<Piece>) -> Vec<Piece> {
     let sweep_of = |g: &Piece| match *g {
         Piece::Conic { rho, .. } => {
             let w = rho / (1.0 - rho);
-            2.0 * w.clamp(-1.0, 1.0).acos()
+            2.0 * det::acos(w.clamp(-1.0, 1.0))
         }
         Piece::Arc { c, a, b } => (angle(b - c) - angle(a - c)).rem_euclid(std::f64::consts::TAU),
         _ => 0.0,
@@ -510,8 +511,8 @@ mod tests {
     /// weight cos 45 degrees.
     fn quarter(a: f64) -> Piece {
         let h = std::f64::consts::FRAC_PI_4;
-        let w = h.cos();
-        let at = |t: f64| v(t.cos(), t.sin());
+        let w = det::cos(h);
+        let at = |t: f64| v(det::cos(t), det::sin(t));
         Piece::Conic {
             a: at(a),
             apex: at(a + h) * (1.0 / w),
@@ -532,7 +533,7 @@ mod tests {
 
     #[test]
     fn a_tiny_arc_whose_ends_meet_stays_an_arc() {
-        let at = |t: f64| v(t.cos(), t.sin());
+        let at = |t: f64| v(det::cos(t), det::sin(t));
         let tiny = Piece::Arc {
             c: v(0.0, 0.0),
             a: at(0.0),
@@ -543,7 +544,7 @@ mod tests {
 
     #[test]
     fn arcs_over_opposite_parts_of_a_circle_are_both_kept() {
-        let at = |t: f64| v(t.cos(), t.sin());
+        let at = |t: f64| v(det::cos(t), det::sin(t));
         let short = Piece::Arc {
             c: v(0.0, 0.0),
             a: at(0.0),
@@ -569,7 +570,7 @@ mod tests {
         };
         assert!(len(*c) < 1e-12 && dist(*a, v(1.0, 0.0)) < 1e-12 && dist(*b, v(0.0, 1.0)) < 1e-12);
         let m = std::f64::consts::FRAC_PI_4;
-        assert!(near(arc, v(m.cos(), m.sin()), 1e-12));
+        assert!(near(arc, v(det::cos(m), det::sin(m)), 1e-12));
         assert!(
             !near(arc, v(-1.0, 0.0), 1e-6),
             "the other side of the circle"

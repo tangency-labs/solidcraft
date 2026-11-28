@@ -590,6 +590,42 @@ fn screw_sweep_joined_walls_are_the_pieces_solid() {
     assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
+/// A screw sweep's walls go into the record as their definitions (`sweep` faces on their nets)
+/// and come back with them as their labels: a body built from the record writes the very same
+/// record again, and its volume is the sweep's own.
+#[test]
+fn screw_sweep_walls_cross_the_record_as_their_definitions() {
+    use solidcore_record::brep::Surface;
+    let thread = polygon(&[[7.2, 0.0, 0.5], [8.5, 0.0, 0.0], [8.5, 0.0, 1.0]]);
+    let options = ScrewSweepOptions {
+        law: None,
+        tolerance: 1e-5,
+        walls: ScrewWalls::Joined,
+    };
+    let made = screw_sweep_with(&thread, [0.0; 3], Z, 1.25, 3.0, &options).unwrap();
+    let (record, _) = made.to_record().unwrap();
+    let sweeps = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, Surface::Sweep { .. }))
+        .count();
+    assert!(sweeps >= 2, "the flanks are sweep faces: {sweeps}");
+    assert!(
+        record
+            .faces
+            .iter()
+            .filter(|f| matches!(f.surface, Surface::Sweep { .. }))
+            .all(|f| f.nurbs.is_some()),
+        "each on its net"
+    );
+    record.validate().unwrap();
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    let (again, _) = back.to_record().unwrap();
+    assert_eq!(again, record, "the record written again is the same");
+    let (v0, v1) = (made.volume(1e-8).unwrap(), back.volume(1e-8).unwrap());
+    assert!(rel(v0, v1) < 1e-12, "made {v0}, read back {v1}");
+}
+
 /// #22577: a thread's V along a whole rod, pitch 1.25 at SolidCraft's tolerance (a
 /// ten-thousandth of the pitch). 1000 turns are within the turns' bound but take more spans
 /// than the kernel allows (eight a half turn at this tolerance), and the refusal is the

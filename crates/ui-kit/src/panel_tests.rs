@@ -2272,3 +2272,39 @@ fn a_dragged_dialog_stays_while_open_and_the_next_opens_docked() {
     assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO, "the next dialog opens docked");
     assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO, "and stays docked");
 }
+
+/// One frame with opening `opened` of a docked dialog keyed "k" shown or not; returns its offset
+/// that frame.
+fn owned_dock_frame(ctx: &egui::Context, opened: Option<u64>) -> egui::Vec2 {
+    let mut offset = egui::Vec2::ZERO;
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        if let Some(opened) = opened {
+            offset = crate::frame::dock_offset_of(ui.ctx(), "k", opened);
+            crate::frame::note_dock_shown(ui.ctx(), "k");
+        }
+    });
+    out.textures_delta.clear();
+    offset
+}
+
+/// #22388: a dragged dialog's place belongs to that opening of it. Closed and replaced by another
+/// on the very next frame, the next opens docked; the same one not drawn for a frame while it
+/// stays open keeps its place.
+#[test]
+fn a_dialog_replaced_on_the_next_frame_opens_docked_and_one_hidden_a_frame_stays() {
+    let ctx = egui::Context::default();
+    let to = egui::vec2(-240.0, 130.0);
+    assert_eq!(owned_dock_frame(&ctx, Some(1)), egui::Vec2::ZERO);
+    crate::frame::set_dock_offset(&ctx, "k", to);
+    assert_eq!(owned_dock_frame(&ctx, Some(1)), to, "kept while open");
+    owned_dock_frame(&ctx, None);
+    assert_eq!(owned_dock_frame(&ctx, Some(1)), to, "hidden a frame while open, it keeps its place");
+    assert_eq!(owned_dock_frame(&ctx, Some(2)), egui::Vec2::ZERO, "the next dialog, on the very next frame, opens docked");
+    assert_eq!(owned_dock_frame(&ctx, Some(2)), egui::Vec2::ZERO, "and stays docked");
+    crate::frame::set_dock_offset(&ctx, "k", to);
+    assert_eq!(owned_dock_frame(&ctx, Some(2)), to, "dragged, it stays");
+    // The plain key still forgets an offset once nothing was drawn for a frame.
+    owned_dock_frame(&ctx, None);
+    owned_dock_frame(&ctx, None);
+    assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO);
+}

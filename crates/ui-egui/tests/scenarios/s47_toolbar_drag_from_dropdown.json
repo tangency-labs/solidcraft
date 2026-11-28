@@ -48,8 +48,8 @@
  },
  {
   "expect": {
-   "shown_handles": ["dropdown_more:solid.torus"],
-   "hidden_handles": ["dropdown_pin:solid.torus", "dropdown_more:solid.box"]
+   "shown_handles": ["dropdown_more:solid.torus", "dropdown_more:solid.box"],
+   "hidden_handles": ["dropdown_pin:solid.torus"]
   }
  },
  {

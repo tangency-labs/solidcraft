@@ -289,7 +289,9 @@ pub struct BoundaryFillParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CoilParams {
-    /// The helix's diameter, greater than zero. Required without `sketch`; refused with it.
+    /// The helix's diameter, greater than zero. Refused with `sketch`. Without `sketch` it is
+    /// required unless `axis` is a circular edge, a cylinder face or a flat end face with a round
+    /// outline, whose diameter the coil then takes and follows.
     #[serde(default)]
     pub diameter: Option<LengthExpr>,
     /// The number of turns, greater than zero; it may be fractional.
@@ -311,7 +313,7 @@ pub struct CoilParams {
     /// The distance along `axis` between one turn and the next.
     #[serde(default)]
     pub pitch: Option<LengthExpr>,
-    /// The section's diameter when circular, or its side when square, greater than zero. The
+    /// The section's diameter when circular, or its side when square or triangular, greater than zero. The
     /// section must stay clear of the coil's axis. Required without `sketch`; refused with it.
     #[serde(default)]
     pub section_size: Option<LengthExpr>,

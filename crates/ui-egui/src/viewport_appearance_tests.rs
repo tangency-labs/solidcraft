@@ -593,7 +593,16 @@ fn cancelling_theme_preview_restores_viewport_palette_keys() {
 /// The on/off state a screen reader hears for the widget labelled `label`.
 fn announced_state(h: &crate::scenario::Harness, label: &str) -> Option<egui::accesskit::Toggled> {
     let tree = h.output.accesskit_update.as_ref().unwrap();
-    tree.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.toggled())
+    let row = crate::scenario::rect_of("dropdown:inspect.colored_components").unwrap();
+    tree.nodes
+        .iter()
+        .find(|(_, node)| {
+            node.label() == Some(label)
+                && node
+                    .bounds()
+                    .is_some_and(|bounds| row.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32)))
+        })
+        .and_then(|(_, node)| node.toggled())
 }
 
 #[test]

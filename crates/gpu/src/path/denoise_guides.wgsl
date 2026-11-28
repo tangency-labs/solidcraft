@@ -37,7 +37,11 @@ fn guide_look(t:Triangle,hit:Hit,direction:vec3<f32>,position:vec3<f32>,travel:f
     look=aged_surface(look,position,outward);
     let normal=guide_normal(t,hit.bary,geometric,direction);
     let perturbed=texture_normal(record,mapped.normal,normal,geometric);
-    return GuideLook(look.base.xyz,select(normal,perturbed,dot(perturbed,-direction)>0.0),look.parameters.x,look.parameters.y);
+    let shading=select(normal,perturbed,dot(perturbed,-direction)>0.0);
+    // As in transport and the CPU guides, the flake is found last, from the final
+    // shading normal, so a sharp metal flake classifies as sharp and bypasses the filter.
+    look=on_flake(look,position,shading);
+    return GuideLook(look.base.xyz,shading,look.parameters.x,look.parameters.y);
 }
 fn guide_sharp(t:Triangle,look:GuideLook)->bool {
     return (look.metallic>0.5 && look.roughness<0.25) || (t.coat.x>0.0 && t.coat.y<0.05);

@@ -34,6 +34,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::local_solve1d::{EvalFunction, FunctionValue, LocalSolve1d};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::LocationType;
 use crate::nurbs::b_spline_surface_n_lib::EvaluateFlags;
@@ -431,7 +432,7 @@ impl Frame {
 
     /// The angle of `w` about Z from X, in degrees.
     fn angle(&self, w: Vec3) -> f64 {
-        w.dot(self.y).atan2(w.dot(self.x)).to_degrees()
+        det::atan2(w.dot(self.y), w.dot(self.x)).to_degrees()
     }
 
     /// `w` without its component along Z.
@@ -497,7 +498,7 @@ impl<'a> Map<'a> {
                     frame: Frame::of(&c.origin),
                     along: Along::Height {
                         radius: c.radius,
-                        tan: c.semi_angle_deg.to_radians().tan(),
+                        tan: det::tan(c.semi_angle_deg.to_radians()),
                     },
                 }
             }
@@ -908,7 +909,7 @@ impl Bezier {
                 );
                 let at = |deg: f64| {
                     let r = deg.to_radians();
-                    o + c.radius_x * r.cos() * x + c.radius_y * r.sin() * y
+                    o + c.radius_x * det::cos(r) * x + c.radius_y * det::sin(r) * y
                 };
                 // quarter turns at most (a conic's interval spans at most two turns)
                 let n = ((hi - lo) / (PERIOD / 4.0)).ceil().clamp(1.0, 8.0);
@@ -918,10 +919,10 @@ impl Bezier {
                     let a = lo + step * i as f64;
                     let half = 0.5 * step;
                     let mid = a + half;
-                    let w = half.to_radians().cos();
+                    let w = det::cos(half.to_radians());
                     let corner = o
-                        + (c.radius_x * mid.to_radians().cos() * x
-                            + c.radius_y * mid.to_radians().sin() * y)
+                        + (c.radius_x * det::cos(mid.to_radians()) * x
+                            + c.radius_y * det::sin(mid.to_radians()) * y)
                             / w;
                     out.push(Self {
                         cp: vec![
@@ -969,8 +970,8 @@ impl Bezier {
         match self.param {
             PieceParam::Linear { t0, t1 } => t0 + s * (t1 - t0),
             PieceParam::Arc { mid, half } => {
-                let q = (2.0 * s - 1.0) * (0.5 * half.to_radians()).tan();
-                mid + 2.0 * q.atan().to_degrees()
+                let q = (2.0 * s - 1.0) * det::tan(0.5 * half.to_radians());
+                mid + 2.0 * det::atan(q).to_degrees()
             }
         }
     }
@@ -1404,11 +1405,11 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
             // the extremes of (P - O) . w: -a sin t (X . w) + b cos t (Y . w) = 0
             let linear = |w: Vec3| -> Roots {
                 let (s, t) = (a * xa.dot(w), b * ya.dot(w));
-                if s.hypot(t) <= EFF_ZERO * size {
+                if det::hypot(s, t) <= EFF_ZERO * size {
                     Roots::Monotone
                 } else {
                     Roots::Every {
-                        base: t.atan2(s).to_degrees(),
+                        base: det::atan2(t, s).to_degrees(),
                         step: PERIOD / 2.0,
                     }
                 }
@@ -1423,7 +1424,8 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
                     let be = -a * w.cross(xa).dot(frame.z);
                     let ga = a * b * n.dot(frame.z);
                     let scale = size * (w.length() + size);
-                    let through = al.hypot(be) <= EFF_ZERO * scale && ga.abs() <= EFF_ZERO * scale;
+                    let through =
+                        det::hypot(al, be) <= EFF_ZERO * scale && ga.abs() <= EFF_ZERO * scale;
                     let about = frame.radial(w).length() <= EFF_ZERO * (w.length() + size)
                         && frame.radial(n).length() <= EFF_ZERO;
                     if d == 0 {
@@ -1454,7 +1456,7 @@ fn closed_form(curve: &Curve, map: &Map<'_>, d: usize) -> Option<Roots> {
 /// The roots in degrees of `p cos t + q sin t + r = 0` (none where it holds for every
 /// or no `t`).
 fn sine_roots(p: f64, q: f64, r: f64) -> Roots {
-    let amp = p.hypot(q);
+    let amp = det::hypot(p, q);
     if amp == 0.0 {
         return Roots::Monotone;
     }
@@ -1462,8 +1464,8 @@ fn sine_roots(p: f64, q: f64, r: f64) -> Roots {
     if c.abs() > 1.0 {
         return Roots::Monotone;
     }
-    let phi = q.atan2(p).to_degrees();
-    let delta = c.acos().to_degrees();
+    let phi = det::atan2(q, p).to_degrees();
+    let delta = det::acos(c).to_degrees();
     Roots::Turns([Some(phi + delta), (delta != 0.0).then_some(phi - delta)])
 }
 
@@ -1732,7 +1734,7 @@ mod tests {
 
     /// The point at `deg` degrees on the circle of radius `r` about Z at height `z`.
     fn round(r: f64, deg: f64, z: f64) -> Point3 {
-        p(r * rad(deg).cos(), r * rad(deg).sin(), z)
+        p(r * det::cos(rad(deg)), r * det::sin(rad(deg)), z)
     }
 
     /// The segment from `a` to `b`, its STEP parameter 0 at `a` and 1 at `b`.
@@ -1877,7 +1879,7 @@ mod tests {
         let (x, y) = (Vec3::new(h, 0.0, h), Vec3::Y);
         let s =
             Surface::from(Plane::create_canonical(&Axis2Placement::new(Vec3::ZERO, x, y)).unwrap());
-        let (c30, s30) = (rad(30.0).cos(), rad(30.0).sin());
+        let (c30, s30) = (det::cos(rad(30.0)), det::sin(rad(30.0)));
         let (ex, ey) = (c30 * x + s30 * y, -s30 * x + c30 * y);
         let centre = 2.0 * x + y;
         let frame = Axis2Placement::new(centre, ex, ey);
@@ -1886,7 +1888,7 @@ mod tests {
         let w = window(&k, &s, &[vec![edge(&e, 0.0, 360.0, true)]]);
         assert_window(&w, [2.0 - r7, 2.0 + r7], [1.0 - r3, 1.0 + r3]);
 
-        let at = |t: f64| centre + 3.0 * rad(t).cos() * ex + rad(t).sin() * ey;
+        let at = |t: f64| centre + 3.0 * det::cos(rad(t)) * ex + det::sin(rad(t)) * ey;
         let chord = segment(at(135.0), at(-45.0));
         let w = window(&k, &s, &[vec![edge(&e, -45.0, 135.0, true), along(&chord)]]);
         let u = |t: f64| at(t).dot(x);
@@ -1911,7 +1913,7 @@ mod tests {
     fn a_spherical_cap_to_the_pole() {
         let k = k();
         let s = sphere(&k);
-        let (z, r) = (2.0 * rad(30.0).sin(), 2.0 * rad(30.0).cos());
+        let (z, r) = (2.0 * det::sin(rad(30.0)), 2.0 * det::cos(rad(30.0)));
         let rim = level(&k, z, r);
         let w = window(&k, &s, &[vec![edge(&rim, 0.0, 360.0, true)]]);
         assert_window(&w, [0.0, 360.0], [30.0, 90.0]);
@@ -1936,7 +1938,7 @@ mod tests {
     #[test]
     fn a_tilted_great_circle_on_a_sphere() {
         let k = k();
-        let tilt = Vec3::new(rad(20.0).cos(), 0.0, rad(20.0).sin());
+        let tilt = Vec3::new(det::cos(rad(20.0)), 0.0, det::sin(rad(20.0)));
         let g = circle(&k, Vec3::ZERO, tilt, Vec3::Y, 2.0);
         let w = window(&k, &sphere(&k), &[vec![edge(&g, 0.0, 360.0, true)]]);
         assert_window(&w, [0.0, 360.0], [-20.0, 90.0]);
@@ -2011,7 +2013,7 @@ mod tests {
     /// The tube circle of the torus (R = 3, r = 1) at `deg` degrees about Z, its angle
     /// the torus's v.
     fn tube(k: &Kernel, deg: f64) -> Curve {
-        let radial = Vec3::new(rad(deg).cos(), rad(deg).sin(), 0.0);
+        let radial = Vec3::new(det::cos(rad(deg)), det::sin(rad(deg)), 0.0);
         circle(k, 3.0 * radial, radial, Vec3::Z, 1.0)
     }
 
@@ -2098,7 +2100,7 @@ mod tests {
         let w = face_window(&k, &cylinder(&k), &[band.outer()], &[], m, TOL).unwrap();
         assert_window(&w, [-5.0, 95.0], [-0.5, 3.5]);
 
-        let rim = level(&k, 2.0 * rad(30.0).sin(), 2.0 * rad(30.0).cos());
+        let rim = level(&k, 2.0 * det::sin(rad(30.0)), 2.0 * det::cos(rad(30.0)));
         let m = WindowMargin { u: 5.0, v: 10.0 };
         let cap = [vec![edge(&rim, 0.0, 360.0, true)]];
         let w = face_window(&k, &sphere(&k), &cap, &[], m, TOL).unwrap();
@@ -2244,7 +2246,7 @@ mod tests {
         ];
         assert_window(&window(&k, &torus(&k), &[upper]), [0.0, 90.0], [0.0, 180.0]);
 
-        let tilt = Vec3::new(rad(20.0).cos(), 0.0, rad(20.0).sin());
+        let tilt = Vec3::new(det::cos(rad(20.0)), 0.0, det::sin(rad(20.0)));
         let (g, gi) = as_spline(&circle(&k, Vec3::ZERO, tilt, Vec3::Y, 2.0));
         let w = window(&k, &sphere(&k), &[vec![spline(&g, gi, true)]]);
         assert_window(&w, [0.0, 360.0], [-20.0, 90.0]);
@@ -2402,14 +2404,14 @@ mod tests {
         let s = quarter_revolution_of_a_circle(&k);
         let map = Map::of(&s, TOL).unwrap();
         let (u, v) = (200.0, 90.0);
-        let radial = Vec3::new(rad(u).cos(), rad(u).sin(), 0.0);
-        let along = Vec3::new(-rad(u).sin(), rad(u).cos(), 0.0);
-        let p = (3.0 + rad(v).cos()) * radial + rad(v).sin() * Vec3::Z;
+        let radial = Vec3::new(det::cos(rad(u)), det::sin(rad(u)), 0.0);
+        let along = Vec3::new(-det::sin(rad(u)), det::cos(rad(u)), 0.0);
+        let p = (3.0 + det::cos(rad(v))) * radial + det::sin(rad(v)) * Vec3::Z;
         let q = map.params(&k, p).unwrap();
         assert_close(q.u.unwrap(), u);
         assert_close(q.v, v);
-        let sv = rad(1.0) * (-rad(v).sin() * radial + rad(v).cos() * Vec3::Z);
-        let su = rad(1.0) * (3.0 + rad(v).cos()) * along;
+        let sv = rad(1.0) * (-det::sin(rad(v)) * radial + det::cos(rad(v)) * Vec3::Z);
+        let su = rad(1.0) * (3.0 + det::cos(rad(v))) * along;
         let [du, dv] = map.rates(&k, p, sv, &q).unwrap();
         assert_close(du, 0.0);
         assert_close(dv, 1.0);

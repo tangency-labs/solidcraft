@@ -432,6 +432,27 @@ pub fn monotone_breaks(c: &Curve2) -> crate::Result<Vec<f64>> {
     })?
 }
 
+/// Whether a loop's pcurves (each paired with its forward sense) wind clockwise.
+/// `None` means the kernel's certified bounds could not determine the orientation.
+///
+/// # Errors
+/// The pcurve records are malformed or the kernel cancelled the check.
+pub fn loop_is_clockwise(pcurves: &[(&Curve2, bool)]) -> crate::Result<Option<bool>> {
+    let mut budget = Budget::input();
+    let mut curves = Vec::new();
+    for &(curve, forward) in pcurves {
+        check_curve2(curve, &mut budget).map_err(|e| crate::Error::Record(e.to_string()))?;
+        curves.push((solidcore_convert::curve2(curve), forward));
+    }
+    let curves: Vec<_> = curves
+        .iter()
+        .map(|(curve, forward)| (curve, *forward))
+        .collect();
+    crate::session::run("pcurve::loop_is_clockwise", |k| {
+        k::loop_is_clockwise(k, &curves)
+    })
+}
+
 /// The point of pcurve `c` at `t` (`None` outside its interval or for a malformed record)
 /// ([`solidcore::eval::pcurve::eval`]).
 #[must_use]

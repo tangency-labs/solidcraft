@@ -2220,6 +2220,7 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent1d::Extent1d;
     use crate::geom::tol::ZONE_TOL_3D;
+    use crate::math::det;
     use crate::topology::{Edge, Edgeuse, EdgeuseOwner, Region, Shell, Vertex, Vertexuse};
 
     /// A chain of wire edges v0 - v1 - v2 along `dirs`, each from a vertex to the next,
@@ -2553,7 +2554,7 @@ mod tests {
 
         let dir_deg = |deg: f64| -> Vec3 {
             let rad = deg * (PI / 180.0);
-            Vec3::new(rad.cos(), rad.sin(), 0.0)
+            Vec3::new(det::cos(rad), det::sin(rad), 0.0)
         };
 
         // Line-chain cases: (d2, expected)
@@ -3135,7 +3136,7 @@ mod tests {
     /// moves the end through a B-spline (no ellipse ends there).
     #[test]
     fn issue_21511_sss_point_on_a_conic_keeps_the_conic() {
-        let on = Point3::new(2.0 * (PI / 6.0).cos(), (PI / 6.0).sin(), 0.0);
+        let on = Point3::new(2.0 * det::cos(PI / 6.0), det::sin(PI / 6.0), 0.0);
         let off = Point3::new(1.5, 0.9, 0.3);
         for (sss, stays_ellipse) in [(on, true), (off, false)] {
             let (k, b, v, e, _) = sss_merge(3, sss);
@@ -3465,7 +3466,7 @@ mod tests {
         let k = Kernel::default();
         let (mut b, v, _) = chain(true, Vec3::X, Vec3::Y);
         // a power of two, so the distance to (1, 0, 0) is exactly `tol`
-        let tol = 0.5_f64.powi(20);
+        let tol = det::powi(0.5_f64, 20);
         {
             let rec = b.vertex_mut(v[1]).unwrap();
             rec.point = Point3::new(1.0, 0.0, tol);

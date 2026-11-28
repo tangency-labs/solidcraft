@@ -1097,6 +1097,7 @@ mod tests {
     use crate::geom::assert_array::labels::BREP_TYPE;
     use crate::geom::extent1d::Extent1d;
     use crate::geom::vector3d::Vec3;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::BSplineCurve;
 
     /// An edge use end without vertex makes the tolerance update an `SM_ERR` that says
@@ -1714,7 +1715,7 @@ mod tests {
             1e-4, 5e-4, 1e-3, 1.3e-3, 1.4e-3, 1.4897e-3, 2e-3, 2.5e-3, 2.889e-3, 4e-3, 1e-2,
         ];
         // and 200 tolerances spaced evenly in log from 1e-5 to 2e-2
-        let sweep = (0..200).map(|i| 1e-5 * 2000.0_f64.powf(f64::from(i) / 199.0));
+        let sweep = (0..200).map(|i| 1e-5 * det::powf(2000.0_f64, f64::from(i) / 199.0));
         for t in issue.into_iter().chain(sweep) {
             let found = face::partially_coincident(&k, &c21, &i21, &c24, &i24, t).unwrap();
             assert!(!found, "tol {t:e}");

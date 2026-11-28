@@ -97,14 +97,19 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match &d.kind {
-        Kind::Extrude { start, all, taper, direction, .. } => {
+        Kind::Extrude { start, all, taper, taper2, direction, thin, offset_start, symmetric_offset, .. } => {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
             let two_sided = crate::dialogs::two_sided(*direction);
-            // The window sends a taper only with one side (positive or negative), as the build
-            // gets it.
-            let taper = if *direction < 2 { taper.as_str() } else { "" };
-            let from = from_slope_height(app, d, &plane, at, *all, taper, two_sided)
+            // The tapers the window sends, as the build gets them: none where it offers none,
+            // the second only with two sides.
+            let shown = crate::dialogs::extrude_taper_shown(*direction, *thin, *offset_start && *symmetric_offset);
+            let tapers = match (shown, two_sided) {
+                (false, _) => ["", ""],
+                (true, false) => [taper.as_str(), ""],
+                (true, true) => [taper.as_str(), taper2.as_str()],
+            };
+            let from = from_slope_height(app, d, &plane, at, *all, tapers, two_sided)
                 .or_else(|| reference_height(app, d, "From Object", &plane, at))
                 .unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
@@ -236,23 +241,25 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
 
 /// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
 /// build starts it there ([`solidcraft_engine::doc::from_slope_height`], which decides by the
-/// same rule as the build: To Object on a flat end, Through All (`all`), a nonzero `taper`, Two
-/// Sides (`two_sided`)), and not for an edited extrude kept on its old start at the face's level
-/// (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
+/// same rule as the build: To Object on a flat end, Through All (`all`), a nonzero taper (either
+/// of `tapers`), Two Sides (`two_sided`)), and not for an edited extrude kept on its old start
+/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
 fn from_slope_height(
     app: &SolveApp,
     d: &Dialog,
     plane: &solidcore_record::Plane,
     centre: Vec3,
     all: bool,
-    taper: &str,
+    tapers: [&str; 2],
     two_sided: bool,
 ) -> Option<f64> {
     let to_point = crate::dialogs::object_point(&d.inputs, "To Object").and_then(|point| {
         let p = point.as_array()?;
         Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
     });
-    let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
+    let tapered = tapers
+        .into_iter()
+        .any(|taper| !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0));
     // An edit that takes To Object off clears `from_level`, as `timeline.edit` does.
     let has_to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
     let kept_level = d.editing.and_then(|(id, _)| app.session.doc.feature(id)).is_some_and(
@@ -453,6 +460,11 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // Test its geometry before navigation, including the first frame entering a handle.
     crate::joint_handles::owns_pointer(app, proj, p)
         || app.dialog.as_ref().and_then(|d| crate::dialogs_move::triad(app, d)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
+        || app
+            .dialog
+            .as_ref()
+            .and_then(|d| crate::dialogs::transform_face::triad(app, d))
+            .is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app.dialog.as_ref().and_then(|d| sketch_move_triad(app, d, anchor(app, d)?.0)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app
             .dialog
@@ -474,6 +486,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         return;
     }
     let Some(mut d) = app.dialog.take() else { return };
+    own_box_drag(ui.ctx(), d.opened);
     if matches!(d.kind, Kind::Assembly(_)) {
         crate::dialogs_assembly::overlay(app, painter, proj, &mut d);
         app.dialog = Some(d);
@@ -498,6 +511,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             app.dialog = Some(d);
             return;
         }
+    }
+    if matches!(d.kind, Kind::TransformFace { .. }) {
+        if let Some(t) = crate::dialogs::transform_face::triad(app, &d)
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_transform_face_triad"), &t, snap_step(app.cam.half_height()))
+        {
+            crate::dialogs::transform_face::drag(app, &mut d, g);
+        }
+        app.dialog = Some(d);
+        return;
     }
     // Move: the triad at the pivot; dragging it sets the distances and angles. Its value box
     // sits beside it and reads the move's main value, so a drag shows its number and typing
@@ -1587,6 +1609,18 @@ pub(crate) fn share_box_drag(ctx: &egui::Context) {
     let shown_last = ctx.data(|d| d.get_temp::<u64>(box_dropped_id().with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
     if !shown_last {
         ctx.data_mut(|d| d.insert_temp(box_dropped_id(), None::<Pos2>));
+    }
+}
+
+/// The main box belongs to the open dialog (`opened`, [`Dialog::opened`]): where another opening's
+/// box was dropped is forgotten, even when it closed only the frame before (#22388).
+fn own_box_drag(ctx: &egui::Context, opened: u64) {
+    let owner = box_dropped_id().with("opened");
+    if ctx.data(|d| d.get_temp::<u64>(owner)) != Some(opened) {
+        ctx.data_mut(|d| {
+            d.insert_temp(owner, opened);
+            d.insert_temp(box_dropped_id(), None::<Pos2>);
+        });
     }
 }
 
@@ -3714,6 +3748,69 @@ mod tests {
         assert!((by - egui::vec2(-80.0, -120.0)).length() < 3.0, "moved with the pointer: {by:?}");
         h.frames(10);
         assert!((main_box(&h).min - first.min - by).length() < 0.5, "and stays there");
+    }
+
+    /// One frame in which `key` is pressed, with no frame of its own before or after it.
+    fn press(h: &mut crate::scenario::Harness, key: egui::Key, modifiers: egui::Modifiers) {
+        h.frame_with(vec![egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers }]);
+    }
+
+    /// Where the Move box opens on the selected body when nothing was dragged: Move started
+    /// after a few frames with no box.
+    fn fresh_move_box(h: &mut crate::scenario::Harness) -> egui::Rect {
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(4);
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.app.start("solid.move");
+        h.frames(6);
+        main_box(h)
+    }
+
+    /// #22388: a dragged value box keeps its place only while its dialog is open. A box whose
+    /// dialog closes and is replaced on the very next frame (Enter, then Move again at once; or
+    /// Cancel and a new start between two frames) opens by its handle, not where the last was
+    /// dropped.
+    #[test]
+    fn a_dragged_value_box_is_forgotten_when_the_next_opens_on_the_next_frame() {
+        // Committed with Enter, then Move started again on the very next frame.
+        let mut h = moving_body();
+        let first = main_box(&h);
+        let from = egui::pos2(first.left() + 4.0, first.center().y);
+        h.step(&serde_json::json!({"drag": [[from.x, from.y], [from.x - 80.0, from.y - 120.0]], "steps": 8})).unwrap();
+        h.frames(10);
+        assert!((main_box(&h).min - first.min - egui::vec2(-80.0, -120.0)).length() < 3.0, "dragged: {first:?} -> {:?}", main_box(&h));
+        let field = main_box(&h);
+        h.step(&serde_json::json!({"click": [field.right() - 20.0, field.center().y]})).unwrap();
+        h.step(&serde_json::json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&serde_json::json!({"text": "5"})).unwrap();
+        press(&mut h, egui::Key::Enter, egui::Modifiers::NONE);
+        for _ in 0..120 {
+            if h.app.dialog.is_none() {
+                break;
+            }
+            h.frame();
+        }
+        assert!(h.app.dialog.is_none(), "Enter commits the move");
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.app.start("solid.move");
+        h.frames(6);
+        let next = main_box(&h);
+        let docked = fresh_move_box(&mut h);
+        assert!((next.min - docked.min).length() < 1.0, "the next box opens by its handle {docked:?}, not where the last was dropped: {next:?}");
+
+        // Closed and started again between two frames: no frame without a box.
+        let mut h = moving_body();
+        let first = main_box(&h);
+        let from = egui::pos2(first.left() + 4.0, first.center().y);
+        h.step(&serde_json::json!({"drag": [[from.x, from.y], [from.x - 80.0, from.y - 120.0]], "steps": 8})).unwrap();
+        h.frames(10);
+        assert!((main_box(&h).min - first.min - egui::vec2(-80.0, -120.0)).length() < 3.0, "dragged");
+        crate::dialogs::cancel(&mut h.app);
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.app.start("solid.move");
+        h.frames(6);
+        let next = main_box(&h);
+        assert!((next.min - first.min).length() < 1.0, "the next box opens by its handle {first:?}, not where the last was dropped: {next:?}");
     }
 
     /// A press in the value field focuses it rather than dragging the box.

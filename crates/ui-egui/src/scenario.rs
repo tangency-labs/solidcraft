@@ -442,6 +442,12 @@ impl Harness {
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
             let at = egui::pos2(point[0] as f32, point[1] as f32);
+            let menu_action = self.output.accesskit_update.as_ref().is_some_and(|tree| {
+                tree.nodes.iter().any(|(_, node)| node.supports_action(egui::accesskit::Action::Click) && widget_centre(node) == Some(point))
+            });
+            if menu_action && crate::ui_kit::Menu::contains_point(&self.ctx, at) {
+                return Ok(point);
+            }
             let page = if self.app.prefs_window.shell.open {
                 rect_of("prefs:page_body")
             } else {

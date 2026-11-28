@@ -1485,11 +1485,10 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
     let (end, toward) = if f.at_start { (*a, *a - *b) } else { (*b, *b - *a) };
     let length = a.dist(*b);
     let corners = frame_multi_trim::box_corners(regions);
-    // The end is square to the member, so at an angle one side of it trails the line's end: each corner of the
+    // The end is square to the member, so at an angle one side of it trails the line's end: every point of the
     // member's own section box runs on until it too leaves the far side, and the end reaches the farthest of them.
-    // A box's exit is linear in where a line starts, so no point of the section box leaves later than its corners.
     let own = placed(f.member, end);
-    let starts: Vec<Vec3> = corners.iter().map(|q| own.to_world(*q)).chain([end]).collect();
+    let sections: Vec<[Vec3; 4]> = corners.as_chunks::<4>().0.iter().map(|r| r.map(|q| own.to_world(q))).collect();
     let reach = f
         .against
         .iter()
@@ -1497,11 +1496,12 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
             let (_, c, d) = segments.get(t)?;
             let at = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d).1;
             let plane = placed(t, at);
-            let exits = corners.as_chunks::<4>().0.iter().flat_map(|r| {
-                let rect = r.map(|q| plane.to_world(q));
-                starts.iter().filter_map(move |s| solidcraft_kernel::planar::exit_through_box(*s, toward, rect))
-            });
-            exits.reduce(f64::max)
+            corners
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter_map(|r| solidcraft_kernel::planar::reach_through_box(end, toward, &sections, r.map(|q| plane.to_world(q))))
+                .reduce(f64::max)
         })
         .fold(0.0, f64::max);
     // Never more than the member's own length: a far side that far off is no joint this end makes.

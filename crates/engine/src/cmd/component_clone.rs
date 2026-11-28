@@ -247,6 +247,10 @@ pub(super) fn build(
         .filter(|p| p.model)
         .map(|p| p.name.as_str())
         .chain(source.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)))
+        .chain(source.features.iter().flat_map(|f| match &f.kind {
+            FeatureKind::Sketch { sketch, .. } => sketch.driven_dimension_params().into_iter().map(String::as_str).collect::<Vec<_>>(),
+            _ => Vec::new(),
+        }))
         .collect();
     let definitions = graph(source, component)?;
     let definition_records: BTreeMap<_, _> = source.components.iter().map(|c| (c.id, c)).collect();
@@ -484,6 +488,7 @@ pub(super) fn build(
         new_ids.push(id);
     }
     // Constraint dimensions own independent generated parameters; public user parameters stay shared.
+    let mut used_driven: BTreeSet<String> = scratch.doc.driven_params().into_iter().map(|d| d.name).collect();
     for f in &feats {
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
             for name in sketch.dimension_params() {
@@ -495,6 +500,30 @@ pub(super) fn build(
                         return Err(bad(CMD, "too many copied parameters"));
                     }
                     let new = scratch.doc_mut().new_model_param(&p.expr, &p.unit)?;
+                    parameters.insert(name.clone(), new);
+                }
+            }
+            for name in sketch.driven_dimension_params() {
+                if !parameters.contains_key(name) {
+                    let is_taken = |cand: &str, used: &BTreeSet<String>| {
+                        scratch.doc.param(cand).is_some()
+                            || scratch.doc.text_param(cand).is_some()
+                            || scratch.doc.features.iter().any(|x| x.param_names.iter().any(|y| y == cand))
+                            || used.contains(cand)
+                    };
+                    let new = if origin.other_design && !is_taken(name, &used_driven) {
+                        name.clone()
+                    } else {
+                        let mut n = 2usize;
+                        loop {
+                            let cand = format!("{name}_{n}");
+                            if !is_taken(&cand, &used_driven) {
+                                break cand;
+                            }
+                            n += 1;
+                        }
+                    };
+                    used_driven.insert(new.clone());
                     parameters.insert(name.clone(), new);
                 }
             }

@@ -21,7 +21,9 @@ view.
   design that has features. Double-click a design's tab, or right-click it and choose **Rename**, to
   rename the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave
   the old one (Preferences › Interface turns the double-click off, for a double-click that maximizes
-  the window instead; **Rename** stays in the menu). **Duplicate** in a design tab's right-click menu
+  the window instead; **Rename** stays in the menu). Double-click a view's sub-tab (Model, Sketch 1…)
+  to rename that view the same way; the same preference turns that off, and the view's **Rename
+  view** row and F2 still work. **Duplicate** in a design tab's right-click menu
   opens a copy of the design in a new tab next to it, named "… copy" and not saved yet. **Save**
   and **Save As…** in the same menu save that tab's design (it is shown first), as the File menu's
   do. With a design's views shown as tabs inside its tab, the chevron right after its + folds them

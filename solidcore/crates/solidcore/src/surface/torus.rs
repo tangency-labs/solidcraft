@@ -108,6 +108,7 @@
 //!   upstream's virtual call does; `ReadFromDB` reads the parent record with
 //!   [`SurfOfRevolution::read_from_db`] into the torus's base.
 
+use crate::math::det;
 use core::ops::Div;
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -1274,10 +1275,10 @@ impl Torus {
         }
 
         // evaluate expensive trigonometric functions
-        let cos_u = (uv.x * PI / 180.0).cos();
-        let sin_u = (uv.x * PI / 180.0).sin();
-        let cos_v = (uv.y * PI / 180.0).cos();
-        let sin_v = (uv.y * PI / 180.0).sin();
+        let cos_u = det::cos(uv.x * PI / 180.0);
+        let sin_u = det::sin(uv.x * PI / 180.0);
+        let cos_v = det::cos(uv.y * PI / 180.0);
+        let sin_v = det::sin(uv.y * PI / 180.0);
 
         let n = (hu + 1) * (hv + 1);
         let d = d
@@ -2067,7 +2068,7 @@ fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
 fn fitted_sides(frame: &Axis2Placement, angles: Extent1d) -> [Vec3; 2] {
     let at = |deg: f64| {
         let a = deg * PI / 180.0;
-        a.cos() * frame.x_axis() + a.sin() * frame.y_axis()
+        det::cos(a) * frame.x_axis() + det::sin(a) * frame.y_axis()
     };
     [at(angles.min()), at(angles.max())]
 }
@@ -2107,7 +2108,7 @@ fn sweep_frame(
     let x = farthest(&first, first_side)?.unitize().ok()?;
     let y = z.cross(x);
     let e = farthest(&last, last_side)?;
-    let mut end_deg = e.dot(y).atan2(e.dot(x)) * 180.0 / PI;
+    let mut end_deg = det::atan2(e.dot(y), e.dot(x)) * 180.0 / PI;
     if end_deg.abs() < EFF_ZERO_SQRT {
         end_deg = 360.0;
     } else if end_deg < 0.0 {
@@ -2866,8 +2867,8 @@ mod tests {
                     let (x, y) = (frame.x_axis(), frame.y_axis());
                     let turned = Axis2Placement::new(
                         frame.origin(),
-                        x * 0.1_f64.cos() + y * 0.1_f64.sin(),
-                        y * 0.1_f64.cos() - x * 0.1_f64.sin(),
+                        x * det::cos(0.1_f64) + y * det::sin(0.1_f64),
+                        y * det::cos(0.1_f64) - x * det::sin(0.1_f64),
                     );
                     for (own, placement, major, minor) in [
                         (true, frame, of_major, of_minor),
@@ -3185,7 +3186,7 @@ mod tests {
                 let v = p - o;
                 let h = v.dot(z);
                 let rho = (v - z * h).length();
-                let off = ((rho - t.major_radius()).powi(2) + h * h).sqrt() - t.minor_radius();
+                let off = (det::powi(rho - t.major_radius(), 2) + h * h).sqrt() - t.minor_radius();
                 worst = worst.max(off.abs());
             }
         }
@@ -3507,7 +3508,7 @@ mod tests {
         let radial = Vec3::new(1.0, 0.0, 0.0);
         let torus_point = |v_deg: f64| {
             let v = v_deg.to_radians();
-            (big + small * v.cos()) * radial + small * v.sin() * Vec3::new(0.0, 0.0, 1.0)
+            (big + small * det::cos(v)) * radial + small * det::sin(v) * Vec3::new(0.0, 0.0, 1.0)
         };
         let iso = t
             .create_iso_parametric_curve(&k, SurfParamType::U, fixed, None, false)

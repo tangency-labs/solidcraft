@@ -1495,10 +1495,33 @@ pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value
     out
 }
 
+/// Evaluate all parameters in dependency order, starting from pre-evaluated read-only `driven`
+/// values (such as solved driven sketch dimensions, #14426) and `unavailable` errors (such as
+/// forward or self-referenced driven dimensions). When both maps are empty, delegates to the
+/// cached [`eval_params`] fast path.
+pub fn eval_params_with_driven(
+    params: &[ParamDef],
+    driven: &BTreeMap<String, Value>,
+    unavailable: &BTreeMap<String, String>,
+    doc_len: f64,
+) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+    if driven.is_empty() && unavailable.is_empty() {
+        return eval_params(params, doc_len);
+    }
+    eval_params_uncached_with(params, driven.clone(), unavailable.clone(), doc_len)
+}
+
 /// [`eval_params`], worked out.
 fn eval_params_uncached(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
-    let mut done: BTreeMap<String, Value> = BTreeMap::new();
-    let mut errors: BTreeMap<String, String> = BTreeMap::new();
+    eval_params_uncached_with(params, BTreeMap::new(), BTreeMap::new(), doc_len)
+}
+
+fn eval_params_uncached_with(
+    params: &[ParamDef],
+    done: BTreeMap<String, Value>,
+    errors: BTreeMap<String, String>,
+    doc_len: f64,
+) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let index: BTreeMap<&str, &ParamDef> = params.iter().map(|p| (p.name.as_str(), p)).collect();
     struct Ctx<'a> {
         index: BTreeMap<&'a str, &'a ParamDef>,
@@ -1558,7 +1581,7 @@ fn eval_params_uncached(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, 
         }
         r
     }
-    let mut cx = Ctx { index, done: std::mem::take(&mut done), errors: std::mem::take(&mut errors), stack: Vec::new(), doc_len };
+    let mut cx = Ctx { index, done, errors, stack: Vec::new(), doc_len };
     for p in params {
         cx.stack.clear();
         let _ = visit(&p.name, &mut cx);

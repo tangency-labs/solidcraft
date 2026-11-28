@@ -101,6 +101,13 @@ pub struct Solid {
     /// Each record face's `origin` as given to [`Assembly::add_face`], in the record's face
     /// order: how the reader names the face it came from.
     pub face_origin: Vec<u64>,
+    /// Each record edge's `origin` as given to [`Assembly::add_edge`] (or
+    /// [`Assembly::add_edge_on`]), in the record's edge order: how the reader names the edge it
+    /// is (a part of, where the assembly split one). `None` for an edge the assembly made itself
+    /// (a seam on a closed surface, a sphere's meridian), which lies within one face. Empty where
+    /// the seams of faces on closed surfaces were completed after the record was ordered: that
+    /// rebuilds the edges, and which edge each one is is not kept.
+    pub edge_origin: Vec<Option<u64>>,
     /// No shell bounds a region: a body of open shells only.
     pub sheet: bool,
     /// What was repaired or noted on the way: seams added, edges turned or merged, faces turned
@@ -150,6 +157,9 @@ pub(crate) struct EdgeB {
     pub(crate) pcurve_tolerance: f64,
     /// The curve's NURBS form and its interval there (`form::edge`), set before the pcurves.
     pub(crate) form: Option<(BCurve, [f64; 2])>,
+    /// What the reader names the edge by ([`Solid::edge_origin`]); `None` for one the assembly
+    /// made. A piece of a split edge keeps its edge's.
+    pub(crate) origin: Option<u64>,
 }
 
 /// A face's bound: a closed chain of edge uses (each an edge and whether the loop runs along
@@ -176,6 +186,19 @@ pub(crate) struct FaceB {
     pub(crate) forward: bool,
     /// A round face's box on its label (`crate::kernel::form::extent`), once measured.
     pub(crate) extent: Option<[[f64; 2]; 2]>,
+    /// The producer's own pcurves ([`Assembly::add_face_with_pcurves`]): the face's surface and
+    /// edge loops as they were given, and each use's pcurve. Taken only while the surface and
+    /// the loops are still those (a seam moved round a closed patch moves its parameters).
+    pub(crate) given: Option<Given>,
+}
+
+/// A face's surface and edge loops as its producer gave them, and the producer's pcurve of each
+/// use, where it holds one ([`Assembly::add_face_with_pcurves`]).
+#[derive(Clone)]
+pub(crate) struct Given {
+    surface: BSurface,
+    loops: Vec<Vec<(u32, bool)>>,
+    pcurves: Vec<Vec<Option<Curve2>>>,
 }
 
 /// A surface whose record form depends on the face on it, given by its definition
@@ -342,7 +365,15 @@ impl<'t> Assembly<'t> {
             self.raise_vertex(v, t.dist(p), origin)?;
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, pcurve_tolerance: self.pcurve_tolerance(), form: None });
+        self.edges.push(EdgeB {
+            curve,
+            interval,
+            vertices,
+            tolerance: self.tol,
+            pcurve_tolerance: self.pcurve_tolerance(),
+            form: None,
+            origin: Some(origin),
+        });
         Ok((i, along))
     }
 
@@ -382,6 +413,7 @@ impl<'t> Assembly<'t> {
             tolerance: self.tol,
             pcurve_tolerance: self.pcurve_tolerance(),
             form: None,
+            origin: None,
         });
         Ok(vec![Bound::Edges(vec![(e, true), (e, false)])])
     }
@@ -464,8 +496,45 @@ impl<'t> Assembly<'t> {
             }
         }
         let i = index(self.faces.len())?;
-        self.faces.push(FaceB { origin, surface, loops: bounds, outer, forward, extent: None });
+        self.faces.push(FaceB { origin, surface, loops: bounds, outer, forward, extent: None, given: None });
         Ok(i)
+    }
+
+    /// [`Assembly::add_face`], with the producer's pcurves of its uses: `pcurves` has one list
+    /// for each edge bound, in the order of `bounds`, and in it one entry for each use, in the
+    /// bound's order: the use's pcurve as a record use's is (on the edge's interval, running
+    /// min → max) in `surface`'s own (u, v), or `None` where the producer has none. A use with a
+    /// closed form keeps it; one without takes the given pcurve, in place of one fitted to its
+    /// edge. A face on a surface that has its own NURBS form in the record (a cylinder, cone,
+    /// sphere, torus or revolution) has every pcurve on that form, so none given is used; nor is
+    /// one of an edge on a conic, whose pcurves run in its NURBS form's parameter, one on a bound
+    /// the assembly joins, splits or turns, or one on a surface the assembly re-parametrises (a
+    /// closed patch whose seam it moves). The record's check of the finished
+    /// body holds them to their edges, as it holds every pcurve.
+    pub fn add_face_with_pcurves(
+        &mut self,
+        origin: u64,
+        surface: BSurface,
+        bounds: Vec<Bound>,
+        outer: Option<usize>,
+        forward: bool,
+        pcurves: Vec<Vec<Option<Curve2>>>,
+    ) -> R<u32> {
+        let loops: Vec<Vec<(u32, bool)>> = bounds
+            .iter()
+            .filter_map(|b| match b {
+                Bound::Edges(es) => Some(es.clone()),
+                Bound::Vertex(_) => None,
+            })
+            .collect();
+        if loops.len() != pcurves.len() || loops.iter().zip(&pcurves).any(|(l, p)| l.len() != p.len()) {
+            return Err(format!("face #{origin}: its pcurves are not one for each use of its bounds"));
+        }
+        let f = self.add_face(origin, surface, bounds, outer, forward)?;
+        if let Some(face) = self.faces.get_mut(f as usize) {
+            face.given = Some(Given { surface: face.surface.clone(), loops, pcurves });
+        }
+        Ok(f)
     }
     /// Points along a face's bounds (each edge at nine points, and its vertex bounds), along the
     /// edges its bounds use twice (its seams), and each edge bound walked as it runs: where the
@@ -1187,8 +1256,10 @@ impl<'t> Assembly<'t> {
             vertices.push(self.vertices.get(v as usize).cloned().ok_or("vertex reference")?);
         }
         let mut edges = Vec::with_capacity(edge_order.len());
+        let mut edge_origin = Vec::new();
         for &e in &edge_order {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            edge_origin.push(edge.origin);
             let (nurbs, interval) = match &edge.form {
                 Some((c, i)) => (Some(c.clone()), *i),
                 None => (None, edge.interval),
@@ -1284,7 +1355,9 @@ impl<'t> Assembly<'t> {
                 }
             }
             // Face order is unchanged; shell sides also determine the edge/vertex walk.
-            brep = brep.canonical().map_err(|e| e.to_string())?.brep;
+            let part = brep.canonical().map_err(|e| e.to_string())?;
+            edge_origin = part.edges.iter().map(|&e| edge_origin.get(e as usize).copied().ok_or("edge reference")).collect::<Result<_, _>>()?;
+            brep = part.brep;
         }
         // Trim construction returns a continuous lift on a periodic surface. Only now, with
         // the whole body mutable, can its crossed cuts become edges and its trim pieces be
@@ -1305,6 +1378,7 @@ impl<'t> Assembly<'t> {
             turned_faces =
                 from.iter().enumerate().filter(|(_, i)| turned_faces.contains(&(**i as u32))).map(|(i, _)| index(i)).collect::<R<Vec<_>>>()?;
             brep = completed;
+            edge_origin = Vec::new();
         }
         solidcore_ops::record_check::validate_file(&brep, self.source_bytes)
             .map_err(|e| if e.contains("the file is valid but too large") { e } else { format!("the record is invalid: {e}") })?;
@@ -1318,7 +1392,7 @@ impl<'t> Assembly<'t> {
             }
             disagreement(&e, &face_origin)
         })?;
-        Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
+        Ok(Solid { item, name, product: None, brep, face_origin, edge_origin, sheet, notes, turned: turned_faces })
     }
 
     /// Leaves out each face that is no wider than the tolerance: one loop whose two open edges
@@ -1727,6 +1801,7 @@ impl<'t> Assembly<'t> {
     fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, Option<BSurface>)> {
         let face = self.faces.get(fi).ok_or("face reference")?;
         let label = face.surface.clone();
+        let face_given = face.given.clone();
         let edge_loops: Vec<Vec<(u32, bool)>> = face
             .loops
             .iter()
@@ -1774,9 +1849,30 @@ impl<'t> Assembly<'t> {
         let mut extended = false;
         // How far each edge lies off this surface, so its closed form is checked at that.
         self.measure_edges(&label, &edge_loops, box_on_form.filter(|_| !wound), face.loops.len())?;
+        // The producer's own pcurves, on a face with no form of its own, where its bounds are
+        // still those they were given on ([`Assembly::add_face_with_pcurves`]).
+        let given = match (&form, face_given) {
+            (None, Some(g)) if g.loops == edge_loops && g.surface == label => Some(g.pcurves),
+            _ => None,
+        };
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let fit = self.pcurve_tolerance();
         let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, fit, box_on_form).map_err(|e| e.to_string())?;
+        // The producer's pcurve of each use with no closed form, where it gives one.
+        let mut took_given = false;
+        for ((l, g), es) in exact.iter_mut().zip(given.iter().flatten()).zip(&edge_loops) {
+            for ((pc, g), &(e, _)) in l.iter_mut().zip(g).zip(es) {
+                // A use of an edge on a NURBS form runs in the form's parameter, not the curve's.
+                let on_form = self.edges.get(e as usize).is_none_or(|x| x.form.is_some());
+                if pc.is_none()
+                    && !on_form
+                    && let Some(c) = g
+                {
+                    *pc = Some(c.clone());
+                    took_given = true;
+                }
+            }
+        }
         // A form ends on the quarter line its face's boundary runs past by up to the tolerance,
         // so an edge that lies wholly past that line (a few µm of a tube circle beyond it) has no
         // closed form on it, and the kernel's trims are made for an edge off their surface. Its
@@ -1814,10 +1910,10 @@ impl<'t> Assembly<'t> {
 
         // Without a kernel, a use with neither is refused below with why.
         let missing = exact.iter().flatten().any(Option::is_none);
-        // Closed forms taken on the uncut form are given as they are: made again on the form,
-        // they would have none.
+        // Closed forms taken on the uncut form, and the producer's pcurves, are given as they
+        // are: made again on the form, they would have none.
         let made = match self.trims {
-            _ if uncut_forms && !missing => {
+            _ if (uncut_forms || took_given) && !missing => {
                 Some(exact.iter().map(|l| l.iter().cloned().collect::<Option<Vec<_>>>()).collect::<Option<Vec<_>>>().ok_or("a closed form")?)
             }
             // A face that winds round its axis is on a form SMLib's trims hop sheets on.

@@ -7663,7 +7663,10 @@ mod tests {
             ("show_discord_button", json!(false), PAGE_GENERAL),
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
             ("browser_components_open", json!(true), PAGE_LAYOUT),
+            ("browser_fold_other_components", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
+            ("browser_hide_construction_folder", json!(true), PAGE_LAYOUT),
+            ("browser_hide_sketches_folder", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("origin_plane_scale", json!(2.0), PAGE_DESIGN),
@@ -11401,6 +11404,40 @@ mod tests {
     }
 
     #[test]
+    fn a_keyboard_opened_saved_layout_menu_owns_keys_and_returns_focus() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        let before = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let list_focus = h.ctx.memory(|memory| memory.focused()).expect("clicking the saved tile focuses its list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some());
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "Down/Enter choose Delete within the menu");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "cancelling the confirmation keeps Preferences open");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "cancelling the confirmation restores the actual saved-layout list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some(), "the restored list accepts Shift+F10");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "closing the menu keeps Preferences open");
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_none(), "Escape closes only the tile menu");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "menu Escape restores the same list focus");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        let replace = crate::scenario::rect_of("prefs:panel_layout:menu_replace").expect("the next keyboard visit opens the menu");
+        let focused = h.ctx.memory(|memory| memory.focused()).and_then(|id| h.ctx.read_response(id)).expect("the reopened menu has a focused row");
+        assert!(replace.contains(focused.rect.center()), "the reopened menu focuses Replace rather than stale Delete: {:?}", focused.rect);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "closing the menu restores the list for the next keyboard visit");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+    }
+
+    #[test]
     fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
         let mut h = layout_page_with_a_saved_layout();
         let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
@@ -14236,16 +14273,25 @@ pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => "ui.ground_shadow_ellipse",
     };
     let mut mode = before;
+    let items: Vec<_> = ["off", "ellipse", "projected"]
+        .into_iter()
+        .map(|value| {
+            let mut item = ui_kit::Item::action(value, app.tr(label(value)), "");
+            item.checked = Some(mode == value);
+            item.radio = true;
+            item.aliases.push(format!("view:ground_shadow:{value}"));
+            item
+        })
+        .collect();
+    let was_open = ui_kit::dropdown_is_open(ui, "ground_shadow_mode");
     let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
-        for value in ["off", "ellipse", "projected"] {
-            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
-            row.selected = mode == value;
-            let choice = row.show(ui);
-            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
-            if choice.clicked() {
-                mode = value;
-                ui.close();
-            }
+        if let Some(picked) = ui_kit::Menu::items(ui, ui.make_persistent_id("ground_shadow_choices"), &items, !was_open).picked {
+            mode = match picked.id.as_str() {
+                "off" => "off",
+                "projected" => "projected",
+                _ => "ellipse",
+            };
+            ui.close();
         }
     });
     crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);
@@ -15171,7 +15217,6 @@ mod settings_search_tests {
             for (query, native) in [
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
                 ("Preview panel placement while dragging", Some((Role::CheckBox, "prefs:live_panel_drag_preview"))),
-                ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
                 ("Position", None),
@@ -15675,7 +15720,7 @@ mod settings_search_tests {
             let body = crate::scenario::rect_of("dialog:page_body");
             h.widget(label).is_some_and(|[x, y]| body.is_none_or(|body| body.contains(egui::pos2(x as f32, y as f32))))
         };
-        for query in ["Placed features", "Rest", "Boss", "Snap Fit", "Box", "Cylinder", "Cone", "Sphere", "Torus", "Coil"] {
+        for query in ["Placed features", "Rest", "Boss", "Snap Fit", "Box", "Cylinder", "Cone", "Sphere", "Torus", "Coil", "Emboss"] {
             h.app.prefs_window.shell.filter = query.into();
             h.frames(4);
             assert!(drawn(&h, "Placement handles"), "searching '{query}' should show Placement handles");

@@ -14,6 +14,7 @@ use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::{CancelToken, Kernel};
+use crate::math::det;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -1643,7 +1644,7 @@ fn piece_turn(piece: &CurveSegment, shift: Vec3, x: Vec3, y: Vec3, rx: f64, ry: 
     if !inside {
         return Turn::Undecided;
     }
-    Turn::Anticlockwise((sx * ey - sy * ex).atan2(sx * ex + sy * ey).to_degrees())
+    Turn::Anticlockwise(det::atan2(sx * ey - sy * ex, sx * ex + sy * ey).to_degrees())
 }
 
 /// How a net's parameter runs along its spine (#2485): the spine's parameter is
@@ -1984,7 +1985,7 @@ impl AnalyticSupport {
                 origin: placement.origin(),
                 axis: axis(placement),
                 radius: *base_radius,
-                tan_angle: (semi_angle_deg * PI / 180.0).tan(),
+                tan_angle: det::tan(semi_angle_deg * PI / 180.0),
             },
             Self::Sphere { placement, radius } => Implicit::Sphere {
                 centre: placement.origin(),
@@ -3458,7 +3459,7 @@ impl AnalyticSupport {
         }
         // the radius changes by tan(angle) per unit along the axis
         let tan = (r1 - r0) / along.dot(axis);
-        let semi_angle_deg = tan.atan().to_degrees();
+        let semi_angle_deg = det::atan(tan).to_degrees();
         if semi_r != 0.0 && (semi_angle_deg > 0.0) != (semi_r > 0.0) {
             return None;
         }
@@ -3666,7 +3667,7 @@ impl AnalyticSupport {
         let end = radial(stop);
         let domain = recognised.anal_uv_domain;
         // the turn nearest the recognised sweep's: a sweep past 180 degrees
-        let mut sweep = end.dot(y).atan2(end.dot(x)).to_degrees();
+        let mut sweep = det::atan2(end.dot(y), end.dot(x)).to_degrees();
         sweep += 360.0 * ((domain.max().x - domain.min().x - sweep) / 360.0).round();
         let origin = centre + axis * (position.origin() - centre).dot(axis);
         let finite = [origin, x, y]
@@ -4191,11 +4192,11 @@ mod tests {
                             (0..cols)
                                 .map(|j| {
                                     let (x, y) = (i as f64, j as f64);
-                                    let w = 1.0 + 0.25 * (1.3 * x + 0.7 * y).sin().abs();
+                                    let w = 1.0 + 0.25 * det::sin(1.3 * x + 0.7 * y).abs();
                                     CPoint::new(
-                                        w * (x + 0.1 * y.sin()),
-                                        w * (y + 0.1 * x.cos()),
-                                        w * (0.3 * x * y).sin(),
+                                        w * (x + 0.1 * det::sin(y)),
+                                        w * (y + 0.1 * det::cos(x)),
+                                        w * det::sin(0.3 * x * y),
                                         w,
                                     )
                                 })

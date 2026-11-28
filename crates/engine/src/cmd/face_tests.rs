@@ -581,6 +581,81 @@ fn body_volume(s: &mut Session, name: &str) -> f64 {
     solidcraft_kernel::measure(&b.body).unwrap().volume
 }
 
+#[test]
+fn transform_face_raises_one_named_cap_and_survives_undo_redo_and_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+    let before = s.model.state();
+    let block = before.body("Block").unwrap();
+    let top = block.body.face_at_point(Vec3::new(5., 5., 10.)).unwrap().unwrap();
+    let name = &solidcraft_doc::naming::face_names(block)[top];
+    for pick in [json!([5, 5, 10]), json!(name)] {
+        let mut s = Session::new(s.doc.as_ref().clone());
+        let out = run(&mut s, "solid.transform_face", json!({"body":"Block","face":pick,"translate":[0,0,2]}));
+        assert!(out["error"].is_null(), "{out}");
+        let f = s.doc.feature(out["feature"].as_u64().unwrap()).unwrap();
+        assert_eq!(f.face_names.as_slice(), std::slice::from_ref(name));
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert!((body_volume(&mut s, "Block") - 1200.).abs() < 1e-6);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((body_volume(&mut s, "Block") - 1000.).abs() < 1e-6);
+        run(&mut s, "edit.redo", json!({}));
+        assert!((body_volume(&mut s, "Block") - 1200.).abs() < 1e-6);
+        let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((body_volume(&mut reopened, "Block") - 1200.).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn transform_face_noop_on_a_fillet_reopens_from_the_saved_model() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":[[5,10,10]],"radius":1}));
+    let rounded = s.model.state();
+    let block = rounded.body("Block").unwrap();
+    let (before, edges) = block.body.rounds().expect("fillet over the box");
+    let names = solidcraft_doc::naming::face_names(block);
+    let cap = block.body.face_at_point(Vec3::new(5., 5., 10.)).unwrap().unwrap();
+    let out = run(&mut s, "solid.transform_face", json!({"body":"Block","face":names[cap],"translate":[2,0,0]}));
+    assert!(out["error"].is_null(), "{out}");
+
+    let saved = s.model.saved(&s.doc).unwrap();
+    let bytes = solidcraft_io::write_design_container_with_cache(&s.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
+    let (doc, cache) = solidcraft_io::read_design_with_model(&bytes).unwrap();
+    let model = solidcraft_doc::Model::adopt(&doc, &cache.expect("evaluated bodies in the design")).unwrap();
+    let reopened = model.state();
+    let after = reopened.body("Block").unwrap();
+    assert_eq!(after.body.record(), block.body.record());
+    assert_eq!(solidcraft_doc::naming::face_names(after), names);
+    // The evaluator passes the original fillet through on a no-op. Its rounds still have
+    // the fillet history over the sharp box, not identity history over the rounded one.
+    let (sharp, restored_edges) = after.body.rounds().unwrap();
+    assert_eq!(sharp.record(), before.record());
+    assert_eq!(restored_edges, edges);
+    assert_eq!(after.body.history(), block.body.history());
+}
+
+#[test]
+fn transform_face_requires_an_unambiguous_owner() {
+    let mut s = Session::default();
+    flush_boxes(&mut s);
+    let before = s.doc.to_json();
+    for p in [json!({"face":[15,0,7.5],"translate":[0,2,0]}), json!({"face":[5,5,20],"body":"Small","translate":[0,0,2]})] {
+        let err = s.execute("solid.transform_face", &p).expect_err("missing or wrong owner");
+        assert_eq!(s.doc.to_json(), before, "{p}: {err}");
+    }
+    let out = run(&mut s, "solid.transform_face", json!({"body":"Small","face":[15,0,7.5],"translate":[0,2,0]}));
+    assert!(out["error"].is_null(), "{out}");
+    assert!((body_volume(&mut s, "Small") - 600.).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.).abs() < 1e-6);
+
+    // A refused retrim keeps the input to that step, not the original 500 mm³ box.
+    let error = s.execute("solid.transform_face", &json!({"body":"Small","face":[15,2,7.5],"translate":[0,-13,0]})).unwrap_err();
+    assert!(error.to_string().contains("edge"), "{error}");
+    assert!((body_volume(&mut s, "Small") - 600.).abs() < 1e-6);
+    assert!((body_volume(&mut s, "Big") - 24000.).abs() < 1e-6);
+}
+
 /// A 3.5 mm boss on a plate with a coaxial 1.75 mm through bore. The plate makes the display
 /// chord tolerance large compared with a pick 0.05 mm from either circular rim of its end.
 fn annular_boss(s: &mut Session) {

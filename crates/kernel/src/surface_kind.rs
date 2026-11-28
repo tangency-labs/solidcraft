@@ -75,10 +75,11 @@ pub fn same_surface(a: &FaceSurface, b: &FaceSurface, tol: f64, region: &solidcr
 /// property of B-spline basis functions, control-point agreement within `tol` bounds the surface
 /// distance over the entire parameter domain by `tol`, absorbing the last-bit rounding when a
 /// boolean shifts operands far from the origin to the origin and back without conflating distinct
-/// surfaces. For `Surface::Blend` faces, falls back to comparing their certified `nurbs` nets.
+/// surfaces. For `Surface::Blend` and `Surface::Sweep` faces, falls back to comparing their certified
+/// `nurbs` nets.
 pub fn same_face_record_surface(a: &Face, b: &Face, tol: f64) -> bool {
     same_record_surface(&a.surface, &b.surface, tol)
-        || (matches!((&a.surface, &b.surface), (Surface::Blend { .. }, Surface::Blend { .. }))
+        || (matches!((&a.surface, &b.surface), (Surface::Blend { .. }, Surface::Blend { .. }) | (Surface::Sweep { .. }, Surface::Sweep { .. }))
             && matches!((&a.nurbs, &b.nurbs), (Some(na), Some(nb)) if same_record_surface(na, nb, tol)))
 }
 

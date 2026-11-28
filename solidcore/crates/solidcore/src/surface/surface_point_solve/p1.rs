@@ -76,6 +76,7 @@
 //! - Debug-only drawing and `SM_ASSERT`s are compiled out of the release build and
 //!   omitted. `Dump` has no counterpart.
 
+use super::cell_index::{self, CellHit, CellIndex, Net};
 use crate::curve::curve::Curve;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
@@ -368,6 +369,46 @@ pub fn triangles_dist(
     } else {
         Ok((d2.distance, 1.0 - d2.u, 1.0 - d2.v))
     }
+}
+
+fn scan_control_cells(
+    net: Net<'_>,
+    query: Point3,
+    op: SolverOperation,
+    direction: Vec3,
+    initial: (usize, usize),
+) -> Result<CellHit> {
+    let maximize = op == SolverOperation::Maximize;
+    let mut best = CellHit {
+        cell: initial,
+        distance: if maximize { -BIG_DOUBLE } else { BIG_DOUBLE },
+        local: (-1.0, -1.0),
+    };
+    for i in 0..net.u {
+        for j in 0..net.v {
+            let (distance, lu, lv) = if op == SolverOperation::Signed3dDirectedMaximize {
+                (
+                    control_point(net.points, net.v, i, j, net.rational)?.dot(direction),
+                    -1.0,
+                    -1.0,
+                )
+            } else if i + 1 < net.u && j + 1 < net.v {
+                let (d, lu, lv) =
+                    triangles_dist(query, net.points, net.rational, i, j, net.u, net.v)?;
+                (if maximize { -d } else { d }, lu, lv)
+            } else {
+                continue;
+            };
+            if distance < best.distance {
+                best = CellHit {
+                    cell: (i, j),
+                    distance,
+                    local: (lu, lv),
+                };
+            }
+        }
+    }
+    Ok(best)
 }
 
 /// Whether the control net is well behaved around control point `(ii, jj)`, so that
@@ -669,94 +710,35 @@ impl<'s> SurfPtGlobalSolver<'s> {
             ));
         };
 
-        let (best_idx_u, best_idx_v) = best_idx;
-        let mut best_idx_u = best_idx_u;
-        let mut best_idx_v = best_idx_v;
         let (num_u, num_v, cpts) = bspl
             .control_points()
             .map_err(|e| chained(OP_TRI, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
-        let mut best_dist = BIG_DOUBLE;
-        let mut this_local_u = -1.0;
-        let mut best_local_u = -1.0;
-        let mut this_local_v = -1.0;
-        let mut best_local_v = -1.0;
-
-        // For collecting average distances:
-        let mut accum_dist = 0.0;
-        let mut dist_count: u64 = 0;
-
-        // Rational surfaces can have polygons whose shapes are very different from
-        // the surface. [B29]
-        let mut suspicious = rational;
-
-        // For operation MAXIMIZE - negate the BestDist guess
-        if b.solver_op == SolverOperation::Maximize {
-            best_dist = -best_dist;
-        }
-
-        for ii in 0..num_u {
-            for jj in 0..num_v {
-                // First, check for a badly-behaved control net. [080718, 080830]
-                if !suspicious
-                    && !well_behaved_control_net(b.test_pt, &cpts, rational, ii, jj, num_u, num_v)?
-                {
-                    suspicious = true; // Warn the caller.
-                }
-
-                // This control point.
-                let pt0 = control_point(&cpts, num_v, ii, jj, rational)?;
-
-                // In all cases, the best is the smallest signed value.
-                let this_dist = if b.solver_op == SolverOperation::Signed3dDirectedMaximize {
-                    this_local_u = -1.0;
-                    this_local_v = -1.0;
-                    pt0.dot(b.dir_vec)
-                } else {
-                    // The triangles of the square 'ahead' of this point: ii+1, jj+1.
-                    let mut d = BIG_DOUBLE;
-                    if ii < num_u - 1 && jj < num_v - 1 {
-                        let (dist, lu, lv) =
-                            triangles_dist(b.test_pt, &cpts, rational, ii, jj, num_u, num_v)?;
-                        d = dist;
-                        this_local_u = lu;
-                        this_local_v = lv;
-
-                        if b.solver_op == SolverOperation::Maximize {
-                            d = -d;
-                        }
-                    }
-                    d
-                };
-
-                // save the best found case
-                if this_dist < best_dist {
-                    best_dist = this_dist;
-                    best_idx_u = ii;
-                    best_idx_v = jj;
-                    best_local_u = this_local_u;
-                    best_local_v = this_local_v;
-                }
-
-                // same col control point distances
-                if ii > 0 {
-                    let pt1 = control_point(&cpts, num_v, ii - 1, jj, rational)?;
-                    accum_dist += pt0.distance(pt1);
-                    dist_count += 1;
-                }
-
-                // same row control point distances
-                if jj > 0 {
-                    let pt1 = control_point(&cpts, num_v, ii, jj - 1, rational)?;
-                    accum_dist += pt0.distance(pt1);
-                    dist_count += 1;
-                }
-            }
-        }
-
-        // Other outputs
-        let ave_cpt_dist = accum_dist / dist_count as f64;
-
+        let net = Net {
+            points: &cpts,
+            u: num_u,
+            v: num_v,
+            rational,
+        };
+        let index = if cpts.len() >= 256
+            && cell_index::indexable(b.test_pt)
+            && matches!(
+                b.solver_op,
+                SolverOperation::Minimize | SolverOperation::Normalize | SolverOperation::Intersect
+            ) {
+            bspl.nurb.cell_index(|| CellIndex::build(net))?
+        } else {
+            None
+        };
+        let (hit, shape) = match index {
+            Some(index) => (index.nearest(net, b.test_pt, best_idx)?, index.shape),
+            None => (
+                scan_control_cells(net, b.test_pt, b.solver_op, b.dir_vec, best_idx)?,
+                net.shape()?,
+            ),
+        };
+        let (mut best_idx_u, mut best_idx_v) = hit.cell;
+        let (best_local_u, best_local_v) = hit.local;
         // Have to check here for seams.
         let (iu, iv) =
             self.check_guess_for_seams_cpts(best_idx_u, best_idx_v, num_u, num_v, &cpts, rational)?;
@@ -785,9 +767,9 @@ impl<'s> SurfPtGlobalSolver<'s> {
             uv: b.domain.clamp_point(uv),
             best_idx_u,
             best_idx_v,
-            best_dist,
-            ave_cpt_dist,
-            suspicious,
+            best_dist: hit.distance,
+            ave_cpt_dist: shape.average_spacing,
+            suspicious: shape.suspicious,
         })
     }
 
@@ -2117,6 +2099,122 @@ mod tests {
 
     fn cp(x: f64, y: f64, z: f64) -> CPoint {
         CPoint { x, y, z, w: NOW }
+    }
+
+    #[test]
+    fn rational_control_strip_prunes_cells_and_preserves_collapsed_triangles() {
+        for width in [0.0, 1.0] {
+            let points: Vec<_> = (0..257)
+                .flat_map(|i| {
+                    (0..2).map(move |j| {
+                        let w = 1.0 + f64::from(i % 2);
+                        CPoint::new(f64::from(i) * w, f64::from(j) * width * w, 0.0, w)
+                    })
+                })
+                .collect();
+            let net = Net {
+                points: &points,
+                u: 257,
+                v: 2,
+                rational: true,
+            };
+            let index = CellIndex::build(net).unwrap().unwrap();
+            let query = Point3::new(250.25, 0.0, 1.0);
+            let mut visits = 0;
+            let hit = index
+                .search(query, net.u, net.v, (0, 0), |i, j| {
+                    visits += 1;
+                    triangles_dist(query, &points, true, i, j, net.u, net.v)
+                })
+                .unwrap();
+            assert_eq!(hit.cell, (250, 0));
+            assert_eq!(hit.distance, 1.0);
+            let scan =
+                scan_control_cells(net, query, SolverOperation::Minimize, Vec3::ZERO, (0, 0))
+                    .unwrap();
+            assert_eq!(hit.local, scan.local);
+            assert!(visits <= 16, "tested {visits} of 256 cells");
+        }
+    }
+
+    #[test]
+    fn equal_distances_use_the_first_cell_even_when_a_later_block_is_visited_first() {
+        // Two overlapping strips at z=0. The far tip of the second rises to z=2,
+        // so its block encloses the query while the first block is one unit away.
+        let points: Vec<_> = (0..33)
+            .flat_map(|i| {
+                (0..2).map(move |j| {
+                    let x = if i <= 16 { i } else { 32 - i };
+                    cp(f64::from(x), f64::from(j), if i == 32 { 2.0 } else { 0.0 })
+                })
+            })
+            .collect();
+        let net = Net {
+            points: &points,
+            u: 33,
+            v: 2,
+            rational: false,
+        };
+        let index = CellIndex::build(net).unwrap().unwrap();
+        let query = Point3::new(15.75, 0.25, 1.0);
+        let mut first = None;
+        let hit = index
+            .search(query, net.u, net.v, (0, 0), |i, j| {
+                first.get_or_insert(i);
+                triangles_dist(query, &points, false, i, j, net.u, net.v)
+            })
+            .unwrap();
+        assert_eq!(first, Some(16));
+        assert_eq!(hit.cell, (15, 0));
+        assert_eq!(hit.distance, 1.0);
+        assert_eq!(hit.local, (0.75, 0.25));
+    }
+
+    #[test]
+    fn editing_a_control_net_invalidates_only_its_own_cell_index() {
+        let rows = (0..=128)
+            .map(|i| vec![cp(f64::from(i), 0.0, 0.0), cp(f64::from(i), 1.0, 0.0)])
+            .collect();
+        let knots = std::iter::once(0.0)
+            .chain((0..=128).map(|i| f64::from(i) / 128.0))
+            .chain(std::iter::once(1.0))
+            .collect();
+        let nurb =
+            crate::nurbs::srf_basic::Surface::new(rows, 1, 1, knots, vec![0., 0., 1., 1.]).unwrap();
+        let original = BSplineSurface::from_nurb(nurb, false);
+        let k = Kernel::default();
+        let support = bilinear(0.0);
+        let guess = |s: &BSplineSurface| {
+            global(
+                &k,
+                &support,
+                SolverOperation::Minimize,
+                Point3::new(0.25, 0.25, 1.0),
+            )
+            .with_seed_net(s)
+            .find_polygon_triangle_guess((0, 0))
+            .unwrap()
+        };
+        let before_search = format!("{:?}", original.nurb);
+        assert_eq!(guess(&original).ave_cpt_dist, 1.0);
+        assert_eq!(
+            format!("{:?}", original.nurb),
+            before_search,
+            "building the index must not change the surface description"
+        );
+        let mut edited = original.clone_exact_shared();
+        for z in [1.0, 2.0] {
+            // Move the last row into the query's block, once while shared and once after detaching.
+            let data = edited.get_or_create_gw_nurb().unwrap();
+            for j in 0..2 {
+                *data.cpt_mut(128, j).unwrap() = cp(0.25, j as f64, z);
+            }
+            let changed = guess(&edited);
+            assert_eq!(changed.best_idx_u, 127);
+            assert!(changed.ave_cpt_dist > 1.0);
+            assert_eq!(guess(&original).best_idx_u, 0);
+            assert_eq!(guess(&original).ave_cpt_dist, 1.0);
+        }
     }
 
     #[test]

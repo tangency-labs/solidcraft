@@ -4627,3 +4627,83 @@ fn a_mistyped_dynamics_value_is_refused_with_a_message() {
         assert!(apply_commands(&app, &d).is_err(), "{typed}");
     }
 }
+
+/// #22615: Joint Origin dialog's Between Two Faces mode picks two planar faces and an optional
+/// snap reference, creating a persistent `Snap::BetweenFaces` with `snap: Some(_)`.
+#[test]
+fn joint_origin_dialog_between_two_faces_mode_with_snap() {
+    let mut app = two_boxes();
+    app.start("joint.origin");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(Asm::JointOrigin { between_faces, name, .. }) = &mut d.kind else {
+        panic!("not JointOrigin");
+    };
+    *between_faces = true;
+    *name = "MidA".into();
+    sync_joint_origin_inputs(&app, true, &mut d.inputs, &mut d.active);
+    assert_eq!(d.inputs.len(), 3);
+    assert_eq!(d.inputs[0].accept, PLANAR_FACES);
+    assert_eq!(d.inputs[1].accept, PLANAR_FACES);
+    assert_eq!(d.inputs[2].accept, SNAPS);
+
+    // Pick left face (x = 0) and right face (x = 20) of A, plus top face (z = 10) as snap.
+    d.inputs[0].items.push(face_sel(&app.session, Vec3::new(0.0, 10.0, 5.0)).unwrap());
+    d.inputs[1].items.push(face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    d.inputs[2].items.push(face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.origin");
+    assert!(cmds[0].1["faces"].is_array(), "{cmds:?}");
+    assert!(cmds[0].1["snap"].is_object(), "{cmds:?}");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let made = app.session.doc.assembly.origins.iter().find(|o| o.name == "MidA").unwrap();
+    assert!(matches!(made.origin.snap, Snap::BetweenFaces { snap: Some(_), .. }), "{:?}", made.origin.snap);
+    let m = app.session.doc.origin_world(&app.session.model.state(), &made.origin).unwrap();
+    let at = solidcraft_engine::doc::apply_point(&m, Vec3::ZERO);
+    assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "{at:?}");
+}
+
+/// #22615: Joint dialog's Between Two Faces side mode creates a joint with `faces` + `snap`, and
+/// Edit Joint reloads both faces and the snap while preserving the origin on offset-only edits.
+#[test]
+fn joint_dialog_between_two_faces_create_and_edit_roundtrip() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        let was = f.between_faces;
+        f.between_faces[0] = true;
+        sync_joint_side_inputs(&app, was, f, &mut d.inputs, &mut d.active);
+        assert_eq!(f.alignment_base(), 4);
+    }
+    assert_eq!(d.inputs.len(), 6);
+    // Side 1 (A): x = 0 and x = 20 faces + top face snap; Side 2 (B): bottom face at z = 0.
+    d.inputs[0].items.push(face_sel(&app.session, Vec3::new(0.0, 10.0, 5.0)).unwrap());
+    d.inputs[1].items.push(face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    d.inputs[2].items.push(face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.inputs[3].items.push(face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert!(cmds[0].1["a"]["faces"].is_array(), "{cmds:?}");
+    assert!(cmds[0].1["a"]["snap"].is_object(), "{cmds:?}");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut edit = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut edit.kind else { panic!("not Joint") };
+    assert_eq!(f.between_faces, [true, false]);
+    assert_eq!(edit.inputs.len(), 6);
+    assert_eq!(edit.inputs[0].items.len(), 1);
+    assert_eq!(edit.inputs[1].items.len(), 1);
+    assert_eq!(edit.inputs[2].items.len(), 1);
+    // Changing only offset does not resend `a`, preserving the saved BetweenFaces origin.
+    f.offset[2] = "5 mm".into();
+    let edit_cmds = apply_commands(&app, &edit).unwrap();
+    assert_eq!(edit_cmds[0].0, "joint.edit");
+    assert!(edit_cmds[0].1.get("a").is_none(), "{edit_cmds:?}");
+    assert_eq!(edit_cmds[0].1["offset"], json!("5 mm"));
+}

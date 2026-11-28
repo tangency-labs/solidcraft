@@ -67,6 +67,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
 use crate::error::{Result, SolidError};
+use crate::math::det;
 use crate::math::{Vec3, EFF_ZERO};
 use crate::nurbs::crv_basic::Boundary;
 use crate::nurbs::crv_fit::p1::interp_given_params;
@@ -408,7 +409,7 @@ impl Mirror {
             if m.dot(n) < 0.0 {
                 m *= -1.0;
             }
-            out.angle = out.angle.max(n.cross(m).length().atan2(n.dot(m)));
+            out.angle = out.angle.max(det::atan2(n.cross(m).length(), n.dot(m)));
             // across the seam the mirror's second derivative is the reflected one
             let len2 = su.length_squared();
             if len2 > EFF_ZERO {
@@ -772,7 +773,7 @@ fn measure(s: &Surface, stations: &[Station]) -> Result<SeamBounds> {
             n *= -1.0;
         }
         // atan2 of the cross and the dot: exact near 0, where acos of a dot loses half the digits
-        let angle = n.cross(st.normal).length().atan2(n.dot(st.normal));
+        let angle = det::atan2(n.cross(st.normal).length(), n.dot(st.normal));
         out.angle = out.angle.max(angle);
         let len2 = su.length_squared();
         if len2 > EFF_ZERO {

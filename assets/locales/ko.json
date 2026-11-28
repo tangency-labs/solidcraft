@@ -7071,7 +7071,7 @@
   "ui.drawing_dimension_tool.overall": "부품 전체 치수(모서리 포함)",
   "ui.drawing_dimension_tool.overall_hint": "더블클릭: 패널에서 '부품 전체 치수'를 선택하면 부품의 전체 너비 또는 높이가 됩니다",
   "ui.drawing_dimension_tool.pick": "도면 뷰에서 모서리를 클릭하세요.",
-  "ui.drawing_dimension_tool.place": "시트를 클릭하여 치수를 배치하세요.",
+  "ui.drawing_dimension_tool.place": "시트를 클릭하거나 Enter를 눌러 치수를 배치하세요.",
   "ui.drawing_dimension_tool.refused": "여기에는 치수를 배치할 수 없습니다: {reason}",
   "ui.drawing_export.all_sheets": "모든 시트",
   "ui.drawing_export.dxf": "DXF(선)",

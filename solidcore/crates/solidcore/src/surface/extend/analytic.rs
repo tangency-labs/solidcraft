@@ -95,6 +95,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::INFINITE_PARAMETER;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::math::CPoint;
@@ -512,7 +513,7 @@ fn radial(f: &Frame, x: Vec3) -> Vec3 {
 
 /// The angle between `a` and `b`, in radians.
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// The circle an iso runs (its centre, its plane's normal and its radius) through `x0`;
@@ -552,7 +553,7 @@ fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3
         n
     };
     let (u0, u1) = (x0 - centre, x1 - centre);
-    let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
+    let mut phi = det::atan2(u0.cross(u1).dot(n), u0.dot(u1));
     if phi < 0.0 {
         phi += TURN;
     }
@@ -625,11 +626,11 @@ pub(super) fn widened_across(
         Implicit::Sphere { radius, .. } => {
             if parallel {
                 let latitude = a.y.to_radians();
-                let r = radius * latitude.cos();
+                let r = radius * det::cos(latitude);
                 (
                     r,
                     gamma(8) * radius * (1.0 + latitude.abs())
-                        + radius * latitude.sin().abs() * conv_y.to_radians(),
+                        + radius * det::sin(latitude).abs() * conv_y.to_radians(),
                     b.x - a.x,
                     conv_x,
                 )
@@ -640,11 +641,11 @@ pub(super) fn widened_across(
         Implicit::Torus { major, minor, .. } => {
             if parallel {
                 let latitude = a.y.to_radians();
-                let term = minor * latitude.cos();
+                let term = minor * det::cos(latitude);
                 (
                     major + term,
                     gamma(12) * (major.abs() + minor * (1.0 + latitude.abs()))
-                        + minor * latitude.sin().abs() * conv_y.to_radians(),
+                        + minor * det::sin(latitude).abs() * conv_y.to_radians(),
                     b.x - a.x,
                     conv_x,
                 )
@@ -1273,7 +1274,7 @@ fn on_definition(
                 if r0.length() > far.0 {
                     far = (
                         r0.length(),
-                        axis.dot(r0.cross(r1)).atan2(r0.dot(r1)),
+                        det::atan2(axis.dot(r0.cross(r1)), r0.dot(r1)),
                         wn / wj,
                     );
                 }
@@ -1284,18 +1285,18 @@ fn on_definition(
             }
             let delta = far.1;
             let half = 0.5 * delta;
-            if half.cos().is_nan() || half.cos() <= 0.0 {
+            if det::cos(half).is_nan() || det::cos(half) <= 0.0 {
                 return Ok(None);
             }
             for &(j, wj) in &joint {
                 let wn = wj * far.2;
                 let centre = origin + axis * axis.dot(j - origin);
                 let r0 = j - centre;
-                let turn = |phi: f64| r0 * phi.cos() + axis.cross(r0) * phi.sin();
+                let turn = |phi: f64| r0 * det::cos(phi) + axis.cross(r0) * det::sin(phi);
                 rebuilt.push(vec![
                     (
-                        centre + turn(half) * (1.0 / half.cos()),
-                        half.cos() * (wj * wn).sqrt(),
+                        centre + turn(half) * (1.0 / det::cos(half)),
+                        det::cos(half) * (wj * wn).sqrt(),
                     ),
                     (centre + turn(delta), wn),
                 ]);
@@ -1356,19 +1357,19 @@ fn on_definition(
             };
             let (a0, b0) = plane(j);
             let (a1, b1) = plane(end);
-            let delta = (a0 * b1 - b0 * a1).atan2(a0 * a1 + b0 * b1);
+            let delta = det::atan2(a0 * b1 - b0 * a1, a0 * a1 + b0 * b1);
             let turn = |phi: f64, s: f64| {
-                let (c, sn) = (phi.cos(), phi.sin());
+                let (c, sn) = (det::cos(phi), det::sin(phi));
                 ((a0 * c - b0 * sn) * s + major, (a0 * sn + b0 * c) * s)
             };
             let half = 0.5 * delta;
-            if half.cos().is_nan() || half.cos() <= 0.0 {
+            if det::cos(half).is_nan() || det::cos(half) <= 0.0 {
                 return Ok(None);
             }
             let profile = [
                 (
-                    turn(half, 1.0 / half.cos()),
-                    half.cos() * (wj * wn).sqrt() / wj,
+                    turn(half, 1.0 / det::cos(half)),
+                    det::cos(half) * (wj * wn).sqrt() / wj,
                 ),
                 (turn(delta, 1.0), wn / wj),
             ];

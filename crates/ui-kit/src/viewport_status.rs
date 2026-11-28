@@ -68,7 +68,7 @@ impl StatusPresentation {
         if self.session_uid.is_some_and(|previous| previous != uid) {
             super::dismiss_details_popups(ctx);
             if let Some(popup) = self.summary_popup {
-                egui::Popup::close_id(ctx, popup);
+                super::Menu::dismiss(ctx, popup);
             }
             if self.owns_focus(ctx) || super::details_field_owns_focus(ctx) {
                 ctx.memory_mut(|memory| {
@@ -95,7 +95,7 @@ impl StatusPresentation {
             self.return_pending = false;
             self.card_owner = None;
             if let Some(id) = self.summary_popup.take() {
-                egui::Popup::close_id(ctx, id);
+                super::Menu::dismiss(ctx, id);
             }
             if self.owns_focus(ctx) {
                 ctx.memory_mut(|memory| {
@@ -130,7 +130,7 @@ impl StatusPresentation {
         self.summary_suspended = suspended;
         if suspended && !self.summary_members.is_empty() {
             if let Some(id) = self.summary_popup.take() {
-                egui::Popup::close_id(ctx, id);
+                super::Menu::dismiss(ctx, id);
             }
             if self.owns_focus(ctx) {
                 ctx.memory_mut(|memory| {
@@ -255,7 +255,10 @@ pub fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut StatusPr
                     if open || response.clicked() || matches!(&action, Some(StatusAction::Edit(id)) if id == &item.id) {
                         state.return_focus = Some(response.id);
                     }
-                    if state.return_pending && state.return_focus == Some(response.id) && !egui::Popup::is_any_open(ui.ctx()) {
+                    if state.return_pending
+                        && state.return_focus == Some(response.id)
+                        && !(egui::Popup::is_any_open(ui.ctx()) || super::Menu::any_open(ui.ctx()))
+                    {
                         response.request_focus();
                         state.return_pending = false;
                     }
@@ -354,7 +357,7 @@ pub fn viewport_status_summary(
     let t = Tokens::get();
     let mut actions = Vec::new();
     let container = Container::new(ctx, Surface::ViewportStatus);
-    let was_open = state.summary_popup.is_some_and(|id| egui::Popup::is_id_open(ctx, id));
+    let was_open = state.summary_popup.is_some_and(|id| super::Menu::is_open(ctx, id));
     let row = container
         .area(Id::unique("viewport_status_summary"))
         .movable(false)
@@ -372,138 +375,120 @@ pub fn viewport_status_summary(
                 if state.summary_suspended {
                     ui.disable();
                 }
-                let mut button_id = None;
-                let mut summary_popup = None;
-                let menu = super::Menu::button_with(
-                    ui,
-                    |ui, _| {
-                        let extra =
-                            solidcraft_ui_text::format("ui.viewport_status_summary_more", &[("count", &items.len().saturating_sub(1).to_string())]);
-                        let name = ui.painter().layout_no_wrap(latest.name.clone(), crate::type_face::semibold(t.font_label), t.text);
-                        let count = ui.painter().layout_no_wrap(extra, egui::FontId::monospace(t.font_small), t.text_dim);
-                        let attention = items.iter().any(|item| item.kind == StatusKind::Attention);
-                        let width = name.size().x + count.size().x + t.space_24 * 2.0 + t.space_8 * 4.0 + if attention { t.space_12 } else { 0.0 };
-                        let (rect, _) = ui.allocate_exact_size(vec2(width, t.control_height.max(ui.spacing().interact_size.y)), egui::Sense::hover());
-                        let response = super::button_at(ui, "viewport_status_summary_button", rect, "", Button::Ghost);
-                        if response.clicked() {
-                            response.request_focus();
-                        }
-                        let popup_id = egui::Popup::default_response_id(&response);
-                        summary_popup = Some(popup_id);
-                        button_id = Some(response.id);
-                        if response.has_focus() {
-                            ui.painter().rect_stroke(rect, t.control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Outside);
-                        }
-                        let mut x = rect.left() + t.space_8;
-                        let icon =
-                            Rect::from_center_size(egui::pos2(x + t.space_12, rect.center().y), vec2(t.space_24 - t.space_4, t.space_24 - t.space_4));
-                        ui.painter().circle_filled(icon.center(), icon.width() / 2.0, disc);
-                        crate::icons::paint_icon(ui.painter(), icon.shrink(t.space_3), latest.kind.icon(), 1.0);
-                        x += t.space_24 + t.space_8;
-                        ui.painter().galley(egui::pos2(x, rect.center().y - name.size().y / 2.0), name.clone(), t.text);
-                        x += name.size().x + t.space_8;
-                        ui.painter().galley(egui::pos2(x, rect.center().y - count.size().y / 2.0), count.clone(), t.text_dim);
-                        x += count.size().x + t.space_8;
-                        if attention {
-                            let dot = egui::pos2(x + t.space_3, rect.center().y);
-                            ui.painter().circle_filled(dot, t.space_3, t.warning);
-                            solidcraft_ui_registry::publish_target(
-                                "viewport_status:summary:attention",
-                                Rect::from_center_size(dot, vec2(t.space_6, t.space_6)),
-                            );
-                            x += t.space_12;
-                        }
-                        let chevron = Rect::from_center_size(egui::pos2(x + t.space_12, rect.center().y), vec2(t.space_16, t.space_16));
-                        if egui::Popup::is_id_open(ctx, popup_id) {
-                            crate::icons::paint_ink_flipped(ui.painter(), chevron, "chevron", t.text_dim);
-                        } else {
-                            crate::icons::paint_icon(ui.painter(), chevron, "chevron", 1.0);
-                        }
-                        let label = solidcraft_ui_text::format(
-                            "ui.viewport_status_summary_label",
-                            &[("name", &latest.name), ("count", &items.len().saturating_sub(1).to_string())],
+                let response = {
+                    let extra =
+                        solidcraft_ui_text::format("ui.viewport_status_summary_more", &[("count", &items.len().saturating_sub(1).to_string())]);
+                    let name = ui.painter().layout_no_wrap(latest.name.clone(), crate::type_face::semibold(t.font_label), t.text);
+                    let count = ui.painter().layout_no_wrap(extra, egui::FontId::monospace(t.font_small), t.text_dim);
+                    let attention = items.iter().any(|item| item.kind == StatusKind::Attention);
+                    let width = name.size().x + count.size().x + t.space_24 * 2.0 + t.space_8 * 4.0 + if attention { t.space_12 } else { 0.0 };
+                    let (rect, _) = ui.allocate_exact_size(vec2(width, t.control_height.max(ui.spacing().interact_size.y)), egui::Sense::hover());
+                    let response = super::button_at(ui, "viewport_status_summary_button", rect, "", Button::Ghost);
+                    if response.clicked() {
+                        response.request_focus();
+                    }
+                    let popup_id = response.id.with("shared_menu");
+                    if response.has_focus() {
+                        ui.painter().rect_stroke(rect, t.control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Outside);
+                    }
+                    let mut x = rect.left() + t.space_8;
+                    let icon =
+                        Rect::from_center_size(egui::pos2(x + t.space_12, rect.center().y), vec2(t.space_24 - t.space_4, t.space_24 - t.space_4));
+                    ui.painter().circle_filled(icon.center(), icon.width() / 2.0, disc);
+                    crate::icons::paint_icon(ui.painter(), icon.shrink(t.space_3), latest.kind.icon(), 1.0);
+                    x += t.space_24 + t.space_8;
+                    ui.painter().galley(egui::pos2(x, rect.center().y - name.size().y / 2.0), name.clone(), t.text);
+                    x += name.size().x + t.space_8;
+                    ui.painter().galley(egui::pos2(x, rect.center().y - count.size().y / 2.0), count.clone(), t.text_dim);
+                    x += count.size().x + t.space_8;
+                    if attention {
+                        let dot = egui::pos2(x + t.space_3, rect.center().y);
+                        ui.painter().circle_filled(dot, t.space_3, t.warning);
+                        solidcraft_ui_registry::publish_target(
+                            "viewport_status:summary:attention",
+                            Rect::from_center_size(dot, vec2(t.space_6, t.space_6)),
                         );
-                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label.as_str()));
-                        solidcraft_ui_registry::publish_target("viewport_status:summary", rect);
-                        solidcraft_ui_registry::publish_target(&target(latest, "summary"), rect);
-                        response
-                    },
-                    |ui| {
-                        super::Menu::heading(ui, solidcraft_ui_text::tr("ui.viewport_status_summary_heading"));
-                        for item in items {
-                            ui.push_id(&item.id, |ui| {
-                                ui.horizontal(|ui| {
-                                    let (icon, _) = ui.allocate_exact_size(vec2(t.space_24, t.space_24), egui::Sense::hover());
-                                    let disc = match item.kind {
-                                        StatusKind::Mode => t.accent_soft,
-                                        StatusKind::Result => t.text_dim.gamma_multiply(0.1),
-                                        StatusKind::Attention => t.warning.gamma_multiply(0.12),
-                                    };
-                                    ui.painter().circle_filled(icon.center(), (icon.width() - t.space_4) / 2.0, disc);
-                                    crate::icons::paint_icon(ui.painter(), icon.shrink(t.space_4), item.kind.icon(), 1.0);
-                                    solidcraft_ui_registry::publish_target(&target(item, "icon"), icon);
-                                    let name = ui.label(RichText::new(&item.name).semibold().size(t.font_label));
-                                    solidcraft_ui_registry::publish_target(&target(item, "name"), name.rect);
-                                    let setting = RichText::new(&item.setting).monospace().size(t.font_small).color(t.text_dim);
-                                    if item.editable {
-                                        let response = super::button(ui, setting, Button::Ghost);
-                                        solidcraft_ui_registry::publish_target(&target(item, "setting"), response.rect);
-                                        state.focus_ids.push(response.id);
-                                        if response.clicked() {
-                                            actions.push(StatusAction::Edit(item.id.clone()));
-                                            ui.close();
-                                        }
-                                    } else {
-                                        let response = ui.label(setting);
-                                        solidcraft_ui_registry::publish_target(&target(item, "setting"), response.rect);
-                                    }
-                                    if item.has_key {
-                                        let label = solidcraft_ui_text::format("ui.viewport_status_key", &[("name", &item.name)]);
-                                        let response =
-                                            icon_action(ui, item, "key", "chevron", &label, &label, state.open_key.as_deref() == Some(&item.id));
-                                        state.focus_ids.push(response.id);
-                                        if response.clicked() {
-                                            state.open_key = Some(item.id.clone());
-                                            ui.close();
-                                        }
-                                    }
-                                    let label = solidcraft_ui_text::format("ui.viewport_status_clear", &[("name", &item.name)]);
-                                    let hint = clear_hint(item);
-                                    let response = icon_action(ui, item, "close", "close", &label, &hint, false);
-                                    state.focus_ids.push(response.id);
-                                    if response.clicked() {
-                                        actions.push(StatusAction::Clear(item.id.clone()));
-                                        ui.close();
-                                    }
-                                });
-                            });
+                        x += t.space_12;
+                    }
+                    let chevron = Rect::from_center_size(egui::pos2(x + t.space_12, rect.center().y), vec2(t.space_16, t.space_16));
+                    if super::Menu::is_open(ctx, popup_id) {
+                        crate::icons::paint_ink_flipped(ui.painter(), chevron, "chevron", t.text_dim);
+                    } else {
+                        crate::icons::paint_icon(ui.painter(), chevron, "chevron", 1.0);
+                    }
+                    let label = solidcraft_ui_text::format(
+                        "ui.viewport_status_summary_label",
+                        &[("name", &latest.name), ("count", &items.len().saturating_sub(1).to_string())],
+                    );
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label.as_str()));
+                    solidcraft_ui_registry::publish_target("viewport_status:summary", rect);
+                    solidcraft_ui_registry::publish_target(&target(latest, "summary"), rect);
+                    response
+                };
+                let button_id = Some(response.id);
+                let summary_popup = Some(response.id.with("shared_menu"));
+                let menu = if response.clicked() || super::Menu::response_is_open(&response) {
+                    let mut entries = vec![super::Item::heading(solidcraft_ui_text::tr("ui.viewport_status_summary_heading"))];
+                    for item in items {
+                        let mut children = Vec::new();
+                        if item.editable {
+                            let mut edit = super::Item::action(&target(item, "setting"), &item.setting, "");
+                            edit.params = Some(serde_json::json!({"status":item.id,"kind":"edit"}));
+                            edit.aliases.push(target(item, "setting"));
+                            children.push(edit);
                         }
-                        super::Menu::separator(ui);
-                        let label = solidcraft_ui_text::tr("ui.viewport_status_summary_clear");
-                        let mut footer = super::MenuItem::new("viewport_status_clear_all", label, "");
-                        // Display hint only. Native popup Escape closes the list without dispatch.
-                        footer.shortcut = "Esc";
-                        let response = footer.show(ui);
-                        state.focus_ids.push(response.id);
-                        if response.clicked() {
-                            actions.push(StatusAction::ClearAll);
-                            ui.close();
+                        if item.has_key {
+                            let label = solidcraft_ui_text::format("ui.viewport_status_key", &[("name", &item.name)]);
+                            let mut key = super::Item::action(&target(item, "key"), &label, "chevron");
+                            key.params = Some(serde_json::json!({"status":item.id,"kind":"key"}));
+                            key.aliases.push(target(item, "key"));
+                            children.push(key);
                         }
-                    },
-                );
+                        let label = solidcraft_ui_text::format("ui.viewport_status_clear", &[("name", &item.name)]);
+                        let mut clear = super::Item::action(&target(item, "close"), &label, "close");
+                        clear.tip = Some(clear_hint(item));
+                        clear.params = Some(serde_json::json!({"status":item.id,"kind":"clear"}));
+                        clear.aliases.push(target(item, "close"));
+                        let mut row = super::Item::submenu(&target(item, "item"), &item.name, item.kind.icon(), children);
+                        row.secondary = Some(Box::new(clear));
+                        row.shortcut = item.setting.clone();
+                        row.aliases.extend([target(item, "item"), target(item, "name"), target(item, "icon")]);
+                        entries.push(row);
+                    }
+                    entries.push(super::Item::sep());
+                    let mut clear =
+                        super::Item::action("viewport_status_clear_all", solidcraft_ui_text::tr("ui.viewport_status_summary_clear"), "").key("Esc");
+                    clear.params = Some(serde_json::json!({"kind":"clear_all"}));
+                    entries.push(clear);
+                    super::Menu::button_items_output(&response, &entries)
+                } else {
+                    super::MenuOutput::default()
+                };
+                state.focus_ids.extend(menu.rows.iter().filter(|(_, response)| response.enabled()).map(|(_, response)| response.id));
+                if let Some(picked) = menu.picked {
+                    let params = picked.params.unwrap_or_default();
+                    let id = params.get("status").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
+                    match params.get("kind").and_then(serde_json::Value::as_str) {
+                        Some("edit") => actions.push(StatusAction::Edit(id)),
+                        Some("key") => state.open_key = Some(id),
+                        Some("clear") => actions.push(StatusAction::Clear(id)),
+                        Some("clear_all") => actions.push(StatusAction::ClearAll),
+                        _ => {}
+                    }
+                }
                 state.summary_popup = summary_popup;
                 state.focus_ids.extend(button_id);
                 if state.open_key.is_some() {
                     state.return_focus = button_id;
                 }
-                if state.return_pending && state.return_focus == button_id && !egui::Popup::is_any_open(ctx) {
-                    menu.response.request_focus();
+                if state.return_pending && state.return_focus == button_id && !(egui::Popup::is_any_open(ctx) || super::Menu::any_open(ctx)) {
+                    response.request_focus();
                     state.return_pending = false;
                 }
-                if was_open && !summary_popup.is_some_and(|id| egui::Popup::is_id_open(ctx, id)) && actions.is_empty() {
-                    menu.response.request_focus();
+                if was_open && !summary_popup.is_some_and(|id| super::Menu::is_open(ctx, id)) && actions.is_empty() {
+                    response.request_focus();
                 }
-                if menu.response.clicked() {
+                if response.clicked() {
                     state.open_key = None;
                 }
             });
@@ -545,7 +530,7 @@ pub fn show_card(
         state.card_owner = Some(id.to_owned());
         state.opened_frame = Some(ctx.cumulative_frame_nr());
     }
-    let popup_was_open = egui::Popup::is_any_open(ctx);
+    let popup_was_open = egui::Popup::is_any_open(ctx) || super::Menu::any_open(ctx);
     let t = Tokens::get();
     let card = Container::new(ctx, Surface::Popup);
     let result =
@@ -558,7 +543,7 @@ pub fn show_card(
     solidcraft_ui_registry::publish_target("viewport_status:card", result.response.rect);
     if state.opened_frame != Some(ctx.cumulative_frame_nr())
         && !popup_was_open
-        && !egui::Popup::is_any_open(ctx)
+        && !(egui::Popup::is_any_open(ctx) || super::Menu::any_open(ctx))
         && ctx.input(|input| {
             input.pointer.any_pressed()
                 && input.pointer.interact_pos().is_some_and(|point| !result.response.rect.contains(point) && !owner.contains(point))

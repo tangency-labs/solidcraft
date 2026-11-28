@@ -24,7 +24,7 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
     let line_h = t.control_height * scale;
     let distance = solidcraft_ui_text::tr_label("Distance");
     let label = p.layout_no_wrap(distance.to_owned(), font.clone(), t.form_dim);
-    p.galley(origin + vec2(0.0, (line_h - label.size().y) / 2.0), label.clone(), t.form_dim);
+    p.galley(origin + vec2(0.0, (line_h - label.size().y) / 2.0 - egui::galley_cap_ink_rise(&p, &label)), label.clone(), t.form_dim);
     let field = Rect::from_min_size(origin + vec2(label.size().x + t.space_8 * scale, 0.0), vec2((t.form_label_width + t.space_6) * scale, line_h));
     p.rect(field, t.control_radius, t.input_fill(), t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     if let Some(bevel) = t.borders.bevel {
@@ -47,14 +47,15 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
     p.rect_filled(feature, t.control_radius, t.selected_bg);
     let icon = Rect::from_center_size(pos2(feature.left() + t.space_16 * scale, feature.center().y), vec2(t.space_16, t.space_16) * scale);
     ui_kit::icons::paint_icon(&p, icon, "extrude", 1.0);
-    p.text(
+    crate::ui_kit::paint_anchored(
+        &p,
         pos2(icon.right() + t.space_6 * scale, feature.center().y),
         egui::Align2::LEFT_CENTER,
         "Extrude1",
         ui_kit::type_face::semibold(t.font_label * scale),
         t.selected_ink,
     );
-    p.text(feature.right_center() - vec2(t.space_8, 0.0), egui::Align2::RIGHT_CENTER, "12.5 mm", font, t.selected_ink);
+    crate::ui_kit::paint_anchored(&p, feature.right_center() - vec2(t.space_8, 0.0), egui::Align2::RIGHT_CENTER, "12.5 mm", font, t.selected_ink);
 }
 
 /// The status colours (selected, warning, error, done) as chips, in colour vision `mode`.
@@ -83,7 +84,8 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
                 icon,
                 ink,
             );
-            ui.painter().galley(pos2(r.left() + t.space_24, r.center().y - galley.size().y / 2.0), galley, ink);
+            let rise = egui::galley_cap_ink_rise(ui.painter(), &galley);
+            ui.painter().galley(pos2(r.left() + t.space_24, r.center().y - galley.size().y / 2.0 - rise), galley, ink);
         }
     });
 }

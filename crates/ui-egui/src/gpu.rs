@@ -359,15 +359,16 @@ mod test_support {
                 renderer.update_texture(device, queue, id, &delta);
             }
         }
-        if let Some(effect) = &renderer.frame_compositor {
+        // As our own runner's painter does (`solidcraft_window_gpu::painter`).
+        let compositor = renderer.callback_resources.get::<solidcraft_window_gpu::Compositor>().map(|c| std::sync::Arc::clone(&c.0));
+        if let Some(effect) = &compositor {
             effect.begin_viewport(viewport.0.value());
+            effect.screen(&screen, &mut renderer.callback_resources);
         }
         let extra = renderer.update_buffers(device, queue, &mut encoder, &jobs, &screen);
         let target = output.create_view(&Default::default());
-        let composed = renderer
-            .frame_compositor
-            .as_ref()
-            .is_some_and(|effect| effect.render(&renderer, &mut encoder, &target, &jobs, &screen, [0.0, 0.0, 0.0, 1.0]));
+        let composed =
+            compositor.as_ref().is_some_and(|effect| effect.render(&renderer, &mut encoder, &target, &jobs, &screen, [0.0, 0.0, 0.0, 1.0]));
         if !composed {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -387,7 +388,7 @@ mod test_support {
             renderer.render(&mut pass, &jobs, &screen);
         }
         queue.submit(extra.into_iter().chain([encoder.finish()]));
-        if let Some(effect) = &renderer.frame_compositor {
+        if let Some(effect) = &compositor {
             effect.submitted();
         }
         for id in out.textures_delta.free.drain() {
@@ -1395,7 +1396,7 @@ mod tests {
         assert_eq!((counts.textures_created, counts.buffers_created, counts.bind_groups_created, counts.pipelines_created), (0, 0, 0, 0));
         assert_eq!((counts.markers_emitted, counts.markers_drawn), (0, 0));
         assert_eq!(counts.live_bytes, 0);
-        assert!(f.renderer.read().frame_compositor.is_none());
+        assert!(f.renderer.read().callback_resources.get::<solidcraft_window_gpu::Compositor>().is_none());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1422,7 +1423,7 @@ mod tests {
         for (name, count) in counters.as_object().unwrap() {
             assert_eq!(count, 0, "{name}");
         }
-        assert!(f.renderer.read().frame_compositor.is_none());
+        assert!(f.renderer.read().callback_resources.get::<solidcraft_window_gpu::Compositor>().is_none());
         assert!(f.app.blur.painted_frame().is_none());
     }
 
@@ -1737,7 +1738,7 @@ mod tests {
             assert_eq!(before.textures_created, f.app.blur.counters().textures_created);
             assert_eq!(before.markers_emitted, f.app.blur.counters().markers_emitted);
             assert_eq!(f.app.blur.counters().live_bytes, 0);
-            assert!(f.renderer.read().frame_compositor.is_none());
+            assert!(f.renderer.read().callback_resources.get::<solidcraft_window_gpu::Compositor>().is_none());
             assert!(plain.iter().any(|v| *v != 0));
             assert!(plain_jobs > 0);
         }

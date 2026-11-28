@@ -4,7 +4,7 @@ use egui::{Context, Ui, ViewportClass, ViewportCommand, ViewportId};
 use serde_json::{Value, json};
 use solidcraft_views::{DesignView, PopOut, TopBar, ViewKind, ViewSet, WindowId, WindowLevel, WindowOptions, WindowPlacement, WindowTarget};
 
-use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Menu, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Surface};
 use crate::{SolveApp, documents};
 
 #[derive(Default)]
@@ -1172,13 +1172,16 @@ fn toast(app: &mut SolveApp, ctx: &Context) {
         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0));
     let undo = edge
         .show(ctx, |ui| {
-            Menu::show(ui, 280.0, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(label);
-                    crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Undo"), crate::ui_kit::Button::Normal).clicked()
+            Container::new(ui.ctx(), Surface::ViewportStatus)
+                .show_frame(ui, Container::menu_frame(), ui.max_rect(), |ui| {
+                    ui.set_width(280.0);
+                    ui.horizontal(|ui| {
+                        ui.label(label);
+                        crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Undo"), crate::ui_kit::Button::Normal).clicked()
+                    })
+                    .inner
                 })
                 .inner
-            })
         })
         .inner;
     if undo && let Some(returned) = app.view_windows.returned.take() {
@@ -1692,7 +1695,8 @@ impl Host {
         let own_popup = crate::ui_kit::window_options_menu::is_open(ctx, bar_menu_id(ctx))
             || crate::app_bar::tab_popup_open(ctx, documents::tab_strip_id(ctx.viewport_id()));
         let ribbon_popup = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
-        let popup = own_popup || ribbon_popup || ctx.any_popup_open() || app.viewport.context_menu.is_some();
+        let shared_popup = crate::ui_kit::Menu::any_open(ctx);
+        let popup = own_popup || ribbon_popup || shared_popup || ctx.any_popup_open() || app.viewport.context_menu.is_some();
         let focus = ctx.memory(|memory| memory.focused());
         let grip_focused = focus == Some(bar_grip_id(ctx));
         let bar_focused = window_focused
@@ -1706,7 +1710,7 @@ impl Host {
         let keyboard_show = f10 || (window_focused && grip_focused);
         let held = own_popup
             || grip_menu
-            || (visible_height > 0.0 && ctx.any_popup_open())
+            || (visible_height > 0.0 && (shared_popup || ctx.any_popup_open()))
             || (visible_height > 0.0 && crate::view_window_drag::active(app));
         if !popup && !bar_focused {
             self.top_bar_reveal.release_keyboard();
@@ -1750,7 +1754,7 @@ impl Host {
         let keyboard_show = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F10));
         let ribbon_focused = crate::toolbar::pop_out_ribbon_focus(ctx);
         let panel_open = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
-        let popup_open = ctx.any_popup_open() || app.viewport.context_menu.is_some() || panel_open;
+        let popup_open = crate::ui_kit::Menu::any_open(ctx) || ctx.any_popup_open() || app.viewport.context_menu.is_some() || panel_open;
         let escape = !popup_open
             && (self.ribbon_reveal.keyboard() || ribbon_focused)
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));

@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::det;
 use core::f64::consts::{FRAC_PI_2, PI, TAU};
 
 fn k() -> Kernel {
@@ -107,8 +108,9 @@ fn the_record_parameter_inverts_the_kernel_parameter() {
     let k = k();
     let close = |a: f64, b: f64| assert!((a - b).abs() <= 1e-15 * 8.0, "{a} != {b}");
     // the record's ellipse at its own parameter
-    let on =
-        |o: [f64; 3], [rx, ry]: [f64; 2], r: f64| [o[0] + rx * r.cos(), o[1] + ry * r.sin(), o[2]];
+    let on = |o: [f64; 3], [rx, ry]: [f64; 2], r: f64| {
+        [o[0] + rx * det::cos(r), o[1] + ry * det::sin(r), o[2]]
+    };
     for (record, o, radii) in [
         (
             Record::Circle {
@@ -535,16 +537,16 @@ fn backtracking_form(a: f64) -> Record {
 fn arcs_form(deg: f64, breaks: &[f64]) -> Record {
     let arcs = breaks.len() - 1;
     let half = (deg / 2.0).to_radians();
-    let w = half.cos();
+    let w = det::cos(half);
     let mut h = Vec::new();
     for i in 0..arcs {
         let t0 = (deg * i as f64).to_radians();
         if i == 0 {
-            h.push([t0.cos(), t0.sin(), 0.0, 1.0]);
+            h.push([det::cos(t0), det::sin(t0), 0.0, 1.0]);
         }
-        h.push([(t0 + half).cos(), (t0 + half).sin(), 0.0, w]);
+        h.push([det::cos(t0 + half), det::sin(t0 + half), 0.0, w]);
         let t1 = t0 + 2.0 * half;
-        h.push([t1.cos(), t1.sin(), 0.0, 1.0]);
+        h.push([det::cos(t1), det::sin(t1), 0.0, 1.0]);
     }
     let mut knots = vec![breaks[0]; 3];
     for b in &breaks[1..arcs] {
@@ -612,7 +614,7 @@ fn an_arc_that_needs_five_quarters_of_its_grid_is_taken_on_its_form() {
         frame: frame(o),
         radius: r,
     };
-    let point = |t: f64| [o[0] + r * t.cos(), o[1] + r * t.sin(), o[2]];
+    let point = |t: f64| [o[0] + r * det::cos(t), o[1] + r * det::sin(t), o[2]];
     for [t0, t1] in [
         [30.02_f64.to_radians(), 360.02_f64.to_radians()],
         [89.98_f64.to_radians(), 419.98_f64.to_radians()],
@@ -751,7 +753,7 @@ fn a_polynomial_spline_and_polyline_are_non_rational() {
 fn a_flat_arc_about_a_far_centre_is_proved_on_its_circle_and_no_further() {
     let (h, r) = (20.0_f64, 4e5_f64);
     let cy = -(r * r - h * h).sqrt();
-    let w = (h / r).asin().cos();
+    let w = det::cos(det::asin(h / r));
     let arc = |lift: f64| {
         // the middle pole, where the end tangents meet, r / w above the centre (homogeneous)
         let top = cy + r / w + lift;

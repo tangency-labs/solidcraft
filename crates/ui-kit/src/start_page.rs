@@ -4,7 +4,7 @@
 //! returns the entry chosen this frame, which the host runs. Nothing here knows the app.
 //!
 //! Tiles and samples take a host [`Icon`] (a kit icon name, a texture or the host's painter);
-//! menu entries do too. Thumbnails are textures the host made.
+//! context menus use the shared Item definition. Thumbnails are textures the host made.
 
 use std::borrow::Cow;
 
@@ -121,13 +121,7 @@ pub struct Recent<'a, A> {
     pub thumbnail_failed: bool,
     pub chosen: A,
     /// The row's context menu.
-    pub menu: Vec<MenuEntry<'a, A>>,
-}
-
-pub struct MenuEntry<'a, A> {
-    pub label: Label<'a>,
-    pub icon: Icon<'a>,
-    pub chosen: A,
+    pub menu: Vec<(crate::Item, A)>,
 }
 
 pub struct Sample<'a, A> {
@@ -160,6 +154,7 @@ pub fn show<A>(ui: &mut egui::Ui, page: Page<'_, A>) -> Option<A> {
     let escape = interactive
         && back.as_ref().is_some_and(|back| back.escape)
         && !egui::Popup::is_any_open(ui.ctx())
+        && !crate::Menu::any_open(ui.ctx())
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     let mut rail = Some((back, rail));
     let mut body = Some(body);
@@ -342,17 +337,16 @@ fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &m
                     },
                 );
                 publish(&row_id, &response);
-                let mut menu = row.menu.into_iter().map(Some).collect::<Vec<_>>();
-                crate::Menu::context(&response, |ui| {
-                    for entry in &mut menu {
-                        let picked =
-                            entry.as_ref().is_some_and(|entry| crate::MenuItem::new(&entry.label, &entry.label, entry.icon).show(ui).clicked());
-                        if picked && let Some(entry) = entry.take() {
-                            *chosen = Some(entry.chosen);
-                            ui.close();
-                        }
+                if crate::Menu::context_active(&response) {
+                    let mut menu = row.menu.into_iter().map(Some).collect::<Vec<_>>();
+                    let entries = menu.iter().filter_map(|entry| entry.as_ref().map(|(item, _)| item.clone())).collect::<Vec<_>>();
+                    if let Some(picked) = crate::Menu::context_items(&response, &entries)
+                        && let Some(index) = menu.iter().position(|entry| entry.as_ref().is_some_and(|(item, _)| item.id == picked.id))
+                        && let Some((_, action)) = menu.get_mut(index).and_then(Option::take)
+                    {
+                        *chosen = Some(action);
                     }
-                });
+                }
                 if response.clicked() {
                     *chosen = Some(row.chosen);
                 }
@@ -477,8 +471,8 @@ mod tests {
                         thumbnail_failed: false,
                         chosen: Picked::Recent(i),
                         menu: vec![
-                            MenuEntry { label: "Remove from list".into(), icon: "delete".into(), chosen: Picked::Forget(i) },
-                            MenuEntry { label: "Show in folder".into(), icon: "folder".into(), chosen: Picked::ShowInFolder(i) },
+                            (crate::Item::action("forget", "Remove from list", "delete"), Picked::Forget(i)),
+                            (crate::Item::action("folder", "Show in folder", "folder"), Picked::ShowInFolder(i)),
                         ],
                     })
                     .collect(),
@@ -632,7 +626,7 @@ mod tests {
         let mut drive = Drive::new(egui::vec2(1400.0, 900.0), 2);
         drive.click_with("start:recent:1", egui::PointerButton::Secondary);
         drive.frame(Vec::new());
-        assert!(egui::Popup::is_any_open(&drive.ctx), "the recent row's menu is open");
+        assert!(crate::Menu::any_open(&drive.ctx), "the recent row's menu is open");
         drive.escape();
         assert_eq!(drive.chosen, [], "Escape closes the menu, not the page");
     }

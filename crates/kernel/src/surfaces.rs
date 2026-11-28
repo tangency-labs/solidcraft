@@ -297,6 +297,29 @@ fn record_body(r: &Brep) -> Result<(Body, bool)> {
     Ok((Body::from_record(r.clone())?, true))
 }
 
+/// Morph `target` by mapping `base`'s face `base_face` onto `control`'s face `control_face`
+/// through [`solidcore_ops::morph::morph_by_surface`].
+pub fn morph_surface(
+    target: &Body,
+    base: &Body,
+    base_face: usize,
+    control: &Body,
+    control_face: usize,
+    options: &solidcore_ops::morph::MorphOptions,
+) -> Result<Body> {
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("morph"));
+    }
+    target.require_brep("Morph")?;
+    base.require_brep("Morph base surface")?;
+    control.require_brep("Morph target surface")?;
+    let record = crate::guard("Morph", || {
+        solidcore_ops::morph::morph_by_surface(target.record(), base.record(), base_face, control.record(), control_face, options)
+            .map_err(|e| KernelError::Failed(format!("Morph: {e}")))
+    })?;
+    Body::from_record(record)
+}
+
 /// `body` with the history `h` over operands of `counts` faces and edges when its order is the
 /// record's, else with none.
 fn with_history(body: Body, same_order: bool, h: History, counts: &[(usize, usize)]) -> Result<Body> {

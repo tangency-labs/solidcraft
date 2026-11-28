@@ -46,6 +46,7 @@
 //!   allocation error above the ceiling even if an overcommitting allocator would
 //!   accept the reservation.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
@@ -149,8 +150,8 @@ impl Spiral {
         } else {
             theta
         };
-        let cos_theta = theta.cos();
-        let sin_theta = theta.sin();
+        let cos_theta = det::cos(theta);
+        let sin_theta = det::sin(theta);
         Vec3::new(
             self.radius_at(theta) * cos_theta,
             self.rl * self.radius_at(theta) * sin_theta,
@@ -166,8 +167,8 @@ impl Spiral {
         } else {
             theta
         };
-        let cos_theta = theta.cos();
-        let sin_theta = theta.sin();
+        let cos_theta = det::cos(theta);
+        let sin_theta = det::sin(theta);
         Vec3::new(
             -self.radius_at(theta) * sin_theta + self.rdfun * cos_theta,
             self.rl * (self.radius_at(theta) * cos_theta + self.rdfun * sin_theta),

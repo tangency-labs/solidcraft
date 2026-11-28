@@ -505,7 +505,7 @@ fn hostile_input_neither_panics_nor_changes_the_report() {
         (sk, a, b, l)
     };
     let push = |sk: &mut Sketch, kind: ConstraintKind| {
-        sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })
+        sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, driven_param: None, text: None })
     };
     let cases: Vec<Box<dyn Fn(&mut Sketch, usize, usize, usize)>> = vec![
         Box::new(|sk, _, _, _| sk.constraints[1].kind.set_value(f64::NAN)),
@@ -894,7 +894,7 @@ fn given_points_are_never_placed() {
     sk.points.push(SPoint { id: "far".into(), pos: v(2e9, 0.0), fixed: true, link: None, exprs: None, construction: false });
     let d = sk.add_point(v(20.0, 30.0), None).unwrap();
     let push = |sk: &mut Sketch, kind: ConstraintKind| {
-        sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })
+        sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, driven_param: None, text: None })
     };
     // Level with A, under B: the row and the column cross at (40, 0), no branch to pick.
     push(&mut sk, ConstraintKind::HorizontalPoints { p: a, q: g });

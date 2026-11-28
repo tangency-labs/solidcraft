@@ -305,7 +305,7 @@ fn to_u32(x: usize) -> Result<u32> {
 }
 
 /// A NURBS curve's stored numbers.
-fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
+pub(crate) fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
     let nurb = c
         .nurb
         .as_ref()
@@ -556,7 +556,7 @@ fn stored_point(
 }
 
 /// The curve a record holds, its NURB as stored (no knot fix-up).
-fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
+pub(crate) fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
     let p = degree_of(r.degree)?;
     non_decreasing(&r.knots)?;
     let mut pw = Vec::new();

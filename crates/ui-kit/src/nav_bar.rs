@@ -2,8 +2,8 @@
 //! menu as plain data ([`Bar`], [`SlotView`], [`Menu`]) and runs the [`NavAction`] the bar
 //! returns; the bar keeps which menu is open and reads nothing of the app. Every slot, menu row
 //! and context item publishes its rect to the widget registry while it is drawn.
-use crate::{BackingTooltipExt as _, Container, NavigationEdge, NavigationIdle, NavigationKind, NavigationSize, Surface};
-use egui::{Align2, Rect, pos2, vec2};
+use crate::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
+use egui::{Rect, pos2};
 use solidcraft_theme::Tokens;
 
 /// One slot as the bar draws it.
@@ -35,9 +35,9 @@ pub struct SlotView<'a> {
     pub alias: Option<&'a str>,
     /// A small dot at the icon's corner: something the slot holds is not at its default.
     pub dot: bool,
-    /// Rows the slot's own context menu offers above Remove: `(id, label, selected)`. Picking one
+    /// Shared menu entries the slot offers above Remove. Picking one
     /// is `NavAction::Item { menu: <slot id>, item: <row id> }`.
-    pub context: Vec<(String, String, bool)>,
+    pub context: Vec<crate::Item>,
 }
 
 /// Labels of the bar's own controls, in the app's language.
@@ -71,57 +71,9 @@ pub struct Bar<'a> {
 /// A menu a slot opens.
 #[derive(Clone, Debug, Default)]
 pub struct Menu {
-    pub entries: Vec<MenuEntry>,
+    pub entries: Vec<crate::Item>,
     /// A pick closes the menu (otherwise it stays open for the next).
     pub close_on_pick: bool,
-}
-
-#[derive(Clone, Debug)]
-pub enum MenuEntry {
-    Heading(String),
-    Separator,
-    Row(MenuRow),
-    Percent {
-        value: u32,
-        label: String,
-        target: String,
-    },
-    /// A segmented choice (the picked one is item `{id}:{index}`).
-    Segments {
-        id: String,
-        options: Vec<String>,
-        selected: usize,
-        targets: Vec<String>,
-    },
-}
-
-/// One row of a slot's menu.
-#[derive(Clone, Debug, Default)]
-pub struct MenuRow {
-    pub id: String,
-    pub label: String,
-    pub icon: String,
-    pub selected: bool,
-    pub enabled: bool,
-    /// Text at the row's end (a current value).
-    pub detail: Option<String>,
-    pub tip: Option<String>,
-    /// The registry name its rect is published under.
-    pub target: String,
-    /// A checkbox in place of the icon (its state), for a row that switches a setting.
-    pub check: Option<bool>,
-    /// Nested under the row above it.
-    pub indent: bool,
-    /// Entries of the menu this row opens (empty: the row is picked itself).
-    pub submenu: Vec<MenuEntry>,
-    /// A pick in that menu leaves it open, for choices made several at a time.
-    pub keep_open: bool,
-}
-
-impl MenuRow {
-    pub fn new(id: impl Into<String>, label: impl Into<String>, icon: impl Into<String>, target: impl Into<String>) -> MenuRow {
-        MenuRow { id: id.into(), label: label.into(), icon: icon.into(), enabled: true, target: target.into(), ..MenuRow::default() }
-    }
 }
 
 /// An item of the bar's context menu.
@@ -223,13 +175,25 @@ pub fn paint_slots(
 
 /// Draw the live bar, its More button, its context menu and the open menu (`menu` gives a menu
 /// slot's rows by its id); what the user chose, for the app to run.
-pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -> Option<NavAction> {
+pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, mut menu: impl FnMut(&str) -> Menu) -> Option<NavAction> {
+    let menu_id = ui.scope_id().with("navigation_bar_menu");
+    let mut open = ui.data(|d| d.get_temp::<String>(menu_id)).unwrap_or_default();
+    let has_trigger = if open == "more" {
+        bar.more.is_positive() && !bar.overflow.is_empty()
+    } else {
+        bar.slots.iter().any(|slot| slot.id == open && slot.rect.is_positive())
+            || (bar.more.is_positive() && bar.overflow.iter().any(|slot| slot.id == open))
+    };
+    if !open.is_empty() && (!bar.rect.is_positive() || !has_trigger) {
+        crate::Menu::dismiss(ui.ctx(), menu_id.with(("popup", &open)));
+        open.clear();
+        ui.data_mut(|data| data.insert_temp(menu_id, open.clone()));
+    }
     if !bar.rect.is_positive() {
         return None;
     }
     solidcraft_ui_registry::publish_rect("nav:outer", bar.rect);
-    let menu_id = ui.scope_id().with("navigation_bar_menu");
-    let mut open = ui.data(|d| d.get_temp::<String>(menu_id)).unwrap_or_default();
+    let previous_open = open.clone();
     let mut action = None;
     let active = bar.active || ui.rect_contains_pointer(bar.rect) || !open.is_empty();
     let opacity = crate::navigation_opacity(bar.idle, active);
@@ -282,196 +246,140 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, menu: impl FnOnce(&str) -> Menu) -
             }
         }
     });
-    context_menu(&background, None, None, &bar.labels, &mut action);
+    // The bar's background spans its child triggers. Route a secondary release to
+    // the slot under it before offering the same event to the background menu.
+    let child_context = ui.input(|input| {
+        input.pointer.button_released(egui::PointerButton::Secondary)
+            && input.pointer.interact_pos().is_some_and(|at| bar.more.contains(at) || bar.slots.iter().any(|slot| slot.rect.contains(at)))
+    });
+    if child_context {
+        crate::Menu::dismiss(ui.ctx(), background.id.with("shared_menu"));
+    } else {
+        context_menu(&background, None, None, &bar.labels, &mut action);
+    }
     if !open.is_empty() && anchor.is_positive() {
-        let child_popup_open = egui::Popup::is_any_open(ui.ctx());
-        let ctx = ui.ctx().clone();
-        // Menus open into the view: up from a bar at the bottom, down from one at the top.
-        let (pivot, at) = match bar.edge {
-            NavigationEdge::Bottom => (Align2::RIGHT_BOTTOM, anchor.right_top() - vec2(0.0, crate::NAV_POPUP_GAP)),
-            NavigationEdge::Top => (Align2::RIGHT_TOP, anchor.right_bottom() + vec2(0.0, crate::NAV_POPUP_GAP)),
-        };
-        let contents = if open == "more" { None } else { Some(menu(&open)) };
-        let popup = Container::new(&ctx, Surface::Popup).area(menu_id.with("popup")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(at).show(
-            &ctx,
-            |ui| {
-                crate::navigation_menu(ui, if open == "more" { crate::NAV_MORE_WIDTH } else { crate::NAV_POPUP_WIDTH }, |ui| match &contents {
-                    None => overflow_menu(ui, bar, &mut open, &mut action),
-                    Some(m) if m.entries.is_empty() => open.clear(),
-                    Some(m) => {
-                        if let Some((picked, closes)) = menu_rows(ui, &open, &m.entries, false) {
-                            if m.close_on_pick && closes && matches!(picked, NavAction::Item { .. }) {
-                                open.clear();
-                            }
-                            action = Some(picked);
-                        }
+        let entries = if open == "more" {
+            bar.overflow
+                .iter()
+                .map(|slot| {
+                    if slot.kind == NavigationKind::Separator {
+                        return crate::Item::sep();
                     }
-                });
-            },
-        );
-        let outside = !child_popup_open
-            && ui.input(|i| {
-                i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !popup.response.rect.contains(p) && !bar.rect.contains(p))
-            });
-        if outside || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    let mut item = crate::Item::action(&format!("__slot:{}", slot.id), &slot.name, slot.icon);
+                    item.selected = slot.selected;
+                    item.tip = Some(slot.tip.clone());
+                    item.shortcut = slot.key.clone().unwrap_or_default();
+                    item.aliases.push(format!("nav:slot:{}", slot.id));
+                    if let Some(alias) = slot.alias {
+                        item.aliases.push(alias.to_string());
+                    }
+                    if slot.kind == NavigationKind::Menu {
+                        let contents = menu(slot.id);
+                        item.children = menu_items(slot.id, &contents.entries, !contents.close_on_pick);
+                        item.enabled = !item.children.is_empty();
+                    }
+                    item.context = context_items((slot.index != usize::MAX).then_some(slot.index), Some((slot.id, &slot.context)), &bar.labels);
+                    item
+                })
+                .collect::<Vec<_>>()
+        } else {
+            let contents = menu(&open);
+            menu_items(&open, &contents.entries, !contents.close_on_pick)
+        };
+        if entries.is_empty() {
             open.clear();
+        } else {
+            let out = crate::Menu::popup(ui.ctx(), menu_id.with(("popup", &open)), crate::MenuAnchor::Rect(anchor), &entries, previous_open != open);
+            if let Some(picked) = out.picked {
+                action = Some(nav_action(&open, &picked));
+            }
+            if out.close {
+                open.clear();
+            }
         }
     }
     ui.data_mut(|d| d.insert_temp(menu_id, open));
     action
 }
 
-/// The context menu of the bar (`index`: `None`) or of a slot: Customise, Hide and Reset on the
-/// bar, the slot's own rows (`slot`) and Remove on a slot.
+/// Domain entries for a bar or slot context menu. The shared component draws every row.
+fn context_items(index: Option<usize>, slot: Option<(&str, &[crate::Item])>, labels: &BarLabels) -> Vec<crate::Item> {
+    let mut entries = Vec::new();
+    if let Some((menu, rows)) = slot.filter(|(_, rows)| !rows.is_empty()) {
+        entries.extend(rows.iter().cloned().map(|mut row| {
+            row.params = Some(serde_json::json!({"nav_menu":menu}));
+            row.aliases.push(format!("nav:context:{menu}:{}", row.id));
+            row
+        }));
+        entries.push(crate::Item::sep());
+    }
+    let choices: Vec<(&str, &str)> = match index {
+        None => vec![("customise", &labels.customise), ("hide", &labels.hide), ("reset", &labels.reset)],
+        Some(_) => vec![("remove", &labels.remove)],
+    };
+    entries.extend(choices.into_iter().map(|(id, label)| {
+        let mut item = crate::Item::action(&format!("__nav_context:{id}"), label, "");
+        item.aliases.push(format!("nav:context:{id}"));
+        item.params = Some(serde_json::json!({"index":index}));
+        item
+    }));
+    entries
+}
+
 fn context_menu(
     response: &egui::Response,
     index: Option<usize>,
-    slot: Option<(&str, &[(String, String, bool)])>,
+    slot: Option<(&str, &[crate::Item])>,
     labels: &BarLabels,
     action: &mut Option<NavAction>,
 ) {
-    crate::navigation_context(response, |ui| {
-        if let Some((menu, rows)) = slot.filter(|(_, rows)| !rows.is_empty()) {
-            for (id, label, selected) in rows {
-                let mut row = crate::NavigationMenuRow::new(id, label, "");
-                row.selected = *selected;
-                let row = row.show(ui);
-                solidcraft_ui_registry::publish_target(&format!("nav:context:{menu}:{id}"), row.rect);
-                if row.clicked() {
-                    *action = Some(NavAction::Item { menu: menu.to_owned(), item: id.clone() });
-                    ui.close();
-                }
-            }
-            crate::navigation_menu_separator(ui);
-        }
-        let items: Vec<(&str, &str, ContextItem)> = match index {
-            None => vec![
-                ("customise", &labels.customise, ContextItem::Customise),
-                ("hide", &labels.hide, ContextItem::Hide),
-                ("reset", &labels.reset, ContextItem::Reset),
-            ],
-            Some(index) => vec![("remove", &labels.remove, ContextItem::Remove(index))],
-        };
-        for (id, label, item) in items {
-            let row = crate::NavigationMenuRow::new(id, label, "").show(ui);
-            solidcraft_ui_registry::publish_target(&format!("nav:context:{id}"), row.rect);
-            if row.clicked() {
-                *action = Some(NavAction::Context(item));
-                ui.close();
-            }
-        }
-    });
-}
-
-/// More: the folded slots as rows. A menu slot opens its menu in place of More.
-fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &mut Option<NavAction>) {
-    for slot in &bar.overflow {
-        if slot.kind == NavigationKind::Separator {
-            let start = ui.next_widget_position();
-            crate::navigation_menu_separator(ui);
-            let bounds = Rect::from_min_max(start, pos2(start.x + ui.available_width(), ui.next_widget_position().y));
-            solidcraft_ui_registry::publish_target(&format!("nav:slot:{}", slot.id), bounds);
-            continue;
-        }
-        let mut item = crate::NavigationMenuRow::new(slot.id, &slot.name, slot.icon);
-        if matches!(slot.kind, NavigationKind::Tool | NavigationKind::Toggle) {
-            item.selected = slot.selected;
-        }
-        let response = item.show(ui);
-        context_menu(&response, (slot.index != usize::MAX).then_some(slot.index), Some((slot.id, &slot.context)), &bar.labels, action);
-        solidcraft_ui_registry::publish_target(&format!("nav:slot:{}", slot.id), response.rect);
-        if let Some(alias) = slot.alias {
-            solidcraft_ui_registry::publish_handle(alias, response.rect.center());
-        }
-        crate::navigation_tooltip(&response, response.rect, NavigationEdge::Bottom, &slot.tip, slot.key.as_deref());
-        if response.clicked() {
-            if slot.kind == NavigationKind::Menu {
-                *open = slot.id.to_owned();
-            } else {
-                *action = Some(NavAction::Slot(slot.id.to_owned()));
-                open.clear();
-            }
-        }
+    if !crate::Menu::context_active(response) {
+        return;
+    }
+    if let Some(picked) = crate::Menu::context_items(response, &context_items(index, slot, labels)) {
+        *action = Some(nav_action(slot.map_or("", |(menu, _)| menu), &picked));
     }
 }
 
-/// A menu's rows; what was picked, if anything, and whether that pick may close the menu (a pick
-/// in a submenu that keeps itself open may not).
-fn menu_rows(ui: &mut egui::Ui, menu: &str, entries: &[MenuEntry], keep_open: bool) -> Option<(NavAction, bool)> {
-    let mut picked = None;
-    for entry in entries {
-        match entry {
-            MenuEntry::Heading(title) => crate::navigation_menu_heading(ui, title),
-            MenuEntry::Separator => crate::navigation_menu_separator(ui),
-            MenuEntry::Percent { value, label, target } => {
-                let mut percent = *value as f32 / 10.0;
-                let response = crate::number_field(ui, &mut percent, 5.0..=3200.0, 1.0, " %").backing_on_hover_text(label);
-                solidcraft_ui_registry::publish_target(target, response.rect);
-                if response.changed() {
-                    picked = Some((NavAction::Percent { menu: menu.to_owned(), tenths: (percent * 10.0).round() as u32 }, !keep_open));
-                }
-            }
-            MenuEntry::Segments { id, options, selected, targets } => {
-                let labels: Vec<&str> = options.iter().map(String::as_str).collect();
-                let targets: Vec<&str> = targets.iter().map(String::as_str).collect();
-                let mut chosen = *selected;
-                let t = Tokens::get();
-                let margin = egui::Margin::symmetric(t.space_8 as i8, t.space_2 as i8);
-                let changed = egui::Frame::NONE
-                    .inner_margin(margin)
-                    .show(ui, |ui| {
-                        crate::segmented(ui, &mut chosen, &labels, crate::Segments { compact: true, targets: &targets, ..Default::default() })
-                    })
-                    .inner;
-                if changed {
-                    picked = Some((NavAction::Item { menu: menu.to_owned(), item: format!("{id}:{chosen}") }, !keep_open));
-                }
-            }
-            MenuEntry::Row(row) => {
-                let response = menu_row(ui, row);
-                if row.submenu.is_empty() {
-                    if response.clicked() {
-                        picked = Some((NavAction::Item { menu: menu.to_owned(), item: row.id.clone() }, !keep_open));
-                    }
-                    continue;
-                }
-                let mut popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(crate::navigation_popup_frame());
-                if row.keep_open {
-                    popup = popup.close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-                }
-                popup.show(|ui| {
-                    ui.set_width(crate::NAV_POPUP_WIDTH - 2.0 * (f32::from(crate::NAV_POPUP_PADDING) + crate::NAV_BORDER));
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    if let Some((action, closes)) = menu_rows(ui, menu, &row.submenu, row.keep_open) {
-                        picked = Some((action, closes));
-                        if !row.keep_open {
-                            ui.close();
-                        }
-                    }
-                });
-            }
-        }
+fn nav_action(menu: &str, picked: &crate::Item) -> NavAction {
+    let params = picked.params.as_ref();
+    if let Some(context) = picked.id.strip_prefix("__nav_context:") {
+        return NavAction::Context(match context {
+            "customise" => ContextItem::Customise,
+            "hide" => ContextItem::Hide,
+            "reset" => ContextItem::Reset,
+            _ => ContextItem::Remove(params.and_then(|p| p.get("index")).and_then(serde_json::Value::as_u64).unwrap_or_default() as usize),
+        });
     }
-    picked
+    if let Some(slot) = picked.id.strip_prefix("__slot:") {
+        return NavAction::Slot(slot.to_string());
+    }
+    let menu = params.and_then(|p| p.get("nav_menu")).and_then(serde_json::Value::as_str).unwrap_or(menu).to_string();
+    if picked.number.is_some() {
+        let percent = params.and_then(|p| p.get("value")).and_then(serde_json::Value::as_f64).unwrap_or_default();
+        return NavAction::Percent { menu, tenths: (percent * 10.0).round().clamp(0.0, u32::MAX as f64) as u32 };
+    }
+    NavAction::Item { menu, item: picked.id.clone() }
 }
 
-fn menu_row(ui: &mut egui::Ui, row: &MenuRow) -> egui::Response {
-    let mut item = crate::NavigationMenuRow::new(&row.id, &row.label, &row.icon);
-    item.selected = row.selected;
-    item.enabled = row.enabled;
-    item.detail = row.detail.as_deref();
-    item.submenu = !row.submenu.is_empty();
-    item.check = row.check;
-    item.indent = row.indent;
-    let response = item.show(ui);
-    let response = match &row.tip {
-        Some(tip) => response.backing_on_hover_text(tip),
-        None => response,
-    };
-    if !row.target.is_empty() {
-        solidcraft_ui_registry::publish_target(&row.target, response.rect);
-    }
-    response
+/// Attach routing metadata to the same Item definition used by every menu.
+fn menu_items(menu: &str, entries: &[crate::Item], keep_open: bool) -> Vec<crate::Item> {
+    entries
+        .iter()
+        .cloned()
+        .map(|mut item| {
+            item.keep_open |= keep_open;
+            item.children = menu_items(menu, &item.children, item.keep_open);
+            if !item.is_sep() && !item.is_heading() {
+                let mut params = item.params.take().filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
+                if let Some(params) = params.as_object_mut() {
+                    params.insert("nav_menu".into(), serde_json::Value::String(menu.into()));
+                }
+                item.params = Some(params);
+            }
+            item
+        })
+        .collect()
 }
 
 #[cfg(test)]

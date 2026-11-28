@@ -1916,8 +1916,8 @@ fn a_dropdown_rows_more_button_opens_its_menu_over_the_open_dropdown() {
     h.frames(2);
     h.step(&serde_json::json!({"click":{"handle":"dropdown_more:solid.extrude"}})).expect("a ⋯ on the Extrude row");
     h.frames(2);
-    assert!(h.app.viewport.context_menu.is_some(), "the row's menu is open");
-    assert_eq!(h.app.menu.target, Target::ToolbarCommand { id: "solid.extrude".into() });
+    assert!(crate::ui_kit::Menu::any_open(&h.ctx), "the row's shared menu is open");
+    assert!(crate::scenario::rect_of("menu:ui.toolbarRemove").is_some(), "the Extrude row offers its toolbar actions");
     let open = h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
     assert!(open.is_some(), "the drop-down stays open under the menu");
 }
@@ -2188,7 +2188,7 @@ fn menus_near_the_window_corner_open_inward() {
             assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true, "{scale} {target:?}");
             // An auto-sized menu takes a few frames to settle its size.
             h.frames(3);
-            let r = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+            let r = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
             assert!(screen.contains_rect(r), "{scale} {target:?}: {r:?} outside {screen:?}");
             // Below and right of the cursor where it fits, else ending at it.
             let x = if at.x + r.width() <= screen.right() { at.x } else { at.x - r.width() };
@@ -2717,7 +2717,7 @@ fn appearance_submenu_keyboard_opens_beside_parent_and_left_returns_to_it() {
     let rows = context_menu::items(&h.app, &target);
     context_menu::open_for(&mut h.app, pos2(400.0, 180.0), target);
     let index = rows.iter().position(|i| i.id == "ui.appearance").unwrap();
-    h.app.menu.key_row = Some(index);
+    crate::ui_kit::Menu::set_cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0, Some(index));
     h.frames(2);
     h.step(&json!({"key":"ArrowRight"})).unwrap();
     let parent = rect_of("menu:ui.appearance").unwrap();
@@ -2853,7 +2853,7 @@ fn keys_walk_into_nested_flyouts_and_left_steps_back_one_level() {
     use crate::scenario::rect_of;
     let (mut h, _) = component_menu();
     let rows = context_menu::items(&h.app, &h.app.menu.target.clone());
-    h.app.menu.key_row = rows.iter().position(|i| i.id == "ui.group.component");
+    crate::ui_kit::Menu::set_cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0, rows.iter().position(|i| i.id == "ui.group.component"));
     h.step(&json!({"key":"ArrowRight"})).unwrap();
     assert!(rect_of("menu:ui.rename:Rename").is_some(), "Right opens the Component flyout");
     let own = &find(&rows, "Component").children;
@@ -2863,7 +2863,13 @@ fn keys_walk_into_nested_flyouts_and_left_steps_back_one_level() {
     }
     h.step(&json!({"key":"ArrowRight"})).unwrap();
     h.frames(2);
-    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "Right on Appearance opens its quick choices");
+    assert!(
+        rect_of("menu:appearance.assign:Aluminum - Satin").is_some(),
+        "Right on Appearance opens its quick choices: downs={downs}, path={:?}, cursors={:?}, focused={:?}",
+        crate::ui_kit::Menu::open_path(&h.ctx, egui::Id::unique("sc_context_menu")),
+        (0..3).map(|depth| crate::ui_kit::Menu::cursor(&h.ctx, egui::Id::unique("sc_context_menu"), depth)).collect::<Vec<_>>(),
+        h.ctx.memory(|memory| memory.focused())
+    );
     assert!(h.app.dialog.is_none(), "opening a flyout runs nothing");
     h.step(&json!({"key":"ArrowLeft"})).unwrap();
     h.frames(2);
@@ -2896,11 +2902,11 @@ fn resting_on_another_row_of_a_flyout_closes_only_the_flyout_beyond_it() {
 fn left_from_a_hovered_flyout_chooses_the_row_that_opened_it() {
     let (mut h, _) = component_menu();
     let rows = context_menu::items(&h.app, &h.app.menu.target.clone());
-    h.app.menu.key_row = rows.iter().position(|i| i.id == "ui.copy");
+    crate::ui_kit::Menu::set_cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0, rows.iter().position(|i| i.id == "ui.copy"));
     h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
     h.frames(2);
     h.step(&json!({"key":"ArrowLeft"})).unwrap();
-    assert_eq!(h.app.menu.key_row, rows.iter().position(|i| i.id == "ui.group.component"));
+    assert_eq!(crate::ui_kit::Menu::cursor(&h.ctx, egui::Id::unique("sc_context_menu"), 0), rows.iter().position(|i| i.id == "ui.group.component"));
     assert!(crate::scenario::rect_of("menu:ui.rename:Rename").is_none(), "the flyout closed");
 }
 
@@ -2955,8 +2961,29 @@ fn a_tall_flyout_moves_up_to_fit_and_its_last_entries_can_be_clicked() {
     h.frames(2);
     h.step(&json!({"move":{"handle":"menu:ui.appearance:Appearance"}})).unwrap();
     h.frames(3);
+    let id = egui::Id::unique("sc_context_menu");
+    let menu = crate::ui_kit::Menu::level_rect(&h.ctx, id, 2).unwrap();
+    assert!(h.ctx.content_rect().contains_rect(menu), "the tall flyout stays inside its window");
+    // Uniform menu rows can make the full palette taller than this window.
+    // Reveal the end before clicking a late choice, as a keyboard user can.
+    h.step(&json!({"key":"End"})).unwrap();
+    h.frames(2);
+    let menu = crate::ui_kit::Menu::level_rect(&h.ctx, id, 2).unwrap();
+    let glass = crate::scenario::rect_of("menu:appearance.assign:Glass - Smoked").unwrap();
+    assert!(menu.contains_rect(glass), "the late choice is visible before it is clicked: {glass:?} in {menu:?}");
+    if let Some(down) = crate::scenario::rect_of("menu:scroll_down") {
+        assert!(glass.bottom() <= down.top() + 0.5, "the choice is above the scroll control: {glass:?}, {down:?}");
+    }
     h.step(&json!({"click":{"handle":"menu:appearance.assign:Glass - Smoked"}})).unwrap();
-    assert!(h.app.session.doc.appearances.components.contains_key(&c), "a late quick choice is reachable");
+    assert!(
+        h.app.session.doc.appearances.components.contains_key(&c),
+        "a late quick choice is reachable: component={c}, applied={:?}, target={:?}, status={:?}, row={glass:?}, menu={menu:?}, scroll_down={:?}, layer={:?}",
+        h.app.session.doc.appearances.components.keys().collect::<Vec<_>>(),
+        h.app.menu.target,
+        h.app.status,
+        crate::scenario::rect_of("menu:scroll_down"),
+        h.ctx.layer_id_at(glass.center())
+    );
 }
 
 #[test]
@@ -3044,7 +3071,7 @@ mod browser_rows {
         assert_eq!(h.app.menu.target, Target::Body { name: "Plate".into() });
         // The click goes to a part of the Origin row the open menu does not cover: the menu is
         // placed to fit the window, and a long one reaches up over the rows above Plate.
-        let menu = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).expect("the Plate menu");
+        let menu = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).expect("the Plate menu");
         // The row's handle is 120 pt into the row, so there is room left of a menu opened there.
         let mut on_origin = origin + half;
         let near = menu.expand(16.0);
@@ -3418,7 +3445,7 @@ fn a_menu_taller_than_the_window_scrolls_its_last_rows_into_view() {
         h.frames(4);
         h
     };
-    let area = |h: &crate::scenario::Harness| h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
+    let area = |h: &crate::scenario::Harness| crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
 
     let mut h = open(576.0);
     let screen = h.ctx.content_rect();

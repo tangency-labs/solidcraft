@@ -9,6 +9,7 @@
     clippy::float_cmp
 )]
 
+use crate::math::det;
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
 use super::extrude::{
@@ -203,7 +204,7 @@ fn areas_in_closed_form_are_enclosed_by_their_bounds() {
     // a circular arc as a conic (w the cosine of its half angle): its sector less the triangle,
     // past the series' range (75 degrees) and inside it (30 degrees)
     for half in [75.0_f64.to_radians(), 30.0_f64.to_radians()] {
-        let (s, c) = half.sin_cos();
+        let (s, c) = det::sin_cos(half);
         let arc = Seg2::Conic {
             a: p(c, -s),
             apex: p(1.0 / c, 0.0),
@@ -226,7 +227,7 @@ fn areas_in_closed_form_are_enclosed_by_their_bounds() {
     }
     // x^2 - y^2 = 1 from (cosh 1, -sinh 1) to (cosh 1, sinh 1), w = cosh 1: the segment between
     // the hyperbola and its chord is sinh 1 cosh 1 - 1
-    let (sh, ch) = (1.0_f64.sinh(), 1.0_f64.cosh());
+    let (sh, ch) = (det::sinh(1.0_f64), det::cosh(1.0_f64));
     let hyper = Seg2::Conic {
         a: p(ch, -sh),
         apex: p(1.0 / ch, 0.0),
@@ -595,8 +596,8 @@ const ARC_CLOSED_FORM_TOL: f64 = 1e-12;
 /// `center + radius (cos t, sin t)` on the plain frame.
 fn on_circle(center: Point2, radius: f64, t: f64) -> [f64; 3] {
     [
-        center.x + radius * t.cos(),
-        center.y + radius * t.sin(),
+        center.x + radius * det::cos(t),
+        center.y + radius * det::sin(t),
         0.0,
     ]
 }
@@ -640,10 +641,11 @@ fn assert_arc_closed_form(k: &Kernel, center: Point2, radius: f64, start: f64, s
             .unwrap();
         let (dx, dy) = (q.x - center.x, q.y - center.y);
         assert!(
-            (dx.hypot(dy) - radius).abs() < ARC_CLOSED_FORM_TOL && q.z.abs() < ARC_CLOSED_FORM_TOL,
+            (det::hypot(dx, dy) - radius).abs() < ARC_CLOSED_FORM_TOL
+                && q.z.abs() < ARC_CLOSED_FORM_TOL,
             "{s:?} at f = {f}: {q:?} off the circle"
         );
-        let turned = (sweep.signum() * (dy.atan2(dx) - start)).rem_euclid(TAU);
+        let turned = (sweep.signum() * (det::atan2(dy, dx) - start)).rem_euclid(TAU);
         assert!(
             turned > last && turned < sweep.abs(),
             "{s:?} at f = {f}: angle {turned} after {last}"
@@ -1002,9 +1004,9 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
             &k,
             knots.clone(),
             vec![
-                [a * t0.cos(), b * t0.sin(), 0.0, 1.0],
-                [a * mid.cos(), b * mid.sin(), 0.0, h.cos()],
-                [a * t1.cos(), b * t1.sin(), 0.0, 1.0],
+                [a * det::cos(t0), b * det::sin(t0), 0.0, 1.0],
+                [a * det::cos(mid), b * det::sin(mid), 0.0, det::cos(h)],
+                [a * det::cos(t1), b * det::sin(t1), 0.0, 1.0],
             ],
         )
     };
@@ -1013,7 +1015,10 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     // (its sagitta 1.33e-5)
     let (h, g) = (0.0012, 0.04 / 30.0);
     let cases = [
-        (piece(15.0, 15.0, 0.0, h), p(15.0 * h.cos(), 15.0 * h.sin())),
+        (
+            piece(15.0, 15.0, 0.0, h),
+            p(15.0 * det::cos(h), 15.0 * det::sin(h)),
+        ),
         (piece(30.0, 15.0, FRAC_PI_2 - g, g), p(0.0, 15.0)),
     ];
     for ((c, iv), mid) in cases {
@@ -1048,8 +1053,8 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     // control point lies 4e-5 off the chord, the arc 2e-5 (over the zone tolerance); the same
     // control points with equal weights (a polynomial) are not
     let (radius, h) = (4e7, 1e-6_f64);
-    let (w, y) = (h.cos(), radius * h.cos() - radius);
-    let (x, top) = (radius * h.sin(), radius / w - radius);
+    let (w, y) = (det::cos(h), radius * det::cos(h) - radius);
+    let (x, top) = (radius * det::sin(h), radius / w - radius);
     let piece = |w: f64, v: f64| {
         vec![vec![
             [-x * v, y * v, v],
@@ -1065,8 +1070,8 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     // 2e-5 off its chord) raised to degree 32: neighbouring weights differ by at most 1.3e-14,
     // under their rounding, the span's by 1e-13; it is rational
     let (radius, h) = (1e8, 4e-13_f64.sqrt());
-    let (w, y) = (h.cos(), radius * h.cos() - radius);
-    let x = radius * h.sin();
+    let (w, y) = (det::cos(h), radius * det::cos(h) - radius);
+    let x = radius * det::sin(h);
     let mut span = vec![
         [-x, y, 1.0],
         [0.0, (radius / w - radius) * w, w],
@@ -1303,8 +1308,13 @@ fn sampling_and_retracing_do_not_certify() {
     for i in 0..8 {
         let a = f64::from(i) * FRAC_PI_2;
         let (m, b) = (a + FRAC_PI_2 * 0.5, a + FRAC_PI_2);
-        pts.push([10.0 * m.cos() / w * w, 10.0 * m.sin() / w * w, 0.0, w]);
-        pts.push([10.0 * b.cos(), 10.0 * b.sin(), 0.0, 1.0]);
+        pts.push([
+            10.0 * det::cos(m) / w * w,
+            10.0 * det::sin(m) / w * w,
+            0.0,
+            w,
+        ]);
+        pts.push([10.0 * det::cos(b), 10.0 * det::sin(b), 0.0, 1.0]);
         knots.extend([f64::from(i + 1) / 8.0; 2]);
     }
     knots.push(1.0);
@@ -1619,11 +1629,11 @@ fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
     assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
     assert_eq!(sweep(center, x, x), Some(0.0));
     for delta in [0.5e-12_f64, 1e-12, 2e-12] {
-        let end = Point2::new(delta.cos(), delta.sin());
+        let end = Point2::new(det::cos(delta), det::sin(delta));
         assert_eq!(sweep(center, x, end), Some(delta));
         let start = Point2::new(-1.0, delta / 2.0);
         let end = Point2::new(-1.0, -delta / 2.0);
-        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        let expected = (det::atan2(end.y, end.x) - det::atan2(start.y, start.x)).rem_euclid(TAU);
         assert_eq!(sweep(center, start, end), Some(expected));
         assert!(expected > 0.0 && expected < 3e-12);
     }
@@ -1804,7 +1814,7 @@ mod recognition {
         assert_eq!(path.as_circle(), None);
         // The stored phase resolves an extra 0.125 radians; its rounding cell must not
         // close the resulting gap/overlap by independently widening both arc endpoints.
-        let start = 2.0_f64.powi(49);
+        let start = det::powi(2.0_f64, 49);
         let circle = Loop2 {
             segs: vec![arc(start, PI), arc((start + PI) + 0.125, PI)],
         };
@@ -2143,7 +2153,7 @@ mod recognition {
         // The world-coordinate midpoint rounds to c, but the x displacements are +4/-3
         // or +4/-3.5. Even when one offset reconstructs both rounded endpoints, the local
         // asymmetry is significant and must not be replaced by a full ellipse.
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         for left in [3.0, 3.5] {
             let points = [
                 Vec2::new(c + 4.0, 0.0),
@@ -2195,8 +2205,9 @@ mod recognition {
                     ((arc.start + arc.end) * 0.5, piece.point_at(0.5)),
                     (arc.end, b),
                 ] {
-                    let actual =
-                        arc.center + arc.major * t.cos() + arc.major.perp() * (arc.ratio * t.sin());
+                    let actual = arc.center
+                        + arc.major * det::cos(t)
+                        + arc.major.perp() * (arc.ratio * det::sin(t));
                     assert!(
                         actual.dist(expected) < 1e-12,
                         "{piece:?}: {actual:?} != {expected:?}"
@@ -2250,7 +2261,7 @@ mod recognition {
     fn profile_conic_ellipse_refuses_lost_local_displacements() {
         // The exact stored-input midpoint is (C+2.5,1), but the world sum rounds
         // it to (C+2,1). The old extraction then moves A from C+4 to C+3.
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         for x_sign in [1.0, -1.0] {
             for reflect in [1.0, -1.0] {
                 let a = Vec2::new(x_sign * (c + 4.0), 0.0);
@@ -2320,7 +2331,7 @@ mod recognition {
                     center,
                     major,
                     ratio,
-                    direction * 2.0 * w.acos(),
+                    direction * 2.0 * det::acos(w),
                     [start, Vec2::new(middle_x, 0.0), end],
                 );
             }
@@ -2364,7 +2375,7 @@ mod recognition {
             .zip(points)
         {
             let actual =
-                arc.center + arc.major * t.cos() + arc.major.perp() * (arc.ratio * t.sin());
+                arc.center + arc.major * det::cos(t) + arc.major.perp() * (arc.ratio * det::sin(t));
             assert!(
                 actual.dist(expected) < 1e-12,
                 "point: {actual:?}, expected {expected:?}, {arc:?}"
@@ -2391,7 +2402,7 @@ mod recognition {
                     Vec2::new(7.0, -9.5 * reflection),
                     Vec2::new(0.0, 7.5),
                     2.0 / 3.0,
-                    direction * 2.0 * 0.6_f64.acos(),
+                    direction * 2.0 * det::acos(0.6_f64),
                     [start, Vec2::new(7.0, -2.0 * reflection), end],
                 );
             }
@@ -2603,7 +2614,7 @@ mod recognition {
 
     #[test]
     fn profile_ellipse_recognizes_unequal_integer_partitions_through_the_real_candidate() {
-        let far = 2.0_f64.powi(52);
+        let far = det::powi(2.0_f64, 52);
         for three in [false, true] {
             let original = ellipse_unequal_pieces(three);
             for (center, scale) in [
@@ -2746,7 +2757,7 @@ mod recognition {
 
     #[test]
     fn profile_ellipse_uses_local_cells_at_large_world_coordinates() {
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         let original = transform_ellipse_pieces(
             &ellipse_unequal_pieces(false),
             Vec2::new(c, c),
@@ -2890,7 +2901,7 @@ mod recognition {
     fn profile_ellipse_arithmetic_retains_exact_dyadic_residuals() {
         use crate::prism::recognition::EllipseScalar as Number;
         let number = |x| Number::exact(x).expect("finite dyadic fixture");
-        let large = 2.0_f64.powi(53);
+        let large = det::powi(2.0_f64, 53);
         let sum = number(large).plus(number(1.0)).expect("finite sum");
         assert_eq!((sum.hi, sum.lo, sum.radius), (large, 1.0, 0.0));
         let cancellation = sum.minus(number(large)).expect("exact cancellation");
@@ -2898,16 +2909,16 @@ mod recognition {
             (cancellation.hi, cancellation.lo, cancellation.radius),
             (1.0, 0.0, 0.0)
         );
-        let e = 2.0_f64.powi(-27);
+        let e = det::powi(2.0_f64, -27);
         let product = number(1.0 + e)
             .times(number(1.0 - e))
             .expect("finite product");
         // (1+2^-27)(1-2^-27) = 1-2^-54; the low term cannot be discarded.
         assert_eq!((product.hi, product.lo), (1.0, -e * e));
-        assert!(product.radius < 2.0_f64.powi(-100));
-        let third = 2.0_f64.powi(-108);
+        assert!(product.radius < det::powi(2.0_f64, -100));
+        let third = det::powi(2.0_f64, -108);
         let three_terms = number(1.0)
-            .plus(number(2.0_f64.powi(-54)))
+            .plus(number(det::powi(2.0_f64, -54)))
             .expect("pair")
             .plus(number(third))
             .expect("three terms");
@@ -2922,30 +2933,30 @@ mod recognition {
         use crate::prism::recognition::EllipseScalar as Number;
         let number = |x| Number::exact(x).expect("finite fixture");
         let dyadic = number(1.0)
-            .plus(number(2.0_f64.powi(-53)))
+            .plus(number(det::powi(2.0_f64, -53)))
             .expect("exact two-term numerator");
         let quotient = dyadic.divided_by(number(2.0)).expect("dyadic quotient");
-        assert_eq!((quotient.hi, quotient.lo), (0.5, 2.0_f64.powi(-54)));
-        assert!(quotient.radius < 2.0_f64.powi(-100));
+        assert_eq!((quotient.hi, quotient.lo), (0.5, det::powi(2.0_f64, -54)));
+        assert!(quotient.radius < det::powi(2.0_f64, -100));
         let third = number(1.0).divided_by(number(3.0)).expect("one third");
         let correction = third.minus(number(1.0 / 3.0)).expect("retain correction");
         // The exact correction is 1/(3*2^54), strictly between these independent dyadics.
         assert_eq!(
             correction
-                .minus(number(2.0_f64.powi(-56)))
+                .minus(number(det::powi(2.0_f64, -56)))
                 .expect("lower comparison")
                 .sign(),
             Some(1)
         );
         assert_eq!(
-            number(2.0_f64.powi(-55))
+            number(det::powi(2.0_f64, -55))
                 .minus(correction)
                 .expect("upper comparison")
                 .sign(),
             Some(1)
         );
-        assert!(third.radius < 2.0_f64.powi(-100));
-        let e = 2.0_f64.powi(-27);
+        assert!(third.radius < det::powi(2.0_f64, -100));
+        let e = det::powi(2.0_f64, -27);
         let square = number(1.0 + 2.0 * e)
             .plus(number(e * e))
             .expect("(1+e)^2 exactly");
@@ -2953,7 +2964,7 @@ mod recognition {
         assert!(root
             .minus(number(1.0 + e))
             .expect("compare analytic root")
-            .fits(2.0_f64.powi(-100)));
+            .fits(det::powi(2.0_f64, -100)));
     }
 
     #[test]
@@ -2976,7 +2987,7 @@ mod recognition {
         assert!(underflow.radius >= minimum);
         assert!(!underflow.fits(0.0));
         assert_eq!(underflow.sign(), None);
-        let radius = 2.0_f64.powi(-53);
+        let radius = det::powi(2.0_f64, -53);
         assert!(number(radius).fits(radius));
         assert!(!number(next_up(radius)).fits(radius));
         let uncertain = Number {
@@ -2997,36 +3008,36 @@ mod recognition {
         let number = |x| Number::exact(x).expect("finite fixture");
         let center = number(0.5);
         let lower_midpoint = center
-            .minus(number(2.0_f64.powi(-55)))
+            .minus(number(det::powi(2.0_f64, -55)))
             .expect("lower midpoint");
         let upper_midpoint = center
-            .plus(number(2.0_f64.powi(-54)))
+            .plus(number(det::powi(2.0_f64, -54)))
             .expect("upper midpoint");
         assert_eq!(lower_midpoint.rounds_to(0.5), Some(false));
         assert_eq!(upper_midpoint.rounds_to(0.5), Some(false));
         assert_eq!(
             center
-                .minus(number(2.0_f64.powi(-56)))
+                .minus(number(det::powi(2.0_f64, -56)))
                 .expect("inside lower cell")
                 .rounds_to(0.5),
             Some(true)
         );
         assert_eq!(
             center
-                .plus(number(2.0_f64.powi(-55)))
+                .plus(number(det::powi(2.0_f64, -55)))
                 .expect("inside upper cell")
                 .rounds_to(0.5),
             Some(true)
         );
         assert_eq!(
             center
-                .minus(number(3.0 * 2.0_f64.powi(-56)))
+                .minus(number(3.0 * det::powi(2.0_f64, -56)))
                 .expect("outside lower cell")
                 .rounds_to(0.5),
             Some(false)
         );
-        let local = 2.0_f64.powi(-52);
-        let c = 2.0_f64.powi(52);
+        let local = det::powi(2.0_f64, -52);
+        let c = det::powi(2.0_f64, 52);
         assert_eq!(ellipse_local_resolution(-4.0, 4.0), Some(local));
         assert_eq!(ellipse_local_resolution(c - 4.0, c + 4.0), Some(local));
         assert_eq!(
@@ -3043,6 +3054,7 @@ mod recognition {
 mod arc_conversion_regressions {
     use super::super::arc_conversion::*;
     use super::super::profile::Seg2;
+    use crate::math::det;
     use crate::math::Vec2;
 
     #[test]
@@ -3072,7 +3084,7 @@ mod arc_conversion_regressions {
 
     #[test]
     fn arc_degree_conversion_refuses_large_phase_error_for_both_orientations() {
-        for start in [2.0_f64.powi(50), -2.0_f64.powi(50)] {
+        for start in [det::powi(2.0_f64, 50), -det::powi(2.0_f64, 50)] {
             for sweep in [1.0, -1.0] {
                 let arc = Seg2::Arc {
                     center: Vec2::ZERO,
@@ -3126,7 +3138,7 @@ mod arc_conversion_regressions {
             let shape = exact_piece(&arc, 0, 1, scalar_encoding(Some)).unwrap();
             assert!(matches!(shape, PathShape::Arc { a0, a1, .. } if (a0, a1) == expected));
         }
-        for start in [0.0, -1e-13, 1e-13, 1.0_f64.atan2(2.0)] {
+        for start in [0.0, -1e-13, 1e-13, det::atan2(1.0_f64, 2.0)] {
             let arc = Seg2::Arc {
                 center: Vec2::ZERO,
                 radius: 8.0,
@@ -4236,7 +4248,7 @@ mod arc_conversion_regressions {
 
     #[test]
     fn translated_conic_keeps_its_rational_definition_in_public_arc_conversion() {
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         let w = 0.5_f64.sqrt();
         let a = Vec2::new(c + 4.0, 0.0);
         let apex = Vec2::new(c + 4.0, 2.0);
@@ -5178,7 +5190,7 @@ fn gusset_face_boundaries_are_measured_on_their_exact_curves() {
     // A parabola (w = 1) takes 2/3 of its control triangle; a hyperbola (w = cosh 1) takes
     // cosh 1 (sinh 1 cosh 1 - 1) / sinh³ 1; across w = 1 the share is continuous.
     assert!((conic_share(1.).unwrap() - 2. / 3.).abs() < 1e-15);
-    let (c, sh) = (1f64.cosh(), 1f64.sinh());
+    let (c, sh) = (det::cosh(1f64), det::sinh(1f64));
     assert!((conic_share(c).unwrap() - c * (sh * c - 1.) / (sh * sh * sh)).abs() < 1e-12);
     for w in [1. - 1.1e-4, 1. - 0.9e-4, 1. + 0.9e-4, 1. + 1.1e-4] {
         assert!(

@@ -29,6 +29,7 @@
 use super::geometry::{Curve, Frame, Surface};
 use super::vec::VecExt;
 use super::{CurveEval, EvalError, SurfaceEval};
+use crate::math::det;
 use crate::math::Vec3;
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_8, TAU};
 
@@ -51,11 +52,11 @@ pub fn winds([u, _]: [[f64; 2]; 2]) -> bool {
 /// arc with ends `±π/4` from its bisector and middle weight `cos π/4` has
 /// `tan((ψ − π/4)/2) = tan(π/8)(2u − 1)`.
 fn quarter_u(psi: f64) -> f64 {
-    0.5 * (1.0 + (0.5 * psi - FRAC_PI_8).tan() / FRAC_PI_8.tan())
+    0.5 * (1.0 + det::tan(0.5 * psi - FRAC_PI_8) / det::tan(FRAC_PI_8))
 }
 
 fn quarter_psi(u: f64) -> f64 {
-    2.0 * (((2.0 * u - 1.0) * FRAC_PI_8.tan()).atan() + FRAC_PI_8)
+    2.0 * (det::atan((2.0 * u - 1.0) * det::tan(FRAC_PI_8)) + FRAC_PI_8)
 }
 
 /// The quarter an angle lies in (an angle on a quarter's end lies in the one after it).
@@ -168,8 +169,8 @@ fn arcs_between(a0: f64, a1: f64) -> Option<(Vec<f64>, Vec<([f64; 2], f64)>)> {
     }
     let n = ((span / FRAC_PI_2) - 1e-9).ceil().max(1.0) as usize;
     let phi = span / n as f64;
-    let w = (0.5 * phi).cos();
-    let at = |a: f64| [a.cos(), a.sin()];
+    let w = det::cos(0.5 * phi);
+    let at = |a: f64| [det::cos(a), det::sin(a)];
     let mut pts = Vec::new();
     let mut knots = vec![0.0; 3];
     for k in 0..n {
@@ -222,7 +223,7 @@ fn face_arcs(
         let at = |t: f64| {
             let k = ((t - a0) / phi).floor().clamp(0.0, n - 1.0);
             let psi = (t - a0 - k * phi).clamp(0.0, phi);
-            k + 0.5 * (1.0 + (0.5 * psi - 0.25 * phi).tan() / (0.25 * phi).tan())
+            k + 0.5 * (1.0 + det::tan(0.5 * psi - 0.25 * phi) / det::tan(0.25 * phi))
         };
         return Some((made, [at(a[0]), at(a[1])]));
     }
@@ -233,7 +234,7 @@ fn face_arcs(
 /// Quarter arcs from quarter `q0`, `n` of them: their knot vector (in form parameter) and their
 /// control points (as `(cos, sin)` factors on the unit circle's plane) with weights.
 fn arcs(q0: f64, n: usize) -> (Vec<f64>, Vec<([f64; 2], f64)>) {
-    let at = |a: f64| [a.cos(), a.sin()];
+    let at = |a: f64| [det::cos(a), det::sin(a)];
     let mut pts = Vec::new();
     let mut knots = vec![q0; 3];
     for k in 0..n {
@@ -380,7 +381,7 @@ fn reaches(s: &Surface, v: [f64; 2], tolerance: f64) -> (f64, f64) {
             half_angle,
             ..
         } => {
-            let slope = half_angle.tan();
+            let slope = det::tan(*half_angle);
             (
                 reach(
                     v.iter()
@@ -436,7 +437,7 @@ pub fn turn_quarters(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Opti
 pub fn turned(s: &Surface, angle: f64) -> Option<Surface> {
     let turn = |f: &Frame| -> Option<Frame> {
         let (o, x, _, z) = axes(f)?;
-        let (sin, cos) = angle.sin_cos();
+        let (sin, cos) = det::sin_cos(angle);
         let nx = x * cos + z.cross(x) * sin;
         let ny = z.cross(nx);
         Some(Frame {
@@ -711,7 +712,7 @@ fn surface_on(
             radius_at_origin,
             half_angle,
         } => {
-            let slope = half_angle.tan();
+            let slope = det::tan(*half_angle);
             let homogeneous = net(frame, &line, &|[h, _]| (radius_at_origin + h * slope, h))?;
             Some((
                 Surface::RationalSpline {
@@ -743,7 +744,7 @@ fn surface_on(
         } => {
             let ((v_knots, tube), fv) = face_arcs(v, reach_v, own, false)?;
             // The tube's arcs turned on by its start (a rotation of the control points, exact).
-            let (ts, tc) = tube_start.sin_cos();
+            let (ts, tc) = det::sin_cos(*tube_start);
             let homogeneous = net(frame, &tube, &|[c, s]| {
                 (
                     major_radius + minor_radius * (c * tc - s * ts),
@@ -784,7 +785,7 @@ pub fn on_frame(
     }
     let nx = (fx - z * fx.dot(z)).normalized()?;
     let ny = z.cross(nx);
-    let shift = x.dot(ny).atan2(x.dot(nx));
+    let shift = det::atan2(x.dot(ny), x.dot(nx));
     let relabel = Frame {
         origin: [o.x, o.y, o.z],
         x_axis: [nx.x, nx.y, nx.z],
@@ -835,10 +836,10 @@ pub fn on_tube(
     {
         return None;
     }
-    let (s, cs) = tube_start.sin_cos();
+    let (s, cs) = det::sin_cos(*tube_start);
     let nx = (radial * cs + fz * s).normalized()?;
     let ny = z.cross(nx);
-    let shift = x.dot(ny).atan2(x.dot(nx));
+    let shift = det::atan2(x.dot(ny), x.dot(nx));
     let relabel = Frame {
         origin: [o.x, o.y, o.z],
         x_axis: [nx.x, nx.y, nx.z],
@@ -872,7 +873,7 @@ pub fn tube_on_grid(
     };
     let (_, ax, _, _) = axes(&a)?;
     let (_, bx, by, _) = axes(&b)?;
-    let turn = ax.dot(by).atan2(ax.dot(bx));
+    let turn = det::atan2(ax.dot(by), ax.dot(bx));
     let off = turn - (turn / FRAC_PI_2).round() * FRAC_PI_2;
     Some(off.abs() <= 1e-9)
 }
@@ -1509,7 +1510,7 @@ fn half_turn(
     if !(near > 0.0) {
         return false;
     }
-    let angle = 2.0 * (reach.max(0.0) / near).min(1.0).asin();
+    let angle = 2.0 * det::asin((reach.max(0.0) / near).min(1.0));
     (0..2).any(|d| {
         let per = ix(&period, d).filter(|p| p.is_finite() && *p > 0.0);
         let (true, Some(per)) = (ix(&collapsed, d), per) else {

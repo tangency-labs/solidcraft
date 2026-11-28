@@ -1,5 +1,6 @@
 use super::*;
 use crate::eval::uv::{degenerate, degenerate_within};
+use crate::math::det;
 
 const MID: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
@@ -581,7 +582,7 @@ fn a_swapped_mapped_revolution_and_a_producer_tolerance_row() {
             [10.0, 0.0, 10.0, 1.0],
         ],
     );
-    let (s, c) = 0.6f64.sin_cos();
+    let (s, c) = det::sin_cos(0.6f64);
     let s = EvalSurface::Revolved {
         profile,
         origin: Vec3::ZERO,
@@ -1475,9 +1476,10 @@ fn dense_periodic_bspline_collapse_certifies_and_handles_poles() {
             (0..nv)
                 .map(|j| {
                     let s = f64::from(j) / f64::from(nv - 1);
-                    let r =
-                        10.0 + 0.4 * (24.0 * t + 0.6 * s).sin() + 0.3 * (3.0 * t + 0.2 * s).sin();
-                    ([r * t.cos(), r * t.sin(), 30.0 * s], 1.0)
+                    let r = 10.0
+                        + 0.4 * det::sin(24.0 * t + 0.6 * s)
+                        + 0.3 * det::sin(3.0 * t + 0.2 * s);
+                    ([r * det::cos(t), r * det::sin(t), 30.0 * s], 1.0)
                 })
                 .collect()
         })
@@ -1503,7 +1505,7 @@ fn dense_periodic_bspline_collapse_certifies_and_handles_poles() {
                 .map(|j| {
                     let s = f64::from(j) / f64::from(pnv - 1);
                     let r = 10.0 * s;
-                    ([r * t.cos(), r * t.sin(), 20.0 * s], 1.0)
+                    ([r * det::cos(t), r * det::sin(t), 20.0 * s], 1.0)
                 })
                 .collect()
         })

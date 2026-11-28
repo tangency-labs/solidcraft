@@ -137,7 +137,11 @@ fn window_chrome_renders_in_the_active_language() {
         });
         h.step(&json!({"click": [select.x, select.y]})).unwrap();
         h.frames(2);
-        assert!(h.widget(filter).is_some(), "{lang}: the selection filter must show {filter:?}");
+        let heading = filter.to_uppercase();
+        assert!(
+            h.shapes.iter().any(|shape| matches!(&shape.shape,egui::Shape::Text(text) if text.galley.text() == heading)),
+            "{lang}: the shared selection menu heading must render {heading:?}"
+        );
         assert!(h.widget(faces).is_some(), "{lang}: the Faces checkbox must show {faces:?}");
     }
 }
