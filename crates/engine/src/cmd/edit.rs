@@ -3539,7 +3539,18 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(parameters) = params.as_object_mut() {
         parameters.remove("name");
     }
-    let r = {
+    let saved_revolve_plane = match &old.kind {
+        FeatureKind::Revolve { to: Some(solidcraft_doc::RevolveTo::Plane(plane)), .. } if cid == "solid.revolve" => {
+            serde_json::to_value(plane).ok().filter(|saved| params.get("to") == Some(saved)).map(|_| plane)
+        }
+        _ => None,
+    };
+    let r = if let Some(plane) = saved_revolve_plane {
+        if let Some(why) = spec.disabled_refusal(&trial) {
+            return Err(bad(cmd, why));
+        }
+        super::features::revolve_with_plane(&mut trial, &params, Some(plane))
+    } else {
         // Offset Plane has no parameter mapping in `frames::map_local`: its constructor maps
         // the complete definition, or captures a face directly in the authoring frame.
         let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);

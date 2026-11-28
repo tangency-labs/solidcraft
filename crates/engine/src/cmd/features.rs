@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::construct::{DatumItem, GeoRef, ObjectAt};
 use solidcraft_doc::{
-    AxisRef, Direction, Expr, Extent, FeatureKind, OffsetEdges, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide,
-    ThinWall, Touching, expr::Kind, point_expr,
+    AxisRef, Direction, Expr, Extent, FeatureKind, OffsetEdges, Operation, PlaneRef, PointExpr, ProfileSel, RailFit, RevolveTo, SweepOrientation,
+    SweepRail, ThinSide, ThinWall, Touching, expr::Kind, point_expr,
 };
 use solidcraft_doc::{BodyName, FeatureName, ObjectRef, SketchId, SplitSheet};
 use solidcraft_doc::{Dir, FacePick, Position};
@@ -110,7 +110,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "angle2?: expr (Two Sides: the other side's angle); ",
             "direction?: symmetric (angle split either side, independent of axis direction); ",
             "convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); ",
-            "to?: [x,y,z] (To Object: turn until that face, vertex or point); ",
+            "to?: [x,y,z] (To Object: turn until that face, vertex or point) | plane name or id | {face:[x,y,z]} (stop the swept solid in that plane or planar face); ",
             "sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet) and fixed?: true (the face's plane as a fixed plane, as solid.extrude's), operation?, touching?, targets?, name?, body_name?",
         )),
     CommandSpec::new("solid.sweep", "Sweep", crate::checked!("solid.sweep", sweep)).begins_edit()
@@ -2071,6 +2071,11 @@ fn fixed_param(p: &Value, cmd: &str) -> Result<bool> {
 }
 
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
+    revolve_with_plane(s, p, None)
+}
+
+/// Edit Feature can replay its own saved plane without picking it again.
+pub(super) fn revolve_with_plane(s: &mut Session, p: &Value, saved_plane: Option<&PlaneRef>) -> Result<Value> {
     let cmd = "solid.revolve";
     // A planar body face revolves like a profile (its edges projected into a sketch on it).
     let (sketch, face_profile, face_body) = match p.get("face").and_then(vec3) {
@@ -2093,9 +2098,31 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(a) = &angle2 {
         check_expr(s, a, Kind::Angle, cmd, "angle2")?;
     }
-    let to = match p.get("to") {
-        Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`to` must be a point [x, y, z] to turn to"))?),
-        None => None,
+    let (to, plane) = match (saved_plane, p.get("to")) {
+        (Some(plane), _) => (None, Some(plane.clone())),
+        (None, None) => (None, None),
+        (None, Some(v)) if v.get("face").is_some() && vec3(v).is_none() => {
+            let plane = super::sketch::face::capture(s, v, cmd)?;
+            super::sketch::face::capture_positions(s, &plane)?;
+            (None, Some(plane))
+        }
+        (None, Some(v)) => match vec3(v) {
+            Some(p) => (Some(RevolveTo::Point(FacePick(p))), None),
+            None if crate::params::revolve_to_plane_form(v) => {
+                let plane = plane_param(s, Some(v), cmd)?;
+                // Explicit plane coordinates are world values. Other plane forms are already
+                // relative to the author or resolve their own placement.
+                let mut holder = FeatureKind::ConstructionPlane { plane };
+                if let Some(inverse) = solidcraft_doc::mat_inverse(&s.active_component_frame()) {
+                    holder.transform_geometry(&inverse);
+                }
+                let FeatureKind::ConstructionPlane { plane } = holder else {
+                    return Err(bad(cmd, "invalid target plane"));
+                };
+                (None, Some(plane))
+            }
+            None => return Err(bad(cmd, "`to` must be a point [x, y, z] to turn to")),
+        },
     };
     let symmetric =
         matches!(str_(p, "direction").map(str::to_ascii_lowercase).as_deref(), Some("symmetric")) || bool_(p, "symmetric").unwrap_or(false);
@@ -2129,7 +2156,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
     }
-    let kind = FeatureKind::Revolve {
+    let mut kind = FeatureKind::Revolve {
         sketch: SketchId(sketch),
         profiles,
         axis,
@@ -2140,9 +2167,15 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         symmetric,
         convention,
         join_profile_arcs,
-        to: to.map(FacePick),
+        to,
     };
-    add_feature(s, &p, kind)
+    // Face capture has already mapped the plane into the author's frame; map the other
+    // fields before installing the captured reference.
+    super::component::to_active_frame(s, &mut kind);
+    if let (Some(plane), FeatureKind::Revolve { to, .. }) = (plane, &mut kind) {
+        *to = Some(RevolveTo::Plane(plane));
+    }
+    add_feature_in(s, &p, kind, false)
 }
 
 /// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis (also

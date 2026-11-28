@@ -443,6 +443,23 @@ pub enum RevolveConvention {
     SketchNormal,
 }
 
+/// To Object for a solid revolve. The point uses the original SCD encoding.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(untagged)]
+pub enum RevolveTo {
+    Point(FacePick),
+    Plane(PlaneRef),
+}
+
+impl RevolveTo {
+    pub fn point(&self) -> Option<FacePick> {
+        match self {
+            Self::Point(point) => Some(*point),
+            Self::Plane(_) => None,
+        }
+    }
+}
+
 /// Symmetric distance semantics. Missing markers preserve existing designs' thickness.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1114,9 +1131,10 @@ pub enum FeatureKind {
         /// separate faces and edges so their stored references still resolve.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         join_profile_arcs: bool,
-        /// To Object: turn until the face, vertex or point here.
+        /// To Object: turn until the face, vertex or point here, or end the solid in a plane.
+
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        to: Option<FacePick>,
+        to: Option<RevolveTo>,
     },
     Fillet {
         /// Reference points on the edges to round (each re-finds the nearest edge).

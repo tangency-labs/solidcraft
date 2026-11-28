@@ -56,6 +56,11 @@ pub fn vec3(v: &Value) -> Option<Vec3> {
     }
 }
 
+/// Distinguish a plane selector from malformed values in the legacy revolve point form.
+pub(crate) fn revolve_to_plane_form(v: &Value) -> bool {
+    v.is_string() || v.is_u64() || ["face", "origin", "normal", "x_dir", "y_dir"].iter().any(|key| v.get(key).is_some())
+}
+
 pub fn req_vec2(cmd: &str, p: &Value, k: &str) -> Result<Vec2> {
     p.get(k).and_then(vec2).ok_or_else(|| bad(cmd, format!("`{k}` must be a point [x, y]")))
 }

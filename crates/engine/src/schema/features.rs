@@ -21,7 +21,7 @@ use super::types::{
     NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
     ScaleFactors, SketchRef, StringList, ThinSideParam, ThreadFromPoint, ToObject, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
 };
-use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
+use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToParam};
 use crate::params::MAX_STRING_LIST;
 
 /// Add a box primitive.
@@ -287,8 +287,8 @@ pub struct RevolveParams {
     /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
     /// and `direction`.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "RevolveToPoint")]
-    pub to: Option<RevolveToPoint>,
+    #[schemars(with = "RevolveToParam")]
+    pub to: Option<RevolveToParam>,
     /// The sketch to revolve, by id or name. Default: the active sketch, else the last one.
     /// Ignored when `face` is given.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]

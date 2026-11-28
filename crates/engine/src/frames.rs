@@ -1104,7 +1104,7 @@ fn map_local_with_input(
             }
         }
         let points = match (&feature.kind, cmd) {
-            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None), ("to2", None)],
+            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", to.as_ref().and_then(solidcraft_doc::RevolveTo::point)), ("from", None), ("to2", None)],
             (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from), ("to2", extent.to2)],
             _ => [("to", None), ("from", None), ("to2", None)],
         };

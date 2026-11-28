@@ -390,6 +390,9 @@ impl crate::Feature {
         placements: Option<&ClonePlacements<'_>>,
     ) -> crate::Result<()> {
         use FeatureKind as K;
+        if let K::Revolve { to: Some(crate::RevolveTo::Plane(plane)), .. } = &self.kind {
+            checked_plane(plane, 0)?;
+        }
         match &self.kind {
             K::Sketch { plane, sketch } => {
                 checked_plane(plane, 0)?;
@@ -470,6 +473,9 @@ impl crate::Feature {
             *e = clone_expression(e, parameters).into();
         }
         self.kind.remap_bodies(bodies);
+        if let K::Revolve { to: Some(crate::RevolveTo::Plane(plane)), .. } = &mut self.kind {
+            remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
+        }
         match &mut self.kind {
             K::Sketch { plane, sketch } => {
                 remap_plane(plane, ids, bodies, 0, placements)?;
