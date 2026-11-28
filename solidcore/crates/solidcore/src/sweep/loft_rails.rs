@@ -782,14 +782,12 @@ impl<'a> Loft<'a> {
         // without a plane takes the plain loft's run direction there
         let mut normals: Vec<Vec3> = Vec::with_capacity(count);
         for (i, s) in sources.iter().enumerate() {
-            let nn = match s.plane {
-                Some((_, n)) => n
-                    .unitize()
-                    .map_err(|_| invalid("a section plane's normal of no length"))?,
-                None => {
-                    let v = *loft.along.get(i).ok_or_else(|| invalid("sections"))?;
-                    loft.middle(v)?.1
-                }
+            let nn = if let Some((_, n)) = s.plane {
+                n.unitize()
+                    .map_err(|_| invalid("a section plane's normal of no length"))?
+            } else {
+                let v = *loft.along.get(i).ok_or_else(|| invalid("sections"))?;
+                loft.middle(v)?.1
             };
             let prev = normals.last().copied().unwrap_or(nn);
             normals.push(if nn.dot(prev) < 0.0 { nn * -1.0 } else { nn });
@@ -815,41 +813,36 @@ impl<'a> Loft<'a> {
             };
             let mut anchors = Vec::new();
             for (s, curves) in self.sources.iter().zip(&self.sections) {
-                match s.plane {
-                    Some((origin, normal)) => {
-                        let (t, hit) = rail_crossing(k, rail, origin, normal)?;
-                        let (g, on, d) = closest_on_section(k, &s.curves, curves, hit)?;
-                        if d > tol {
-                            return Err(invalid(
-                                "a guide rail crosses a section's plane away from its curves: a rail has to pass through every section",
-                            ));
-                        }
-                        anchors.push(Anchor {
-                            g,
-                            nudge: on - hit,
-                            t,
-                            hit,
-                        });
+                if let Some((origin, normal)) = s.plane {
+                    let (t, hit) = rail_crossing(k, rail, origin, normal)?;
+                    let (g, on, d) = closest_on_section(k, &s.curves, curves, hit)?;
+                    if d > tol {
+                        return Err(invalid(
+                            "a guide rail crosses a section's plane away from its curves: a rail has to pass through every section",
+                        ));
                     }
-                    None => {
-                        let Some((ref rail_plain, ref rail_nurb)) = rail_plain_nurb else {
-                            return Err(invalid("a guide rail"));
-                        };
-                        let hit_info = anchor_rail_to_curves(
-                            k, rail, rail_plain, rail_nurb, &s.curves, curves, space_tol,
-                        )?;
-                        if hit_info.distance > space_tol {
-                            return Err(invalid(
-                                "a guide rail does not pass through every section",
-                            ));
-                        }
-                        anchors.push(Anchor {
-                            g: hit_info.g,
-                            nudge: hit_info.on - hit_info.hit,
-                            t: hit_info.t,
-                            hit: hit_info.hit,
-                        });
+                    anchors.push(Anchor {
+                        g,
+                        nudge: on - hit,
+                        t,
+                        hit,
+                    });
+                } else {
+                    let Some((ref rail_plain, ref rail_nurb)) = rail_plain_nurb else {
+                        return Err(invalid("a guide rail"));
+                    };
+                    let hit_info = anchor_rail_to_curves(
+                        k, rail, rail_plain, rail_nurb, &s.curves, curves, space_tol,
+                    )?;
+                    if hit_info.distance > space_tol {
+                        return Err(invalid("a guide rail does not pass through every section"));
                     }
+                    anchors.push(Anchor {
+                        g: hit_info.g,
+                        nudge: hit_info.on - hit_info.hit,
+                        t: hit_info.t,
+                        hit: hit_info.hit,
+                    });
                 }
             }
             if any_space && anchors.len() >= 2 {
