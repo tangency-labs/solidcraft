@@ -275,3 +275,4 @@ mesh_convert
 mesh_reduce
 mesh_import
 repair
+lighten

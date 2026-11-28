@@ -213,6 +213,34 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
+        FeatureKind::Lighten(feat) => {
+            let body_idx = st.bodies.iter().position(|b| (feat.target_face as usize) < b.body.face_count()).unwrap_or(0);
+            let Some(mb) = st.bodies.get(body_idx).cloned() else {
+                return Err(DocError::Invalid("no body to lighten".into()));
+            };
+            let config = solidcraft_kernel::lighten::LightenConfig {
+                wall_offset: feat.wall_offset,
+                depth_spec: solidcraft_kernel::lighten::PocketDepthSpec::BlindDepth(feat.depth),
+                corner_radius: feat.corner_radius,
+                draft_angle: feat.draft_angle,
+                auto_fillet_radius: feat.auto_fillet.map(|(r, _)| r),
+                auto_chamfer_size: feat.auto_chamfer.map(|(c, _)| c),
+                method: solidcraft_kernel::lighten::ManufacturingMethod::CncPocket,
+                island_faces: Vec::new(),
+            };
+            let fillet_loc = feat.auto_fillet.map(|(_, loc)| loc).unwrap_or_default();
+            let chamfer_loc = feat.auto_chamfer.map(|(_, loc)| loc).unwrap_or_default();
+            let mut new_body = mb.body.clone();
+            let warnings = solidcraft_kernel::lighten::auto_pocket_with_warnings(&mut new_body, feat.target_face, &config, fillet_loc, chamfer_loc)
+                .map_err(DocError::Invalid)?;
+            if !warnings.is_empty() {
+                *warning = Some(warnings.join("; "));
+            }
+            if let Some(slot) = st.bodies.get_mut(body_idx) {
+                *slot = ModelBody::new(mb.name, new_body, mb.feature);
+            }
+            Ok(())
+        }
         FeatureKind::Remove { bodies } => {
             if bodies.is_empty() {
                 return Err(DocError::Invalid("no bodies to remove".into()));

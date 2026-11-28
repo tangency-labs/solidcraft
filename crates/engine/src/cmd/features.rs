@@ -1142,7 +1142,8 @@ fn cross_component_profile_frame(s: &Session, kind: &FeatureKind) -> Option<soli
     cross_component_profile_frame_for(s, s.active_component, kind)
 }
 
-pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
+/// Add a feature, evaluate, and report its result (an evaluation error fails the command).
+pub(crate) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     add_feature_in(s, p, kind, true)
 }
 

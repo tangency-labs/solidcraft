@@ -48,6 +48,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.fillet", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.chamfer", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.shell", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.lighten", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.draft", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.mirror", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.rib", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -543,6 +544,19 @@ crate::dialog_descriptor::dialog_descriptors! {
                 picked_faces: bool,
                 /// With round edges: the rounds' radius (an expression); empty: the offset's.
                 radius: String,
+            },
+            /// Face-based weight-reduction pocketing (`solid.lighten`).
+            Lighten {
+                wall_offset: String,
+                depth: String,
+                draft_angle: String,
+                corner_radius: String,
+                auto_fillet_enabled: bool,
+                auto_fillet_radius: String,
+                auto_fillet_loc: usize,
+                auto_chamfer_enabled: bool,
+                auto_chamfer_size: String,
+                auto_chamfer_loc: usize,
             },
             FingerJoint {
                 count: String,
@@ -1512,6 +1526,21 @@ impl Dialog {
                 },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
+            "solid.lighten" => Dialog::new(
+                Kind::Lighten {
+                    wall_offset: length_default(s, "4.0"),
+                    depth: length_default(s, "7.0"),
+                    draft_angle: "0 deg".into(),
+                    corner_radius: length_default(s, "3.0"),
+                    auto_fillet_enabled: true,
+                    auto_fillet_radius: length_default(s, "2.0"),
+                    auto_fillet_loc: 0,
+                    auto_chamfer_enabled: true,
+                    auto_chamfer_size: length_default(s, "1.0"),
+                    auto_chamfer_loc: 0,
+                },
+                vec![SelInput::new("Faces", PLANAR_FACES, true)],
+            ),
             _ => {
                 let (kind, inputs) = Kind::simple_start(id)
                     .map(|(kind, inputs)| (crate::length_input::defaults(&s.doc, kind), inputs))
@@ -1905,6 +1934,7 @@ impl Dialog {
                 | Kind::Combine { .. }
                 | Kind::FingerJoint { .. }
                 | Kind::BoundaryFill { .. }
+                | Kind::Lighten { .. }
         )
     }
 
@@ -1931,6 +1961,7 @@ impl Dialog {
                 (label, ValueKind::Length, radius)
             }
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
+            Kind::Lighten { depth, .. } => ("Pocket Depth", ValueKind::Length, depth),
             Kind::Dome { height, .. } => ("Height", ValueKind::Length, height),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Dogbone(c) => ("Diameter", ValueKind::Length, &mut c.diameter),
@@ -3716,6 +3747,7 @@ fn title(k: &Kind) -> &'static str {
             _ => "TORUS",
         },
         Kind::Combine { .. } => "COMBINE",
+        Kind::Lighten { .. } => "LIGHTEN",
         Kind::FingerJoint { .. } => "cmd.solid.finger_joint",
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
@@ -6053,6 +6085,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::Hole { .. }
             | Kind::Primitive { .. }
             | Kind::Combine { .. }
+            | Kind::Lighten { .. }
             | Kind::Shell { .. }
             | Kind::Dome { .. }
             | Kind::Draft { .. }
@@ -8847,6 +8880,50 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.combine", p)
         }
+        Kind::Lighten {
+            wall_offset,
+            depth,
+            draft_angle,
+            corner_radius,
+            auto_fillet_enabled,
+            auto_fillet_radius,
+            auto_fillet_loc,
+            auto_chamfer_enabled,
+            auto_chamfer_size,
+            auto_chamfer_loc,
+        } => {
+            need(0, "a planar face")?;
+            let Some(Sel::Face { body, index, .. }) = sels(d, 0).first() else {
+                return Err("select a planar face first".into());
+            };
+            const FILLET_LOCS: [&str; 3] = ["bottom", "top", "all"];
+            const CHAMFER_LOCS: [&str; 3] = ["top", "bottom", "all"];
+            let mut p = json!({
+                "body": body,
+                "target_face": *index as u64,
+                "wall_offset": wall_offset,
+                "depth": depth,
+                "draft_angle": draft_angle,
+                "corner_radius": corner_radius,
+            });
+            if *auto_fillet_enabled {
+                p["auto_fillet"] = json!({
+                    "radius": auto_fillet_radius,
+                    "location": FILLET_LOCS.get(*auto_fillet_loc).copied().unwrap_or("bottom"),
+                });
+            } else {
+                p["auto_fillet"] = json!(false);
+            }
+            if *auto_chamfer_enabled {
+                p["auto_chamfer"] = json!({
+                    "size": auto_chamfer_size,
+                    "location": CHAMFER_LOCS.get(*auto_chamfer_loc).copied().unwrap_or("top"),
+                });
+            } else {
+                p["auto_chamfer"] = json!(false);
+            }
+            ("solid.lighten", p)
+        }
         Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
             let bodies = sels(d, 0).body_names();
             if bodies.len() < 2 || bodies.len() > solidcraft_engine::doc::MAX_FINGER_JOINT_BODIES {
@@ -10277,6 +10354,40 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         })
                         .collect();
                 }
+            }
+            d
+        }
+        FeatureKind::Lighten(feat) => {
+            let mut d = start("solid.lighten")?;
+            let doc = &s.doc;
+            let fillet_loc_idx = match feat.auto_fillet.map(|(_, l)| l) {
+                Some(solidcraft_engine::doc::FilletLocation::Top) => 1,
+                Some(solidcraft_engine::doc::FilletLocation::All) => 2,
+                _ => 0,
+            };
+            let chamfer_loc_idx = match feat.auto_chamfer.map(|(_, l)| l) {
+                Some(solidcraft_engine::doc::ChamferLocation::Bottom) => 1,
+                Some(solidcraft_engine::doc::ChamferLocation::All) => 2,
+                _ => 0,
+            };
+            d.kind = Kind::Lighten {
+                wall_offset: crate::length_input::model(doc, feat.wall_offset),
+                depth: crate::length_input::model(doc, feat.depth),
+                draft_angle: format!("{} deg", feat.draft_angle),
+                corner_radius: crate::length_input::model(doc, feat.corner_radius),
+                auto_fillet_enabled: feat.auto_fillet.is_some(),
+                auto_fillet_radius: crate::length_input::model(doc, feat.auto_fillet.map_or(2.0, |(r, _)| r)),
+                auto_fillet_loc: fillet_loc_idx,
+                auto_chamfer_enabled: feat.auto_chamfer.is_some(),
+                auto_chamfer_size: crate::length_input::model(doc, feat.auto_chamfer.map_or(1.0, |(c, _)| c)),
+                auto_chamfer_loc: chamfer_loc_idx,
+            };
+            if let Some(inp) = d.inputs.first_mut()
+                && let Some(mb) = st.bodies.iter().find(|b| (feat.target_face as usize) < b.body.face_count())
+                && let Ok(faces) = mb.body.faces(0.05)
+                && let Some(face) = faces.get(feat.target_face as usize)
+            {
+                inp.items = vec![Sel::Face { body: mb.name.clone(), index: face.index, point: face.centroid }];
             }
             d
         }
@@ -13134,6 +13245,75 @@ mod preselected_sketch_line_tests {
             let made = h.app.session.doc.features.iter().filter(|f| format!("{:?}", f.kind).starts_with(kind.trim_end_matches("Feature"))).count();
             assert_eq!(made, 1, "{command} runs on the edge");
         }
+    }
+}
+
+#[cfg(test)]
+mod lighten_dialog_tests {
+    use super::*;
+    use crate::scenario::Harness;
+
+    #[test]
+    fn lighten_dialog_defaults_fit_1280x720_and_commit() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 60, "width": 60, "height": 20})).unwrap();
+        h.frames(2);
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let top = st.bodies[0]
+            .body
+            .faces(0.01)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99 && (f.centroid.z - 20.0).abs() < 1e-3))
+            .unwrap();
+        h.app.session.selection = vec![Sel::Face { body: st.bodies[0].name.clone(), index: top.index, point: top.centroid }];
+        drop(st);
+
+        h.step(&json!({"start": "solid.lighten"})).unwrap();
+        h.frames(4);
+
+        let d = h.app.dialog.as_ref().expect("Lighten dialog opened");
+        assert_eq!(d.inputs[0].items.len(), 1, "selected planar face pre-populated");
+        assert!(
+            matches!(
+                &d.kind,
+                Kind::Lighten {
+                    wall_offset,
+                    depth,
+                    draft_angle,
+                    corner_radius,
+                    auto_fillet_enabled: true,
+                    auto_fillet_radius,
+                    auto_fillet_loc: 0,
+                    auto_chamfer_enabled: true,
+                    auto_chamfer_size,
+                    auto_chamfer_loc: 0,
+                } if wall_offset.contains("4")
+                    && depth.contains("7")
+                    && draft_angle == "0 deg"
+                    && corner_radius.contains("3")
+                    && auto_fillet_radius.contains("2")
+                    && auto_chamfer_size.contains("1")
+            ),
+            "unexpected Lighten defaults: {:?}",
+            d.kind
+        );
+
+        if let (Some(dlg), Some(vp)) = (h.app.viewport.dialog_rect, h.app.viewport.rect) {
+            assert!(dlg.bottom() <= vp.bottom() + 1.0, "dialog {dlg:?} must fit within viewport {vp:?}");
+            assert!(dlg.top() >= vp.top() - 1.0, "dialog {dlg:?} must not clip top of {vp:?}");
+        }
+
+        // Disable auto-fillet/chamfer or commit directly and verify Lighten feature is created.
+        if let Some(Kind::Lighten { auto_fillet_enabled, auto_chamfer_enabled, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *auto_fillet_enabled = false;
+            *auto_chamfer_enabled = false;
+        }
+        h.frames(2);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(4);
+        assert!(h.app.dialog.is_none(), "Enter commits Lighten dialog: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.as_ref()));
+        assert!(h.app.session.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Lighten(_))), "LightenFeature recorded on timeline");
     }
 }
 

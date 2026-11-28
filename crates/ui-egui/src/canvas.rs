@@ -153,6 +153,17 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             (at, along_face.or_else(|| st.body(body).and_then(|b| blend_grow_dir(&b.mesh(), *index, at))))
         }
         Kind::Fillet { .. } | Kind::Shell { .. } => (at, normal.map(|n| -n)),
+        Kind::Lighten { .. } => {
+            let centroid = match first {
+                Sel::Face { body, index, .. } => st
+                    .body(body)
+                    .and_then(|b| b.body.faces(0.05).ok())
+                    .and_then(|faces| faces.into_iter().find(|f| f.index == *index).map(|f| f.centroid))
+                    .unwrap_or(at),
+                _ => at,
+            };
+            (centroid, normal.map(|n| -n))
+        }
         // A hem's handle starts on the centre line of its layer and runs to its tip (#5828).
         Kind::Sheet(crate::dialogs_sheet::Sm::Hem { .. }) => match crate::dialogs_sheet::hem_handle(app, d) {
             Some((start, dir)) => (start, Some(dir)),
@@ -1269,6 +1280,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
         _ => Vec::new(),
     };
+    let is_lighten = matches!(d.kind, Kind::Lighten { .. });
     let section = matches!(d.kind, Kind::Section { .. });
     // With To Object picked the box holds To Offset, which is used, whatever All says: the
     // engine takes To Object first.
@@ -1381,7 +1393,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             place.handles = Some(arrow_grab(from, ts));
             keep_in_view(past_arrow(from, ts, size), place.view)
         }
-        None => rect_at(box_at, egui::Align2::LEFT_TOP, size),
+        None => {
+            if is_lighten {
+                box_at = bs - size * 0.5;
+            }
+            rect_at(box_at, egui::Align2::LEFT_TOP, size)
+        }
     };
     let box_at = clear_of_dialog(rect, place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);

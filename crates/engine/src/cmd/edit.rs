@@ -3281,6 +3281,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(crate::features::lighten::COMMANDS)
         .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
         .chain(super::shaft_spline::COMMANDS)

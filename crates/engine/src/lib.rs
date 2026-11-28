@@ -30,6 +30,7 @@ pub mod drawing_view;
 pub mod easyprint;
 mod edit_start;
 mod failure_codes;
+pub mod features;
 pub mod frames;
 pub mod fuzz;
 #[cfg(not(target_arch = "wasm32"))]
@@ -106,6 +107,11 @@ pub use edit_start::EditStart;
 pub use edit_start::RefreshedSketchModel;
 pub use edit_start::SketchDomain;
 pub use edit_start::SketchFinishEvent;
+pub use features::lighten::ChamferLocation;
+pub use features::lighten::FilletLocation;
+pub use features::lighten::LightenConfig;
+pub use features::lighten::ManufacturingMethod;
+pub use features::lighten::PocketDepthSpec;
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -117,6 +123,38 @@ pub use solidcraft_render as render;
 pub use solidcraft_sketch as sketch;
 pub use view_context::ViewContext;
 pub use view_context::ViewDescriptor;
+
+/// AI client and Model Context Protocol (MCP) configuration.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct AiClient {
+    pub endpoint: Option<String>,
+    pub api_key: Option<String>,
+    pub model: Option<String>,
+    pub mcp_connected: bool,
+}
+
+impl AiClient {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether an AI model or MCP server is connected and configured.
+    pub fn is_configured(&self) -> bool {
+        self.mcp_connected || (self.endpoint.is_some() && self.api_key.is_some())
+    }
+
+    pub fn set_mcp_connected(&mut self, connected: bool) {
+        self.mcp_connected = connected;
+    }
+
+    pub fn configure(&mut self, endpoint: impl Into<String>, api_key: impl Into<String>, model: Option<String>) {
+        self.endpoint = Some(endpoint.into());
+        self.api_key = Some(api_key.into());
+        self.model = model;
+    }
+}
+
+pub type Engine = Session;
 
 /// Longest accepted request line on the JSON-lines channels (MCP over stdio and the control
 /// server over loopback), so both refuse runaway input at the same size.
@@ -1169,6 +1207,8 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
+    /// AI model and MCP server client configuration.
+    pub ai_client: AiClient,
     /// Count the commands the person runs in this session for the app's usage statistics
     /// ([`usage`]): the app's own design only, like [`Session::crash_journal`].
     #[cfg(feature = "usage-stats")]
@@ -1617,12 +1657,23 @@ impl Session {
             motion_traces: Default::default(),
             command_check: None,
             crash_journal: false,
+            ai_client: AiClient::default(),
             #[cfg(feature = "usage-stats")]
             count_usage: false,
         };
         session.sync_capture_position_state();
         session.saved = session.doc.clone();
         session
+    }
+
+    /// Access the active AI client / MCP configuration.
+    pub fn ai_client(&self) -> &AiClient {
+        &self.ai_client
+    }
+
+    /// Mutably access the active AI client / MCP configuration.
+    pub fn ai_client_mut(&mut self) -> &mut AiClient {
+        &mut self.ai_client
     }
 
     /// Become `fresh` (another design opened, recovered or started), keeping the settings that
@@ -4061,6 +4112,7 @@ impl Session {
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
             crash_journal: false,
+            ai_client: AiClient::default(),
             #[cfg(feature = "usage-stats")]
             count_usage: false,
         }

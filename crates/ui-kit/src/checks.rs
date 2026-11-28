@@ -51,6 +51,31 @@ pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mi
     }
 }
 
+/// Circular toggle painting: compact hollow ring when off, blue circle with thin white outline when on.
+pub fn paint_circle(ui: &Ui, square: Rect, response: &Response, on: bool) {
+    let t = Tokens::get();
+    let center = square.center();
+    let radius = (square.width().min(square.height()) * 0.34).clamp(4.0, 4.75);
+    let fill = if on {
+        t.form_primary_fill
+    } else if response.hovered() {
+        t.hover
+    } else {
+        t.control_fill
+    };
+    let stroke = if on {
+        egui::Stroke::new(1.0, t.on_accent)
+    } else if response.hovered() || response.has_focus() {
+        egui::Stroke::new(1.0, t.form_primary)
+    } else {
+        t.control_border_stroke(t.control_border)
+    };
+    ui.painter().circle(center, radius, fill, stroke);
+    if response.has_focus() {
+        ui.painter().circle_stroke(center, radius + t.space_2, egui::Stroke::new(1.0, t.form_primary));
+    }
+}
+
 /// Checkboxes only via crate::checkbox. Labels, accessibility, keyboard and response stay native.
 pub fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
     checkbox_indeterminate(ui, label, value, false)
@@ -59,17 +84,22 @@ pub fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
 /// A checkbox with a command's icon between the box and the label (Customize Toolbar, #11471).
 /// The icon is part of the target. Tokens: as [`checkbox`], plus space_16 for the icon.
 pub fn checkbox_icon(ui: &mut Ui, label: &str, icon: &str, value: &mut bool) -> Response {
-    check_row(ui, label, icon, value, false)
+    check_row(ui, label, icon, value, false, false)
+}
+
+/// Circular toggle indicator that fills blue when selected (`circle_toggle`).
+pub fn circle_toggle(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
+    check_row(ui, label, "", value, false, true)
 }
 
 /// Mixed values become checked when activated; the caller owns whether selection is mixed.
 /// Tokens: space_14/3/2/6, radius_sm, control_fill/border, form_primary/ink, hover, on_accent.
 pub fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool, mixed: bool) -> Response {
-    check_row(ui, label, "", value, mixed)
+    check_row(ui, label, "", value, mixed, false)
 }
 
-/// The box, then `icon` when it is not empty, then the label.
-fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool) -> Response {
+/// The box (or circular toggle), then `icon` when it is not empty, then the label.
+fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool, circle: bool) -> Response {
     super::settings_search::note_unlabelled(ui, &[label]);
     if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[label]) {
         return super::settings_search::hidden_response(ui);
@@ -95,7 +125,11 @@ fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool
         response.mark_changed();
     }
     let square = box_at(ui, pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
-    paint_box(ui, square, &response, *value, mixed && !response.changed());
+    if circle {
+        paint_circle(ui, square, &response, *value);
+    } else {
+        paint_box(ui, square, &response, *value, mixed && !response.changed());
+    }
     if !icon.is_empty() {
         let at = Rect::from_center_size(pos2(square.right() + t.space_6 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
         super::icons::paint_icon(&ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)), at, icon, 1.0);

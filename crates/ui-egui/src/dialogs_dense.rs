@@ -65,6 +65,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
+        Kind::Lighten { .. } => Some("solid.lighten"),
         Kind::FingerJoint { .. } => Some("solid.finger_joint"),
         Kind::Rib { web, .. } => Some(if *web { "solid.web" } else { "solid.rib" }),
         Kind::Primitive { cmd, .. } => Some(cmd),
@@ -463,6 +464,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     let mut enter = false;
     if matches!(d.kind, Kind::Appearance(_)) {
         ui.spacing_mut().item_spacing.y = t.space_10;
+    }
+    if matches!(d.kind, Kind::Lighten { .. }) {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
     }
     if matches!(d.kind, Kind::Sketch | Kind::SketchModify(_) | Kind::Text(_) | Kind::TextMove(_) | Kind::EditParam { .. }) {
         let prompt = if let Some(input) = d.active_input() {
@@ -1790,6 +1794,65 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     d.extra.insert("new_component".into(), json!(new_component));
                 }
             });
+        }
+        Kind::Lighten {
+            wall_offset,
+            depth,
+            draft_angle,
+            corner_radius,
+            auto_fillet_enabled,
+            auto_fillet_radius,
+            auto_fillet_loc,
+            auto_chamfer_enabled,
+            auto_chamfer_size,
+            auto_chamfer_loc,
+        } => {
+            enter |= expr_row(ui, "Wall Offset", wall_offset);
+            enter |= expr_row(ui, "Pocket Depth", depth);
+            enter |= expr_row(ui, "Draft Angle", draft_angle);
+            enter |= expr_row(ui, "Corner Radius", corner_radius);
+
+            // Mutually exclusive location masks so Top/Bottom/All cannot collide across Fillet & Chamfer.
+            let fillet_disabled = if *auto_chamfer_enabled {
+                match *auto_chamfer_loc {
+                    0 => [false, true, true], // Chamfer Top conflicts with Fillet Top & All
+                    1 => [true, false, true], // Chamfer Bottom conflicts with Fillet Bottom & All
+                    _ => [true, true, true],  // Chamfer All conflicts with every Fillet location
+                }
+            } else {
+                [false, false, false]
+            };
+            let chamfer_disabled = if *auto_fillet_enabled {
+                match *auto_fillet_loc {
+                    0 => [false, true, true], // Fillet Bottom conflicts with Chamfer Bottom & All
+                    1 => [true, false, true], // Fillet Top conflicts with Chamfer Top & All
+                    _ => [true, true, true],  // Fillet All conflicts with every Chamfer location
+                }
+            } else {
+                [false, false, false]
+            };
+
+            ui_kit::circle_toggle(ui, "Auto Fillet", auto_fillet_enabled);
+            if *auto_fillet_enabled {
+                ui.indent("lighten_auto_fillet_fields", |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                    enter |= expr_row(ui, "Fillet Radius", auto_fillet_radius);
+                    form_row(ui, "Location", |ui| {
+                        ui_kit::dropdown_disabled(ui, "lighten_fillet_loc", auto_fillet_loc, &["Bottom", "Top", "All"], &fillet_disabled);
+                    });
+                });
+            }
+
+            ui_kit::circle_toggle(ui, "Auto Chamfer", auto_chamfer_enabled);
+            if *auto_chamfer_enabled {
+                ui.indent("lighten_auto_chamfer_fields", |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                    enter |= expr_row(ui, "Chamfer Size", auto_chamfer_size);
+                    form_row(ui, "Location", |ui| {
+                        ui_kit::dropdown_disabled(ui, "lighten_chamfer_loc", auto_chamfer_loc, &["Top", "Bottom", "All"], &chamfer_disabled);
+                    });
+                });
+            }
         }
         Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
             enter |= finger_joint_count_row(ui, app, count);

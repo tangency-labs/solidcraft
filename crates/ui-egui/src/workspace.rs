@@ -460,7 +460,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             },
             CommandGroup {
                 label: "Bodies",
-                ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
+                ids: &["solid.shell", "solid.lighten", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
             },
             CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone"] },
         ],
@@ -598,7 +598,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "MODIFY",
         promoted: 4,
-        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert"],
+        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.lighten", "solid.press_pull", "sheet.convert"],
     },
     Section {
         tab: "MODEL",
@@ -2082,6 +2082,7 @@ mod tests {
                 "solid.split_face",
                 "face.delete",
                 "solid.shell",
+                "solid.lighten",
                 "solid.combine",
                 "solid.finger_joint",
                 "solid.split_body",
@@ -2165,7 +2166,7 @@ mod tests {
         for (panel, expected) in [
             ("SKETCH", vec!["sketch.create"]),
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
-            ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
+            ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.lighten"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
             ("CONSTRUCT", vec!["construct.plane", "construct.axis", "construct.point"]),
         ] {

@@ -211,6 +211,7 @@ joint	false
 joint_origin	false
 kofi	false
 library	false
+lighten	false
 line	false
 line_mid	false
 lip	false

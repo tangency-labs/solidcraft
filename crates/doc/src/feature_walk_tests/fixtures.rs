@@ -363,6 +363,19 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("mesh_reduce", json!({"type": "mesh_reduce", "body": "B", "triangle_count": 10})),
         ("mesh_import", json!({"type": "mesh_import", "file": "a.stl", "meshes": []})),
         ("repair", json!({"type": "repair", "body": "B", "gap": "repair.gap", "patch_holes": true})),
+        (
+            "lighten",
+            json!({
+                "type": "lighten",
+                "target_face": 0,
+                "wall_offset": 4.0,
+                "depth": 7.0,
+                "draft_angle": 0.0,
+                "corner_radius": 3.0,
+                "auto_fillet": [2.0, "bottom"],
+                "auto_chamfer": [1.0, "top"]
+            }),
+        ),
     ]
 }
 

@@ -777,6 +777,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             // the preview holding still until the input stops changing.
             "solid.fillet" => &["radius", "radius2", "mid"],
             "solid.chamfer" => &["distance", "distance2", "angle"],
+            "solid.lighten" => &["wall_offset", "depth", "draft_angle", "corner_radius", "auto_fillet", "auto_chamfer"],
             // Every value is its own setup: a count, spacing or extent typed on the way to
             // another (a spacing of 1 on the way to 15 over an 80 mm extent makes 81 copies) is
             // left behind as soon as the next is typed, not waited for (#8523).
@@ -1082,6 +1083,9 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     if let Some(job) = crate::dialogs_assembly::world_preview(s, cmds, colors) {
         return job;
     }
+    if let Some(job) = lighten_preview(s, cmds, colors) {
+        return job;
+    }
     if let Some(p) = mirror_of(cmds) {
         return compute_mirror(s, p, colors);
     }
@@ -1122,6 +1126,21 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             Ok(b)
         }
     }
+}
+
+fn lighten_preview(s: &Session, cmds: &[(String, Value)], c: Colors) -> Option<Job> {
+    let params = cmds.iter().find_map(|(id, p)| match id.as_str() {
+        "solid.lighten" => Some(p),
+        "timeline.redefine" if p.get("command").and_then(Value::as_str) == Some("solid.lighten") => p.get("params"),
+        _ => None,
+    })?;
+    let (before, after) = match solidcraft_engine::features::lighten::preview_cut_state_for_command(s, params) {
+        Ok(states) => states,
+        Err(e) => return Some(Err(e)),
+    };
+    let mut b = build_as(&before, &after, c, None, &HashMap::new());
+    b.bounds = state_bounds(&after);
+    Some(Ok(b))
 }
 
 /// The tool body of a feature that adds or removes one, built on its own (as a new body): what

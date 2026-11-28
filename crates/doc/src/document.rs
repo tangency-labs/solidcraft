@@ -3315,6 +3315,8 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         patch_holes: bool,
     },
+    /// Lighten / Auto-Pocket: structural pockets on a planar face.
+    Lighten(LightenFeature),
     /// Occurrence position changes and non-rigid joint values recorded in the timeline (`component.capture_position`).
     CapturePosition {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3322,6 +3324,34 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         joints: Vec<CapturedJoint>,
     },
+}
+
+pub use solidcraft_kernel::{ChamferLocation, FilletLocation};
+
+/// Parameters for the face-based `solid.lighten` weight-reduction pocketing feature.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct LightenFeature {
+    pub target_face: u64,
+    pub wall_offset: f64,
+    pub depth: f64,
+    pub draft_angle: f64,
+    pub corner_radius: f64,
+    pub auto_fillet: Option<(f64, FilletLocation)>,
+    pub auto_chamfer: Option<(f64, ChamferLocation)>,
+}
+
+impl Default for LightenFeature {
+    fn default() -> Self {
+        Self {
+            target_face: 0,
+            wall_offset: 4.0,
+            depth: 7.0,
+            draft_angle: 0.0,
+            corner_radius: 3.0,
+            auto_fillet: Some((2.0, FilletLocation::Bottom)),
+            auto_chamfer: Some((1.0, ChamferLocation::Top)),
+        }
+    }
 }
 
 fn zero_translate() -> [Expr; 3] {
@@ -4505,6 +4535,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
             FeatureKind::MeshReduce { .. } => "MeshReduceFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
+            FeatureKind::Lighten(_) => "LightenFeature",
             FeatureKind::CapturePosition { .. } => "CapturePositionFeature",
         }
     }
@@ -4608,6 +4639,7 @@ impl FeatureKind {
             FeatureKind::MeshReduce { .. } => "mesh_reduce",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
+            FeatureKind::Lighten(_) => "solid.lighten",
             FeatureKind::CapturePosition { .. } => "capture_position",
         }
     }
@@ -4710,6 +4742,7 @@ impl FeatureKind {
             "MeshConvertFeature" => "mesh_convert",
             "MeshReduceFeature" => "mesh_reduce",
             "RepairFeature" => "repair",
+            "LightenFeature" => "solid.lighten",
             "CapturePositionFeature" => "capture_position",
             _ => return None,
         })
@@ -4816,6 +4849,7 @@ impl FeatureKind {
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
             FeatureKind::MeshReduce { .. } => "ReduceMesh",
             FeatureKind::Repair { .. } => "Repair",
+            FeatureKind::Lighten(_) => "Lighten",
             FeatureKind::CapturePosition { .. } => "CapturePosition",
         }
     }

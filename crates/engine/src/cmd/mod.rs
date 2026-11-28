@@ -64,7 +64,7 @@ mod drawing_view;
 mod edit;
 mod envelopes;
 mod face;
-mod features;
+pub(crate) mod features;
 mod features_more;
 mod hole_stacks;
 mod join_pieces;
@@ -674,6 +674,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features::COMMANDS.iter());
     v.extend(dogbone::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
+    v.extend(crate::features::lighten::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
