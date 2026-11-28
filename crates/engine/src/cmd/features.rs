@@ -1263,15 +1263,14 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     // component that are shown, never a hidden one (#2464). The shown ones are kept as its
     // participants, so showing or hiding bodies later doesn't change the model.
     let participants = match &kind {
-        FeatureKind::Extrude { operation: Operation::Join | Operation::Cut | Operation::Intersect, targets, .. }
-            if participants.is_empty() && targets.is_empty() =>
-        {
-            let shown = shown_scope(s).unwrap_or_default();
-            if shown.is_empty() && shown_scope(s).is_some() {
+        FeatureKind::Extrude { operation, targets, .. } if *operation != Operation::NewBody && participants.is_empty() && targets.is_empty() => {
+            match shown_scope_for(s, *operation) {
                 // An empty list would mean every body, hidden ones included.
-                return Err(EngineError::Other("no shown solid body to change: show one, or name the bodies".into()));
+                Some(shown) if shown.is_empty() => {
+                    return Err(EngineError::Other("no shown solid body to change: show one, or name the bodies".into()));
+                }
+                shown => shown.unwrap_or_default(),
             }
-            shown
         }
         _ => participants,
     };
@@ -1535,7 +1534,7 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         });
     } else if let Some(hidden) = auto_hidden.filter(|_| operation == Operation::Cut) {
         let st = s.model.state();
-        let shown: Vec<String> = active_scope(s, &st).into_iter().filter(|b| b.name != hidden && shown_solid(s, b)).map(|b| b.name.clone()).collect();
+        let shown = shown_targets(s, active_scope(s, &st), operation);
         if shown.is_empty() {
             return Err(bad(
                 cmd,
@@ -1790,12 +1789,27 @@ fn face_join_targets(s: &Session, p: &Value, operation: Operation, sketches: &[u
 /// shown; empty when none is. A shown surface body is left out: naming one as a target is
 /// refused ("a cut needs a solid"), while an operation that names none skips it (#18083).
 pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
+    shown_scope_for(s, Operation::Join)
+}
+
+/// The shown targets for an operation before an automatic selection is stored by name.
+pub fn shown_scope_for(s: &Session, operation: Operation) -> Option<Vec<String>> {
     let st = s.model.state();
     let scope = active_scope(s, &st);
     if scope.iter().all(|b| s.body_visible(&b.name)) {
         return None;
     }
-    Some(scope.into_iter().filter(|b| shown_solid(s, b)).map(|b| b.name.clone()).collect())
+    Some(shown_targets(s, scope, operation))
+}
+
+fn shown_targets(s: &Session, mut bodies: Vec<&solidcraft_doc::ModelBody>, operation: Operation) -> Vec<String> {
+    bodies.retain(|b| shown_solid(s, b));
+    // An automatic cut skips meshes when it has a solid to cut. With only meshes, keep the
+    // target so the evaluator can name it and suggest Convert Mesh, as when all bodies are shown.
+    if operation == Operation::Cut && bodies.iter().any(|b| !b.body.is_mesh()) {
+        bodies.retain(|b| !b.body.is_mesh());
+    }
+    bodies.into_iter().map(|b| b.name.clone()).collect()
 }
 
 fn shown_solid(s: &Session, b: &solidcraft_doc::ModelBody) -> bool {
@@ -6088,6 +6102,13 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         vec![p.get("face").and_then(point).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on a cylindrical face"))?]
     };
+    // A single `face` that names its body names one that exists (the plural form checks below).
+    if !grouped && let Some(name) = p.get("face").and_then(|f| f.get("body")).filter(|b| !b.is_null()) {
+        let name = name.as_str().ok_or_else(|| bad(cmd, "`face.body` must be a body name"))?;
+        if !s.model.state().bodies.iter().any(|body| body.name == name) {
+            return Err(bad(cmd, format!("no body named `{name}` (the body of `face`)")));
+        }
+    }
     let (face, additional_faces) = faces.split_first().ok_or_else(|| bad(cmd, "pick a cylindrical face to thread"))?;
     if single_face_selection && (!grouped || !additional_faces.is_empty()) {
         return Err(bad(cmd, "`single_face_selection` requires exactly one body-qualified entry in `faces`"));
@@ -6199,10 +6220,20 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let up_to = match p.get("up_to") {
         None | Some(Value::Null) => None,
-        Some(v) => Some(match vec3(v) {
-            Some(q) => solidcraft_doc::ThreadLimit::Face(FacePick(q)),
-            None => solidcraft_doc::ThreadLimit::Plane(plane_param(s, Some(v), cmd)?),
-        }),
+        Some(v) => {
+            // A point is `[x, y, z]`, `{x, y, z}` or `{point}` (as a `face` is); a plane is a name,
+            // an id or an object holding an `origin`, a `normal`, `x_dir` or `y_dir`.
+            let point = vec3(v).or_else(|| v.get("point").and_then(vec3));
+            let plane_object = v.as_object().is_some_and(|o| ["face", "origin", "normal", "x_dir", "y_dir"].iter().any(|k| o.contains_key(*k)));
+            match point {
+                Some(q) => Some(solidcraft_doc::ThreadLimit::Face(FacePick(q))),
+                // An object that is neither a point nor a plane says what `up_to` takes.
+                None if v.is_object() && !plane_object => {
+                    return Err(bad(cmd, format!("`up_to` must be a point [x, y, z] or {{x, y, z}}, or a plane ({PLANE_FORMS})")));
+                }
+                None => Some(solidcraft_doc::ThreadLimit::Plane(plane_param(s, Some(v), cmd)?)),
+            }
+        }
     };
     match (str_(p, "extent"), &length, &up_to) {
         (None, Some(_), Some(_)) => return Err(bad(cmd, "give `length` or `up_to`, not both")),

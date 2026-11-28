@@ -3462,6 +3462,78 @@ fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
     }
 }
 
+/// #18048: a pattern or mirror of a Draft drafts the copied face instead of failing with
+/// "Draft1 cannot be patterned or mirrored yet". A 20 x 20 x 20 pad joined on a 100 x 40 x 10
+/// plate has its side at x = 10 drafted 5 deg about its bottom edge (neutral plane z = 10): the
+/// side sweeps a wedge of 0.5 * 20 * (20 tan 5 deg) * 20 = 4000 tan 5 deg. Each copy of the pad
+/// is drafted by the same wedge, whether the pad is copied with the draft or was copied before.
+#[test]
+fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let pattern = json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": 50});
+    let with = |features: Value, mut p: Value| {
+        p["features"] = features;
+        p
+    };
+    let cases = [
+        ("mirror", None, ("solid.mirror", json!({"features": ["Pad1", "Draft1"], "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}))),
+        ("pattern", None, ("solid.pattern.rectangular", with(json!(["Pad1", "Draft1"]), pattern.clone()))),
+        (
+            "pattern of the draft alone",
+            Some(with(json!(["Pad1"]), pattern.clone())),
+            ("solid.pattern.rectangular", with(json!(["Draft1"]), pattern.clone())),
+        ),
+    ];
+    for (what, before, (copy, params)) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+        let pad_copied_before = before.is_some();
+        if let Some(p) = before {
+            let r = run(&mut s, "solid.pattern.rectangular", p);
+            assert!(r["error"].is_null(), "{what}: {r}");
+        }
+        let pads = volume(&mut s);
+        run(
+            &mut s,
+            "solid.draft",
+            json!({"faces": [[10, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+        );
+        let drafted = volume(&mut s) - pads;
+        assert!(rel(drafted.abs(), wedge) < 1e-6, "{what}: the source drafts {drafted} mm³, not ±{wedge}");
+        let r = run(&mut s, copy, params);
+        assert!(r["error"].is_null(), "{what}: {r}");
+        // Both pads undrafted: the second pad is either there already or copied now.
+        let pads = if pad_copied_before { pads } else { 48000.0 + 8000.0 };
+        let want = pads + 2.0 * drafted;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{what}: {} vs {want}", volume(&mut s));
+    }
+}
+
+/// #18048: a pattern of a Draft drafts the copied face where the draft finds it now. The pad's
+/// side at x = 30 is drafted 5 deg about its bottom edge and the pad and draft are patterned
+/// 50 apart; making the pad 30 long moves that side to x = 40, so the copy's side is at x = 90,
+/// not at x = 80 where it was picked. Each pad is 30 x 20 x 20 less the wedge 4000 tan 5 deg.
+#[test]
+fn pattern_of_a_draft_follows_its_face_after_an_edit() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+    run(
+        &mut s,
+        "solid.draft",
+        json!({"faces": [[30, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+    );
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pad1", "Draft1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 50}));
+    assert!(r["error"].is_null(), "{r}");
+    assert!(rel(volume(&mut s), 40000.0 + 2.0 * (8000.0 - wedge)) < 1e-6, "20 long: {}", volume(&mut s));
+    let r = run(&mut s, "timeline.edit", json!({"feature": "Pad1", "set": {"length": "30 mm"}}));
+    assert!(r["error"].is_null(), "{r}");
+    let want = 40000.0 + 2.0 * (12000.0 - wedge);
+    assert!(rel(volume(&mut s), want) < 1e-6, "30 long: {} vs {want}", volume(&mut s));
+}
+
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
 /// earlier or is mirrored together with the thread.
 #[test]
@@ -4786,7 +4858,7 @@ fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
     assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/711.diff
+// ---- no-cache model helpers
 fn fresh_no_cache_model(doc: &solidcraft_doc::Document) -> solidcraft_doc::Model {
     let mut m = solidcraft_doc::Model::new();
     m.no_cache = true;
@@ -4951,7 +5023,7 @@ fn moving_component_with_planar_sweep_rail_recomputes_railed_sweep() {
     assert!((cached.area - expected.area).abs() < 1e-3, "cached area {} vs fresh {}", cached.area, expected.area);
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/726.diff
+// ---- moved-component path/rail tests
 
 /// Scene: `Tube` pipe in C1 along a planar XZ path owned by C2 (nested under `Asm` when
 /// `nested`). Returns the session and the occurrence id to move (C2, or `Asm` when nested).

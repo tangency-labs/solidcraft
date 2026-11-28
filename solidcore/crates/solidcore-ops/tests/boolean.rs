@@ -3179,6 +3179,107 @@ fn an_intersection_answered_empty_while_a_vertex_lies_in_the_other_operand_is_re
     }
 }
 
+/// A cylinder of radius `r` and height `h` about +Z from base centre `base`, its seam turned
+/// `seam_deg` about its axis (SolidCraft's cylinders put the seam where the sketch put it).
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
+fn cylinder_with_seam(base: [f64; 3], r: f64, h: f64, seam_deg: f64) -> Body {
+    let c = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], r, h).unwrap();
+    let (s, co) = seam_deg.to_radians().sin_cos();
+    c.transform(&[
+        [co, s, 0.0, 0.0],
+        [-s, co, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [base[0], base[1], base[2], 1.0],
+    ])
+    .unwrap();
+    c
+}
+
+/// #22582: a point in the plane of a cylinder's cap, on a line along x or y that touches the
+/// rim circle, is at distance sqrt(a^2 + r^2) > r from the axis (`a` its offset along the
+/// line from the touching point): outside. The classifier's first ray runs along that line,
+/// grazing the rim, and its sector answer was a rounding error: inside at some seam angles.
+#[test]
+fn a_point_in_a_cylinder_cap_plane_whose_ray_grazes_the_rim_is_outside() {
+    all_fixes();
+    let mut wrong = Vec::new();
+    // the issue's scales: 0.05 and 1 failed, 40 did not
+    for scale in [0.05, 1.0, 40.0] {
+        let ([cx, cy, z0], r, h) = (
+            [10.0 * scale, 22.5 * scale, 30.0 * scale],
+            2.5 * scale,
+            5.0 * scale,
+        );
+        let mut points = Vec::new();
+        for z in [z0, z0 + h] {
+            for a in [0.5 * scale, 1.5 * scale, 3.0 * scale] {
+                // rays along +x and -x touch the rim at (cx, cy +- r); along +y and -y at (cx +- r, cy)
+                points.extend([
+                    [cx - a, cy + r, z],
+                    [cx + a, cy + r, z],
+                    [cx - a, cy - r, z],
+                    [cx + a, cy - r, z],
+                    [cx + r, cy - a, z],
+                    [cx - r, cy + a, z],
+                ]);
+            }
+        }
+        // every 5 degrees at scale 1; at the other scales, the seams that failed at scale 1
+        let seams: Vec<u16> = if scale == 1.0 {
+            (0..3600).step_by(50).chain([175, 200, 351, 425]).collect()
+        } else {
+            vec![0, 175, 200, 351, 425, 900]
+        };
+        for tenth in seams {
+            let seam = f64::from(tenth) / 10.0;
+            let c = cylinder_with_seam([cx, cy, z0], r, h, seam);
+            for (p, l) in points.iter().zip(c.locate_points(&points).unwrap()) {
+                if l != Ok(solidcore_ops::PointLocation::Outside) {
+                    wrong.push((scale, seam, *p, l));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{} not outside: {wrong:?}", wrong.len());
+}
+
+/// #22582's intersect: box A spans x 7.5..12.5, y 25..30, z 10..30; cylinder B (r 2.5, z
+/// 30..35, axis through (10, 22.5)) stands on A's top plane, where its rim touches A only at
+/// (10, 25, 30) (its other points on that plane are at y < 25). They share one point, so the
+/// intersection is empty, in either order. It was refused as "an intersection was missed":
+/// A's corner (7.5, 25, 30), 3.54 from B's axis, was classified inside B.
+#[test]
+fn a_box_and_a_cylinder_touching_at_a_rim_point_intersect_to_nothing() {
+    all_fixes();
+    for scale in [0.05, 1.0, 40.0] {
+        for seam in [0.0, 35.13, 90.0, 215.13] {
+            let a = || {
+                make_box(
+                    [7.5 * scale, 25.0 * scale, 10.0 * scale],
+                    [5.0 * scale, 5.0 * scale, 20.0 * scale],
+                )
+                .unwrap()
+            };
+            let b = || {
+                cylinder_with_seam(
+                    [10.0 * scale, 22.5 * scale, 30.0 * scale],
+                    2.5 * scale,
+                    5.0 * scale,
+                    seam,
+                )
+            };
+            for (x, y) in [(a(), b()), (b(), a())] {
+                let r = boolean(x, y, BooleanOp::Intersect);
+                assert!(
+                    matches!(r, Ok(None)),
+                    "scale {scale}, seam {seam}: {:?}",
+                    r.map(|r| r.is_some())
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn a_refused_empty_cut_names_a_vertex_of_the_body_outside_the_tool() {
     all_fixes();

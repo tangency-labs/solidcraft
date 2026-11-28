@@ -1,6 +1,10 @@
 use super::*;
 use crate::{scenario::Harness, ui_kit::LayoutMode};
 
+fn any_popup_open(ctx: &egui::Context) -> bool {
+    egui::Popup::is_any_open(ctx) || crate::ui_kit::Menu::any_open(ctx)
+}
+
 #[test]
 fn details_descriptions_are_pure_and_live_edits_preserve_custom_companions() {
     use crate::ui_kit::DetailValue as V;
@@ -227,11 +231,11 @@ fn details_owned_dropdown_suspends_without_leaking_above_preferences_or_mode_cha
     h.frames(3);
     h.step(&json!({"click":{"handle":"details:field:record"}})).unwrap();
     h.frames(3);
-    assert!(egui::Popup::is_any_open(&h.ctx));
+    assert!(any_popup_open(&h.ctx));
     let before = h.app.session.continuity.clone();
     h.call("ui.prefs", json!({"open":"Interface"}));
     h.frames(3);
-    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(!any_popup_open(&h.ctx));
     assert!(crate::scenario::rect_of("viewport_status:card").is_none());
     assert!(!h.app.viewport_status.owns_focus(&h.ctx));
     assert_eq!(h.app.session.continuity, before);
@@ -241,7 +245,7 @@ fn details_owned_dropdown_suspends_without_leaking_above_preferences_or_mode_cha
     h.call("ui.prefs", json!({"viewport_status_details":false}));
     h.frames(3);
     assert!(h.app.viewport_status.open_key.is_none());
-    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(!any_popup_open(&h.ctx));
     assert!(!crate::ui_kit::details_field_owns_focus(&h.ctx));
     assert_eq!(h.app.session.continuity, before);
 }
@@ -367,7 +371,7 @@ fn details_document_identity_releases_equal_slot_owners_and_native_buffers() {
     h.frames(3);
     assert_eq!(h.app.session.uid, uid);
     assert!(h.app.viewport_status.open_key.is_none());
-    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(!any_popup_open(&h.ctx));
     assert!(matches!(h.app.session.analysis,Some(solidcraft_engine::SurfaceAnalysis::Draft{angle,..}) if angle==3.0));
 }
 
@@ -409,9 +413,9 @@ fn details_tool_and_native_record_menu_each_keep_the_first_escape() {
     assert!(!h.app.session.continuity.is_empty());
     h.step(&json!({"click":{"handle":"details:field:record"}})).unwrap();
     h.frames(3);
-    assert!(egui::Popup::is_any_open(&h.ctx));
+    assert!(any_popup_open(&h.ctx));
     h.step(&json!({"key":"Escape"})).unwrap();
-    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(!any_popup_open(&h.ctx));
     assert!(h.app.viewport_status.open_key.is_some());
     assert!(!h.app.session.continuity.is_empty());
 }
@@ -423,6 +427,8 @@ fn details_summary_owner_anchors_and_count_changes_release_stale_cards() {
     h.frames(3);
     let effect = h.app.session.status_items().into_iter().find(|effect| effect.command == "inspect.section").unwrap();
     let owner = crate::viewport_status::identity(&effect);
+    h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:item")}})).unwrap();
+    h.frames(2);
     h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:key")}})).unwrap();
     h.frames(3);
     let badge = crate::scenario::rect_of("viewport_status:summary").unwrap();
@@ -433,7 +439,7 @@ fn details_summary_owner_anchors_and_count_changes_release_stale_cards() {
         (outline.left() - card.left()).abs() < 1.0 && card.top() > outline.bottom(),
         "visible owner {outline:?}, target {badge:?}, card {card:?}"
     );
-    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(!any_popup_open(&h.ctx));
     h.app.run("inspect.continuity", json!({"clear":true})).unwrap();
     h.frames(3);
     assert!(h.app.viewport_status.open_key.is_none());
@@ -2264,7 +2270,7 @@ fn analysis_status_focused_dialog_and_real_text_popup_preserve_owner_priority_in
             assert!(h.ctx.memory(|memory| memory.focused().is_some()), "the real radius editor has focus");
             if popup {
                 h.call("ui.click", json!({"x":at.x,"y":at.y,"button":"right"}));
-                assert!(egui::Popup::is_any_open(&h.ctx), "a real editor context menu is open");
+                assert!(any_popup_open(&h.ctx), "a real editor context menu is open");
                 let mut reached_guard = false;
                 let mut tap = crate::test_support::key(egui::Key::Escape);
                 tap.push(egui::Event::Key {
@@ -2285,7 +2291,7 @@ fn analysis_status_focused_dialog_and_real_text_popup_preserve_owner_priority_in
                     |ui| {
                         let first = ui.ctx().current_pass_index() == 0;
                         if first {
-                            assert!(egui::Popup::is_any_open(ui.ctx()), "the surviving popup predicate reaches the global guard");
+                            assert!(any_popup_open(ui.ctx()), "the surviving popup predicate reaches the global guard");
                             reached_guard = true;
                         }
                         h.app.logic(ui.ctx());
@@ -2298,7 +2304,7 @@ fn analysis_status_focused_dialog_and_real_text_popup_preserve_owner_priority_in
                     },
                 );
                 assert!(reached_guard);
-                assert!(!egui::Popup::is_any_open(&h.ctx));
+                assert!(!any_popup_open(&h.ctx));
                 assert!(h.app.dialog.is_some(), "the first Escape closes only the editor's menu");
                 assert!(h.app.session.analysis.is_some());
             }
@@ -2577,13 +2583,13 @@ fn section_only_status_real_editor_popup_then_dialog_own_escape_before_the_cut()
     h.call("ui.click", json!({"x":at.x,"y":at.y}));
     assert!(h.ctx.memory(|memory| memory.focused().is_some()));
     h.call("ui.click", json!({"x":at.x,"y":at.y,"button":"right"}));
-    assert!(egui::Popup::is_any_open(&h.ctx));
+    assert!(any_popup_open(&h.ctx));
     let cut = h.app.session.section.clone();
     analysis_escape_relayout_frame(&mut h, |app| {
         assert!(app.dialog.is_some(), "the real popup has first refusal before Dialog cancellation");
         assert_eq!(app.session.section, cut);
     });
-    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(!any_popup_open(&h.ctx));
     assert!(h.app.dialog.is_some());
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.dialog.is_none());
@@ -2772,19 +2778,19 @@ fn summary_native_menu_escape_is_close_only_then_newest_replacement_clears_and_u
     assert!(crate::scenario::rect_of(&format!("viewport_status:{}:summary", item.id)).is_some());
     h.step(&json!({"click":{"handle":"viewport_status:summary"}})).unwrap();
     h.frames(3);
-    assert!(egui::Popup::is_any_open(&h.ctx));
+    assert!(any_popup_open(&h.ctx));
     assert!(crate::scenario::rect_of("menu:viewport_status_clear_all").is_some());
     let mut previous = f32::NEG_INFINITY;
     for effect in h.app.session.status_items() {
         let item = crate::viewport_status::presentation(&h.app, &effect).unwrap();
-        let close = crate::scenario::rect_of(&format!("viewport_status:{}:close", item.id)).unwrap();
-        assert!(close.top() > previous, "menu order follows oldest slots rather than newest activation");
-        previous = close.top();
+        let row = crate::scenario::rect_of(&format!("viewport_status:{}:item", item.id)).unwrap();
+        assert!(row.top() > previous, "menu order follows oldest slots rather than newest activation");
+        previous = row.top();
     }
     analysis_escape_relayout_frame(&mut h, |app| {
         assert_eq!(app.session.status_items().len(), 3, "footer Esc hint is not a clear-all binding");
     });
-    assert!(!egui::Popup::is_any_open(&h.ctx));
+    assert!(!any_popup_open(&h.ctx));
     assert_eq!(h.app.session.status_items().len(), 3);
     h.step(&json!({"key":"Escape"})).unwrap();
     h.frames(3);
@@ -2808,7 +2814,7 @@ fn summary_menu_yields_to_preferences_and_command_dialog_without_resuming_or_ste
         let frames = (h.ctx.global_style().animation_time * 60.0).ceil() as usize + 2;
         h.step(&json!({"click":{"handle":"viewport_status:summary"}})).unwrap();
         h.frames(frames);
-        assert!(egui::Popup::is_any_open(&h.ctx));
+        assert!(any_popup_open(&h.ctx));
         assert!(crate::scenario::rect_of("menu:viewport_status_clear_all").is_some());
         let effects = h.app.session.status_items();
         let eligible = [StatusId::SurfaceAnalysis, StatusId::Continuity, StatusId::Section];
@@ -2822,7 +2828,7 @@ fn summary_menu_yields_to_preferences_and_command_dialog_without_resuming_or_ste
             h.call("ui.prefs", json!({"open":"Interface"}));
         }
         h.frames(frames);
-        assert!(!egui::Popup::is_any_open(&h.ctx), "{owner} dismisses the lower Summary popup");
+        assert!(!any_popup_open(&h.ctx), "{owner} dismisses the lower Summary popup");
         assert!(crate::scenario::rect_of("menu:viewport_status_clear_all").is_none());
         let heading = solidcraft_ui_text::tr("ui.viewport_status_summary_heading").to_uppercase();
         assert!(!h.shapes.iter().any(|shape| contains_text(&shape.shape, &heading)), "no Summary list paints over {owner}");
@@ -2839,7 +2845,7 @@ fn summary_menu_yields_to_preferences_and_command_dialog_without_resuming_or_ste
         assert_eq!(h.app.session.status_items(), effects);
         assert_eq!(h.app.session.newest_status_item(&eligible), newest);
         assert_eq!(serde_json::to_value(&*h.app.session.doc).unwrap(), document);
-        assert!(!egui::Popup::is_any_open(&h.ctx), "a dismissed Summary must not reopen after the owner closes");
+        assert!(!any_popup_open(&h.ctx), "a dismissed Summary must not reopen after the owner closes");
         if owner == "stacked" {
             h.step(&json!({"key":"Escape"})).unwrap();
             assert!(h.app.dialog.is_none());
@@ -2847,7 +2853,7 @@ fn summary_menu_yields_to_preferences_and_command_dialog_without_resuming_or_ste
         }
         h.step(&json!({"click":{"handle":"viewport_status:summary"}})).unwrap();
         h.frames(frames);
-        assert!(egui::Popup::is_any_open(&h.ctx), "a distinct native click can reopen Summary");
+        assert!(any_popup_open(&h.ctx), "a distinct native click can reopen Summary");
         assert_eq!(h.app.session.status_items(), effects);
     }
 }
@@ -2863,9 +2869,10 @@ fn summary_menu_keeps_tool_owned_row_clear_available() {
     assert_eq!(h.app.session.status_items().len(), 3);
     h.step(&json!({"click":{"handle":"viewport_status:summary"}})).unwrap();
     h.frames(frames);
-    assert!(egui::Popup::is_any_open(&h.ctx), "a Tool is not a higher modal owner");
+    assert!(any_popup_open(&h.ctx), "a Tool is not a higher modal owner");
     let section = h.app.session.status_items().into_iter().find(|item| item.id == solidcraft_engine::status_items::StatusId::Section).unwrap();
     let section = crate::viewport_status::presentation(&h.app, &section).unwrap();
+    assert!(crate::scenario::rect_of(&format!("viewport_status:{}:close", section.id)).is_some(), "Summary exposes per-status Clear directly");
     h.step(&json!({"click":{"handle":format!("viewport_status:{}:close", section.id)}})).unwrap();
     assert!(h.app.session.section.is_empty());
     assert!(h.app.tool.is_some(), "row X retains the active Tool");
@@ -2878,7 +2885,7 @@ fn summary_popup_closes_on_preference_count_and_replacement_transitions() {
         let mut h = summary_three_effects();
         h.step(&json!({"click":{"handle":"viewport_status:summary"}})).unwrap();
         h.frames(3);
-        assert!(egui::Popup::is_any_open(&h.ctx));
+        assert!(any_popup_open(&h.ctx));
         match transition {
             "disable" => h.app.preferences.viewport_status_summary = false,
             "count" => {
@@ -2890,7 +2897,7 @@ fn summary_popup_closes_on_preference_count_and_replacement_transitions() {
             _ => crate::viewport_status::dispatch(&mut h.app, vec![crate::ui_kit::StatusAction::ClearAll]),
         }
         crate::viewport_status::reconcile(&mut h.app, &h.ctx);
-        assert!(!egui::Popup::is_any_open(&h.ctx), "{transition} closes only the stale summary owner");
+        assert!(!any_popup_open(&h.ctx), "{transition} closes only the stale summary owner");
         assert!(!h.app.viewport_status.owns_focus(&h.ctx));
         h.frames(3);
         if transition == "zero" {
@@ -2953,7 +2960,7 @@ fn summary_footer_pointer_and_native_keyboard_dispatch_clear_all_without_a_key_b
         }
         h.frames(3);
         assert!(h.app.session.status_items().is_empty());
-        assert!(!egui::Popup::is_any_open(&h.ctx));
+        assert!(!any_popup_open(&h.ctx));
         assert!(crate::scenario::rect_of("viewport_status:summary").is_none());
     }
 }
