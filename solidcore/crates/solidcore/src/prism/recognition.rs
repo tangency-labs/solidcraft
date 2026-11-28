@@ -214,13 +214,6 @@ fn rounding_radius(value: f64) -> f64 {
     (spacing * 0.5).max(f64::from_bits(1))
 }
 
-// Error-free addition residual for finite operands whose sum does not overflow.
-fn sum_roundoff(a: f64, b: f64) -> f64 {
-    let sum = a + b;
-    let virtual_b = sum - a;
-    (a - (sum - virtual_b)) + (b - virtual_b)
-}
-
 impl AngleResolution {
     fn new(value: f64) -> Self {
         Self {
@@ -777,90 +770,142 @@ fn loop_as_general_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     (winding == 1 || winding == -1).then_some((center, major, ratio))
 }
 
+/// `sum(k * p)` over stored points in double-double.
+fn corner_combination(terms: &[(f64, Vec2)]) -> Option<EllipsePoint> {
+    let mut sum = EllipsePoint {
+        x: EllipseScalar::ZERO,
+        y: EllipseScalar::ZERO,
+    };
+    for &(k, p) in terms {
+        let k = EllipseScalar::exact(k)?;
+        sum = sum.plus(EllipsePoint {
+            x: EllipseScalar::exact(p.x)?.times(k)?,
+            y: EllipseScalar::exact(p.y)?.times(k)?,
+        })?;
+    }
+    Some(sum)
+}
+
+/// Four rational quarters of weight 1/sqrt(2) on one parallelogram: corners c +/- u and
+/// c +/- v, and each control at its quarter's fourth corner c + from + to. The
+/// construction is c (the rounded mean of the stored corners, returned as the centre) and
+/// u, v (the rounded half diagonals, from which `ellipse_axes` takes the returned axes as
+/// before), and every stored corner and control must lie in its cell around that
+/// construction's point. A cell is half an ULP of the
+/// corners' local semiextent plus the rounding of u and v (once for a corner, twice for a
+/// control). It is widened by the rounding of a producer that stores each corner as one
+/// f64 sum and each control as the f64 a + b - c of its quarter's corners, as a turned
+/// sketch ellipse does (#18399), and by the rounding of the returned centre. With
+/// c = c* + mean(e) for stored corner errors e, a corner is off by (e0 - e1 + e2 - e3) / 4,
+/// within the corners' largest half ULP; a control by mean(e) plus its two roundings, the
+/// half ULPs of |a| + |b| and of the control itself.
+/// The stored points must also lie, along each semi-axis, within sqrt(EPSILON) of that
+/// semi-axis from the construction: half of the significand still resolves the ellipse in
+/// its thinnest direction, so the points cannot fold a quarter or flip its turn. Where the
+/// world spacing, not the curve, decides the shape (a 4/3 split at x = 2^52), the loop is
+/// refused.
+/// Joins are exact.
 fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     let [q0, q1, q2, q3] = lp.segs.as_slice() else {
         return None;
     };
-    let (
-        &Seg2::Conic { a: p0, .. },
-        &Seg2::Conic { a: p1, .. },
-        &Seg2::Conic { a: p2, .. },
-        &Seg2::Conic { a: p3, .. },
-    ) = (q0, q1, q2, q3)
-    else {
-        return None;
+    let quarter = |seg: &Seg2, next: &Seg2| match (*seg, *next) {
+        (Seg2::Conic { a, apex, b, w }, Seg2::Conic { a: next_a, .. })
+            if a.is_finite()
+                && apex.is_finite()
+                && b.is_finite()
+                && w == std::f64::consts::FRAC_1_SQRT_2
+                && b == next_a =>
+        {
+            Some((a, apex))
+        }
+        _ => None,
     };
-    let center = (p0 + p2) * 0.5;
-    if !center.is_finite() || center != (p1 + p3) * 0.5 {
+    let [(p0, h0), (p1, h1), (p2, h2), (p3, h3)] = [
+        quarter(q0, q1)?,
+        quarter(q1, q2)?,
+        quarter(q2, q3)?,
+        quarter(q3, q0)?,
+    ];
+    let corners = [p0, p1, p2, p3];
+    let rounded = |p: EllipsePoint| Vec2::new(p.x.hi + p.x.lo, p.y.hi + p.y.lo);
+    // The construction is the returned f64 centre and the f64 half diagonals the returned
+    // axes come from, so each cell below bounds a stored point's distance from its point.
+    let center = rounded(corner_combination(&corners.map(|p| (0.25, p)))?);
+    let u = rounded(corner_combination(&[(0.5, p0), (-0.5, p2)])?);
+    let v = rounded(corner_combination(&[(0.5, p1), (-0.5, p3)])?);
+    let exact = |p: Vec2| EllipsePoint::relative(p, Vec2::ZERO);
+    if !center.is_finite() || !matches!(exact(u)?.cross(exact(v)?)?.sign()?, 1 | -1) {
         return None;
-    }
-    let offsets = [p0 - center, p1 - center, p2 - center, p3 - center];
-    if offsets.iter().any(|d| !d.is_finite()) {
-        return None;
-    }
-    let extent = offsets.iter().fold(Vec2::ZERO, |size, d| {
-        Vec2::new(size.x.max(d.x.abs()), size.y.max(d.y.abs()))
-    });
-    // Do not lose a significant LOCAL displacement when averaging large world
-    // coordinates. TwoSum recovers what the world-coordinate sum discarded; half
-    // that residue must fit the rounding cell of the local extent in each axis.
-    for (a, b) in [(p0, p2), (p1, p3)] {
-        let error = Vec2::new(sum_roundoff(a.x, b.x), sum_roundoff(a.y, b.y)) * 0.5;
-        if !error.is_finite()
-            || error.x.abs() > rounding_radius(extent.x)
-            || error.y.abs() > rounding_radius(extent.y)
-        {
-            return None;
-        }
-    }
-    // A rounded world-coordinate sum can hide asymmetric endpoints. A displacement
-    // from either endpoint must reconstruct BOTH original points. Trying both keeps
-    // ordinary affine constructions whose inverse subtraction rounds differently.
-    let opposite = |a: Vec2, b: Vec2| {
-        [a - center, center - b]
-            .into_iter()
-            .find(|&d| center + d == a && center - d == b)
-    };
-    let (u, v) = (opposite(p0, p2)?, opposite(p1, p3)?);
-    let axes = [u, v, -u, -v];
-    let mut direction = None;
-    for ((seg, next), (from, to)) in lp
-        .segs
-        .iter()
-        .zip(lp.segs.iter().cycle().skip(1))
-        .zip(axes.iter().zip(axes.iter().cycle().skip(1)))
-    {
-        let (&Seg2::Conic { a, apex, b, w }, &Seg2::Conic { a: next_a, .. }) = (seg, next) else {
-            return None;
-        };
-        if !(a.is_finite() && apex.is_finite() && b.is_finite())
-            || w != std::f64::consts::FRAC_1_SQRT_2
-            || b != next_a
-        {
-            return None;
-        }
-        // Every endpoint and apex must use the SAME pair of accepted offsets.
-        // The alternatives only change the association of this affine construction.
-        if a != center + *from
-            || b != center + *to
-            || (apex != a + *to && apex != b + *from && apex != center + (*from + *to))
-        {
-            return None;
-        }
-        let cross = from.cross(*to);
-        if !cross.is_finite()
-            || cross == 0.0
-            || direction.is_some_and(|positive| positive != cross.is_sign_positive())
-        {
-            return None;
-        }
-        direction = Some(cross.is_sign_positive());
     }
     let (mut major, _, ratio, _) = ellipse_axes(u, v)?;
+
+    let (min, max) = corners.iter().fold((p0, p0), |(min, max), p| {
+        (
+            Vec2::new(min.x.min(p.x), min.y.min(p.y)),
+            Vec2::new(max.x.max(p.x), max.y.max(p.y)),
+        )
+    });
+    let local = Vec2::new(
+        ellipse_local_resolution(min.x, max.x)?,
+        ellipse_local_resolution(min.y, max.y)?,
+    );
+    let add =
+        |a: Vec2, b: Vec2| Vec2::new(ellipse_bound_add(a.x, b.x), ellipse_bound_add(a.y, b.y));
+    let larger = |a: Vec2, b: Vec2| Vec2::new(a.x.max(b.x), a.y.max(b.y));
+    let rounding = |p: Vec2| Vec2::new(rounding_radius(p.x), rounding_radius(p.y));
+    let largest = |points: [Vec2; 4]| {
+        points
+            .into_iter()
+            .fold(Vec2::ZERO, |cell, p| larger(cell, rounding(p)))
+    };
+    let sums = [(p0, p1), (p1, p2), (p2, p3), (p3, p0)]
+        .map(|(a, b)| Vec2::new(a.x.abs() + b.x.abs(), a.y.abs() + b.y.abs()));
+    let (corners_rounding, controls_rounding) = (largest(corners), largest([h0, h1, h2, h3]));
+    // The returned half diagonals' rounding is local; a corner uses one, a control two.
+    let offsets = larger(rounding(u), rounding(v));
+    let (corner_local, control_local) = (add(local, offsets), add(local, add(offsets, offsets)));
+    // The producer's rounding, and the returned centre's.
+    let corner_rounding = add(corners_rounding, rounding(center));
+    let control_rounding = add(add(corner_rounding, controls_rounding), largest(sums));
+    let corner_cell = add(corner_local, corner_rounding);
+    let control_cell = add(control_local, control_rounding);
+
+    let offsets = [u, v, -u, -v];
+    let mut farthest = Vec2::ZERO;
+    for ((corner, control), (from, to)) in corners
+        .into_iter()
+        .zip([h0, h1, h2, h3])
+        .zip(offsets.into_iter().zip(offsets.into_iter().cycle().skip(1)))
+    {
+        let corner = EllipsePoint::relative(corner, center)?.minus(exact(from)?)?;
+        let control = EllipsePoint::relative(control, center)?
+            .minus(exact(from)?)?
+            .minus(exact(to)?)?;
+        if !corner.fits(corner_cell) || !control.fits(control_cell) {
+            return None;
+        }
+        for point in [corner, control] {
+            let reach = Vec2::new(point.x.magnitude_bound(), point.y.magnitude_bound());
+            farthest = larger(farthest, reach);
+        }
+    }
+    // How far the stored points actually are from the construction, along each semi-axis,
+    // against sqrt(EPSILON) of that semi-axis. The minor axis is taken perpendicular to the
+    // major one, with length |u x v| / |major|: for a thin ellipse the computed minor
+    // vector's direction is rounding.
+    let semi_major = major.length_hypot();
+    let semi_minor = u.cross(v).abs() / semi_major;
+    let along = |axis: Vec2| (farthest.x * axis.x.abs() + farthest.y * axis.y.abs()) / semi_major;
+    if !(along(major) <= semi_major * f64::EPSILON.sqrt()
+        && along(major.perp()) <= semi_minor * f64::EPSILON.sqrt())
+    {
+        return None;
+    }
     if major.x < 0.0 || (major.x == 0.0 && major.y < 0.0) {
         major = -major;
     }
-    Some((center, major, ratio))
+    ratio.is_finite().then_some((center, major, ratio))
 }
 
 /// Recognize one directed turn of circular arcs on exactly the same center and radius.
@@ -957,7 +1002,9 @@ pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
 }
 
 /// Conservatively recognize one turn of an ellipse from rational quadratic pieces.
-/// Four quarter pieces retain their common-parallelogram recognition rules. Other
+/// Four quarter pieces of weight 1/sqrt(2) are checked against the one parallelogram
+/// their corners fix, in cells that count the stored coordinates' rounding while the
+/// ellipse resolves it (`loop_as_quarter_ellipse`). Other
 /// partitions require exact stored joins and reconstruct one fixed returned ellipse:
 /// shared vertices and tangent controls must fit componentwise cells no larger than
 /// half an ULP of the original vertices' local semiextent; required weights must lie
@@ -974,7 +1021,6 @@ pub fn loop_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
             |seg| matches!(seg, Seg2::Conic { w, .. } if *w == std::f64::consts::FRAC_1_SQRT_2),
         )
     {
-        // Preserve both acceptance and rejection of this already-supported case.
         return loop_as_quarter_ellipse(lp);
     }
     loop_as_general_ellipse(lp)
