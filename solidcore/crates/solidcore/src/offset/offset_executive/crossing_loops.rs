@@ -2121,7 +2121,14 @@ impl OffsetExecutive {
                 return Err(unresolved(LoopCrossing::Unmerged));
             }
             // the curves where the walls meet, joined from crossing to crossing (more than
-            // one where the meeting passes a seam of either wall's surface)
+            // one where the meeting passes a seam of either wall's surface). Each joint and
+            // each end at a crossing must hold within the B-rep's tolerance: there the two
+            // walls and the face meet in one point, as the body's tolerance requires of a
+            // vertex. A meeting that reaches a crossing only within the wider tolerance the
+            // crossings were found at is not proved to close the body there (its end and
+            // the crossing are found by different solves whose gap then decides the cut's
+            // topology), and is refused as before
+            let fit = b.tolerance();
             let mut pool: Vec<Meeting> = Vec::new();
             for curve in intersect_faces_read_only(kernel, b, wall_s, b, wall_t, false)?.curves {
                 let ivl = curve.natural_interval();
@@ -2134,13 +2141,19 @@ impl OffsetExecutive {
             let mut used = vec![false; pool.len()];
             let mut path: Vec<usize> = Vec::new();
             let mut here = from;
-            while path.is_empty() || here.distance(to) > tol_3d {
+            // (a NaN distance never reaches `to`: the walk refuses when no curve goes on)
+            while path.is_empty()
+                || !matches!(
+                    here.distance(to).partial_cmp(&fit),
+                    Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+                )
+            {
                 let next: Vec<usize> = (0..pool.len())
                     .filter(|&i| {
                         !used.get(i).copied().unwrap_or(true)
                             && pool
                                 .get(i)
-                                .is_some_and(|m| m.ends.iter().any(|p| p.distance(here) <= tol_3d))
+                                .is_some_and(|m| m.ends.iter().any(|p| p.distance(here) <= fit))
                     })
                     .collect();
                 let [i] = next.as_slice() else {
@@ -2148,7 +2161,11 @@ impl OffsetExecutive {
                 };
                 *at_mut(&mut used, *i)? = true;
                 let [p0, p1] = at(&pool, *i)?.ends;
-                here = if p0.distance(here) <= tol_3d { p1 } else { p0 };
+                here = if p0.distance(here) <= p1.distance(here) {
+                    p1
+                } else {
+                    p0
+                };
                 path.push(*i);
             }
             let mut meeting = Vec::new();
