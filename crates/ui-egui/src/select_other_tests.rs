@@ -921,7 +921,7 @@ fn popup_uses_window_height_and_flips_above_the_pointer() {
             if y > 500.0 {
                 assert!(rect.bottom() <= y, "opens above the pointer: {rect:?}");
             } else if y < 500.0 {
-                assert!(rect.top() > y, "opens below the pointer: {rect:?}");
+                assert!(rect.top() >= y, "opens at or below the pointer: {rect:?}");
             }
         } else {
             assert!(!rect.contains(crate::scenario::handle_at(&format!("select_other:{}", count - 1)).unwrap()), "overflow needs scrolling");

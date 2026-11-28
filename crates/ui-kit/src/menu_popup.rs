@@ -917,11 +917,31 @@ impl Menu {
         let margin = Self::frame().total_margin().sum();
         let root_width = width(ctx, items, screen);
         let root_height = height(items).min((screen.height() - Tokens::get().space_8).max(1.0));
-        let at = match anchor {
-            MenuAnchor::Point(point) => place(point, Vec2::ZERO, vec2(root_width + margin.x, root_height), screen),
+        let (at, root_bottom) = match anchor {
+            MenuAnchor::Point(point) => {
+                let bottom = (screen.bottom() - Tokens::get().space_4).max(screen.top());
+                let usable = Rect::from_min_max(screen.min, pos2(screen.right(), bottom));
+                (place(point, Vec2::ZERO, vec2(root_width + margin.x, root_height), usable), bottom)
+            }
             MenuAnchor::Rect(rect) => {
-                let y = if rect.bottom() + root_height <= screen.bottom() { rect.bottom() } else { (rect.top() - root_height).max(screen.top()) };
-                pos2(rect.left().min(screen.right() - root_width - margin.x).max(screen.left()), y)
+                let below_top = rect.bottom().clamp(screen.top(), screen.bottom());
+                let above_bottom = rect.top().clamp(screen.top(), screen.bottom());
+                let below_bottom = (screen.bottom() - Tokens::get().space_4).max(below_top);
+                let below = (below_bottom - below_top).max(0.0);
+                let above = (above_bottom - screen.top()).max(0.0);
+                let full = height(items);
+                let open_below = full <= below || (full > above && below >= above);
+                let minimum = full.min(Tokens::get().control_height + Tokens::get().space_2 + margin.y);
+                let (y, bottom) = if below.max(above) < minimum {
+                    // An exceptionally small host may have no side that fits one action.
+                    // Use its whole capacity so the selected row remains hittable.
+                    (screen.top(), screen.bottom() - Tokens::get().space_4)
+                } else if open_below {
+                    (below_top, below_bottom)
+                } else {
+                    (above_bottom - full.min(above), above_bottom)
+                };
+                (pos2(rect.left().min(screen.right() - root_width - margin.x).max(screen.left()), y), bottom)
             }
         };
         let pointer = ctx.pointer_hover_pos();
@@ -957,7 +977,8 @@ impl Menu {
                 }
                 ui.set_width(content_width);
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let room = (screen.bottom() - position.y - margin.y - Tokens::get().space_4).max(0.0);
+                let bottom = if depth == 0 { root_bottom } else { screen.bottom() - Tokens::get().space_4 };
+                let room = (bottom - position.y - margin.y).max(0.0);
                 let reveal = state.scroll_cursor.then_some(cursor).flatten().filter(|index| *index < rows.len()).map(|index| {
                     let top = height(&rows[..index]) - margin.y;
                     (top, top + height(&rows[index..=index]) - margin.y)

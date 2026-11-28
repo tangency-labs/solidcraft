@@ -644,13 +644,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         item.tip = Some(row.label.clone());
         items.push(item);
     }
-    let output = crate::ui_kit::Menu::popup(
-        ctx,
-        egui::Id::unique("sc_select_other"),
-        crate::ui_kit::MenuAnchor::Rect(egui::Rect::from_center_size(p.at, egui::vec2(1.0, 1.0))),
-        &items,
-        !p.shown,
-    );
+    let output = crate::ui_kit::Menu::popup(ctx, egui::Id::unique("sc_select_other"), crate::ui_kit::MenuAnchor::Point(p.at), &items, !p.shown);
     if let Some(rect) = output.rect {
         crate::scenario::publish_rect("select_other", rect);
     }

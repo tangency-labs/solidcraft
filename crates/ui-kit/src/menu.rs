@@ -1147,18 +1147,23 @@ mod tests {
         let ctx = crate::test_support::context();
         let bounds = Rect::from_min_size(pos2(100.0, 100.0), vec2(280.0, 64.0));
         let rows: Vec<_> = (0..12).map(|index| Item::action(&index.to_string(), "Action", "")).collect();
-        let id = egui::Id::unique("tiny-menu-host");
-        Menu::set_cursor(&ctx, id, 0, Some(11));
-        for pass in 0..3 {
-            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                let result = Menu::popup_with_bounds(ui.ctx(), id, MenuAnchor::Point(bounds.left_bottom()), &rows, false, bounds);
-                assert!(bounds.contains_rect(result.rect.unwrap()), "popup {:?} exceeds host {:?}", result.rect, bounds);
-                if pass == 2 {
-                    let focused = &result.rows.iter().find(|(item, _)| item.id == "11").unwrap().1;
-                    assert_eq!(focused.interact_rect, focused.rect, "the selected action remains fully interactable in a short host");
-                }
-            });
-            output.textures_delta.clear();
+        for (index, anchor) in [MenuAnchor::Point(bounds.left_bottom()), MenuAnchor::Rect(Rect::from_center_size(bounds.center(), vec2(100.0, 24.0)))]
+            .into_iter()
+            .enumerate()
+        {
+            let id = egui::Id::unique(("tiny-menu-host", index));
+            Menu::set_cursor(&ctx, id, 0, Some(11));
+            for pass in 0..3 {
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    let result = Menu::popup_with_bounds(ui.ctx(), id, anchor, &rows, false, bounds);
+                    assert!(bounds.contains_rect(result.rect.unwrap()), "popup {:?} exceeds host {:?}", result.rect, bounds);
+                    if pass == 2 {
+                        let focused = &result.rows.iter().find(|(item, _)| item.id == "11").unwrap().1;
+                        assert_eq!(focused.interact_rect, focused.rect, "the selected action remains fully interactable in a short host");
+                    }
+                });
+                output.textures_delta.clear();
+            }
         }
     }
 
@@ -1229,6 +1234,64 @@ mod tests {
         let cancelled = frame(events);
         assert!(cancelled.close && !cancelled.open);
         assert!(cancelled.picked.is_none(), "the caller must not dispatch Remove after Escape cancelled its menu");
+    }
+
+    #[test]
+    fn tall_rect_anchored_roots_scroll_on_one_side_without_covering_the_opener() {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 720.0));
+        for (top, below) in [(80.0_f32, true), (620.0, false), (350.0, false)] {
+            let ctx = crate::test_support::context();
+            let id = egui::Id::unique(("side-bounded-root", top.to_bits()));
+            let anchor = Rect::from_min_size(pos2(50.0, top), vec2(100.0, 24.0));
+            let items: Vec<_> = (0..50).map(|index| Item::action(&index.to_string(), &format!("Action {index}"), "")).collect();
+            let frame = |events| {
+                let mut result = MenuOutput::default();
+                let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+                    result = Menu::popup(ui.ctx(), id, MenuAnchor::Rect(anchor), &items, false);
+                });
+                output.textures_delta.clear();
+                result
+            };
+            frame(vec![]);
+            frame(vec![]);
+            let opened = frame(vec![]);
+            let bounds = opened.rect.unwrap();
+            assert!(screen.contains_rect(bounds));
+            assert!(!bounds.intersect(anchor).is_positive(), "scrolling root {bounds:?} must not cover opener {anchor:?}");
+            if below {
+                assert!(bounds.top() >= anchor.bottom());
+            } else {
+                assert!(bounds.bottom() <= anchor.top());
+            }
+            frame(key(egui::Key::End));
+            let revealed = frame(vec![]);
+            let last = &revealed.rows.last().unwrap().1;
+            assert_eq!(last.interact_rect, last.rect, "the final action is reachable after scrolling");
+            assert!(revealed.rect.unwrap().contains_rect(last.rect));
+            assert_eq!(frame(key(egui::Key::Enter)).picked.map(|item| item.id), Some("49".into()));
+        }
+    }
+
+    #[test]
+    fn middle_point_popup_shows_all_rows_when_the_usable_window_fits_them() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("point-popup-full-fit");
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 1000.0));
+        let mut items = vec![Item::heading("Select Other")];
+        items.extend((0..20).map(|index| Item::action(&index.to_string(), &format!("Choice {index}"), "")));
+        for _ in 0..3 {
+            solidcraft_ui_registry::clear_handles();
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                let popup = Menu::popup(ui.ctx(), id, MenuAnchor::Point(pos2(300.0, 500.0)), &items, false);
+                let bounds = popup.rect.unwrap();
+                let last = &popup.rows.last().unwrap().1;
+                assert!(screen.contains_rect(bounds));
+                assert!(bounds.contains_rect(last.rect), "all twenty rows fit without scrolling: {:?} in {bounds:?}", last.rect);
+                assert_eq!(last.interact_rect, last.rect);
+                assert!(solidcraft_ui_registry::rect_of("menu:scroll_down").is_none(), "placement and scroll height use the same window bottom");
+            });
+            output.textures_delta.clear();
+        }
     }
 
     #[test]
