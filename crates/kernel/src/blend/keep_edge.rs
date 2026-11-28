@@ -20,6 +20,7 @@
 //! normal) that bounds the floor, such as a ring's own cylinders: the prism runs on past that end
 //! and is kept within the floor's outline.
 
+use solidcore_ops::keep_edge as geo;
 use solidcore_record::brep::Surface;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -33,6 +34,11 @@ const REL: f64 = 1e-7;
 
 fn refuse(why: impl std::fmt::Display) -> KernelError {
     KernelError::Failed(format!("keep-edge round: {why}"))
+}
+
+/// A point or direction as the kernel's measuring functions take it.
+fn arr(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
 }
 
 /// How the prism ends at one end of the edge.
@@ -111,7 +117,7 @@ fn fill_of(body: &Body, rec: &Faces, e: usize, radius: f64) -> Result<Option<Fil
     if !rec.straight(e) {
         return Ok(None);
     }
-    let Some(along) = (b - a).normalized() else { return Ok(None) };
+    let Some(along) = geo::unit_between(arr(a), arr(b)).map(|u| Vec3::new(u[0], u[1], u[2])) else { return Ok(None) };
     let mut why = None;
     // Either face may be the wall: the one that is lower than the radius.
     for (wall, floor) in [(*f0, *f1), (*f1, *f0)] {
@@ -136,11 +142,8 @@ fn with_wall(body: &Body, rec: &Faces, e: usize, wall: usize, floor: usize, ends
     // Square to the edge, into each face.
     let f_dir = rec.direction_into_face(floor, use_in(floor)?).ok_or_else(|| refuse("the floor's direction"))?;
     let w_dir = rec.direction_into_face(wall, use_in(wall)?).ok_or_else(|| refuse("the wall's direction"))?;
-    let (wx, wy) = (w_dir.dot(f_dir), w_dir.dot(nf));
     // Concave: the wall rises from the floor on its outer side, and the floor runs off the wall's.
-    if wy <= 1e-9 || f_dir.dot(nw) <= 1e-9 {
-        return Ok(None);
-    }
+    let Some((wx, wy)) = geo::wall_frame(arr(f_dir), arr(w_dir), arr(nf), arr(nw)) else { return Ok(None) };
     // The ordinary round (a ball tangent to both faces) touches the wall at a distance
     // R / tan(a / 2) from the edge, a being the angle between the faces (cos a = wx), which is a
     // height R (1 + wx) up the wall (tan(a / 2) = wy / (1 + wx)). Where the wall is at least that
@@ -150,7 +153,7 @@ fn with_wall(body: &Body, rec: &Faces, e: usize, wall: usize, floor: usize, ends
     for u in rec.uses(wall) {
         for v in rec.rec.edges.get(u.edge as usize).map(|x| x.vertices).unwrap_or_default() {
             if let Some(p) = rec.point(v) {
-                tallest = tallest.max((p - a).dot(w_dir) * wy);
+                tallest = tallest.max(geo::wall_height(arr(a), arr(p), arr(w_dir), wy));
             }
         }
     }
@@ -189,33 +192,25 @@ fn with_wall(body: &Body, rec: &Faces, e: usize, wall: usize, floor: usize, ends
         return Err(refuse("the wall must be a quadrilateral with a straight top edge"));
     };
     let (t0, t1) = rec.ends(*t).ok_or_else(|| refuse("the top edge"))?;
-    let length = (t0 - a).dot(w_dir);
-    let level = (t1 - a).dot(w_dir);
-    let top_dir = (t1 - t0).normalized().ok_or_else(|| refuse("the top edge"))?;
-    if (length - level).abs() > tol || length <= tol || top_dir.cross(along).len() > 1e-6 {
+    let top = geo::top_edge(arr(a), arr(t0), arr(t1), arr(w_dir), arr(along)).ok_or_else(|| refuse("the top edge"))?;
+    let length = top.length;
+    if (length - top.level).abs() > tol || length <= tol || !top.parallel {
         return Err(refuse("the wall's top edge must be straight and parallel to its base"));
     }
-    let h = length * wy;
     let r = radius;
-    if h >= reach * (1.0 - 1e-9) {
+    if length * wy >= reach * (1.0 - 1e-9) {
         return Ok(None);
     }
     // The section: x along the floor away from the wall, y along its normal; the wall's top
     // edge at (tx, h); the circle tangent to the floor through it.
-    let tx = length * wx;
-    let c = (r * r - (r - h) * (r - h)).sqrt();
-    let cx = tx + c;
-    let theta = c.atan2(r - h);
+    let section = geo::round_section(length, wx, wy, r).ok_or_else(|| refuse("the wall is too high for the round"))?;
+    let geo::Section { h, tx, cx, theta, .. } = section;
     if cx <= 1e-9 {
         return Err(refuse("the wall leans too far over the floor for the round to leave it"));
     }
     // The arc stays on the air side of the wall's plane.
-    for i in 0..=16 {
-        let ang = -std::f64::consts::FRAC_PI_2 - theta * f64::from(i) / 16.0;
-        let (px, py) = (cx + r * ang.cos(), r + r * ang.sin());
-        if px * wy - py * wx < -tol {
-            return Err(refuse("the round would cross the wall"));
-        }
+    if !geo::arc_clears_wall(&section, wx, wy, r, tol) {
+        return Err(refuse("the round would cross the wall"));
     }
     // The floor reaches under the whole round: the contact line at its middle and quarters.
     for t in [0.25, 0.5, 0.75] {
@@ -230,11 +225,7 @@ fn with_wall(body: &Body, rec: &Faces, e: usize, wall: usize, floor: usize, ends
     let margin = |end: End| if end == End::Upright { 4.0 * r } else { 0.0 };
     // The prism, in the section plane at the edge's start, x along the floor, y up from it.
     let plane = Plane { origin: a, x: f_dir, y: nf };
-    let sign = if f_dir.cross(nf).dot(along) > 0.0 { 1.0 } else { -1.0 };
-    let s_b = (b - a).dot(f_dir.cross(nf));
-    let s_a = -sign * margin(end_a);
-    let s_b = s_b + sign * margin(end_b);
-    let (lo, hi) = if s_a <= s_b { (s_a, s_b) } else { (s_b, s_a) };
+    let (lo, hi) = geo::prism_span(arr(a), arr(b), arr(f_dir), arr(nf), arr(along), margin(end_a), margin(end_b));
     let p0 = Vec2::new(0.0, 0.0);
     let t_pt = Vec2::new(tx, h);
     let start = -std::f64::consts::FRAC_PI_2;
@@ -295,17 +286,14 @@ fn classify_end(rec: &Faces, wall: usize, floor: usize, side: usize, nf: Vec3, a
     let upright = match &face.surface {
         Surface::Plane { .. } | Surface::PlaneThrough { .. } => {
             let n = rec.plane_normal(g).ok_or_else(|| refuse("the end face"))?;
-            if n.dot(nf).abs() > 1e-6 {
-                return Err(refuse("the wall's end must be square to the floor"));
+            match geo::plane_end(arr(n), arr(nf), arr(along)) {
+                geo::EndKind::Tilted => return Err(refuse("the wall's end must be square to the floor")),
+                geo::EndKind::Square => return Ok(End::Square),
+                geo::EndKind::Upright => true,
             }
-            if n.cross(along).len() <= 1e-6 {
-                return Ok(End::Square);
-            }
-            true
         }
         Surface::Cylinder { frame, .. } => {
-            let axis = v3(frame.x_axis).cross(v3(frame.y_axis));
-            if axis.cross(nf).len() > 1e-6 {
+            if !geo::cylinder_is_upright(arr(v3(frame.x_axis)), arr(v3(frame.y_axis)), arr(nf)) {
                 return Err(refuse("the wall's end must be square to the floor"));
             }
             true

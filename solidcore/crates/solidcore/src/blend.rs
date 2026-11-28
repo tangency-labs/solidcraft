@@ -31,6 +31,7 @@ pub mod fillet_standard_solver;
 pub mod fillet_tangent_rollover;
 pub mod hcr;
 pub mod identify_fillet;
+pub mod keep_edge_section;
 pub mod law_corners;
 pub mod round_room;
 pub mod run_out;
