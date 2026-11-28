@@ -31,8 +31,9 @@ pub const FORMAT: &str = "solidcraft-profile/1";
 pub const MAX_PROFILES: usize = 32;
 /// Most bytes read from a profile file.
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
-/// Most bytes in one checked profile document.
-const MAX_PROFILE_BYTES: usize = 1024 * 1024;
+/// Most bytes in one checked profile document: room for the largest view navigator body, whose
+/// lists are plain numbers ([`crate::view_gizmo`]), about 2 MB written out, and the rest.
+pub(crate) const MAX_PROFILE_BYTES: usize = 3 * 1024 * 1024;
 const MAX_SHORTCUTS: usize = 2000;
 const MAX_FAVOURITES: usize = 64;
 /// Most imported themes one profile carries (the one it uses).
@@ -46,18 +47,20 @@ const MAX_ID: usize = 200;
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_eye_left",
+    "browser_scroll_wheel",
     "center_arc_follows_cursor",
     "color_vision",
+    "command_search_centred",
     "design_reopen_views",
     "design_reuse_views",
     "design_sub_tab_render",
     "design_sub_tab_sheets",
-    "design_sub_tab_sketches",
     "design_views_as_tabs",
     "dialog_buttons",
     "direct_interaction",
     "escape_twice_finishes_sketch",
     "free_orbit",
+    "free_orbit_key",
     "free_orbit_upright",
     "hidden_toolbar_tabs",
     "hide_constraint_glyphs_zoomed_out",
@@ -68,9 +71,9 @@ const PROFILE_KEYS: &[&str] = &[
     "invert_navigator_arrows",
     "keep_hover_while_navigating",
     "keep_work_on_tab_switch",
+    "keyboard_profile",
     "language",
     "layout",
-    "library_thumbnail_size",
     "line_drag_draws_one",
     "line_hover_tangent_arc",
     "live_panel_drag_preview",
@@ -83,10 +86,12 @@ const PROFILE_KEYS: &[&str] = &[
     "mouse_gestures",
     "nav",
     "nav_bridge_enabled",
+    "nav_button_map",
     "nav_bridge_port",
     "navigation_bar",
     "navigator_fit",
     "navigator_style",
+    "navigator_turn_around",
     "orbit_around",
     "orbit_reverse",
     "origin_plane_names",
@@ -105,12 +110,12 @@ const PROFILE_KEYS: &[&str] = &[
     "ribbon_reveal",
     "ribbon_tabs_only",
     "right_drag_orbits",
+    "roll_key",
     "select_other_hidden",
     "selection_shift_add_only",
     "shortcut_again_ends_tool",
     "shortcut_cycles_modes",
     "show_design_view_switcher",
-    "show_document_browser",
     "show_selected_hidden_edges",
     "sketch_align_points",
     "sketch_auto_dimensions",
@@ -137,6 +142,7 @@ const PROFILE_KEYS: &[&str] = &[
     "timeline_origin_bodies",
     "toast_place",
     "trackpad_pan",
+    "trackpad_twist_rolls",
     "trackpad_twist_turns",
     "trackpad_zoom_modifier",
     "ui_font",

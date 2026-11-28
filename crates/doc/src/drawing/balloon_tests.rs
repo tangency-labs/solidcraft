@@ -37,12 +37,13 @@ fn ballooned() -> (Drawing, [u64; 2]) {
         place: ViewPlace::At([150.0, 150.0]),
         settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     let mut added = [0; 2];
     for ((path, at), id) in [(vec![3], [40.0, 25.0]), (vec![3, 7], [-35.5, 60.0])].into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.balloons.add([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at, parts_list: None })]);
+        d.balloons.add([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at, parts_list: None, along: None })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -133,7 +134,10 @@ fn the_balloons_rules_are_kept_on_reading() {
     // A placed part's path: 1 to 64 occurrences, none of them 0. A design's own body is no part.
     let path = |p: Value| refused(&d, |v| balloon(v, &nested)["edge"]["path"] = p);
     let deep = rule(&nested, "an occurrence path is at most 64 occurrences, none of them 0");
-    let own = rule(&nested, "it points at a placed part: its edge's body is placed through an occurrence");
+    let own = rule(
+        &nested,
+        "a balloon points at a part placed as a component of an assembly: an edge with no `path` is on the design's own body, so place the part as a component and give its occurrence in the edge's `path`",
+    );
     assert_eq!(
         [path(json!([3])), path(json!(vec![3; 64])), path(json!(vec![3; 65])), path(json!([3, 0])), path(json!([]))],
         ["read".to_string(), "read".into(), deep.clone(), deep, own.clone()]

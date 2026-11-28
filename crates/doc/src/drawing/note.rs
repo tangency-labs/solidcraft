@@ -6,6 +6,9 @@
 //!   symbols placed on a drawing can use it too.
 //! - **The place** is on paper: in millimetres from the sheet's lower-left corner for a note on a
 //!   sheet, and from the view's centre for any other, so that note moves with its view.
+//! - **The alignment** ([`HAlign`], the one title blocks and tables use) says which end of the text
+//!   sits at the place: its start (left), its middle (centre) or its end (right), each line the same
+//!   way. A new note starts at its place; a note saved before this has none and keeps its layout.
 //! - **The content** is the title block's text with fields ([`Content`]), so a sheet's number works
 //!   in a note. It reads what a note can name: never an answer given when a block was placed, or a
 //!   table's row.
@@ -26,7 +29,7 @@ use std::ops::RangeInclusive;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_geom::cell::{Content, Part, Source};
+use solidcraft_geom::cell::{Content, HAlign, Part, Source};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
 
@@ -50,11 +53,14 @@ pub enum Anchor {
     Sheet(#[serde(with = "crate::ids")] u64),
     /// A view, by its id.
     View(#[serde(with = "crate::ids")] u64),
-    /// An edge of a view's model: its leader ends on the edge's middle.
+    /// An edge of a view's model: its leader ends `along` it, as a part of its length from its start
+    /// (#22195), else on its middle.
     Edge {
         #[serde(with = "crate::ids")]
         view: u64,
         edge: ModelEdge,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<f64>,
     },
     /// A corner or a centre of a view's model: its leader ends there.
     Corner {
@@ -108,6 +114,14 @@ pub enum Branch {
 }
 
 impl Branch {
+    /// The model reference it points at.
+    pub fn reference(&self) -> Reference<'_> {
+        match self {
+            Branch::Edge(edge) => Reference::Edge(edge),
+            Branch::Corner(point) => Reference::Point(point),
+        }
+    }
+
     /// The occurrence path of the model reference it points at.
     pub fn path(&self) -> &[u64] {
         match self {
@@ -143,6 +157,13 @@ pub struct Note {
     /// The height of its capitals on paper, when it sets its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_mm: Option<f64>,
+    /// Which end of its text sits at its place, and how each line stands in the block: left starts at the
+    /// place, centre centres on it, right ends at it, each line of several the same way (#20122). None
+    /// is the layout every note had before alignments: the block centred on the place, its lines
+    /// starting at the block's left edge. A note saved without one reads as None and draws exactly as it
+    /// did; the commands make a new note left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align: Option<HAlign>,
     /// Its leaders beside its anchor's, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub branches: Vec<Branch>,
@@ -201,7 +222,12 @@ impl Drawing {
                 })?;
             }
             Anchor::View(_) => {}
-            Anchor::Edge { edge, .. } => check_edge(edge)?,
+            Anchor::Edge { edge, along, .. } => {
+                check_edge(edge)?;
+                require(along.is_none_or(|t| (0.0..=1.0).contains(&t)), || {
+                    "where its leader ends along its edge is a part of it from 0 to 1".into()
+                })?;
+            }
             Anchor::Corner { point, .. } => check_point(point)?,
         }
         if let Some(view) = n.anchor.view() {
@@ -240,8 +266,8 @@ impl End {
     /// The leader of no model reference: a note on a sheet or a view alone.
     const NONE: End = End { status: Status::Ok, point: None, exact: true };
 
-    fn edge(lookup: &mut Lookup<'_>, edge: &ModelEdge) -> End {
-        let (status, point, exact) = lookup.middle(edge);
+    fn edge(lookup: &mut Lookup<'_>, edge: &ModelEdge, along: Option<f64>) -> End {
+        let (status, point, exact) = lookup.along(edge, along);
         End { status, point, exact }
     }
 
@@ -275,11 +301,11 @@ impl Document {
                 let n = drawing.notes.by_id(*id).ok_or_else(|| DocError::Unknown(format!("note {}", ids::encode(*id))))?;
                 let anchor = match &n.anchor {
                     Anchor::Sheet(_) | Anchor::View(_) => End::NONE,
-                    Anchor::Edge { edge, .. } => End::edge(&mut lookup, edge),
+                    Anchor::Edge { edge, along, .. } => End::edge(&mut lookup, edge, *along),
                     Anchor::Corner { point, .. } => End::corner(&mut lookup, point),
                 };
                 let mut branch = |branch: &Branch| match branch {
-                    Branch::Edge(edge) => End::edge(&mut lookup, edge),
+                    Branch::Edge(edge) => End::edge(&mut lookup, edge, None),
                     Branch::Corner(point) => End::corner(&mut lookup, point),
                 };
                 Ok(Resolved { anchor, branches: n.branches.iter().map(&mut branch).collect() })

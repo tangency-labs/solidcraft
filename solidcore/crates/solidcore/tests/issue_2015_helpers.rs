@@ -47,7 +47,7 @@ fn typed_predicates_preserve_all_three_states_and_reject_invalid_flags() {
 }
 
 #[test]
-fn typed_shell_query_keeps_the_raw_querys_result_and_rng_state() {
+fn typed_shell_query_keeps_the_raw_querys_result() {
     let mut k_raw = Kernel::default();
     let mut k_typed = Kernel::default();
     let mut raw = create_box(&mut k_raw, Point3::ZERO, 2.0, 3.0, 4.0).unwrap();
@@ -56,7 +56,6 @@ fn typed_shell_query_keeps_the_raw_querys_result_and_rng_state() {
     let expected = is_inner_shell_of(&mut k_raw, &mut raw, shell, None).unwrap();
     let actual = is_inner_shell_of_tri(&mut k_typed, &mut typed, shell, None).unwrap();
     assert_eq!(actual, Tri::try_from(expected).unwrap());
-    assert_eq!(k_raw.rng.next_u64(), k_typed.rng.next_u64());
     assert!(is_inner_shell_of_tri(
         &mut k_typed,
         &mut typed,

@@ -206,6 +206,25 @@ pub enum Curve2 {
     },
 }
 
+/// A [`Curve2`] prepared for repeated evaluation at many parameters without rebuilding its
+/// NLib curve on every point.
+#[derive(Clone, Debug)]
+pub struct Curve2Eval {
+    curve: crate::nurbs::crv_basic::Curve,
+}
+
+impl Curve2Eval {
+    /// The point at `t` (`None` outside the knot range or for non-finite `t`).
+    #[must_use]
+    pub fn eval(&self, t: f64) -> Option<[f64; 2]> {
+        if !t.is_finite() {
+            return None;
+        }
+        let p = self.curve.eval(t, Side::Left).ok()?;
+        (p.x.is_finite() && p.y.is_finite()).then_some([p.x, p.y])
+    }
+}
+
 impl Curve2 {
     /// The active parameter interval `[knots[degree], knots[count]]`.
     #[must_use]
@@ -218,20 +237,17 @@ impl Curve2 {
         Some([*k.get(degree)?, *k.get(count)?])
     }
 
+    /// Prepare this pcurve for repeated evaluation ([`Curve2Eval`]); `None` for malformed data.
+    #[must_use]
+    pub fn evaluator(&self) -> Option<Curve2Eval> {
+        let curve = nl_curve2(self)?;
+        let count = curve.knots().len().checked_sub(curve.degree() + 1)?;
+        basis_check(curve.degree(), count, curve.knots()).then_some(Curve2Eval { curve })
+    }
+
     /// The point at `t` (`None` outside the knot range or for malformed data).
     #[must_use]
     pub fn eval(&self, t: f64) -> Option<[f64; 2]> {
-        let c = nl_curve2(self)?;
-        if !t.is_finite()
-            || !basis_check(
-                c.degree(),
-                c.knots().len().checked_sub(c.degree() + 1)?,
-                c.knots(),
-            )
-        {
-            return None;
-        }
-        let p = c.eval(t, Side::Left).ok()?;
-        (p.x.is_finite() && p.y.is_finite()).then_some([p.x, p.y])
+        self.evaluator()?.eval(t)
     }
 }

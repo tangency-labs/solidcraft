@@ -1,4 +1,7 @@
 //! Runtime icon discovery: use the same headless UI and requests as control clients.
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -427,7 +430,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     assistant(&mut h, &mut requested);
 
     let navigation = h.app.preferences.navigation_bar.clone();
-    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","selection_mode","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
     collect(&mut h, "navigation catalogue", &mut requested);
     let size = h.ctx.content_rect().size();
     h.call("ui.resize", json!({"width":500,"height":800}));
@@ -440,7 +443,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.call("ui.prefs", json!({"navigation_bar":navigation}));
     h.frames(3);
 
-    for (handle, surface) in [("nav:slot:visual_style", "navigation visual styles"), ("nav:view", "navigation display")] {
+    for (handle, surface) in [
+        ("nav:slot:selection_mode", "navigation selection modes"),
+        ("nav:slot:visual_style", "navigation visual styles"),
+        ("nav:view", "navigation display"),
+    ] {
         click(&mut h, handle);
         h.frames(3);
         collect(&mut h, surface, &mut requested);
@@ -534,8 +541,10 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    let data = std::env::temp_dir().join(format!("solidcraft-icon-audit-{}.png", std::process::id()));
+    std::fs::write(&data, &png).unwrap();
+    let data = data.to_string_lossy().into_owned();
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
     menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
     h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
@@ -640,10 +649,13 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         h.call("ui.selectOther", json!({"close":true}));
     }
 
-    // Search every command by its full label so results beyond the first page are painted.
+    // Search every command by its full label so results beyond the first page are painted. Search
+    // leaves a script-only command out of a search by name and lists it for its exact id (#9734),
+    // so such a command is searched by its id and its icon is painted too.
     for command in solidcraft_engine::command_specs() {
+        let by_label = solidcraft_ui_egui::shortcut_box::search(&h.app, command.label).iter().any(|row| row.0 == command.id);
         solidcraft_ui_egui::shortcut_box::open(&mut h.app, None);
-        h.app.sbox.text = command.label.to_owned();
+        h.app.sbox.text = if by_label { command.label } else { command.id }.to_owned();
         h.frames(2);
         collect(&mut h, command.id, &mut requested);
         escape(&mut h);
@@ -760,6 +772,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     for (name, source) in [
         ("dimensions and constraints", include_str!("scenarios/s11_sketch_constraints.json")),
         ("corner popup", include_str!("scenarios/sketch_corner_window.json")),
+        ("flange corner cards", include_str!("scenarios/sheet_flange_corner_cards.json")),
         ("sketch palette", include_str!("scenarios/sketch_palette_linetype_icons.json")),
         ("sketch Select Other", include_str!("scenarios/select_other_coincident_lines.json")),
         ("canvas calibration", include_str!("scenarios/s19_canvas_calibrate.json")),
@@ -824,7 +837,17 @@ fn audit_is_opt_in_drains_and_records_resolved_aliases() {
 #[test]
 fn offset_mode_artwork_review() {
     use solidcraft_theme::{ColorVision, Tokens};
-    let names = ["offset", "offset_two_sides", "offset_symmetric", "sketch_chamfer", "sketch_chamfer_two_distances", "split_body"];
+    let names = [
+        "offset",
+        "offset_two_sides",
+        "offset_symmetric",
+        "sketch_chamfer",
+        "sketch_chamfer_two_distances",
+        "split_body",
+        "gusset_side_negative",
+        "gusset_side_center",
+        "gusset_side_positive",
+    ];
     let mut sheet = tiny_skia::Pixmap::new(400, names.len() as u32 * 88).unwrap();
     for (row, name) in names.iter().enumerate() {
         let resolved = icon_svg::resolve(name);

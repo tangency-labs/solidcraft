@@ -5,9 +5,10 @@
 //! the ordinary DxfFile constructor keeps the strict owned-file admission.
 //! Numbers follow the writer's one rule on both routes.
 
-use super::{DxfFile, DxfLinetype, DxfShape, EntityView, LayerView, extend_extents, path, shape_work, write_drawing_views};
+use super::{DxfExportProfile, DxfFile, DxfLinetype, DxfShape, EntityView, LayerView, extend_extents, path, shape_work, write_drawing_views};
 use crate::{IoError, Result};
 use solidcore_record::Vec2;
+use std::collections::{HashMap, hash_map::Entry};
 
 #[derive(Clone, Copy, Debug)]
 enum Producer {
@@ -26,6 +27,9 @@ pub(super) struct Budget {
     values: usize,
     text_bytes: usize,
     bytes: usize,
+    /// The file's `$INSUNITS` (1 in, 2 ft, 4 mm, 5 cm, 6 m); the producer's geometry is in this
+    /// unit and the header declares it.
+    units: i32,
 }
 
 fn invalid(message: &str) -> IoError {
@@ -46,7 +50,10 @@ impl Budget {
         matches!(self.producer, Producer::LegacyBaseline)
     }
 
-    fn new(producer: Producer, layers: usize, entities: usize, values: usize, text_bytes: usize) -> Result<Self> {
+    fn new(producer: Producer, layers: usize, entities: usize, values: usize, text_bytes: usize, units: i32) -> Result<Self> {
+        if !matches!(units, 1 | 2 | 4 | 5 | 6) {
+            return Err(invalid("producer file units are not a supported $INSUNITS"));
+        }
         // A finite f64 in the retained fixed twelve-decimal spelling needs at
         // most 323 bytes. 2048 bytes per work value covers its coordinate tuple,
         // group codes and delimiters. Entity/layer allowances include handles,
@@ -64,7 +71,7 @@ impl Budget {
         // do not reject a valid 32-bit producer because its loose bound exceeds it.
         let addressable = isize::MAX as u128;
         let bytes = usize::try_from(bytes.min(addressable)).map_err(|_| invalid("producer byte bound is not addressable"))?;
-        Ok(Self { producer, layers, entities, values, text_bytes, bytes })
+        Ok(Self { producer, layers, entities, values, text_bytes, bytes, units })
     }
 
     pub(super) fn layer_name(self, name: &str, color: i16, linetype: DxfLinetype, weighted: bool) -> Result<()> {
@@ -90,10 +97,15 @@ impl Budget {
             (Producer::FlatPattern, "BEND_UP") => Some((1, DxfLinetype::Dashed)),
             (Producer::FlatPattern, "BEND_DOWN") => Some((5, DxfLinetype::Dashed)),
             (Producer::FlatPattern, "BEND_NOTES") => Some((8, DxfLinetype::Continuous)),
+            // The note beside each press-in hardware hole (`M3 nut`).
+            (Producer::FlatPattern, "HARDWARE") => Some((8, DxfLinetype::Continuous)),
             (Producer::FlatPattern, "PERFORATION") => Some((3, DxfLinetype::Continuous)),
             // A roll's lines (where it starts and ends, and its middle), on a layer of their own so
             // a reader of the bend layers doesn't take a roll for bends.
             (Producer::FlatPattern, "ROLL") => Some((3, DxfLinetype::Continuous)),
+            // A formed bead's centreline and footprint, by the side it stands out of.
+            (Producer::FlatPattern, "FORM_UP") => Some((1, DxfLinetype::Dashed)),
+            (Producer::FlatPattern, "FORM_DOWN") => Some((5, DxfLinetype::Dashed)),
             (Producer::FlatPattern, value) if pocket_name(value) => Some((3, DxfLinetype::Continuous)),
             _ => None,
         };
@@ -111,8 +123,8 @@ impl Budget {
                     || (layer == "VISIBLE" && matches!(shape, DxfShape::Circle { .. } | DxfShape::Arc { .. }))
             }
             Producer::FlatPattern => match layer {
-                "BEND_UP" | "BEND_DOWN" | "ROLL" => matches!(shape, DxfShape::Line(..)),
-                "BEND_NOTES" => matches!(shape, DxfShape::Text { .. }),
+                "BEND_UP" | "BEND_DOWN" | "ROLL" | "FORM_UP" | "FORM_DOWN" => matches!(shape, DxfShape::Line(..)),
+                "BEND_NOTES" | "HARDWARE" => matches!(shape, DxfShape::Text { .. }),
                 "PERFORATION" => matches!(shape, DxfShape::Circle { .. }),
                 _ => matches!(
                     shape,
@@ -152,7 +164,7 @@ impl Budget {
 pub(super) fn baseline_file() -> Result<DxfFile<DxfShape>> {
     // The original 53 include the whole-text non-BMP witness after 10,000 BMP
     // scalars. The adapter admits no larger text work and is not production API.
-    let mut budget = Budget::new(Producer::LegacyBaseline, 1024, 1_000_000, 1_000_000, 40_004)?;
+    let mut budget = Budget::new(Producer::LegacyBaseline, 1024, 1_000_000, 1_000_000, 40_004, 4)?;
     budget.bytes = crate::MAX_DRAWING_BYTES;
     DxfFile::with_export_budget(budget)
 }
@@ -160,7 +172,8 @@ pub(super) fn baseline_file() -> Result<DxfFile<DxfShape>> {
 fn pocket_name(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("POCKET_") else { return false };
     let rest = ["TOP_Z", "BOTTOM_Z", "INTERNAL_Z"].into_iter().find_map(|prefix| rest.strip_prefix(prefix));
-    let Some(rest) = rest.and_then(|value| value.strip_suffix("_MM")) else { return false };
+    // The depth unit in the name is the file's: `_MM` in a millimetre file, `_IN` in an inch one.
+    let Some(rest) = rest.and_then(|value| value.strip_suffix("_MM").or_else(|| value.strip_suffix("_IN"))) else { return false };
     let Some((low, high)) = rest.split_once("_TO_") else { return false };
     let number = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit() || matches!(c, b'-' | b'.'));
     number(low) && number(high)
@@ -173,6 +186,12 @@ impl DxfFile<DxfShape> {
     /// bend records) and already generated perforation holes. Actual consumption
     /// is checked again by the one writer; a smaller forged plan cannot extend it.
     pub fn for_flat_pattern_export(contours: usize, bends: usize, perforations: usize) -> Result<Self> {
+        Self::for_flat_pattern_export_units(contours, bends, perforations, 4)
+    }
+
+    /// [`for_flat_pattern_export`] for a file in another unit: `$INSUNITS` 1 (inches), 2 (feet),
+    /// 5 (centimetres) or 6 (metres), the producer's geometry already in that unit.
+    pub fn for_flat_pattern_export_units(contours: usize, bends: usize, perforations: usize, units: i32) -> Result<Self> {
         let path_entities = mul(contours, path::MAX_PATH_ITEMS)?;
         let entities = add(add(path_entities, mul(bends, 2)?)?, perforations)?;
         // An exact path item has at most 129 sampled extent points (ELLIPSE),
@@ -183,8 +202,8 @@ impl DxfFile<DxfShape> {
         let values = (path_entities as u128) * 129 + (bends as u128) * 6 + (perforations as u128) * 2;
         let values = usize::try_from(values).unwrap_or(usize::MAX);
         let text_bytes = usize::try_from((bends as u128) * 2048).unwrap_or(usize::MAX);
-        // Layer 0 and the nine named roles, and at most one pocket layer per contour.
-        let budget = Budget::new(Producer::FlatPattern, add(contours, 10)?, entities, values, text_bytes)?;
+        // Layer 0 and the twelve named roles, and at most one pocket layer per contour.
+        let budget = Budget::new(Producer::FlatPattern, add(contours, 13)?, entities, values, text_bytes, units)?;
         Self::with_export_budget(budget)
     }
 
@@ -210,18 +229,36 @@ impl DxfFile<DxfShape> {
         }
         let producer = if arcs { Producer::CurrentViewArcs } else { Producer::CurrentView };
         let values_per_line = if arcs { 65 } else { 2 };
-        let budget = Budget::new(producer, 4, entities, add(mul(lines, values_per_line)?, sketch_points)?, 0)?;
+        let budget = Budget::new(producer, 4, entities, add(mul(lines, values_per_line)?, sketch_points)?, 0, 4)?;
         Self::with_export_budget(budget)
     }
 }
 
-pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget) -> Result<String> {
+/// Write a producer's file. The file is checked under its contract as it stands, with its
+/// standard layers; a flat pattern's `profile` then says what each of those layers is written as
+/// (nothing for a role that is off, whose entities are left out too). Without a profile every
+/// layer and entity is written as it is.
+pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget, profile: Option<&DxfExportProfile>) -> Result<String> {
     if file.layers().len() > budget.layers || file.entities().len() > budget.entities {
         return Err(invalid("stored metadata exceeds the immutable producer plan"));
+    }
+    if profile.is_some() && !matches!(budget.producer, Producer::FlatPattern) {
+        return Err(invalid("a DXF profile styles the flat pattern's roles only"));
     }
     for layer in file.layers() {
         budget.layer_name(layer.name(), layer.color(), layer.linetype(), layer.weight().is_some())?;
     }
+    // With a profile: one entry per layer of the file, in its order.
+    let written = match profile {
+        None => None,
+        Some(profile) => {
+            let mut written = Vec::new();
+            written.try_reserve_exact(file.layers().len()).map_err(|_| invalid("layer-view allocation failed"))?;
+            written.extend(file.layers().iter().map(|l| profile.written(l.name(), l.color(), l.linetype())));
+            Some(written)
+        }
+    };
+    let written = written.as_deref();
     let mut values = 0usize;
     let mut text_bytes = 0usize;
     let mut samples = Vec::new();
@@ -232,6 +269,12 @@ pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget) -> Result<String> 
             return Err(invalid("producer entities do not have weight overrides"));
         }
         budget.shape(layer.name(), entity.geometry())?;
+        if let Some(written) = written
+            && written.get(file.layer_index(entity.layer())?).is_none_or(Option::is_none)
+        {
+            // Its role is off: checked as the producer's, but not written or measured.
+            continue;
+        }
         let count = shape_work(entity.geometry())?;
         values = add(values, count)?;
         if values > budget.values {
@@ -254,16 +297,59 @@ pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget) -> Result<String> 
     }
     let mut layer_views = Vec::new();
     layer_views.try_reserve_exact(file.layers().len()).map_err(|_| invalid("layer-view allocation failed"))?;
-    layer_views.extend(file.layers().iter().map(|l| LayerView { name: l.name(), color: l.color(), linetype: l.linetype(), weight: l.weight() }));
-    if matches!(budget.producer, Producer::FlatPattern) {
-        // Legacy flat files put 0 first, then role/depth names in lexical order.
-        // Sort borrowed metadata once, without rewriting in-memory handles.
-        layer_views.sort_by(|a, b| a.name.cmp(b.name));
+    match written {
+        None => {
+            layer_views.extend(file.layers().iter().map(|l| LayerView {
+                name: l.name(),
+                color: l.color(),
+                linetype: l.linetype(),
+                weight: l.weight(),
+            }));
+            if matches!(budget.producer, Producer::FlatPattern) {
+                // Legacy flat files put 0 first, then role/depth names in lexical order.
+                // Sort borrowed metadata once, without rewriting in-memory handles.
+                layer_views.sort_by(|a, b| a.name.cmp(b.name));
+            }
+        }
+        Some(written) => {
+            layer_views.extend(written.iter().flatten().map(|(name, color, linetype)| LayerView {
+                name,
+                color: *color,
+                linetype: *linetype,
+                weight: None,
+            }));
+            // The same order: 0 first, whatever a profile's names start with, then by name.
+            layer_views.sort_by(|a, b| (a.name != "0", a.name).cmp(&(b.name != "0", b.name)));
+            // Roles may share a layer: it is in the table once. DXF layer names ignore case, and
+            // a layer has one colour and linetype.
+            let mut seen: HashMap<String, (i16, DxfLinetype)> = HashMap::new();
+            let mut agree = true;
+            layer_views.retain(|view| match seen.entry(view.name.to_ascii_lowercase()) {
+                Entry::Occupied(first) => {
+                    agree &= *first.get() == (view.color, view.linetype);
+                    false
+                }
+                Entry::Vacant(first) => {
+                    first.insert((view.color, view.linetype));
+                    true
+                }
+            });
+            if !agree {
+                return Err(IoError::Invalid("DXF profile: two roles share a layer but give it different colours or linetypes".into()));
+            }
+        }
     }
     let layers = layer_views.into_iter();
-    let entities = file
-        .entities()
-        .iter()
-        .map(|e| Ok(EntityView { layer: file.layer(e.layer())?.name(), shape: e.geometry(), weight: e.weight(), source_text: e.source_text() }));
-    write_drawing_views(layers, entities, Some(budget.bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), 4)
+    let entities = file.entities().iter().filter_map(|e| {
+        let layer = match written {
+            None => file.layer(e.layer()).map(|layer| Some(layer.name())),
+            Some(written) => file.layer_index(e.layer()).map(|index| written.get(index).and_then(Option::as_ref).map(|(name, ..)| name.as_ref())),
+        };
+        match layer {
+            Ok(Some(layer)) => Some(Ok(EntityView { layer, shape: e.geometry(), weight: e.weight(), source_text: e.source_text() })),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        }
+    });
+    write_drawing_views(layers, entities, Some(budget.bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), budget.units)
 }

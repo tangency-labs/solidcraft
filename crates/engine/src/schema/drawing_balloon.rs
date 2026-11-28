@@ -36,14 +36,28 @@ impl JsonSchema for BalloonIdParam {
     }
 }
 
+/// Where on its edge a balloon's arrow or a note's leader ends (#22195).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AtEdge {
+    /// The edge's middle.
+    #[default]
+    Middle,
+    /// Where the edge was picked: its `point`, kept as a part of the edge's length from its start,
+    /// so it follows the edge as the model changes.
+    Picked,
+}
+
 /// What `drawing.balloon.add` takes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct AddParams {
     pub view: ViewIdParam,
-    /// The edge its arrow points at, with `path`: the occurrences its body is placed through, from
-    /// the top, which is the part the balloon numbers.
+    /// The edge its arrow points at. `path` is a field of this object, not of the call: the ids of
+    /// the occurrences its body is placed through, from the top (at least one), which is the part
+    /// the balloon numbers. Example: `{"point": [40, 0, 0], "path": [3]}`. A design of one part,
+    /// with no component, has no occurrence to name: place the part as a component first.
     pub edge: EdgeParam,
     /// The balloon's centre on paper, in millimetres from the view's centre.
     pub at: [f64; 2],
@@ -51,6 +65,9 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "TableIdParam")]
     pub parts_list: Option<TableIdParam>,
+    /// Where its arrow ends on the edge: `middle` (the default) or `picked`, the edge's `point`.
+    #[serde(default)]
+    pub at_edge: AtEdge,
 }
 
 /// What `drawing.balloon.inspect` takes.
@@ -93,6 +110,20 @@ pub struct BalloonSet {
 pub struct RepairParams {
     pub balloon: BalloonIdParam,
     pub pick: PickParam,
+}
+
+/// What `drawing.balloon.delete` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DeleteParams {
+    pub balloon: BalloonIdParam,
+}
+
+/// What `drawing.balloon.delete` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DeleteResult {
+    pub balloon: String,
 }
 
 /// What `drawing.balloon.edit` returns.

@@ -22,7 +22,10 @@
 //! common edge with a face of the other body on a surface of another analytic kind, when the
 //! pair is not made (the partner already classified, or `FixFoundFaceCoincidence` pairing
 //! nothing), is classified once every common edge has been visited, as a copy of that part of
-//! its partner (`resolve_tangent_patches`), instead of being left to a ray.
+//! its partner (`resolve_tangent_patches`), instead of being left to a ray. Not upstream
+//! (#21931): with no copy kept, such a face stays beside a kept partner, and one of the other
+//! body that stays is made in its partner's region on the side the operation keeps the other
+//! body's faces (`kept_patch_region`).
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
@@ -52,7 +55,7 @@
 use std::collections::BTreeSet;
 
 use super::p1::{self, MergeOptions};
-use crate::error::boolean::BooleanFailure;
+use crate::error::boolean::{BooleanFailure, BooleanStage};
 use crate::error::{Failure, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::{
@@ -384,8 +387,17 @@ pub enum MergeEntity {
     Vertex(VertexId),
 }
 
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::entity_missing(OP, "a topology entity the Boolean needs"))
+/// `value`, or a defect naming the link `why` the kernel failed to keep (each call names
+/// its own link; no shared phrase).
+#[track_caller]
+fn linked<T>(value: Option<T>, stage: BooleanStage, why: &'static str) -> Result<T> {
+    value.ok_or_else(|| SolidError::boolean_null_defect(OP, stage, why))
+}
+
+/// The operand in `slot`, which the caller passes (an empty slot is the caller's).
+fn operand(slot: &mut Option<Brep>) -> Result<&mut Brep> {
+    slot.as_mut()
+        .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))
 }
 
 fn ignored<T>(result: Result<T>) -> Result<Option<T>> {
@@ -417,6 +429,9 @@ struct Faces {
     /// Not upstream (#17118): the tangent patches found at common edges, resolved by
     /// [`resolve_tangent_patches`] once every common edge has been visited.
     tangent_patches: Vec<TangentPatch>,
+    /// Not upstream (#21931): each face of the other body that [`resolve_tangent_patches`]
+    /// kept, with its partner face in the primary, for [`kept_patch_region`].
+    kept_patches: Vec<(FaceId, FaceId)>,
 }
 
 /// Not upstream (#17118): a face found coincident at a common edge with a face of the other
@@ -483,20 +498,27 @@ fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId)
         b.face(f)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::entity_missing(OP, "a face has no surface"))
+            .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::FaceWithoutSurface))
     }
     Ok(surface(primary, pf)?.is_other_analytic_kind(surface(other, of)?))
 }
 
-/// Not upstream (#17118): classifies each tangent patch still unclassified once every common
-/// edge has been visited. A face on a surface of another kind than the face it coincides with
-/// lies on it only over a tangent patch within the tolerance, so within the tolerance it is a
-/// copy of that part of its partner. The operation keeps one copy of coincident faces or none
-/// ([`coincident_keep`]). With none, the patch goes. With one, the copy is the partner's when
-/// the partner is kept, so the patch goes, and the patch's when the partner is deleted. A
-/// patch whose partner is classified by a later patch is visited again, so the order of the
-/// list does not matter; a patch whose partner is still unclassified when a pass classifies
-/// nothing more is left to the ray, as before.
+/// Not upstream (#17118, #21931): classifies each tangent patch still unclassified once every
+/// common edge has been visited. A face on a surface of another kind than the face it coincides
+/// with lies on it only over a tangent patch within the tolerance, so within the tolerance it is
+/// a copy of that part of its partner. The operation keeps one copy of coincident faces or none
+/// ([`coincident_keep`]). With one, the copy is the partner's when the partner is kept, so the
+/// patch goes, and the patch's when the partner is deleted. With none (a difference of faces
+/// facing the same way, a union or intersection of faces facing opposite ways), a deleted
+/// partner takes the patch with it. A kept partner still covers the patch, since the imprint
+/// drew no edge round the patch in it, so the space between the two, thinner than the
+/// tolerance, lies against a face of the result, and the patch is kept to close it: a wedge
+/// less a part whose round grazes the wedge's plane keeps that plane (it lies outside the
+/// part), and the round's sliver on it closes the leftover beside it. Which side of the partner
+/// the patch lies on is below the tolerance, so it is not read. A patch whose partner is
+/// classified by a later patch is visited again, so the order of the list does not matter; a
+/// patch whose partner is still unclassified when a pass classifies nothing more is left to the
+/// ray, as before.
 fn resolve_tangent_patches(
     kernels: &BooleanKernels<'_>,
     state: &mut ManifoldState,
@@ -551,15 +573,16 @@ fn resolve_tangent_patch(
     if source_marked {
         return true;
     }
-    if keep_copy && !partner_kept && !partner_deleted {
+    if !partner_kept && !partner_deleted {
         return false;
     }
-    let keep_source = keep_copy && partner_deleted;
+    let keep_source = keep_copy != partner_kept;
     if reverse {
         state
             .other_marks
             .mark(kernels.other(), Entity::Face(of), marks.1);
         if keep_source {
+            faces.kept_patches.push((of, pf));
             faces.other_keep.push(of);
         } else {
             faces.other_delete.push(of);
@@ -575,6 +598,37 @@ fn resolve_tangent_patch(
         }
     }
     true
+}
+
+/// Not upstream (#21931): the region a face `f` of the other body is made in when
+/// [`resolve_tangent_patches`] kept it. The patch lies on its partner within the tolerance, so
+/// a radial sector at its edges or a point on them can fall on either side of the partner, and
+/// made in the region on the wrong side it splits no region with the faces it bounds the result
+/// with. Its side is the one where the operation keeps the other body's faces
+/// ([`region_keep`]): of the two regions the partner lies between, the one on that side. `None`
+/// for a face that is no kept patch, or a partner with that side on both or neither of its
+/// faces (no face between a solid and its outside), which is placed as any other face.
+fn kept_patch_region(
+    primary: &Brep,
+    operation: BooleanOperation,
+    faces: &Faces,
+    f: FaceId,
+) -> Result<Option<RegionId>> {
+    let Some(&(_, partner)) = faces.kept_patches.iter().find(|&&(of, _)| of == f) else {
+        return Ok(None);
+    };
+    let Some(fu) = face::faceuses(primary, partner)?.0 else {
+        return Ok(None);
+    };
+    let (r1, r2) = region_pair(primary, fu)?;
+    let kept = |r: RegionId| -> Result<bool> {
+        Ok(region_keep(operation, true, void(primary, r)? != 0, None) == Some(true))
+    };
+    Ok(match (kept(r1)?, kept(r2)?) {
+        (true, false) => Some(r1),
+        (false, true) => Some(r2),
+        _ => None,
+    })
 }
 
 /// Not upstream (#17118): a bound on how far any point of `f` lies from the plane of
@@ -854,8 +908,26 @@ fn within_partner(
 
 fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
     Ok((
-        required(eu::faceuse_region(b, fu)?)?,
-        required(eu::faceuse_region(b, required(eu::faceuse_mate(b, fu)?)?)?)?,
+        linked(
+            eu::faceuse_region(b, fu)?,
+            BooleanStage::Classify,
+            "a face use of a face lies in no region, though the kernel keeps every face \
+             use's shell in a region",
+        )?,
+        linked(
+            eu::faceuse_region(
+                b,
+                linked(
+                    eu::faceuse_mate(b, fu)?,
+                    BooleanStage::Classify,
+                    "a face use has no mate, though the kernel makes every face with a pair \
+                     of face uses",
+                )?,
+            )?,
+            BooleanStage::Classify,
+            "a face use's mate lies in no region, though the kernel keeps every face use's \
+             shell in a region",
+        )?,
     ))
 }
 
@@ -1126,7 +1198,12 @@ fn classify_edge_faces(
         if eu::is_shell_edgeuse(source, edgeuse)? {
             continue;
         }
-        let source_face = required(eu::face(source, edgeuse)?)?;
+        let source_face = linked(
+            eu::face(source, edgeuse)?,
+            BooleanStage::Classify,
+            "an edge use that is not a shell edge use has no face, though only shell edge \
+             uses lie outside a face",
+        )?;
         if source_marks.is_marked(source_k, Entity::Face(source_face), mark) {
             continue;
         }
@@ -1157,10 +1234,20 @@ fn classify_edge_faces(
             continue;
         };
         if let Some(found) = sector.coincident_faceuse {
-            let source_fu = required(eu::faceuse(if reverse { other } else { primary }, edgeuse)?)?;
+            let source_fu = linked(
+                eu::faceuse(if reverse { other } else { primary }, edgeuse)?,
+                BooleanStage::Classify,
+                "an edge use of a face has no face use, though the kernel links every edge use \
+                 of a face to its face use",
+            )?;
             let (pf, of, pf_regions, of_regions) = if reverse {
                 (
-                    required(eu::faceuse_face(primary, found)?)?,
+                    linked(
+                        eu::faceuse_face(primary, found)?,
+                        BooleanStage::Classify,
+                        "the coincident face use the radial sector found has no face, though \
+                         the kernel links every face use to its face",
+                    )?,
                     source_face,
                     region_pair(primary, found)?,
                     region_pair(other, source_fu)?,
@@ -1168,7 +1255,12 @@ fn classify_edge_faces(
             } else {
                 (
                     source_face,
-                    required(eu::faceuse_face(other, found)?)?,
+                    linked(
+                        eu::faceuse_face(other, found)?,
+                        BooleanStage::Classify,
+                        "the coincident face use the radial sector found has no face, though \
+                         the kernel links every face use to its face",
+                    )?,
                     region_pair(primary, source_fu)?,
                     region_pair(other, found)?,
                 )
@@ -1302,14 +1394,31 @@ fn classify_edge_faces(
                 }
             }
             let opposite = if reverse { &*primary } else { &*other };
-            let r = required(eu::shell_region(
-                opposite,
-                required(eu::shell(opposite, found)?)?,
-            )?)?;
+            let r = linked(
+                eu::shell_region(
+                    opposite,
+                    linked(
+                        eu::shell(opposite, found)?,
+                        BooleanStage::Classify,
+                        "the radial edge use the sector found has no shell, though the sector \
+                         walks only the edge uses of faces, each of which lies in a shell",
+                    )?,
+                )?,
+                BooleanStage::Classify,
+                "the shell of the radial edge use the sector found lies in no region, though \
+                 the kernel keeps every shell in a region",
+            )?;
             let slice_same = if !reverse && operation == BooleanOperation::Slice {
                 Some(
-                    eu::faceuse_orientation(opposite, required(eu::faceuse(opposite, found)?)?)?
-                        == OrientType::Same,
+                    eu::faceuse_orientation(
+                        opposite,
+                        linked(
+                            eu::faceuse(opposite, found)?,
+                            BooleanStage::Classify,
+                            "the radial edge use the sector found has no face use, though the \
+                             sector walks only the edge uses of faces",
+                        )?,
+                    )? == OrientType::Same,
                 )
             } else {
                 None
@@ -1324,10 +1433,7 @@ fn classify_edge_faces(
                 }
             }
         } else {
-            return Err(SolidError::stage_failed(
-                OP,
-                "the faces are neither in a shell nor classified",
-            ));
+            return Err(SolidError::boolean(OP, BooleanFailure::NoRadialEdgeUse));
         }
     }
     Ok(true)
@@ -1402,15 +1508,17 @@ fn classify_remaining(
             for &edge_id in &edges {
                 // Upstream deliberately/repeatedly uses sFaceEdges[0] in the
                 // primary pass; the other pass uses j and a different fraction.
+                // (inside the loop over `edges`, so the list has a first edge)
                 let selected = if reverse {
                     edge_id
                 } else {
-                    *edges.first().ok_or_else(|| {
-                        SolidError::entity_missing(OP, "the edge list has an edge")
-                    })?
+                    edges.first().copied().unwrap_or(edge_id)
                 };
                 let e = source.edge(selected)?;
-                let curve = required(e.curve.as_ref())?;
+                let curve = e
+                    .curve
+                    .as_ref()
+                    .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::EdgeWithoutCurve))?;
                 let point = curve.evaluate_point(
                     source_k,
                     e.interval
@@ -1470,19 +1578,12 @@ fn classify_remaining(
     Ok(())
 }
 
-fn unique<T: Copy + PartialEq>(values: &mut Vec<T>) {
+fn unique<T: Copy + Ord>(values: &mut Vec<T>) {
     // SmTArray::RemoveDuplicates retains the LAST occurrence of each entry.
     // Reverse/retain/reverse preserves precisely that order without pointer sort.
-    let mut seen = Vec::new();
+    let mut seen = BTreeSet::new();
     values.reverse();
-    values.retain(|v| {
-        if seen.contains(v) {
-            false
-        } else {
-            seen.push(*v);
-            true
-        }
-    });
+    values.retain(|v| seen.insert(*v));
     values.reverse();
 }
 
@@ -1502,16 +1603,23 @@ fn repair_lists(
     }
     let actual = bp::faces(primary, None)?;
     if actual.len() as i128 - faces.keep.len() as i128 - faces.delete.len() as i128 != 0 {
-        faces.keep.retain(|f| actual.contains(f));
-        faces.delete.retain(|f| actual.contains(f));
+        let actual_set: BTreeSet<FaceId> = actual.iter().copied().collect();
+        faces.keep.retain(|f| actual_set.contains(f));
+        faces.delete.retain(|f| actual_set.contains(f));
     }
+    // a patch whose partner is gone (a last coincidence repair that changed the topology) has
+    // no side to be made on
+    faces
+        .kept_patches
+        .retain(|(_, partner)| actual.contains(partner));
     let actual = bp::faces(other, None)?;
     if operation != BooleanOperation::PartialMerge
         && actual.len() as i128 - faces.other_keep.len() as i128 - faces.other_delete.len() as i128
             != 0
     {
-        faces.other_keep.retain(|f| actual.contains(f));
-        faces.other_delete.retain(|f| actual.contains(f));
+        let actual_set: BTreeSet<FaceId> = actual.into_iter().collect();
+        faces.other_keep.retain(|f| actual_set.contains(f));
+        faces.other_delete.retain(|f| actual_set.contains(f));
     }
     // Confused/duplicate lists only emit SE_MSG upstream; they do not fail.
     Ok(())
@@ -1587,8 +1695,24 @@ fn remember_split(
     new_face: FaceId,
     other_face: FaceId,
 ) -> Result<()> {
-    let (r1, r2) = region_pair(primary, required(face::upward_faceuse(primary, new_face)?)?)?;
-    let (o1, o2) = region_pair(other, required(face::upward_faceuse(other, other_face)?)?)?;
+    let (r1, r2) = region_pair(
+        primary,
+        linked(
+            face::upward_faceuse(primary, new_face)?,
+            BooleanStage::Merge,
+            "the face made from the other face has no upward face use, though the kernel \
+             makes every face with its face uses",
+        )?,
+    )?;
+    let (o1, o2) = region_pair(
+        other,
+        linked(
+            face::upward_faceuse(other, other_face)?,
+            BooleanStage::Merge,
+            "the other face kept by the Boolean has no upward face use, though the kernel \
+             keeps every face with its face uses",
+        )?,
+    )?;
     let key = |r| intersector.object_key(false, MergeEntity::Region(r));
     // Capture both handles before either AddAttribute, even when r1 == r2.
     let handle1 = attributes.find_attribute(key(r1), ids::OTHER_REGION_ID);
@@ -1610,12 +1734,20 @@ fn remember_split(
         let this_type = source_type(primary, r, this_infinite)?;
         let other_type = source_type(other, o, Some(o) == other.infinite_region())?;
         if let Some(handle) = handle {
-            let data = required(
+            let data = linked(
                 attributes
                     .get_mut(handle)
                     .and_then(Attribute::merge_region_data_mut),
+                BooleanStage::Merge,
+                "the region's merge-region attribute is not in the attribute table with its \
+                 data, though the handle was just found by that attribute's id",
             )?;
-            let first = required(data.this_region(0))?;
+            let first = linked(
+                data.this_region(0),
+                BooleanStage::Merge,
+                "the region's merge-region attribute records no first region, though the \
+                 Boolean makes that attribute with its first region",
+            )?;
             // (fork e7ebc8d passes this status on: `SER`)
             data.set_regions(0, first, this_type, other_key, other_type)?;
         } else {
@@ -1642,10 +1774,19 @@ fn make_other_faces(
 ) -> Result<()> {
     for &f in &faces.other_keep {
         let (fu1, fu2) = face::faceuses(other, f)?;
-        let fu1 = required(fu1)?;
-        let fu2 = required(fu2)?;
-        let original =
-            intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?;
+        let [fu1, fu2] = [fu1, fu2].map(|fu| {
+            linked(
+                fu,
+                BooleanStage::Merge,
+                "an other face kept by the Boolean has not both of its face uses, though the \
+                 kernel keeps every face with a pair",
+            )
+        });
+        let (fu1, fu2) = (fu1?, fu2?);
+        let original = match kept_patch_region(primary, operation, faces, f)? {
+            Some(r) => Some(r),
+            None => intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?,
+        };
         let original_void = if let Some(r) = original {
             void(primary, r)?
         } else {
@@ -1666,15 +1807,28 @@ fn make_other_faces(
             MadeFaceuse::default()
         };
         if let (Some(new_region), Some(_)) = (made.new_region, original) {
-            let old = required(made.old_region)?;
+            let old = linked(
+                made.old_region,
+                BooleanStage::Merge,
+                "the face made from the other face split a region but names no old region, \
+                 though making the face reports the region it splits",
+            )?;
             if void(primary, new_region)? != original_void || void(primary, old)? != original_void {
                 let changed = if void(primary, old)? == original_void {
                     new_region
                 } else {
                     old
                 };
-                let other_void1 = void(other, required(eu::faceuse_region(other, fu1)?)?)?;
-                let other_void2 = void(other, required(eu::faceuse_region(other, fu2)?)?)?;
+                let [region1, region2] = [fu1, fu2].map(|fu| {
+                    linked(
+                        eu::faceuse_region(other, fu)?,
+                        BooleanStage::Merge,
+                        "a face use of an other face kept by the Boolean lies in no region, \
+                         though the kernel keeps every face use's shell in a region",
+                    )
+                });
+                let other_void1 = void(other, region1?)?;
+                let other_void2 = void(other, region2?)?;
                 if other_void1 != other_void2 || (other_void1 == 1 && other_void2 == 1) {
                     primary.region_mut(changed)?.set_is_void(original_void);
                 }
@@ -1687,7 +1841,12 @@ fn make_other_faces(
                     other,
                     intersector,
                     attributes,
-                    required(made.old_region)?,
+                    linked(
+                        made.old_region,
+                        BooleanStage::Merge,
+                        "the face made from the other face split a region but names no old \
+                         region, though making the face reports the region it splits",
+                    )?,
                     new_face,
                     f,
                 )?;
@@ -1702,7 +1861,12 @@ fn update_infinite(
     intersector: &impl ManifoldIntersector,
     attributes: &AttributeStore,
 ) -> Result<bool> {
-    let infinite = required(primary.infinite_region())?;
+    let infinite = linked(
+        primary.infinite_region(),
+        BooleanStage::Classify,
+        "the primary B-rep has no infinite region, though the kernel keeps one in every \
+         B-rep",
+    )?;
     if merge_data(
         attributes,
         intersector.object_key(false, MergeEntity::Region(infinite)),
@@ -2078,7 +2242,17 @@ fn editing_stages(
             primary.region_mut(r)?.set_is_void(i32::from(!solid));
         }
     }
-    if !infinite_current || void(primary, required(primary.infinite_region())?)? == 0 {
+    if !infinite_current
+        || void(
+            primary,
+            linked(
+                primary.infinite_region(),
+                BooleanStage::Classify,
+                "the primary B-rep has no infinite region, though the kernel keeps one in \
+                 every B-rep",
+            )?,
+        )? == 0
+    {
         find_and_set_infinite(
             kernels,
             primary,
@@ -2167,8 +2341,8 @@ fn manifold_boolean_transformed(
     operation: BooleanOperation,
     caller_lock: Option<&mut MarkLock>,
 ) -> Result<bool> {
-    let a = required(primary.as_mut())?;
-    let b = required(other.as_mut())?;
+    let a = operand(primary)?;
+    let b = operand(other)?;
     kernels.primary.check_cancelled(OP)?;
     if let Some(other_kernel) = kernels.other.as_deref() {
         other_kernel.check_cancelled(OP)?;
@@ -2220,21 +2394,33 @@ fn manifold_boolean_translated(
     operation: BooleanOperation,
     caller_lock: Option<&mut MarkLock>,
 ) -> Result<bool> {
-    let a = required(primary.as_mut())?;
-    let b = required(other.as_mut())?;
+    let a = linked(
+        primary.as_mut(),
+        BooleanStage::Merge,
+        "the primary operand is gone after the temporary transform, though the transform \
+         hands on the operands checked on entry",
+    )?;
+    let b = linked(
+        other.as_mut(),
+        BooleanStage::Merge,
+        "the other operand is gone after the temporary transform, though the transform \
+         hands on the operands checked on entry",
+    )?;
     kernels.primary.check_cancelled(OP)?;
     if let Some(other_kernel) = kernels.other.as_deref() {
         other_kernel.check_cancelled(OP)?;
     }
     if operation == BooleanOperation::Slice {
         if !is_sheet(kernels, b)? {
-            return Err(SolidError::stage_failed(
-                OP,
-                "a slice needs a sheet, and the B-rep is not one",
-            ));
+            return Err(SolidError::boolean(OP, BooleanFailure::SliceNeedsSheet));
         }
         if !is_oriented_sheet(kernels, b)? {
-            let first = required(bp::faces(b, None)?.first().copied())?;
+            let first = linked(
+                bp::faces(b, None)?.first().copied(),
+                BooleanStage::Merge,
+                "the sheet to slice with has no face, though a sheet is one only when its \
+                 edges are manifold or lamina edges, each of which borders a face",
+            )?;
             orient_sheet_surfaces(kernels, b, first, true)?;
         }
     }
@@ -2297,7 +2483,13 @@ fn manifold_boolean_translated(
         } else {
             kernels.mark_action(|contexts| lock.release(contexts))
         };
-        required(primary.as_mut())?.set_editing_enabled(edit_a);
+        linked(
+            primary.as_mut(),
+            BooleanStage::Merge,
+            "the primary operand is gone after the Boolean, though the Boolean drops only the \
+             other operand",
+        )?
+        .set_editing_enabled(edit_a);
         released?;
         return Ok(true);
     }
@@ -2315,13 +2507,23 @@ fn manifold_boolean_translated(
     if operation == BooleanOperation::ExtractSeparate {
         for (source, reverse, sets, components) in [
             (
-                required(primary.as_mut())?,
+                linked(
+                    primary.as_mut(),
+                    BooleanStage::Merge,
+                    "the primary operand is gone after the extraction, though the Boolean \
+                     drops only the other operand",
+                )?,
                 false,
                 &faces.primary_sets,
                 &mut state.primary_components,
             ),
             (
-                required(other.as_mut())?,
+                linked(
+                    other.as_mut(),
+                    BooleanStage::Merge,
+                    "the other operand is gone after the extraction, though the Boolean drops \
+                     it only on the path that returned before",
+                )?,
                 true,
                 &faces.other_sets,
                 &mut state.other_components,
@@ -2649,6 +2851,54 @@ mod tests {
         assert_eq!(faces.keep, [p2, p1]);
         assert_eq!(faces.other_delete, [q]);
         assert!(faces.delete.is_empty() && faces.other_keep.is_empty());
+        assert!(faces.tangent_patches.is_empty());
+        kernels
+            .mark_action(|contexts| lock.release(contexts))
+            .unwrap();
+    }
+
+    /// #21931: where the operation keeps no copy of coincident faces, a patch whose partner is
+    /// kept stays (it bounds the film between them), one whose partner is deleted goes, and a
+    /// patch of the other body that stays is recorded with its partner.
+    #[test]
+    fn a_tangent_patch_with_no_copy_kept_stays_beside_a_kept_partner_only() {
+        let mut first = Kernel::default();
+        let mut second = Kernel::default();
+        first.context.set_doing_boolean(true);
+        let mut kernels = BooleanKernels {
+            primary: &mut first,
+            other: Some(&mut second),
+        };
+        let mut lock = kernels
+            .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
+            .unwrap();
+        kernels
+            .mark_action(|contexts| lock.new_mark(contexts))
+            .unwrap();
+        let marks = (lock.mark_type1(), lock.mark_type2());
+        let (kept, deleted, q1, q2) = (
+            FaceId::from_index(1),
+            FaceId::from_index(2),
+            FaceId::from_index(3),
+            FaceId::from_index(4),
+        );
+        let mut state = ManifoldState::default();
+        let patch = |pf, of| TangentPatch {
+            reverse: true,
+            pf,
+            of,
+            keep: Some(false),
+        };
+        let mut faces = Faces {
+            keep: vec![kept],
+            delete: vec![deleted],
+            tangent_patches: vec![patch(kept, q1), patch(deleted, q2)],
+            ..Faces::default()
+        };
+        resolve_tangent_patches(&kernels, &mut state, &mut faces, marks);
+        assert_eq!(faces.other_keep, [q1]);
+        assert_eq!(faces.other_delete, [q2]);
+        assert_eq!(faces.kept_patches, [(q1, kept)]);
         assert!(faces.tangent_patches.is_empty());
         kernels
             .mark_action(|contexts| lock.release(contexts))

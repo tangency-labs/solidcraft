@@ -28,6 +28,44 @@ fn round_trips(s: &Session) {
     assert!((a.area - b.area).abs() < 1e-3 * a.area, "area {} -> {}", a.area, b.area);
 }
 
+/// A cylinder of radius 10 and height 100 at x = 50, mirrored in the YZ plane, the source
+/// removed: the mirrored body's two end edges are written as STEP `CIRCLE`s, as the source's are,
+/// not as rational B-splines (WR-21139), and they read back as circles of radius 10 on a solid
+/// of volume pi * 10^2 * 100. A reader could not get the hole's diameter from the B-spline.
+#[test]
+fn a_mirrored_cylinder_exports_its_circles_as_circles() {
+    let mut s = Session::default();
+    run(
+        &mut s,
+        json!([
+            {"command":"solid.cylinder","params":{"radius":10,"height":100,"base":[50,0,0],"operation":"new","name":"Cyl","body_name":"Cyl"}},
+            {"command":"solid.mirror","params":{"bodies":["Cyl"],"plane":"YZ","name":"Mirror"}},
+            {"command":"solid.remove","params":{"bodies":["Cyl"],"name":"RemoveOriginal"}}
+        ]),
+    );
+    round_trips(&s);
+    let st = s.model.state();
+    let body = &st.bodies[0].body;
+    let text = step_export(&[body], "test").unwrap_or_else(|e| panic!("export: {e}"));
+    assert_eq!(text.matches("=CIRCLE(").count(), 2, "{text}");
+    let imp = step_import(&text).unwrap_or_else(|e| panic!("import: {e}"));
+    let circles: Vec<f64> = imp.bodies[0]
+        .body
+        .record()
+        .edges
+        .iter()
+        .filter_map(|e| match e.curve {
+            solidcore_record::brep::Curve::Circle { radius, .. } => Some(radius),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(circles.len(), 2, "{circles:?}");
+    assert!(circles.iter().all(|r| (r - 10.0).abs() < 1e-9), "{circles:?}");
+    let want = std::f64::consts::PI * 100.0 * 100.0;
+    let got = measure(&imp.bodies[0].body).unwrap().volume;
+    assert!((got - want).abs() < 1e-6 * want, "volume {got}, expected {want}");
+}
+
 /// Robustness seed 19, shrunk: a three-quarter turn of a rectangle, a sphere cut, a 1 mm shell.
 /// The shell moves revolved faces by a scale across their axis; export refused them and the
 /// refusal surfaced as a panic ("a Display implementation returned an error").

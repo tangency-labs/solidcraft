@@ -49,7 +49,7 @@ fn all_authored_surfaces_and_native_studios_render_from_saved_exact_bindings() {
             } else {
                 studio
             };
-            let reopened = solidcraft_engine::doc::Document::from_json(&session.doc.to_json()).unwrap();
+            let reopened = solidcraft_engine::io::read_design(&solidcraft_engine::io::write_design_container(&session.doc).unwrap()).unwrap();
             assert_eq!(reopened.render.setups["Smoke"], session.doc.render.setups["Smoke"]);
             assert_eq!(session.doc.features, geometry);
             assert_eq!(session.doc.materials, materials);

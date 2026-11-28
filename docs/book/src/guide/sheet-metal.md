@@ -8,6 +8,8 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   sketch of lines and circular arcs, or an edge flange from a part edge. A contour flange along an ellipse, a conic or a
   spline is not supported yet ([#15743](https://github.com/tangency-labs/solidcraft/issues/15743)): the free-form panel it
   would make has no closed-form flat, so the flange is refused, naming the curve.
+- **Tab** (`sheet.tab`) adds a flat piece of material to a sheet from a closed sketch on one of
+  its flat faces.
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
@@ -39,6 +41,39 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.
+
+### Unfolding from a press brake chart
+
+Many shops have a chart that gives the bend deduction or the bend allowance for each thickness
+and bend radius, not a K-factor. A rule can take that value instead: in Sheet Metal Rules, set
+**Unfold** to **Bend Deduction** or **Bend Allowance**, and type the chart's value for a 90° bend
+in the row that replaces K Factor. With a command, `unfold_method` is `k_factor` (the default),
+`deduction` or `allowance`, and `unfold_value` is the 90° value, a length or an expression:
+
+```json
+{"command":"sheet.manage_rules","params":{"name":"Steel 2 mm","thickness":"2 mm",
+ "bend_radius":"2 mm","unfold_method":"deduction","unfold_value":"3.5 mm"}}
+```
+
+The rule works the K-factor out from the 90° value, and every bend of the rule unfolds from that
+K-factor, at any angle. At 90°, the bend allowance is BA = π/2 · (R + K·T), and the bend
+deduction is BD = 2·(R + T) − BA, for bend radius R and thickness T. So K = (2·BA/π − R)/T. The
+example above gives BA = 8 − 3.5 = 4.5 mm and K = 0.4324. `sheet.rules` lists the K-factor each
+rule works out to. A value that would make K less than 0 or more than 1 is refused, and the
+message gives the range the value must be in for that thickness and radius. The chart's value
+is for one thickness and radius, so make one rule for each line of the chart you use.
+
+Changing **Unfold** in the dialog keeps the part as it is. Going to Bend Deduction or Bend
+Allowance fills the 90° row with the value the rule's K-factor gives, for you to type the chart's
+value over. Going between the two converts the value. Going back to K Factor puts the K-factor
+the 90° value works out to in the K Factor row.
+
+Picking a material and gauge from the standard library gives the rule a new thickness, so the
+rule goes back to **K Factor**, with the pick's K-factor. Set **Unfold** again and type the
+chart's value for the new thickness. A rule pack holds K-factors only: a rule that unfolds from
+a 90° value is exported with the K-factor it works out to, so the pack gives the same flat
+pattern. A rule whose thickness, radius or 90° value is a design's parameter has no K-factor
+outside that design: the export leaves it out and names it.
 
 ## Step by step
 
@@ -89,10 +124,11 @@ A rule is saved in its design, and a new design starts with only the default ste
 the same rules in every design, keep them as **personal rules**, saved in your profile: open
 **Personal rules** at the top of Sheet Metal Rules.
 
-- **Save new** keeps the rule the manager shows under a name: its thickness, K factor, bend
-  radius, reliefs, gaps, corner relief shape and angle display. A bare number is saved with the
-  design's unit, so the rule makes the same sheet in a millimetre or an inch design. `Thickness`
-  and other expressions are kept as typed, and are worked out in the design the rule is used in.
+- **Save new** keeps the rule the manager shows under a name: its thickness, K factor (or its
+  unfold choice and 90° value), bend radius, reliefs, gaps, corner relief shape and angle
+  display. A bare number is saved with the design's unit, so the rule makes the same sheet in a
+  millimetre or an inch design. `Thickness` and other expressions are kept as typed, and are
+  worked out in the design the rule is used in.
 - Picking a personal rule fills the manager with it: the design's own rule of that name, or else
   a new rule. **OK** adds it to the design (or updates that rule); picking alone changes nothing.
 - The save icon beside the box saves the manager's values over the picked personal rule.
@@ -324,6 +360,30 @@ refused, and so is a line too short for its bend. Arcs are not supported yet.
 {"command":"sheet.path_flange","params":{"edge":[1,0,20],"sketch":"Path","curves":["p1","p2"]}}
 ```
 
+**Tab** (`sheet.tab`) adds a flat piece of material to a sheet in its own plane: a mounting ear,
+a tongue that goes through a slot in another part, more room round a hole, or a lug added after
+the walls are folded. Sketch a closed profile on a flat face of the sheet (either side, or in a
+plane level with one) so that it touches or overlaps the face's outline, and pick it in the Tab
+dialog (SHEET METAL → CREATE). The profile's area joins that panel through the sheet's thickness,
+as part of its outline: no second body and no seam, and where the profile overlaps the sheet it
+simply merges. The thickness is always the body's rule's. The tab unfolds with its panel, so the
+flat pattern and its DXF carry it, and later flanges, hems and folds use its edges like any other
+edge of the sheet. A tab on a wall that is already folded works the same way, sketched on that
+wall's face.
+
+A tab is refused, with a message saying why, when its profile does not meet the face's outline
+(touching it at a corner only does not count), adds nothing to it, reaches into a bend zone, or
+would overlap another panel of the sheet once folded or in the flat pattern, would join more
+than one panel (two faces side by side in one plane, both touched by the profile), and while the
+sheet is unfolded. Flange on a sketch on the sheet's face still makes a new sheet body of its own.
+
+```json
+{"command":"sheet.tab","params":{"sketch":"Ear"}}
+```
+
+(A 100 x 60 sheet with `Ear` a 40 x 40 rectangle on its top face, 10 mm on the sheet and 30 mm past its long edge:
+one body with a 40 x 30 tab out of that edge, and a flat pattern in one piece.)
+
 A flange can also stand on the far edge of another flange: a return, such as a lip turned in
 along the top of a tray's walls. It runs along that edge from end to end, so it follows the
 closed end of the flange it stands on, slanted or not. Two returns of one feature whose flanges
@@ -452,9 +512,24 @@ consume an undo step.
 {"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf"}}
 ```
 
-The DXF is an AutoCAD 2000 (`AC1015`) drawing in millimetres, made for a laser-cutting shop's
+The DXF is an AutoCAD 2000 (`AC1015`) drawing, made for a laser-cutting shop's
 nesting or CAM software: each kind of line is on a layer of its own, with a colour (AutoCAD's
 index) and, for the bends, a linetype that the file defines.
+
+`"units"` is `mm` (the default) or `inches`: in `inches` every coordinate, radius and text height
+is written in inches, the header is `$INSUNITS 1` and `$MEASUREMENT 0` (instead of `$INSUNITS 4`
+and `$MEASUREMENT 1`), the `DASHED` pattern is in half and quarter inches, the bend notes' radii
+are in inches and the pocket layers name their depths in inches (`POCKET_…_Z…_TO_…_IN`). The
+drawing is the same part, only its units are different; the bend table's CSV stays in millimetres.
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat-in.dxf","units":"inches"}}
+```
+
+`"bend_lines"` (default `true`) and `"markings"` (default `true`) keep or leave out the bend
+centre lines and the letters' contours with the bend notes — for a cutter that would cut or etch
+them. **Export DXF…** opens these options before the save picker, from the flat-pattern panel
+or the Sheet Metal ribbon. The choices apply to that export only.
 
 | Layer | Colour | Line | Holds |
 |---|---|---|---|
@@ -466,6 +541,7 @@ index) and, for the bends, a linetype that the file defines.
 | `BEND_NOTES` | 8 grey | continuous | the note beside each bend line, only with `"bend_notes": true` |
 | `POCKET_…` | 3 green | continuous | pockets, a layer for each depth (see below) |
 | `PERFORATION` | 3 green | continuous | the holes of a perforation field |
+| `HARDWARE` | 8 grey | continuous | the note beside each press-in hardware hole, `M3 nut` or `M4 stud 10 mm`, as high as `note_height`; only with `"hardware_notes": true`, and not with `"layers": "single"` |
 
 `OUTLINE`, `CUT`, `BEND_UP` and `BEND_DOWN` are always in the layer table, the others when the
 sheet has something for them. The inner contours (`CUT`, `TEXT`) are written before the outline,
@@ -493,9 +569,46 @@ parallel to it and readable from below or from the right. A bend that cut-outs s
 for each piece. Notes are off by default, because a program that cuts or marks every layer would
 mark them.
 
+The file for a shop is the sheet and its mounting holes: press-in hardware is not in it, and the
+holes are plain circles. `"hardware_notes": true` adds a note beside each hardware hole on
+`HARDWARE` (`M3 nut`), as high as `note_height`; in the app, the flat pattern window has a Hardware
+notes tickbox for it when the sheet has hardware. Like the bend notes it is off by default.
+
 For a program that cuts every line it is given, `"bend_lines": false` leaves the bend lines out
 (`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer
 `0` instead of a layer for each role.
+
+A cutter's software often expects its own layer names and colours. A **DXF profile** is a small
+file a shop writes once for its machine: for each role (the outline, the cut-outs, cut text,
+etched text, bends up, bends down, bend notes, pockets, perforation, roll lines) it gives the
+layer's name, its colour and its linetype (continuous, dashed or hidden), or turns the role off
+so that it is not in the file at all.
+
+In the app, open **Create Flat Pattern** and click **Choose profile…** to pick the file. The panel
+lists each role the profile writes otherwise than the standard layers, or says why the file cannot
+be used, and **Export DXF…** then writes the file with it. **Use standard layers** drops the
+profile again. The ribbon's **Export DXF** button always writes the standard layers.
+
+From a script, pass it as `"profile"`, either the file's path or the profile itself:
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":"example-laser.json"}}
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":{
+  "format":"solidcraft-dxf-profile",
+  "roles":{
+    "outline":{"layer":"CUT","color":7},
+    "cut":{"layer":"CUT","color":7},
+    "bend_up":{"layer":"FOLD","color":3,"linetype":"hidden"},
+    "bend_down":{"layer":"FOLD","color":3,"linetype":"hidden"},
+    "cut_text":{"on":false}}}}}
+```
+
+A role the profile does not mention keeps the layer in the table above, and without a profile
+the file is exactly as described there. The entities and their order do not change, only their
+layers; a role is written when both the export's options and the profile allow it, and
+`"layers": "single"` cannot be combined with a profile. A profile that names an unknown role or
+gives a colour, linetype or layer name that cannot be used is refused with a message saying
+which, and no file is written. The file format: `docs/formats/dxf-profiles.md`.
 
 A bend's angle is how far the sheet turns from flat. Many press brakes are set by the
 **included angle** instead: the angle left between the bend's two sides, 180° less the bend
@@ -544,17 +657,18 @@ extrude of its footprint: through the sheet it is a cut-out (a cylinder a round 
 part way it is a pocket. A primitive cut at any other angle, or across a folded bend, is refused.
 
 Hole machines the sheet the same way from a flat face of any panel, on either side, folded or
-unfolded: square to that panel, a through hole (plain or tapped) is a round cut-out of the flat
-pattern and a `CIRCLE` in the DXF, and a counterbore or a blind flat-bottomed hole is a round
-pocket. A hole slanted to its panel or drilled into the edge of
-the sheet, a countersink and a drill point are refused.
+unfolded: square to that panel, a through hole (plain, countersunk or tapped) is a round cut-out
+of the flat pattern and a `CIRCLE` in the DXF, a countersink keeps its conical bevel on the sheet
+through Unfold / Refold, and a counterbore or a blind flat-bottomed hole is a round pocket. A hole
+slanted to its panel, a countersink across a bend and a drill point are refused.
 
 Parallel, untapered extrude cuts also preserve shallow pockets through Unfold / Refold.
 The pocket floor and side walls remain solid geometry; overlapping cuts from opposite sides
 become a through hole wherever they remove the whole thickness. Flat-pattern JSON lists
 `pockets` with their side, depth and bottom/top thickness coordinates in millimetres.
 DXF pocket boundaries use `POCKET_BOTTOM_Z…_TO_…_MM`, `POCKET_TOP_Z…_TO_…_MM`, or
-`POCKET_INTERNAL_Z…_TO_…_MM` layers. These are machining operations, so do not treat every
+`POCKET_INTERNAL_Z…_TO_…_MM` layers (named in `_IN` with their depths in inches in an inches
+drawing, `"units": "inches"`). These are machining operations, so do not treat every
 pocket layer as a through-cut contour when importing the drawing into a CAM tool. (Text
 machined to a depth is a marking, on `ETCH`.)
 

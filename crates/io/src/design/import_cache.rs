@@ -67,6 +67,10 @@ impl ImportCache {
 
     /// Exact source bytes, file name (which affects component names and format detection),
     /// and import options, plus the same producer identity as the saved-design cache.
+    ///
+    /// Known limitation: the key doesn't record the active kernel backend. That is fine for the
+    /// builds we ship, but the opt-in `backend-occt` build can share cached imports with a
+    /// normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
     pub fn key(bytes: &[u8], file: &str, options: &Value) -> String {
         digest(
             json!([digest(bytes), Path::new(file).file_name().map(|f| f.to_string_lossy()), options, native_cache::identity()])
@@ -111,7 +115,7 @@ impl ImportCache {
         let path = self.path(key).ok_or_else(|| invalid("import cache key"))?;
         let bytes = write_design_container_with_cache(doc, DesignCompression::Fast, None, Some(model))?;
         let mut reader = DesignContainerReader::new(Cursor::new(&bytes))?;
-        if reader.reader.limited_part(native_cache::ENTRIES[0], 32 << 20).is_err() {
+        if reader.reader.limited_part(native_cache::ENTRIES[0], native_cache::max_manifest()).is_err() {
             return Err(invalid("import model was not stored"));
         }
         let binding = serde_json::to_vec(&json!({"key": key, "reply": reply})).map_err(invalid)?;

@@ -43,6 +43,97 @@ fn near(a: Vec3, b: Vec3, tol: f64) -> bool {
     a.distance(b) <= tol
 }
 
+fn positive_u_sheet(k: &mut Kernel, net: solidcore::nurbs::srf_basic::Surface) -> (Brep, EdgeId) {
+    use solidcore::geom::extent2d::Extent2d;
+    use solidcore::geom::tol::USE_DEFAULT;
+    use solidcore::nurbs::b_spline_surface::BSplineSurface;
+    use solidcore::surface::surface::Surface;
+    use solidcore::topology::brep::{p3::new_brep, sheet::face_on};
+
+    let surface = Surface::from(BSplineSurface::from_nurb(net, false));
+    let mut sheet = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
+    let trim = Extent2d::from_points(Point2::new(0.0, -1.0), Point2::new(1.0, 1.0));
+    face_on(k, &mut sheet, surface, &trim).unwrap();
+    let edge = pick(k, &sheet, [0.0, 0.0, 0.0]);
+    (sheet, edge)
+}
+
+/// The sheet is z = x² + x³. Its trim follows x = 0, where dx/du changes from
+/// 2 to 1. For a unit diagonal (a, b, 0), the vertical components of curvature
+/// and its arc-length derivative at the trim are 2a² and 6a³.
+#[test]
+fn a_blend_reads_the_curvature_and_its_change_on_the_outgoing_span() {
+    use solidcore::nurbs::math::{CPoint, NOW};
+    use solidcore::nurbs::srf_basic::Surface as Net;
+
+    let rows = [
+        (-2.0, -4.0),
+        (-4.0 / 3.0, 4.0 / 3.0),
+        (-2.0 / 3.0, 0.0),
+        (0.0, 0.0),
+        (1.0 / 3.0, 0.0),
+        (2.0 / 3.0, 1.0 / 3.0),
+        (1.0, 2.0),
+    ]
+    .into_iter()
+    .map(|(x, z)| [-1.0, 1.0].map(|y| CPoint::new(x, y, z, NOW)).to_vec())
+    .collect();
+    let net = Net::new(
+        rows,
+        3,
+        1,
+        vec![-1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        vec![-1.0, -1.0, 1.0, 1.0],
+    )
+    .unwrap();
+    let mut k = Kernel::default();
+    let (sheet, edge) = positive_u_sheet(&mut k, net);
+    for x in [-1.0, 1.0] {
+        let leave = Vec3::new(x, 1.0, 0.0).unitize().unwrap();
+        for f in section_frames(&k, &sheet, &[edge], leave, &opts(3)).unwrap() {
+            assert!(f.p.x.abs() < 1e-10 && f.p.z.abs() < 1e-10, "{:?}", f.p);
+            assert!((f.bend.z - 1.0).abs() < 1e-9, "{:?}", f.bend);
+            assert!(
+                (f.bend_change.z - 6.0 * leave.x.powi(3)).abs() < 1e-9,
+                "{:?}",
+                f.bend_change
+            );
+        }
+    }
+}
+
+/// On z = |x| the projection of a downward direction onto either side points
+/// into the opposite span. No one-sided stationary frame follows that direction.
+#[test]
+fn a_support_frame_refuses_a_leave_direction_that_crosses_back_at_a_fold() {
+    use solidcore::nurbs::math::{CPoint, NOW};
+    use solidcore::nurbs::srf_basic::Surface as Net;
+
+    let rows = [-1.0_f64, 0.0, 1.0]
+        .into_iter()
+        .map(|x| {
+            [-1.0, 1.0]
+                .map(|y| CPoint::new(x, y, x.abs(), NOW))
+                .to_vec()
+        })
+        .collect();
+    let net = Net::new(
+        rows,
+        1,
+        1,
+        vec![-1.0, -1.0, 0.0, 1.0, 1.0],
+        vec![-1.0, -1.0, 1.0, 1.0],
+    )
+    .unwrap();
+    let mut k = Kernel::default();
+    let (sheet, edge) = positive_u_sheet(&mut k, net);
+    let result = section_frames(&k, &sheet, &[edge], Vec3::new(0.0, 0.0, -1.0), &opts(3));
+    assert!(
+        matches!(result, Err(SolidError::InvalidInput { reason, .. })
+        if reason.contains("outgoing span"))
+    );
+}
+
 /// A cylinder's top rim (radius 5 at z = 10), left along the axis, down the wall: the wall's
 /// generators are straight, so every frame's bend and change of bend are 0, and it leaves
 /// straight down.

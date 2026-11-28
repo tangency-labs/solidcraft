@@ -138,20 +138,6 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     }
 }
 
-/// The scene a case's op runs on: the B-rep exactly as [`Runner`]'s Rust side builds it,
-/// and the selected edge use, before the op; `None` when the build fails or selects no
-/// edge use. For certificate tests that must check a premise on the replayed model
-/// rather than on a dump of it (`tests/issue_18325_moved_rows.rs`).
-///
-/// # Errors
-///
-/// A case that does not parse, or the build's harness error.
-pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
-    Ok(setup(&case.parse::<Inputs>()?)?
-        .ok()
-        .map(|s| (s.brep, s.eu)))
-}
-
 /// The output of an op body (after the build status), as both sides build it.
 fn output_of(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
@@ -175,6 +161,8 @@ fn status_of(e: &SolidError) -> Option<f64> {
 
 /// The tail every op reports: the edge use's and its mate's state and the edge state.
 fn put_states(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: EdgeuseId) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let mate = eu1::mate(b, eu).ok().flatten();
     put_eu_state(k, o, b, Some(eu))?;
     put_eu_state(k, o, b, mate)?;

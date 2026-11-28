@@ -30,13 +30,16 @@ fn resolved(s: &mut Session, p: &Value) -> Result<Look> {
     let body = p
         .pointer("/target/body")
         .and_then(Value::as_str)
-        .and_then(|name| state.body(name))
+        // A placed copy's name means the body it shows, as the chain takes it (#9740).
+        .and_then(|name| s.own_body_name(name))
+        .and_then(|name| state.body(&name))
         .ok_or_else(|| bad("appearance.pick_up", "target has no resolved look"))?;
-    let displayed = p
-        .pointer("/target/face")
-        .and_then(Value::as_u64)
-        .and_then(|face| usize::try_from(face).ok())
-        .map_or_else(|| s.doc.model_display_look(body), |face| s.doc.model_face_look(body, face));
+    // The chain above accepted the target, so a face given by name finds its index again.
+    let face = match p.pointer("/target/face") {
+        Some(face) => Some(super::appearance_chain::face_index(s, "appearance.pick_up", &body.name, face)?),
+        None => None,
+    };
+    let displayed = face.map_or_else(|| s.doc.model_display_look(body), |face| s.doc.model_face_look(body, face));
     if let Some(look) = displayed {
         return Ok(look);
     }

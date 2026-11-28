@@ -26,8 +26,6 @@ const KINDS: [ValueKind; FIELDS] =
 const FIELDS: usize = 6;
 /// The field shown in degrees, and the one without a unit.
 const ANGLE: usize = 3;
-/// The fields before this one (X, Y, Height, Angle) can hold an expression of parameters.
-const ANGLE_END: usize = 4;
 const LINE_SPACING: usize = 5;
 
 /// Starts the words' expression in the Text field (`='W' + number(Width)`, #9281).
@@ -231,7 +229,8 @@ fn source(app: &SolveApp, sketch: u64, link: &str) -> Option<Source> {
     let LinkSource::Text { text, at, height, angle, font, style, exprs } = &source.source else { return None };
     let values = [at.x, at.y, *height, *angle, style.letter_spacing, style.line_spacing];
     let text = exprs.text.as_ref().map_or_else(|| text.clone(), |e| format!("{FORMULA}{e}"));
-    let exprs = [exprs.x.clone(), exprs.y.clone(), exprs.height.clone(), exprs.angle.clone(), None, None];
+    let exprs =
+        [exprs.x.clone(), exprs.y.clone(), exprs.height.clone(), exprs.angle.clone(), exprs.letter_spacing.clone(), exprs.line_spacing.clone()];
     Some((text, font.clone().unwrap_or_default(), values, style.clone(), exprs))
 }
 
@@ -512,6 +511,15 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     }
     let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
+    // Say how to type several lines: Enter finishes the text, so it is not found by trying (#16738).
+    // The words are only there while the Text box has focus, as #17121's review asked; the line keeps
+    // its height either way, so the rows under it do not move when the Text box loses focus.
+    let new_line_hint = solidcraft_ui_text::tr("sketch_text.new_line_hint");
+    if ui.memory(|m| m.has_focus(id)) {
+        ui_kit::text(ui, new_line_hint, ui_kit::Text::Hint("sketch_text_new_line"));
+    } else {
+        ui_kit::hint_space(ui, new_line_hint);
+    }
     if k.focus {
         response.request_focus();
         let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
@@ -729,21 +737,20 @@ pub(crate) fn commands(app: &SolveApp, k: &Tx) -> Result<Vec<(String, Value)>, S
     Ok(vec![("sketch.edit_text".into(), edit_params(app, k)?)])
 }
 
-/// `sketch.edit_text`'s parameters for the fields as they are. X, Y, Height and Angle go as
-/// numbers, or as their expressions when these name parameters (the text then follows them): an
-/// untouched field that holds one keeps it.
+/// `sketch.edit_text`'s parameters for the fields as they are. Each field goes as a number, or as
+/// its expression when this names parameters (the text then follows them): an untouched field
+/// that holds one keeps it.
 fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
     let doc = &app.session.doc;
-    let mut out = [0.0; FIELDS];
     let mut sent: [Value; FIELDS] = std::array::from_fn(|_| Value::Null);
-    for (i, slot) in out.iter_mut().enumerate() {
+    for (i, out) in sent.iter_mut().enumerate() {
         let (Some(value), Some(initial), Some(original), Some(kind), Some(label)) =
             (k.values.get(i), k.initial.get(i), k.original.get(i), KINDS.get(i), LABELS.get(i))
         else {
             return Err("missing value".into());
         };
         let given = k.exprs.get(i).and_then(Option::as_ref).filter(|_| value == initial);
-        *slot = if value == initial {
+        let number = if value == initial {
             *original
         } else {
             let typed = crate::length_input::expression(doc, value, *kind);
@@ -754,16 +761,15 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
             v
         };
         // A field that names parameters, or names its value (`h = 10`, #4071), goes as typed.
-        let names_parameters = i < ANGLE_END
-            && (!solidcraft_engine::doc::expr::references(value).is_empty() || solidcraft_engine::doc::expr::definition(value).is_some());
-        sent[i] = match given {
+        let names_parameters =
+            !solidcraft_engine::doc::expr::references(value).is_empty() || solidcraft_engine::doc::expr::definition(value).is_some();
+        *out = match given {
             Some(e) => json!(e),
             None if value != initial && names_parameters => json!(value.trim()),
-            None => json!(if i == ANGLE { slot.to_degrees() } else { *slot }),
+            None => json!(if i == ANGLE { number.to_degrees() } else { number }),
         };
     }
-    let [_, _, _, _, letter_spacing, line_spacing] = out;
-    let [sent_x, sent_y, sent_height, sent_angle, ..] = sent;
+    let [sent_x, sent_y, sent_height, sent_angle, letter_spacing, line_spacing] = sent;
     let align = match k.style.align {
         TextAlign::Left => "left",
         TextAlign::Center => "center",
@@ -1196,7 +1202,7 @@ mod tests {
     fn exprs_of(h: &Harness, link: &str) -> solidcraft_engine::sketch::TextExprs {
         let sid = h.app.session.active_sketch.unwrap();
         let LinkSource::Text { exprs, .. } = h.app.session.doc.sketch(sid).unwrap().link(link).unwrap().source.clone() else { panic!("text source") };
-        exprs
+        *exprs
     }
 
     #[test]
@@ -1265,6 +1271,47 @@ mod tests {
         h.frames(2);
         ok(&mut h);
         assert!(editing(&h.app), "the dialog stays open on a field that cannot be used");
+    }
+
+    /// #21814: Letter Spacing and Line Spacing take parameters like Height: OK keeps the
+    /// expressions, reopened the fields show them, and the spacing follows the parameters.
+    #[test]
+    fn spacing_fields_that_name_parameters_stay_expressions() {
+        let (mut h, link, _) = setup();
+        h.app.run("parameters.add", json!({"name":"gap","expression":"1 mm"})).unwrap();
+        h.app.run("parameters.add", json!({"name":"lines","expression":"1.5","unit":""})).unwrap();
+        h.app.start("sketch.edit_text");
+        h.frames(3);
+        replace(&mut h, "dialog:Letter Spacing", "gap * 2");
+        replace(&mut h, "dialog:Line Spacing", "lines");
+        ok(&mut h);
+        assert!(!editing(&h.app), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let exprs = exprs_of(&h, &link);
+        assert_eq!((exprs.letter_spacing.as_deref(), exprs.line_spacing.as_deref()), (Some("gap * 2"), Some("lines")));
+        let style = style_of(&h, &link);
+        assert_eq!((style.letter_spacing, style.line_spacing), (2.0, 1.5));
+
+        // Reopened, the fields show the expressions; an untouched OK keeps them, and the numbers
+        // follow a changed parameter.
+        h.app.run("parameters.change", json!({"name":"lines","expression":"2"})).unwrap();
+        select_text(&mut h, &link);
+        h.app.start("sketch.edit_text");
+        h.frames(3);
+        assert_eq!((tx(&h.app).values[4].as_str(), tx(&h.app).values[5].as_str()), ("gap * 2", "lines"));
+        ok(&mut h);
+        let exprs = exprs_of(&h, &link);
+        assert_eq!((exprs.letter_spacing.as_deref(), exprs.line_spacing.as_deref()), (Some("gap * 2"), Some("lines")));
+        assert_eq!(style_of(&h, &link).line_spacing, 2.0);
+
+        // A number typed over an expression replaces it.
+        select_text(&mut h, &link);
+        h.app.start("sketch.edit_text");
+        h.frames(3);
+        replace(&mut h, "dialog:Line Spacing", "1.2");
+        ok(&mut h);
+        let exprs = exprs_of(&h, &link);
+        assert_eq!((exprs.letter_spacing.as_deref(), exprs.line_spacing), (Some("gap * 2"), None));
+        assert_eq!(style_of(&h, &link).line_spacing, 1.2);
     }
 
     fn words_of(h: &Harness, link: &str) -> String {
@@ -1455,6 +1502,8 @@ mod tests {
         let (mut h, link, _) = setup();
         h.app.start("sketch.edit_text");
         h.frames(3);
+        // The dialog says how (#16738).
+        assert!(h.widget(solidcraft_ui_text::tr("sketch_text.new_line_hint")).is_some(), "the new-line hint under the Text box");
         h.step(&json!({"text":"A"})).unwrap();
         h.step(&json!({"key":"Enter","shift":true})).unwrap();
         h.step(&json!({"text":"B"})).unwrap();
@@ -1466,6 +1515,23 @@ mod tests {
         assert!(!editing(&h.app));
         let sid = h.app.session.active_sketch.unwrap();
         assert!(matches!(&h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source, LinkSource::Text { text, .. } if text == "A\nB"));
+    }
+
+    /// The hint is there while the Text box is being typed in, and gone once the focus is elsewhere
+    /// (#17121 review). The rest of the dialog stays where it is when it goes.
+    #[test]
+    fn the_new_line_hint_shows_only_while_the_text_box_has_focus() {
+        let (mut h, _, _) = setup();
+        h.app.start("sketch.edit_text");
+        h.frames(3);
+        let hint = solidcraft_ui_text::tr("sketch_text.new_line_hint");
+        assert!(h.widget(hint).is_some(), "the new-line hint under the Text box");
+        let footer = h.widget("OK").expect("the dialog's OK button");
+        let focused = h.ctx.memory(|memory| memory.focused());
+        h.ctx.memory_mut(|memory| focused.into_iter().for_each(|id| memory.surrender_focus(id)));
+        h.frames(2);
+        assert!(h.widget(hint).is_none(), "no new-line hint while the Text box is not focused");
+        assert_eq!(h.widget("OK"), Some(footer), "the fields under the hint do not move when it goes away");
     }
 
     /// "IO" (10 mm) seen from the top: the profile of the I, and those of the O's ring and its counter.

@@ -27,6 +27,65 @@ pub fn whole_profile_selection_from_value(value: &Value) -> Result<ProfileSel> {
     serde_json::from_value(value.clone()).map_err(|_| invalid())
 }
 
+/// Validate a text profile reference (`text_regions`: the letters of whole sketch texts) before
+/// decoding it.
+pub fn text_regions_selection_from_value(value: &Value) -> Result<ProfileSel> {
+    validate_text_reference(value)?;
+    serde_json::from_value(value.clone()).map_err(|_| invalid())
+}
+
+fn validate_text_reference(value: &Value) -> Result<()> {
+    exact_keys(value, &["type", "links"])?;
+    if value.get("type").and_then(Value::as_str) != Some("text_regions") {
+        return Err(invalid());
+    }
+    let links = value.get("links").and_then(Value::as_array).ok_or_else(invalid)?;
+    if links.is_empty() || links.len() > 128 {
+        return Err(invalid());
+    }
+    let mut seen = BTreeSet::new();
+    for link in links {
+        if !seen.insert(id(link)?) {
+            return Err(invalid());
+        }
+    }
+    Ok(())
+}
+
+/// Validate a sided profile reference (`sided_curves`: each profile's curves with the side of each
+/// it lies on) before decoding it.
+pub fn sided_curves_selection_from_value(value: &Value) -> Result<ProfileSel> {
+    validate_sided_reference(value)?;
+    serde_json::from_value(value.clone()).map_err(|_| invalid())
+}
+
+fn validate_sided_reference(value: &Value) -> Result<()> {
+    exact_keys(value, &["type", "loops"])?;
+    if value.get("type").and_then(Value::as_str) != Some("sided_curves") {
+        return Err(invalid());
+    }
+    let loops = value.get("loops").and_then(Value::as_array).ok_or_else(invalid)?;
+    if loops.is_empty() || loops.len() > 128 {
+        return Err(invalid());
+    }
+    for sided in loops {
+        let curves = sided.as_array().ok_or_else(invalid)?;
+        if curves.is_empty() || curves.len() > 512 {
+            return Err(invalid());
+        }
+        let mut seen = BTreeSet::new();
+        for curve in curves {
+            exact_keys(curve, &["curve", "side"])?;
+            if !seen.insert(id(curve.get("curve").ok_or_else(invalid)?)?)
+                || !matches!(curve.get("side").and_then(Value::as_str), Some("inside" | "outside" | "left" | "right"))
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_whole_reference(value: &Value) -> Result<()> {
     exact_keys(value, &["type", "profiles"])?;
     if value.get("type").and_then(Value::as_str) != Some("whole_boundaries") {
@@ -42,11 +101,11 @@ fn validate_whole_reference(value: &Value) -> Result<()> {
         exact_keys(profile, &["outer", "holes"])?;
         let mut boundary = |value: &Value| -> Result<Vec<String>> {
             let values = value.as_array().ok_or_else(invalid)?;
-            if values.is_empty() || values.len() > 512 {
+            if values.is_empty() || values.len() > crate::profile_refs::MAX_WHOLE_LOOP_CURVES {
                 return Err(invalid());
             }
-            total += values.len();
-            if total > 20_000 {
+            total = total.saturating_add(values.len());
+            if total > crate::profile_refs::MAX_WHOLE_CURVES {
                 return Err(invalid());
             }
             // Bound each raw ID before any owned allocation. A loop is a set of curves: its
@@ -186,6 +245,12 @@ pub(crate) fn validate_raw(value: &Value) -> Result<()> {
         if value.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
             return validate_whole_reference(value);
         }
+        if value.get("type").and_then(Value::as_str) == Some("text_regions") {
+            return validate_text_reference(value);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("sided_curves") {
+            return validate_sided_reference(value);
+        }
         if value.get("type").and_then(Value::as_str) == Some("offset_boundaries") {
             exact_keys(value, &["type", "associations"])?;
             let ids = value.get("associations").and_then(Value::as_array).ok_or_else(invalid)?;
@@ -295,18 +360,24 @@ mod tests {
         let many = (0..129).map(|index| json!({"outer":[format!("c{index:03}")],"holes":[]})).collect::<Vec<_>>();
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":&many[..128]})).is_ok());
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":many})).is_err());
-        let oversized = (0..513).map(|index| format!("c{index:03}")).collect::<Vec<_>>();
+        // The outline of a line of script text has hundreds of curves: it loads (it used to stop
+        // at 512). One loop past what a sketch may hold does not.
+        use crate::profile_refs::{MAX_WHOLE_CURVES, MAX_WHOLE_LOOP_CURVES};
+        let script = (0..600).map(|index| format!("c{index:03}")).collect::<Vec<_>>();
+        assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":[{"outer":script,"holes":[]}]})).is_ok());
+        let oversized = (0..=MAX_WHOLE_LOOP_CURVES).map(|index| format!("c{index}")).collect::<Vec<_>>();
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":[{"outer":oversized,"holes":[]}]})).is_err());
         let too_many_holes = (0..129).map(|index| vec![format!("hole{index:03}")]).collect::<Vec<_>>();
         assert!(
             whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":[{"outer":["outer"],"holes":too_many_holes}]})).is_err()
         );
-        let aggregate = (0..40)
-            .map(|profile| {
-                let outer = (0..512).map(|curve| format!("profile{profile:03}curve{curve:03}")).collect::<Vec<_>>();
-                json!({"outer":outer,"holes":[]})
-            })
-            .collect::<Vec<_>>();
+        let full = |profile: usize| {
+            let outer = (0..MAX_WHOLE_LOOP_CURVES).map(|curve| format!("p{profile}c{curve}")).collect::<Vec<_>>();
+            json!({"outer":outer,"holes":[]})
+        };
+        let mut aggregate = (0..MAX_WHOLE_CURVES / MAX_WHOLE_LOOP_CURVES).map(full).collect::<Vec<_>>();
+        assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_ok());
+        aggregate.push(json!({"outer":["one more"],"holes":[]}));
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_err());
     }
 
@@ -469,6 +540,7 @@ mod tests {
                             direction: crate::Direction::Positive,
                             distance2: None,
                             start_offset: None,
+                            symmetric_offset: false,
                             through_all: false,
                             second_follows_first: false,
                             taper: None,
@@ -477,9 +549,14 @@ mod tests {
                             to_offset: None,
                             from: None,
                             to_body_apart: false,
+                            through_all2: false,
+                            to2: None,
+                            to_offset2: None,
                             from_level: false,
                             picked_placements: Vec::new(),
                             one_sided_direction: None,
+                            to_ref: None,
+                            from_ref: None,
                         },
                         operation: crate::Operation::NewBody,
                         targets: vec![],

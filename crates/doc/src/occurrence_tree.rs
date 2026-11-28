@@ -14,7 +14,7 @@ pub(crate) struct OccurrenceTree<'a> {
 impl<'a> OccurrenceTree<'a> {
     pub(crate) fn new(doc: &'a Document) -> Self {
         let mut children: HashMap<u64, Vec<&Occurrence>> = HashMap::new();
-        for o in &doc.occurrences {
+        for o in doc.active_occurrences() {
             children.entry(o.parent).or_default().push(o);
         }
         OccurrenceTree { children }
