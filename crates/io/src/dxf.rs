@@ -1107,7 +1107,9 @@ impl LayeredTextStyles {
         let error = |why: &str| IoError::Invalid(format!("not supported yet: layered DXF STYLE: {why}"));
         let fields = record.f.len().checked_add(record.s.len()).ok_or_else(|| error("field count overflow"))?;
         *work = work.checked_add(fields).filter(|n| *n <= MAX_WORK).ok_or_else(|| error("work budget exceeded"))?;
-        let name = layered_text(record, 2)?.filter(|n| !n.is_empty() && n.len() <= 255 && !n.chars().any(char::is_control)).ok_or_else(|| error("invalid style name"))?;
+        let name = layered_text(record, 2)?
+            .filter(|n| !n.is_empty() && n.len() <= 255 && !n.chars().any(char::is_control))
+            .ok_or_else(|| error("invalid style name"))?;
         if self.0.len() >= MAX_TEXT_STYLES || self.0.insert(name.to_ascii_uppercase(), (name.to_string(), None)).is_some() {
             return Err(error("duplicate declaration or too many styles"));
         }
