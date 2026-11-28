@@ -1315,6 +1315,10 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
     enter
 }
 
+/// The keys of a Frame Member's corners and finishing, which a frame of several groups takes for
+/// the whole frame, not per group.
+const FINISHING: [&str; 6] = ["corner", "corners", "flip", "coped", "gap", "fit_ends"];
+
 /// Keep Offset A and B and the shown group's `locate` in step. The offsets are the user's
 /// intention: typed (or set by an arrow or the marker in the view), they set `locate` (the
 /// anchor's point minus the offset; both empty: none), and a later change of the profile, Anchor,
@@ -1452,8 +1456,9 @@ fn applied_locate(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<S
 }
 
 /// The command the dialog's OK runs (`extra`: parameters kept from the feature being edited).
-/// Group placement uses the same path/profile reader as an ordinary frame. Unsupported joined
-/// groups are refused, preserving the selected corner and finishing controls for the user.
+/// Group placement uses the same path/profile reader as an ordinary frame, one group at a time;
+/// the corners and finishing are read once over every group's lines, since a corner override can
+/// name a line of each of two groups.
 pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     // Offset A and B typed for the group shown are applied to its `locate` as the values are now.
     let applied;
@@ -1475,16 +1480,6 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     if m.continuous {
         return Err("not supported yet: continuous members cannot be combined with groups; use separate Frame Members".into());
     }
-    if m.corner != NONE
-        || !m.overrides.is_empty()
-        || !crate::selection::items(inputs, 2).is_empty()
-        || extra.get("corners").and_then(Value::as_array).is_some_and(|a| !a.is_empty())
-    {
-        return Err("not supported yet: frame member groups with joined corners; use corner none without corner overrides".into());
-    }
-    if m.flip || m.coped || !m.gap.trim().is_empty() || extra.get("fit_ends").and_then(Value::as_bool) == Some(true) {
-        return Err("not supported yet: frame member groups with finishing options; use separate Frame Members for finishing".into());
-    }
     if extra.get("pairs").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) {
         return Err("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs".into());
     }
@@ -1503,12 +1498,22 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
         shown.angle = group.angle;
         shown.mirror = group.mirror;
         shown.name = group.name;
+        // Placement only: the corners are the whole frame's, read below.
+        shown.corner = NONE;
+        shown.overrides.clear();
+        shown.flip = false;
         let mut picks = inputs.to_vec();
+        if let Some(corners) = picks.get_mut(2) {
+            corners.items.clear();
+        }
         let path = picks.first_mut().ok_or("select lines for the path first")?;
         path.items = group.lines;
         shown.sync(&path.items);
         let mut kept = extra.clone();
         kept.remove("locate");
+        for key in FINISHING {
+            kept.remove(key);
+        }
         let mut flat = flat_commands(app, &shown, &picks, &kept)?.into_iter().next().ok_or("select lines for the path first")?.1;
         let mut placement = Map::new();
         for key in ["lines", "anchor", "locate", "angle", "mirror", "body_name"] {
@@ -1527,6 +1532,24 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     }
     let mut p = common.ok_or("select lines for the path first")?;
     p["groups"] = json!(grouped);
+    // The corners and finishing, over every group's lines.
+    let mut whole = m.clone();
+    whole.all = false;
+    whole.groups = vec![Group::default()];
+    whole.current = 0;
+    let mut picks = inputs.to_vec();
+    let path = picks.first_mut().ok_or("select lines for the path first")?;
+    path.items = m.all_groups(inputs).into_iter().flat_map(|g| g.lines).collect();
+    whole.sync(&path.items);
+    let flat = flat_commands(app, &whole, &picks, extra)?.into_iter().next().ok_or("select lines for the path first")?.1;
+    if let Some(o) = p.as_object_mut() {
+        for key in FINISHING {
+            match flat.get(key) {
+                Some(v) => o.insert(key.into(), v.clone()),
+                None => o.remove(key),
+            };
+        }
+    }
     Ok(vec![("frame.member".into(), p)])
 }
 
