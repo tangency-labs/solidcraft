@@ -1,6 +1,6 @@
 //! Closed mesh fixtures use explicit input triangles, independent of a display tessellator.
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::surface::face_surface::{face_surface, record_face};
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -1024,4 +1024,214 @@ fn rotated_f32_parallel_shoulders_keep_their_analytic_contacts() {
     assert_eq!(cylinders(&result.body), 3);
     assert!(result.body.face_list().len() < 24);
     assert_volume(&mut k, &mut { result.body }, 1068. * PI, 0.04);
+}
+
+/// Add the surface patch bounded by `outlines` (an outline and its holes, in the patch's own 2D
+/// coordinates) as its constrained triangulation, each node placed in 3D by `place`.
+fn patch(mesh: &mut TriMesh, outlines: &[Vec<Vec2>], place: impl Fn(Vec2) -> Vec3) {
+    let refs: Vec<&[Vec2]> = outlines.iter().map(Vec::as_slice).collect();
+    let mut flat = TriMesh::default();
+    cap_at(&mut flat, &refs, 0.);
+    let offset = u32::try_from(mesh.positions.len()).unwrap();
+    mesh.positions
+        .extend(flat.positions.iter().map(|p| place(Vec2::new(p.x, p.y))));
+    mesh.triangles
+        .extend(flat.triangles.iter().map(|t| t.map(|i| i + offset)));
+}
+
+/// tangency-labs/solidcore#3405: a 60 x 40 x 30 block bored through along X (diameter 10, axis
+/// at y = 20) and along Y (diameter 8, axis at x = 30), from explicit triangles. Crossing, both
+/// axes are at z = 15: the Y bore cuts two openings into the X bore's wall, and each half of the
+/// Y bore runs from a face of the block to one of them. Apart, the X bore is at z = 8 and the Y
+/// bore at z = 22 (z 3 to 13 and 18 to 26). The X bore's wall is cut along X at 192 equal steps
+/// of angle, and at the four angles where an opening comes to a point.
+fn bored_block(crossing: bool) -> TriMesh {
+    let (big, small) = (5., 4.);
+    let (x_axis_z, y_axis_z) = if crossing { (15., 15.) } else { (8., 22.) };
+    // A point of the X bore's wall from its length round the bore and its x.
+    let on_x_bore = |p: Vec2| {
+        let angle = p.x / big;
+        Vec3::new(p.y, 20. + big * angle.cos(), x_axis_z + big * angle.sin())
+    };
+    // Each angle round the X bore, with the half length along X of the opening there, if any.
+    let mut angles: Vec<(f64, Option<f64>)> = (0..=192)
+        .map(|i| {
+            let angle = f64::from(i) * TAU / 192.;
+            let across = big * angle.sin();
+            let opening = (crossing && across.abs() < small)
+                .then(|| (small.powi(2) - across.powi(2)).sqrt());
+            (angle, opening)
+        })
+        .collect();
+    if crossing {
+        let tip = (small / big).asin();
+        angles.extend([tip, PI - tip, PI + tip, TAU - tip].map(|angle| (angle, Some(0.))));
+        angles.sort_by(|a, b| a.0.total_cmp(&b.0));
+    }
+    let mut mesh = TriMesh::default();
+    for (&(a, at_a), &(b, at_b)) in angles.iter().zip(angles.iter().skip(1)) {
+        let (a, b) = (a * big, b * big);
+        if let (Some(wa), Some(wb)) = (at_a, at_b) {
+            let low = [(a, 0.), (b, 0.), (b, 30. - wb), (a, 30. - wa)];
+            let high = [(a, 30. + wa), (b, 30. + wb), (b, 60.), (a, 60.)];
+            for piece in [low, high] {
+                let outline = piece.map(|(s, x)| Vec2::new(s, x)).to_vec();
+                patch(&mut mesh, &[outline], on_x_bore);
+            }
+        } else {
+            // One side of the strip may end at the point of an opening.
+            let point = |s: f64, opening: Option<f64>| opening.map(|_| Vec2::new(s, 30.));
+            let mut outline = vec![Vec2::new(a, 0.), Vec2::new(b, 0.)];
+            outline.extend(point(b, at_b));
+            outline.extend([Vec2::new(b, 60.), Vec2::new(a, 60.)]);
+            outline.extend(point(a, at_a));
+            patch(&mut mesh, &[outline], on_x_bore);
+        }
+    }
+    let ring: Vec<_> = angles.iter().skip(1).map(|&(angle, _)| angle * big).collect();
+    for x in [0., 60.] {
+        let hole = ring
+            .iter()
+            .map(|&s| {
+                let p = on_x_bore(Vec2::new(s, x));
+                Vec2::new(p.y, p.z)
+            })
+            .collect();
+        patch(
+            &mut mesh,
+            &[rectangle(0., 0., 40., 30.).to_vec(), hole],
+            |p| Vec3::new(x, p.x, p.y),
+        );
+    }
+    // The Y bore's walls, each from a rim to its end on the face y = 0 or y = 40.
+    let mut walls = Vec::new();
+    if crossing {
+        for (near, end) in [(0., 40.), (PI, 0.)] {
+            let mut opening: Vec<_> = angles
+                .iter()
+                .skip(1)
+                .filter_map(|&(angle, w)| {
+                    let turn = (angle - near + PI).rem_euclid(TAU) - PI;
+                    w.filter(|_| turn.abs() < FRAC_PI_2).map(|w| (turn, angle, w))
+                })
+                .collect();
+            opening.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut rim: Vec<_> = opening
+                .iter()
+                .map(|&(_, angle, w)| on_x_bore(Vec2::new(angle * big, 30. - w)))
+                .collect();
+            rim.extend(
+                opening
+                    .iter()
+                    .rev()
+                    .filter(|&&(_, _, w)| w > 0.)
+                    .map(|&(_, angle, w)| on_x_bore(Vec2::new(angle * big, 30. + w))),
+            );
+            walls.push((rim, end, None));
+        }
+    } else {
+        let rim = circular_points(Vec2::new(30., y_axis_z), small, 96, 0.)
+            .iter()
+            .map(|p| Vec3::new(p.x, 0., p.y))
+            .collect();
+        walls.push((rim, 40., Some(0.)));
+    }
+    for (rim, end, start) in walls {
+        let far: Vec<_> = rim.iter().map(|p| Vec3::new(p.x, end, p.z)).collect();
+        let offset = u32::try_from(mesh.positions.len()).unwrap();
+        let n = u32::try_from(rim.len()).unwrap();
+        mesh.positions.extend(rim.iter().chain(&far));
+        for i in 0..n {
+            let j = (i + 1) % n;
+            mesh.triangles.extend([
+                [offset + i, offset + j, offset + n + j],
+                [offset + i, offset + n + j, offset + n + i],
+            ]);
+        }
+        for y in std::iter::once(end).chain(start) {
+            let hole = far.iter().map(|p| Vec2::new(p.x, p.z)).collect();
+            patch(
+                &mut mesh,
+                &[rectangle(0., 0., 60., 30.).to_vec(), hole],
+                |p| Vec3::new(p.x, y, p.y),
+            );
+        }
+    }
+    for z in [0., 30.] {
+        patch(&mut mesh, &[rectangle(0., 0., 60., 40.).to_vec()], |p| {
+            Vec3::new(p.x, p.y, z)
+        });
+    }
+    mesh
+}
+
+/// The material two perpendicular cylinders of radii `big` and `small` share when their axes
+/// meet: 8 times the integral over 0..small of sqrt(small² - t²) sqrt(big² - t²) dt. With
+/// t = small sin(u) the integrand is smooth, and Simpson's rule on 2000 steps takes it.
+fn crossing_cylinders_volume(big: f64, small: f64) -> f64 {
+    let steps = 2000;
+    let h = FRAC_PI_2 / f64::from(steps);
+    let f = |u: f64| {
+        small.powi(2) * u.cos().powi(2) * (big.powi(2) - (small * u.sin()).powi(2)).sqrt()
+    };
+    let sum: f64 = (0..=steps)
+        .map(|i| {
+            let weight = if i == 0 || i == steps {
+                1.
+            } else if i % 2 == 1 {
+                4.
+            } else {
+                2.
+            };
+            weight * f(f64::from(i) * h)
+        })
+        .sum();
+    8. * sum * h / 3.
+}
+
+fn planes(body: &Brep) -> usize {
+    surface_kinds(body)
+        .iter()
+        .filter(|&&kind| kind == "plane")
+        .count()
+}
+
+/// tangency-labs/solidcore#3405: a block bored through on two axes is an exact solid, each bore
+/// one cylinder and each side one plane, as a block bored on one axis is. Apart, the solid has
+/// the block's 12 edges and 8 corners, and each bore its two end circles and one seam with their
+/// two vertices. Crossing, the X bore keeps one face and the Y bore is two, one each side of it.
+#[test]
+fn a_block_bored_on_two_axes_gets_exact_cylinders_and_planes() {
+    let block = 60. * 40. * 30.;
+    let bores = PI * 25. * 60. + PI * 16. * 40.;
+    for (crossing, f32_input) in [(false, false), (true, false), (true, true)] {
+        let mut mesh = bored_block(crossing);
+        if f32_input {
+            for p in &mut mesh.positions {
+                *p = Vec3::new(
+                    f64::from(p.x as f32),
+                    f64::from(p.y as f32),
+                    f64::from(p.z as f32),
+                );
+            }
+        }
+        let what = format!("crossing={crossing} f32={f32_input}");
+        let mut k = Kernel::default();
+        let result = reconstruct(&mut k, &mesh.positions, &mesh.triangles, 0.05).unwrap();
+        assert_eq!(result.kind, ReconstructionKind::Analytic, "{what}");
+        let mut body = result.body;
+        assert_eq!(planes(&body), 6, "{what}: {:?}", surface_kinds(&body));
+        let expected = if crossing {
+            assert_eq!(cylinders(&body), 3, "{what}: {:?}", surface_kinds(&body));
+            assert_eq!(body.face_list().len(), 9, "{what}");
+            block - bores + crossing_cylinders_volume(5., 4.)
+        } else {
+            assert_eq!(cylinders(&body), 2, "{what}: {:?}", surface_kinds(&body));
+            assert_eq!(body.face_list().len(), 8, "{what}");
+            assert_eq!(body.edge_list().len(), 12 + 2 * 3, "{what}");
+            assert_eq!(body.vertex_list().len(), 8 + 2 * 2, "{what}");
+            block - bores
+        };
+        assert_volume(&mut k, &mut body, expected, 1e-6);
+    }
 }
