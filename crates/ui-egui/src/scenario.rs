@@ -437,7 +437,8 @@ impl Harness {
     fn reveal_widget(&mut self, text: &str, near: Option<&str>) -> Result<[f64; 2], String> {
         let find = |h: &Self| match near {
             Some(label) => h.widget_near(text, label),
-            None => h.widget(text),
+            // A window with Apply calls its OK button Done: a step that says OK finds it too.
+            None => h.widget(text).or_else(|| if text == "OK" { h.widget("Done") } else { None }),
         };
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;

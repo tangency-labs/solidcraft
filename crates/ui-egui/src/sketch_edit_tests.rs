@@ -719,6 +719,158 @@ fn extrude_from_an_open_used_sketch_picks_its_new_profile() {
     }
 }
 
+/// #6940: one used sketch gives several features in a row. Extrude from the sketch's menu (here
+/// through `ui.start` with `sketch`, as the menu does) opens with the sketch shown although an
+/// earlier extrude uses and hides it; Apply makes one extrusion, keeps the window with the sketch
+/// still shown and only the picks cleared; OK makes the next and closes, and the sketch is hidden
+/// again. Esc after an Apply keeps what was applied. Revolve opens the same way.
+#[test]
+fn several_features_from_one_used_sketch_with_apply() {
+    use crate::dialogs::Kind;
+    use serde_json::json;
+    use solidcraft_engine::Sel;
+    let shown = |h: &crate::scenario::Harness, sketch| solidcraft_engine::view::sketch_shown(&h.app.session, sketch);
+    for last in ["OK", "Escape"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance": 5, "profiles": [0]})).unwrap();
+        assert!(!shown(&h, sketch), "{last}: the first extrude hides the sketch it uses");
+        let r = h.call("ui.start", json!({"command": "solid.extrude", "params": {"sketch": sketch}}));
+        assert_eq!(r["ok"], true, "{last}: {r}");
+        h.settle();
+        assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Extrude { .. })), "{last}: Extrude is open");
+        assert!(shown(&h, sketch), "{last}: the sketch is shown while Extrude works from it");
+        assert!(crate::scenario::rect_of("dialog:apply").is_some(), "{last}: a new Extrude has Apply");
+        assert!(h.widget("Done").is_some() && h.widget("OK").is_none(), "{last}: a window with Apply ends the run with Done, not OK");
+        let (features, undo) = (h.app.session.doc.features.len(), h.app.session.undo.len());
+        for (index, step) in [(1, "apply"), (2, last)] {
+            h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index }];
+            h.settle();
+            // The preview computes off the window thread and the window is taller while it says so:
+            // wait for it, as a person does, so the click lands where the button now is.
+            for _ in 0..3000 {
+                if !h.app.preview.busy && h.app.applying.is_none() {
+                    break;
+                }
+                h.frames(1);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            h.frames(2);
+            let action = match step {
+                "apply" => json!({"click": {"handle": "dialog:apply"}}),
+                "OK" => json!({"key": "Enter"}),
+                _ => json!({"key": "Escape"}),
+            };
+            // The extrusion computes off the window thread, and OK is refused while one is still
+            // computing: wait for the feature to land (not just for the computing to stop, which
+            // is also true before it starts), as a person does before the next step. A click that
+            // landed while the window was still moving did nothing, and a person clicks again: so
+            // does the test, a few times at most (Apply that never works still fails below).
+            let before = features + if step == "apply" { 0 } else { 1 };
+            for attempt in 0..4 {
+                if attempt > 0 && step != "apply" {
+                    break;
+                }
+                h.step(&action).unwrap();
+                for _ in 0..1500 {
+                    if step == last && last == "Escape" {
+                        break;
+                    }
+                    if h.app.applying.is_none() && h.app.session.doc.features.len() > before {
+                        break;
+                    }
+                    h.frames(1);
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                if step != "apply" || h.app.session.doc.features.len() > before {
+                    break;
+                }
+                h.settle();
+            }
+            assert!(h.app.applying.is_none(), "{last}: the {step} finished computing");
+            h.settle();
+        }
+        let made = if last == "OK" { 2 } else { 1 };
+        assert_eq!(h.app.session.doc.features.len(), features + made, "{last}: one extrusion per Apply or OK");
+        assert_eq!(h.app.session.undo.len(), undo + made, "{last}: one undo step each");
+        assert!(h.app.dialog.is_none(), "{last}");
+        assert!(!shown(&h, sketch), "{last}: hidden again once the window closes");
+    }
+    // Revolve starts the same way.
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance": 5, "profiles": [0]})).unwrap();
+    let r = h.call("ui.start", json!({"command": "solid.revolve", "params": {"sketch": sketch}}));
+    assert_eq!(r["ok"], true, "{r}");
+    h.settle();
+    assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Revolve { .. })), "Revolve is open");
+    assert!(shown(&h, sketch), "the sketch is shown while Revolve works from it");
+    crate::dialogs::cancel(&mut h.app);
+    h.settle();
+    assert!(!shown(&h, sketch), "hidden again after Cancel");
+    // Wrong params are refused before anything opens.
+    for bad in [json!({"sketch": "no such sketch"}), json!({"sketch": sketch, "depth": 3}), json!({"sketch": [1]})] {
+        let r = h.call("ui.start", json!({"command": "solid.extrude", "params": bad}));
+        assert!(r["ok"] == false && h.app.dialog.is_none(), "{bad}: {r}");
+    }
+    // A sketch with no profile opens with nothing picked, never another sketch's profile.
+    let empty = h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let r = h.call("ui.start", json!({"command": "solid.extrude", "params": {"sketch": empty}}));
+    assert_eq!(r["ok"], true, "{r}");
+    h.settle();
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.inputs[0].items.is_empty()), "no fallback profile from another sketch");
+    crate::dialogs::cancel(&mut h.app);
+    h.settle();
+}
+
+/// #6940: Apply in a fillet window starts the next fillet with no edges, and forgets the edges it
+/// applied, so a Tangent Chain toggle cannot bring them back into the next one.
+#[test]
+fn apply_in_a_fillet_window_forgets_the_applied_edges() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 20})),
+        ("solid.fillet", json!({"edges": [[40, 10, 20]], "radius": 2})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    // The fillet's own editor resolves its edge to a pick; reuse that pick in a new fillet window.
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(id);
+    let picks = h.app.dialog.as_ref().unwrap().picked_edges.clone();
+    assert_eq!(picks.len(), 1);
+    // Editing a feature has no Apply, so its window keeps OK.
+    h.settle();
+    assert!(h.widget("OK").is_some() && h.widget("Done").is_none(), "a window without Apply keeps OK");
+    crate::dialogs::cancel(&mut h.app);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    h.app.start("solid.fillet");
+    h.settle();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = picks.clone();
+    d.picked_edges = picks;
+    h.settle();
+    h.step(&json!({"click": {"handle": "dialog:apply"}})).unwrap();
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("Apply keeps the window open");
+    assert!(d.inputs[0].items.is_empty() && d.picked_edges.is_empty(), "the next fillet starts with no edges");
+}
+
 /// #8127: a sketch inside an inserted fastener, opened from its row in the browser, activates the
 /// fastener's component while it is open; Finish and Cancel make the design active again, so the
 /// other bodies are no longer drawn faded. Editing it with the fastener already active leaves the

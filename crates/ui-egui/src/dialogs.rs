@@ -797,9 +797,10 @@ pub struct Dialog {
     /// Where the face that reopened this fillet or chamfer was clicked (Press Pull): its arrow
     /// sits on the edge nearest it. UI state only, never saved.
     pub(crate) anchor_hint: Option<Vec3>,
-    /// The open sketch an Extrude or Revolve ended on its way to opening (#14128). It stays
-    /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
-    /// be picked even when an earlier feature uses the sketch and hides it.
+    /// The sketch an Extrude or Revolve works from: the open sketch it ended on its way to opening
+    /// (#14128), or the one whose menu started it (#6940). It stays shown while this dialog is
+    /// open, as an edited feature's sketch does, so its profiles can be picked even when an
+    /// earlier feature uses the sketch and hides it. Apply keeps it for the next feature.
     pub(crate) started_from_sketch: Option<u64>,
     /// New Sketch was pressed: the dialog waits while the sketch is drawn ([`crate::command_sketch`]).
     pub(crate) new_sketch: bool,
@@ -1789,6 +1790,14 @@ impl Dialog {
 
     pub fn edit_param(s: &Session, name: &str) -> Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
+    }
+
+    /// An Extrude or Revolve works from `sketch`: it stays shown while the dialog is open, as an
+    /// edited feature's sketch does (#6940).
+    pub(crate) fn work_from_sketch(&mut self, sketch: u64) {
+        if matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. }) {
+            self.started_from_sketch = Some(sketch);
+        }
     }
 
     /// The Name row's text (Extrude): what the feature is called, or will be.
@@ -3726,6 +3735,40 @@ fn title(k: &Kind) -> &'static str {
     }
 }
 
+/// Whether a new feature of this dialog's kind can be applied and the dialog kept open for the
+/// next one (#6940): several extrusions from one sketch, fillets or holes in a row. Press Pull
+/// works on the face it was opened on, so it ends with OK.
+fn repeatable(d: &Dialog) -> bool {
+    match &d.kind {
+        Kind::SketchModify(k) => crate::sketch_modify_ui::repeatable(k),
+        Kind::Extrude { .. } => !press_pull_extrude(d),
+        Kind::Revolve { .. } | Kind::Fillet { .. } | Kind::Hole { .. } => true,
+        _ => false,
+    }
+}
+
+/// Starts an Extrude or Revolve on a sketch from its menu in the history tree, or from
+/// `ui.start` with `sketch` (#6940): the sketch's profiles start picked, as they always have
+/// from the menu, and the sketch stays shown while the dialog is open, even when an earlier
+/// feature uses it and hides it, so its regions can be clicked. With Apply, one sketch gives
+/// several features in a row.
+pub(crate) fn start_from_sketch(app: &mut SolveApp, command: &str, sketch: u64) {
+    let n = crate::open_meshing::session_world(&app.session).sketch(sketch).map_or(0, |s| s.profiles.len());
+    let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": sketch, "index": i})).collect();
+    let _ = app.run("select.set", json!({ "items": items }));
+    app.start(command);
+    if let Some(d) = app.dialog.as_mut() {
+        if n == 0
+            && let Some(input) = d.inputs.first_mut()
+        {
+            // The sketch has no profile: drop the default pick from another sketch.
+            input.items.clear();
+        }
+        d.work_from_sketch(sketch);
+    }
+    sync_feature_edit(app);
+}
+
 /// Whether the dialog is an extrude opened by Press Pull (the Q shortcut), which says
 /// PRESS PULL, not EXTRUDE (#11705).
 fn press_pull_extrude(d: &Dialog) -> bool {
@@ -5560,6 +5603,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         _ => !has_ok || !d.previews() || (built.unwrap_or_else(|| apply_commands(app, &d).is_ok()) && app.preview.error.is_none()),
     };
     let (ok_label, close_label) = action_labels(&d.kind);
+    // A window with Apply ends its run with Done, not OK (#6940); windows without Apply keep OK.
+    let repeatable = d.editing.is_none() && !d.extra.contains_key("pattern") && repeatable(&d);
+    let ok_label = if repeatable && ok_label == "OK" { tr("ui.dialog_done") } else { ok_label };
     // What the footer's OK takes, for the check in the view's corner too (#6709).
     let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
     // #10620: the card widens to fit its widest label in the current language. The body
@@ -5601,8 +5647,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. }) | Kind::ShaftSpline(_)),
     );
     let window = panel.window(ctx);
-    let repeatable =
-        matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     let mut painted = false;
     let mut resize = crate::card_resize::Resize::None;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
@@ -5691,6 +5735,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::ui_kit::Action::Apply => {
                         ok = true;
                         apply_again = true;
+                        // The click leaves the Apply button holding the keyboard, and Enter only
+                        // runs OK with nothing focused: hand it back so the next Enter or Done
+                        // after Apply ends the run (#6940).
+                        if let Some(id) = ctx.memory(|m| m.focused()) {
+                            ctx.memory_mut(|m| m.surrender_focus(id));
+                        }
                     }
                     crate::ui_kit::Action::None => {}
                 }
@@ -5930,6 +5980,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         for input in &mut d.inputs {
             input.items.clear();
         }
+        // The edges picked for the feature just applied belong to it: a Tangent Chain toggle must
+        // not bring them back into the next one.
+        d.picked_edges.clear();
         d.active = 0;
         d.error = None;
         d.refused = None;
