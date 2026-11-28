@@ -202,7 +202,7 @@ fn rotation(r: &Value, cmd: &str) -> Result<DragRotate> {
     }
     let origin = move_vector(r, "origin", Vec3::ZERO, true, cmd)?;
     let axis = move_vector(r, "axis", Vec3::Z, false, cmd)?;
-    if axis.normalized().is_none() {
+    if [axis.x, axis.y, axis.z].iter().all(|c| *c == 0.0) {
         return Err(bad(cmd, "rotate: axis must have a finite nonzero length"));
     }
     let angle = r
