@@ -261,3 +261,50 @@ fn a_tangent_is_never_failing_while_the_sketch_is_solved() {
         }
     }
 }
+
+/// #14343: a Tangent between a line and a circle whose line's end is close to the circle is read
+/// at that end: the end lies on the circle and the line touches it there. A Tangent of a design
+/// saved before that change keeps the plain tangency (`old_join`): the infinite line touches the
+/// circle and the line's end stops short of it.
+#[test]
+fn a_tangent_is_read_at_the_line_end_that_is_close_to_the_circle() {
+    // A circle of radius 5 and a line whose end lies on it, not tangent there.
+    let sketch = |old: bool| {
+        let mut sk = Sketch::new();
+        let centre = sk.add_point(v(0.0, 0.0), None).unwrap();
+        let circle = sk.add_circle(v(0.0, 0.0), 5.0, Some(centre), Some("c")).unwrap();
+        let line = sk.add_line(v(5.0, 0.0), v(10.0, 5.0), None, None, Some("l")).unwrap();
+        sk.add_constraint(ConstraintKind::Fix { p: centre }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Radius { c: circle, value: 5.0 }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Tangent { a: line, b: circle }, None).unwrap();
+        if old {
+            sk.constraints.last_mut().unwrap().old_join = true;
+        }
+        sk
+    };
+    // The line's end, the one nearer the circle, and the line's direction.
+    let parts = |sk: &Sketch| {
+        let line = sk.curve_index("l").unwrap();
+        let circle = sk.curve_index("c").unwrap();
+        let (a, b) = sk.curves[line].kind.ends().unwrap();
+        let (pa, pb) = (sk.points[a].pos, sk.points[b].pos);
+        let end = if pa.dist(sk.center(circle).unwrap()) < pb.dist(sk.center(circle).unwrap()) { pa } else { pb };
+        (end, pb - pa, sk.center(circle).unwrap())
+    };
+
+    // A Tangent made now: the line touches the circle at its end, which lies on it.
+    let mut sk = sketch(false);
+    assert!(solve(&mut sk).ok());
+    let (end, d, centre) = parts(&sk);
+    assert!((end.dist(centre) - 5.0).abs() < 1e-6, "the line's end does not lie on the circle: {end:?}");
+    assert!((end - centre).dot(d).abs() < 1e-6, "the line does not touch the circle at that end");
+
+    // A Tangent of a design saved before that change: the plain tangency, where the infinite
+    // line touches the circle and the line's end stops short of it.
+    let mut sk = sketch(true);
+    assert!(solve(&mut sk).ok());
+    let (end, d, centre) = parts(&sk);
+    assert!((end.dist(centre) - 5.0).abs() > 1e-6, "the line's end lies on the circle: {end:?}");
+    let gap = (centre - end).cross(d).abs() / d.len();
+    assert!((gap - 5.0).abs() < 1e-6, "the line does not touch the circle: {gap}");
+}

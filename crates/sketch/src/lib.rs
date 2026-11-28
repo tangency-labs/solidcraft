@@ -220,6 +220,7 @@ pub use solver::Analysis;
 pub use solver::CONSISTENT;
 pub use solver::DrivingValues;
 pub use solver::Hold;
+pub use solver::JOIN_TOL;
 pub use solver::MAX_COMPONENT_VARS;
 pub use solver::SolveReport;
 pub use solver::SolveStatus;

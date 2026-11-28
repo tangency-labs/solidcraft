@@ -34,7 +34,7 @@ pub const CONSISTENT: f64 = 1e-6;
 /// The constraint a block stands for.
 pub(super) fn block_constraint(b: &Block) -> Option<usize> {
     match b {
-        Block::User(ci, _) | Block::TangentAt(ci, _, _) => Some(*ci),
+        Block::User(ci, _) | Block::TangentAt(ci, _, _) | Block::TangentJoin(ci, _, _) => Some(*ci),
         Block::Closure { .. } | Block::Arc { .. } => None,
     }
 }
@@ -192,17 +192,14 @@ pub fn constraint_residual(sk: &Sketch, ci: usize) -> Option<f64> {
     let fixed =
         Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     let on_curve = points_on_curves(sk);
-    let b = match super::touch_point(sk, &c.kind, &on_curve) {
-        Some(p) => Block::TangentAt(ci, &c.kind, p),
-        None => Block::User(ci, &c.kind),
-    };
+    let b = super::block_of(sk, ci, c, &on_curve);
     let state = State { sk, lay: &fixed, x: &[] };
     let mut r = Vec::new();
     block_residuals(&state, &b, &mut r);
     // A tangency read at its touch point holds there when the curves only touch at a point that
     // is not on both: the touch-free form (distance from the centre equals the radius) shows a
     // violated tying constraint as well, so the larger of the two is the constraint's distance.
-    if matches!(b, Block::TangentAt(..)) {
+    if matches!(b, Block::TangentAt(..) | Block::TangentJoin(..)) {
         super::residuals(&state, &c.kind, &mut r);
     }
     Some(max_abs(&r))
