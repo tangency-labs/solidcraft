@@ -107,7 +107,7 @@ const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [-
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
 /// `mcp`'s lines in the usage.
-const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact] [--structured]\n                     [--http 127.0.0.1:PORT [--http-token-file FILE] [--http-info-file FILE]]\n      (--http ADDR: serve MCP Streamable HTTP on a loopback address (127.0.0.1:PORT, 127.0.0.1:0, or [::1]:PORT;\n       non-loopback addresses are refused) so multiple local clients share one warm session; requires Authorization:\n       Bearer <token> (random 32-byte hex token by default, or --http-token-file / SOLIDCRAFT_MCP_TOKEN); --http-info-file\n       writes {\"url\", \"token\", \"pid\"} with owner-only permissions)\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n      (--structured: every tool result also carries its reply as data, structuredContent {result, notes?}, for\n       programs that call the tools, such as a Python client; chat clients leave it off; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
+const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact] [--structured]\n                     [--http 127.0.0.1:PORT [--http-token-file FILE] [--http-info-file FILE]]\n      (--http ADDR: serve MCP Streamable HTTP on a loopback address (127.0.0.1:PORT, 127.0.0.1:0, or [::1]:PORT;\n       non-loopback addresses are refused) so multiple local clients share one warm session; requires Authorization:\n       Bearer <token> supplied via --http-token-file / SOLIDCRAFT_MCP_TOKEN, or generated from OS entropy and\n       written to --http-info-file FILE as {\"url\", \"token\", \"pid\"} (0600 on Unix; on Windows place it in a\n       user-private directory); generated tokens are never printed to stderr)\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n      (--structured: every tool result also carries its reply as data, structuredContent {result, notes?}, for\n       programs that call the tools, such as a Python client; chat clients leave it off; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// The plugin operations' lines in the usage. The macro holds one text for each operation, so
 /// `plugin --help` prints both and an operation's own `--help` prints its own lines alone
 /// (#19237): what the operation does, its arguments and its exit codes.
@@ -1574,6 +1574,12 @@ fn parse_mcp_http_args(args: &[String]) -> Result<Option<McpHttpArgs>, String> {
     };
     let addr = solidcraft_mcp::http::parse_loopback_addr(raw_addr).map_err(|e| format!("mcp: {e}"))?;
     let (token, token_source) = solidcraft_mcp::http::resolve_token_from_env(token_file.as_deref()).map_err(|e| format!("mcp: {e}"))?;
+    if token_source == solidcraft_mcp::http::TokenSource::Generated && info_file.is_none() {
+        return Err(format!(
+            "mcp: --http requires --http-info-file FILE when no bearer token is supplied (or pass --http-token-file FILE or {}); generated tokens are not printed to stderr",
+            solidcraft_mcp::http::TOKEN_ENV
+        ));
+    }
     Ok(Some(McpHttpArgs { addr, token, token_source, info_file }))
 }
 
@@ -1724,14 +1730,10 @@ fn serve_mcp_http(
         solidcraft_mcp::http::TokenSource::Env => {
             solidcraft_engine::note!("solidcraft mcp: bearer token loaded from {}", solidcraft_mcp::http::TOKEN_ENV);
         }
-        solidcraft_mcp::http::TokenSource::Generated => match &http.info_file {
-            Some(path) => {
-                solidcraft_engine::note!("solidcraft mcp: connection info written to {} (owner-only)", path.display());
-            }
-            None => {
-                solidcraft_engine::note!("solidcraft mcp: bearer token: {} (pass as Authorization: Bearer <token>)", http.token);
-            }
-        },
+        solidcraft_mcp::http::TokenSource::Generated => {}
+    }
+    if let Some(path) = &http.info_file {
+        solidcraft_engine::note!("solidcraft mcp: connection info written to {}", path.display());
     }
     let config = solidcraft_mcp::http::HttpConfig::new(http.token);
     solidcraft_mcp::Server::new(backend)

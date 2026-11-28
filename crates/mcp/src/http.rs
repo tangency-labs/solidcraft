@@ -1,5 +1,5 @@
 //! Local loopback MCP Streamable HTTP helpers for SolidCraft: OS-random bearer token
-//! resolution, owner-only connection metadata files (`--http-info-file`), and re-exports of the
+//! resolution, connection metadata files (`--http-info-file`), and re-exports of the
 //! shared HTTP transport from [`solidcraft_mcp_server::http`].
 
 use std::fs::OpenOptions;
@@ -103,8 +103,10 @@ impl Drop for InfoFileGuard {
     }
 }
 
-/// Write connection metadata `{"url": ..., "token": ..., "pid": ...}` to `path` with owner-only
-/// permissions (`0600` on Unix). Returns a guard that cleans up the file on graceful shutdown.
+/// Write connection metadata `{"url": ..., "token": ..., "pid": ...}` to `path` (`0600` on Unix;
+/// on Windows the file inherits its parent directory's ACL and does not receive an owner-only ACL,
+/// so place it inside a user-private directory). Returns a guard that cleans up the file on
+/// graceful shutdown.
 pub fn write_info_file(path: &Path, url: &str, token: &str, pid: u32) -> io::Result<InfoFileGuard> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()

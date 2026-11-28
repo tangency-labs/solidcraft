@@ -51,7 +51,7 @@ solidcraft-cli mcp --connect 127.0.0.1:7878
 
 # Local Streamable HTTP server: multiple local clients share one warm headless session
 # (for example a large .sc assembly kept hot in RAM, optionally with --render-gpu).
-solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc --render-gpu
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc --render-gpu
 ```
 
 ### Streamable HTTP (`--http`)
@@ -61,14 +61,16 @@ multiple local MCP clients (Claude Code sessions, Codex, Python scripts) can sha
 persistent warm SolidCraft session in RAM without reloading a large `.sc` assembly per client:
 
 ```sh
-# Fixed loopback port (prints the ready URL and generated bearer token on stderr).
-solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc --render-gpu
+# Fixed loopback port + generated bearer token written to an info file
+# (stderr logs the ready URL and info-file path; generated tokens are never printed to stderr).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc --render-gpu
 
-# Ephemeral loopback port + owner-only connection metadata file (0600 on Unix):
+# Ephemeral loopback port + connection metadata file:
 # writes {"url": "http://127.0.0.1:<port>/mcp", "token": "...", "pid": ...}.
-solidcraft-cli mcp --http 127.0.0.1:0 --http-info-file /tmp/solidcraft-mcp.json --in assembly.sc
+solidcraft-cli mcp --http 127.0.0.1:0 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc
 
-# Explicit bearer token from a file or environment variable (preferred over command-line args).
+# Explicit bearer token from a file or environment variable (no --http-info-file required;
+# preferred over command-line arguments).
 solidcraft-cli mcp --http 127.0.0.1:8765 --http-token-file ~/.config/solidcraft/mcp.token --in assembly.sc
 SOLIDCRAFT_MCP_TOKEN="..." solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc
 ```
@@ -79,11 +81,15 @@ Security model:
   `127.0.0.1:0`, `[::1]:PORT`, or `localhost:PORT`). Non-loopback addresses (`0.0.0.0`, `[::]`,
   LAN IPs) are refused at startup.
 - **Mandatory Bearer authentication:** every HTTP request must carry `Authorization: Bearer <token>`
-  (verified in constant time; missing or wrong tokens receive `401 Unauthorized`). By default a
-  random 32-byte hex token is generated on startup from OS entropy; pass `--http-token-file` or
-  `SOLIDCRAFT_MCP_TOKEN` to supply one explicitly, and `--http-info-file` to write `url`, `token`
-  and `pid` with owner-only permissions (`0600` on Unix) instead of printing the generated token to
-  stderr.
+  (verified in constant time; missing or wrong tokens receive `401 Unauthorized`). Pass
+  `--http-token-file` or `SOLIDCRAFT_MCP_TOKEN` to supply a token explicitly; otherwise the server
+  generates a random 32-byte hex token from OS entropy and requires `--http-info-file` to write
+  `url`, `token` and `pid`. Generated tokens are never printed to stderr (MCP clients often record a
+  server's stderr in log files); stderr prints only the ready URL and the info-file path. On Unix
+  the info file is created with owner-only permissions (`0600`); on Windows it does not get an
+  owner-only ACL (it inherits its parent directory's permissions), so on shared Windows machines
+  place `--http-info-file` inside a user-private directory (for example under `%LOCALAPPDATA%` or
+  `%USERPROFILE%`).
 - **DNS rebinding protection:** requests with a non-loopback `Host` or `Origin` header are refused
   with `403 Forbidden`.
 - **File scope:** `--allow-path`, `--require-allow-path` and `--allow-any-path` apply identically
