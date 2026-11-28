@@ -2733,6 +2733,45 @@ mod tests {
     }
 
     #[test]
+    fn configuration_joint_suppression_roundtrips() {
+        use crate::config::{Column, ConfigRow};
+        use crate::joints::{Joint, JointExprs, JointKind, JointOrigin, Snap};
+        let mut d = Document::new("configured joint");
+        let joint_id = d.allocate_id().unwrap();
+        let origin = Snap::Frame { origin: solidcore_record::Vec3::ZERO, z: solidcore_record::Vec3::Z, x: None };
+        d.assembly.joints.push(Joint {
+            id: joint_id,
+            name: "Angle1".into(),
+            kind: JointKind::Rigid,
+            a: JointOrigin::new(0, origin.clone()),
+            b: JointOrigin::new(1, origin),
+            values: Vec::new(),
+            limits: Vec::new(),
+            flip: false,
+            offset: 0.0,
+            offset_xy: [0.0; 2],
+            angle: 0.0,
+            suppressed: false,
+            exprs: JointExprs::default(),
+            captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
+            constraint: None,
+            dynamics: Vec::new(),
+        });
+        d.configs.columns = vec![Column::SuppressJoint(joint_id)];
+        d.configs.rows = vec![
+            ConfigRow { id: d.allocate_id().unwrap(), name: "Fixed".into(), cells: vec!["false".into()] },
+            ConfigRow { id: d.allocate_id().unwrap(), name: "Free".into(), cells: vec!["true".into()] },
+        ];
+        d.apply_configuration("Free").unwrap();
+        let opened = read(&d.to_json()).unwrap();
+        assert_eq!(opened, d);
+        assert!(opened.joint(joint_id).unwrap().suppressed);
+        assert!(opened.configuration_matches());
+    }
+
+    #[test]
     fn version_seven_origin_sketch_keeps_geometry_dimension_ids_and_expressions() {
         use solidcore_record::Vec2;
         use solidcraft_sketch::{ConstraintKind, Sketch};

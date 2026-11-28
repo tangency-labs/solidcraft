@@ -814,6 +814,10 @@ fn config_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, omitted: &mut V
                 let name = doc.feature(*id).map(|f| f.name.as_str()).filter(|n| doc.find_feature(n).is_some_and(|f| f.id == *id));
                 json!({"feature": name.ok_or("a suppression column whose feature a name does not pick out")?})
             }
+            Column::SuppressJoint(id) => {
+                let name = doc.joint(*id).map(|j| j.name.as_str()).filter(|n| doc.assembly.joints.iter().filter(|j| j.name == *n).count() == 1);
+                json!({"joint": name.ok_or("a joint suppression column whose joint a name does not pick out")?})
+            }
             // `config.column` finds the body in the design as the replay has built it by then. A
             // body that is not there now (its feature is suppressed) is not there then either.
             Column::Material(body) | Column::Appearance(body) if !has_body(body) => {

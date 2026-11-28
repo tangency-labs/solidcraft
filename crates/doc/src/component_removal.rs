@@ -207,6 +207,10 @@ impl Document {
             group.members.retain(|o| !occurrences.contains(o));
         }
         self.occurrences.retain(|o| !occurrences.contains(&o.id));
+        if !joints.is_empty() {
+            let removed: Vec<u64> = joints.iter().copied().collect();
+            self.remove_configuration_joints(&removed);
+        }
         joints
     }
 }

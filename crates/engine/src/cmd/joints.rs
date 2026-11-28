@@ -3275,12 +3275,13 @@ pub(super) fn suppress_joints(doc: &mut solidcraft_doc::Document, ids: &[u64], s
 }
 
 pub(super) fn delete_joints(doc: &mut solidcraft_doc::Document, ids: &[u64]) {
-    let ids: std::collections::BTreeSet<_> = ids.iter().copied().collect();
-    doc.assembly.joints.retain(|joint| !ids.contains(&joint.id));
-    doc.assembly.links.retain(|link| !ids.contains(&link.a) && !ids.contains(&link.b));
+    let ids_set: std::collections::BTreeSet<_> = ids.iter().copied().collect();
+    doc.assembly.joints.retain(|joint| !ids_set.contains(&joint.id));
+    doc.assembly.links.retain(|link| !ids_set.contains(&link.a) && !ids_set.contains(&link.b));
     for group in &mut doc.timeline_groups {
-        group.joints.retain(|id| !ids.contains(id));
+        group.joints.retain(|id| !ids_set.contains(id));
     }
+    doc.remove_configuration_joints(ids);
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {

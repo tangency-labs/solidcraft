@@ -28,11 +28,11 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ConfigRowParams>(), &["row"]);
     assert_keys(
         input_schema_for::<ConfigConfigureParams>(),
-        &["appearances", "component_appearances", "face_appearances", "features", "materials", "params"],
+        &["appearances", "component_appearances", "face_appearances", "features", "joints", "materials", "params"],
     );
     assert_keys(
         input_schema_for::<ConfigColumnParams>(),
-        &["appearance", "component_appearance", "delete", "face_appearance", "feature", "material", "param"],
+        &["appearance", "component_appearance", "delete", "face_appearance", "feature", "joint", "material", "param"],
     );
     assert_keys(input_schema_for::<ConfigRowEditParams>(), &["delete", "from", "index", "name", "rename", "values"]);
     assert_keys(input_schema_for::<ConfigRuleParams>(), &["delete", "id", "index", "rule", "rules"]);
@@ -54,6 +54,11 @@ fn strict_keeps_todays_errors() {
         ("config.configure", json!({"component_appearances": null})),
         ("config.configure", json!({"component_appearances": [true]})),
         ("config.configure", json!({"component_appearances": ["Nope"]})),
+        ("config.configure", json!({"joints": null})),
+        ("config.configure", json!({"joints": "Nope"})),
+        ("config.configure", json!({"joints": [true]})),
+        ("config.configure", json!({"joints": [-1]})),
+        ("config.configure", json!({"joints": ["Nope"]})),
         ("config.configure", json!({"face_appearances": ["appearance:A"]})),
         ("config.configure", json!({"face_appearances": [{"body": "A"}]})),
         ("config.configure", json!({"face_appearances": [{"body": "Nope", "point": [0, 0, 0]}]})),
@@ -64,6 +69,10 @@ fn strict_keeps_todays_errors() {
         ("config.column", json!({"material": 5})),
         ("config.column", json!({"param": "Nope"})),
         ("config.column", json!({"feature": "Nope"})),
+        ("config.column", json!({"joint": null})),
+        ("config.column", json!({"joint": true})),
+        ("config.column", json!({"joint": -1})),
+        ("config.column", json!({"joint": "Nope"})),
         ("config.column", json!({"component_appearance": -1})),
         ("config.column", json!({"face_appearance": 5})),
         ("config.column", json!({"face_appearance": {"body": "A", "point": [0, 0]}})),
@@ -134,8 +143,14 @@ fn the_table_editing_schemas_take_what_the_handlers_read() {
     check(input_schema_for::<ConfigConfigureParams>(), json!({"params": [1]}), false);
     check(input_schema_for::<ConfigConfigureParams>(), json!({"component_appearances": ["Arm", 3]}), true);
     check(input_schema_for::<ConfigConfigureParams>(), json!({"component_appearances": [-3]}), false);
+    check(input_schema_for::<ConfigConfigureParams>(), json!({"joints": ["Hinge", 3]}), true);
+    check(input_schema_for::<ConfigConfigureParams>(), json!({"joints": [-3]}), false);
+    check(input_schema_for::<ConfigConfigureParams>(), json!({"joints": "Hinge"}), false);
     check(input_schema_for::<ConfigConfigureParams>(), json!({"face_appearances": [{"body": "A", "point": [0, 0, 5]}]}), true);
     check(input_schema_for::<ConfigConfigureParams>(), json!({"face_appearances": ["face_appearance:A"]}), false);
+    check(input_schema_for::<ConfigColumnParams>(), json!({"joint": "Hinge"}), true);
+    check(input_schema_for::<ConfigColumnParams>(), json!({"joint": 3, "delete": true}), true);
+    check(input_schema_for::<ConfigColumnParams>(), json!({"joint": -1}), false);
     check(input_schema_for::<ConfigColumnParams>(), json!({"face_appearance": "face_appearance:A", "delete": true}), true);
     check(input_schema_for::<ConfigColumnParams>(), json!({"param": null}), false);
     check(input_schema_for::<ConfigRowEditParams>(), json!({"name": "R", "values": {"param:W": "20 mm", "suppress:Block": true}}), true);
@@ -152,7 +167,7 @@ fn the_table_editing_schemas_take_what_the_handlers_read() {
     // read `oneOf`).
     let column = input_schema_for::<ConfigColumnParams>();
     let one_of = column.as_value()["oneOf"].as_array().map(Vec::len);
-    assert_eq!(one_of, Some(6), "{}", column.as_value());
+    assert_eq!(one_of, Some(7), "{}", column.as_value());
 }
 
 /// #20924: a column given no target, or a key that is none, names the accepted targets and the
@@ -165,7 +180,7 @@ fn a_column_without_a_target_names_the_targets_and_the_unknown_key() {
     let message = refused(&mut s, json!({"parameter": "a"}));
     assert!(
         message.contains(
-            "give exactly one configuration target: `param`, `feature`, `material`, `appearance`, `component_appearance` or `face_appearance`"
+            "give exactly one configuration target: `param`, `feature`, `joint`, `material`, `appearance`, `component_appearance` or `face_appearance`"
         ),
         "{message}"
     );

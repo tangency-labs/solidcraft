@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "config.add_suppress_joint": "تعطيل {name} (وصلة)",
+    "config.suppress_joint": "تعطيل الوصلة"
+  },
+  "de": {
+    "config.add_suppress_joint": "{name} unterdrücken (Gelenk)",
+    "config.suppress_joint": "Gelenk unterdrücken"
+  },
+  "en": {
+    "config.add_suppress_joint": "Suppress {name} (joint)",
+    "config.suppress_joint": "Suppress Joint"
+  },
+  "he": {
+    "config.add_suppress_joint": "השבתת {name} (מפרק)",
+    "config.suppress_joint": "השבת מפרק"
+  },
+  "ja": {
+    "config.add_suppress_joint": "{name} を抑制 (ジョイント)",
+    "config.suppress_joint": "ジョイントを抑制"
+  },
+  "ko": {
+    "config.add_suppress_joint": "{name} 억제 (관절)",
+    "config.suppress_joint": "관절 억제"
+  },
+  "vi": {
+    "config.add_suppress_joint": "Ẩn {name} (khớp nối)",
+    "config.suppress_joint": "Ẩn khớp nối"
+  },
+  "zh": {
+    "config.add_suppress_joint": "抑制 {name}（关节）",
+    "config.suppress_joint": "抑制关节"
+  }
+}

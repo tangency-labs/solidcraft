@@ -40,6 +40,15 @@ pub(super) fn configurations_rows(
                     "material" => format!("{}: {name}", solidcraft_ui_text::tr_label("Material")),
                     "appearance" => format!("{}: {name}", solidcraft_ui_text::tr_label("Appearance")),
                     "suppress" => format!("{}: {name}", solidcraft_ui_text::tr_label("Suppress")),
+                    "suppress_joint" => {
+                        let joint_name = v["targets"]
+                            .as_array()
+                            .and_then(|targets| targets.iter().find(|target| target["key"].as_str() == Some(c)))
+                            .and_then(|target| target["target"]["suppress_joint"].as_u64())
+                            .and_then(|id| app.session.doc.joint(id))
+                            .map_or(name, |joint| joint.name.as_str());
+                        format!("{}: {joint_name}", solidcraft_ui_text::tr("config.suppress_joint"))
+                    }
                     _ => name.to_owned(),
                 })
         }))
@@ -79,7 +88,7 @@ pub(super) fn configurations_rows(
                 } else {
                     match tb.columns.get(index - 1).map(|column| column_parts(column).0) {
                         Some("param") => 0.9,
-                        Some("suppress") => 1.1,
+                        Some("suppress" | "suppress_joint") => 1.1,
                         Some("material") => 1.2,
                         _ => 1.3,
                     }
@@ -249,7 +258,7 @@ pub(super) fn configurations_rows(
                                             .unwrap_or_default()
                                     });
                                     let (kind, _) = column_parts(column);
-                                    if kind == "suppress" {
+                                    if matches!(kind, "suppress" | "suppress_joint") {
                                         let (response, toggled) = suppress_box(ui, column, &value);
                                         crate::scenario::publish_handle(&format!("config:new:cell:{column}"), response.rect.center());
                                         if let Some(on) = toggled {
@@ -326,6 +335,7 @@ pub(super) fn configurations_rows(
             .iter()
             .map(|key| match column_parts(key) {
                 ("suppress", name) => format!("{} {name}", solidcraft_ui_text::tr_label("Suppress")),
+                ("suppress_joint", name) => format!("{} {name}", solidcraft_ui_text::tr("config.suppress_joint")),
                 (_, name) => name.to_owned(),
             })
             .collect();
@@ -397,8 +407,13 @@ fn swapped_id() -> egui::Id {
 /// Remove `column` (a column key) from the table.
 fn remove_column(app: &mut SolveApp, error: &mut Option<String>, column: &str) {
     let (kind, name) = column_parts(column);
-    let key = if kind == "suppress" { "feature" } else { kind };
-    *error = app.run("config.column", json!({key:if kind == "face_appearance" {column} else {name},"delete":true})).err();
+    let (key, value) = match kind {
+        "suppress" => ("feature", name),
+        "suppress_joint" => ("joint", column),
+        "face_appearance" => (kind, column),
+        _ => (kind, name),
+    };
+    *error = app.run("config.column", json!({key:value,"delete":true})).err();
 }
 
 /// The key the Configuration (name) column's width is kept under.
@@ -469,6 +484,12 @@ fn column_menu(
     for f in &app.session.doc.features {
         if !columns.contains(&format!("suppress:{}", f.name)) {
             options.push((format!("Suppress {}", f.name), json!({ "feature": f.name })));
+        }
+    }
+    for j in &app.session.doc.assembly.joints {
+        let key = app.session.doc.config_key(&solidcraft_engine::doc::config::Column::SuppressJoint(j.id));
+        if !columns.contains(&key) {
+            options.push((solidcraft_ui_text::format("config.add_suppress_joint", &[("name", &j.name)]), json!({ "joint": j.id })));
         }
     }
     for body in &app.session.model.state().bodies {
@@ -603,6 +624,8 @@ fn column_menu(
                     json!({ "params": [n] })
                 } else if let Some(n) = p.get("feature") {
                     json!({ "features": [n] })
+                } else if let Some(n) = p.get("joint") {
+                    json!({ "joints": [n] })
                 } else if let Some(n) = p.get("material") {
                     json!({ "materials": [n] })
                 } else if let Some(n) = p.get("component_appearance") {
@@ -761,7 +784,7 @@ fn value_cell(
     };
     let tab_target = [ui_kit::CellKey::Next, ui_kit::CellKey::Previous].into_iter().any(|key| goes(key).is_some());
     let (kind, _) = column_parts(column);
-    if kind == "suppress" {
+    if matches!(kind, "suppress" | "suppress_joint") {
         let (response, toggled) = suppress_box(ui, column, value);
         crate::scenario::publish_handle(&format!("config:cell:{name}:{column}"), response.rect.center());
         if let Some(on) = toggled {
