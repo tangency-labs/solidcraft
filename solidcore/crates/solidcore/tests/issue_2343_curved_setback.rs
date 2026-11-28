@@ -1585,7 +1585,8 @@ fn d_prism_asked_past_the_rails_names_the_setback_that_fits() {
 /// Mitre's cut (above): 6 + sqrt 15 (9.873) less the fit margin, a thousand of the chord's
 /// tolerances, the lesser of the two bounds. Main named the room (12 less the margin) from
 /// the overlap check before the trace, a size the rails then refuse. Asked 12 and 15 on the
-/// bored prism and on the plain one; the plain one builds at the size named.
+/// bored prism and on the plain one. The size named is the one the test above names and
+/// builds on the plain prism (the bored one is refused there by the bore, not the rails).
 #[test]
 fn d_prism_asked_past_the_room_names_the_far_cut() {
     for (bore, faces) in [(Some(6.9), 14), (None, 13)] {
@@ -1603,7 +1604,7 @@ fn d_prism_asked_past_the_room_names_the_far_cut() {
             );
             assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
             assert!(!r.ok, "{}, asked {asked}: built", case.name);
-            let named = match r.refusal {
+            match r.refusal {
                 Some(BlendRefusal::SetbackTooLong {
                     vertex,
                     largest,
@@ -1621,23 +1622,8 @@ fn d_prism_asked_past_the_room_names_the_far_cut() {
                         "{}, asked {asked}: {largest} against {want}",
                         case.name
                     );
-                    largest
                 }
                 other => panic!("{}, asked {asked}: {other:?}, {}", case.name, r.reason),
-            };
-            if bore.is_none() && asked == 12.0 {
-                let (mut k, mut b, edges, case) = d_prism_eight_case(bore, faces);
-                let r = round_asked(
-                    &mut k,
-                    &mut b,
-                    &edges,
-                    &[1.0, 1.5, 2.0],
-                    case.v,
-                    Some(named),
-                );
-                assert!(r.ok, "{}, asked {named}: {}", case.name, r.reason);
-                graded(&mut k, &mut b, &case, 3);
-                kept_definitions(&k, &b, &case, 3);
             }
         }
     }

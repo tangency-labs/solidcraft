@@ -633,8 +633,8 @@ fn eased_asked_setback_is_the_setback_fill() {
 }
 
 /// A setback asked for that does not fit on the corner's edges (20, the upright edge's
-/// length) is refused by the overlap check (#3145) before the corner is built, naming the
-/// setback that fits (20 less a thousand of the edge's tolerances); one that stops short of
+/// length) is refused by the overlap check (#3145; at this Setback once the far corners are
+/// placed, #13649) before its fill is built, naming the setback that fits (20 less a thousand of the edge's tolerances); one that stops short of
 /// where the rails cross (0), or whose rails cross behind their ends (5), is refused with
 /// its reason (the fork's `SM_FILERR_CORNER_UNSUPPORTED`, this port's 9).
 #[test]

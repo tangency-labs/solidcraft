@@ -186,7 +186,8 @@ pub struct SetbackCorner {
     /// `m_bConvexSetBack`: whether the corner's edges are convex.
     pub convex: bool,
     /// `m_bSetBackOverflows`: the rule's setbacks do not fit, the blends overflow (refused
-    /// if the corner is built).
+    /// if the corner is built). Not set where an asked setback overlaps
+    /// ([`Self::asked_overlap`]), which is refused instead.
     pub overflows: bool,
     /// `m_vSetBackRoom` (the fork's 37c9e1d): each blended edge's room, its length less the
     /// far end's claim (what a setback grown beside a curved face is held within). Beside a
@@ -197,8 +198,9 @@ pub struct SetbackCorner {
     /// rails of the rounds beside it cross (`sm_SbSetBacks`'s `rvLeast`); a setback below it
     /// is too short.
     pub least: Vec<f64>,
-    /// Not the fork (#13649): a setback asked at the corner that overlaps on an edge
-    /// ([`SetbackTooLongWhy::Overlap`]): the largest that does not ([`overlap_largest`]).
+    /// Not the fork (#13649): a setback asked at the corner that overlaps on an edge whose far
+    /// end makes no claim ([`SetbackTooLongWhy::Overlap`]; [`overlapping_setbacks`] refuses
+    /// the others before the trace): the largest that does not ([`overlap_largest`]).
     /// The corner is made meanwhile at the rule's setbacks, each held to half its room (only
     /// so that its vertices can be placed), and [`build_setback_fill`] refuses it once the far
     /// corners' cuts on the rounds' rails are seen, naming the lesser bound.
@@ -385,7 +387,7 @@ fn ease_at(fills: &[SetBackFill], vertex: VertexId) -> f64 {
 /// the corner's later tests (the Setback's room, [`SetbackTooLongWhy::Room`]: its claim is never more than the far
 /// claim here, so where the fit margin is at least its tolerance, the corner's, it refuses
 /// nothing this passes; and where a far corner cuts a rail, [`SetbackTooLongWhy::PastRails`])
-/// still run.
+/// still run, after the Setback's overlap on its unclaimed edges (below).
 ///
 /// The length is the edge curve's over its interval, certified to a bracket as wide as the
 /// corner's tolerance ([`Curve::length_bound`], asked as the Setback's room asks it: the room
@@ -393,11 +395,10 @@ fn ease_at(fills: &[SetBackFill], vertex: VertexId) -> f64 {
 /// An edge at the corner with no curve is refused (a null pointer), never skipped. The first
 /// refused corner, with its vertex.
 ///
-/// Not at the Setback (#13649): a far corner may cut a round's rail short of the room, which
-/// is not known before the far corners are placed, so a Setback's overlap is decided by
+/// At the Setback only its edges whose far end makes a claim are tested here (#13649): on an
+/// edge whose far end makes none, a far corner may cut the edge's round short of its length,
+/// which is not known before the far corners are placed, so that overlap is decided by
 /// [`make_setback_topology`] and refused by [`build_setback_fill`], naming the lesser bound.
-/// The far claims it reads are the fills'; a far N x N corner's set setback that overlaps is
-/// refused here at that corner, by the same inequality.
 ///
 /// # Errors
 /// Those of the topology queries and of the length brackets (a curve kind with no certified
@@ -413,16 +414,20 @@ pub fn overlapping_setbacks(
         let Some(vtx) = corner.filleted_vertex() else {
             continue;
         };
-        if corner.blend.is_some_and(BlendCorner::is_setback) {
-            continue;
-        }
         let d = asked_at(corners, fills, vtx);
         if !d.is_finite() || d <= 0.0 {
             continue;
         }
-        let largest = overlap_largest(k, b, corners, fills, vtx, corner.approx_tol_3d)?;
+        let (largest, claimed) = overlap_largest(k, b, corners, fills, vtx, corner.approx_tol_3d)?;
+        // at the Setback, refused here on an edge whose far end makes a claim, naming the
+        // least over every edge
+        let test = if corner.blend.is_some_and(BlendCorner::is_setback) {
+            claimed
+        } else {
+            largest
+        };
         // refused past what is certified to fit; built only where certified
-        if d > largest {
+        if d > test {
             return Ok(Some((vtx, overlap_refusal(vtx, d, largest))));
         }
     }
@@ -433,7 +438,8 @@ pub fn overlapping_setbacks(
 /// end's claim ([`overlapping_setbacks`]), certified: the least over the edges of
 /// `length - ease - far` less the fit margin, the length from its lower side, a bracket
 /// `tol` wide. `corners` give the far ends' set setbacks where they have no fill (none read
-/// where empty).
+/// where empty). With it, the least over the edges whose far end makes a claim
+/// (`BIG_DOUBLE` where none does).
 fn overlap_largest(
     k: &Kernel,
     b: &Brep,
@@ -441,9 +447,10 @@ fn overlap_largest(
     fills: &[SetBackFill],
     vtx: VertexId,
     tol: f64,
-) -> Result<f64> {
+) -> Result<(f64, f64)> {
     let ease = ease_at(fills, vtx);
     let mut largest = BIG_DOUBLE;
+    let mut claimed = BIG_DOUBLE;
     // the largest setback certified to fit: from the length's lower side (#3184)
     for e in vertex::edges(b, vtx, None)? {
         let curve =
@@ -457,9 +464,13 @@ fn overlap_largest(
         };
         // the fit margin: a thousand of the edge's tolerances (the bound is open)
         let margin = 1000.0 * edge::tolerance(b, e)?;
-        largest = smin(largest, length.lower - ease - far - margin);
+        let fits = length.lower - ease - far - margin;
+        largest = smin(largest, fits);
+        if far > 0.0 {
+            claimed = smin(claimed, fits);
+        }
     }
-    Ok(largest)
+    Ok((largest, claimed))
 }
 
 /// The refusal of a setback `d` asked at `vtx` that overlaps on an edge, naming `largest`
@@ -1474,6 +1485,19 @@ pub fn make_setback_topology(
     // room) the blends overflow their faces: the executive's overflow comes first, and the
     // corner, made meanwhile with each setback at half its room (only so that its vertices
     // can be placed), refuses in BuildSetBackFill if it is ever built.
+    //
+    // An asked setback that overlaps on an edge whose far end makes no claim (#13649;
+    // `overlapping_setbacks` leaves those to this) is refused once the far corners' cuts on
+    // the rounds' rails are seen (build_setback_fill), naming the lesser bound. The corner is
+    // made meanwhile at the rule's setbacks, each held to half its room, only so that its
+    // vertices can be placed. Where the rule's cannot be found, it is refused here as the
+    // overlap.
+    let asked = set_back_fill_of(fills, vtx);
+    let asked_overlap = match asked {
+        Some(a) => Some(overlap_largest(k, target, &[], fills, vtx, tol)?.0)
+            .filter(|&over| a.setback > over),
+        None => None,
+    };
     let found = set_backs(
         k,
         target,
@@ -1498,24 +1522,17 @@ pub fn make_setback_topology(
     } = match found {
         Ok(found) => found,
         Err(why) => {
+            if let (Some(a), Some(over)) = (asked, asked_overlap) {
+                return Ok(Err(overlap_refusal(vtx, a.setback, over)));
+            }
             return Ok(Err(SetbackRefusal::not_built(why.unwrap_or(
                 "Fillet Error: the corner's setbacks cannot be found",
-            ))))
+            ))));
         }
     };
-    let asked = set_back_fill_of(fills, vtx);
-    // An asked setback that overlaps on an edge (#13649; `overlapping_setbacks` leaves the
-    // Setback to this) is refused once the far corners' cuts on the rounds' rails are seen
-    // (build_setback_fill), naming the lesser bound. The corner is made meanwhile at the
-    // rule's setbacks, each held to half its room, only so that its vertices can be placed.
-    let mut asked_overlap = None;
-    if let Some(a) = asked {
-        let over = overlap_largest(k, target, &[], fills, vtx, tol)?;
-        if a.setback > over {
-            asked_overlap = Some(over);
-            for ((s, &r), &w) in sbs.iter_mut().zip(&rule).zip(&room) {
-                *s = smin(r, 0.5 * w);
-            }
+    if asked_overlap.is_some() {
+        for ((s, &r), &w) in sbs.iter_mut().zip(&rule).zip(&room) {
+            *s = smin(r, 0.5 * w);
         }
     }
     if let Some(a) = asked.filter(|_| asked_overlap.is_none()) {
@@ -2970,7 +2987,8 @@ fn past_rails(asked: Option<SetBackFill>, vtx: VertexId, reach: f64) -> SetbackR
 /// (#13649): where a far corner cuts a round's rail so near the vertex that a setback at
 /// `over` with its ease is past that cut by more than `tol` (refused there,
 /// [`Gathered::PastRails`]), it names the rails' reach less the ease ([`past_rails`]), else
-/// `over` ([`overlap_refusal`]). Ends not gathered show no cut: `over`.
+/// `over` ([`overlap_refusal`]). Ends not gathered, or far vertices not placed, show no cut:
+/// `over`, which the rails test may then refuse when asked, as on main before #13649.
 fn overlap_or_past_rails(
     asked: SetBackFill,
     vtx: VertexId,
