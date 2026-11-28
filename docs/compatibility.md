@@ -228,6 +228,12 @@ the number. Test:
 `a_round_saved_on_a_start_offset_caps_edge_stays_on_the_edge_it_was_picked_on`
 (`crates/engine/src/naming_history_tests.rs`).
 
+Surface Loft walls numbered before #22436 (#22855): a loft with one tangent end numbered its one
+wall (`F3:face:0`); it now names it after its section curve. A face saved as face 0 of a feature
+that numbers no face now is found as the one face that feature makes, when the saved pick lies on
+it. Several faces, or another number, ask to be picked again. Test:
+`plane_tangent_keeps_a_tangent_loft_wall_saved_by_number` (`crates/engine/src/construct_tests.rs`).
+
 Round edge numbers (#14479): where a fillet or chamfer rounded one of several edges between the
 same two faces (`F2:side:c1|F2:side:l1~2`), 0.30.1 wrote an edge of that round in the older form,
 with the round's edge number at the end (`F2:top|F3:blend:F2:side:c1|F2:side:l1~2`). That form
