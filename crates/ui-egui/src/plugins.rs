@@ -387,9 +387,14 @@ pub(crate) fn sync_policy(app: &mut SolveApp) {
     if let Err(e) = sync_store(app) {
         log::warn!("plugins: {e}");
     }
-    app.session.disabled_plugins.clone_from(&app.preferences.disabled_plugins);
-    app.session.plugin_limits = host_limits(&app.preferences);
-    app.session.plugin_state.grants.clone_from(&app.preferences.plugin_grants);
+    apply_policy(&mut app.session, &app.preferences);
+}
+/// Give `session` the plugin policy the preferences hold: the plugins turned off, the resource
+/// ceilings and the approvals. Unlike [`sync_policy`], it reads and writes no grant store.
+pub(crate) fn apply_policy(session: &mut solidcraft_engine::Session, preferences: &crate::prefs::Prefs) {
+    session.disabled_plugins.clone_from(&preferences.disabled_plugins);
+    session.plugin_limits = host_limits(preferences);
+    session.plugin_state.grants.clone_from(&preferences.plugin_grants);
 }
 /// Mirror successful install/remove command security state into persisted user preferences.
 /// This also covers commands from the control channel, without opening Preferences.
@@ -1778,6 +1783,70 @@ mod tests {
         let refused = solidcraft_engine::io::vfs::scoped(scope, || h.app.run("plugin.revoke", json!({"id":"workshop-helper"})));
         assert!(refused.unwrap_err().to_string().contains("shared"));
         assert!(grant_store::read_all(&root).contains_key("workshop-helper"));
+    }
+
+    /// Approvals belong to the plugin, not to a design (#23499). Each tab's design keeps its own
+    /// copy of them, and a control request saves the shown design's copy when it differs from the
+    /// preferences. A tab shown over the control channel must not bring back an older copy: not
+    /// the one of a tab opened before the plugin was replaced, nor the empty one of a tab opened
+    /// before it was installed.
+    #[test]
+    fn switching_tabs_keeps_the_plugin_approval_given_in_another_tab() {
+        use serde_json::json;
+        use solidcraft_engine::plugin::grant_store;
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        h.app.share_plugin_grants();
+        let first = h.app.session.document_id.clone();
+        // A design in a tab of its own, which finds the test's plugins folder, never the per-user one.
+        let new_tab = |h: &mut crate::scenario::Harness| {
+            let mut session = solidcraft_engine::Session::default();
+            session.plugin_state.plugins_dir = Some(root.clone());
+            crate::documents::open_tab(&mut h.app, session).unwrap();
+            h.app.session.document_id.clone()
+        };
+        let install = |h: &mut crate::scenario::Harness, zip: &Path, replace: bool| {
+            let params = json!({"path": zip, "replace": replace, "approve": {"command_groups": ["file"]}});
+            let (reply, _) = h.call_queued("engine.execute", json!({"command": "plugin.install", "params": params}));
+            assert_eq!(reply["ok"], true, "{reply}");
+            reply["result"]["approval"].as_str().unwrap().to_owned()
+        };
+        let approval = |grants: &std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>| {
+            grants.get("workshop-helper").and_then(|grants| grants.package_hash.clone())
+        };
+        // Version 1.2.3 of the plugin, then 1.2.4 of it: another package, so another approval.
+        let path = package(&h, "workshop-helper");
+        let older = h.dir.join("workshop-helper-1.2.3.zip");
+        std::fs::rename(zip_package(&path), &older).unwrap();
+        let manifest = std::fs::read_to_string(path.join("plugin.json")).unwrap().replace("1.2.3", "1.2.4");
+        std::fs::write(path.join("plugin.json"), manifest).unwrap();
+        let newer = zip_package(&path);
+        let second = new_tab(&mut h);
+        let replaced = install(&mut h, &older, false);
+        new_tab(&mut h);
+        let current = install(&mut h, &newer, true);
+        assert_ne!(replaced, current);
+        assert_eq!(approval(&grant_store::read_all(&root)).as_deref(), Some(current.as_str()));
+        // The first tab was opened before the install, so its design holds no approval. The second
+        // was opened before the replacement, so its design holds the replaced one.
+        let held =
+            |h: &crate::scenario::Harness, id: &str| h.app.docs.background().find(|s| s.document_id == id).map(|s| approval(&s.plugin_state.grants));
+        assert_eq!(held(&h, &first), Some(None));
+        assert_eq!(held(&h, &second), Some(Some(replaced)));
+        // The next tab after the third is the first.
+        for (shown, request) in [
+            (&first, json!({"command": "view.next_tab", "params": {}})),
+            (&second, json!({"command": "document.activate", "params": {"document_id": second}})),
+        ] {
+            let (reply, _) = h.call_queued("engine.execute", request);
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert_eq!(&h.app.session.document_id, shown);
+            assert_eq!(approval(&h.app.preferences.plugin_grants).as_deref(), Some(current.as_str()), "the preferences, {shown}");
+            assert_eq!(approval(&grant_store::read_all(&root)).as_deref(), Some(current.as_str()), "the grant store, {shown}");
+            let (listed, _) = h.call_queued("engine.execute", json!({"command": "plugin.grants", "params": {}}));
+            assert_eq!(listed["result"]["grants"][0]["status"], "current", "{listed}");
+        }
     }
 
     fn page_frame(app: &mut SolveApp, ctx: &egui::Context, dir: &Path, events: Vec<egui::Event>) {
