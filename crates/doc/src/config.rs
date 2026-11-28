@@ -256,7 +256,7 @@ impl Document {
         // targets instead get their baseline from the row below, before ordered rules run.
         for rule in &self.configs.rules {
             if rule.enabled
-                && let crate::config_rules::RuleEffect::DriveSuppression { feature, .. } = rule.effect
+                && let rules::RuleEffect::DriveSuppression { feature, .. } = rule.effect
                 && !self.configs.columns.contains(&Column::Suppress(feature))
             {
                 let target =
