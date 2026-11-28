@@ -257,7 +257,7 @@ fn pixel_annulus_fill_keeps_hole_and_cpu_bridge_matches_cached_boundaries() {
     });
     let cached: Vec<_> = (0..ss.sketch.curves.len()).flat_map(|index| curve_sample(&h.app, sid, index, &ss.plane, &proj).parts.clone()).collect();
     assert_eq!(
-        cpu.iter().map(|(points, _, _, _)| points.clone()).collect::<Vec<_>>(),
+        cpu.iter().map(|(points, _, _)| points.clone()).collect::<Vec<_>>(),
         cached,
         "CPU styling bridge and GPU/picking cache must retain identical boundary parts"
     );
