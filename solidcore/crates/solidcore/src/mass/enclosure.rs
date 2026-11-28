@@ -145,7 +145,8 @@ pub const MAX_CELL_BUDGET: usize = 1 << 22;
 fn default_refinement_budget(start: usize) -> usize {
     start
         .saturating_mul(CELL_BUDGET_PER_START)
-        .clamp(CELL_BUDGET, MAX_CELL_BUDGET)
+        .max(CELL_BUDGET)
+        .min(MAX_CELL_BUDGET)
 }
 
 /// The most bisections from a starting cell to one of its cells: past it a cell is kept
