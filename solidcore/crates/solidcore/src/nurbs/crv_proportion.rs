@@ -722,6 +722,7 @@ fn length_enclosure(curve: &Curve, width: f64) -> Result<Option<(f64, f64)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::crv_geom::ToleranceKind;
 
     fn curve(points: &[[f64; 3]], degree: usize) -> Curve {
@@ -1056,7 +1057,7 @@ mod tests {
         );
         // the parabola y = x^2 over [0, 1], its speed varying: (2 sqrt 5 + asinh 2) / 4
         let parabola = curve(&[[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [1.0, 1.0, 0.0]], 2);
-        let exact = (2.0 * 5.0_f64.sqrt() + 2.0_f64.asinh()) / 4.0;
+        let exact = (2.0 * 5.0_f64.sqrt() + det::asinh(2.0_f64)) / 4.0;
         let (lo, hi) = length_enclosure(&parabola, 1e-10).unwrap().unwrap();
         assert!(
             lo <= exact && exact <= hi && hi - lo <= 1e-10,

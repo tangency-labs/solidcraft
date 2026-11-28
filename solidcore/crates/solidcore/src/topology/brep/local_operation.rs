@@ -41,6 +41,7 @@
 //! wall and each capped end's rim's on the wall's new rim there (`rims_by_end`), as the local
 //! operation carries an edge's attributes to the edge that replaces it.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::offset::OffsetFailure;
@@ -341,9 +342,11 @@ fn coaxial_slab(
 /// The four exact box sides, and bare planar faces across both circular rims.
 ///
 /// The exact UV box proves each rim is the cylinder's own iso circle at its stored
-/// end height, which is where the tool's caps lie. The face across a rim shares that
-/// edge, so a bare plane there is an end plane of the slab within the body's own
-/// validity; it stays the result's support, trimmed by the cone. Its fitted frame is
+/// end height, which is where the tool's caps lie. A rim may come in pieces end to end
+/// (other faces meeting it at vertices along it); each piece lies on the rim's iso line,
+/// so the face across it shares an arc of that circle and a bare plane there holds the
+/// circle: an end plane of the slab within the body's own validity, whichever side it
+/// faces. It stays the result's support, trimmed by the cone. Its fitted frame is
 /// not compared with the cylinder: the body's construction rounds it, and the
 /// removal volume is defined by the cylinder alone.
 fn complete_cylinder_boundary(
@@ -360,10 +363,13 @@ fn complete_cylinder_boundary(
         return Ok(false);
     }
     let uses = eu::faceuse_edgeuses(b, fu, false, None)?;
-    if uses.len() != 4 {
+    if uses.len() < 4 {
         return Ok(false);
     }
     let mut sides = BTreeSet::new();
+    // (#19699) a rim may be split into pieces where other faces meet it (a pad on the end
+    // face whose corner pokes past the rim): each piece's span along its rim
+    let mut pieces: [Vec<(f64, f64)>; 2] = [Vec::new(), Vec::new()];
     for u in uses {
         let Some(curve) = eu::uv_trim_curve(b, u)?.0 else {
             return Ok(false);
@@ -372,7 +378,7 @@ fn complete_cylinder_boundary(
         let Some(line) = uv_line(k, curve)? else {
             return Ok(false);
         };
-        let mut side = None;
+        let mut side: Option<(usize, (f64, f64))> = None;
         for (i, in_u, value, low, high) in [
             (0, true, domain.min().x, domain.min().y, domain.max().y),
             (1, true, domain.max().x, domain.min().y, domain.max().y),
@@ -380,20 +386,26 @@ fn complete_cylinder_boundary(
             (3, false, domain.max().y, domain.min().x, domain.max().x),
         ] {
             let [a, z] = line.ends;
+            let span = (
+                coordinate(a, !in_u).min(coordinate(z, !in_u)),
+                coordinate(a, !in_u).max(coordinate(z, !in_u)),
+            );
+            // a seam use runs the whole side; a rim use some of it
             if line.points.iter().all(|&p| {
                 coordinate(p, in_u) == value
                     && coordinate(p, !in_u) >= low
                     && coordinate(p, !in_u) <= high
-            }) && coordinate(a, !in_u).min(coordinate(z, !in_u)) == low
-                && coordinate(a, !in_u).max(coordinate(z, !in_u)) == high
+            }) && (i >= 2 || span == (low, high))
             {
-                side = Some(i);
+                side = Some((i, span));
             }
         }
-        let Some(side) = side else {
+        let Some((side, span)) = side else {
             return Ok(false);
         };
-        if !sides.insert(side) {
+        if let Some(rim) = side.checked_sub(2).and_then(|r| pieces.get_mut(r)) {
+            rim.push(span);
+        } else if !sides.insert(side) {
             return Ok(false);
         }
         if side >= 2 {
@@ -414,7 +426,29 @@ fn complete_cylinder_boundary(
             }
         }
     }
-    Ok(true)
+    // Both seams once each, and each rim's pieces end to end over its whole side: sorted,
+    // the first from the side's start, each from where the one before it ends, the last to
+    // the side's end, exactly where it ends at a seam, as a whole rim always has. Two pieces
+    // meet at a vertex of the loop, whose parameters both uses' UV trims end at, each found
+    // from the vertex on the one surface: they agree to `uv_rounding`, and a piece starting
+    // farther from where the last ended (a hole in the rim, or two pieces over one arc)
+    // leaves the wall to the local operation.
+    let (low, high) = (domain.min().x, domain.max().x);
+    let r = uv_rounding(low.abs().max(high.abs()).max((high - low).abs()));
+    let covers = |rim: &mut Vec<(f64, f64)>| {
+        rim.sort_by(|p, q| p.0.total_cmp(&q.0));
+        let mut at: Option<f64> = None;
+        for &(from, to) in rim.iter() {
+            let joined = at.map_or(from == low, |at| (from - at).abs() <= r);
+            if !joined || to <= from {
+                return false;
+            }
+            at = Some(to);
+        }
+        at == Some(high)
+    };
+    let [bottom, top] = &mut pieces;
+    Ok(sides.len() == 2 && covers(bottom) && covers(top))
 }
 
 /// A rim plane square to the cylinder's axis through the rims' own centre `centre`, proved
@@ -986,7 +1020,7 @@ impl Meridian {
             (d - axis * d.dot(axis)).length() <= tolerance
         };
         let line = |a: f64, b: f64, c: f64| {
-            let length = a.hypot(b);
+            let length = det::hypot(a, b);
             (length > 0.0 && length.is_finite() && c.is_finite()).then(|| Self {
                 n: (a / length, b / length),
                 c: c / length,
@@ -1009,7 +1043,7 @@ impl Meridian {
             } => {
                 let sigma = along(placement.z_axis())?;
                 on_axis(placement.origin()).then_some(())?;
-                let slope = sigma * semi_angle_deg.to_radians().tan();
+                let slope = sigma * det::tan(semi_angle_deg.to_radians());
                 line(
                     1.0,
                     -slope,
@@ -2228,7 +2262,7 @@ mod tests {
                 Point3::new(0.0, 0.0, neutral),
                 Vec3::Z,
                 Vec3::Z,
-                0.1_f64.atan(),
+                det::atan(0.1_f64),
             )
             .unwrap();
             let cone = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
@@ -2346,7 +2380,7 @@ mod tests {
                 )
             })
             .unwrap();
-        let draft = Draft::new(origin, Vec3::Z, Vec3::Z, 0.1_f64.atan()).unwrap();
+        let draft = Draft::new(origin, Vec3::Z, Vec3::Z, det::atan(0.1_f64)).unwrap();
         let cone = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
         assert_eq!(
             contract_complete_cone(&mut k, &mut b, &[f], &[cone]).unwrap(),
@@ -2363,12 +2397,12 @@ mod tests {
     #[test]
     fn parallel_plane_origin_uses_determinants_before_rounding_the_origin_difference() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let scale = crate::math::Vec2::new(1.0, 1.0);
-        let origin = x * 2.0_f64.powi(-53);
+        let origin = x * det::powi(2.0_f64, -53);
         let own = Surface::from(Plane::new(origin, x, y, scale, &domain));
         let coincident = Surface::from(Plane::new(x, x, y, scale, &domain));
         // Both origins lie exactly in the stored axis span, but rounding x-origin
@@ -2404,7 +2438,7 @@ mod tests {
     #[test]
     fn parallel_net_moves_every_control_point_using_the_given_stored_plane_axes() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -2459,7 +2493,7 @@ mod tests {
     #[test]
     fn perpendicularity_to_the_rounded_normal_does_not_prove_parallel_planes() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -2476,7 +2510,7 @@ mod tests {
             .is_none());
         // Scaling amplifies the mismatch in the control coordinates. It remains
         // exactly perpendicular to m, but not in the given plane's stored span.
-        let a = a * 2.0_f64.powi(80);
+        let a = a * det::powi(2.0_f64, 80);
         assert!(exact::is_zero(&exact::dot(m, a).unwrap()));
         assert!(!exact::is_zero(&exact::det3(x, y, a).unwrap()));
         let own_net = Surface::from(
@@ -2906,7 +2940,12 @@ mod tests {
             .unwrap()
             .unwrap()
             .clone();
-        given_its_own(k, b, s, 4.0 / 3.0 * std::f64::consts::PI * 1.5_f64.powi(3));
+        given_its_own(
+            k,
+            b,
+            s,
+            4.0 / 3.0 * std::f64::consts::PI * det::powi(1.5_f64, 3),
+        );
     }
 
     #[test]
@@ -2915,7 +2954,7 @@ mod tests {
         let mut k = Kernel::default();
         let b = ap::create_torus(&mut k, Point3::ZERO, 3.0, 1.0).unwrap();
         let s = Surface::from(ap::create_torus_surface(&k, Point3::ZERO, 3.0, 1.0).unwrap());
-        given_its_own(k, b, s, 2.0 * std::f64::consts::PI.powi(2) * 3.0);
+        given_its_own(k, b, s, 2.0 * det::powi(std::f64::consts::PI, 2) * 3.0);
     }
 
     /// A whole torus's one face, meeting only itself across its seams, given the coaxial
@@ -2937,7 +2976,7 @@ mod tests {
         .unwrap();
         let (v, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold);
-        let want = 2.0 * std::f64::consts::PI.powi(2) * 3.0 * 1.5 * 1.5;
+        let want = 2.0 * det::powi(std::f64::consts::PI, 2) * 3.0 * 1.5 * 1.5;
         assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
         assert_eq!(
             (b.faces().len(), b.edges().len(), b.vertices().len()),
@@ -3397,7 +3436,7 @@ mod tests {
             ("turned piece", |k| {
                 use crate::geom::axis2_placement::Axis2Placement;
                 let (b, piece) = split_block_piece(k);
-                let (c, sn) = (0.02_f64.cos(), 0.02_f64.sin());
+                let (c, sn) = (det::cos(0.02_f64), det::sin(0.02_f64));
                 let pivot = Point3::new(30.0, 0.0, 20.0);
                 let turned = Point3::new(
                     c * pivot.x + sn * pivot.z,
@@ -4039,7 +4078,7 @@ mod tests {
 
     /// `∫ √(R² − u²) du` from 0 to `u`.
     fn quarter_disc_area(radius: f64, u: f64) -> f64 {
-        0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * (u / radius).asin())
+        0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * det::asin(u / radius))
     }
 
     /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every

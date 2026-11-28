@@ -59,7 +59,7 @@ struct Host {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: std::sync::Weak<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
-    lost: egui_wgpu::DeviceLost,
+    lost: solidcraft_viewport_gpu::DeviceLost,
     format: wgpu::TextureFormat,
     capability: std::sync::OnceLock<Capability>,
     split: bool,
@@ -108,17 +108,18 @@ impl State {
         self.retire();
         self.failure = None;
         self.hook = None;
+        let window = solidcraft_viewport_egui::window_device(rs);
         self.host = Some(Host {
             adapter: rs.adapter.clone(),
             device_type: rs.adapter.get_info().device_type,
             device: rs.device.clone(),
             queue: rs.queue.clone(),
             renderer: Arc::downgrade(&rs.renderer),
-            lost: rs.device_lost.clone(),
+            lost: window.lost,
             format: rs.target_format,
             capability: std::sync::OnceLock::new(),
             split,
-            msaa: rs.msaa_samples,
+            msaa: window.msaa_samples,
         });
     }
 
@@ -312,7 +313,7 @@ impl State {
         if validate_radius(hook.blur)? == 0.0 {
             return Err("a panel hook needs a blur radius above 0".into());
         }
-        let (built, error) = egui_wgpu::capture_errors(&host.device, || HookPipeline::new(host, &hook));
+        let (built, error) = solidcraft_viewport_gpu::capture_errors(&host.device, || HookPipeline::new(host, &hook));
         if let Some(error) = error {
             return Err(error.to_string());
         }
@@ -540,7 +541,7 @@ pub fn fixture_state(
             device: device.clone(),
             queue: queue.clone(),
             renderer: Arc::downgrade(renderer),
-            lost: egui_wgpu::DeviceLost::watch(device),
+            lost: solidcraft_viewport_gpu::DeviceLost::watch(device),
             format,
             capability: match policy {
                 FixturePolicy::Production => std::sync::OnceLock::new(),
@@ -878,8 +879,9 @@ impl Shared {
         if !current {
             inner.gpu = None;
             inner.counts.clear_live();
-            let (gpu, failure) =
-                egui_wgpu::capture_errors(device, || Gpu::new(device, self.host.format, size, steps, offset, self.hook.is_some(), &mut inner.counts));
+            let (gpu, failure) = solidcraft_viewport_gpu::capture_errors(device, || {
+                Gpu::new(device, self.host.format, size, steps, offset, self.hook.is_some(), &mut inner.counts)
+            });
             if let Some(error) = failure {
                 log::warn!("blur resources refused: {error}");
                 return fail(windows, "GPU refused blur resources");
@@ -892,7 +894,7 @@ impl Shared {
         let Inner { gpu, counts, .. } = &mut *inner;
         let Some(gpu) = gpu else { return false };
         gpu.ready_serial = serial;
-        let (_, failed) = egui_wgpu::capture_errors(device, || {
+        let (_, failed) = solidcraft_viewport_gpu::capture_errors(device, || {
             gpu.grow_markers(device, bindings, counts);
             if let Some(hook) = &self.hook {
                 gpu.grow_hook_markers(device, hook, bindings);

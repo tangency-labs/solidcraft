@@ -1077,8 +1077,9 @@ pub struct BrowserVisibilityParams {
     #[serde(default)]
     pub isolate: Option<bool>,
     /// With `visible: true` and no target: put back what the Isolates since the last Unisolate
-    /// hid, leaving changes made since alone; with none in effect, show everything. Default:
-    /// false.
+    /// hid, leaving changes made since alone; with none in effect, show every body and placement
+    /// (as `folder: bodies`), leaving sketches, construction items and joints as they are.
+    /// Default: false.
     #[serde(default)]
     pub unisolate: Option<bool>,
 }
