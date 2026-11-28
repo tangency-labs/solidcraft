@@ -154,6 +154,8 @@ pub(crate) struct Field {
     pub(crate) tip: Option<String>,
     pub(crate) required: bool,
     pub(crate) kind: Kind,
+    /// Valid numeric quick picks in declaration order, bounded to sixteen.
+    presets: Vec<Value>,
     /// Installed-family picker for an otherwise ordinary string.
     pub(crate) font: bool,
     /// A choice's pictures, one package image path (`x-solidcraft-icon`) per option in order;
@@ -387,6 +389,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "x-solidcraft-enabled-when",
         "x-solidcraft-defaults",
         "x-solidcraft-grant",
+        "x-solidcraft-presets",
         craft_plugin::layout::SECTION,
         craft_plugin::layout::UNIT_FROM,
         craft_plugin::layout::HELP,
@@ -518,6 +521,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         _ => return None,
     };
     let label = text("title").unwrap_or_else(|| key.to_owned());
+    let presets = numeric_presets(&kind, p.get("x-solidcraft-presets"));
     Some((
         Field {
             key: key.to_owned(),
@@ -525,6 +529,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             tip: text("description"),
             required,
             kind,
+            presets,
             font,
             images,
             swatches,
@@ -610,6 +615,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             tip,
             required,
             kind,
+            presets: Vec::new(),
             font: false,
             images: Vec::new(),
             swatches: Vec::new(),
@@ -942,6 +948,35 @@ fn integer_bound(p: &Map<String, Value>, lower: bool) -> Option<Option<i64>> {
         bounds.push(past(v)?);
     }
     Some(if lower { bounds.into_iter().max() } else { bounds.into_iter().min() })
+}
+
+/// Invalid, duplicate or excessively long preset lists cannot alter the field's validation.
+fn numeric_presets(kind: &Kind, annotation: Option<&Value>) -> Vec<Value> {
+    if !matches!(kind, Kind::Number { .. } | Kind::Integer { .. }) {
+        return Vec::new();
+    }
+    let mut presets = Vec::new();
+    for value in annotation.and_then(Value::as_array).into_iter().flatten().take(16) {
+        if !within(kind, value) {
+            continue;
+        }
+        let value = match kind {
+            Kind::Number { .. } => {
+                let Some(n) = value.as_f64().filter(|n| n.is_finite()) else { continue };
+                if let Some(i) = value.as_i64().map(i128::from).or_else(|| value.as_u64().map(i128::from))
+                    && n as i128 != i
+                {
+                    continue;
+                }
+                json!(n)
+            }
+            _ => value.clone(),
+        };
+        if !presets.contains(&value) {
+            presets.push(value);
+        }
+    }
+    presets
 }
 
 /// Whether `value` is within the limits of `kind`.
@@ -3372,7 +3407,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         return (false, response.changed());
     }
     let mut browse = false;
-    let response = match (&field.kind, input) {
+    let response = match (&field.kind, &mut *input) {
         (Kind::Number { min, max, step, unit, .. }, Input::Number(value)) => {
             let range = min.unwrap_or(f64::NEG_INFINITY)..=max.unwrap_or(f64::INFINITY);
             let speed = step.unwrap_or_else(|| match (min, max) {
@@ -3543,9 +3578,35 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         _ => ui.response(),
     };
     crate::scenario::publish_handle(&format!("plugin_dialog:field:{}", field.key), response.rect.center());
-    let edited = response.changed();
+    let mut edited = response.changed();
     if let Some(tip) = &field.tip {
         response.backing_on_hover_text(tip);
+    }
+    if !field.presets.is_empty() {
+        let current = scalar_value(field, input);
+        ui_kit::row(ui, "", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (index, value) in field.presets.iter().enumerate() {
+                    // A live dialog hook may have changed the numeric constraints.
+                    if !within(&field.kind, value) {
+                        continue;
+                    }
+                    let selected = current.as_ref().is_some_and(|current| match field.kind {
+                        Kind::Integer { .. } => current.as_i64() == value.as_i64(),
+                        _ => current.as_f64() == value.as_f64(),
+                    });
+                    let label = value.as_i64().map(|v| v.to_string()).or_else(|| value.as_f64().map(|v| v.to_string())).unwrap_or_default();
+                    let button = ui_kit::button(ui, &label, if selected { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small });
+                    crate::scenario::publish_handle(&format!("plugin_dialog:preset:{}:{index}", field.key), button.rect.center());
+                    if button.clicked()
+                        && let Some(chosen) = stored_input(field, value)
+                    {
+                        edited |= *input != chosen;
+                        *input = chosen;
+                    }
+                }
+            });
+        });
     }
     (browse, edited)
 }

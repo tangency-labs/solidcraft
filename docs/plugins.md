@@ -666,6 +666,11 @@ is drawn: input checks, tool schemas and the values the plugin receives stay the
   it, down to the next heading or divider. Sections start open each time the dialog
   opens. Folded fields keep their values and are still sent. A folded field with an error is
   still drawn.
+- `x-solidcraft-presets` on a number or integer field gives a list of common values, for
+  example `"x-solidcraft-presets": [300, 450, 600, 900]`. The dialog shows quick-pick buttons
+  below the editable field, highlights the current value and still accepts other valid typed
+  values. At most the first sixteen entries are considered; invalid and duplicate values are
+  omitted.
 - `x-solidcraft-unit-from` on a number field names a string choice in the same schema. The
   choice's current value (for example `mm` or `in`) is drawn after the number instead of `unit`.
 - `x-solidcraft-help` on a field adds a "More about this field" link under it, opening the page
