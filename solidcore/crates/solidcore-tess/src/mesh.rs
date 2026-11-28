@@ -11,6 +11,12 @@ use crate::vec::VecExt as _;
 /// halving splits the longest side, so 24 takes a sliver 2^12 times the resolution long down to it.
 const OFF_SPLITS: u32 = 24;
 
+/// How many pieces [`Mesh::pieces_off`] may look at for one triangle of the mesh: past it the
+/// pieces left are decided by their centroids. Along the line where a surface ends the split
+/// pieces grow about as the square root of their count, so this is far more than that needs; a
+/// test that flips back and forth all over a triangle would otherwise split it into millions.
+const OFF_BUDGET: usize = 4096;
+
 /// A triangle's corners, each with its normal.
 pub type NormalTriangle = [(Vec3, Vec3); 3];
 
@@ -88,13 +94,12 @@ impl Mesh {
     /// whether a point lies on the surface (within its own tolerance). A triangle whose corners,
     /// side middles and centroid are all on it is left out and one with none of them on it is
     /// kept whole; one that is both is halved across its longest side and each half asked again,
-    /// down to `resolution`, where its centroid decides. Only the triangles along the line where
-    /// the surface ends are split. Normals of new corners are their side's corners' averaged.
-    ///
-    /// For display: a preview ghosts the old shape of a body where the new one is not. Kept or
-    /// dropped whole, a long facet of a face that was only trimmed (an extruded side under a
-    /// fillet, meshed in strips from bottom to top) was ghosted all the way along, over the part
-    /// of the face that stays.
+    /// down to `resolution`, where its centroid decides (as it does past a bounded number of
+    /// halvings and of pieces per triangle). Only the triangles along the line where the surface
+    /// ends are split, so a long facet the surface covers in part keeps only its part off it.
+    /// Normals of new corners are their side's corners' averaged. A triangle with a corner that
+    /// has no position or no normal is left out. For display (a preview's ghost of removed
+    /// material, say); nothing measured is decided from it.
     #[must_use]
     pub fn pieces_off(&self, on: impl Fn(Vec3) -> bool, resolution: f64) -> Vec<NormalTriangle> {
         let mut out = Vec::new();
@@ -106,7 +111,8 @@ impl Mesh {
                 ))
             };
             if let (Some(a), Some(b), Some(c)) = (corner(t[0]), corner(t[1]), corner(t[2])) {
-                pieces_off(&on, resolution, [a, b, c], 0, &mut out);
+                let mut budget = OFF_BUDGET;
+                pieces_off(&on, resolution, [a, b, c], 0, &mut budget, &mut out);
             }
         }
         out
@@ -123,14 +129,17 @@ impl Mesh {
     }
 }
 
-/// [`Mesh::pieces_off`] for one triangle `t`, `depth` halvings in.
+/// [`Mesh::pieces_off`] for one triangle `t`, `depth` halvings in, with `budget` pieces of its
+/// mesh triangle left to look at.
 fn pieces_off(
     on: &impl Fn(Vec3) -> bool,
     resolution: f64,
     t: NormalTriangle,
     depth: u32,
+    budget: &mut usize,
     out: &mut Vec<NormalTriangle>,
 ) {
+    *budget = budget.saturating_sub(1);
     let [(a, _), (b, _), (c, _)] = t;
     let probes = [
         a,
@@ -148,8 +157,8 @@ fn pieces_off(
     let mixed = hits.iter().any(|h| *h);
     let sides = [a.dist(b), b.dist(c), c.dist(a)];
     let longest = sides.iter().copied().fold(0.0, f64::max);
-    if !mixed || depth >= OFF_SPLITS || longest <= resolution {
-        // Wholly off, or as small as asked: then its centroid decides.
+    if !mixed || depth >= OFF_SPLITS || *budget < 2 || longest <= resolution {
+        // Wholly off, or as small as asked (or as far as it may go): then its centroid decides.
         if !mixed || !hits[6] {
             out.push(t);
         }
@@ -164,8 +173,8 @@ fn pieces_off(
         return;
     };
     let mid = ((pi + pj) / 2.0, (ni + nj).normalized().unwrap_or(ni));
-    pieces_off(on, resolution, [(pi, ni), mid, o], depth + 1, out);
-    pieces_off(on, resolution, [mid, (pj, nj), o], depth + 1, out);
+    pieces_off(on, resolution, [(pi, ni), mid, o], depth + 1, budget, out);
+    pieces_off(on, resolution, [mid, (pj, nj), o], depth + 1, budget, out);
 }
 
 #[cfg(test)]
@@ -176,14 +185,14 @@ mod tests {
     /// to within the resolution, and covers the upper half's area.
     #[test]
     fn pieces_off_keep_only_what_is_off_the_surface() {
-        let up = Vec3::new(0.0, -1.0, 0.0);
+        let toward = Vec3::new(0.0, -1.0, 0.0);
         let mesh = Mesh {
             positions: vec![
                 Vec3::ZERO,
                 Vec3::new(1.0, 0.0, 0.0),
                 Vec3::new(0.0, 0.0, 10.0),
             ],
-            normals: vec![up; 3],
+            normals: vec![toward; 3],
             triangles: vec![[0, 1, 2]],
             ..Mesh::default()
         };
@@ -218,5 +227,26 @@ mod tests {
             1,
             "all off: the triangle whole"
         );
+    }
+
+    /// A test that flips back and forth all over the triangle (a fine checkerboard) is split
+    /// only as far as the budget allows, not into millions of pieces.
+    #[test]
+    fn pieces_off_stay_bounded_on_a_noisy_surface() {
+        let n = Vec3::new(0.0, 0.0, 1.0);
+        let mesh = Mesh {
+            positions: vec![
+                Vec3::ZERO,
+                Vec3::new(100.0, 0.0, 0.0),
+                Vec3::new(0.0, 100.0, 0.0),
+            ],
+            normals: vec![n; 3],
+            triangles: vec![[0, 1, 2]],
+            ..Mesh::default()
+        };
+        let checker = |p: Vec3| ((p.x * 3.7).floor() + (p.y * 3.7).floor()).rem_euclid(2.0) < 1.0;
+        let pieces = mesh.pieces_off(checker, 1e-9);
+        assert!(!pieces.is_empty());
+        assert!(pieces.len() <= OFF_BUDGET, "{} pieces", pieces.len());
     }
 }
