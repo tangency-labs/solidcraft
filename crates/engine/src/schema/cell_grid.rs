@@ -33,6 +33,9 @@ pub enum CellShapeParam {
     Circle,
     /// Regular polygons of `sides` sides, on a `dot_grid`.
     Polygon,
+    /// Irregular convex cells: the Voronoi cells of the hexagonal grid's centres, each moved by a
+    /// pseudo-random offset from `seed`.
+    Voronoi,
     /// Your own cell: the one closed profile of the sketch `cell_sketch`, repeated on a lattice
     /// of `pitch_x`, `pitch_y` and `stagger`. `size`, `sides` and `dot_grid` are not used, and
     /// `clip` defaults to `whole` (`snap` is refused).
@@ -149,6 +152,16 @@ pub struct CellGridParams {
     /// whole number of grid rows thicker. Keep-outs are not moved.
     #[serde(default)]
     pub snap_inset: Option<NumberExpr>,
+    /// Which pseudo-random pattern a `voronoi` grid uses: a whole number, default 0.
+    #[serde(default)]
+    pub seed: Option<NumberExpr>,
+    /// How far a `voronoi` cell's centre moves, from 0 (the hexagonal grid's centres) to 1 (as
+    /// far as they can be). Default: 0.7.
+    #[serde(default)]
+    pub irregularity: Option<NumberExpr>,
+    /// Rounds each corner of a `voronoi` cell with this radius. Default 0: sharp corners.
+    #[serde(default)]
+    pub corner_radius: Option<LengthExpr>,
     /// The least clearance from a cell to every edge of the field and its keep-outs, with
     /// `clip: whole`. Default 0: a cell may touch an edge.
     #[serde(default)]

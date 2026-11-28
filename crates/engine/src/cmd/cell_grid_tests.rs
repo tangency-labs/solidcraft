@@ -783,3 +783,48 @@ fn the_command_help_names_the_sketched_cell() {
         assert!(help.contains(word), "{word}: {help}");
     }
 }
+
+#[test]
+fn the_voronoi_parameters_are_refused_with_any_other_shape() {
+    // A typo or a wrong shape gets an error, not a silently different part: each of the three,
+    // with each built-in shape and with a sketched cell.
+    let mut s = plate(62.0, 3.0);
+    for shape in ["hexagon", "square", "triangle", "circle", "polygon", "sketch"] {
+        for (key, value) in [("seed", json!(7)), ("irregularity", json!(0.4)), ("corner_radius", json!("0.5 mm"))] {
+            let e = cut(&mut s, json!({"depth": 1.5, "shape": shape, key: value})).unwrap_err().to_string();
+            assert!(e.contains(&format!("`{key}` is for `shape: voronoi`")), "{shape} {key}: {e}");
+        }
+    }
+    // No shape given is the default hexagon.
+    let p = json!({"sketch": "Field", "size": 10, "web": 2, "depth": 1.5, "seed": 7});
+    let e = s.execute("solid.cell_grid", &p).unwrap_err().to_string();
+    assert!(e.contains("`seed` is for `shape: voronoi`"), "{e}");
+    assert!((volume(&s) - 62.0 * 62.0 * 3.0).abs() < 1e-6, "a refused grid cuts nothing");
+    assert!(s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. })));
+}
+
+#[test]
+fn the_voronoi_parameters_given_as_null_are_no_parameters() {
+    let mut s = plate(62.0, 3.0);
+    cut(&mut s, json!({"depth": 1.5, "seed": null, "irregularity": null, "corner_radius": null})).unwrap();
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 - 25.0 * 100.0 * 1.5)).abs() < 1e-6, "{}", volume(&s));
+}
+
+#[test]
+fn voronoi_cells_take_their_three_parameters() {
+    let mut s = plate(62.0, 3.0);
+    cut(&mut s, json!({"depth": 1.5, "shape": "voronoi", "seed": 7, "irregularity": 0.4, "corner_radius": "0.5 mm"})).unwrap();
+    assert!(volume(&s) < 62.0 * 62.0 * 3.0 - 1.0, "{}", volume(&s));
+    let kept = s
+        .doc
+        .features
+        .iter()
+        .any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::CellGrid { seed: Some(_), irregularity: Some(_), corner_radius: Some(_), .. }));
+    assert!(kept, "the feature keeps the three values");
+}
+
+#[test]
+fn the_help_says_the_voronoi_parameters_are_refused_with_other_shapes() {
+    let help = crate::cmd::find_command("solid.cell_grid").map(|c| c.params).unwrap_or_default();
+    assert!(help.contains("seed, irregularity and corner_radius are refused with any other shape"), "{help}");
+}

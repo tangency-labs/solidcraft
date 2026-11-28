@@ -17,6 +17,7 @@ pub fn shape(s: CellShape) -> k::CellShape {
         CellShape::Triangle => k::CellShape::Triangle,
         CellShape::Circle => k::CellShape::Circle,
         CellShape::Polygon => k::CellShape::Polygon,
+        CellShape::Voronoi => k::CellShape::Voronoi,
     }
 }
 
@@ -29,6 +30,7 @@ pub fn record_shape(s: k::CellShape) -> CellShape {
         k::CellShape::Triangle => CellShape::Triangle,
         k::CellShape::Circle => CellShape::Circle,
         k::CellShape::Polygon => CellShape::Polygon,
+        k::CellShape::Voronoi => CellShape::Voronoi,
     }
 }
 
@@ -119,6 +121,9 @@ pub fn spec(s: &CellGridSpec) -> k::CellGridSpec {
         clip: clip(s.clip),
         keepout_clip: s.keepout_clip.map(clip),
         snap_inset: s.snap_inset,
+        seed: s.seed,
+        irregularity: s.irregularity,
+        corner_radius: s.corner_radius,
         margin: s.margin,
     }
 }
@@ -137,6 +142,9 @@ pub fn record_spec(s: &k::CellGridSpec) -> CellGridSpec {
         clip: record_clip(s.clip),
         keepout_clip: s.keepout_clip.map(record_clip),
         snap_inset: s.snap_inset,
+        seed: s.seed,
+        irregularity: s.irregularity,
+        corner_radius: s.corner_radius,
         margin: s.margin,
     }
 }

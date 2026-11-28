@@ -2875,6 +2875,741 @@ fn a_conic_whose_chord_is_too_short_to_measure_stays_within_the_tolerance_of_its
     }
 }
 
+// --- voronoi cells ---
+
+/// A voronoi grid with the test size and web.
+fn voronoi(seed: u32, irregularity: f64, clip: Clip) -> CellGridSpec {
+    CellGridSpec {
+        clip,
+        seed,
+        irregularity,
+        ..spec(CellShape::Voronoi)
+    }
+}
+
+/// The corners of a cell's single loop of lines.
+fn corners(cell: &GridCell) -> Vec<Vec2> {
+    assert_eq!(cell.loops.len(), 1, "cell ({}, {})", cell.i, cell.j);
+    vertices(cell)
+}
+
+#[test]
+fn a_voronoi_grid_with_the_same_seed_is_planned_the_same() {
+    let field = [rect(0.0, 0.0, 60.0, 40.0)];
+    let a = run(&field, &voronoi(7, 0.8, Clip::Free));
+    let b = run(&field, &voronoi(7, 0.8, Clip::Free));
+    assert!(!a.cells.is_empty());
+    assert_eq!(a, b);
+}
+
+#[test]
+fn a_voronoi_grid_with_another_seed_is_planned_differently() {
+    let field = [rect(0.0, 0.0, 60.0, 40.0)];
+    let a = run(&field, &voronoi(7, 0.8, Clip::Free));
+    let b = run(&field, &voronoi(8, 0.8, Clip::Free));
+    assert_ne!(a.cells, b.cells);
+}
+
+#[test]
+fn a_voronoi_grid_without_irregularity_is_the_hexagon_grid() {
+    let field = [rect(-3.0, -2.0, 47.0, 41.0)];
+    for clip in [Clip::Whole, Clip::Free] {
+        let hex = run(&field, &with_clip(CellShape::Hexagon, clip));
+        let vor = run(&field, &voronoi(3, 0.0, clip));
+        assert_eq!(hex.cells.len(), vor.cells.len(), "{clip:?}");
+        assert!((hex.open_area - vor.open_area).abs() < 1e-6, "{clip:?}");
+        let mut hex_cells: Vec<(i64, i64, f64)> =
+            hex.cells.iter().map(|c| (c.i, c.j, c.area)).collect();
+        let mut vor_cells: Vec<(i64, i64, f64)> =
+            vor.cells.iter().map(|c| (c.i, c.j, c.area)).collect();
+        hex_cells.sort_by_key(|a| (a.0, a.1));
+        vor_cells.sort_by_key(|a| (a.0, a.1));
+        for (h, v) in hex_cells.iter().zip(&vor_cells) {
+            assert_eq!((h.0, h.1), (v.0, v.1), "{clip:?}");
+            assert!((h.2 - v.2).abs() < 1e-6, "{clip:?} {h:?} {v:?}");
+        }
+    }
+    let whole = run(&field, &voronoi(3, 0.0, Clip::Whole));
+    for c in &whole.cells {
+        assert!((c.area - CELL_AREA).abs() < 1e-6, "{c:?}");
+    }
+}
+
+#[test]
+fn voronoi_cells_are_convex_inside_the_field_and_a_web_apart() {
+    let (x0, y0, x1, y1) = (0.0, 0.0, 30.0, 25.0);
+    let tol = 1e-6;
+    for seed in [0, 1, 42] {
+        for irregularity in [0.3, 1.0] {
+            let plan = run(
+                &[rect(x0, y0, x1, y1)],
+                &voronoi(seed, irregularity, Clip::Free),
+            );
+            assert!(plan.cells.len() > 10);
+            let cells: Vec<Vec<Vec2>> = plan.cells.iter().map(corners).collect();
+            let mut total = 0.0;
+            for (cell, pts) in plan.cells.iter().zip(&cells) {
+                total += cell.area;
+                assert!((poly_area(pts) - cell.area).abs() < tol, "{cell:?}");
+                let n = pts.len();
+                for k in 0..n {
+                    let (a, b, c) = (pts[k], pts[(k + 1) % n], pts[(k + 2) % n]);
+                    assert!(cross2(b - a, c - b) > -tol, "not convex: {cell:?}");
+                    assert!(a.x > x0 - tol && a.x < x1 + tol, "{cell:?}");
+                    assert!(a.y > y0 - tol && a.y < y1 + tol, "{cell:?}");
+                }
+            }
+            assert!(total < (x1 - x0) * (y1 - y0));
+            for a in 0..cells.len() {
+                let ca = Convex::new(cells[a].clone()).unwrap();
+                for b in a + 1..cells.len() {
+                    assert!(
+                        poly_gap(&cells[a], &cells[b]) >= W - tol,
+                        "cells {a} and {b} closer than the web"
+                    );
+                    assert!(cells[b].iter().all(|&q| !ca.contains(q, tol)));
+                }
+            }
+        }
+    }
+}
+
+/// The hexagonal distance of lattice cell `(di, dj)` from cell `(0, 0)`: its ring.
+fn ring_of(di: i64, dj: i64) -> i64 {
+    di.abs().max(dj.abs()).max((di + dj).abs())
+}
+
+#[test]
+fn only_the_first_rings_of_sites_are_near_enough_to_cut_a_voronoi_cell() {
+    let lat = voronoi(0, 1.0, Clip::Free).lattice().unwrap();
+    let p = lat.p;
+    // At irregularity 1 a site is up to half a pitch from its centre, and a site cuts a cell
+    // only when nearer its site than twice the farthest a point of a cell can be.
+    let moved = p / 2.0;
+    let cuts_within = 2.0 * (p / 3f64.sqrt() + moved);
+    let nearest_in_ring = |ring: i64| {
+        let reach = ring + 2;
+        (-reach..=reach)
+            .flat_map(|di| (-reach..=reach).map(move |dj| (di, dj)))
+            .filter(|&(di, dj)| ring_of(di, dj) == ring)
+            .map(|(di, dj)| lat.center(di, dj).distance(lat.center(0, 0)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    for ring in 1..=8 {
+        let nearest = nearest_in_ring(ring);
+        // The bound of the module docs: a ring is no nearer than its hexagon's sides.
+        assert!(
+            nearest >= ring as f64 * p * 3f64.sqrt() / 2.0 - 1e-9,
+            "ring {ring}: {nearest}"
+        );
+        let can_cut = nearest - 2.0 * moved < cuts_within;
+        assert_eq!(can_cut, ring <= voronoi::RINGS, "ring {ring}: {nearest}");
+    }
+}
+
+#[test]
+fn voronoi_cells_at_full_irregularity_are_cut_by_the_first_rings_alone() {
+    let tol = 1e-9;
+    for web in [0.001, W] {
+        for seed in 0..40 {
+            let spec = CellGridSpec {
+                web,
+                ..voronoi(seed, 1.0, Clip::Free)
+            };
+            let lat = spec.lattice().unwrap();
+            let far = lat.p / 3f64.sqrt() + lat.p / 2.0;
+            for i in -6..=6 {
+                for j in -6..=6 {
+                    let near = voronoi::cell_polygon(&lat, &spec, i, j);
+                    let wide = voronoi::cell_polygon_within(&lat, &spec, i, j, 8);
+                    let (Some((s, near)), Some((_, wide))) = (near, wide) else {
+                        panic!("seed {seed} cell ({i}, {j}): no cell");
+                    };
+                    assert!(
+                        (poly_area(&near) - poly_area(&wide)).abs() < tol,
+                        "seed {seed} cell ({i}, {j}): a site past ring {} cuts it",
+                        voronoi::RINGS
+                    );
+                    for q in &near {
+                        assert!(
+                            wide.iter().any(|v| v.distance(*q) < tol),
+                            "seed {seed} cell ({i}, {j}): corner {q:?}"
+                        );
+                        assert!(s.distance(*q) <= far + tol, "seed {seed} cell ({i}, {j})");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn voronoi_cells_with_rounded_corners_are_smaller_and_as_many() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0)];
+    let sharp = run(&field, &voronoi(5, 0.6, Clip::Whole));
+    let round = run(
+        &field,
+        &CellGridSpec {
+            corner_radius: 0.5,
+            ..voronoi(5, 0.6, Clip::Whole)
+        },
+    );
+    assert_eq!(sharp.cells.len(), round.cells.len());
+    for (s, r) in sharp.cells.iter().zip(&round.cells) {
+        assert!(r.area < s.area && r.area > 0.0, "{r:?}");
+        assert!(r.loops[0]
+            .segs
+            .iter()
+            .any(|seg| matches!(seg, Seg2::Arc { .. })));
+        // The loop closes and its area is the one reported.
+        let area = r.loops[0].signed_area().unwrap().value;
+        assert!((area - r.area).abs() < 1e-6, "{area} {}", r.area);
+    }
+    // Trimmed rounded cells chain into closed loops too.
+    let free = run(
+        &field,
+        &CellGridSpec {
+            corner_radius: 0.5,
+            ..voronoi(5, 0.6, Clip::Free)
+        },
+    );
+    assert!(free.warnings.is_empty(), "{:?}", free.warnings);
+    assert!(free.partial > 0);
+}
+
+#[test]
+fn a_rounded_voronoi_cell_with_a_short_side_keeps_its_corner_radius() {
+    // Cells of this grid have sides far shorter than the radius: the radius must not follow them.
+    let field = [rect(8.0, 8.0, 152.0, 92.0)];
+    for (seed, irregularity) in [(0, 0.7), (7, 0.7), (0, 1.0), (3, 0.2)] {
+        let sharp = CellGridSpec {
+            size: 12.0,
+            web: 2.0,
+            ..voronoi(seed, irregularity, Clip::Whole)
+        };
+        let shortest = run(&field, &sharp)
+            .cells
+            .iter()
+            .flat_map(|c| {
+                let pts = corners(c);
+                let n = pts.len();
+                (0..n)
+                    .map(|k| pts[k].distance(pts[ring_next(k, n)]))
+                    .collect::<Vec<_>>()
+            })
+            .fold(f64::INFINITY, f64::min);
+        let plan = run(
+            &field,
+            &CellGridSpec {
+                corner_radius: 1.5,
+                ..sharp
+            },
+        );
+        assert!(plan.cells.len() > 20, "{}", plan.cells.len());
+        let mut full = 0;
+        for cell in &plan.cells {
+            let segs = &cell.loops[0].segs;
+            for seg in segs {
+                match *seg {
+                    Seg2::Arc { radius, sweep, .. } => {
+                        assert!(
+                            radius > 0.2 && radius <= 1.5,
+                            "{seed} {irregularity} {seg:?}"
+                        );
+                        assert!(sweep * radius > 1e-6, "{seg:?}");
+                        full += usize::from(radius == 1.5);
+                    }
+                    Seg2::Line { a, b } => {
+                        let (dx, dy) = (b.x - a.x, b.y - a.y);
+                        assert!(dx.hypot(dy) > 1e-6, "{seg:?}");
+                    }
+                    _ => panic!("{seg:?}"),
+                }
+            }
+            // The corners turn the outline once.
+            let turn: f64 = segs
+                .iter()
+                .map(|seg| match seg {
+                    Seg2::Arc { sweep, .. } => *sweep,
+                    _ => 0.0,
+                })
+                .sum();
+            assert!((turn - 2.0 * PI).abs() < 1e-9, "{turn}");
+            let area = cell.loops[0].signed_area().unwrap().value;
+            assert!((area - cell.area).abs() < 1e-6, "{area} {}", cell.area);
+        }
+        assert!(full > 0);
+        if (seed, irregularity) == (0, 0.7) {
+            assert!(
+                shortest < 0.5,
+                "the case needs a short side, not {shortest}"
+            );
+        }
+    }
+}
+
+/// The least distance from a cell's outline (each piece's ends and middle) to the loop's pieces.
+fn rim_of(cell: &GridCell, outline: &[Loop2]) -> f64 {
+    let mut least = f64::INFINITY;
+    for seg in cell.loops.iter().flat_map(|l| &l.segs) {
+        let pts = match *seg {
+            Seg2::Line { a, b } => vec![a, (a + b) * 0.5],
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => [0.0, 0.5]
+                .iter()
+                .map(|f| {
+                    let t = start + sweep * f;
+                    center + v(t.cos(), t.sin()) * radius
+                })
+                .collect(),
+            _ => panic!("{seg:?}"),
+        };
+        for o in outline.iter().flat_map(|l| &l.segs) {
+            let piece = match *o {
+                Seg2::Line { a, b } => Prim::line(a, b),
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                } => Prim::arc(center, radius, start, sweep),
+                _ => panic!("{o:?}"),
+            };
+            for &p in &pts {
+                least = least.min(piece.distance(p));
+            }
+        }
+    }
+    least
+}
+
+fn prims_of(loops: &[Loop2]) -> Vec<Prim> {
+    loops
+        .iter()
+        .flat_map(|l| &l.segs)
+        .map(|s| match *s {
+            Seg2::Line { a, b } => Prim::line(a, b),
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => Prim::arc(center, radius, start, sweep),
+            _ => panic!("{s:?}"),
+        })
+        .collect()
+}
+
+/// `n + 1` points along each piece of a cell's outline, ends included.
+fn cell_points(cell: &GridCell, n: usize) -> Vec<Vec2> {
+    let mut out = Vec::new();
+    for seg in cell.loops.iter().flat_map(|l| &l.segs) {
+        for k in 0..=n {
+            let f = k as f64 / n as f64;
+            out.push(match *seg {
+                Seg2::Line { a, b } => a + (b - a) * f,
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                } => {
+                    let t = start + sweep * f;
+                    center + v(t.cos(), t.sin()) * radius
+                }
+                _ => panic!("{seg:?}"),
+            });
+        }
+    }
+    out
+}
+
+/// The least distance from a cell to the loops, 32 samples to a piece.
+fn dense_rim(cell: &GridCell, outline: &[Loop2]) -> f64 {
+    let prims = prims_of(outline);
+    cell_points(cell, 32)
+        .iter()
+        .flat_map(|&p| prims.iter().map(move |o| o.distance(p)))
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// The distance from `p` to the nearest cell's outline.
+fn gap_to_cells(p: Vec2, plan: &CellGridPlan) -> f64 {
+    plan.cells
+        .iter()
+        .flat_map(|c| prims_of(&c.loops))
+        .map(|o| o.distance(p))
+        .fold(f64::INFINITY, f64::min)
+}
+
+#[test]
+fn a_keep_out_less_than_two_webs_from_the_outline_stays_a_keep_out_when_the_field_is_filled() {
+    // On a lattice centre, 1 below the top edge: moved out by the web it crosses the outline
+    // moved in by the web.
+    let (c, r) = (v(6.0 * H, 4.0 * P), 4.2);
+    let field = [rect(0.0, 0.0, 40.0, 30.0), circle(c.x, c.y, r)];
+    for irregularity in [0.0, 0.7] {
+        for keepout in [Clip::Snap, Clip::Free] {
+            let (snap, whole) = (
+                CellGridSpec {
+                    keepout_clip: Some(Clip::Snap),
+                    ..voronoi(0, irregularity, keepout)
+                },
+                voronoi(0, irregularity, Clip::Whole),
+            );
+            let plan = run(&field, &snap);
+            let fell_back = plan
+                .warnings
+                .iter()
+                .any(|w| w.contains("could not be moved in"));
+            if fell_back {
+                // Whole cells only: none reaches into the keep-out.
+                let mut expect = whole;
+                expect.clip = if keepout == Clip::Snap {
+                    Clip::Whole
+                } else {
+                    Clip::Free
+                };
+                expect.keepout_clip = Some(Clip::Whole);
+                assert_eq!(plan.cells, run(&field, &expect).cells, "{irregularity}");
+            }
+            let clear = if fell_back { r } else { r + W };
+            for cell in &plan.cells {
+                for p in cell_points(cell, 32) {
+                    assert!(
+                        p.distance(c) >= clear - 1e-6,
+                        "{irregularity}: cell ({}, {}) at {p:?}",
+                        cell.i,
+                        cell.j
+                    );
+                    assert!(
+                        (-1e-6..=40.0 + 1e-6).contains(&p.x)
+                            && (-1e-6..=30.0 + 1e-6).contains(&p.y),
+                        "{irregularity}: cell ({}, {}) at {p:?}",
+                        cell.i,
+                        cell.j
+                    );
+                }
+                if !fell_back && keepout == Clip::Snap {
+                    assert!(
+                        dense_rim(cell, &field) >= W - 1e-6,
+                        "cell ({}, {})",
+                        cell.i,
+                        cell.j
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_leaves_no_rim_wider_than_one_web() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0), circle(20.0, 15.0, 4.0)];
+    for (seed, irregularity) in [(9, 0.5), (0, 0.7), (3, 1.0)] {
+        let plan = run(&field, &voronoi(seed, irregularity, Clip::Snap));
+        assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+        let d = W + 0.01;
+        let mut probes = Vec::new();
+        for k in 0..=160 {
+            let f = f64::from(k) / 160.0;
+            probes.push(v(d + (40.0 - 2.0 * d) * f, d));
+            probes.push(v(d + (40.0 - 2.0 * d) * f, 30.0 - d));
+            probes.push(v(d, d + (30.0 - 2.0 * d) * f));
+            probes.push(v(40.0 - d, d + (30.0 - 2.0 * d) * f));
+            let t = std::f64::consts::TAU * f;
+            probes.push(v(20.0, 15.0) + v(t.cos(), t.sin()) * (4.0 + d));
+        }
+        // Just inside the rim's inner edge: on a cell or in a web between two.
+        for p in probes {
+            let gap = gap_to_cells(p, &plan);
+            assert!(
+                gap <= W,
+                "{seed} {irregularity}: {p:?} is {gap} from every cell"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_voronoi_field_and_its_keep_out_fill_or_trim_each_as_asked() {
+    let (c, r) = (v(20.0, 15.0), 4.0);
+    let field = [rect(0.0, 0.0, 40.0, 30.0), circle(c.x, c.y, r)];
+    let (outer, hole) = (&field[..1], &field[1..]);
+    let go = |clip: Clip, keepout: Clip| {
+        run(
+            &field,
+            &CellGridSpec {
+                keepout_clip: Some(keepout),
+                ..voronoi(9, 0.5, clip)
+            },
+        )
+    };
+    let least = |p: &CellGridPlan, lp: &[Loop2]| {
+        p.cells
+            .iter()
+            .map(|cell| dense_rim(cell, lp))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let a = go(Clip::Snap, Clip::Free);
+    assert!(a.warnings.is_empty(), "{:?}", a.warnings);
+    assert!((least(&a, outer) - W).abs() < 1e-6 && least(&a, hole) < 1e-6);
+    let b = go(Clip::Free, Clip::Snap);
+    assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+    assert!(least(&b, outer) < 1e-6 && (least(&b, hole) - W).abs() < 1e-6);
+    let d = go(Clip::Snap, Clip::Whole);
+    assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+    assert!((least(&d, outer) - W).abs() < 1e-6);
+    for cell in &d.cells {
+        for p in cell_points(cell, 32) {
+            assert!(
+                p.distance(c) >= r - 1e-6,
+                "cell ({}, {}) at {p:?}",
+                cell.i,
+                cell.j
+            );
+        }
+    }
+    let e = go(Clip::Whole, Clip::Snap);
+    assert!(e.warnings.is_empty(), "{:?}", e.warnings);
+    assert!((least(&e, hole) - W).abs() < 1e-6);
+    for p in e.cells.iter().flat_map(vertices) {
+        assert!(
+            (0.0..=40.0).contains(&p.x) && (0.0..=30.0).contains(&p.y),
+            "{p:?}"
+        );
+    }
+}
+
+#[test]
+fn a_voronoi_grid_keeps_whole_cells_when_a_short_edge_or_a_small_round_field_is_used_up() {
+    // A chamfer of 0.7, shorter than 2 W tan(22.5 deg): its moved line runs backwards.
+    let chamfered = [polygon(&[
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 29.5),
+        (39.5, 30.0),
+        (0.0, 30.0),
+    ])];
+    // A round field no wider than the web beside a big one: both its arcs are used up.
+    let small = [rect(0.0, 0.0, 40.0, 30.0), circle(60.0, 15.0, 1.0)];
+    for field in [&chamfered[..], &small[..]] {
+        let snap = run(field, &voronoi(4, 0.6, Clip::Snap));
+        let whole = run(field, &voronoi(4, 0.6, Clip::Whole));
+        assert_eq!(snap.warnings.len(), 1, "{:?}", snap.warnings);
+        assert!(
+            snap.warnings[0].contains("could not be moved in by the web"),
+            "{:?}",
+            snap.warnings
+        );
+        assert_eq!(snap.cells, whole.cells);
+        assert_eq!(snap.partial, 0);
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_keeps_its_rim_on_a_turned_and_moved_grid() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0), circle(20.0, 15.0, 4.0)];
+    let plan = run(
+        &field,
+        &CellGridSpec {
+            angle: 0.4,
+            anchor: v(3.3, -1.7),
+            ..voronoi(9, 0.5, Clip::Snap)
+        },
+    );
+    assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+    assert!(plan.partial > 0);
+    let mut on_rim = 0;
+    for cell in &plan.cells {
+        let rim = dense_rim(cell, &field);
+        assert!(rim >= W - 1e-6, "cell ({}, {}): {rim}", cell.i, cell.j);
+        on_rim += usize::from(rim <= W + 1e-6);
+    }
+    assert_eq!(on_rim, plan.partial);
+}
+
+#[test]
+fn a_snapped_voronoi_grid_fills_the_field_up_to_a_rim_of_one_web() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0)];
+    for (seed, irregularity) in [(9, 0.5), (0, 0.7), (3, 1.0), (5, 0.0)] {
+        let snap = run(&field, &voronoi(seed, irregularity, Clip::Snap));
+        let whole = run(&field, &voronoi(seed, irregularity, Clip::Whole));
+        let free = run(&field, &voronoi(seed, irregularity, Clip::Free));
+        assert!(snap.warnings.is_empty(), "{:?}", snap.warnings);
+        // More than the whole cells, less than the cells trimmed at the outline itself.
+        assert!(snap.partial > 0);
+        assert!(snap.cells.len() > whole.cells.len());
+        assert!(snap.open_area > whole.open_area && snap.open_area < free.open_area);
+        let mut on_rim = 0;
+        for cell in &snap.cells {
+            let rim = rim_of(cell, &field);
+            assert!(rim >= W - 1e-6, "cell ({}, {}): {rim}", cell.i, cell.j);
+            on_rim += usize::from(rim <= W + 1e-6);
+            for p in vertices(cell) {
+                assert!(p.x >= W - 1e-6 && p.x <= 40.0 - W + 1e-6, "{p:?}");
+                assert!(p.y >= W - 1e-6 && p.y <= 30.0 - W + 1e-6, "{p:?}");
+            }
+        }
+        // The cells along the outline are cut exactly one web from it.
+        assert_eq!(on_rim, snap.partial, "{seed} {irregularity}");
+        // The cells away from the outline are the ones `Whole` keeps.
+        for cell in snap.cells.iter().filter(|c| c.kind == CellKind::Whole) {
+            let same = whole.cells.iter().find(|c| (c.i, c.j) == (cell.i, cell.j));
+            assert!(
+                same.is_none_or(|c| c == cell),
+                "cell ({}, {})",
+                cell.i,
+                cell.j
+            );
+        }
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_keeps_a_rim_inside_a_corner_that_turns_away_and_round_a_keepout() {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    // An L: the corner at (30, 20) turns away from the field.
+    let pts = [
+        (0.0, 0.0),
+        (60.0, 0.0),
+        (60.0, 20.0),
+        (30.0, 20.0),
+        (30.0, 50.0),
+        (0.0, 50.0),
+    ];
+    let l = Loop2 {
+        segs: (0..pts.len())
+            .map(|k| line(pts[k], pts[(k + 1) % pts.len()]))
+            .collect(),
+    };
+    let hole = Loop2 {
+        segs: vec![Seg2::Arc {
+            center: v(15.0, 30.0),
+            radius: 6.0,
+            start: 0.0,
+            sweep: std::f64::consts::TAU,
+        }],
+    };
+    let field = [l, hole];
+    for corner_radius in [0.0, 1.0] {
+        let plan = run(
+            &field,
+            &CellGridSpec {
+                corner_radius,
+                ..voronoi(2, 0.7, Clip::Snap)
+            },
+        );
+        assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+        assert!(plan.partial > 0 && plan.whole > 0);
+        let mut least = f64::INFINITY;
+        for cell in &plan.cells {
+            let rim = rim_of(cell, &field);
+            assert!(rim >= W - 1e-6, "cell ({}, {}): {rim}", cell.i, cell.j);
+            least = least.min(rim);
+        }
+        assert!(least <= W + 1e-6, "{least}");
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_rounds_the_corners_the_rim_cuts() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0)];
+    let plan = run(
+        &field,
+        &CellGridSpec {
+            corner_radius: 1.0,
+            ..voronoi(9, 0.5, Clip::Snap)
+        },
+    );
+    assert!(plan.partial > 0);
+    for cell in plan.cells.iter().filter(|c| c.kind != CellKind::Whole) {
+        let segs = &cell.loops[0].segs;
+        let arcs = segs
+            .iter()
+            .filter(|s| matches!(s, Seg2::Arc { .. }))
+            .count();
+        // Lines and arcs in turn: every corner is rounded, the ones on the rim too.
+        assert_eq!(2 * arcs, segs.len(), "cell ({}, {})", cell.i, cell.j);
+        assert!(rim_of(cell, &field) >= W - 1e-6);
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_cuts_a_sharp_corner_inside_a_rounded_corner_smaller_than_the_web() {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    // A corner rounded by 1, less than the web.
+    let field = [Loop2 {
+        segs: vec![
+            line((0.0, 0.0), (40.0, 0.0)),
+            line((40.0, 0.0), (40.0, 29.0)),
+            Seg2::Arc {
+                center: v(39.0, 29.0),
+                radius: 1.0,
+                start: 0.0,
+                sweep: FRAC_PI_2,
+            },
+            line((39.0, 30.0), (0.0, 30.0)),
+            line((0.0, 30.0), (0.0, 0.0)),
+        ],
+    }];
+    let rounded = run(&field, &voronoi(9, 0.5, Clip::Snap));
+    let sharp = run(&[rect(0.0, 0.0, 40.0, 30.0)], &voronoi(9, 0.5, Clip::Snap));
+    assert!(rounded.warnings.is_empty(), "{:?}", rounded.warnings);
+    assert_eq!(rounded.cells, sharp.cells);
+    for cell in &rounded.cells {
+        assert!(rim_of(cell, &field) >= W - 1e-6);
+    }
+}
+
+#[test]
+fn a_voronoi_grid_keeps_whole_cells_when_the_outline_cannot_move_in_by_the_web() {
+    // The second field is narrower than two webs.
+    let field = [rect(0.0, 0.0, 40.0, 30.0), rect(50.0, 0.0, 52.0, 30.0)];
+    let snap = run(&field, &voronoi(4, 0.6, Clip::Snap));
+    let whole = run(&field, &voronoi(4, 0.6, Clip::Whole));
+    assert_eq!(snap.warnings.len(), 1, "{:?}", snap.warnings);
+    assert!(!whole.cells.is_empty());
+    assert_eq!(snap.cells, whole.cells);
+    assert_eq!(snap.partial, 0);
+}
+
+#[test]
+fn an_irregularity_outside_zero_to_one_or_a_negative_corner_radius_is_refused() {
+    let field = [rect(0.0, 0.0, 20.0, 20.0)];
+    for irregularity in [-0.1, 1.5, f64::NAN, f64::INFINITY] {
+        let err = plan(&field, &voronoi(0, irregularity, Clip::Free)).unwrap_err();
+        assert!(
+            matches!(&err, CellGridError::Parameter(m) if m.contains("irregularity")),
+            "{err}"
+        );
+    }
+    for corner_radius in [-0.5, f64::NAN] {
+        let err = plan(
+            &field,
+            &CellGridSpec {
+                corner_radius,
+                ..voronoi(0, 0.5, Clip::Free)
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, CellGridError::Parameter(m) if m.contains("corner radius")),
+            "{err}"
+        );
+    }
+}
+
 // --- sketched cells ---
 
 /// An L of lines with a half-circle cap on its stem: the foot is `[0, 10] x [0, 4]`, the stem
@@ -3842,4 +4577,49 @@ fn hostile_sketched_cells_are_refused_and_never_panic() {
         plan_sketch(&open, &sk_square(), &spec),
         Err(CellGridError::Field(_))
     ));
+}
+
+#[test]
+fn a_voronoi_keep_out_too_near_the_outline_keeps_its_cells_whole_and_the_rest_filled() {
+    // 1.5 from the left edge, between one and two webs: moved out it would cross the outline
+    // moved in.
+    let (c, r) = (v(6.0, 20.0), 4.5);
+    let field = [rect(0.0, 0.0, 60.0, 40.0), circle(c.x, c.y, r)];
+    for (seed, irregularity) in [(9, 0.5), (0, 0.7), (3, 1.0)] {
+        let plan = run(&field, &voronoi(seed, irregularity, Clip::Snap));
+        assert!(
+            !plan
+                .warnings
+                .iter()
+                .any(|w| w.contains("could not be moved in")),
+            "{:?}",
+            plan.warnings
+        );
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|w| w.contains("a keep-out could not be moved out")),
+            "{:?}",
+            plan.warnings
+        );
+        assert!(plan.partial > 0);
+        let (mut right, mut top, mut bottom) = (false, false, false);
+        for cell in &plan.cells {
+            let rim = dense_rim(cell, &field);
+            assert!(rim >= W - 1e-6, "cell ({}, {}): {rim}", cell.i, cell.j);
+            for p in cell_points(cell, 32) {
+                assert!(
+                    p.distance(c) >= r + W - 1e-6,
+                    "{seed}: cell ({}, {}) at {p:?}",
+                    cell.i,
+                    cell.j
+                );
+                right |= p.x >= 60.0 - 1.5 * W;
+                top |= p.x > 30.0 && p.y >= 40.0 - 1.5 * W;
+                bottom |= p.x > 30.0 && p.y <= 1.5 * W;
+            }
+        }
+        // Far from the keep-out the field is filled up to a rim of one web.
+        assert!(right && top && bottom, "{seed} {irregularity}");
+    }
 }

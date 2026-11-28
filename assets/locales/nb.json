@@ -1670,7 +1670,7 @@
   "help.solid.boundary_fill": "Lager volumkropper av områdene som omsluttes av overlappende verktøykropper, og fyller bare områdene du velger. Bruk det til å bygge en form av rommet flere kropper avgrenser sammen.",
   "help.solid.bounding_solid": "Oppretter en boks som omslutter de valgte kroppene, med en valgfri margin. Bruk det til å se den samlede størrelsen på en del, eller som råemnet den freses ut av.",
   "help.solid.box": "Oppretter en boks fra lengde, bredde og høyde, fra et hjørnepunkt eller sentrert på et punkt. Bruk det til en rask blokk, en plassholder eller en kropp å skjære funksjoner inn i.",
-  "help.solid.cell_grid": "Skjærer et rutenett av sekskant-, kvadrat-, trekant-, sirkel- eller mangekantceller ut av en del, innenfor profilene i en skisse. Bruk det til lufteåpninger, høyttalergitter og lettere plater.",
+  "help.solid.cell_grid": "Skjærer et rutenett av sekskant-, kvadrat-, trekant-, sirkel-, mangekant- eller voronoiceller ut av en del, innenfor profilene i en skisse. Bruk det til lufteåpninger, høyttalergitter og lettere plater.",
   "help.solid.chamfer": "Lager en plan fas langs de valgte kantene med avstanden du angir. Bruk verktøyet til å fjerne skarpe kanter eller gjøre det lettere å føre inn en pinne eller skrue.",
   "help.solid.coil": "Oppretter en spiralformet kropp, for eksempel en fjær, fra en diameter, vindinger, høyde eller stigning og et rundt eller kvadratisk tverrsnitt. Bruk det til fjærer, spoler og spiralformede rygger.",
   "help.solid.combine": "Slår sammen kropper, trekker dem fra en målkropp eller beholder bare volumet de har felles, og kan beholde verktøykroppene. Bruk det til å slå sammen deler, til å skjære en form med en annen eller til å finne hvor to kropper overlapper.",

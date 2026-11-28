@@ -27,6 +27,13 @@ pub(crate) enum Cell<'a> {
         c: Vec2,
         r: f64,
     },
+    /// A convex polygon with rounded corners: the points within `r` of the convex `core`, its
+    /// outline `prims` (counter-clockwise lines and arcs).
+    Rounded {
+        core: &'a Convex,
+        r: f64,
+        prims: Vec<Prim>,
+    },
     /// Any closed loop of lines and arcs (a sketched cell, convex or not).
     General(&'a Loop),
 }
@@ -41,6 +48,7 @@ impl Cell<'_> {
                 x1: c.x + r,
                 y1: c.y + r,
             },
+            Cell::Rounded { core, r, .. } => core.bounds.grown(*r),
             Cell::General(lp) => lp.bounds(),
         }
     }
@@ -64,6 +72,7 @@ impl Cell<'_> {
                     p1: start,
                 }]
             }
+            Cell::Rounded { prims, .. } => prims.clone(),
             Cell::General(lp) => lp.prims.clone(),
         }
     }
@@ -72,6 +81,16 @@ impl Cell<'_> {
         match self {
             Cell::Polygon(poly) => poly.contains(p, 0.0),
             Cell::Circle { c, r } => p.distance(*c) < *r,
+            Cell::Rounded { core, r, .. } => {
+                let n = core.pts.len();
+                core.contains(p, 0.0)
+                    || (0..n).any(|k| {
+                        matches!(
+                            (core.pts.get(k), core.pts.get(ring_next(k, n))),
+                            (Some(&a), Some(&b)) if Prim::line(a, b).distance(p) < *r
+                        )
+                    })
+            }
             Cell::General(lp) => lp.contains(p),
         }
     }

@@ -1,5 +1,5 @@
 //! Cell grids: fills the area of a sketch with cells of one shape (hexagons, squares, triangles,
-//! circles or regular polygons) and returns the cells as closed 2D loops, with the counts and the
+//! circles, regular polygons or irregular voronoi cells) and returns the cells as closed 2D loops, with the counts and the
 //! open area. This is the pure planning half of the cell grid feature: it knows a field and the
 //! grid's parameters, not a body, a command or a cut.
 //!
@@ -18,6 +18,14 @@
 //! indices. Two fields with the same shape, size, web, angle and anchor therefore get the same
 //! lattice, which is how a grid split over two parts lines up. With `angle` 0 a hexagon is
 //! flat-top; the other shapes follow the same pattern (see [`CellShape`]).
+//!
+//! # Voronoi cells
+//! [`CellShape::Voronoi`] starts from the hexagon lattice's centres and moves each by a
+//! pseudo-random step that depends only on `seed` and the cell's indices, up to
+//! `irregularity * p / 2`. A cell is the part of the plane nearer its centre than any other,
+//! drawn in by half the web, with its corners rounded by `corner_radius`. The same seed gives the
+//! same pattern on every field, so these grids line up across parts as the regular ones do.
+//! Voronoi cells have no lattice lines to snap to and act as `Whole` under [`Clip::Snap`].
 //!
 //! # Clipping, at a field's edge
 //! The field as drawn is the limit: no mode puts a cell outside it or over a keep-out.
@@ -56,6 +64,7 @@ pub(crate) mod region;
 mod sketch;
 pub(crate) mod snap;
 mod vec;
+pub(crate) mod voronoi;
 
 #[cfg(test)]
 mod tests;
@@ -103,6 +112,9 @@ pub enum CellShape {
     /// Regular polygons with `sides` sides and inscribed diameter `size`, a flat at the bottom,
     /// on a [`DotGrid`].
     Polygon,
+    /// Irregular convex cells: the Voronoi cells of the hexagonal grid's centres, each moved by a
+    /// pseudo-random offset from `seed`.
+    Voronoi,
 }
 
 /// The grid of centres for circles and polygons, which have no grid of their own.
@@ -151,6 +163,13 @@ pub struct CellGridSpec {
     /// With [`Clip::Snap`], how many lattice lines further in each straight field edge moves
     /// after it snaps (0: onto the nearest line). Keep-outs are not moved.
     pub snap_inset: u32,
+    /// Which pseudo-random pattern a [`CellShape::Voronoi`] grid uses.
+    pub seed: u32,
+    /// How far a [`CellShape::Voronoi`] cell's centre moves, 0 to 1 (0: the hexagonal grid's
+    /// centres, 1: moved as far as they can be).
+    pub irregularity: f64,
+    /// Rounds each corner of a [`CellShape::Voronoi`] cell with this radius (0: sharp corners).
+    pub corner_radius: f64,
     /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
     /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
     pub margin: f64,
@@ -169,6 +188,9 @@ impl Default for CellGridSpec {
             clip: Clip::Snap,
             keepout_clip: None,
             snap_inset: 0,
+            seed: 0,
+            irregularity: 0.7,
+            corner_radius: 0.0,
             margin: 0.0,
         }
     }
@@ -214,6 +236,18 @@ impl CellGridSpec {
                 "a snap inset needs `clip: snap`: it moves the lines the field's edges snap to"
                     .into(),
             ));
+        }
+        if !(self.irregularity.is_finite() && (0.0..=1.0).contains(&self.irregularity)) {
+            return Err(CellGridError::Parameter(format!(
+                "the irregularity must be from 0 to 1, not {}",
+                self.irregularity
+            )));
+        }
+        if !(self.corner_radius.is_finite() && (0.0..=MAX_COORD).contains(&self.corner_radius)) {
+            return Err(CellGridError::Parameter(format!(
+                "the corner radius must be from 0 to {MAX_COORD} mm, not {}",
+                self.corner_radius
+            )));
         }
         if !(self.margin.is_finite() && (0.0..=MAX_COORD).contains(&self.margin)) {
             return Err(CellGridError::Parameter(format!(
@@ -392,6 +426,9 @@ pub fn cell_center(spec: &CellGridSpec, i: i64, j: i64) -> Result<Vec2, CellGrid
 
 /// The cells of a grid over a field given as closed loops (see the module docs).
 pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGridError> {
+    if spec.shape == CellShape::Voronoi {
+        return voronoi::plan(field, spec);
+    }
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
     let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;

@@ -2738,7 +2738,7 @@
   "help.solid.boundary_fill": "Makes solids from the regions enclosed by overlapping tool bodies, filling only the regions you pick. Use it to build a shape from the space that several bodies bound together.",
   "help.solid.bounding_solid": "Creates a box that encloses the selected bodies, with an optional margin. Use it to see a part's overall size, or as the stock it is machined from.",
   "help.solid.box": "Creates a box from a length, width and height, from a corner point or centered on a point. Use it for a quick block, a placeholder or a body to cut features into.",
-  "help.solid.cell_grid": "Cuts a grid of hexagon, square, triangle, circle or polygon cells out of a part, inside a sketch's profiles. Use it for vents, speaker grilles and lighter plates.",
+  "help.solid.cell_grid": "Cuts a grid of hexagon, square, triangle, circle, polygon or voronoi cells out of a part, inside a sketch's profiles. Use it for vents, speaker grilles and lighter plates.",
   "help.solid.chamfer": "Cuts the selected edges with a flat bevel of the distance you set. Use it to break sharp edges or to ease the entry of a pin or screw.",
   "help.solid.coil": "Creates a helical body, such as a spring, from a diameter, turns, height or pitch and a round or square section. Use it for springs, coils and helical ridges.",
   "help.solid.combine": "Joins bodies, cuts them out of a target body, or keeps only the volume they share, and can keep the tool bodies. Use it to merge parts, to cut one shape with another or to find where two bodies overlap.",

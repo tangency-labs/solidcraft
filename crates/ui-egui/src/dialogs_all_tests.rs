@@ -1249,6 +1249,61 @@ fn cell_grid_sends_the_keepout_clip_and_the_snap_inset() {
     assert!(p.get("snap_inset").is_none(), "{p}");
 }
 
+/// Seed, Irregularity and Corner radius are the Voronoi cells' rows: shown with that shape only.
+#[test]
+fn cell_grid_form_shows_the_voronoi_rows_for_voronoi_cells_only() {
+    let voronoi = |d: &mut Dialog| {
+        if let Kind::CellGrid(c) = &mut d.kind {
+            c.shape = 6;
+        }
+    };
+    let rows = ["Seed", "Irregularity", "Corner radius"];
+    check_form_with("solid.cell_grid", &rows, &["Sides", "Dot grid"], voronoi);
+    check_form_with("solid.cell_grid", &[], &rows, |d: &mut Dialog| {
+        if let Kind::CellGrid(c) = &mut d.kind {
+            c.shape = 0;
+        }
+    });
+}
+
+/// The Voronoi rows go into the command call with that shape only, and Edit Feature refills them.
+#[test]
+fn cell_grid_sends_the_voronoi_values_and_edit_restores_them() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    let sent = |d: &Dialog| apply_commands(&h.app, d).unwrap()[0].clone();
+    let keys = ["seed", "irregularity", "corner_radius"];
+    let (_, p) = sent(&d);
+    assert!(keys.iter().all(|k| p.get(k).is_none()), "other shapes send none: {p}");
+    if let Kind::CellGrid(c) = &mut d.kind {
+        (c.shape, c.seed, c.irregularity, c.corner_radius) = (6, "7".into(), "0.4".into(), "0.5 mm".into());
+    }
+    let (_, p) = sent(&d);
+    assert_eq!(
+        (p["shape"].as_str(), p.get("seed"), p.get("irregularity"), p.get("corner_radius")),
+        (Some("voronoi"), Some(&json!("7")), Some(&json!("0.4")), Some(&json!("0.5 mm"))),
+        "{p}"
+    );
+    // The kernel does not build Voronoi cells yet: the stored feature is a hexagon grid with the
+    // Voronoi values set, which is what Edit Feature reads.
+    let hexagons = json!({"sketch": sketch, "size": "6 mm", "web": "1.5 mm", "depth": "2 mm"});
+    h.app.run("solid.cell_grid", hexagons).unwrap();
+    let mut kind = h.app.session.doc.find_feature("CellGrid1").unwrap().kind.clone();
+    if let FeatureKind::CellGrid { shape, seed, irregularity, corner_radius, .. } = &mut kind {
+        *shape = solidcore_record::cell_grid::CellShape::Voronoi;
+        *seed = Some("7".into());
+        *irregularity = Some("0.4".into());
+        *corner_radius = Some("0.5 mm".into());
+    }
+    let Some((Kind::CellGrid(c), ..)) = crate::dialogs_cell_grid::for_feature(&h.app, &kind) else { panic!() };
+    assert_eq!((c.shape, c.seed.as_str(), c.irregularity.as_str(), c.corner_radius.as_str()), (6, "7", "0.4", "0.5 mm"));
+}
+
 /// Mode is Cut unless Raised is chosen: Cut sends no mode, Raised sends `raised`, the body grows
 /// by the cells (a cut shrinks it), and Through all is not offered, nor sent, with raised cells.
 #[test]

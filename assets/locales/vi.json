@@ -2738,7 +2738,7 @@
   "help.solid.boundary_fill": "Tạo khối đặc từ các vùng được bao kín bởi các thân khối công cụ chồng lấn, chỉ điền đầy những vùng bạn chọn. Dùng để dựng hình từ không gian được nhiều thân khối cùng bao lại.",
   "help.solid.bounding_solid": "Tạo khối hộp bao ngoài các thân khối đã chọn, có thể thêm khoảng dư. Dùng để xem kích thước tổng thể của chi tiết hoặc làm phôi để gia công chi tiết đó.",
   "help.solid.box": "Tạo khối hộp theo chiều dài, chiều rộng và chiều cao, từ điểm góc hoặc có tâm tại một điểm. Dùng để tạo nhanh khối, hình giữ chỗ hoặc thân khối để cắt tạo các tính năng.",
-  "help.solid.cell_grid": "Cắt một lưới ô lục giác, vuông, tam giác, tròn hoặc đa giác khỏi chi tiết, bên trong các biên dạng của bản phác. Dùng cho lỗ thông gió, lưới loa và tấm nhẹ hơn.",
+  "help.solid.cell_grid": "Cắt một lưới ô lục giác, vuông, tam giác, tròn, đa giác hoặc Voronoi khỏi chi tiết, bên trong các biên dạng của bản phác. Dùng cho lỗ thông gió, lưới loa và tấm nhẹ hơn.",
   "help.solid.chamfer": "Vát các cạnh đã chọn theo khoảng cách bạn thiết lập. Dùng để triệt tiêu cạnh sắc hoặc giúp lắp chốt, bu lông dễ dàng hơn.",
   "help.solid.coil": "Tạo thân khối xoắn ốc, như lò xo, từ đường kính, số vòng, chiều cao hoặc bước xoắn và tiết diện tròn hoặc vuông. Dùng cho lò xo, cuộn xoắn và gờ xoắn ốc.",
   "help.solid.combine": "Hợp nhất các khối, cắt trừ khỏi khối đích, hoặc chỉ giữ lại phần thể tích giao nhau, đồng thời có thể giữ lại các khối công cụ. Dùng để gộp chi tiết, dùng hình này cắt hình kia hoặc tìm vị trí hai khối giao nhau.",
