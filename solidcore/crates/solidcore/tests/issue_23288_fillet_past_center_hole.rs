@@ -37,7 +37,8 @@ fn holed_cube(k: &mut Kernel) -> (Brep, EdgeId) {
         })
         .collect();
     assert_eq!(top.len(), 1, "the top edge at y = 50");
-    (b, top[0])
+    let top = *top.first().expect("the top edge at y = 50");
+    (b, top)
 }
 
 fn round_top(radius: f64) -> Result<f64, String> {
