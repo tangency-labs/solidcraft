@@ -467,15 +467,8 @@ fn lift_bound(ax: &Axis, source: &Source, [p, q]: [End; 2]) -> R<Verdict> {
     if !(range.lo - KINK_SLACK..=range.hi + KINK_SLACK).contains(&q.theta) {
         return Ok(Verdict::Unbounded);
     }
-    let first = (range.lo / FRAC_PI_2).floor();
-    let last = (range.hi / FRAC_PI_2).ceil();
-    let mut k = first;
-    while k <= last {
-        let boundary = k * FRAC_PI_2;
-        if (range.lo + KINK_SLACK..range.hi - KINK_SLACK).contains(&boundary) {
-            return Ok(Verdict::Kink(boundary));
-        }
-        k += 1.0;
+    if let Some(verdict) = quarter_boundary(range) {
+        return Ok(verdict);
     }
     // t = tan(psi/2 - pi/8) runs in [-tan(pi/8), tan(pi/8)] inside a quarter, with
     // dt/dtheta = (1 + t^2)/2, and du/dtheta = c (1 + t^2) for c = 1/(4 tan(pi/8)).
@@ -506,6 +499,26 @@ fn lift_bound(ax: &Axis, source: &Source, [p, q]: [End; 2]) -> R<Verdict> {
     let climb = ((ax.radius)(1.0) - (ax.radius)(0.0)).hypot(1.0);
     let bound = radius * 4.0 * reach * eu + climb * ev;
     Ok(if bound.is_finite() { Verdict::Within(bound) } else { Verdict::Unbounded })
+}
+
+/// `Kink` at the first boundary of the form's quarters inside the angle range, `Unbounded` if the
+/// range starts too far out to step to one, `None` if none is inside.
+fn quarter_boundary(range: Ivl) -> Option<Verdict> {
+    let first = (range.lo / FRAC_PI_2).floor();
+    // Past 2^53 an f64 counter stops moving; a range starting that far off holds no useful boundary.
+    if !(first.abs() < 1e15) {
+        return Some(Verdict::Unbounded);
+    }
+    let last = (range.hi / FRAC_PI_2).ceil();
+    let mut k = first;
+    while k <= last {
+        let boundary = k * FRAC_PI_2;
+        if (range.lo + KINK_SLACK..range.hi - KINK_SLACK).contains(&boundary) {
+            return Some(Verdict::Kink(boundary));
+        }
+        k += 1.0;
+    }
+    None
 }
 
 /// The point of the piece `[p, q]` where the angle is `boundary` (bisected on the angle followed
@@ -781,5 +794,51 @@ mod tests {
         unwind(&loops, &mut pcs, [0.0, 8.0]).unwrap();
         let start = solidcore_ops::pcurve::eval(&pcs[1][0], 0.0).unwrap();
         assert!((start[0] - 0.5).abs() < 1e-12, "{start:?}");
+    }
+
+    /// #21750: a piece that starts a hair (1e-15) off the axis has its angle's rate enclosed
+    /// within about ±5e29, so its angle range spans more quarters than an f64 counter can step.
+    #[test]
+    fn a_piece_whose_angle_range_spans_more_quarters_than_a_float_can_count_is_unbounded() {
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ax = Axis {
+                origin: Vec3::new(0.0, 0.0, 0.0),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                y: Vec3::new(0.0, 1.0, 0.0),
+                z: Vec3::new(0.0, 0.0, 1.0),
+                radius: Box::new(|_| 1.0),
+            };
+            for i in 0..32 {
+                let gap = 1e-15 * (1.0 + f64::from(i) / 32.0);
+                let source = Source::Line { start: [gap, gap, 0.0], direction: [1.0, 1.0, 0.0] };
+                let end = |t: f64| End { t, theta: (gap + t).atan2(gap + t), u: 0.0, v: 0.0, du: 0.0, dv: 0.0, d_theta: 0.0 };
+                let verdict = match lift_bound(&ax, &source, [end(0.0), end(1.0)]) {
+                    Ok(Verdict::Unbounded) => "unbounded".to_string(),
+                    Ok(Verdict::Kink(at)) => format!("a kink at {at}"),
+                    Ok(Verdict::Within(bound)) => format!("within {bound}"),
+                    Err(e) => e,
+                };
+                send.send((gap, verdict)).unwrap();
+            }
+        });
+        for _ in 0..32 {
+            let (gap, verdict) = receive.recv_timeout(std::time::Duration::from_secs(20)).expect("lift_bound did not return within 20 s");
+            assert_eq!(verdict, "unbounded", "gap {gap}");
+        }
+    }
+
+    /// A range that starts near its piece and only ends past the counter (a rate enclosed
+    /// lopsidedly) still gives the first boundary inside it, as on main.
+    #[test]
+    fn a_range_that_only_ends_past_the_float_counter_still_gives_its_first_quarter_boundary() {
+        let kink = |lo: f64, hi: f64| match quarter_boundary(Ivl::new(lo, hi)) {
+            Some(Verdict::Kink(at)) => Some(at),
+            _ => None,
+        };
+        assert_eq!(kink(-3.0, 1e30), Some(-FRAC_PI_2));
+        assert_eq!(kink(-3.0, f64::INFINITY), Some(-FRAC_PI_2));
+        assert_eq!(kink(0.1, 2e16), Some(FRAC_PI_2));
+        assert!(matches!(quarter_boundary(Ivl::new(-1e30, -3.0)), Some(Verdict::Unbounded)));
     }
 }
