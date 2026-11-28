@@ -1614,7 +1614,7 @@ fn scene_samples(backend: eframe::wgpu::Backend, samples: u32, supported: &[u32]
 /// or WARP or llvmpipe where there is no GPU), which draws every sample on the CPU: 1x unless an
 /// anti-aliasing level was chosen in Graphics (`chosen`, a saved `msaa`), which applies there
 /// too (#3321). Safe mode ignores saved settings, so it always draws 1x. Preferences keeps
-/// showing the level asked for, as with OpenGL's 1x (`effective_msaa_samples`).
+/// showing the level asked for.
 fn software_samples(samples: u32, software: bool, chosen: bool) -> u32 {
     if software && !chosen { 1 } else { samples }
 }
@@ -3671,8 +3671,7 @@ mod msaa_tests {
     fn saved_multisampling_uses_the_selected_backend_policy() {
         use eframe::wgpu::Backend;
         for requested in [1, 2, 4, 8] {
-            assert_eq!(eframe::egui_wgpu::effective_msaa_samples(Backend::Gl, requested), 1);
-            for backend in [Backend::Vulkan, Backend::Dx12, Backend::Metal] {
+            for backend in [Backend::Gl, Backend::Vulkan, Backend::Dx12, Backend::Metal] {
                 assert_eq!(eframe::egui_wgpu::effective_msaa_samples(backend, requested), requested);
             }
         }
@@ -3724,8 +3723,10 @@ mod msaa_tests {
     #[test]
     fn the_scene_follows_the_backend_policy_too() {
         use eframe::wgpu::Backend;
-        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 1);
-        assert_eq!(super::scene_samples(Backend::Gl, 4, &[]), 1);
+        // Desktop OpenGL takes the chosen count like every native backend; the startup check
+        // falls back to 1x where it draws nothing.
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 4);
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[]), 4);
         assert_eq!(super::scene_samples(Backend::Vulkan, 4, &[1, 4]), 4);
         assert_eq!(super::scene_samples(Backend::Dx12, 8, &[1, 2, 4]), 4);
     }
