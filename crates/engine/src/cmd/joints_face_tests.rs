@@ -1672,8 +1672,8 @@ fn center_rule_is_one_undo_step_and_reopens() {
 #[test]
 fn midplane_origin_with_hole_snap_centers_asymmetric_shaft_and_follows_edits() {
     let mut s = Session::default();
-    run(&mut s, "param.set", json!({"name": "HX", "expression": "14 mm"}));
-    run(&mut s, "param.set", json!({"name": "HY", "expression": "18 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "HX", "expression": "14 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "HY", "expression": "18 mm"}));
     // Clevis with two parallel horizontal ear plates (inner faces z = 5 and z = 25 -> midplane z = 15)
     // and an off-center hole through the lower ear at (HX, HY).
     run(&mut s, "component.create", json!({"name": "Clevis"}));
@@ -1744,8 +1744,8 @@ fn midplane_origin_with_hole_snap_centers_asymmetric_shaft_and_follows_edits() {
         "timeline.redefine",
         json!({"feature": upper, "command": "solid.box", "params": {"length": 40, "width": 40, "height": 5, "corner": [0, 0, 35], "body_name": "UpperEar"}}),
     );
-    run(&mut s, "param.set", json!({"name": "HX", "expression": "22 mm"}));
-    run(&mut s, "param.set", json!({"name": "HY", "expression": "26 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "HX", "expression": "22 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "HY", "expression": "26 mm"}));
     assert!(near(place(&s, "Shaft", Vec3::new(0.0, 0.0, 8.0)), Vec3::new(22.0, 26.0, 20.0)));
 
     // Cold reopen preserves the midplane + snap origin and resolves identically.
@@ -1762,7 +1762,7 @@ fn midplane_origin_with_snap_is_order_independent_and_supports_face_and_sketch_s
     let mut s = slot();
     run(&mut s, "component.activate", json!({"component": "Slot"}));
     run(&mut s, "sketch.create", json!({"name": "RefSk", "plane": "XY"}));
-    run(&mut s, "sketch.circle", json!({"center": [5, 14], "radius": 2}));
+    run(&mut s, "sketch.circle.center", json!({"center": [5, 14], "radius": 2, "id": "c1"}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     let sk_id = s.doc.find_feature("RefSk").unwrap().id;
