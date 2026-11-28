@@ -146,6 +146,7 @@ pub(crate) fn run_ordered(
 /// whole. SMLib is given one point inside each, never the pick itself, which may lie on the
 /// line between two pieces.
 pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
+    b.require_brep("shell")?;
     if !(thickness.is_finite() && thickness > 1e-6) {
         return Err(KernelError::Invalid("shell thickness must be positive".into()));
     }
@@ -330,9 +331,11 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     Ok(out)
 }
 
-/// One point inside each face `faces` of `b`: the centroid of its largest triangle.
+/// One point on each face `faces` of `b`: its largest triangle's centroid dropped onto the face, as
+/// SMLib takes the nearest face and a chord's centroid can be nearer a neighbour (#21721).
 fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
-    let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
+    let chord = (b.size() * 1e-3).max(1e-3);
+    let mesh = b.mesh(&crate::MeshTolerance::chord(chord))?;
     faces
         .iter()
         .map(|f| {
@@ -344,6 +347,10 @@ fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
                 .max_by(|x, y| area(x).total_cmp(&area(y)))
                 .map(|[p, q, s]| (p + q + s) * (1.0 / 3.0))
                 .ok_or_else(|| KernelError::Failed(format!("offset faces: face {f} has no triangles")))
+                .and_then(|c| {
+                    b.point_lies_on_face(*f, c, 2.0 * chord)?
+                        .ok_or_else(|| KernelError::Failed(format!("offset faces: no point of face {f} near its largest triangle")))
+                })
         })
         .collect()
 }
