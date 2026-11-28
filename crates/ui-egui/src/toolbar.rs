@@ -6839,7 +6839,7 @@ mod ribbon_label_tests {
         // Japanese is measured with the bundled Japanese face, as a Japanese UI draws it: without it
         // the glyphs are missing and their width says nothing.
         let ctx = crate::fonts::test_context();
-        let cjk = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf"));
+        let cjk = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf"));
         assert!(crate::fonts::install_cjk_font_for(&ctx, cjk.to_vec(), "ja"));
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {

@@ -381,12 +381,12 @@ pub const DOCUMENTED: &[&str] = &[
 /// `assets/icons/ui/design/svg/help`, drawn by [`icon_svg`] in the palette of the current theme. A
 /// documented command without an entry shows its text only. Nothing is saved in a design.
 const ILLUSTRATIONS: &[(&str, &str)] = &[
-    ("solid.combine", include_str!("../../../assets/icons/ui/design/svg/help/help_combine.svg")),
-    ("solid.loft", include_str!("../../../assets/icons/ui/design/svg/help/help_loft.svg")),
-    ("solid.mirror", include_str!("../../../assets/icons/ui/design/svg/help/help_mirror.svg")),
-    ("solid.pattern.circular", include_str!("../../../assets/icons/ui/design/svg/help/help_pattern_circular.svg")),
-    ("solid.pattern.rectangular", include_str!("../../../assets/icons/ui/design/svg/help/help_pattern_rectangular.svg")),
-    ("solid.sweep", include_str!("../../../assets/icons/ui/design/svg/help/help_sweep.svg")),
+    ("solid.combine", include_str!("../embedded/assets/icons/ui/design/svg/help/help_combine.svg")),
+    ("solid.loft", include_str!("../embedded/assets/icons/ui/design/svg/help/help_loft.svg")),
+    ("solid.mirror", include_str!("../embedded/assets/icons/ui/design/svg/help/help_mirror.svg")),
+    ("solid.pattern.circular", include_str!("../embedded/assets/icons/ui/design/svg/help/help_pattern_circular.svg")),
+    ("solid.pattern.rectangular", include_str!("../embedded/assets/icons/ui/design/svg/help/help_pattern_rectangular.svg")),
+    ("solid.sweep", include_str!("../embedded/assets/icons/ui/design/svg/help/help_sweep.svg")),
 ];
 
 /// The picture is shown 240 x 180 points: the band y 8 to 56 (4:3) of the 64 x 64 grid.

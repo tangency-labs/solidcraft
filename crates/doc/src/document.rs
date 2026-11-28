@@ -7391,7 +7391,7 @@ enum CopyMaterialSources<'a> {
 }
 
 /// The built-in material library: (name, density), and each material's colour.
-#[path = "../../../assets/materials/library.rs"]
+#[path = "../embedded/assets/materials/library.rs"]
 mod materials;
 pub use materials::{DEFAULT_DENSITY, DEFAULT_MATERIAL, MATERIALS, material_color};
 

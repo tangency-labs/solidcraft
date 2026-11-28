@@ -1,0 +1,2271 @@
+{
+  "schema": "solidcraft.render-environment-manifest/1",
+  "version": "1.0.0",
+  "status": "authored_unbound",
+  "runtime_ready": false,
+  "recipe_source": "source/recipes.json",
+  "recipe_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+  "generator": "../tools/environments.py",
+  "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+  "generator_version": "1.0.0",
+  "license": "MIT OR Apache-2.0",
+  "projection": {
+    "type": "equirectangular",
+    "sample_location": "pixel_centers",
+    "up_axis": "+Z",
+    "u_axis": "+azimuth from +X toward +Y",
+    "equations": "phi = 2*pi*(u-0.5); theta = pi*v; direction = (sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta))",
+    "cardinal_directions": {
+      "u=0.0,v=0.5": "-X; repeat seam",
+      "u=0.25,v=0.5": "-Y",
+      "u=0.5,v=0.5": "+X",
+      "u=0.75,v=0.5": "+Y",
+      "v=0.0": "+Z",
+      "v=1.0": "-Z"
+    },
+    "wrapping": "repeat U, clamp V",
+    "engine_binding": "pending; importer must explicitly map this convention and may not assume orientation from the file extension"
+  },
+  "items": [
+    {
+      "id": "HDR-001",
+      "name": "Neutral side softbox",
+      "catalog_id": "ENV-001",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/neutral-side-softbox.hdr",
+      "sha256": "09a4ff8376eff857fb1c7181e99bdf69310358e4bcc024af37922ec4361f3156",
+      "bytes": 70727,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00994873046875,
+        "maximum_channel": 16.0,
+        "solid_angle_weighted_mean_rgb": [
+          0.97555863,
+          0.97555863,
+          0.97555863
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            0.05477808,
+            0.05477808,
+            0.05477808
+          ],
+          "-X": [
+            6.57585754,
+            6.57585754,
+            6.57585754
+          ],
+          "+Y": [
+            0.05477808,
+            0.05477808,
+            0.05477808
+          ],
+          "-Y": [
+            6.57585754,
+            6.57585754,
+            6.57585754
+          ],
+          "+Z": [
+            6.53524164,
+            6.53524164,
+            6.53524164
+          ],
+          "-Z": [
+            0.03168527,
+            0.03168527,
+            0.03168527
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-002",
+      "name": "White enveloping studio",
+      "catalog_id": "ENV-002",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/white-enveloping-studio.hdr",
+      "sha256": "36bb4ee24d9c5dd98806469b04b226fbe9e46a9d5a86d0f90e9a001ae5ff2854",
+      "bytes": 180031,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.1494140625,
+        "maximum_channel": 14.375,
+        "solid_angle_weighted_mean_rgb": [
+          2.31805415,
+          2.31805415,
+          2.31805415
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            6.41911091,
+            6.41911091,
+            6.41911091
+          ],
+          "-X": [
+            8.26917533,
+            8.26917533,
+            8.26917533
+          ],
+          "+Y": [
+            2.62302909,
+            2.62302909,
+            2.62302909
+          ],
+          "-Y": [
+            11.65503576,
+            11.65503576,
+            11.65503576
+          ],
+          "+Z": [
+            15.23100715,
+            15.23100715,
+            15.23100715
+          ],
+          "-Z": [
+            0.59800128,
+            0.59800128,
+            0.59800128
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-003",
+      "name": "Black metal strips",
+      "catalog_id": "ENV-003",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/black-metal-strips.hdr",
+      "sha256": "8bf3c3f915cfaeb8ad6cae3259a6eeb89e1288c7ad47b2b44ed0cc46c29e085a",
+      "bytes": 61803,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0,
+        "maximum_channel": 48.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.15498237,
+          1.15498237,
+          1.15498237
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            2.84831157,
+            2.84831157,
+            2.84831157
+          ],
+          "-X": [
+            5.40236557,
+            5.40236557,
+            5.40236557
+          ],
+          "+Y": [
+            0.00156892,
+            0.00156892,
+            0.00156892
+          ],
+          "-Y": [
+            8.43130957,
+            8.43130957,
+            8.43130957
+          ],
+          "+Z": [
+            5.8989209,
+            5.8989209,
+            5.8989209
+          ],
+          "-Z": [
+            0.71290877,
+            0.71290877,
+            0.71290877
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-004",
+      "name": "Hangar skylight pattern",
+      "catalog_id": "ENV-007",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/hangar-skylight.hdr",
+      "sha256": "d9885e23eb802e5e7a45bb988ccfb332f57f8abf48e5f80145123777d1017fb7",
+      "bytes": 112991,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.011962890625,
+        "maximum_channel": 16.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.04714912,
+          1.17120478,
+          1.31346777
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            2.21210953,
+            2.48639161,
+            2.80228809
+          ],
+          "-X": [
+            0.75171453,
+            0.79210981,
+            0.84613346
+          ],
+          "+Y": [
+            1.86453252,
+            2.15540508,
+            2.48791547
+          ],
+          "-Y": [
+            4.55665249,
+            4.84507782,
+            5.18459003
+          ],
+          "+Z": [
+            9.69226942,
+            11.03264632,
+            12.55520966
+          ],
+          "-Z": [
+            0.03865435,
+            0.038796,
+            0.03907852
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-005",
+      "name": "Neutral comparison field",
+      "catalog_id": "ENV-008",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/neutral-comparison.hdr",
+      "sha256": "fde48bb84ba1f045ba5fc270ff6ebe4f0a516677e545f6ff3aeeabfb02e45872",
+      "bytes": 39116,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 1.0,
+        "maximum_channel": 1.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            3.14159265,
+            3.14159265,
+            3.14159265
+          ],
+          "-X": [
+            3.14159265,
+            3.14159265,
+            3.14159265
+          ],
+          "+Y": [
+            3.14159265,
+            3.14159265,
+            3.14159265
+          ],
+          "-Y": [
+            3.14159265,
+            3.14159265,
+            3.14159265
+          ],
+          "+Z": [
+            3.14160744,
+            3.14160744,
+            3.14160744
+          ],
+          "-Z": [
+            3.14160744,
+            3.14160744,
+            3.14160744
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Uniform reference field has no directional highlights."
+      ]
+    },
+    {
+      "id": "HDR-006",
+      "name": "Warm table window",
+      "catalog_id": "ENV-021",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/warm-table-window.hdr",
+      "sha256": "27d9bc2eb8b6e658a4038d54901c5047e181f839077e3b9a8f867c8bd8771905",
+      "bytes": 120525,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.011962890625,
+        "maximum_channel": 12.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.11690133,
+          0.95225313,
+          0.77356401
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            1.005917,
+            0.98901292,
+            0.97855574
+          ],
+          "-X": [
+            6.95335744,
+            5.7612231,
+            4.45762022
+          ],
+          "+Y": [
+            1.005917,
+            0.98901292,
+            0.97855574
+          ],
+          "-Y": [
+            6.95335744,
+            5.7612231,
+            4.45762022
+          ],
+          "+Z": [
+            6.05963632,
+            5.23920074,
+            4.352121
+          ],
+          "-Z": [
+            0.17883208,
+            0.14833709,
+            0.1159642
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-007",
+      "name": "Showroom ribbons",
+      "catalog_id": "ENV-034",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/showroom-ribbons.hdr",
+      "sha256": "af6f479f9af614b15712fe7f3adf474fa081706d2f12073db6464fee4c1e4395",
+      "bytes": 102314,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.02490234375,
+        "maximum_channel": 20.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.17962447,
+          1.17962447,
+          1.17962447
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            2.4824795,
+            2.4824795,
+            2.4824795
+          ],
+          "-X": [
+            5.55270346,
+            5.55270346,
+            5.55270346
+          ],
+          "+Y": [
+            2.28068104,
+            2.28068104,
+            2.28068104
+          ],
+          "-Y": [
+            2.89776963,
+            2.89776963,
+            2.89776963
+          ],
+          "+Z": [
+            9.3490829,
+            9.3490829,
+            9.3490829
+          ],
+          "-Z": [
+            0.18281164,
+            0.18281164,
+            0.18281164
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-008",
+      "name": "Mechanical bay windows",
+      "catalog_id": "ENV-071",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/mechanical-bay.hdr",
+      "sha256": "b6f6cc7d1cde1b0ed709fba7cdc74142ddcec11c93bd46bb44cbffed51fc52a9",
+      "bytes": 125662,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0179443359375,
+        "maximum_channel": 16.625,
+        "solid_angle_weighted_mean_rgb": [
+          0.90454196,
+          0.99104538,
+          1.08246265
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            2.44146957,
+            2.72513455,
+            3.01265039
+          ],
+          "-X": [
+            3.29763691,
+            3.70829092,
+            4.15438845
+          ],
+          "+Y": [
+            1.15081799,
+            1.15084848,
+            1.15088152
+          ],
+          "-Y": [
+            2.59842152,
+            2.99937329,
+            3.42291847
+          ],
+          "+Z": [
+            8.05966036,
+            8.73234553,
+            9.44320553
+          ],
+          "-Z": [
+            0.05741579,
+            0.05741579,
+            0.05741579
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-009",
+      "name": "CNC overhead lanes",
+      "catalog_id": "ENV-072",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/cnc-overhead.hdr",
+      "sha256": "25fb9b48d497b371d75256cc47704281a54d73a1b3dd80f56fcd8eebe6366597",
+      "bytes": 62591,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00799560546875,
+        "maximum_channel": 18.0,
+        "solid_angle_weighted_mean_rgb": [
+          0.68348553,
+          0.68348553,
+          0.68348553
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            1.56549395,
+            1.56549395,
+            1.56549395
+          ],
+          "-X": [
+            1.56549395,
+            1.56549395,
+            1.56549395
+          ],
+          "+Y": [
+            1.94888936,
+            1.94888936,
+            1.94888936
+          ],
+          "-Y": [
+            1.94888936,
+            1.94888936,
+            1.94888936
+          ],
+          "+Z": [
+            6.61516671,
+            6.61516671,
+            6.61516671
+          ],
+          "-Z": [
+            0.02601443,
+            0.02601443,
+            0.02601443
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-010",
+      "name": "Woodshop broad window",
+      "catalog_id": "ENV-073",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/woodshop-window.hdr",
+      "sha256": "e0e764c43c6194ccdd40a8f4dc9943799d6ec2af24858e92411bf17195a812cf",
+      "bytes": 128787,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00897216796875,
+        "maximum_channel": 10.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.17547825,
+          0.99761139,
+          0.79236946
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            0.77550675,
+            0.76448134,
+            0.74443108
+          ],
+          "-X": [
+            7.16779329,
+            5.9579345,
+            4.57003672
+          ],
+          "+Y": [
+            0.77550675,
+            0.76448134,
+            0.74443108
+          ],
+          "-Y": [
+            7.16779329,
+            5.9579345,
+            4.57003672
+          ],
+          "+Z": [
+            6.93629623,
+            5.93521111,
+            4.77683516
+          ],
+          "-Z": [
+            0.11241321,
+            0.09194916,
+            0.06996541
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-011",
+      "name": "Garage doorway field",
+      "catalog_id": "ENV-075",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/garage-door.hdr",
+      "sha256": "27eb8fcbc8be6e4f1c63ae9737de924f2c3683569493ca8e8f11cea1c8eea85d",
+      "bytes": 102098,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00799560546875,
+        "maximum_channel": 10.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.02813035,
+          1.15523935,
+          1.29533111
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            2.13285401,
+            2.39037345,
+            2.67389741
+          ],
+          "-X": [
+            2.13285401,
+            2.39037345,
+            2.67389741
+          ],
+          "+Y": [
+            1.07558877,
+            1.07558877,
+            1.07558877
+          ],
+          "-Y": [
+            8.63780111,
+            10.00242376,
+            11.50688346
+          ],
+          "+Z": [
+            4.86250053,
+            5.27486476,
+            5.72928162
+          ],
+          "-Z": [
+            0.3191188,
+            0.36587489,
+            0.41716982
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-012",
+      "name": "Makerspace worklights",
+      "catalog_id": "ENV-079",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/makerspace-worklights.hdr",
+      "sha256": "092595e5c0ba9dbe0b2da8b57a9b0009289e4d8eac652efb9d6472cac4fbb7df",
+      "bytes": 143986,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0198974609375,
+        "maximum_channel": 12.1875,
+        "solid_angle_weighted_mean_rgb": [
+          1.37600291,
+          1.37600291,
+          1.37600291
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            3.36690079,
+            3.36690079,
+            3.36690079
+          ],
+          "-X": [
+            4.84714343,
+            4.84714343,
+            4.84714343
+          ],
+          "+Y": [
+            1.05371507,
+            1.05371507,
+            1.05371507
+          ],
+          "-Y": [
+            6.30122843,
+            6.30122843,
+            6.30122843
+          ],
+          "+Z": [
+            11.7871183,
+            11.7871183,
+            11.7871183
+          ],
+          "-Z": [
+            0.06337055,
+            0.06337055,
+            0.06337055
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-013",
+      "name": "Home workbench window",
+      "catalog_id": "ENV-080",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/home-workbench.hdr",
+      "sha256": "a6be944c2a725519e34b6bf1ef1070c274a644ec9d796d688a2d7e35719b47fd",
+      "bytes": 85142,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00994873046875,
+        "maximum_channel": 10.0,
+        "solid_angle_weighted_mean_rgb": [
+          0.59430197,
+          0.6349434,
+          0.67947085
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            0.66248323,
+            0.55933877,
+            0.44461837
+          ],
+          "-X": [
+            3.95236471,
+            4.57212257,
+            5.25532346
+          ],
+          "+Y": [
+            0.0547823,
+            0.05478298,
+            0.05478371
+          ],
+          "-Y": [
+            3.35586529,
+            3.53533721,
+            3.73142127
+          ],
+          "+Z": [
+            3.64028835,
+            3.73139997,
+            3.8293233
+          ],
+          "-Z": [
+            0.04954373,
+            0.05240196,
+            0.05552017
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-014",
+      "name": "Electronics bench neutral",
+      "catalog_id": "ENV-082",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/esd-bench-neutral.hdr",
+      "sha256": "744fb423871db3605f95adfeaa7160c463afa0deaba93ec03a1eebf58ddf8a99",
+      "bytes": 173793,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.004974365234375,
+        "maximum_channel": 24.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.71357931,
+          1.71357931,
+          1.71357931
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            3.48614019,
+            3.48614019,
+            3.48614019
+          ],
+          "-X": [
+            4.81845706,
+            4.81845706,
+            4.81845706
+          ],
+          "+Y": [
+            0.16149363,
+            0.16149363,
+            0.16149363
+          ],
+          "-Y": [
+            8.14326161,
+            8.14326161,
+            8.14326161
+          ],
+          "+Z": [
+            16.18294792,
+            16.18294792,
+            16.18294792
+          ],
+          "-Z": [
+            0.01605392,
+            0.01605392,
+            0.01605392
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-015",
+      "name": "Sun-free diffuse overcast",
+      "catalog_id": "ENV-182",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/sun-free-overcast.hdr",
+      "sha256": "ea07b1d0ef708e8f7887676a1c22fb80c7762a6fce35185def6f76fdb720cf3d",
+      "bytes": 39116,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0498046875,
+        "maximum_channel": 1.796875,
+        "solid_angle_weighted_mean_rgb": [
+          0.77416666,
+          0.8245685,
+          0.92820751
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            2.43152785,
+            2.5906333,
+            2.91593451
+          ],
+          "-X": [
+            2.43152785,
+            2.5906333,
+            2.91593451
+          ],
+          "+Y": [
+            2.43152785,
+            2.5906333,
+            2.91593451
+          ],
+          "-Y": [
+            2.43152785,
+            2.5906333,
+            2.91593451
+          ],
+          "+Z": [
+            4.67017471,
+            4.96397578,
+            5.59584048
+          ],
+          "-Z": [
+            0.19736166,
+            0.2161202,
+            0.23700649
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Generic smooth sky-like field, not a weather observation or physical sky model."
+      ]
+    },
+    {
+      "id": "HDR-016",
+      "name": "Automotive turntable ribbons",
+      "catalog_id": "ENV-201",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/automotive-turntable.hdr",
+      "sha256": "71ab28ff4664808148b322cb7b0908ae31689eda2986eb89f5ed38cf1f7db022",
+      "bytes": 99513,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00299072265625,
+        "maximum_channel": 36.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.98908726,
+          1.98908726,
+          1.98908726
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            5.34775088,
+            5.34775088,
+            5.34775088
+          ],
+          "-X": [
+            7.28631994,
+            7.28631994,
+            7.28631994
+          ],
+          "+Y": [
+            2.62608194,
+            2.62608194,
+            2.62608194
+          ],
+          "-Y": [
+            9.70589232,
+            9.70589232,
+            9.70589232
+          ],
+          "+Z": [
+            14.06718811,
+            14.06718811,
+            14.06718811
+          ],
+          "-Z": [
+            0.54336192,
+            0.54336192,
+            0.54336192
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-017",
+      "name": "Paint inspection bands",
+      "catalog_id": "ENV-206",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/paint-inspection-bands.hdr",
+      "sha256": "09fa36d40f67fb06c8d9af7c3b0c9f6977dc4f70a316d16d7dbc3474e47b4b9f",
+      "bytes": 130670,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0,
+        "maximum_channel": 66.5,
+        "solid_angle_weighted_mean_rgb": [
+          2.9349479,
+          2.9349479,
+          2.9349479
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            7.40847631,
+            7.40847631,
+            7.40847631
+          ],
+          "-X": [
+            7.40847631,
+            7.40847631,
+            7.40847631
+          ],
+          "+Y": [
+            0.00314043,
+            0.00314043,
+            0.00314043
+          ],
+          "-Y": [
+            21.51725526,
+            21.51725526,
+            21.51725526
+          ],
+          "+Z": [
+            17.53444972,
+            17.53444972,
+            17.53444972
+          ],
+          "-Z": [
+            1.45757004,
+            1.45757004,
+            1.45757004
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Bands are HDR-owned sources in this standalone variant; disable equivalent inspection-rig emitters."
+      ]
+    },
+    {
+      "id": "HDR-018",
+      "name": "Assembly bench soft",
+      "catalog_id": "ENV-211",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/assembly-bench-soft.hdr",
+      "sha256": "648772cf8644b21cf93227d0344618ac7bb26490727136a60890c10715747bf4",
+      "bytes": 115819,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00799560546875,
+        "maximum_channel": 16.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.47521144,
+          1.47521144,
+          1.47521144
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            2.64373416,
+            2.64373416,
+            2.64373416
+          ],
+          "-X": [
+            5.44820477,
+            5.44820477,
+            5.44820477
+          ],
+          "+Y": [
+            0.49641013,
+            0.49641013,
+            0.49641013
+          ],
+          "-Y": [
+            5.40235246,
+            5.40235246,
+            5.40235246
+          ],
+          "+Z": [
+            13.58661694,
+            13.58661694,
+            13.58661694
+          ],
+          "-Z": [
+            0.0429894,
+            0.0429894,
+            0.0429894
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-019",
+      "name": "Rework offset strips",
+      "catalog_id": "ENV-212",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/rework-offset-strips.hdr",
+      "sha256": "ebd3aa8277e8907a42318d082ce9703dfa811ae543dc8595974a3b0264cf0716",
+      "bytes": 138006,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00299072265625,
+        "maximum_channel": 32.0,
+        "solid_angle_weighted_mean_rgb": [
+          0.92702755,
+          0.92702755,
+          0.92702755
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            1.723877,
+            1.723877,
+            1.723877
+          ],
+          "-X": [
+            4.7035472,
+            4.7035472,
+            4.7035472
+          ],
+          "+Y": [
+            0.68217342,
+            0.68217342,
+            0.68217342
+          ],
+          "-Y": [
+            3.41799956,
+            3.41799956,
+            3.41799956
+          ],
+          "+Z": [
+            7.44678558,
+            7.44678558,
+            7.44678558
+          ],
+          "-Z": [
+            0.03572569,
+            0.03572569,
+            0.03572569
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-020",
+      "name": "FDM neutral inspection",
+      "catalog_id": "ENV-214",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/fdm-neutral-inspection.hdr",
+      "sha256": "aefa127830f27e829a86f5e68db223e38bcbcd6401d151fa9d0011d52f7928ae",
+      "bytes": 105072,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0059814453125,
+        "maximum_channel": 24.0,
+        "solid_angle_weighted_mean_rgb": [
+          0.96508961,
+          0.96508961,
+          0.96508961
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            1.47632009,
+            1.47632009,
+            1.47632009
+          ],
+          "-X": [
+            5.61846402,
+            5.61846402,
+            5.61846402
+          ],
+          "+Y": [
+            0.14499878,
+            0.14499878,
+            0.14499878
+          ],
+          "-Y": [
+            4.63642718,
+            4.63642718,
+            4.63642718
+          ],
+          "+Z": [
+            6.27922692,
+            6.27922692,
+            6.27922692
+          ],
+          "-Z": [
+            0.4903104,
+            0.4903104,
+            0.4903104
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Printer LEDs and enclosure geometry are not represented."
+      ]
+    },
+    {
+      "id": "HDR-021",
+      "name": "Printed-part photography",
+      "catalog_id": "ENV-217",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/printed-part-photo.hdr",
+      "sha256": "593b9d1adad30917656095910b039c067de8ab83f4a8744ef5a1fc20c4e67e49",
+      "bytes": 120412,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.00799560546875,
+        "maximum_channel": 28.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.50204613,
+          1.50204613,
+          1.50204613
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            4.44484843,
+            4.44484843,
+            4.44484843
+          ],
+          "-X": [
+            6.3921287,
+            6.3921287,
+            6.3921287
+          ],
+          "+Y": [
+            2.95161915,
+            2.95161915,
+            2.95161915
+          ],
+          "-Y": [
+            7.25799235,
+            7.25799235,
+            7.25799235
+          ],
+          "+Z": [
+            8.70323267,
+            8.70323267,
+            8.70323267
+          ],
+          "-Z": [
+            0.25640594,
+            0.25640594,
+            0.25640594
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ]
+    },
+    {
+      "id": "HDR-022",
+      "name": "Robot LED editorial",
+      "catalog_id": "ENV-218",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/robot-led-editorial.hdr",
+      "sha256": "476918df9a2ec213f8de03b76ac9794d39e7d25ca56af7e1e5b376db2e22ae58",
+      "bytes": 126219,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0019989013671875,
+        "maximum_channel": 24.0,
+        "solid_angle_weighted_mean_rgb": [
+          1.12137031,
+          1.0224792,
+          1.22289054
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            4.11355342,
+            1.85552925,
+            1.3829018
+          ],
+          "-X": [
+            1.74133313,
+            2.94084973,
+            5.55827617
+          ],
+          "+Y": [
+            0.61620154,
+            0.42955949,
+            0.80774281
+          ],
+          "-Y": [
+            5.29505509,
+            5.29505509,
+            5.29505509
+          ],
+          "+Z": [
+            8.99528541,
+            8.55067947,
+            9.45178533
+          ],
+          "-Z": [
+            0.17858545,
+            0.1252826,
+            0.23373902
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Colored accents are editorial light sources, not spectral LEDs or product emissions."
+      ]
+    },
+    {
+      "id": "HDR-023",
+      "name": "Spacecraft clean-bay field",
+      "catalog_id": "ENV-231",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/spacecraft-clean-bay.hdr",
+      "sha256": "8e6f212e5d44f8733cd03451402b9618bf5751e6efda05898e6adc6f617f9a5c",
+      "bytes": 145258,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "environment_map",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.039794921875,
+        "maximum_channel": 18.0,
+        "solid_angle_weighted_mean_rgb": [
+          2.25932762,
+          2.25932762,
+          2.25932762
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            7.4960058,
+            7.4960058,
+            7.4960058
+          ],
+          "-X": [
+            7.4960058,
+            7.4960058,
+            7.4960058
+          ],
+          "+Y": [
+            0.7207702,
+            0.7207702,
+            0.7207702
+          ],
+          "-Y": [
+            8.8072952,
+            8.8072952,
+            8.8072952
+          ],
+          "+Z": [
+            18.24369943,
+            18.24369943,
+            18.24369943
+          ],
+          "-Z": [
+            0.28624716,
+            0.28624716,
+            0.28624716
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "This is terrestrial inspection lighting, not a vacuum scene or qualified cleanroom."
+      ]
+    },
+    {
+      "id": "HDR-024",
+      "name": "Vacuum zero-ambient field",
+      "catalog_id": "ENV-244",
+      "concept_relation": "illumination_variant_only",
+      "version": "1.0.0",
+      "status": "authored_unbound",
+      "content_available": true,
+      "runtime_ready": false,
+      "path": "exports/vacuum-black.hdr",
+      "sha256": "9702e4cfb320b21df354de3c6ff96c127758a99ae0d0cb96e23b5f949d3e65b8",
+      "bytes": 39116,
+      "dimensions": [
+        1024,
+        512
+      ],
+      "role": "environment_radiance",
+      "color_space": "linear_srgb",
+      "transfer_function": "linear",
+      "format": "Radiance RGBE RLE",
+      "header_orientation": "-Y +X",
+      "primaries_xy": [
+        0.64,
+        0.33,
+        0.3,
+        0.6,
+        0.15,
+        0.06,
+        0.3127,
+        0.329
+      ],
+      "exposure": 1.0,
+      "color_correction": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "radiance_units": "authored_relative_units",
+      "solar_disk": false,
+      "energy_owner": "none",
+      "seed": 0,
+      "source_sha256": "63ccfde760074f87235b28e087583dcdbf18c9078cec7830585deec60d6c77bd",
+      "generator_sha256": "7c24db77efd89e138ccf683e65aac6285311d6e51f28896291d2ed427aced244",
+      "statistics": {
+        "minimum_channel": 0.0,
+        "maximum_channel": 0.0,
+        "solid_angle_weighted_mean_rgb": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hemisphere_cosine_integrals_rgb": {
+          "+X": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "-X": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "+Y": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "-Y": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "+Z": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "-Z": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "integral_units": "relative_radiance_times_steradians; not lux or watts",
+        "integral_method": "pixel-center cosine with exact cell solid angle"
+      },
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Contains no Sun, stars, Earth, atmosphere, ambient fill or lunar terrain.",
+        "A scene without another explicit source must render dark; no automatic exposure compensation is authorized."
+      ]
+    }
+  ]
+}

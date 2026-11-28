@@ -1452,8 +1452,8 @@ mod tests {
 
     #[test]
     fn the_templates_offer_every_policy_the_app_reads() {
-        let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
-        let adml = include_str!("../../../packaging/windows/policies/en-US/solidcraft.adml");
+        let admx = include_str!("../embedded/packaging/windows/policies/solidcraft.admx");
+        let adml = include_str!("../embedded/packaging/windows/policies/en-US/solidcraft.adml");
         for name in LOCKS.iter().map(|lock| lock.policy).chain(ALLOWS.iter().map(|(policy, _)| *policy)).chain([ORGANIZATION_NAME, USAGE_STATISTICS])
         {
             assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
@@ -1514,11 +1514,11 @@ mod tests {
 
     #[test]
     fn the_shipped_templates_name_the_values_the_app_reads() {
-        let linux = Policy::from_json(include_str!("../../../packaging/linux/policies/policy.json"));
+        let linux = Policy::from_json(include_str!("../embedded/packaging/linux/policies/policy.json"));
         assert_eq!(linux.locked(), ["check_updates", "usage_statistics"]);
         assert_eq!(linux.organization(), Some("Example Corp"));
-        let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
-        let mobileconfig = include_str!("../../../packaging/macos/policies/solidcraft.mobileconfig");
+        let admx = include_str!("../embedded/packaging/windows/policies/solidcraft.admx");
+        let mobileconfig = include_str!("../embedded/packaging/macos/policies/solidcraft.mobileconfig");
         for name in [CHECK_FOR_UPDATES, USAGE_STATISTICS, ORGANIZATION_NAME] {
             assert!(admx.contains(&format!("valueName=\"{name}\"")), "{name} in the ADMX");
             assert!(mobileconfig.contains(&format!("<key>{name}</key>")), "{name} in the profile");

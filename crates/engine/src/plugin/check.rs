@@ -303,7 +303,7 @@ fn image_problems(entries: &[Entry], files: &[safe_zip::File]) -> Vec<CheckProbl
     let mut named: Vec<_> = entries.iter().flat_map(|entry| images::referenced(&entry.input_schema)).collect();
     named.sort();
     named.dedup();
-    let palette = include_str!("../../../look/icons/design/palette.toml").parse::<toml_edit::DocumentMut>();
+    let palette = include_str!("../../embedded/crates/look/icons/design/palette.toml").parse::<toml_edit::DocumentMut>();
     let check = |rel: &str| -> std::result::Result<(), String> {
         if !images::valid_path(rel) {
             return Err("not a relative .svg path inside the package".into());

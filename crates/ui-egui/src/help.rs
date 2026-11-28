@@ -12,7 +12,7 @@ pub const COMMIT: &str = env!("SOLIDCRAFT_COMMIT");
 pub const BUILD_DATE: &str = env!("SOLIDCRAFT_BUILD_DATE");
 /// The user and developer guide (docs/book, published by .github/workflows/pages.yml).
 pub const DOCS_URL: &str = "https://docs.solidcraft.io/";
-const ATTRIBUTION: &str = include_str!("../../../ATTRIBUTION.md");
+const ATTRIBUTION: &str = include_str!("../embedded/ATTRIBUTION.md");
 /// ATTRIBUTION.md as Markdown, parsed once: its tables run to a thousand rows (#7776).
 static ATTRIBUTION_BLOCKS: std::sync::LazyLock<Vec<crate::update::Block>> = std::sync::LazyLock::new(|| crate::update::parse_markdown(ATTRIBUTION));
 use solidcraft_engine::licences::{LICENSE_APACHE, LICENSE_MIT, NOTICE, THIRD_PARTY};

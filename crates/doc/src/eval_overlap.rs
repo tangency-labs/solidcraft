@@ -471,7 +471,7 @@ mod tests {
     /// edge off its face (the block already fails the check).
     fn refused_join() -> crate::Document {
         let mut doc = crate::Document::new("refused join");
-        let step: Arc<str> = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step").into();
+        let step: Arc<str> = include_str!("../embedded/tests/step-regressions/block_edge_off_its_face.step").into();
         let kind = crate::FeatureKind::Import { file: "block.step".into(), step, components: Vec::new(), skip: Vec::new(), records: None };
         doc.add_feature(kind, Some("Block")).unwrap();
         doc

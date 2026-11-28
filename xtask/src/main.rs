@@ -21,6 +21,7 @@ mod layers;
 mod licences;
 mod lists;
 mod mesh_decisions;
+mod package_includes;
 mod parallel;
 mod params;
 mod pending;
@@ -54,6 +55,7 @@ commands:
                   a README and no includes from outside its directory, then build and test it in a
                   scratch workspace holding only it and the shared crates it uses
                   (target/xtask-shared): it would build after extraction
+  package-includes check compile-time includes stay inside their package
   assets          check that every non-code asset file is attributed in ATTRIBUTION.md
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
@@ -195,6 +197,7 @@ fn main() -> ExitCode {
         },
         Some("shared") => shared::run(&root()),
         Some("ui-containers") => ui_containers::run(&root()),
+        Some("package-includes") => package_includes::run(&root()),
         Some("assets") => assets::run(&root()),
         Some("icons") => icons::run(&root()),
         Some("app-icons") => app_icons::run(&root()),
@@ -558,6 +561,28 @@ fn wasm_check() -> Result<(Command, usize), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_includes_resolves_literals_concat_and_test_cfg() {
+        let package = Path::new("/package");
+        let file = Path::new("/package/src/lib.rs");
+        for source in [
+            "const X: &str = include_str!(\"../../outside\");",
+            "#[path = \"../../outside.rs\"] mod outside;",
+            "const X: &str = include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../outside\"));",
+        ] {
+            let errors = package_includes::scan(package, file, source).unwrap();
+            assert_eq!(errors.len(), 1);
+            assert!(errors[0].contains("lib.rs:1:"));
+        }
+        for source in [
+            "const X: &str = include_str!(\"../local\");",
+            "#[cfg(test)] mod tests { const X: &str = include_str!(\"../../outside\"); }",
+            "include!(concat!(env!(\"OUT_DIR\"), \"/generated.rs\"));",
+        ] {
+            assert!(package_includes::scan(package, file, source).unwrap().is_empty());
+        }
+    }
 
     #[test]
     fn root_prefers_the_runtime_manifest_dir() {

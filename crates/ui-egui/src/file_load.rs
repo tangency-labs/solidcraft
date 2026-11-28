@@ -2448,7 +2448,7 @@ mod tests {
                 "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}});
         std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
         let code = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
-        let fixture = include_str!("../../craft-plugin-wasm/src/importer_storage_fixture.wat").replace("__CODE__", code);
+        let fixture = include_str!("../embedded/crates/craft-plugin-wasm/src/importer_storage_fixture.wat").replace("__CODE__", code);
         std::fs::write(folder.join("importer.wasm"), wat::parse_str(fixture).unwrap()).unwrap();
         let path = h.dir.join("part.smp");
         let doc = solidcraft_engine::doc::Document::new("Imported settings");
@@ -2630,7 +2630,7 @@ M30
     /// one Import feature, as before.
     #[test]
     fn freecad_history_preference_keeps_the_solids_only_import() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../io/src/native_cad/fixtures/bracket.FCStd");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/crates/io/src/native_cad/fixtures/bracket.FCStd");
         assert!(crate::prefs::Prefs::default().freecad_history, "on by default");
         for (on, types) in [(true, vec!["Sketch", "ExtrudeFeature", "Sketch", "ExtrudeFeature", "FilletFeature"]), (false, vec!["BaseFeature"])] {
             let mut app = SolveApp::new(Session::default(), Default::default());
@@ -2683,7 +2683,7 @@ M30
         let body = solidcraft_engine::kernel::ExportBody { name: "Block".into(), body: &block, color: None };
         let iges = dir.join("block.igs");
         std::fs::write(&iges, solidcraft_engine::kernel::iges_export_bodies(&[body], &Default::default()).unwrap()).unwrap();
-        let washer = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step").to_string();
+        let washer = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/tests/step-conformance/washer.step").to_string();
         for (path, want) in [(washer, None), (iges.to_string_lossy().to_string(), Some(6000.0))] {
             let file = &path;
             let mut volumes = Vec::new();
@@ -3401,7 +3401,7 @@ M30
     fn a_step_file_cadmpeg_reads_is_staged_by_its_reader() {
         let dir = std::env::temp_dir().join(format!("solidcraft-staged-cadmpeg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/tests/step-conformance/washer.step");
         let request = |path: &str| {
             let mut r = Request::new(path, Kind::Insert);
             r.options.insert("reader".into(), serde_json::json!("cadmpeg"));
@@ -3461,7 +3461,7 @@ M30
         let dir = std::env::temp_dir().join(format!("solidcraft-staged-open-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("staged.sc").to_string_lossy().into_owned();
-        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/cylinder_seam.step");
+        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/tests/step-conformance/cylinder_seam.step");
         let mut part = Session::default();
         part.execute("solid.box", &serde_json::json!({"length": 10, "width": 10, "height": 10})).unwrap();
         part.execute("file.insert_step", &serde_json::json!({"path": step})).unwrap();
@@ -3528,7 +3528,7 @@ M30
         let dir = std::env::temp_dir().join(format!("solidcraft-staged-work-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("staged.sc").to_string_lossy().into_owned();
-        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/cylinder_seam.step");
+        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/tests/step-conformance/cylinder_seam.step");
         let mut part = Session::default();
         part.execute("file.insert_step", &serde_json::json!({"path": step})).unwrap();
         part.execute("component.activate", &serde_json::json!({"component": "root"})).unwrap();

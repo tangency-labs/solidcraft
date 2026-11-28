@@ -261,10 +261,10 @@ impl AppearanceChain {
 }
 
 /// The built-in appearance library: (name, colour, opacity).
-#[path = "../../../assets/appearances/library.rs"]
+#[path = "../embedded/assets/appearances/library.rs"]
 mod defaults;
 pub use defaults::LIBRARY;
-#[path = "../../../assets/appearances/opaque_finishes.rs"]
+#[path = "../embedded/assets/appearances/opaque_finishes.rs"]
 mod finishes;
 pub use finishes::OPAQUE_FINISHES;
 

@@ -3426,7 +3426,7 @@ mod tests {
         let neutral = DxfExportProfile::neutral();
         assert_eq!(DxfExportProfile::read(neutral.to_json().to_string().as_bytes()).unwrap(), neutral);
         // The format page prints the neutral profile in full: its first JSON block is that profile.
-        let page = include_str!("../../../docs/formats/dxf-profiles.md");
+        let page = include_str!("../embedded/docs/formats/dxf-profiles.md");
         let example = page.split("```json").nth(1).and_then(|rest| rest.split("```").next()).unwrap();
         assert_eq!(DxfExportProfile::read(example.as_bytes()).unwrap(), neutral);
         // The page's second block is a shop's profile, and reads.

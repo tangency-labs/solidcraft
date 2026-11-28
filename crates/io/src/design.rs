@@ -2143,6 +2143,12 @@ mod tests {
         std::fs::remove_file(dir.0.join("crates/doc/src/target_x.rs")).unwrap();
         assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()));
 
+        // A vendored package has no source workspace: neither digest path may trust it.
+        let missing = dir.0.join("vendored-io");
+        std::fs::create_dir_all(&missing).unwrap();
+        assert_eq!(build_script::evaluation_source(&missing), None);
+        assert_eq!(build_script::evaluation_source_from_disk(&missing, false), None);
+
         // Missing required inputs fail closed (`None` -> `"unknown"`).
         std::fs::remove_file(dir.0.join("Cargo.lock")).unwrap();
         assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false), None);
@@ -4666,7 +4672,7 @@ mod tests {
         for _ in 0..8 {
             hdr.extend_from_slice(&[128, 64, 32, 129]);
         }
-        let texture = include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
+        let texture = include_bytes!("../embedded/assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
         let provenance = TextureProvenance {
             author: "Original SolidCraft test".into(),
             source: "original bundled diagnostic".into(),
@@ -4704,7 +4710,7 @@ mod tests {
             render_surface::{EmbeddedSurfaceKind, EmbeddedSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceSource},
             render_texture_resources::{TextureProvenance, TextureResource},
         };
-        let source = include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
+        let source = include_bytes!("../embedded/assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
         let resource = TextureResource::new(
             source.clone(),
             TextureProvenance {

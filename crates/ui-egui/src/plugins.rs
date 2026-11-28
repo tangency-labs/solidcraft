@@ -2088,8 +2088,8 @@ mod tests {
     fn legacy_shader_plugins_show_no_picture_rows() {
         let mut h = crate::scenario::Harness::new();
         let dir = h.dir.join("public-plugins");
-        write(&dir, "dusk", include_str!("../../../docs/plugin-examples/dusk/plugin.json"));
-        write(&dir, "panorama", include_str!("../../../docs/plugin-examples/panorama/plugin.json"));
+        write(&dir, "dusk", include_str!("../embedded/docs/plugin-examples/dusk/plugin.json"));
+        write(&dir, "panorama", include_str!("../embedded/docs/plugin-examples/panorama/plugin.json"));
         crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
         let ctx = crate::fonts::test_context();
         for _ in 0..3 {

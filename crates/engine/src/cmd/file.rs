@@ -6907,7 +6907,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-open-steps-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("steps.sc").to_string_lossy().to_string();
-        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/cylinder_seam.step");
+        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/tests/step-conformance/cylinder_seam.step");
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
         s.execute("file.insert_step", &json!({"path": step})).unwrap();

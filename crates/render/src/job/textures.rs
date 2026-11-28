@@ -807,10 +807,10 @@ mod tests {
     #[cfg(feature = "raytrace-cpu")]
     fn cpu_map_core_prepares_existing_rgb_and_gray_builtin_resources_without_a_second_loader() {
         let resources: [(MapRole, &[u8]); 4] = [
-            (MapRole::BaseColor, include_bytes!("../../../../assets/render/starter/materials/exports/SURF-001/base_color.png")),
-            (MapRole::NormalOpenGl, include_bytes!("../../../../assets/render/starter/materials/exports/SURF-001/normal_open_gl.png")),
-            (MapRole::Roughness, include_bytes!("../../../../assets/render/starter/materials/exports/SURF-001/roughness.png")),
-            (MapRole::Metallic, include_bytes!("../../../../assets/render/starter/materials/exports/SURF-001/metallic.png")),
+            (MapRole::BaseColor, include_bytes!("../../embedded/assets/render/starter/materials/exports/SURF-001/base_color.png")),
+            (MapRole::NormalOpenGl, include_bytes!("../../embedded/assets/render/starter/materials/exports/SURF-001/normal_open_gl.png")),
+            (MapRole::Roughness, include_bytes!("../../embedded/assets/render/starter/materials/exports/SURF-001/roughness.png")),
+            (MapRole::Metallic, include_bytes!("../../embedded/assets/render/starter/materials/exports/SURF-001/metallic.png")),
         ];
         for (role, encoded) in resources {
             let map = TextureMap::new(encoded.to_vec(), role).unwrap();

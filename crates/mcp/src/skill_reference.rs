@@ -12,37 +12,37 @@ const SKILLS: &[Skill] = &[
     Skill {
         name: "solidcraft-checking",
         files: &[
-            ("SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
-            ("reference/porting.md", include_str!("../../../skills/solidcraft-checking/reference/porting.md")),
+            ("SKILL.md", include_str!("../embedded/skills/solidcraft-checking/SKILL.md")),
+            ("reference/porting.md", include_str!("../embedded/skills/solidcraft-checking/reference/porting.md")),
         ],
     },
-    Skill { name: "solidcraft-editing", files: &[("SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md"))] },
+    Skill { name: "solidcraft-editing", files: &[("SKILL.md", include_str!("../embedded/skills/solidcraft-editing/SKILL.md"))] },
     Skill {
         name: "solidcraft-mechanisms",
         files: &[
-            ("SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
-            ("reference.md", include_str!("../../../skills/solidcraft-mechanisms/reference.md")),
+            ("SKILL.md", include_str!("../embedded/skills/solidcraft-mechanisms/SKILL.md")),
+            ("reference.md", include_str!("../embedded/skills/solidcraft-mechanisms/reference.md")),
         ],
     },
     Skill {
         name: "solidcraft-modeling",
         files: &[
-            ("SKILL.md", include_str!("../../../skills/solidcraft-modeling/SKILL.md")),
-            ("reference.md", include_str!("../../../skills/solidcraft-modeling/reference.md")),
+            ("SKILL.md", include_str!("../embedded/skills/solidcraft-modeling/SKILL.md")),
+            ("reference.md", include_str!("../embedded/skills/solidcraft-modeling/reference.md")),
         ],
     },
     Skill {
         name: "solidcraft-reporting",
         files: &[
-            ("SKILL.md", include_str!("../../../skills/solidcraft-reporting/SKILL.md")),
-            ("reference/report-template.md", include_str!("../../../skills/solidcraft-reporting/reference/report-template.md")),
+            ("SKILL.md", include_str!("../embedded/skills/solidcraft-reporting/SKILL.md")),
+            ("reference/report-template.md", include_str!("../embedded/skills/solidcraft-reporting/reference/report-template.md")),
         ],
     },
     Skill {
         name: "solidcraft-sheetmetal",
         files: &[
-            ("SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
-            ("reference.md", include_str!("../../../skills/solidcraft-sheetmetal/reference.md")),
+            ("SKILL.md", include_str!("../embedded/skills/solidcraft-sheetmetal/SKILL.md")),
+            ("reference.md", include_str!("../embedded/skills/solidcraft-sheetmetal/reference.md")),
         ],
     },
 ];

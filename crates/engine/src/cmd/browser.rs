@@ -2427,7 +2427,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-17689-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("block.step");
-        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        std::fs::write(&path, include_str!("../../embedded/tests/step-regressions/block_edge_off_its_face.step")).unwrap();
         let mut s = Session::default();
         let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
         assert_eq!(r["created_bodies"], json!(["Bloco"]), "{r}");
@@ -2475,7 +2475,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-bg-checks-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("block.step");
-        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        std::fs::write(&path, include_str!("../../embedded/tests/step-regressions/block_edge_off_its_face.step")).unwrap();
         let mut s = Session::default();
         let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
         let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));

@@ -2,10 +2,10 @@
 //! downloaded executable carries them (Help ▸ About ▸ Licences, `solidcraft-cli licences`).
 //! THIRD-PARTY-LICENSES.txt is written by `cargo xtask licences` and checked by `cargo xtask ci`.
 
-pub const LICENSE_MIT: &str = include_str!("../../../LICENSE-MIT");
-pub const LICENSE_APACHE: &str = include_str!("../../../LICENSE-APACHE");
-pub const NOTICE: &str = include_str!("../../../NOTICE");
-pub const THIRD_PARTY: &str = include_str!("../../../THIRD-PARTY-LICENSES.txt");
+pub const LICENSE_MIT: &str = include_str!("../embedded/LICENSE-MIT");
+pub const LICENSE_APACHE: &str = include_str!("../embedded/LICENSE-APACHE");
+pub const NOTICE: &str = include_str!("../embedded/NOTICE");
+pub const THIRD_PARTY: &str = include_str!("../embedded/THIRD-PARTY-LICENSES.txt");
 
 /// Everything, as one text.
 pub fn all() -> String {

@@ -212,6 +212,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     crate::skills::run(root)?;
     gate("scripts/test-format-pending.sh")?;
     crate::cmd_layers()?;
+    crate::package_includes::run(root)?;
     crate::shared::run(root)?;
     crate::ui_containers::run(root)?;
     crate::mesh_decisions::run(root)?;

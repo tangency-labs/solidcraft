@@ -24014,7 +24014,7 @@ mod kept_refused_tests {
     /// changed beside it.
     #[test]
     fn a_refusal_names_only_the_results_own_inputs_that_failed_the_check() {
-        let text = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step");
+        let text = include_str!("../embedded/tests/step-regressions/block_edge_off_its_face.step");
         let bad = kernel::step_import(text).unwrap().bodies.remove(0).body;
         assert!(kernel::failing_check(&bad).unwrap().is_some(), "the block fails the check");
         let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();

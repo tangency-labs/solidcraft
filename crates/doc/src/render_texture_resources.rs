@@ -417,7 +417,7 @@ mod tests {
     use crate::render_surface::{EmbeddedSurfaceKind, EmbeddedSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceSource};
     use serde_json::json;
     fn image() -> Vec<u8> {
-        include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec()
+        include_bytes!("../embedded/assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec()
     }
     fn provenance() -> TextureProvenance {
         TextureProvenance { author: "SolidCraft contributors".into(), source: "original test asset".into(), license: "MIT OR Apache-2.0".into() }

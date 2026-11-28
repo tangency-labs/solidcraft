@@ -36,12 +36,12 @@ fn placed_bodies(s: &Session) -> usize {
     root + placements.iter().map(|(c, _, _)| per_component.get(c).copied().unwrap_or(0)).sum::<usize>()
 }
 const SAMPLE_PICTURES: [&[u8]; 6] = [
-    include_bytes!("../../../assets/samples/exports/0.png"),
-    include_bytes!("../../../assets/samples/exports/1.png"),
-    include_bytes!("../../../assets/samples/exports/2.png"),
-    include_bytes!("../../../assets/samples/exports/3.png"),
-    include_bytes!("../../../assets/samples/exports/4.png"),
-    include_bytes!("../../../assets/samples/exports/5.png"),
+    include_bytes!("../embedded/assets/samples/exports/0.png"),
+    include_bytes!("../embedded/assets/samples/exports/1.png"),
+    include_bytes!("../embedded/assets/samples/exports/2.png"),
+    include_bytes!("../embedded/assets/samples/exports/3.png"),
+    include_bytes!("../embedded/assets/samples/exports/4.png"),
+    include_bytes!("../embedded/assets/samples/exports/5.png"),
 ];
 
 /// What a background job makes: a key ("sample:N" or a path), the picture, and for samples the
@@ -1404,7 +1404,7 @@ mod tests {
     #[test]
     fn shipped_sample_pictures_are_bounded_and_match_the_current_scripts() {
         use sha2::{Digest, Sha256};
-        let hashes: Vec<String> = serde_json::from_str(include_str!("../../../assets/samples/exports/scripts.json")).unwrap();
+        let hashes: Vec<String> = serde_json::from_str(include_str!("../embedded/assets/samples/exports/scripts.json")).unwrap();
         let samples = solidcraft_engine::sample::samples();
         assert_eq!(samples.len(), SAMPLE_PICTURES.len());
         assert_eq!(hashes.len(), samples.len());

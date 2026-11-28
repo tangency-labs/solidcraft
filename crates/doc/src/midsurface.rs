@@ -2186,7 +2186,7 @@ mod tests {
         // rounded to radius 4 (its 8 circles of radius 4) and 100 holes of radius 3 (its 200
         // circles of radius 3); the importer's test reads its volume as 71588.321 = 10 x this area.
         // The sheet: 10000 - 4 (16 - 4 pi) - 100 (9 pi) = 9936 - 884 pi mm², with 100 holes.
-        let read = solidcraft_kernel::step_import(include_str!("../../../tests/step-conformance/plate_100_holes.step")).unwrap();
+        let read = solidcraft_kernel::step_import(include_str!("../embedded/tests/step-conformance/plate_100_holes.step")).unwrap();
         let plate = &read.bodies[0].body;
         assert!(!plate.is_mesh());
         assert_eq!(plate.face_count(), 110);
