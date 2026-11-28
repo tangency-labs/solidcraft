@@ -226,3 +226,30 @@ fn undo_takes_back_a_radius_handle_drag() {
     h.frames(2);
     assert_eq!(h.app.dialog.as_ref().map(|d| d.extra.clone()), Some(dragged), "Redo drags them again");
 }
+
+/// #13449: variable and spline fillets keep their radius controls in the dialog
+/// instead of offering a misleading single-radius editor on the canvas.
+#[test]
+fn multiple_radii_have_no_single_canvas_radius_editor() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap();
+    assert_eq!(d.primary().map(|(label, _, _)| label), Some("Radius"));
+    for style in ["variable", "spline"] {
+        d.extra.insert("type".into(), json!(style));
+        assert!(d.primary().is_none(), "{style}");
+    }
+    d.extra.insert("type".into(), json!("curvature"));
+    assert_eq!(d.primary().map(|(label, _, _)| label), Some("Equivalent Radius"));
+    let mut chamfer = crate::dialogs::Dialog::for_command(&h.app, "solid.chamfer").unwrap();
+    assert!(chamfer.primary().is_some(), "chamfer distances are unaffected");
+}
+
+#[test]
+fn a_spline_fillet_keeps_its_individual_handles_without_a_radius_arrow() {
+    let mut h = spline_fixture();
+    assert!(h.app.dialog.as_mut().unwrap().primary().is_none());
+    assert!(h.at(&json!({"handle":"arrow"})).is_err());
+    assert!(h.at(&json!({"handle":"fillet_r0"})).is_ok());
+    assert!(h.at(&json!({"handle":"fillet_r2"})).is_ok());
+}

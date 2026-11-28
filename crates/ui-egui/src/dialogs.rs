@@ -1903,6 +1903,12 @@ impl Dialog {
             Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
             Kind::Revolve { angle, .. } => ("Angle", ValueKind::Angle, angle),
+            // Variable and spline fillets have several independent radii. Their dialog
+            // fields (and spline handles) remain available, but a single canvas radius
+            // field or arrow would misrepresent the feature.
+            Kind::Fillet { chamfer: false, .. } if matches!(self.extra.get("type").and_then(Value::as_str), Some("variable" | "spline")) => {
+                return None;
+            }
             Kind::Fillet { radius, chamfer, .. } => {
                 let label = if *chamfer {
                     "Distance"
