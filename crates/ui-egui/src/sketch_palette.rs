@@ -787,11 +787,16 @@ mod tests {
         for &(key, _) in TOGGLES {
             let before = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
+            let states: Vec<bool> = TOGGLES.iter().map(|&(k, _)| option_on(&h, k)).collect();
             // Test change: below the navigator the column is shorter and the last option sits
-            // under the pinned footer; scroll each option into view first, as a person would.
+            // under the pinned footer; scroll each option into view first, as a person would, and
+            // check that this option (and no other) flipped, so a click on a neighbour can't pass.
             let at = scroll_into_options(&mut h, &format!("sketch_palette:toggle:{key}"));
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             assert_ne!(h.app.session.doc.to_json(), before, "{key}");
+            for (&(other, _), was) in TOGGLES.iter().zip(&states) {
+                assert_eq!(option_on(&h, other), *was != (other == key), "clicking {key}: {other}");
+            }
             assert_eq!(h.app.session.undo.len(), undo + 1, "{key}");
             assert_eq!(h.app.session.active_sketch, Some(active));
             h.app.run("edit.undo", json!({})).unwrap();
@@ -821,12 +826,44 @@ mod tests {
             }
             let delta = if at.y > options.bottom() { -120 } else { 120 };
             h.call("ui.scroll", json!({"x":options.center().x,"y":options.center().y,"delta":delta}));
-            h.settle();
+            settle_scroll(h);
         }
+        assert!(!h.ctx.input(|input| input.is_scrolling()), "{handle}: the options area is still scrolling");
         let at = crate::scenario::handle_at(handle).unwrap();
         let options = crate::scenario::rect_of("sketch_palette:options").unwrap();
         assert!(options.contains(at), "{handle} scrolls into view: {at:?} outside {options:?}");
         at
+    }
+
+    /// Follows the wheel's actual smoothing, rather than clicking the palette's moving content.
+    fn settle_scroll(h: &mut crate::scenario::Harness) {
+        h.settle();
+        for _ in 0..120 {
+            if h.ctx.input(|input| !input.is_scrolling()) {
+                break;
+            }
+            h.frame();
+        }
+    }
+
+    /// Whether the active sketch's palette option `key` is on, read from the sketch itself.
+    fn option_on(h: &crate::scenario::Harness, key: &str) -> bool {
+        let world = h.app.session.world_state().unwrap();
+        let view = &world.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view;
+        match key {
+            "grid" => !view.hide_grid,
+            "snap" => !view.no_snap,
+            "slice" => view.slice,
+            "show_profile" => !view.hide_profile,
+            "show_points" => !view.hide_points,
+            "show_dimensions" => !view.hide_dimensions,
+            "show_constraints" => !view.hide_constraints,
+            "show_projected" => !view.hide_projected,
+            "show_construction" => !view.hide_construction,
+            "show_control_polygons" => !view.hide_control_polygons,
+            "sketch_3d" => view.three_d,
+            _ => panic!("unknown palette option {key}"),
+        }
     }
 
     #[test]
@@ -1061,8 +1098,9 @@ mod tests {
                     break;
                 }
                 h.call("ui.scroll", json!({"x":fold.x,"y":fold.y.min(footer_top - 20.0),"delta":-120}));
-                h.settle();
+                settle_scroll(&mut h);
             }
+            assert!(!h.ctx.input(|input| input.is_scrolling()), "scale{scale} height{height}: the options area is still scrolling");
             let at = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
             assert!(
                 at.y < crate::scenario::rect_of("sketch_palette:finish").unwrap().top(),
@@ -1077,7 +1115,8 @@ mod tests {
             let options = crate::scenario::rect_of("sketch_palette:options").unwrap();
             assert!(vp.contains_rect(options));
             h.call("ui.scroll", json!({"x":options.center().x,"y":options.center().y,"delta":-1000}));
-            h.settle();
+            settle_scroll(&mut h);
+            assert!(!h.ctx.input(|input| input.is_scrolling()), "scale{scale} height{height}: the options area is still scrolling");
             assert_eq!(h.app.session.doc.to_json(), baseline);
             assert_eq!(h.app.session.undo.len(), undo);
             let [x, y] = h.widget("3D Sketch").unwrap();
