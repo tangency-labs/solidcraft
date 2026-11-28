@@ -1311,6 +1311,20 @@ for `host@0.1` optionally when its component does not import the query. The boun
 at most 32 strings and reports API availability only; it does not approve file access, command
 groups, input folders or increased memory, run commands, or open dialogs.
 
+Plugins can read their effective sandbox budgets through the separate additive import
+`craft:host/limits@0.1.0`, declared in `crates/craft-plugin/wit-host/plugin.wit`.
+Declare required `host@0.1` when importing this interface. Its read-only `get()` returns
+`execution-limits`: `fuel` (total allowed fuel), `memory-bytes` (allowed linear memory),
+`fuel-left` (remaining fuel), and `deadline-ms` (remaining guest execution time in milliseconds).
+The values reflect the effective manifest budgets after host ceilings and installation approval,
+including smaller hook budgets and the fixed deadline for long jobs. Host calls do not consume
+guest execution time. The query uses one host call and does not raise any limit.
+
+This interface is linked alongside both plugin WIT versions; existing imports and worlds stay
+unchanged. Older guests need no rebuild. A guest importing limits requires a host release that
+provides it; use `min_host_version` to declare that minimum. Listing `host@0.1` as optional does
+not make a static limits import optional.
+
 An optional manifest capability cannot make a static WIT import optional. A component that
 unconditionally imports an interface absent from a host cannot load there, even if that
 capability is listed as optional. Keep unavailable interfaces out of such a component's imports,

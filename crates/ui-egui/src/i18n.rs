@@ -359,6 +359,7 @@ mod tests {
             assert_eq!(Locale::for_language("en").text(id), *english, "{id}: the engine's English is the catalog's");
         }
         let failure = PluginFailure {
+            requested_limits: None,
             plugin: "Dutchman".into(),
             file: Some("cube.f3d".into()),
             exporting: false,

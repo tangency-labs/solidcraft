@@ -49,9 +49,33 @@ mod host_bindings {
 }
 use host_bindings::craft::host::capabilities;
 
+/// The effective sandbox budgets, independent of the plugin API version.
+#[derive(wasmtime::component::ComponentType, wasmtime::component::Lift, wasmtime::component::Lower)]
+#[component(record)]
+struct ExecutionLimits {
+    fuel: u64,
+    #[component(name = "memory-bytes")]
+    memory_bytes: u64,
+    #[component(name = "fuel-left")]
+    fuel_left: u64,
+    #[component(name = "deadline-ms")]
+    deadline_ms: u64,
+}
+
 fn link_host_query<H: PluginHost + 'static>(linker: &mut Linker<State<H>>, granted: &[String]) -> wasmtime::Result<()> {
     if granted.iter().any(|capability| capability.starts_with("host@")) {
         host_bindings::HostQuery::add_to_linker::<_, wasmtime::component::HasSelf<_>>(linker, |s| s)?;
+        linker.instance("craft:host/limits@0.1.0")?.func_wrap("get", |mut context: wasmtime::StoreContextMut<'_, State<H>>, (): ()| {
+            context.data_mut().check().map_err(|_| wasmtime::Error::msg("plugin limits query refused"))?;
+            let limits = &context.data().execution_limits;
+            let fuel_left = context.get_fuel()?;
+            Ok((ExecutionLimits {
+                fuel: limits.fuel,
+                memory_bytes: u64::try_from(limits.memory_mib).unwrap_or(u64::MAX).saturating_mul(1024 * 1024),
+                fuel_left,
+                deadline_ms: u64::try_from(context.data().deadline.remaining.as_millis()).unwrap_or(u64::MAX),
+            },))
+        })?;
     }
     Ok(())
 }
@@ -246,6 +270,7 @@ struct State<H> {
     clock: bool,
     forms: bool,
     limits: StoreLimits,
+    execution_limits: Limits,
     failed: Option<HostError>,
     calls: u64,
     max_calls: u64,
@@ -1228,6 +1253,7 @@ fn execute<H: PluginHost + 'static>(
         max_calls,
         log_bytes: 0,
         deadline: GuestDeadline::new(deadline_ms),
+        execution_limits: Limits::default(),
         limits: store_limits(limits, 10_000),
         import: None,
         panels: runtime.ui.clone(),
@@ -1320,6 +1346,7 @@ fn store_limits(limits: &Limits, table_elements: usize) -> StoreLimits {
 
 /// Fuel, memory and the deadline and cancellation checks every epoch tick.
 fn prepare_store<H: PluginHost + 'static>(store: &mut Store<State<H>>, limits: &Limits) -> Result<()> {
+    store.data_mut().execution_limits = limits.clone();
     store.limiter(|s| &mut s.limits);
     store.set_fuel(limits.fuel).map_err(|e| trap(e.to_string()))?;
     store.set_epoch_deadline(1);
@@ -2032,6 +2059,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         log_bytes: 0,
         deadline: dialog_deadline.map_or_else(|| GuestDeadline::new(limits.deadline_ms), GuestDeadline::until),
         // A large converter has a large indirect-call table.
+        execution_limits: Limits::default(),
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
         panels: None,
@@ -2184,6 +2212,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         max_calls: MAX_IMPORT_CALLS,
         log_bytes: 0,
         deadline: GuestDeadline::new(limits.deadline_ms),
+        execution_limits: Limits::default(),
         limits: store_limits(limits, 1_000_000),
         import: None,
         panels: None,

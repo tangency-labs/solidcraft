@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "plugin_error.deadline_stopped": "استهلك هذا الملحق كل وقت التشغيل المسموح به، {allowed} ms.{request} ارفع Preferences › Plugins › Max plugin guest time (ms).",
+    "plugin_error.fuel_stopped": "استهلك هذا الملحق كل الوقود المسموح به، {allowed}.{request} ارفع Preferences › Plugins › Max plugin fuel، أو وافق على طلبه عند تثبيته.",
+    "plugin_error.limit_request": " يطلب {requested}.",
+    "plugin_error.memory_stopped": "احتاج هذا الملحق إلى أكثر من {allowed} MiB من الذاكرة المسموح بها.{request} ارفع Preferences › Plugins › Max plugin memory (MiB)، أو وافق على طلبه عند تثبيته."
+  },
+  "de": {
+    "plugin_error.deadline_stopped": "Dieses Plugin hat die erlaubten {allowed} ms Gastzeit verbraucht.{request} Erhöhen Sie Einstellungen › Plugins › Max plugin guest time (ms).",
+    "plugin_error.fuel_stopped": "Dieses Plugin hat die erlaubten {allowed} Brennstoffeinheiten verbraucht.{request} Erhöhen Sie Einstellungen › Plugins › Max plugin fuel oder genehmigen Sie die Anfrage bei der Installation.",
+    "plugin_error.limit_request": " Es fordert {requested} an.",
+    "plugin_error.memory_stopped": "Dieses Plugin benötigt mehr als die erlaubten {allowed} MiB Speicher.{request} Erhöhen Sie Einstellungen › Plugins › Max plugin memory (MiB) oder genehmigen Sie die Anfrage bei der Installation."
+  },
+  "en": {
+    "plugin_error.deadline_stopped": "This plugin used all {allowed} ms of guest time allowed.{request} Raise Preferences › Plugins › Max plugin guest time (ms).",
+    "plugin_error.fuel_stopped": "This plugin used all {allowed} fuel allowed.{request} Raise Preferences › Plugins › Max plugin fuel, or approve its request when you install it.",
+    "plugin_error.limit_request": " It asks for {requested}.",
+    "plugin_error.memory_stopped": "This plugin needed more than the {allowed} MiB of memory allowed.{request} Raise Preferences › Plugins › Max plugin memory (MiB), or approve its request when you install it."
+  },
+  "he": {
+    "plugin_error.deadline_stopped": "התוסף ניצל את כל {allowed} ms זמן האורח המותר.{request} הגדל את Preferences › Plugins › Max plugin guest time (ms).",
+    "plugin_error.fuel_stopped": "התוסף ניצל את כל {allowed} יחידות הדלק המותרות.{request} הגדל את Preferences › Plugins › Max plugin fuel, או אשר את הבקשה בעת ההתקנה.",
+    "plugin_error.limit_request": " הוא מבקש {requested}.",
+    "plugin_error.memory_stopped": "התוסף זקוק ליותר מ־{allowed} MiB הזיכרון המותרים.{request} הגדל את Preferences › Plugins › Max plugin memory (MiB), או אשר את הבקשה בעת ההתקנה."
+  },
+  "ja": {
+    "plugin_error.deadline_stopped": "このプラグインは許可されたゲスト時間 {allowed} ms を使い切りました。{request} Preferences › Plugins › Max plugin guest time (ms) を増やしてください。",
+    "plugin_error.fuel_stopped": "このプラグインは許可された燃料 {allowed} をすべて使い切りました。{request} Preferences › Plugins › Max plugin fuel を増やすか、インストール時に要求を承認してください。",
+    "plugin_error.limit_request": " 要求値は {requested} です。",
+    "plugin_error.memory_stopped": "このプラグインは許可された {allowed} MiB を超えるメモリーを必要としました。{request} Preferences › Plugins › Max plugin memory (MiB) を増やすか、インストール時に要求を承認してください。"
+  },
+  "ko": {
+    "plugin_error.deadline_stopped": "이 플러그인은 허용된 게스트 시간 {allowed} ms를 모두 사용했습니다.{request} Preferences › Plugins › Max plugin guest time (ms)를 늘리세요.",
+    "plugin_error.fuel_stopped": "이 플러그인은 허용된 연료 {allowed}을 모두 사용했습니다.{request} Preferences › Plugins › Max plugin fuel을 늘리거나 설치할 때 요청을 승인하세요.",
+    "plugin_error.limit_request": " 요청 값은 {requested}입니다.",
+    "plugin_error.memory_stopped": "이 플러그인은 허용된 메모리 {allowed} MiB보다 많은 메모리가 필요했습니다.{request} Preferences › Plugins › Max plugin memory (MiB)를 늘리거나 설치할 때 요청을 승인하세요."
+  },
+  "vi": {
+    "plugin_error.deadline_stopped": "Plugin này đã dùng hết {allowed} ms thời gian khách được phép.{request} Tăng Preferences › Plugins › Max plugin guest time (ms).",
+    "plugin_error.fuel_stopped": "Plugin này đã dùng hết {allowed} nhiên liệu được phép.{request} Tăng Preferences › Plugins › Max plugin fuel, hoặc chấp thuận yêu cầu khi cài đặt.",
+    "plugin_error.limit_request": " Plugin yêu cầu {requested}.",
+    "plugin_error.memory_stopped": "Plugin này cần nhiều hơn {allowed} MiB bộ nhớ được phép.{request} Tăng Preferences › Plugins › Max plugin memory (MiB), hoặc chấp thuận yêu cầu khi cài đặt."
+  },
+  "zh": {
+    "plugin_error.deadline_stopped": "此插件已用完允许的 {allowed} ms 客体时间。{request} 请提高 Preferences › Plugins › Max plugin guest time (ms)。",
+    "plugin_error.fuel_stopped": "此插件已用完允许的 {allowed} 燃料。{request} 请提高 Preferences › Plugins › Max plugin fuel，或在安装时批准其请求。",
+    "plugin_error.limit_request": " 请求值为 {requested}。",
+    "plugin_error.memory_stopped": "此插件所需内存超过允许的 {allowed} MiB。{request} 请提高 Preferences › Plugins › Max plugin memory (MiB)，或在安装时批准其请求。"
+  }
+}

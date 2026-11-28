@@ -6,6 +6,19 @@ use craft_plugin::HostError;
 
 /// The `plugin_error.*` messages and their English text.
 pub const MESSAGES: &[(&str, &str)] = &[
+    (
+        "plugin_error.deadline_stopped",
+        "This plugin used all {allowed} ms of guest time allowed.{request} Raise Preferences › Plugins › Max plugin guest time (ms).",
+    ),
+    (
+        "plugin_error.fuel_stopped",
+        "This plugin used all {allowed} fuel allowed.{request} Raise Preferences › Plugins › Max plugin fuel, or approve its request when you install it.",
+    ),
+    ("plugin_error.limit_request", " It asks for {requested}."),
+    (
+        "plugin_error.memory_stopped",
+        "This plugin needed more than the {allowed} MiB of memory allowed.{request} Raise Preferences › Plugins › Max plugin memory (MiB), or approve its request when you install it.",
+    ),
     ("plugin_error.design_too_large", "the design it made is larger than {allowed} MiB, the most a plugin can hand over."),
     ("plugin_error.failed", "{plugin}: {reason}"),
     ("plugin_error.failed_export", "{plugin} could not export {file}: {reason}"),
@@ -65,6 +78,8 @@ pub struct PluginFailure {
     /// The file is being exported, rather than opened.
     pub exporting: bool,
     pub error: HostError,
+    /// The explicitly declared manifest limits, when present.
+    pub requested_limits: Option<serde_json::Value>,
 }
 
 /// `id`'s text in this thread's language, or its English when no catalog has it.
@@ -104,9 +119,17 @@ fn fill(template: &str, args: &[(&str, &str)]) -> String {
     text
 }
 
-/// Seconds, as a person reads them: 300, or 0.05.
-fn seconds(ms: u64) -> String {
-    if ms.is_multiple_of(1000) { (ms / 1000).to_string() } else { format!("{}.{:03}", ms / 1000, ms % 1000).trim_end_matches('0').to_string() }
+/// Group large budgets for readability without changing their exact value.
+fn grouped(value: u64) -> String {
+    let digits = value.to_string();
+    let mut result = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(digit);
+    }
+    result
 }
 
 impl PluginFailure {
@@ -130,15 +153,26 @@ impl PluginFailure {
             HostError::OverCeiling { limit, requested, allowed } if limit == "deadline_ms" => {
                 say("plugin_error.time_ceiling", &[("requested", &number(*requested)), ("allowed", &number(*allowed))])
             }
-            HostError::Exhausted { limit, allowed } => match limit.as_str() {
-                "fuel" => say("plugin_error.out_of_fuel", &[("allowed", &number(*allowed))]),
-                "host_calls" => say("plugin_error.out_of_host_calls", &[("allowed", &number(*allowed))]),
-                "memory_mib" => say("plugin_error.out_of_memory", &[("allowed", &number(*allowed))]),
-                "stack_kib" => say("plugin_error.out_of_stack", &[("allowed", &number(*allowed))]),
-                "deadline_ms" => say("plugin_error.guest_time_exhausted", &[("seconds", &seconds(*allowed))]),
-                "design_mib" => say("plugin_error.design_too_large", &[("allowed", &number(*allowed))]),
-                _ => self.error.to_string(),
-            },
+            HostError::Exhausted { limit, allowed } => {
+                let key = match limit.as_str() {
+                    "fuel" => Some("plugin_error.fuel_stopped"),
+                    "memory_mib" => Some("plugin_error.memory_stopped"),
+                    "deadline_ms" => Some("plugin_error.deadline_stopped"),
+                    _ => None,
+                };
+                if let Some(key) = key {
+                    let requested = self.requested_limits.as_ref().and_then(|limits| limits.get(limit)).and_then(serde_json::Value::as_u64);
+                    let request = requested.map_or_else(String::new, |value| say("plugin_error.limit_request", &[("requested", &grouped(value))]));
+                    say(key, &[("allowed", &grouped(*allowed)), ("request", &request)])
+                } else {
+                    match limit.as_str() {
+                        "host_calls" => say("plugin_error.out_of_host_calls", &[("allowed", &number(*allowed))]),
+                        "stack_kib" => say("plugin_error.out_of_stack", &[("allowed", &number(*allowed))]),
+                        "design_mib" => say("plugin_error.design_too_large", &[("allowed", &number(*allowed))]),
+                        _ => self.error.to_string(),
+                    }
+                }
+            }
             HostError::Trap { reason } => say("plugin_error.trap", &[("reason", reason)]),
             HostError::UserStorageConflict { .. } => say("plugin_error.user_storage_conflict", &[]),
             // What the plugin or the host said about the input, without the field's name.
@@ -163,23 +197,40 @@ impl PluginFailure {
     }
 }
 
-/// Names `plugin` (and `file`) in a failure of its run. A cancel is not the plugin's failure, and
-/// an error that is not the plugin's (a design that failed to rebuild) is kept as it is.
-pub(crate) fn named(plugin: &str, file: Option<&str>) -> impl Fn(crate::EngineError) -> crate::EngineError {
-    named_for(plugin, file, false)
+/// Read explicit limit requests using the installed package's existing authority.
+pub(super) fn format_limits(session: &super::Session, folder: &str) -> Option<serde_json::Value> {
+    super::with_installed(session, folder, || {
+        let path = std::path::Path::new(folder).join("plugin.json");
+        let bytes = solidcraft_io::vfs::read(&path.to_string_lossy(), craft_plugin::MAX_MANIFEST_BYTES).ok()?;
+        serde_json::from_slice::<serde_json::Value>(&bytes).ok()?.pointer("/runtime/limits").cloned()
+    })
 }
 
-/// Names the plugin and output file using the same error reasons as an import.
-pub(crate) fn named_export(plugin: &str, file: &str) -> impl Fn(crate::EngineError) -> crate::EngineError {
-    named_for(plugin, Some(file), true)
+/// Names the plugin and retains its explicit resource requests.
+pub(crate) fn named_with_limits(
+    plugin: &str,
+    file: Option<&str>,
+    exporting: bool,
+    requested_limits: Option<serde_json::Value>,
+) -> impl Fn(crate::EngineError) -> crate::EngineError {
+    named_for(plugin, file, exporting, requested_limits)
 }
 
-fn named_for(plugin: &str, file: Option<&str>, exporting: bool) -> impl Fn(crate::EngineError) -> crate::EngineError {
+fn named_for(
+    plugin: &str,
+    file: Option<&str>,
+    exporting: bool,
+    requested_limits: Option<serde_json::Value>,
+) -> impl Fn(crate::EngineError) -> crate::EngineError {
     move |error| match error {
         crate::EngineError::Plugin(HostError::Cancelled) => crate::EngineError::Plugin(HostError::Cancelled),
-        crate::EngineError::Plugin(error) => {
-            crate::EngineError::PluginFailed(Box::new(PluginFailure { plugin: plugin.into(), file: file.map(String::from), exporting, error }))
-        }
+        crate::EngineError::Plugin(error) => crate::EngineError::PluginFailed(Box::new(PluginFailure {
+            plugin: plugin.into(),
+            file: file.map(String::from),
+            exporting,
+            error,
+            requested_limits: requested_limits.clone(),
+        })),
         e @ (crate::EngineError::Other(_) | crate::EngineError::Feature(_)) => {
             let text = e.to_string();
             let text = text.strip_prefix("plugin: ").unwrap_or(&text);
