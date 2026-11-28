@@ -18,6 +18,10 @@ pub const LOST_ENV: &str = "SOLIDCRAFT_DEVICE_LOST";
 /// session journal, which recorded it, is gone by then.
 pub const REASON_ENV: &str = "SOLIDCRAFT_DEVICE_LOST_REASON";
 
+/// Set to `"1"` on the start after an out-of-memory device loss, classified from the full
+/// untruncated reason in the parent before [`REASON_ENV`] is trimmed to [`REASON_CHARS`].
+pub const OOM_ENV: &str = "SOLIDCRAFT_DEVICE_LOST_OOM";
+
 /// The longest reason passed on ([`REASON_ENV`]) and shown, in characters.
 const REASON_CHARS: usize = 300;
 
@@ -52,6 +56,13 @@ pub fn is_out_of_memory(reason: Option<&str>) -> bool {
         || normalized.contains("out_of_host_memory")
 }
 
+/// Whether a restarted launch followed an out-of-memory loss, preferring the parent's
+/// untruncated classification ([`OOM_ENV`]) and falling back to [`is_out_of_memory`] on
+/// [`REASON_ENV`].
+pub fn was_out_of_memory(oom_flag: Option<&str>, reason: Option<&str>) -> bool {
+    oom_flag.is_some_and(|v| v.trim() == "1") || is_out_of_memory(reason)
+}
+
 /// Whether the start after a lost device uses the software renderer: when this launch already
 /// followed a recent loss (the driver keeps losing it), or ran on it anyway — unless the device
 /// was lost because memory ran out, where software rendering would worsen memory exhaustion
@@ -73,14 +84,17 @@ pub fn reason(reason: Option<&str>) -> Option<String> {
 /// renderer, with what the driver reported ([`REASON_ENV`]) and the designs whose unsaved changes
 /// the lost launch couldn't keep ([`startup::UNKEPT_ENV`]).
 pub fn note(software: bool, reason: Option<&str>, unkept: Option<&str>) -> String {
+    note_with_oom(software, is_out_of_memory(reason), reason, unkept)
+}
+
+/// As [`note`], with an explicit `out_of_memory` classification decided before [`REASON_ENV`]
+/// truncation.
+pub fn note_with_oom(software: bool, out_of_memory: bool, reason: Option<&str>, unkept: Option<&str>) -> String {
     let unsaved = startup::unsaved_clause(unkept, "unsaved changes were kept for recovery");
     let mut first = unsaved.chars();
     let unsaved = first.next().map(|c| c.to_uppercase().chain(first).collect::<String>()).unwrap_or_default();
-    let cause = if is_out_of_memory(reason) {
-        "Graphics or system memory ran out"
-    } else {
-        "The graphics device was reset (the graphics driver stopped responding)"
-    };
+    let cause =
+        if out_of_memory { "Graphics or system memory ran out" } else { "The graphics device was reset (the graphics driver stopped responding)" };
     let mut note = format!("{cause}, so SolidCraft closed and started again. {unsaved}.");
     if software {
         note.push_str(" This start uses software rendering, which doesn't depend on the graphics driver.");
@@ -110,6 +124,11 @@ fn command(
         // Not one inherited from an earlier loss.
         None => command.env_remove(REASON_ENV),
     };
+    if is_out_of_memory(Some(reason)) {
+        command.env(OOM_ENV, "1");
+    } else {
+        command.env_remove(OOM_ENV);
+    }
     match startup::unkept(unkept) {
         Some(designs) => command.env(startup::UNKEPT_ENV, designs),
         None => command.env_remove(startup::UNKEPT_ENV),
@@ -237,6 +256,24 @@ mod tests {
         let unkept_note = super::note(false, Some("Out of memory"), Some("Bracket: autosave is off"));
         assert!(unkept_note.contains("Some unsaved changes couldn't be kept for recovery (Bracket: autosave is off)."), "{unkept_note}");
         assert!(!unkept_note.contains("the graphics driver stopped responding"), "{unkept_note}");
+
+        // A long OOM reason whose tail is truncated past REASON_CHARS is still classified as OOM
+        // via OOM_ENV set by the parent on the full reason.
+        let env = |command: &std::process::Command, name: &str| {
+            command.get_envs().find(|(k, _)| *k == name).map(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+        };
+        let long_oom = format!("{} Out of memory", "x".repeat(350));
+        let oom_cmd = super::command(std::path::PathBuf::from("solidcraft"), Vec::new(), false, 1_000, &long_oom, &[]);
+        let truncated_reason = env(&oom_cmd, super::REASON_ENV).flatten();
+        let oom_flag = env(&oom_cmd, super::OOM_ENV).flatten();
+        assert_eq!(oom_flag.as_deref(), Some("1"));
+        assert!(!super::is_out_of_memory(truncated_reason.as_deref()), "tail was truncated");
+        assert!(super::was_out_of_memory(oom_flag.as_deref(), truncated_reason.as_deref()));
+        let long_note = super::note_with_oom(false, true, truncated_reason.as_deref(), None);
+        assert!(long_note.starts_with("Graphics or system memory ran out"), "{long_note}");
+
+        let driver_cmd = super::command(std::path::PathBuf::from("solidcraft"), Vec::new(), false, 1_000, "Lost: Device lost", &[]);
+        assert_eq!(env(&driver_cmd, super::OOM_ENV), Some(None));
     }
 
     /// The start after a loss is told why (#9044): the old process's journal held the reason, and
