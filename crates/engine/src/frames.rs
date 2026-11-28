@@ -464,13 +464,21 @@ impl Mapper<'_> {
                     (self.f.active, p)
                 }
                 None => {
-                    // A component origin plane key: it follows its component, which is the
-                    // frame it is read in when that is the command's.
-                    if alike(&self.f.active, &target) {
-                        return None;
+                    // A component origin plane key (`o:N/origin/XY`) names a plane of that
+                    // occurrence's component, placed by its occurrence: read from the root it is
+                    // a world plane, so it is mapped into the frame of the command's bodies
+                    // (for the part's own body that is the part's plane, at its local position).
+                    let doc = self.s.placed_document();
+                    let datum = solidcraft_doc::construct::DatumRef::parse_key(&name);
+                    match datum.and_then(|d| solidcraft_doc::construct::resolve_datum(&doc, &d).ok()) {
+                        Some(solidcraft_doc::construct::ConstructGeom::Plane(p)) => (solidcraft_doc::IDENTITY, p),
+                        _ => {
+                            refuse(format!(
+                                "plane `{name}` cannot be mapped into the frame of a placed part; use an explicit {{origin, normal}} plane"
+                            ));
+                            return None;
+                        }
                     }
-                    refuse(format!("plane `{name}` cannot be mapped into the frame of a placed part; use an explicit {{origin, normal}} plane"));
-                    return None;
                 }
             },
         };

@@ -2909,8 +2909,27 @@ fn thread_face_point_with_an_unknown_body_is_refused() {
     assert!(s.execute("solid.thread", &json!({"face": {"point": [4, 0, 102], "body": "Shaft"}})).is_ok());
 }
 
-/// A plane the helper cannot map into the placed shaft's frame is refused with a reason, never
-/// passed through to be read in the wrong frame.
+/// A component's origin plane key names a plane of that part, so from the root it is already in
+/// the placed shaft's frame: the thread runs up to the part's XY plane, as an explicit plane does.
+#[test]
+fn placed_thread_up_to_the_parts_origin_plane_key_ends_on_that_plane() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, -4], "radius": 4, "height": 12, "body_name": "Shaft"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [0, 0, 100]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let key = format!("o:{occurrence}/origin/XY");
+    let reply = run(&mut s, "solid.thread", json!({"face": [4, 0, 102], "from": [4, 0, 108], "up_to": key}));
+    // The shaft spans local z -4 to 8 (world 96 to 108); from the top end down to the part's XY
+    // plane (local z 0) the thread is 8 mm long. Had the key been read in the root frame it would
+    // be world z 0, 108 mm away, and the limit would be refused.
+    let (a, b) = (reply["thread"]["start"].as_f64().unwrap(), reply["thread"]["end"].as_f64().unwrap());
+    assert!(((b - a).abs() - 8.0).abs() < 1e-6, "ends on the part's XY plane, reply {reply}");
+}
+
+/// A plane key that names no plane of any part is refused with a reason, never passed through to
+/// be read in the wrong frame.
 #[test]
 fn placed_thread_up_to_an_unmappable_plane_name_is_refused() {
     let mut s = Session::default();
@@ -2919,7 +2938,6 @@ fn placed_thread_up_to_an_unmappable_plane_name_is_refused() {
     let occurrence = part["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [0, 0, 100]}));
     run(&mut s, "component.activate", json!({"component": "root"}));
-    let key = format!("o:{occurrence}/origin/XY");
-    let e = s.execute("solid.thread", &json!({"face": [4, 0, 102], "up_to": key})).expect_err("refused").to_string();
+    let e = s.execute("solid.thread", &json!({"face": [4, 0, 102], "up_to": "o:9999/origin/XY"})).expect_err("refused").to_string();
     assert!(e.contains("cannot be mapped") && e.contains("explicit"), "{e}");
 }
