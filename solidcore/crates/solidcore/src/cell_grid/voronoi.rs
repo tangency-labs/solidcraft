@@ -38,10 +38,15 @@
 //! web smaller or larger. At a corner that turns towards the field the moved pieces cross and
 //! are cut there; at one that turns away they are joined by an arc of one web about the corner
 //! (two lines that turn only a little are lengthened until they meet). A piece the move uses up
-//! (an edge or a radius shorter than the web allows) is not handled: the grid then keeps whole
-//! cells only and says so. Where the field is narrower than two webs the moved outline crosses
-//! itself, so every trimmed cell is measured against the outline as drawn and left solid when it
-//! comes nearer than a web.
+//! (an edge or a radius shorter than the web allows) is not handled: on a field's outline the grid
+//! then keeps whole cells only and says so. A keep-out that cannot be moved, or whose moved loop
+//! would cross another moved loop or nest differently (one within two webs of the outline or of
+//! another keep-out), is left as drawn instead: the rest of the field is still filled, and a cell
+//! that would come within a web of that keep-out is left solid, with one warning for all of them.
+//! Only when the loops still cross with such keep-outs left as drawn does the grid keep whole cells
+//! only. Where the field is narrower than two webs the moved outline crosses itself, so every
+//! trimmed cell is measured against the outline as drawn and left solid when it comes nearer than
+//! a web.
 
 use std::f64::consts::{PI, TAU};
 
@@ -423,7 +428,9 @@ fn inset_loops(
                 return Some((now, left));
             }
             let changed = |k: &usize| nested.get(*k) != roles.get(*k);
-            blame = (0..loops.len()).filter(|&k| role(k) && is_moved(k)).collect();
+            blame = (0..loops.len())
+                .filter(|&k| role(k) && is_moved(k))
+                .collect();
             if blame.iter().any(changed) {
                 blame.retain(changed);
             }
