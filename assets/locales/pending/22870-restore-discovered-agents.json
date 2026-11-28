@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.ai_restore_discovered": "Restore removed agents"
+  },
+  "ar": {
+    "ui.ai_restore_discovered": "استعادة الوكلاء الذين تمت إزالتهم"
+  },
+  "de": {
+    "ui.ai_restore_discovered": "Entfernte Agenten wiederherstellen"
+  },
+  "he": {
+    "ui.ai_restore_discovered": "שחזור סוכנים שהוסרו"
+  },
+  "ja": {
+    "ui.ai_restore_discovered": "削除したエージェントを復元"
+  },
+  "ko": {
+    "ui.ai_restore_discovered": "제거된 에이전트 복원"
+  },
+  "vi": {
+    "ui.ai_restore_discovered": "Khôi phục các tác nhân đã xóa"
+  },
+  "zh": {
+    "ui.ai_restore_discovered": "恢复已移除的智能体"
+  }
+}

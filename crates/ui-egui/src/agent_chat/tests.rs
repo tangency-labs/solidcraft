@@ -293,6 +293,27 @@ fn app_with_discovered_login() -> SolveApp {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn removing_a_discovered_agent_survives_refresh_and_preferences_roundtrip() {
+    let mut app = app_with_discovered_login();
+    app.agent_chat.running_id.clear();
+    app.preferences.agent_default = "qwen".into();
+    app.preferences.agent_last = "qwen".into();
+    app.preferences.agents.push(agents::AgentConfig { id: "other".into(), name: "Other agent".into(), ..Default::default() });
+    settings::remove_agent(&mut app, "qwen");
+    assert_eq!(agents::entries(&app).into_iter().map(|e| e.id).collect::<Vec<_>>(), ["other"]);
+    assert!(app.preferences.agent_default.is_empty() && app.preferences.agent_last.is_empty());
+    let stored = serde_json::to_value(&app.preferences).unwrap();
+    app.preferences = serde_json::from_value(stored).unwrap();
+    // A fresh discovery result must still respect the persisted removal.
+    app.agent_chat.detection = app_with_discovered_login().agent_chat.detection.take();
+    assert_eq!(agents::current(&app).unwrap().id, "other");
+    assert!(app.preferences.agent_hidden_discovered.contains("qwen"));
+    app.preferences.agent_hidden_discovered.clear();
+    assert!(agents::entries(&app).iter().any(|e| e.id == "qwen"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn agent_login_file_does_not_claim_a_verified_sign_in() {
     let app = app_with_discovered_login();
     assert_eq!(agents::current(&app).unwrap().login, "login_found");
