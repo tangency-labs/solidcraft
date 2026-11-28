@@ -367,6 +367,131 @@ fn get(out: &[Vec3], idx: usize) -> Result<Vec3> {
     })
 }
 
+/// The simple evaluation of an offset at a point of a collapsed boundary of its base (a
+/// pole), as the limit from inside the domain (#13610).
+///
+/// Along a collapsed boundary `u = u0` the base's `Bv` vanishes, so the normal's numerator
+/// `N = Bu x Bv` vanishes on the whole line and `N = (u - u0) G` with
+/// `G^(i,j) = N^(i+1,j) / (i + 1)` there (Taylor in `u`; for a collapsed `v = v0` the roles
+/// swap). Inside the domain the unit normal is `sign * G / |G|` (`sign` is -1 at the upper
+/// end, where `u - u0 < 0`), which has a limit at the boundary: `G` in place of `N` in
+/// every formula of the regular path. `N`'s derivatives are those of the product
+/// (Leibniz), from the base's derivatives up to the order `hod + 2`.
+#[allow(clippy::too_many_arguments)]
+fn collapsed_boundary_limit(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    hod: usize,
+    [hu, hv]: [usize; 2],
+    [base_u_side, base_v_side]: [Side; 2],
+    only_upper_half: bool,
+    (across_u, sign): (bool, f64),
+    offset_distance: f64,
+    out: &mut [Vec3],
+) -> Result<()> {
+    const BINOMIAL: [[f64; 4]; 4] = [
+        [1.0, 0.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0, 0.0],
+        [1.0, 2.0, 1.0, 0.0],
+        [1.0, 3.0, 3.0, 1.0],
+    ];
+    let order = hod + 2;
+    let m = surface.evaluate_simple(
+        k,
+        uv,
+        order,
+        order,
+        EvaluateFlags {
+            u_side: base_u_side,
+            v_side: base_v_side,
+            only_upper_half: true,
+            non_zero_tangents: false,
+        },
+    )?;
+    let d = |i: usize, j: usize| at(&m, i, j);
+    let binomial = |n: usize, r: usize| -> Result<f64> {
+        BINOMIAL
+            .get(n)
+            .and_then(|row| row.get(r))
+            .copied()
+            .ok_or_else(|| {
+                SolidError::invalid_input(OP_EVAL, "derivative order past the binomial table")
+            })
+    };
+    // N^(i,j) of N = Bu x Bv
+    let numerator = |i: usize, j: usize| -> Result<Vec3> {
+        let mut sum = Vec3::new(0.0, 0.0, 0.0);
+        for a in 0..=i {
+            for b in 0..=j {
+                let term = d(1 + a, b)?.cross(d(i - a, 1 + j - b)?);
+                sum += (binomial(i, a)? * binomial(j, b)?) * term;
+            }
+        }
+        Ok(sum)
+    };
+    // G^(i,j), oriented as the normal inside the domain
+    let g = |i: usize, j: usize| -> Result<Vec3> {
+        let (ni, nj, over) = if across_u {
+            (i + 1, j, i + 1)
+        } else {
+            (i, j + 1, j + 1)
+        };
+        let over = f64::from(u32::try_from(over).unwrap_or(u32::MAX));
+        Ok((sign / over) * numerator(ni, nj)?)
+    };
+
+    let cond_uv = (only_upper_half && hod >= 2) || (!only_upper_half && hu >= 1 && hv >= 1);
+
+    let c = g(0, 0)?;
+    let m_len = c.length();
+    if m_len < EFF_ZERO {
+        return Err(SolidError::surface(OP_EVAL, SurfaceFailure::NoNormal));
+    }
+    let n = c / m_len;
+    put(out, 0, d(0, 0)? + offset_distance * n)?;
+
+    let zero = Vec3::new(0.0, 0.0, 0.0);
+    let (mut cu, mut cv) = (zero, zero);
+    let (mut mu, mut mv) = (0.0, 0.0);
+    let (mut nu, mut nv, mut nuu, mut nuv, mut nvv) = (zero, zero, zero, zero, zero);
+    if hod >= 1 {
+        cu = g(1, 0)?;
+        mu = n.dot(cu);
+        nu = (cu - mu * n) / m_len;
+        cv = g(0, 1)?;
+        mv = n.dot(cv);
+        nv = (cv - mv * n) / m_len;
+    }
+    if hu >= 1 {
+        put(out, hv + 1, d(1, 0)? + offset_distance * nu)?;
+    }
+    if hv >= 1 {
+        put(out, 1, d(0, 1)? + offset_distance * nv)?;
+    }
+    if hod >= 2 {
+        let cuu = g(2, 0)?;
+        let muu = (cu.dot(cu) + c.dot(cuu) - mu * mu) / m_len;
+        nuu = (cuu - 2.0 * mu * nu - muu * n) / m_len;
+        let cuv = g(1, 1)?;
+        let muv = (cu.dot(cv) + c.dot(cuv) - mu * mv) / m_len;
+        nuv = (cuv - mu * nv - mv * nu - muv * n) / m_len;
+        let cvv = g(0, 2)?;
+        let mvv = (cv.dot(cv) + c.dot(cvv) - mv * mv) / m_len;
+        nvv = (cvv - 2.0 * mv * nv - mvv * n) / m_len;
+    }
+    if hu >= 2 {
+        put(out, 2 * (hv + 1), d(2, 0)? + offset_distance * nuu)?;
+    }
+    if cond_uv {
+        put(out, hv + 2, d(1, 1)? + offset_distance * nuv)?;
+    }
+    if hv >= 2 {
+        put(out, 2, d(0, 2)? + offset_distance * nvv)?;
+    }
+    Ok(())
+}
+
 /// `lHighestOffsetDeriv`: the highest total order an evaluation asks for (`None` on
 /// overflow, which upstream wraps).
 fn highest_offset_deriv(hu: usize, hv: usize, only_upper_half: bool) -> Option<usize> {
@@ -1737,6 +1862,55 @@ impl OffsetSurface {
                 put(out, 3, extrapolate(3)?)?;
             }
             return Ok(());
+        }
+
+        // A simple evaluation on a collapsed boundary of the base (a pole) takes the limit
+        // from inside the domain (#13610). The collapsed side is read from the base's
+        // derivatives, not the record, since the record can name the other side at a
+        // corner. Orders past MAX_DERIVATIVE, or a point where both or neither side
+        // qualifies, keep the path below.
+        let on = domain.point_boundaries(uv, EFF_ZERO);
+        if do_eval_simple
+            && !use_ext
+            && self.singularities & on != 0
+            && hod + 2 <= crate::nurbs::math::MAX_DERIVATIVE
+            && bu.cross(bv).length() < tol
+        {
+            let mut constant_along_v = true;
+            let mut constant_along_u = true;
+            for order in 1..=hb {
+                constant_along_v &= d(0, order)?.length() < tol;
+                constant_along_u &= d(order, 0)?.length() < tol;
+            }
+            let u_side_sign = match on & (SS_UMIN | SS_UMAX) {
+                SS_UMIN if constant_along_v => Some(1.0),
+                SS_UMAX if constant_along_v => Some(-1.0),
+                _ => None,
+            };
+            let v_side_sign = match on & (SS_VMIN | SS_VMAX) {
+                SS_VMIN if constant_along_u => Some(1.0),
+                SS_VMAX if constant_along_u => Some(-1.0),
+                _ => None,
+            };
+            let across = match (u_side_sign, v_side_sign) {
+                (Some(sign), None) => Some((true, sign)),
+                (None, Some(sign)) => Some((false, sign)),
+                _ => None,
+            };
+            if let Some(across) = across {
+                return collapsed_boundary_limit(
+                    k,
+                    surface,
+                    uv,
+                    hod,
+                    [hu, hv],
+                    [base_u_side, base_v_side],
+                    only_upper_half,
+                    across,
+                    offset_distance,
+                    out,
+                );
+            }
         }
 
         // the base normal's numerator N = Bu x Bv
@@ -3767,6 +3941,205 @@ mod tests {
     fn offset(d: f64) -> OffsetSurface {
         let k = Kernel::default();
         OffsetSurface::new(&k, d, plane(), true, crate::geom::extent2d::SS_NONE).unwrap()
+    }
+
+    /// #13610's dome: a quadratic net whose first row is the point (0, 0, 1), offset by 0.2.
+    /// Indexed `[u][v]`; its pole is the u = 0 row.
+    const DOME_13610_ROWS: [[[f64; 3]; 4]; 4] = [
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [-0.0, 0.0, 1.0],
+            [-0.0, 0.0, 1.0],
+        ],
+        [
+            [0.3333333333333333, 0.0, 0.8888888888888888],
+            [0.16666666666666669, 0.28867513459481287, 0.8888888888888888],
+            [
+                -0.16666666666666657,
+                0.28867513459481287,
+                0.8888888888888888,
+            ],
+            [
+                -0.3333333333333333,
+                4.082155997157844e-17,
+                0.8888888888888888,
+            ],
+        ],
+        [
+            [0.6666666666666666, 0.0, 0.5555555555555556],
+            [0.33333333333333337, 0.5773502691896257, 0.5555555555555556],
+            [-0.33333333333333315, 0.5773502691896257, 0.5555555555555556],
+            [
+                -0.6666666666666666,
+                8.164311994315688e-17,
+                0.5555555555555556,
+            ],
+        ],
+        [
+            [1.0, 0.0, 0.0],
+            [0.5000000000000001, 0.8660254037844386, 0.0],
+            [-0.4999999999999998, 0.8660254037844387, 0.0],
+            [-1.0, 1.2246467991473532e-16, 0.0],
+        ],
+    ];
+
+    fn dome_13610_with(rows: &[[[f64; 3]; 4]; 4], singularities: u32) -> OffsetSurface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let w = -f64::MAX;
+        let net = rows
+            .iter()
+            .map(|r| r.iter().map(|&[x, y, z]| CPoint::new(x, y, z, w)).collect())
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+        let nl = NlSurface::new(net, 2, 2, knots.clone(), knots).unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(nl, false));
+        OffsetSurface::new(&Kernel::default(), 0.2, base, true, singularities).unwrap()
+    }
+
+    /// The dome with its pole at u = 0 (`SS_UMIN`).
+    fn dome_13610() -> OffsetSurface {
+        dome_13610_with(&DOME_13610_ROWS, SS_UMIN)
+    }
+
+    /// The dome with its rows reversed: the pole at u = 1 (`SS_UMAX`).
+    fn dome_13610_reversed() -> OffsetSurface {
+        let mut rows = DOME_13610_ROWS;
+        rows.reverse();
+        dome_13610_with(&rows, SS_UMAX)
+    }
+
+    /// The dome transposed: the pole at v = 0 (`SS_VMIN`).
+    fn dome_13610_transposed() -> OffsetSurface {
+        let rows: [[[f64; 3]; 4]; 4] =
+            std::array::from_fn(|i| std::array::from_fn(|j| DOME_13610_ROWS[j][i]));
+        dome_13610_with(&rows, SS_VMIN)
+    }
+
+    /// The dome transposed with its columns reversed: the pole at v = 1 (`SS_VMAX`).
+    fn dome_13610_transposed_reversed() -> OffsetSurface {
+        let rows: [[[f64; 3]; 4]; 4] =
+            std::array::from_fn(|i| std::array::from_fn(|j| DOME_13610_ROWS[3 - j][i]));
+        dome_13610_with(&rows, SS_VMAX)
+    }
+
+    /// At a point `uv` of a collapsed boundary, the simple and the exact evaluation give the
+    /// regular point, and their first-order outputs are those of the limit (the values at
+    /// `inside`, next to the boundary).
+    fn assert_collapsed_limit(off: &OffsetSurface, uv: Point2, inside: Point2) {
+        let k = &Kernel::default();
+        let p = off.evaluate_point(k, uv).unwrap();
+        let near = off
+            .evaluate_simple(k, inside, 1, 1, flags(false, false))
+            .unwrap();
+        for m in [
+            off.evaluate_simple(k, uv, 1, 1, flags(false, false))
+                .unwrap(),
+            off.evaluate(k, uv, 1, 1, flags(false, false)).unwrap(),
+        ] {
+            assert!(
+                (p - m[0][0]).length() < 1e-12,
+                "the point moved: {:?} vs {p:?}",
+                m[0][0]
+            );
+            for (i, j) in [(1, 0), (0, 1), (1, 1)] {
+                assert!(
+                    (m[i][j] - near[i][j]).length() < 1e-4,
+                    "({i},{j}) not the limit: {:?} vs {:?}",
+                    m[i][j],
+                    near[i][j]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn issue_13610_simple_offset_derivatives_at_a_collapsed_boundary_are_the_limits() {
+        let k = &Kernel::default();
+        let off = dome_13610();
+        let uv = Point2::new(0.0, 0.5);
+        for m in [
+            off.evaluate_simple(k, uv, 1, 1, flags(false, false))
+                .unwrap(),
+            off.evaluate(k, uv, 1, 1, flags(false, false)).unwrap(),
+        ] {
+            assert!(
+                (m[0][1].x + 0.248_868_406_735_302_2).abs() < 1e-9,
+                "(0,1).x = {}",
+                m[0][1].x
+            );
+            assert!(
+                (m[1][0].y - 1.279_844_877_855_972).abs() < 1e-9,
+                "(1,0).y = {}",
+                m[1][0].y
+            );
+            assert!(
+                (m[1][1].x + 3.100_179_375_173_321).abs() < 1e-8,
+                "(1,1).x = {}",
+                m[1][1].x
+            );
+        }
+        assert_collapsed_limit(&off, uv, Point2::new(1e-6, 0.5));
+    }
+
+    #[test]
+    fn issue_13610_limit_at_the_pole_on_the_upper_u_side() {
+        let off = dome_13610_reversed();
+        assert_collapsed_limit(&off, Point2::new(1.0, 0.5), Point2::new(1.0 - 1e-6, 0.5));
+    }
+
+    #[test]
+    fn issue_13610_limit_at_the_pole_on_the_lower_v_side() {
+        let off = dome_13610_transposed();
+        assert_collapsed_limit(&off, Point2::new(0.5, 0.0), Point2::new(0.5, 1e-6));
+    }
+
+    #[test]
+    fn issue_13610_limit_at_the_pole_on_the_upper_v_side() {
+        let k = &Kernel::default();
+        let off = dome_13610_transposed_reversed();
+        let uv = Point2::new(0.5, 1.0);
+        let inside = Point2::new(0.5, 1.0 - 1e-6);
+        assert_collapsed_limit(&off, uv, inside);
+        // the second-order entries, with the upper-half flags that keep the order at two
+        let m = off
+            .evaluate_simple(k, uv, 2, 2, flags(false, true))
+            .unwrap();
+        let near = off.evaluate(k, inside, 2, 2, flags(false, true)).unwrap();
+        for (i, j) in [(2, 0), (0, 2)] {
+            assert!(
+                (m[i][j] - near[i][j]).length() <= 1e-4 * (1.0 + near[i][j].length()),
+                "({i},{j}) not the limit: {:?} vs {:?}",
+                m[i][j],
+                near[i][j]
+            );
+        }
+    }
+
+    /// At a corner the record can name the side that is not collapsed: the collapsed side is
+    /// read from the base, and the limit is the same.
+    #[test]
+    fn issue_13610_collapsed_side_at_a_corner_is_read_from_the_base() {
+        let off = dome_13610_with(&DOME_13610_ROWS, SS_VMIN);
+        assert_collapsed_limit(&off, Point2::new(0.0, 0.0), Point2::new(1e-6, 0.0));
+        let off = dome_13610_with(&DOME_13610_ROWS, SS_UMIN | SS_VMIN);
+        assert_collapsed_limit(&off, Point2::new(0.0, 0.0), Point2::new(1e-6, 0.0));
+    }
+
+    /// A third-order limit needs base derivatives of order 5, past the evaluator's largest
+    /// order: the request keeps the path it had (a success; its derivatives at the pole are
+    /// not the limits, #13610 stays open for them) instead of failing.
+    #[test]
+    fn issue_13610_third_order_request_at_a_pole_keeps_its_status() {
+        let k = &Kernel::default();
+        let off = dome_13610();
+        let uv = Point2::new(0.0, 0.5);
+        let m = off
+            .evaluate_simple(k, uv, 3, 0, flags(false, false))
+            .unwrap();
+        assert!((m[0][0] - off.evaluate_point(k, uv).unwrap()).length() < 1e-12);
     }
 
     #[test]
