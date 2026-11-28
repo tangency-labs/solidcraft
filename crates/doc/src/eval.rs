@@ -16972,6 +16972,37 @@ fn replay(
             }
             continue;
         }
+        // A Draft repeats at the copied faces of the body they lie on, about the copied neutral
+        // plane and pull direction (#18048).
+        if let FeatureKind::Draft { faces, angle, neutral, pull, body } = &src.kind {
+            if let Some(batch) = pending.take() {
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
+            }
+            let a = val(vals, angle, Kind::Angle)?;
+            let pl = doc.resolve_plane_in(vals, neutral, 0, src.component, Some(st))?;
+            let picked: Vec<Vec3> = crate::plain(faces);
+            let picks = PickFrames::new(doc, st, own, src);
+            let named = |b: &ModelBody, q: Vec3| body.as_ref().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
+            for m in mats {
+                let (m, on) = match picked.first() {
+                    Some(p) => picks.copy(st, m, *p, named)?,
+                    None => (*m, None),
+                };
+                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(&m, *p)).collect();
+                let i = match on {
+                    Some(i) => i,
+                    None => body_at(st, body, &moved)?,
+                };
+                let neutral = placed_plane(&m, &pl)?;
+                let pull = crate::apply_vector(&m, pull.0);
+                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+                let nb = Traced::step(kernel::draft(&mb.body, &moved, &neutral, pull, a)?, &[&mb.traced()]);
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = mb.remade(nb);
+                }
+            }
+            continue;
+        }
         // A moved copy is copied again as a body: each instance is the copy the Move made,
         // placed by the pattern (#5931). Frame members are too: each instance is every member
         // the feature made, as it is here, placed by the pattern.
@@ -17203,6 +17234,7 @@ fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> 
             (body.as_deref(), st.blend_edges.get(&src.id).and_then(|e| e.first().copied()).or(edges.first().map(|e| e.0)))
         }
         FeatureKind::OffsetFace { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
+        FeatureKind::Draft { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
         FeatureKind::Hole { position, points: None, .. } => (
             match src.participants.as_slice() {
                 [one] if one != "*" => Some(one.as_str()),
@@ -17422,7 +17454,9 @@ enum Tapped {
 #[path = "eval_thread.rs"]
 mod thread;
 use thread::thread_on;
-pub use thread::{ThreadInfo, metric_thread_sizes, parse_metric_thread, suggested_thread, suggested_thread_in};
+pub use thread::{
+    THREAD_OFFSET_NEGATIVE, THREAD_OFFSET_WITH_TIP, ThreadInfo, metric_thread_sizes, parse_metric_thread, suggested_thread, suggested_thread_in,
+};
 
 /// Height above `plane` (along its normal) of the object at `p` as seen from `centre`: the face
 /// there if it is planar and parallel (its plane), else where a ray from `centre` along the
@@ -20301,6 +20335,7 @@ fn eval_feature_kind(
             }
             if !*copy {
                 move_constructions_with(doc, st, bodies, &base_motion, carry, leave);
+                move_threads(st, bodies, &base_motion);
             }
             Ok(())
         }
@@ -20767,6 +20802,23 @@ fn move_turn_line(
 fn lost_turn_line(origin: Vec3, axis: Vec3, why: String, warning: &mut Option<String>) -> Result<(Vec3, Vec3)> {
     append_warning(warning, format!("the edge this turn was picked on was not found ({why}): it turns about where that edge was"));
     Ok((origin, axis))
+}
+
+/// The thread record is the thread's place on the body. A plain move carries the body and would
+/// leave that place behind, so the record is carried by the same motion and stays the thread
+/// feature's. The body transform runs once per listing, so a name listed more than once takes
+/// the motion once for each; a step the motion cannot place leaves the record as it was.
+fn move_threads(st: &mut ModelState, bodies: &[crate::BodyName], m: &Mat) {
+    for t in &mut st.threads {
+        let n = bodies.iter().filter(|name| **name == t.body).count();
+        let mut moved = (n > 0).then(|| t.clone());
+        for _ in 0..n {
+            moved = moved.and_then(|cur| cur.moved(m));
+        }
+        if let Some(moved) = moved.filter(|_| n > 0) {
+            *t = moved;
+        }
+    }
 }
 
 /// Construction axes and points built on bodies a Move moves go with them (#10127): an axis

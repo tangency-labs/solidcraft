@@ -12,6 +12,8 @@ use crate::SolveApp;
 
 /// A host picker answer: a selected path, or `None` when cancelled.
 pub type FilePickerFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
+/// A host picker answer for several files: the selected paths, none when cancelled.
+pub type FilesPickerFuture = Pin<Box<dyn Future<Output = Vec<String>>>>;
 type Completion = Box<dyn FnOnce(&mut SolveApp, Option<String>)>;
 
 type Ready = Box<dyn FnOnce(&mut SolveApp)>;
@@ -85,10 +87,59 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
+    /// Ask for files, several at once (the agent chat's files): the types `extensions` names listed
+    /// under `label`, or any type when it names none. The host's dialog for several, else one file
+    /// as [`Self::pick_file`] asks.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_files(&mut self, label: &str, extensions: &[&str], complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_files.as_ref() {
+            Some(pick) => {
+                let future = pick(label, extensions);
+                self.begin_file_task(future, complete);
+            }
+            None => self.pick_file(label, extensions, move |app, path| complete(app, path.into_iter().collect())),
+        }
+    }
+
+    /// Ask for folders, several at once (the agent chat's files): the host's dialog for several,
+    /// else one as [`Self::pick_folder`] asks.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_folders(&mut self, complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_folders.as_ref() {
+            Some(pick) => {
+                let future = pick();
+                self.begin_file_task(future, complete);
+            }
+            None => self.pick_folder("", move |app, path| complete(app, path.into_iter().collect())),
+        }
+    }
+
+    /// Ask for files and folders in one dialog, several at once, where the host's dialog can
+    /// (macOS). Without one, the answer is a cancel (the chat then offers files and folders apart).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_files_or_folders(&mut self, complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_files_or_folders.as_ref() {
+            Some(pick) => {
+                let future = pick();
+                self.begin_file_task(future, complete);
+            }
+            None => complete(self, Vec::new()),
+        }
+    }
+
     /// Ask for a folder, starting in `current` (empty: the folder last used): a plugin field's
-    /// Browse button, the document library's folder, or a folder setting. The plugin dialog shows
-    /// Browse only when this service is set. Without a host dialog, the answer is a cancel and
-    /// nothing is changed.
+    /// Browse button, the document library's folder, a folder setting, or one the agent chat
+    /// attaches. The plugin dialog shows Browse only when this service is set. Without a host
+    /// dialog, the answer is a cancel and nothing is changed.
     pub(crate) fn pick_folder(&mut self, current: &str, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;

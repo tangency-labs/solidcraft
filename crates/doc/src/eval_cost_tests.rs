@@ -2534,6 +2534,7 @@ fn marking(p: Vec3) -> FeatureKind {
         face: FacePick(p),
         designation: Some("M6".into()),
         length: None,
+        offset: None,
         modeled: false,
         from: None,
         up_to: None,
@@ -8513,7 +8514,7 @@ fn body_transfer_cache_invalidates_when_destination_component_is_added() {
     assert!(cached.last_recomputed >= 1);
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/726.diff
+// ---- sketch helpers
 
 fn add_circle_sketch(doc: &mut Document, comp: u64, plane: PlaneRef, center: Vec2, radius: f64, id_name: &str) -> u64 {
     let mut sk = Sketch::new();
