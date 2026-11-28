@@ -1641,6 +1641,7 @@ mod tests {
     use crate::boolean::api_brep::boolean_union;
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
+    use crate::math::det;
     use crate::math::{Point3, Vec3};
     use crate::primitive::api_curves::create_line_segment;
     use crate::sweep::api_brep::create_linear_sweep;
@@ -1704,7 +1705,7 @@ mod tests {
             5.0,
         );
         let c = crease_deg.to_radians();
-        let (w, l) = ((c.sin(), c.cos()), (-c.cos(), c.sin()));
+        let (w, l) = ((det::sin(c), det::cos(c)), (-det::cos(c), det::sin(c)));
         let at = |s: f64, t: f64| (s * w.0 + t * l.0, s * w.1 + t * l.1);
         let boss = prism(
             k,
@@ -1736,7 +1737,10 @@ mod tests {
             let c = f64::to_radians(crease_deg);
             let corner = vertex_at(&b, Point3::new(0.0, -25.0, 5.0));
             let far = vertex_at(&b, Point3::new(0.0, 0.0, 5.0));
-            let foot = vertex_at(&b, Point3::new(-15.0 * c.sin(), -15.0 * c.cos(), 5.0));
+            let foot = vertex_at(
+                &b,
+                Point3::new(-15.0 * det::sin(c), -15.0 * det::cos(c), 5.0),
+            );
             let below = vertex_at(&b, Point3::new(0.0, 0.0, 0.0));
             let e = edge_between(&b, corner, far);
             let n = edge_between(&b, far, foot);
@@ -1770,7 +1774,7 @@ mod tests {
                 -crate::topology::vertex::edge_end_tangent(&k, &b, e, true).unwrap()
             };
             let tn = tangent_leaving(&k, &b, n, far).unwrap().unwrap();
-            let off = (-te.dot(tn) / (te.length() * tn.length())).acos();
+            let off = det::acos(-te.dot(tn) / (te.length() * tn.length()));
             assert!((off - c).abs() < 1e-9, "crease {crease_deg}: {off}");
             assert!(te.dot(tn) < 0.0, "crease {crease_deg}");
             let side = edge::edgeuses(&b, e, None, None).unwrap()[0];
@@ -1792,7 +1796,7 @@ mod tests {
         let te = Vec3::new(2.0, 0.0, 0.0);
         let at = |deg: f64| {
             let t = deg.to_radians();
-            Vec3::new(-3.0 * t.cos(), 3.0 * t.sin(), 0.0)
+            Vec3::new(-3.0 * det::cos(t), 3.0 * det::sin(t), 0.0)
         };
         // straight back, and either side of 45 degrees
         assert!(turns_back(te, at(0.0)));
@@ -1819,7 +1823,7 @@ mod tests {
         let te = Vec3::new(2.0, 0.0, 0.0);
         let at = |deg: f64| {
             let t = deg.to_radians();
-            Vec3::new(3.0 * t.cos(), 3.0 * t.sin(), 0.0)
+            Vec3::new(3.0 * det::cos(t), 3.0 * det::sin(t), 0.0)
         };
         // along E, and either side of 45 degrees from it
         assert!(!leaves_off_e(te, at(0.0)));
@@ -1854,7 +1858,7 @@ mod tests {
         let tol = 0.010_001;
         let at = |radius: f64, deg: f64, z: f64| {
             let t = deg.to_radians();
-            Point3::new(radius * t.cos(), radius * t.sin(), z)
+            Point3::new(radius * det::cos(t), radius * det::sin(t), z)
         };
         // rulings, on it and either side of it inside the tolerance, and just past it
         let w = at(1.0, 0.0, 0.0);
@@ -1864,11 +1868,11 @@ mod tests {
         assert!(!cylinder.holds_segment(at(1.0101, 30.0, -2.0), at(1.0101, 30.0, 3.0), tol));
         assert!(!cylinder.holds_segment(at(0.9899, 30.0, -2.0), at(0.9899, 30.0, 3.0), tol));
         // a chord whose ends lie 0.005 out and its middle 0.004 in
-        let half = (0.996_f64 / 1.005).acos().to_degrees();
+        let half = det::acos(0.996_f64 / 1.005).to_degrees();
         assert!(cylinder.holds_segment(at(1.005, -half, 0.0), at(1.005, half, 1.0), tol));
         // the chord on it at W, its ends and midpoint within the tolerance, not between them
         let r = Point3::new(0.950_15, 0.117_314_977_5_f64.sqrt(), 0.0);
-        let off = |p: Point3| (p.x.hypot(p.y) - 1.0).abs();
+        let off = |p: Point3| (det::hypot(p.x, p.y) - 1.0).abs();
         assert!(off(r) <= tol && off(w + (r - w) * 0.5) <= tol);
         assert!(off(w + (r - w) * (5.0 / 12.0)) > 0.0104);
         assert!(!cylinder.holds_segment(w, r, tol));
@@ -1884,18 +1888,18 @@ mod tests {
     /// plane (which tilts it towards or away from nP).
     fn tolerance_tangent(phi: f64, delta: f64, theta: f64) -> (Vec3, Vec3) {
         let n_p = Vec3::new(0.0, 0.0, 1.0);
-        let n_s = Vec3::new(phi.sin(), 0.0, phi.cos());
+        let n_s = Vec3::new(det::sin(phi), 0.0, det::cos(phi));
         let square = Vec3::new(0.0, 1.0, 0.0);
-        let in_plane = Vec3::new(phi.cos(), 0.0, -phi.sin());
-        let off = square * theta.cos() + in_plane * theta.sin();
-        let n_x = n_s * delta.cos() + off * delta.sin();
+        let in_plane = Vec3::new(det::cos(phi), 0.0, -det::sin(phi));
+        let off = square * det::cos(theta) + in_plane * det::sin(theta);
+        let n_x = n_s * det::cos(delta) + off * det::sin(delta);
         (n_p.cross(n_s), -n_p.cross(n_x))
     }
 
     /// `sin phi / (tan delta sqrt(1 + cos² phi))`: at least 1 where every offset direction
     /// keeps N within 45 degrees of antiparallel (the worst case's closed form).
     fn margin(phi: f64, delta: f64) -> f64 {
-        phi.sin() / (delta.tan() * (1.0 + phi.cos() * phi.cos()).sqrt())
+        det::sin(phi) / (det::tan(delta) * (1.0 + det::cos(phi) * det::cos(phi)).sqrt())
     }
 
     /// The offset directions swept: 720 about S's normal.
@@ -1913,7 +1917,7 @@ mod tests {
     #[test]
     fn a_t_tangent_only_within_tolerance_still_turns_back() {
         let (te, tn) = tolerance_tangent(20.0_f64.to_radians(), 0.02, 0.0);
-        let off = (-te.dot(tn) / (te.length() * tn.length())).acos();
+        let off = det::acos(-te.dot(tn) / (te.length() * tn.length()));
         assert!(off > 0.03 && (off - 0.0585).abs() < 1e-3, "{off}");
         assert!(turns_back(te, tn));
         assert!(!turns_back(te, -tn));
@@ -1940,8 +1944,8 @@ mod tests {
         for delta in [0.03_f64, 0.1] {
             let bound = |m: f64| {
                 // sin phi = m tan delta sqrt(1 + cos² phi), solved for sin² phi
-                let t2 = (m * delta.tan()).powi(2);
-                (t2 * 2.0 / (1.0 + t2)).sqrt().asin()
+                let t2 = det::powi(m * det::tan(delta), 2);
+                det::asin((t2 * 2.0 / (1.0 + t2)).sqrt())
             };
             let outside = bound(1.001);
             assert!((margin(outside, delta) - 1.001).abs() < 1e-9);

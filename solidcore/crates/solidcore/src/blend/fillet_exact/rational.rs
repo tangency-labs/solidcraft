@@ -70,6 +70,7 @@
 //!   principal frame. Its coefficients and centred constant follow directly from
 //!   the rotational quadratic form, avoiding cancellation on shallow cones.
 
+use crate::math::det;
 use std::collections::VecDeque;
 
 use super::{BlendQuadric, BlendSpine, ExactBlend, QuadricKind};
@@ -331,7 +332,7 @@ fn contact_of(o: &BlendQuadric, contact: f64, s: &Segment) -> Contact {
         }
         // SM_BQ_CONE (the fork's default): n = ((V - H d) cos^2 a - H d sin^2 a) / (H sin a)
         _ => {
-            let (c, sn) = (o.angle.cos(), o.angle.sin());
+            let (c, sn) = (det::cos(o.angle), det::sin(o.angle));
             let h = dot_const(&v, o.dir);
             let r = v_add(&v, &v_mul(&v_const(o.dir), &h), -1.0);
             let n = v_add(&v_scale(&r, c * c), &v_mul(&v_const(o.dir), &h), -sn * sn);
@@ -451,7 +452,7 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
         QuadricKind::Sphere => (normal, 1.0, 1.0, q.radius * q.radius),
         QuadricKind::Cylinder => (q.dir.unitize()?, 1.0, 0.0, q.radius * q.radius),
         QuadricKind::Cone => {
-            let (sin, cos) = q.angle.sin_cos();
+            let (sin, cos) = det::sin_cos(q.angle);
             (q.dir.unitize()?, cos * cos, -sin * sin, 0.0)
         }
         _ => {
@@ -596,8 +597,8 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
 /// `sm_ConicPoint`.
 fn conic_point(k: &Conic, t: f64) -> Point3 {
     match k.kind {
-        ConicKind::Ellipse => k.c + k.a1 * t.cos() + k.a2 * t.sin(),
-        ConicKind::Hyperbola => k.c + (k.a1 * t.cosh() + k.a2 * t.sinh()) * k.branch,
+        ConicKind::Ellipse => k.c + k.a1 * det::cos(t) + k.a2 * det::sin(t),
+        ConicKind::Hyperbola => k.c + (k.a1 * det::cosh(t) + k.a2 * det::sinh(t)) * k.branch,
         ConicKind::Parabola => k.c + k.a2 * t + k.a1 * (t * t),
     }
 }
@@ -608,8 +609,8 @@ fn conic_param(k: &Conic, x: Point3) -> f64 {
     let px = d.dot(k.a1) / k.a1.dot(k.a1);
     let py = d.dot(k.a2) / k.a2.dot(k.a2);
     match k.kind {
-        ConicKind::Ellipse => py.atan2(px),
-        ConicKind::Hyperbola => (py * k.branch).asinh(),
+        ConicKind::Ellipse => det::atan2(py, px),
+        ConicKind::Hyperbola => det::asinh(py * k.branch),
         ConicKind::Parabola => py,
     }
 }
@@ -687,7 +688,7 @@ fn ellipse_param_about_axis(
             },
         ));
     }
-    Ok((a1 + mu * w1).atan2(a0 + mu * w0))
+    Ok(det::atan2(a1 + mu * w1, a0 + mu * w0))
 }
 
 /// `sm_ConicSegment`: one rational quadratic segment of the conic from `t0` to `t1`.
@@ -699,12 +700,12 @@ fn conic_segment(k: &Conic, t0: f64, t1: f64) -> Segment {
     let mut w = 1.0;
     let p1 = match k.kind {
         ConicKind::Ellipse => {
-            w = h.cos();
-            k.c + (k.a1 * tm.cos() + k.a2 * tm.sin()) * (1.0 / w)
+            w = det::cos(h);
+            k.c + (k.a1 * det::cos(tm) + k.a2 * det::sin(tm)) * (1.0 / w)
         }
         ConicKind::Hyperbola => {
-            w = h.cosh();
-            k.c + (k.a1 * tm.cosh() + k.a2 * tm.sinh()) * (k.branch / w)
+            w = det::cosh(h);
+            k.c + (k.a1 * det::cosh(tm) + k.a2 * det::sinh(tm)) * (k.branch / w)
         }
         // P(t0) + (t1 - t0)/2 P'(t0)
         ConicKind::Parabola => p0 + (k.a2 + k.a1 * (2.0 * t0)) * h,
@@ -1278,7 +1279,7 @@ fn rational_spine_parts(
                     },
                 ));
             }
-            let c = (w0 / wd).powf(1.0 / d as f64);
+            let c = det::powf(w0 / wd, 1.0 / d as f64);
             let mut ci = prev / w0;
             for i in 0..=d {
                 let wi = at(&sg.w, i) * ci;
@@ -1611,7 +1612,7 @@ mod tests {
             let q = BlendQuadric {
                 kind: QuadricKind::Cylinder,
                 point: Point3::ZERO,
-                dir: Vec3::new(0.0, -tau.sin(), tau.cos()),
+                dir: Vec3::new(0.0, -det::sin(tau), det::cos(tau)),
                 radius: 4.0,
                 angle: 0.0,
                 side: 1.0,
@@ -1630,7 +1631,7 @@ mod tests {
                     assert!(q.distance(x).abs() < 1e-13, "{}", q.distance(x));
                 }
                 let p = conic_point(&kc, t);
-                assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
+                assert!((conic_param(&kc, p) - det::atan2(det::sin(t), det::cos(t))).abs() < 1e-12);
             }
         }
     }
@@ -1695,7 +1696,7 @@ mod tests {
                 &k,
                 placement,
                 60.0,
-                slope.atan().to_degrees(),
+                det::atan(slope).to_degrees(),
                 Some(6.0),
                 false,
                 false,
@@ -1833,7 +1834,7 @@ mod tests {
             tube: 0.0,
         };
         let normal = Vec3::new(1.0, 0.0, 1.0).unitize().unwrap();
-        let near = 2.0_f64.powi(-26);
+        let near = det::powi(2.0_f64, -26);
         for slide in [0.0, 65536.0] {
             let conic = plane_section(Point3::new(near, slide, near), normal, &cone).unwrap();
             assert_eq!(conic.kind, ConicKind::Parabola, "origin slid by {slide}");
@@ -1879,7 +1880,7 @@ mod tests {
                 side: 1.0,
                 tube: 0.0,
             };
-            for (q, radius) in [(cylinder, 4.0), (cone, 5.0 * 0.3_f64.tan())] {
+            for (q, radius) in [(cylinder, 4.0), (cone, 5.0 * det::tan(0.3_f64))] {
                 let kc = plane_section(plane_point, normal, &q).unwrap();
                 assert_eq!(kc.kind, ConicKind::Ellipse, "{dx:e} {dz:e}");
                 assert!((kc.a1.length() - radius).abs() < 1e-9, "{dx:e} {dz:e}");
@@ -1905,7 +1906,7 @@ mod tests {
     #[test]
     fn a_point_of_the_face_reads_where_its_balls_centre_lies_on_the_spine_ellipse() {
         let tau = 0.7f64;
-        let axis = Vec3::new(0.0, tau.sin(), tau.cos());
+        let axis = Vec3::new(0.0, det::sin(tau), det::cos(tau));
         let e1 = Vec3::new(1.0, 0.0, 0.0);
         let e2 = axis.cross(e1);
         let face = BlendQuadric {
@@ -1926,7 +1927,7 @@ mod tests {
             assert_eq!(kc.kind, ConicKind::Ellipse);
             for i in 0..12 {
                 let phi = 0.3 + 0.5 * f64::from(i);
-                let radial = e1 * phi.cos() + e2 * phi.sin();
+                let radial = e1 * det::cos(phi) + e2 * det::sin(phi);
                 // a point of the face 3 along the axis from the plane, and its ball's centre
                 // moved along the axis onto the plane
                 let x = axis * 3.0 + radial;
@@ -1934,7 +1935,7 @@ mod tests {
                 let on_plane = centre - axis * ((centre - at).dot(normal) / axis.dot(normal));
                 let truth = conic_param(&kc, on_plane);
                 let read = ellipse_param_about_axis(&kc, at, normal, &q, &face, x).unwrap();
-                let off = (read - truth).sin().abs() + (1.0 - (read - truth).cos());
+                let off = det::sin(read - truth).abs() + (1.0 - det::cos(read - truth));
                 assert!(
                     off < 1e-12,
                     "ball {ball} phi {phi}: read {read} truth {truth}"
@@ -2223,8 +2224,8 @@ mod tests {
         let b = cyl(Point3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 1.5);
         let node = Point3::new(0.0, 3.5, 0.0);
         let on = |phi: f64| {
-            let y = 2.0 + 1.5 * phi.cos();
-            Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * phi.sin())
+            let y = 2.0 + 1.5 * det::cos(phi);
+            Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * det::sin(phi))
         };
         let arc = nodal_quartic(
             &a,
@@ -2276,8 +2277,8 @@ mod tests {
                 let origin = Point3::new(7.0, -4.0, 2.0) * size;
                 let rotate = |v: Vec3| {
                     Vec3::new(
-                        angle.cos() * v.x - angle.sin() * v.y,
-                        angle.sin() * v.x + angle.cos() * v.y,
+                        det::cos(angle) * v.x - det::sin(angle) * v.y,
+                        det::sin(angle) * v.x + det::cos(angle) * v.y,
                         v.z,
                     )
                 };
@@ -2299,8 +2300,12 @@ mod tests {
                     );
                     let node = origin + rotate(Vec3::new(0.0, r, 0.0)) * size;
                     let from_node = |phi: f64| {
-                        let y = r - rho + rho * phi.cos();
-                        rotate(Vec3::new((r * r - y * y).sqrt(), y - r, rho * phi.sin())) * size
+                        let y = r - rho + rho * det::cos(phi);
+                        rotate(Vec3::new(
+                            (r * r - y * y).sqrt(),
+                            y - r,
+                            rho * det::sin(phi),
+                        )) * size
                     };
                     for (first, second) in [(a, b), (b, a)] {
                         for reversed in [false, true] {
@@ -2357,16 +2362,16 @@ mod tests {
             ..BlendQuadric::default()
         };
         let cylinder_sphere = |phi: f64| {
-            let x = 2.0 * phi.cos();
-            Point3::new(x, 2.0 * phi.sin(), (8.0 - 4.0 * x).sqrt())
+            let x = 2.0 * det::cos(phi);
+            Point3::new(x, 2.0 * det::sin(phi), (8.0 - 4.0 * x).sqrt())
         };
         let cone_sphere = |z: f64| {
             let x = -0.5 * z * z + 3.0 * z - 2.0;
             Point3::new(x, (z * z - x * x).sqrt(), z)
         };
         let cylinder_cone = |phi: f64| {
-            let x = 1.0 + 2.0_f64.sqrt() * phi.cos();
-            let z = 3.0 + 2.0_f64.sqrt() * phi.sin();
+            let x = 1.0 + 2.0_f64.sqrt() * det::cos(phi);
+            let z = 3.0 + 2.0_f64.sqrt() * det::sin(phi);
             Point3::new(x, (z * z - x * x).sqrt(), z)
         };
         let cone_cone = |t: f64| {
@@ -2508,7 +2513,7 @@ mod tests {
                 Cone::create_canonical_with_semi_angle(
                     k,
                     &frame,
-                    q.angle.tan(),
+                    det::tan(q.angle),
                     q.angle * 180.0 / PI,
                     Some(6.0),
                     false,

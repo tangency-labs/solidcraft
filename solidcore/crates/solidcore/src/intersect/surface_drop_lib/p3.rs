@@ -5214,7 +5214,7 @@ mod tests {
             let p = uv.evaluate_point(&k, t).unwrap();
             let c = curve.evaluate_point(&k, t).unwrap();
             assert!(
-                (p.x - c.x).hypot(p.y - c.y) <= tol,
+                det::hypot(p.x - c.x, p.y - c.y) <= tol,
                 "at {t}: uv {p:?}, curve {c:?}"
             );
         }

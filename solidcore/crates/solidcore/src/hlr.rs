@@ -1756,7 +1756,7 @@ fn classify_track(t: &Track, ctx: &Ctx, shadows: &ShadowIndex) -> Result<Vec<Pie
     // box is not small.
     let screen_span = |range: [f64; 2]| {
         let (lo, hi) = screen_box(c, range, p, view);
-        let d = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+        let d = det::hypot(hi[0] - lo[0], hi[1] - lo[1]);
         d.is_finite().then_some(d)
     };
     let tiny = |range: [f64; 2]| screen_span(range).is_some_and(|d| d <= tol);

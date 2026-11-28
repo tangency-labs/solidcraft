@@ -82,6 +82,7 @@ use crate::case::CaseContext;
 use crate::cases::contract;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Highest directional derivative order a case may ask for.
 const MAX_DIR_DERIV: usize = 7;
@@ -967,7 +968,7 @@ fn gen_uv_near(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
         return [u, v];
     }
     let off = |rng: &mut Rng, lo: f64, hi: f64| -> f64 {
-        let w = (hi - lo) * 10f64.powf(rng.uniform(-6.0, -0.7));
+        let w = (hi - lo) * det::powf(10f64, rng.uniform(-6.0, -0.7));
         if rng.chance(0.5) {
             lo - w
         } else {
@@ -1162,7 +1163,7 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
                 v,
                 ivl: rng.chance(0.5).then(|| {
                     // sometimes just inside a domain end (ContainsValue has no tolerance)
-                    let near = |rng: &mut Rng, x: f64| x + (b - a) * 10f64.powf(rng.uniform(-14.0, -11.0));
+                    let near = |rng: &mut Rng, x: f64| x + (b - a) * det::powf(10f64, rng.uniform(-14.0, -11.0));
                     match rng.below(5) {
                         0 => [near(rng, a), a + (b - a) * rng.uniform(0.2, 0.8)],
                         1 => [a + (b - a) * rng.uniform(0.2, 0.8), b - (near(rng, a) - a)],

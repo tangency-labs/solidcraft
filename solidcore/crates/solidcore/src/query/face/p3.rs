@@ -827,7 +827,7 @@ fn cone_tight_box_complete(
         let a = rx.dot(dir);
         let b = ry.dot(dir);
         if a * a + b * b > 0.0 {
-            let base = b.atan2(a).to_degrees();
+            let base = det::atan2(b, a).to_degrees();
             for shift in [0.0, 180.0] {
                 let mut deg = base + shift;
                 // Normalize into [u_lo, u_lo + 360).
@@ -883,7 +883,7 @@ fn cone_tight_box_complete(
         };
         if !apex.is_cylinder {
             let v_apex =
-                -cone.base_radius / (cone.semi_angle_deg * std::f64::consts::PI / 180.0).tan();
+                -cone.base_radius / det::tan(cone.semi_angle_deg * std::f64::consts::PI / 180.0);
             if !v_apex.is_finite() {
                 return Ok(false);
             }
@@ -5876,9 +5876,9 @@ mod tests {
             create_cone, create_cylinder, create_partial_cone, create_partial_cylinder,
         };
         let mut k = Kernel::default();
-        let c30 = (30.0_f64.to_radians()).cos();
-        let s30 = (30.0_f64.to_radians()).sin();
-        let c120 = (120.0_f64.to_radians()).cos();
+        let c30 = det::cos(30.0_f64.to_radians());
+        let s30 = det::sin(30.0_f64.to_radians());
+        let c120 = det::cos(120.0_f64.to_radians());
         let cases: [(&str, Brep, [f64; 6]); 5] = [
             (
                 "full cone with apex",

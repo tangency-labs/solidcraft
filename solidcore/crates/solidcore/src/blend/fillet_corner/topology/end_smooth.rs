@@ -26,6 +26,7 @@ use crate::error::{EntityRef, Result};
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Vec2, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::edge_closest_point;
@@ -112,7 +113,7 @@ fn end_cap(k: &Kernel, target: &mut Brep, at: &EndAt) -> Result<Vec3> {
         .unitize()?;
     let turn = n0.angle_between(n1)?;
     // the rails' distance from the blended edge at the vertex
-    let reach = at.radius * (turn / 2.0).tan();
+    let reach = at.radius * det::tan(turn / 2.0);
 
     let mut held: Vec<Vec3> = Vec::new();
     for face in at.faces {
@@ -217,7 +218,7 @@ fn is_crease_at(
         return Ok(false);
     };
     let off = b1.dot(n0).abs().max(b0.dot(n1).abs());
-    Ok(off.asin() > angle_rad)
+    Ok(det::asin(off) > angle_rad)
 }
 
 /// Why a blended edge use at a smooth vertex without a face is the kernel's fault.
@@ -321,7 +322,7 @@ impl FilletCorner {
             radius,
             crease_rad,
             tol_3d: self.approx_tol_3d,
-            tangent_cos: self.tangency_tol_radians.cos(),
+            tangent_cos: det::cos(self.tangency_tol_radians),
         };
         let normal = end_cap(k, target, &at)?;
         let mut x = if normal.x.abs() < 0.9 {

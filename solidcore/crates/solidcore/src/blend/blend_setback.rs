@@ -117,6 +117,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{
@@ -1053,7 +1054,7 @@ pub fn distances(faces: &[Face], edges: &[Edge]) -> core::result::Result<Setback
                 el_ref(faces, f0)?.normal.dot(el_ref(faces, f1)?.normal),
             ),
         );
-        *el_mut(&mut rail, i)? = e.radius * (0.5 * cos.acos()).tan();
+        *el_mut(&mut rail, i)? = e.radius * det::tan(0.5 * det::acos(cos));
     }
     let mut least = vec![0.0; le];
     for f in 0..lf {
@@ -1716,7 +1717,7 @@ fn standard_form_across(
     let l2 = ((w0[2] * w0[0] - w0[1] * w0[1]) / (w0[0] * w0[0])
         - (wq[2] * wq[0] - wq[1] * wq[1]) / (wq[0] * wq[0]))
         / qf;
-    let c = (w0[0] / wq[0]).powf(1.0 / qf);
+    let c = det::powf(w0[0] / wq[0], 1.0 / qf);
     let (c1, c2) = (c * l1, c * (l2 + l1 * l1));
     // c^j, c^(j - 1), c^(j - 2) (the last two only where j reaches them: their factors are 0
     // below)
@@ -1750,7 +1751,7 @@ fn row_middle(row: &[Hom]) -> Result<Hom> {
     let q = row.len().checked_sub(1).ok_or_else(past_table)?;
     let mut m = HOM_ZERO;
     for (j, h) in row.iter().enumerate() {
-        m = axpy(&m, binomial(q, j)? / 2.0_f64.powf(q as f64), h);
+        m = axpy(&m, binomial(q, j)? / det::powf(2.0_f64, q as f64), h);
     }
     Ok(m)
 }
@@ -2608,8 +2609,8 @@ fn fill_hole_with(
     let bs: Vec<Point2> = (0..n)
         .map(|m| {
             Point2::new(
-                (2.0 * PI * m as f64 / nf).cos(),
-                (2.0 * PI * m as f64 / nf).sin(),
+                det::cos(2.0 * PI * m as f64 / nf),
+                det::sin(2.0 * PI * m as f64 / nf),
             )
         })
         .collect();
@@ -2738,7 +2739,7 @@ fn fill_hole_with(
         let q = h0.len() - 1;
         let mut mh = HOM_ZERO;
         for (c, hc) in h0.iter().enumerate() {
-            mh = axpy(&mh, binomial(q, c)? / 2.0_f64.powf(q as f64), hc);
+            mh = axpy(&mh, binomial(q, c)? / det::powf(2.0_f64, q as f64), hc);
         }
         let mid = Point3::new(mh[0] / mh[3], mh[1] / mh[3], mh[2] / mh[3]);
         let side = if (mid - face.point).dot(face.normal) < 0.0 {
@@ -3443,7 +3444,9 @@ mod tests {
         coef.iter()
             .enumerate()
             .map(|(i, c)| {
-                c * binomial(n, i).unwrap() * s.powi(i as i32) * (1.0 - s).powi((n - i) as i32)
+                c * binomial(n, i).unwrap()
+                    * det::powi(s, i as i32)
+                    * det::powi(1.0 - s, (n - i) as i32)
             })
             .sum()
     }

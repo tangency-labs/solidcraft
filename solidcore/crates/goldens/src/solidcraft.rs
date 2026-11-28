@@ -53,6 +53,7 @@ use solidcore::SolidError;
 
 use crate::ssi::glob_match;
 use crate::HarnessError;
+use solidcore::math::det;
 
 /// Relative accuracy passed to `SmApiBrepComputeVolume`: its finest (upstream clamps
 /// to `[1e-8, 1e-1]`). The cases check volumes to absolute tolerances as tight as
@@ -1296,7 +1297,7 @@ fn cylinder(k: &mut Kernel, origin: P3, axis: P3, radius: f64, height: f64) -> R
             Some(TransformObject::Brep(&mut b)),
             p3(origin),
             turn,
-            cos.acos().to_degrees(),
+            det::acos(cos).to_degrees(),
         )
         .map_err(|e| solid(&e))?;
     }
@@ -1499,7 +1500,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 let (u, v) = match path.first() {
                     Some(Seg::Line { from, to }) => (to[0] - from[0], to[1] - from[1]),
                     Some(Seg::Arc { start_deg, .. }) => {
-                        let (s, c) = start_deg.to_radians().sin_cos();
+                        let (s, c) = det::sin_cos(start_deg.to_radians());
                         (-s, c)
                     }
                     _ => return Err(Run::Error("pipe path starts with no line or arc".into())),
@@ -1529,7 +1530,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                         Some(TransformObject::Curve(&mut circle)),
                         Vec3::new(0.0, 0.0, 0.0),
                         axis,
-                        cos.acos().to_degrees(),
+                        det::acos(cos).to_degrees(),
                     )
                     .map_err(|e| solid(&e))?;
                 }

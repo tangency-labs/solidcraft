@@ -20,6 +20,7 @@ use solidcore::curve::curve::p2::Curve;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::math::EFF_ZERO;
 use solidcore::Kernel;
+use solidcore::math::det;
 
 // ---- exact arithmetic ------------------------------------------------------------------
 
@@ -368,11 +369,11 @@ fn polyline(points: &[[f64; 3]]) -> Vec<Curve> {
 #[test]
 fn plane_normals_of_open_chains_certify() {
     let k = Kernel::default();
-    let u = Vec3::new(0.3_f64.cos(), 0.3_f64.sin(), 0.0);
+    let u = Vec3::new(det::cos(0.3_f64), det::sin(0.3_f64), 0.0);
     let v = Vec3::new(
-        -0.3_f64.sin() * 0.7_f64.cos(),
-        0.3_f64.cos() * 0.7_f64.cos(),
-        0.7_f64.sin(),
+        -det::sin(0.3_f64) * det::cos(0.7_f64),
+        det::cos(0.3_f64) * det::cos(0.7_f64),
+        det::sin(0.7_f64),
     );
     let mut chains = vec![polyline(&[
         [0.0, 0.0, 0.0],
@@ -427,7 +428,7 @@ fn plane_normals_of_open_chains_certify() {
         [16.0, -16.0, 8.0],
         [0.0, -8.0, 16.0],
         [-16.0, 0.0, -16.0],
-        [-8.0, -8.0 + 2f64.powi(-32), 8.0],
+        [-8.0, -8.0 + det::powi(2f64, -32), 8.0],
     ]);
     let n = solidcore::curve::curve::p3::compute_crvs_normal(&k, &skew).unwrap();
     assert_eq!(certify(&k, &skew, Answer::Normal(n)), Cert::UncertainArea);

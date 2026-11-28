@@ -37,6 +37,7 @@ use solidcore::query::poly::{PolyBrep, PolyEdgeId, PolyShellId, PolyVertexId};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Largest radial ring the generator makes.
 const MAX_RING: usize = 16;
@@ -377,7 +378,7 @@ fn fan(shell: usize, n: usize, m: &mut Mesh) {
     m.pts.push([0.0, 0.0, 0.0]);
     for i in 0..n {
         let a = std::f64::consts::TAU * i as f64 / n as f64;
-        m.pts.push([a.cos(), a.sin(), 0.1 * (i % 2) as f64]);
+        m.pts.push([det::cos(a), det::sin(a), 0.1 * (i % 2) as f64]);
     }
     for i in 0..n {
         let j = (i + 1) % n;
@@ -470,8 +471,8 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     }
 
     let s = match rng.below(8) {
-        0 => 10f64.powi(rng.range_i64(-6, -2) as i32),
-        1 => 10f64.powi(rng.range_i64(2, 6) as i32),
+        0 => det::powi(10f64, rng.range_i64(-6, -2) as i32),
+        1 => det::powi(10f64, rng.range_i64(2, 6) as i32),
         _ => rng.uniform(0.5, 4.0),
     };
     let tol = if rng.chance(0.8) { 1e-5 * s.max(1.0) } else { rng.uniform(1e-9, 1e-3) };

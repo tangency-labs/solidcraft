@@ -22,6 +22,7 @@
 
 use crate::blend::blend_corner::ball::ball_triangle_face;
 use crate::eval::{Curve, Curve2, Frame, Surface};
+use crate::math::det;
 use crate::surface::face_surface::record_face;
 use crate::topology::FaceId;
 use crate::{Brep, Kernel, Vec3};
@@ -351,7 +352,7 @@ fn arc_form(centre: V3, radius: f64, p0: V3, p1: V3) -> Option<(Vec<f64>, Vec<[f
     let (a, b) = (sub(p0, centre), sub(p1, centre));
     let x = unit(a)?;
     let y = unit(sub(b, scale(x, dot(b, x))))?;
-    let angle = dot(b, y).atan2(dot(b, x));
+    let angle = det::atan2(dot(b, y), dot(b, x));
     if !(angle > 1e-6 && angle < std::f64::consts::PI - 1e-6) {
         return None;
     }
@@ -368,8 +369,13 @@ fn arc_form(centre: V3, radius: f64, p0: V3, p1: V3) -> Option<(Vec<f64>, Vec<[f
     }
     // two spans of half the turn each
     let half = angle / 2.0;
-    let w = (half / 2.0).cos();
-    let at = |t: f64, r: f64| add(centre, add(scale(x, r * t.cos()), scale(y, r * t.sin())));
+    let w = det::cos(half / 2.0);
+    let at = |t: f64, r: f64| {
+        add(
+            centre,
+            add(scale(x, r * det::cos(t)), scale(y, r * det::sin(t))),
+        )
+    };
     let tip = radius / w;
     Some((
         vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
@@ -960,7 +966,7 @@ pub fn plane_loops_hold(
             let at_shared = |x: [f64; 2]| {
                 shared
                     .iter()
-                    .any(|s| (x[0] - s[0]).hypot(x[1] - s[1]) <= eps)
+                    .any(|s| det::hypot(x[0] - s[0], x[1] - s[1]) <= eps)
             };
             match pb {
                 Piece::Path(b) => {
@@ -1046,7 +1052,7 @@ fn segments_meet(
     let cr = |p: [f64; 2], q: [f64; 2]| p[0] * q[1] - p[1] * q[0];
     let r = [a1[0] - a0[0], a1[1] - a0[1]];
     let s = [b1[0] - b0[0], b1[1] - b0[1]];
-    let (lr, ls) = (r[0].hypot(r[1]), s[0].hypot(s[1]));
+    let (lr, ls) = (det::hypot(r[0], r[1]), det::hypot(s[0], s[1]));
     let denom = cr(r, s);
     if denom.abs() > 1e-12 * lr * ls {
         let w = [b0[0] - a0[0], b0[1] - a0[1]];
@@ -1064,7 +1070,7 @@ fn segments_meet(
             0.0
         };
         let q = [o[0] + t * d[0], o[1] + t * d[1]];
-        (q, (p[0] - q[0]).hypot(p[1] - q[1]))
+        (q, det::hypot(p[0] - q[0], p[1] - q[1]))
     };
     for (p, o, d, l) in [
         (a0, b0, s, ls),

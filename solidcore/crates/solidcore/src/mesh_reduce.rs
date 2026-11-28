@@ -1053,6 +1053,7 @@ fn finalize_repaired_closed_mesh(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn grid(n: u32) -> (Vec<[f64; 3]>, Vec<u32>) {
         let mut positions = Vec::new();
@@ -1530,7 +1531,7 @@ mod tests {
     #[test]
     fn shared_volume_is_translation_stable_and_certifies_each_winding() {
         use crate::math::Vec3;
-        for shift in [0., 2_f64.powi(40)] {
+        for shift in [0., det::powi(2_f64, 40)] {
             let origin = Vec3::new(shift, shift, shift);
             let points = [
                 Vec3::new(shift + 2., shift, shift),

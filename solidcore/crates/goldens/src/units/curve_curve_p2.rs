@@ -50,6 +50,7 @@ use crate::case::CaseContext;
 use crate::cases::contract::{self as contract, Limits};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Most `ApproximateLength` samples a case runs.
 const MAX_SAMPLES: usize = 400;
@@ -1858,8 +1859,8 @@ fn gen_static(rng: &mut Rng) -> Inputs {
                     let th = sweep * (i as f64 / k as f64);
                     let s = sweep / (b - a);
                     [
-                        Vec3::new(cen[0] + r * th.cos(), cen[1] + r * th.sin(), cen[2]),
-                        Vec3::new(-r * s * th.sin(), r * s * th.cos(), 0.0),
+                        Vec3::new(cen[0] + r * det::cos(th), cen[1] + r * det::sin(th), cen[2]),
+                        Vec3::new(-r * s * det::sin(th), r * s * det::cos(th), 0.0),
                     ]
                 } else {
                     match curve

@@ -58,6 +58,7 @@ use solidcore::blend::fillet_section::interval::Ivl;
 use std::collections::BTreeMap;
 use std::ops::{Add, Div, Mul, Sub};
 use std::sync::{Arc, Mutex, OnceLock};
+use solidcore::math::det;
 
 const Z: Ivl = Ivl::new(0.0, 0.0);
 
@@ -545,8 +546,8 @@ const MAX_DEPTH: u32 = 22;
 fn enclose(law: &Law) -> Envelope {
     let len = law.len;
     // `len` a whole number well inside f64's mantissa: every `len * i / 2^n` below is exact
-    assert!(len.fract() == 0.0 && len > 0.0 && len < 2.0_f64.powi(20), "len {len}");
-    let u0 = 2.0_f64.powi(-8);
+    assert!(len.fract() == 0.0 && len > 0.0 && len < det::powi(2.0_f64, 20), "len {len}");
+    let u0 = det::powi(2.0_f64, -8);
     let mut total = Z;
     // the strip u <= u0
     let n_strip = 4096;
@@ -570,7 +571,7 @@ fn enclose(law: &Law) -> Envelope {
     let mut stack: Vec<(f64, f64, f64, f64, u32)> = Vec::new();
     let hs = len / 64.0;
     for j in 1..=8 {
-        let (ua, ub) = (2.0_f64.powi(-j), 2.0_f64.powi(1 - j));
+        let (ua, ub) = (det::powi(2.0_f64, -j), det::powi(2.0_f64, 1 - j));
         let hu = (ub - ua) / 8.0;
         for iu in 0..8 {
             for is in 0..64 {

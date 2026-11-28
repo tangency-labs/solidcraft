@@ -39,6 +39,7 @@ use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::topology::brep::p7::LOOP_GAP_ZONES;
 use crate::topology::edgeuse::p1 as eu1;
@@ -642,11 +643,11 @@ fn seam_point_farthest_from_plane(
     let e1 = (from - centre).unitize().ok()?;
     let w = to - centre;
     let e2 = (w - e1 * w.dot(e1)).unitize().ok()?;
-    let phi = w.dot(e2).atan2(w.dot(e1));
+    let phi = det::atan2(w.dot(e2), w.dot(e1));
     let (a, b) = (plane_normal.dot(e1), plane_normal.dot(e2));
-    let point = |t: f64| centre + (e1 * t.cos() + e2 * t.sin()) * radius;
+    let point = |t: f64| centre + (e1 * det::cos(t) + e2 * det::sin(t)) * radius;
     let distance = |t: f64| plane_normal.dot(point(t) - plane_origin).abs();
-    let peak = b.atan2(a);
+    let peak = det::atan2(b, a);
     let mut best = (0.0, distance(0.0));
     for t in [phi, peak, peak + crate::math::PI, peak - crate::math::PI] {
         if (0.0..=phi).contains(&t) && distance(t) > best.1 {
@@ -1091,12 +1092,12 @@ mod tests {
             Point3::new(0.0, 0.0, 0.0),
         );
         let a = 0.1_f64;
-        let pole = Point3::new(0.0, -a.sin(), a.cos());
+        let pole = Point3::new(0.0, -det::sin(a), det::cos(a));
         let p = seam_point_farthest_from_plane(c, 1.0, Point3::new(1.0, 0.0, 0.0), pole, o, n)
             .expect("the arc is defined");
         assert!(p.distance(pole) < 1e-12, "{p:?}");
         // a seam over the top: from (1, 0, 0) through (0, -1, 0)... to a pole near (-1, 0, 0)
-        let far = Point3::new(-a.cos(), -a.sin(), 0.0);
+        let far = Point3::new(-det::cos(a), -det::sin(a), 0.0);
         let p = seam_point_farthest_from_plane(c, 1.0, Point3::new(1.0, 0.0, 0.0), far, o, n)
             .expect("the arc is defined");
         assert!((n.dot(p - o).abs() - 1.0).abs() < 1e-12, "{p:?}");

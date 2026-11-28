@@ -182,6 +182,7 @@ pub fn hermite_knots(s: &[f64]) -> (Vec<f64>, Vec<usize>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// A Bernstein polynomial's value at t (de Casteljau).
     fn eval(b: &[f64], t: f64) -> f64 {
@@ -206,7 +207,7 @@ mod tests {
         }
         let p = bern_pow(&a, 3);
         for t in [0.0, 0.3, 1.0] {
-            assert!((eval(&p, t) - eval(&a, t).powi(3)).abs() < 1e-13);
+            assert!((eval(&p, t) - det::powi(eval(&a, t), 3)).abs() < 1e-13);
         }
         assert_eq!(bern_pow(&a, 0), vec![1.0]);
         assert!(bern_mul(&[], &a).is_empty());
@@ -223,8 +224,8 @@ mod tests {
                 // the weights are positive (thumbweights below 1)
                 assert!(form.w.iter().all(|&x| x > 0.0));
                 for t in [0.1_f64, 0.4, 0.5, 0.9] {
-                    let a = (1.0 - t).powi(n as i32 + 1);
-                    let b = t.powi(n as i32 + 1);
+                    let a = det::powi(1.0 - t, n as i32 + 1);
+                    let b = det::powi(t, n as i32 + 1);
                     let f = a / (a + b);
                     let p1 = t / (1.0 - w + w * t);
                     let p2 = t * (1.0 - w) / (1.0 - w * t);
@@ -234,11 +235,11 @@ mod tests {
                         let g1 = eval(&form.g[1][k], t) / ww;
                         // T1(1 - p1) has (u - 1)^k = (-p1)^k; T2(p2) has (p2 - 1)^k
                         assert!(
-                            (g0 - f * (-p1).powi(k as i32)).abs() < 1e-13,
+                            (g0 - f * det::powi(-p1, k as i32)).abs() < 1e-13,
                             "{n} {w} {t} {k}"
                         );
                         assert!(
-                            (g1 - (1.0 - f) * (p2 - 1.0).powi(k as i32)).abs() < 1e-13,
+                            (g1 - (1.0 - f) * det::powi(p2 - 1.0, k as i32)).abs() < 1e-13,
                             "{n} {w} {t} {k}"
                         );
                     }

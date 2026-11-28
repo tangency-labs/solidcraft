@@ -20,6 +20,7 @@ use solidcore::primitive::primitive_creation::{
 };
 use solidcore::sweep::topology_sweep::access::SweepAccess;
 use solidcore::topology::{Brep, BrepId, Region, RegionId};
+use solidcore::math::det;
 
 /// Differential runner.
 pub struct Runner;
@@ -322,7 +323,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
 
 /// A generated case near the unit's boundaries: each op, scale `1e-6..1e6`.
 fn generated(rng: &mut Rng) -> (i32, Vec<f64>) {
-    let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
+    let scale = det::powi(10f64, rng.range_i64(-6, 6) as i32);
     let edit = f64::from(rng.below(2) != 0);
     // the frame: origin, an X axis and a Y axis not parallel to it
     let mut f = vec![

@@ -802,6 +802,7 @@ mod tests {
     use super::*;
     use solidcore::nurbs::b_spline_surface::SurfParamType;
     use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::math::det;
 
     /// The torus payload of
     /// `fixtures/surface.surface_p11/analytic-torus-iso-boundary.json`.
@@ -943,7 +944,7 @@ mod tests {
     }
     /// Restricts a scalar quadratic Bernstein polynomial to [a,b], exactly in real arithmetic.
     fn review_restrict_quadratic(p: [f64; 3], a: f64, b: f64) -> [f64; 3] {
-        let value = |t: f64| (1.0 - t).powi(2) * p[0] + 2.0 * t * (1.0 - t) * p[1] + t * t * p[2];
+        let value = |t: f64| det::powi(1.0 - t, 2) * p[0] + 2.0 * t * (1.0 - t) * p[1] + t * t * p[2];
         let start = value(a);
         [
             start,

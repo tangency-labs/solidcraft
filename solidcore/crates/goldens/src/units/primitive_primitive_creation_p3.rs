@@ -35,6 +35,7 @@ use solidcore::sweep::topology_sweep::{
 use solidcore::topology::Brep;
 #[cfg(test)]
 use solidcore::topology::{BrepId, FaceId, Region};
+use solidcore::math::det;
 
 /// Differential runner.
 pub struct Runner;
@@ -686,7 +687,7 @@ impl UnitDiff for Runner {
         }
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-6, 6) as i32);
         let corner = rng.below(3) == 0;
         let mut data = vec![
             f64::from(corner),
@@ -939,7 +940,7 @@ mod moved_rows {
                     .iter()
                     .map(|deg| {
                         let t = deg.to_radians();
-                        centre + Vec3::new(radius * t.cos(), radius * t.sin(), 0.0)
+                        centre + Vec3::new(radius * det::cos(t), radius * det::sin(t), 0.0)
                     })
                     .collect(),
             }

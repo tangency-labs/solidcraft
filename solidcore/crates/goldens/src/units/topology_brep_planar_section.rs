@@ -26,6 +26,7 @@ use solidcore::topology::Brep;
 use solidcore::{Result as SolidResult, SolidError};
 
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The runner of `CreatePlanarSectionCurves` and `SmApiIntersectBrepWithPlane`.
 pub struct Runner;
@@ -567,7 +568,7 @@ impl UnitDiff for Runner {
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         let mut i = Inputs::default();
-        let scale = 10f64.powi(rng.range_i64(-2, 2) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-2, 2) as i32);
         if rng.below(3) == 0 {
             let file = FILES.get(rng.below(FILES.len() as u64) as usize)?;
             i.body = Body::File {
@@ -623,7 +624,7 @@ impl UnitDiff for Runner {
             i.tol = Some(if rng.chance(0.1) {
                 0.0
             } else {
-                10f64.powi(rng.range_i64(-8, -3) as i32)
+                det::powi(10f64, rng.range_i64(-8, -3) as i32)
             });
         }
         if rng.chance(0.2) {

@@ -778,6 +778,7 @@ fn tilt_sin_cos(a: Vec3, b: Vec3) -> Option<(f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// The planar model at r = 1 (generic-blend's Roll-over, the ledge's planar twin): A1
     /// at u = 1, w = -1 (local up = w + 1, side = 1 - u), the wall and the round's other
@@ -882,7 +883,7 @@ mod tests {
     fn off_torus(p: Point3) -> f64 {
         let (dx, dz, h) = (p.x - 1.0, p.z + 1.0, p.y + 1.0);
         let rho = (dx * dx + dz * dz).sqrt();
-        (((rho - 2.0).powi(2) + h * h).sqrt() - 1.0).abs()
+        ((det::powi(rho - 2.0, 2) + h * h).sqrt() - 1.0).abs()
     }
 
     /// A wall within `tol` of touching the round's circle (moved `delta = 5e-10` clear of it,
@@ -987,10 +988,10 @@ mod tests {
         let on_cylinder = |q: [f64; 2]| (norm2(sub2(q, c)) - rb).abs() < 1e-12;
         for (deg, pieces_n) in [(30.0_f64, 2), (90.0, 1)] {
             let t = deg.to_radians();
-            let seam = [c[0] + rb * t.cos(), c[1] + rb * t.sin()];
+            let seam = [c[0] + rb * det::cos(t), c[1] + rb * det::sin(t)];
             let profile = Profile {
                 seam,
-                wall_dir: [-t.sin(), t.cos()],
+                wall_dir: [-det::sin(t), det::cos(t)],
                 round_face: CliffShape::Circle {
                     centre: c,
                     radius: rb,
@@ -1152,7 +1153,7 @@ mod tests {
                 // about the axis: rho, and the height off the centre plane y = -1
                 let (dx, dz, h) = (p.x - 1.0, p.z + 1.0, p.y + 1.0);
                 let rho = (dx * dx + dz * dz).sqrt();
-                let off = ((rho - 2.0).powi(2) + h * h).sqrt() - 1.0;
+                let off = (det::powi(rho - 2.0, 2) + h * h).sqrt() - 1.0;
                 assert!(off.abs() <= target + 1e-12, "{p:?} {off}");
                 // the crease's closed form: sin t = (1 - x) / rho = 1 / rho at x = 0, and
                 // cos p = 2 - rho

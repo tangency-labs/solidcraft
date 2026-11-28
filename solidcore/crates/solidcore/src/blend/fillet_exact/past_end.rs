@@ -12,6 +12,7 @@
 //! Deviations: none (no upstream counterpart). No recursion: the enclosure's subdivision is a
 //! worklist bounded by [`BUDGET`] boxes; past it nothing is proven (no refusal).
 
+use crate::math::det;
 use core::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use super::{BlendQuadric, QuadricKind};
@@ -212,7 +213,7 @@ impl FaceChart {
                 // a box clear of the axis is seen from it within less than a half turn,
                 // spanned by its corners; each corner's angle is taken within half a turn of
                 // the box's middle, which is decided only well inside that half turn
-                let mid = py.mid().atan2(px.mid());
+                let mid = det::atan2(py.mid(), px.mid());
                 let mut arc: Option<Ivl> = None;
                 for (cx, cy) in [
                     (px.lo, py.lo),
@@ -220,7 +221,7 @@ impl FaceChart {
                     (px.hi, py.lo),
                     (px.hi, py.hi),
                 ] {
-                    let mut d = libm(cy.atan2(cx)) - Ivl::from(mid);
+                    let mut d = libm(det::atan2(cy, cx)) - Ivl::from(mid);
                     if d.mid() > PI {
                         d = d - two_pi();
                     } else if d.mid() < -PI {
@@ -313,8 +314,8 @@ fn cos_sin(s: Ivl) -> Option<(Ivl, Ivl)> {
     if !(s.is_finite() && s.hi - s.lo <= FRAC_PI_2 && s.lo >= -9.0 && s.hi <= 9.0) {
         return None;
     }
-    let mut c = libm(s.lo.cos()).hull(libm(s.hi.cos()));
-    let mut n = libm(s.lo.sin()).hull(libm(s.hi.sin()));
+    let mut c = libm(det::cos(s.lo)).hull(libm(det::cos(s.hi)));
+    let mut n = libm(det::sin(s.lo)).hull(libm(det::sin(s.hi)));
     let half = pi() * Ivl::from(0.5);
     for k in -4_i32..=4 {
         let t = Ivl::from(f64::from(k)) * pi();
@@ -364,7 +365,7 @@ fn offset_value(q: &BlendQuadric, dist: f64, c: Box3) -> Option<Ivl> {
         QuadricKind::Cone => {
             // the normal away from the axis is cos(a) radial - sin(a) d: the apex moves back
             // along d by side dist / sin(a) (`BlendQuadric::offset`)
-            let (sa, ca) = (libm(q.angle.sin()), libm(q.angle.cos()));
+            let (sa, ca) = (libm(det::sin(q.angle)), libm(det::cos(q.angle)));
             let back = Ivl::from(q.side * dist) / (sa * dd.sqrt());
             let [a, b, e] = delta(q.point);
             let x = [
@@ -590,8 +591,8 @@ mod tests {
             let (c, s) = cos_sin(Ivl::new(lo, hi)).unwrap();
             for i in 0..=10_000 {
                 let t = lo + (hi - lo) * f64::from(i) / 10_000.0;
-                assert!(c.lo <= t.cos() && t.cos() <= c.hi, "cos {t}");
-                assert!(s.lo <= t.sin() && t.sin() <= s.hi, "sin {t}");
+                assert!(c.lo <= det::cos(t) && det::cos(t) <= c.hi, "cos {t}");
+                assert!(s.lo <= det::sin(t) && det::sin(t) <= s.hi, "sin {t}");
             }
         }
         assert!(cos_sin(Ivl::new(0.0, 2.0)).is_none());
@@ -621,7 +622,7 @@ mod tests {
             panic!("not a cylinder")
         };
         let p = ivec(Vec3::new(x, y, 0.0));
-        idot(p, *v).mid().atan2(idot(p, *u).mid())
+        det::atan2(idot(p, *v).mid(), idot(p, *u).mid())
     }
 
     /// A box clear of the axis has the angle range its corners span, across the turn too.
@@ -630,7 +631,7 @@ mod tests {
         let chart = axis_frame();
         // a box whose angles about the axis run either side of the chart's own half turn
         let back = chart_angle(&chart, -1.0, 0.0);
-        let (bc, bs) = (back.cos(), back.sin());
+        let (bc, bs) = (det::cos(back), det::sin(back));
         let bx = [
             Ivl::new(1.5 * bc - 0.5, 1.5 * bc + 0.5),
             Ivl::new(1.5 * bs - 0.5, 1.5 * bs + 0.5),
@@ -740,8 +741,8 @@ mod tests {
             ..BlendQuadric::default()
         };
         // the point at height 2 on the cone, moved out by 0.25 along its normal
-        let (r, z) = (2.0 * angle.tan(), 2.0);
-        let moved = Point3::new(r + 0.25 * angle.cos(), 0.0, z - 0.25 * angle.sin());
+        let (r, z) = (2.0 * det::tan(angle), 2.0);
+        let moved = Point3::new(r + 0.25 * det::cos(angle), 0.0, z - 0.25 * det::sin(angle));
         assert!(holds(&cone, 0.25, moved));
     }
 }

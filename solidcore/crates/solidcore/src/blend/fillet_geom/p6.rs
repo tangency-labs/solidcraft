@@ -144,6 +144,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -881,7 +882,7 @@ impl FilletBrep {
                     let vec = end_pnt - start_pnt;
                     let angle = vec.angle_between(start_vec)?;
                     if let Some(w) = weights.get_mut(1) {
-                        *w = angle.cos();
+                        *w = det::cos(angle);
                     }
                     BSplineCurve::create_canonical(&CanonicalData {
                         dim: curve_dim,
@@ -4421,7 +4422,7 @@ mod tests {
     /// `(cos w, sin w, 0)`; the fillet lies between them. With offsets `r1`, `r2` along the
     /// unit normals towards the fillet, the centre `m` and the rails `rho_i = m - r_i n_i`.
     fn wedge(w: f64, r1: f64, r2: f64) -> (Point3, Point3) {
-        let (s, c) = w.sin_cos();
+        let (s, c) = det::sin_cos(w);
         let n1 = Vec3::new(0.0, 1.0, 0.0);
         let n2 = Vec3::new(s, -c, 0.0);
         // m . n1 = r1 and m . n2 = r2
@@ -4443,7 +4444,7 @@ mod tests {
                 let w = deg.to_radians();
                 let (rho1, rho2) = wedge(w, r1, r2);
                 let side = fillet_side_at_rail(rho1, Vec3::new(0.0, 0.0, 1.0), rho2).unwrap();
-                let want = r2 * w.sin() / (rho2 - rho1).length();
+                let want = r2 * det::sin(w) / (rho2 - rho1).length();
                 assert!(want > 0.0);
                 assert!(
                     (side.dot(INTO) - want).abs() < 1e-12,
@@ -4472,7 +4473,7 @@ mod tests {
         let pieces = [(0, into), (2, -into)];
         // the face's binormal at the rail, the section leaving at 95 degrees from `into`
         let a = 95.0_f64.to_radians();
-        let face_binormal = into * a.cos() + normal * a.sin();
+        let face_binormal = into * det::cos(a) + normal * det::sin(a);
         assert_eq!(
             inside_piece(face_binormal, &pieces),
             Some(2),

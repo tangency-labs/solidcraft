@@ -57,6 +57,7 @@ use crate::cases::contract::{self as contract, Limits};
 use crate::runner::default_cases;
 use crate::util::assert_reports::put_assert_reports;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2500;
@@ -1104,7 +1105,7 @@ fn gen_transform(rng: &mut Rng) -> OpIn {
         };
     }
     let ang = rng.uniform(0.0, 6.0);
-    let (s, c) = ang.sin_cos();
+    let (s, c) = det::sin_cos(ang);
     let scale = if rng.chance(0.4) {
         if rng.chance(0.5) {
             let f = rng.uniform(0.5, 2.0);

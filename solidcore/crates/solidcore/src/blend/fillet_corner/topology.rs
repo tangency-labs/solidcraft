@@ -47,6 +47,7 @@ mod mixed;
 pub mod mixed_3x2;
 mod swept_turn;
 
+use crate::math::det;
 pub(crate) use ball::BallTopologyEnv;
 
 use crate::blend::fillet_corner::p1::{
@@ -294,7 +295,7 @@ pub(crate) fn cusp_side_edge(
         return Ok(None);
     };
     let tol_deg = crate::math::rad_to_deg(corner.tangency_tol_radians);
-    let cos_tol = corner.tangency_tol_radians.cos();
+    let cos_tol = det::cos(corner.tangency_tol_radians);
     for side in [
         *need(
             (index + total - 1)

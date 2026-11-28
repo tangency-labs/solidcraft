@@ -50,6 +50,7 @@ use super::topology_proto_topology_p1::{
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
@@ -1168,7 +1169,7 @@ fn real_face_script(rng: &mut Rng) -> Script {
         0 => 1.0,
         1 => 1e3,
         2 => 1e-3,
-        _ => 10f64.powf(rng.uniform(-2.0, 2.0)),
+        _ => det::powf(10f64, rng.uniform(-2.0, 2.0)),
     };
     // P(u, v) = (u s, v s, u v z s): planar or twisted
     let z = if rng.chance(0.3) { rng.uniform(-0.5, 0.5) } else { 0.0 };

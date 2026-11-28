@@ -36,6 +36,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The runner.
 pub struct Runner;
@@ -1077,7 +1078,7 @@ fn gen_curve(rng: &mut Rng, p: &PlaneIn, s: f64) -> CurveIn {
         k => {
             let c = q(rng);
             let ang = rng.uniform(0.0, std::f64::consts::TAU);
-            let (ca, sa) = (ang.cos(), ang.sin());
+            let (ca, sa) = (det::cos(ang), det::sin(ang));
             let ex = add(mul(x, ca), mul(y, sa));
             let ey = add(mul(x, -sa), mul(y, ca));
             let ey = if rng.chance(0.3) { mul(ey, -1.0) } else { ey };
@@ -1244,7 +1245,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 rng.uniform(d[1] - 0.5, d[3] + 0.5),
             );
             let ang = rng.uniform(0.0, std::f64::consts::TAU);
-            let (ca, sa) = (ang.cos(), ang.sin());
+            let (ca, sa) = (det::cos(ang), det::sin(ang));
             let ex = add(mul(x, ca), mul(y, sa));
             let ey = add(mul(x, -sa), mul(y, ca));
             let ey = if rng.chance(0.3) { mul(ey, -1.0) } else { ey };
@@ -1428,7 +1429,7 @@ mod wr455 {
                 let slack = gamma(16) * terms * 3.0_f64.sqrt();
                 let at = |t: f64| {
                     let r = t.to_radians();
-                    region_gap_above(plane, dom, o + x * (rx * r.cos()) + y * (ry * r.sin()))
+                    region_gap_above(plane, dom, o + x * (rx * det::cos(r)) + y * (ry * det::sin(r)))
                         + slack
                 };
                 // steps of at most 1e-4 in 3D: the Lipschitz term stays below 5e-5

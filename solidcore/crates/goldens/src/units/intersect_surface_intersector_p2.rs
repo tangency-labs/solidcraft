@@ -63,6 +63,7 @@ use crate::ssi::case::SurfaceSpec;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The op status of an op the runner does not run (undefined upstream).
 const REJECTED: f64 = -2.0;
@@ -932,7 +933,7 @@ fn gen_plane(rng: &mut Rng, s: f64, near: Option<([f64; 3], f64)>) -> SurfaceIn 
             };
             let x0 = norm(cross(n, a));
             let y0 = cross(n, x0);
-            let (c, sn) = (tilt.cos(), tilt.sin());
+            let (c, sn) = (det::cos(tilt), det::sin(tilt));
             let x = [
                 x0[0] * c + n[0] * sn,
                 x0[1] * c + n[1] * sn,
@@ -988,7 +989,7 @@ fn gen_bspline(rng: &mut Rng, s: f64, tube: bool) -> SurfaceIn {
         for j in 0..nv {
             let (x, y, z) = if tube {
                 let a = core::f64::consts::TAU * (i % (nu - 1)) as f64 / (nu - 1) as f64;
-                (s * a.cos(), s * a.sin(), s * j as f64 / (nv - 1) as f64)
+                (s * det::cos(a), s * det::sin(a), s * j as f64 / (nv - 1) as f64)
             } else {
                 (
                     s * i as f64 / (nu - 1) as f64,

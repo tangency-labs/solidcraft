@@ -1636,6 +1636,7 @@ mod tests {
     use solidcore::geom::extent2d::Extent2d;
     use solidcore::math::EFF_ZERO_SQRT;
     use std::collections::BTreeMap;
+    use solidcore::math::det;
 
     /// The generator segment's start, its direction, the sweep vector and the plane of
     /// `gen1053`, from its inputs.
@@ -1806,7 +1807,7 @@ mod tests {
             let BuildIn::Canonical { vec } = &surf.build else {
                 panic!("expected the canonical sweep vector");
             };
-            let (sin, cos) = d[usize::from(end)].to_radians().sin_cos();
+            let (sin, cos) = det::sin_cos(d[usize::from(end)].to_radians());
             v3(*c) + v3(*x) * (*r * cos) + v3(*y) * (*r * sin) + v3(*vec) * height
         }
 

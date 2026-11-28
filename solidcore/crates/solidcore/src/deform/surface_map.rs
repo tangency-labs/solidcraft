@@ -23,6 +23,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::adv_surface_intersector::NoSurfaceHandle;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{gamma, NOW};
@@ -504,7 +505,7 @@ impl<'a> SurfaceToSurfaceMap<'a> {
             let r = s - p;
             let f1 = r.dot(e1);
             let f2 = r.dot(e2);
-            if f1.hypot(f2) <= self.options.tolerance * 1e-3 {
+            if det::hypot(f1, f2) <= self.options.tolerance * 1e-3 {
                 break;
             }
             let j11 = su.dot(e1);
@@ -529,7 +530,7 @@ impl<'a> SurfaceToSurfaceMap<'a> {
         // unconverged iterations never return a bogus hit.
         let hit = self.base.evaluate_point(k, uv)?;
         let r = hit - p;
-        let residual = r.dot(e1).hypot(r.dot(e2));
+        let residual = det::hypot(r.dot(e1), r.dot(e2));
         if !residual.is_finite() || residual > self.options.tolerance {
             return Err(SolidError::invalid_input(
                 OP_MAP,

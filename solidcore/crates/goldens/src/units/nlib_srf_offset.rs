@@ -613,6 +613,7 @@ mod tests {
     use solidcore::nurbs::srf_adv::p1::offset_get_max_deriv;
     use solidcore::nurbs::srf_offset::OffsetOptions;
     use solidcore::nurbs::srf_tool::p1::decompose_to_bez;
+    use solidcore::math::det;
 
     /// Check interior samples of every original knot span, including the sliver and
     /// the short extensions. A global uniform grid would miss the failing region.
@@ -677,7 +678,7 @@ mod tests {
     /// Some Bezier patch of `sur` gets a sample count of at least `slm` (1000).
     fn slm_reached(sur: &Surface, i: &Inputs) -> bool {
         let exp = if i.pp == 1 || i.qq == 1 { 0.5 } else { 0.34 };
-        let f1 = (1.0 / i.tol).powf(exp);
+        let f1 = det::powf(1.0 / i.tol, exp);
         let f2 = 2.0 * i.pp.max(i.qq) as f64;
         decompose_to_bez(sur).unwrap().iter().flatten().any(|b| {
             let mut b = b.clone();

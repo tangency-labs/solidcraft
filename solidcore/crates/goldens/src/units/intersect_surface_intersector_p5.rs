@@ -60,6 +60,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
@@ -797,7 +798,7 @@ fn gen_scene(rng: &mut Rng, scene: Scene, s: f64) -> (SurfaceIn, Option<SurfaceI
                 2 => std::f64::consts::FRAC_PI_2,
                 _ => rng.uniform(2.0, 3.0),
             };
-            let bx = add(mul(fold.cos(), x), mul(fold.sin(), z));
+            let bx = add(mul(det::cos(fold), x), mul(det::sin(fold), z));
             let off = if rng.chance(0.3) {
                 s * rng.uniform(-1e-3, 1e-3)
             } else {
@@ -826,7 +827,7 @@ fn gen_scene(rng: &mut Rng, scene: Scene, s: f64) -> (SurfaceIn, Option<SurfaceI
         }
         Scene::NearParallel => {
             let ang = rng.uniform(-4.5, 4.5).to_radians();
-            let y2 = add(mul(ang.cos(), y), mul(ang.sin(), z));
+            let y2 = add(mul(det::cos(ang), y), mul(det::sin(ang), z));
             let o2 = add(o, mul(s * rng.uniform(-0.3, 0.3), z));
             (plane_at(o, x, y, s), Some(plane_at(o2, x, y2, s)))
         }

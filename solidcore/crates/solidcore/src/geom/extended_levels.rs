@@ -4,6 +4,7 @@
 //! farther along than the face's own body does.
 
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::det;
 
 /// A surface carried on without end, as a face's analytic surface gives it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -115,13 +116,13 @@ pub fn extended_levels(
             axis,
             half_angle,
         } => {
-            let c2 = half_angle.cos().powi(2);
+            let c2 = det::powi(det::cos(half_angle), 2);
             for q in points {
                 let w = *q - apex;
                 roots(
-                    n.dot(axis).powi(2) - c2,
+                    det::powi(n.dot(axis), 2) - c2,
                     w.dot(axis) * n.dot(axis) - c2 * w.dot(n),
-                    w.dot(axis).powi(2) - c2 * w.dot(w),
+                    det::powi(w.dot(axis), 2) - c2 * w.dot(w),
                     &mut out,
                 );
             }

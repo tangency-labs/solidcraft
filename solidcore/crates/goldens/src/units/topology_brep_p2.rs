@@ -58,6 +58,7 @@ use super::topology_vertexuse::{
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The unit runner.
 pub struct Runner;
@@ -1217,7 +1218,7 @@ fn gen_op(rng: &mut Rng) -> (OpIn, i64) {
                 tol: match rng.below(4) {
                     0 => 0.0,
                     1 => -1e-4,
-                    2 => 10f64.powf(rng.uniform(-12.0, 3.0)),
+                    2 => det::powf(10f64, rng.uniform(-12.0, 3.0)),
                     _ => 1e-5,
                 },
                 only_larger: rng.chance(0.7),

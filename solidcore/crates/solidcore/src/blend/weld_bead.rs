@@ -55,6 +55,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::EFF_ZERO_RAD;
 use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
@@ -525,7 +526,7 @@ fn frame(
             "a weld bead lies in an inside corner (a concave edge) only, not on an outside or a tangent edge",
         ));
     }
-    let wedge = u1.cross(u2).length().atan2(u1.dot(u2));
+    let wedge = det::atan2(u1.cross(u2).length(), u1.dot(u2));
     let chamfer = ChamferDefinition::new(size, wedge)?;
     let [d1, d2] = chamfer.setbacks();
     // a leg is a setback, how far a toe lies from the edge along its face, whether given as a

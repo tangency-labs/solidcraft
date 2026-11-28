@@ -11,6 +11,7 @@ use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::primitive_creation::p1::{self as api, EntityMaps, PrimitiveCreation};
 use solidcore::topology::{Brep, BrepId, RegionId};
+use solidcore::math::det;
 
 /// Primitive creation differential runner.
 pub struct Runner;
@@ -110,7 +111,7 @@ fn boolean_face(
     let frame = Axis2Placement::new(
         Vec3::new(0.0, 0.0, value(data, 2)),
         Vec3::X,
-        Vec3::new(0.0, angle.cos(), angle.sin()),
+        Vec3::new(0.0, det::cos(angle), det::sin(angle)),
     );
     let domain = Extent2d::from_bounds(
         value(data, 3),

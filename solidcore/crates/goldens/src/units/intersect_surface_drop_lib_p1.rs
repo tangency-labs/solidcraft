@@ -64,6 +64,7 @@ use solidcore::SolidError;
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The record of an op undefined upstream (not run).
 const REJECTED: f64 = -2.0;
@@ -1480,7 +1481,7 @@ fn gen_iso(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
             if r < 1.0e-6 * s {
                 return None;
             }
-            let a0 = pa[1].atan2(pa[0]);
+            let a0 = det::atan2(pa[1], pa[0]);
             let span = pick(rng, &[0.5, 1.0, 3.0, 6.0], 1.0);
             CurveIn::Circle {
                 c: [0.0, 0.0, pa[2]],
@@ -1925,7 +1926,7 @@ mod wr455_trim {
                 hi[a] = hi[a].max(x / wc);
             }
         }
-        let diag = (0..3).map(|a| (hi[a] - lo[a]).powi(2)).sum::<f64>().sqrt();
+        let diag = (0..3).map(|a| det::powi(hi[a] - lo[a], 2)).sum::<f64>().sqrt();
         let h_min = |knots: &[f64]| {
             knots
                 .windows(2)

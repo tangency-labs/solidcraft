@@ -319,6 +319,7 @@ mod tests {
     use solidcore::geom::axis2_placement::Axis2Placement;
     use solidcore::geom::extent1d::Extent1d;
     use solidcore::geom::vector3d::Vec3;
+    use solidcore::math::det;
     use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
     use solidcore::SolidError;
 
@@ -333,7 +334,7 @@ mod tests {
         let sweep = BSplineCurve::create_arc_from_points(
             Vec3::ZERO,
             Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(t.cos(), t.sin(), 0.0),
+            Vec3::new(det::cos(t), det::sin(t), 0.0),
             NurbCircleParam::Quadratic,
         )
         .unwrap_err();

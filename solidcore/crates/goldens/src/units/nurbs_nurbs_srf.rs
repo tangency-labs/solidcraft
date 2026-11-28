@@ -41,6 +41,7 @@ use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 #[path = "fixtures/nurbs_nurbs_srf_sms.rs"]
 mod sms;
@@ -534,7 +535,7 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
                         Shape::Random | Shape::Repeated | Shape::Collapsed => {
                             [coord(rng), coord(rng), coord(rng)]
                         }
-                        Shape::Smooth => [fi, fj, amp * (0.3 * fi).sin() * (0.2 * fj).cos()],
+                        Shape::Smooth => [fi, fj, amp * det::sin(0.3 * fi) * det::cos(0.2 * fj)],
                         Shape::ZigZag => [
                             fi * 0.1,
                             fj * 0.1,
@@ -544,9 +545,9 @@ fn gen_srf(rng: &mut Rng) -> InlineSrf {
                             let a = 2.0 * std::f64::consts::PI * fj / m as f64;
                             let b = 2.0 * std::f64::consts::PI * fi / n as f64;
                             [
-                                (2.0 + b.cos()) * a.cos(),
-                                (2.0 + b.cos()) * a.sin(),
-                                b.sin(),
+                                (2.0 + det::cos(b)) * det::cos(a),
+                                (2.0 + det::cos(b)) * det::sin(a),
+                                det::sin(b),
                             ]
                         }
                         Shape::Point => base,

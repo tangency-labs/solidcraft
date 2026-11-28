@@ -52,6 +52,7 @@ use crate::geom::object::NotifyOperation;
 use crate::geom::solution_array::SolutionType;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
@@ -258,7 +259,7 @@ impl SeamIso {
         if (target.length() - radius).abs() > tol || target.dot(radial.cross(forward)).abs() > tol {
             return Err(refused(R::SeamTrimMissesNewVertex));
         }
-        let angle = target.dot(forward).atan2(target.dot(radial));
+        let angle = det::atan2(target.dot(forward), target.dot(radial));
         if angle <= 0.0 || !angle.is_finite() {
             return Err(refused(R::SeamTrimMissesNewVertex));
         }

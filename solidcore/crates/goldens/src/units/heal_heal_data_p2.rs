@@ -87,6 +87,7 @@ use crate::own_builder::{
 };
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 600;
@@ -1897,8 +1898,8 @@ fn seam_cone_brep(
         let mut frame = Axis2Placement::default();
         frame.set_canonical(
             Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(t.cos(), t.sin(), 0.0),
-            Vec3::new(-t.sin(), t.cos(), 0.0),
+            Vec3::new(det::cos(t), det::sin(t), 0.0),
+            Vec3::new(-det::sin(t), det::cos(t), 0.0),
         )?;
         let full = Surface::from(BSplineSurface::create_cone_patch(
             &frame, radii[0], radii[1], 0.0, 360.0, height, param,
@@ -2674,7 +2675,7 @@ pub(crate) fn gen_targets(rng: &mut Rng) -> Targets {
 }
 
 pub(crate) fn log_uniform(rng: &mut Rng, lo: f64, hi: f64) -> f64 {
-    10f64.powf(rng.uniform(lo.log10(), hi.log10()))
+    det::powf(10f64, rng.uniform(det::log10(lo), det::log10(hi)))
 }
 
 pub(crate) fn gen_brep_in(rng: &mut Rng) -> BIn {

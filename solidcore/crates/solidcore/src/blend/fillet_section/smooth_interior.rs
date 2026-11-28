@@ -89,6 +89,7 @@ pub fn correction_kernels(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     #[test]
     fn sided_jumps_cancel_first_and_second_derivative_jumps() {
@@ -113,24 +114,26 @@ mod tests {
             let u = f64::from(i) / 16.0;
             let d = eps * u;
             let (g, g2) = correction_kernels(d, eps, false).unwrap();
-            let h = 3.0 / 16.0 + u / 2.0 + 3.0 * u * u / 8.0 - u.powi(4) / 16.0;
-            let h2 = 3.0 * u / 32.0 + u * u / 4.0 + 3.0 * u.powi(3) / 16.0 - u.powi(5) / 32.0;
+            let h = 3.0 / 16.0 + u / 2.0 + 3.0 * u * u / 8.0 - det::powi(u, 4) / 16.0;
+            let h2 = 3.0 * u / 32.0 + u * u / 4.0 + 3.0 * det::powi(u, 3) / 16.0
+                - det::powi(u, 5) / 32.0;
             assert!((g.value - (d.max(0.0) - eps * h)).abs() < 1e-16);
-            assert!((g2.value - (d.max(0.0).powi(2) / 2.0 - eps * eps * h2)).abs() < 1e-16);
+            assert!((g2.value - (det::powi(d.max(0.0), 2) / 2.0 - eps * eps * h2)).abs() < 1e-16);
             let step = if u < 0.0 { 0.0 } else { 1.0 };
-            assert!((g.first - (step - (0.5 + 0.75 * u - 0.25 * u.powi(3)))).abs() < 1e-15);
+            assert!((g.first - (step - (0.5 + 0.75 * u - 0.25 * det::powi(u, 3)))).abs() < 1e-15);
             assert!((g.second + (0.75 - 0.75 * u * u) / eps).abs() < 1e-15);
             assert!(
                 (g2.first
                     - (d.max(0.0)
                         - eps
                             * (3.0 / 32.0 + u / 2.0 + 9.0 * u * u / 16.0
-                                - 5.0 * u.powi(4) / 32.0)))
+                                - 5.0 * det::powi(u, 4) / 32.0)))
                     .abs()
                     < 1e-15
             );
             assert!(
-                (g2.second - (step - (0.5 + 9.0 * u / 8.0 - 5.0 * u.powi(3) / 8.0))).abs() < 1e-15
+                (g2.second - (step - (0.5 + 9.0 * u / 8.0 - 5.0 * det::powi(u, 3) / 8.0))).abs()
+                    < 1e-15
             );
         }
         for d in [-1.0, -eps, eps, 1.0] {
@@ -155,8 +158,8 @@ mod tests {
             // Synthetic jumps with the design's orders: Delta_N=t²,
             // Delta2_N=t, Delta_T=t, Delta2_T=1. This checks kernel scaling,
             // not that a particular face satisfies these compatibility orders.
-            assert!((t * t * g.value + t * g2.value).abs() <= 0.2 * t.powi(3));
-            assert!((t * g.value + g2.value).abs() <= 0.2 * t.powi(2));
+            assert!((t * t * g.value + t * g2.value).abs() <= 0.2 * det::powi(t, 3));
+            assert!((t * g.value + g2.value).abs() <= 0.2 * det::powi(t, 2));
             assert!((t * t * g.second).abs() <= 2.0 * t);
             assert!(g2.second.abs() <= 0.5);
         }

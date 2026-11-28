@@ -26,6 +26,7 @@
 
 use crate::blend::carried_face::plane_normal;
 use crate::blend::straight_wedge::{straight_wedge, StraightWedge};
+use crate::math::det;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use crate::query::face::p1::point_on_face;
@@ -314,8 +315,8 @@ fn one(w: &StraightWedge, kind: RunOutKind, d: f64, size: f64, tolerance: f64) -
         }
         RunOutKind::Round => {
             // half the angle between the faces: the angle between the directions in
-            let half = 0.5 * c.clamp(-1.0, 1.0).acos();
-            let (sin_h, tan_h) = (half.sin(), half.tan());
+            let half = 0.5 * det::acos(c.clamp(-1.0, 1.0));
+            let (sin_h, tan_h) = (det::sin(half), det::tan(half));
             if !(sin_h > 1e-9 && tan_h > 1e-9) {
                 return None;
             }
@@ -323,7 +324,7 @@ fn one(w: &StraightWedge, kind: RunOutKind, d: f64, size: f64, tolerance: f64) -
             let centre_at = d / sin_h;
             let centre = [centre_at * bisector.dot(i0), centre_at * bisector.dot(y)];
             let (t0, t1) = ([t, 0.0], [t * c, t * s]);
-            let angle = |p: [f64; 2]| (p[1] - centre[1]).atan2(p[0] - centre[0]);
+            let angle = |p: [f64; 2]| det::atan2(p[1] - centre[1], p[0] - centre[0]);
             let start = angle(t0);
             // the arc between the contact points that faces the edge: the shorter one, its
             // angle that between the faces' normals

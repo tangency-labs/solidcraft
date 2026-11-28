@@ -32,6 +32,7 @@ use solidcore::geom::vector3d::Vec3;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// One command of a point-sequence program, lowered (output layout).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -271,7 +272,7 @@ fn polygon(rng: &mut Rng, c: V3, nrm: V3, n: usize, star: bool) -> Vec<V3> {
             } else {
                 r0
             };
-            add(c, add(scale(u, r * t.cos()), scale(v, r * t.sin())))
+            add(c, add(scale(u, r * det::cos(t)), scale(v, r * det::sin(t))))
         })
         .collect()
 }

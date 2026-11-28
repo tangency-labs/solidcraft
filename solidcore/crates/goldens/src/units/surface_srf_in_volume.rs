@@ -90,6 +90,7 @@ use crate::units::surface_surface_cache_p1::{
     bss_of, default_form, gen_bss, gen_srf, gen_sub_dom, srf, BssIn, InlineSrf, SrfIn,
 };
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2000;
@@ -1275,7 +1276,7 @@ fn gen_transform(rng: &mut Rng) -> [[f64; 3]; 4] {
         1 => {
             // rotation about z by a random angle, translated
             let a = rng.uniform(-3.2, 3.2);
-            let (s, c) = a.sin_cos();
+            let (s, c) = det::sin_cos(a);
             [coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]]
         }
         2 => {
@@ -1416,7 +1417,7 @@ fn gen_placement(rng: &mut Rng) -> ([f64; 3], [f64; 3], [f64; 3]) {
         ([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
     } else {
         let a = rng.uniform(-3.2, 3.2);
-        let (s, c) = a.sin_cos();
+        let (s, c) = det::sin_cos(a);
         (coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0])
     }
 }
@@ -1824,7 +1825,7 @@ fn gen_exact_volume_case(rng: &mut Rng) -> Inputs {
         (3 | 6, 2) => {
             let t: f64 = if rng.chance(0.2) { 0.0 } else { rng.uniform(-3.0, 3.0) };
             frame_patch(rng, (0.2 * s, 3.0 * s), (-2.0 * s, 2.0 * s), f[3], &|r, z| {
-                at_frame(&f, r * t.cos(), r * t.sin(), z)
+                at_frame(&f, r * det::cos(t), r * det::sin(t), z)
             })
         }
         // unbend: planes normal to the axis

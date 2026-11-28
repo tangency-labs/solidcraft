@@ -33,6 +33,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2000;
@@ -555,8 +556,8 @@ fn gen_hyp(rng: &mut Rng) -> HypIn {
         // orthonormal frame from a random rotation
         let a = rng.uniform(0.0, std::f64::consts::TAU);
         let b = rng.uniform(-1.5, 1.5);
-        let (sa, ca) = a.sin_cos();
-        let (sb, cb) = b.sin_cos();
+        let (sa, ca) = det::sin_cos(a);
+        let (sb, cb) = det::sin_cos(b);
         let x = [ca * cb, sa * cb, sb];
         let z0 = [-sa, ca, 0.0];
         (x, z0)
@@ -582,7 +583,7 @@ fn gen_hyp(rng: &mut Rng) -> HypIn {
 fn curve_point(h: &HypIn, s: f64) -> [f64; 3] {
     let hy = build(h);
     let pos = hy.position();
-    let p = pos.origin() + (h.a * s.cosh()) * pos.x_axis() + (h.b * s.sinh()) * pos.y_axis();
+    let p = pos.origin() + (h.a * det::cosh(s)) * pos.x_axis() + (h.b * det::sinh(s)) * pos.y_axis();
     [p.x, p.y, p.z]
 }
 

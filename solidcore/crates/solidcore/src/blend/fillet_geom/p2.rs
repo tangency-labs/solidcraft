@@ -191,6 +191,7 @@
 //!   its odd derivatives (upstream negates all); only the first is read without an ease,
 //!   so the pinned results are unchanged.
 
+use crate::math::det;
 use std::borrow::Cow;
 
 use crate::blend::fillet_corner::p3::FilletCorner;
@@ -1783,8 +1784,8 @@ fn continues_across(
         return Ok(false);
     }
     // the angle between the tangents, read high by its rounding
-    let between = t1.cross(t2).length().atan2(t1.dot(t2)) * (1.0 + gamma(8)) + gamma(8);
-    let turn = 2.0 * spread.asin() + ANG_TOL_RAD;
+    let between = det::atan2(t1.cross(t2).length(), t1.dot(t2)) * (1.0 + gamma(8)) + gamma(8);
+    let turn = 2.0 * det::asin(spread) + ANG_TOL_RAD;
     Ok(between.is_finite() && between <= turn)
 }
 
@@ -1988,7 +1989,7 @@ pub fn srf_srf_intersection_with_context(
             cos_tol: if opts.heading_side_only {
                 0.0
             } else {
-                angle_tol.cos()
+                det::cos(angle_tol)
             },
         });
 
@@ -5239,8 +5240,8 @@ mod tests {
         let t = seam_deg.to_radians();
         let frame = Axis2Placement::new(
             Point3::new(0.0, 0.0, 0.0),
-            Vec3::new(t.cos(), t.sin(), 0.0),
-            Vec3::new(-t.sin(), t.cos(), 0.0),
+            Vec3::new(det::cos(t), det::sin(t), 0.0),
+            Vec3::new(-det::sin(t), det::cos(t), 0.0),
         );
         let mut cylinder = Cone::create_canonical_cylinder(k, &frame, 10.0).unwrap();
         let mut domain = Extent2d::default();
@@ -5464,7 +5465,7 @@ mod tests {
     /// The point at `deg` degrees on the cylinder's circle at height 5.
     fn on_circle(deg: f64) -> Point3 {
         let t = deg.to_radians();
-        Point3::new(10.0 * t.cos(), 10.0 * t.sin(), 5.0)
+        Point3::new(10.0 * det::cos(t), 10.0 * det::sin(t), 5.0)
     }
 
     /// A curve through a closed candidate's closure may go without a UV curve only on a
@@ -5480,7 +5481,7 @@ mod tests {
         // on the seam, and within the tolerance of it
         assert!(on_closed_seam(&k, &cylinder, &domain, Some(on_circle(5.0)), tol).unwrap());
         let t = 5.0_f64.to_radians();
-        let near = on_circle(5.0) + Vec3::new(t.cos(), t.sin(), 0.0) * (0.5 * tol);
+        let near = on_circle(5.0) + Vec3::new(det::cos(t), det::sin(t), 0.0) * (0.5 * tol);
         assert!(on_closed_seam(&k, &cylinder, &domain, Some(near), tol).unwrap());
         // beside it (10 degrees off and more, and 1e-3 along the circle) and no closure at all
         for deg in [15.0, -5.0, 180.0, 5.0 + 1e-4_f64.to_degrees()] {
@@ -5903,7 +5904,7 @@ mod tests {
 
     fn on_branch(sign: f64, deg: f64) -> Point3 {
         let s = deg.to_radians();
-        Point3::new(s.cos(), sign * s.cos(), s.sin())
+        Point3::new(det::cos(s), sign * det::cos(s), det::sin(s))
     }
 
     /// #21416 review: two candidates that meet on a closed surface's seam are joined only where

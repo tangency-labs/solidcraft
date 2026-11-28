@@ -5,6 +5,7 @@
 use solidcore::nurbs::math::NOW;
 
 use crate::HarnessError;
+use solidcore::math::det;
 
 pub(super) struct SmsSurface {
     pub net: Vec<Vec<[f64; 4]>>,
@@ -29,7 +30,7 @@ pub(super) fn parse_sms(text: &str, path: &str) -> Result<SmsSurface, HarnessErr
         if !value.is_finite()
             || value.fract() != 0.0
             || value < 0.0
-            || value >= 2.0_f64.powi(usize::BITS as i32)
+            || value >= det::powi(2.0_f64, usize::BITS as i32)
         {
             return Err(error(&format!("bad {name} count {value}")));
         }

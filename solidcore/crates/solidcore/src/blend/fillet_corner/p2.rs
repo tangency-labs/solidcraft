@@ -2158,6 +2158,7 @@ fn new_rail_x_edgeuse_vertex_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// A G^n section certificate that spent its work budget inside a corner's surface
     /// (`make_{variable,constant}_radius_fillet_with`, the analytic corner) is passed on,
@@ -2227,7 +2228,7 @@ mod tests {
             let a = std::f64::consts::TAU * (i as f64) / (n as f64);
             let v = pseudo
                 .brep_mut()
-                .add_vertex(Point3::new(a.cos(), a.sin(), 0.0))
+                .add_vertex(Point3::new(det::cos(a), det::sin(a), 0.0))
                 .unwrap();
             let mut fv = FilletVertex::new(&k, None);
             fv.set_fillet_vertex_type(FilletVertexType::RailXRail);

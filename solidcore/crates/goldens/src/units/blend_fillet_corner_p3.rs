@@ -84,6 +84,7 @@ use crate::cases::blend;
 use crate::runner::default_cases;
 use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The corner operation run by [`corner`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1294,7 +1295,7 @@ fn gen_solver(rng: &mut Rng, linear: bool) -> SolverIn {
         1 => 1e-5,
         2 => 1e-6,
         3 => 0.0,
-        _ => 10f64.powf(rng.uniform(-9.0, -1.0)),
+        _ => det::powf(10f64, rng.uniform(-9.0, -1.0)),
     };
     let tang = match rng.below(5) {
         0 => 0.01,
@@ -1684,7 +1685,7 @@ fn gen_corner_model(rng: &mut Rng) -> Inputs {
         1 => 1e-6 * scale,
         2 => 0.0,
         3 => 1e-12,
-        _ => scale * 10f64.powf(rng.uniform(-9.0, -2.0)),
+        _ => scale * det::powf(10f64, rng.uniform(-9.0, -2.0)),
     };
     let tan = rng.uniform(1e-4, 0.2);
     let op = *rng

@@ -3,6 +3,7 @@
 use solidcore::nurbs::math::NOW;
 
 use crate::HarnessError;
+use solidcore::math::det;
 
 pub(crate) struct ParsedSurface {
     pub(crate) net: Vec<Vec<[f64; 4]>>,
@@ -14,7 +15,7 @@ pub(crate) struct ParsedSurface {
 
 fn count(path: &str, value: f64) -> Result<usize, HarnessError> {
     // usize::MAX rounds up to 2^BITS on 64-bit targets: compare exclusively.
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= upper {
         return Err(HarnessError::new(format!("{path}: bad count {value}")));
     }

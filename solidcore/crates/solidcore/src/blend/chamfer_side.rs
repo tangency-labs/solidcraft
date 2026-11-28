@@ -15,6 +15,7 @@
 //! trim curves, branch and bound over the edge's parameter. No recursion: the pieces are a
 //! list, at most [`MAX_WEDGE_PIECES`].
 
+use crate::math::det;
 use std::collections::BinaryHeap;
 
 use crate::blend::fillet_section::certificate::{
@@ -99,7 +100,7 @@ pub fn wedge_at_middle(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
     let t = b.edge(e)?.interval.evaluate(0.5);
     let (_, n0) = outward(k, b, u0, t)?;
     let (_, n1) = outward(k, b, u1, t)?;
-    Ok(n0.dot(n1).clamp(-1.0, 1.0).acos())
+    Ok(det::acos(n0.dot(n1).clamp(-1.0, 1.0)))
 }
 
 /// An upper bound on the widest wedge along an edge ([`widest_wedge_bound`]).
@@ -378,7 +379,7 @@ pub fn widest_wedge_bound(k: &Kernel, b: &mut Brep, e: EdgeId, gap: f64) -> Resu
     // the wedge is pi less the normals' angle: acos(-c), rounded up; a cosine enclosed at 1 or
     // above (or not at all) is clamped to -1, a wedge of pi
     Ok(WedgeBound {
-        wedge: round_up((-top).max(-1.0).acos()).min(crate::math::PI),
+        wedge: round_up(det::acos((-top).max(-1.0))).min(crate::math::PI),
         pieces: pieces.len(),
     })
 }

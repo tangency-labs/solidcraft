@@ -138,6 +138,7 @@
 //!
 //! No loops depend on input size beyond the given arrays; there is no recursion.
 
+use crate::math::det;
 use std::collections::BTreeMap;
 
 use crate::blend::fillet_corner::p2::{
@@ -721,7 +722,7 @@ pub fn fillet_radius(
         ang_rad = PI - ang_rad;
     }
     let leng = surf_pnt.distance(surf_pnt2);
-    let radius = leng / 2.0 / (ang_rad / 2.0).sin();
+    let radius = leng / 2.0 / det::sin(ang_rad / 2.0);
     Ok((radius, ang_rad))
 }
 
@@ -4576,7 +4577,7 @@ mod tests {
                     dom.min().y + fv * (dom.max().y - dom.min().y),
                 );
                 let p = s.evaluate_point(&k, uv).unwrap();
-                let on = p.x.hypot(p.y) + p.z - 1.0;
+                let on = det::hypot(p.x, p.y) + p.z - 1.0;
                 assert!(on.abs() <= 1e-9, "{p:?} is {on:e} off the cone");
             }
         }

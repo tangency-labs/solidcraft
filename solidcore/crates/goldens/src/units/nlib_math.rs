@@ -43,6 +43,7 @@ use solidcore::{SolidError, Vec3};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
@@ -864,7 +865,7 @@ fn special(rng: &mut Rng) -> f64 {
     } else if r < 0.7 {
         let e = rng.range_i64(-320, 307) as i32;
         let s = if rng.chance(0.5) { 1.0 } else { -1.0 };
-        s * rng.uniform(1.0, 10.0) * 10f64.powi(e)
+        s * rng.uniform(1.0, 10.0) * det::powi(10f64, e)
     } else {
         coord(rng)
     }

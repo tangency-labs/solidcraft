@@ -220,6 +220,7 @@ pub fn spring_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// A homogeneous Bezier curve at `t` (de Casteljau), as a Euclidean point.
     fn at(h: &[[f64; 4]], t: f64) -> Point3 {
@@ -262,7 +263,7 @@ mod tests {
             "halves apart by {}",
             ep.distance(eq)
         );
-        let angle = |a: Vec3, b: Vec3| a.cross(b).length().atan2(a.dot(b));
+        let angle = |a: Vec3, b: Vec3| det::atan2(a.cross(b).length(), a.dot(b));
         let leave_p = euclid_of(&fp[1]) - euclid_of(&fp[0]);
         let leave_q = euclid_of(&fq[1]) - euclid_of(&fq[0]);
         assert!(angle(leave_p, tp) <= 1e-10, "{}", angle(leave_p, tp));
@@ -279,7 +280,7 @@ mod tests {
     ) -> (Point3, Vec3) {
         let x = |s: f64| {
             let (t, z) = (theta(s), h(s));
-            Vec3::new(rho(z) * t.cos(), rho(z) * t.sin(), z)
+            Vec3::new(rho(z) * det::cos(t), rho(z) * det::sin(t), z)
         };
         let d = 1e-6;
         (x(s), (x(s + d) - x(s - d)).unitize().unwrap())
@@ -324,9 +325,9 @@ mod tests {
         let x = |s: f64| {
             let (t, f) = (0.3 + 0.6 * s, 0.2 + 0.3 * s + 0.2 * s * (1.0 - s));
             Vec3::new(
-                10.0 * f.cos() * t.cos(),
-                10.0 * f.cos() * t.sin(),
-                10.0 * f.sin(),
+                10.0 * det::cos(f) * det::cos(t),
+                10.0 * det::cos(f) * det::sin(t),
+                10.0 * det::sin(f),
             )
         };
         let d = 1e-6;

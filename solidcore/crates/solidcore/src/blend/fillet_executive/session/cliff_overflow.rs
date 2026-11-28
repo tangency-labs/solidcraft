@@ -20,6 +20,7 @@ use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use crate::error::blend::{BlendFailure, OverflowInput};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -127,7 +128,7 @@ impl SessionObjects<'_> {
             *normal = planar.normal;
         }
         let [n0, n1] = normals;
-        let phi = smos_max(-1.0, smos_min(1.0, n0.dot(n1))).acos();
+        let phi = det::acos(smos_max(-1.0, smos_min(1.0, n0.dot(n1))));
         let [geom] = base.fillet_geoms[..] else {
             return Ok(true);
         };
@@ -189,7 +190,7 @@ impl SessionObjects<'_> {
                     continue;
                 }
                 let out = bisector * (sign / len); // edge to centre
-                let off = 1.0 / (angle / 2.0).sin();
+                let off = 1.0 / det::sin(angle / 2.0);
                 let centre = pnt + out * (radius * off);
                 let along = edge_d + out * (slope * off); // dC/dT
                 let speed = along.length();

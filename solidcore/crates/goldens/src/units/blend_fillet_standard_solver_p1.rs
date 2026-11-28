@@ -75,6 +75,7 @@ use super::topology_edgeuse_p2::{inexact_geometry, put_eu_state, Setup};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The upstream routine run by the shim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1568,7 +1569,7 @@ fn gen_rails(rng: &mut Rng, blend: bool) -> (InlineCrv, InlineCrv, InlineCrv) {
         let y = perp(x, rng);
         let z = x.cross(y);
         // section plane: radial e_a, axial e_b
-        let off = |r: f64, ang: f64| (r * ang.cos(), r * ang.sin());
+        let off = |r: f64, ang: f64| (r * det::cos(ang), r * det::sin(ang));
         let (a1, h1) = off(r1, rng.uniform(-0.5, 0.5));
         let (a2, h2) = off(r2, rng.uniform(-0.5, 0.5) + theta);
         let arc = |rad: f64, h: f64| {
@@ -1595,7 +1596,7 @@ fn gen_rails(rng: &mut Rng, blend: bool) -> (InlineCrv, InlineCrv, InlineCrv) {
     let e_a = perp(d, rng);
     let e_b = d.cross(e_a);
     let off1 = e_a * r1;
-    let off2 = (e_a * theta.cos() + e_b * theta.sin()) * r2;
+    let off2 = (e_a * det::cos(theta) + e_b * det::sin(theta)) * r2;
     let rail1 = translate(&center, off1);
     let mut rail2 = translate(&center, off2);
     match rng.below(12) {

@@ -32,6 +32,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 160;
@@ -455,7 +456,7 @@ fn ngon(rng: &mut Rng, cx: f64, cy: f64, r: f64, z: f64, n: u64) -> Vec<[f64; 3]
     (0..n)
         .map(|i| {
             let a = (i as f64 + phase) * std::f64::consts::TAU / n as f64;
-            [cx + r * a.cos(), cy + r * a.sin(), z]
+            [cx + r * det::cos(a), cy + r * det::sin(a), z]
         })
         .collect()
 }

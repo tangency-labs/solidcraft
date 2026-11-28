@@ -33,6 +33,7 @@ use solidcore::SolidError;
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
@@ -324,7 +325,7 @@ fn number(rng: &mut Rng) -> f64 {
         1 => USE_DEFAULT,
         2 => 0.0,
         3 => -0.0,
-        4 => rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(3, 15) as i32)),
+        4 => rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(3, 15) as i32)),
         5 => f64::from(rng.range_i64(-5, 5) as i32),
         _ => rng.uniform(-100.0, 100.0),
     }

@@ -2087,6 +2087,7 @@ fn generated(rng: &mut Rng) -> Inputs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::math::det;
 
     /// tangency-labs/solidcraft#18634: the `review_box_translated_*_null` rows' 1e-3 box
     /// at (1e6, 1e6, 1e6) was refused by its constructor (status 1001), as main's
@@ -3257,10 +3258,10 @@ mod tests {
     /// `(n + 64) eps` of the upper total.
     fn half_pipe_angular_integral(arc: f64) -> (f64, f64) {
         use std::f64::consts::PI;
-        let w = |y: f64| PI - 2.0 * (y / HALF_PIPE_R).asin();
+        let w = |y: f64| PI - 2.0 * det::asin(y / HALF_PIPE_R);
         let f = |z: f64| w(1.0 + arc - (arc * arc - z * z).sqrt());
         // as `arc_end` in the generator
-        let ze = arc * 45.0_f64.to_radians().sin();
+        let ze = arc * det::sin(45.0_f64.to_radians());
         let n: u32 = 1 << 20;
         let z = |i: u32| {
             if i == n {

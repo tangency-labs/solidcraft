@@ -2183,7 +2183,7 @@ fn on_the_posts_torus(s: &BSplineSurface) {
         major: 4.0,
         minor: 6.0,
     };
-    let tube = |x: Vec3| (x.x.hypot(x.y) - 4.0).hypot(x.z - 4.0) - 6.0;
+    let tube = |x: Vec3| det::hypot(det::hypot(x.x, x.y) - 4.0, x.z - 4.0) - 6.0;
     on_its_analytic(s, &on, tube, 1e-11);
 }
 

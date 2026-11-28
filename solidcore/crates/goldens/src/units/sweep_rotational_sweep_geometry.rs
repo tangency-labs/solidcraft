@@ -56,6 +56,7 @@ use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::util::{flag, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The unit runner.
 pub struct Runner;
@@ -812,13 +813,13 @@ impl Frame {
 
     /// The point at radius `r`, angle `th` (radians) and height `h`.
     fn at(&self, r: f64, th: f64, h: f64) -> [f64; 3] {
-        let radial = add(scale3(self.u, r * th.cos()), scale3(self.w, r * th.sin()));
+        let radial = add(scale3(self.u, r * det::cos(th)), scale3(self.w, r * det::sin(th)));
         add(add(self.o, radial), scale3(self.d, h))
     }
 
     /// The radial direction at angle `th`.
     fn radial(&self, th: f64) -> [f64; 3] {
-        add(scale3(self.u, th.cos()), scale3(self.w, th.sin()))
+        add(scale3(self.u, det::cos(th)), scale3(self.w, det::sin(th)))
     }
 }
 

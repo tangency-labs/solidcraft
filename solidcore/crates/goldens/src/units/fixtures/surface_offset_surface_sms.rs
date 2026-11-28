@@ -6,6 +6,7 @@
 //! only after reads; there are no header-derived reservations or geometry caps.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 /// Raw SMS data, without downstream geometry validation or adapter defaults.
@@ -18,7 +19,7 @@ pub(crate) struct ParsedSrf {
 }
 
 fn count(path: &str, value: f64) -> Result<usize, HarnessError> {
-    let exclusive_upper = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive_upper = det::powi(2.0_f64, usize::BITS as i32);
     if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= exclusive_upper {
         return Err(HarnessError::new(format!("{path}: bad count {value}")));
     }

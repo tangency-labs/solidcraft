@@ -26,6 +26,7 @@ use super::geom::P3;
 use super::raw::{type_name, RawCurve, RawOutput, N_SAMPLES};
 use super::EngineFailure;
 use crate::Deferred;
+use solidcore::math::det;
 
 fn deferred(unit: &str, upstream: &str) -> Deferred {
     Deferred {
@@ -176,7 +177,7 @@ pub(crate) fn rust_surface(
             // apex-based description: radius(h) = h * tan(half_angle), h in [h0, h1]
             // along z, full 360 degree rotation
             let z = unit_cross(v3(*xaxis), v3(*yaxis));
-            let t = (half_angle_deg * std::f64::consts::PI / 180.0).tan();
+            let t = det::tan(half_angle_deg * std::f64::consts::PI / 180.0);
             let o = v3(*apex) + z * height[0];
             let pl = Axis2Placement::new(o, v3(*xaxis), v3(*yaxis));
             match Cone::create_canonical(

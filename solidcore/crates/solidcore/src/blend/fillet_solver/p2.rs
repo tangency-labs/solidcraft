@@ -129,6 +129,7 @@ use crate::intersect::surface_intersector::p1::{
     IntersectionPointType, SrfIndex, TsectPnt, MAX_USER_DOUBLES,
 };
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -785,7 +786,7 @@ fn trim_runs_on_in(
     };
     let (a, d) = at(from)?;
     let out = [d.x * sign, d.y * sign];
-    let speed = out[0].hypot(out[1]);
+    let speed = det::hypot(out[0], out[1]);
     if speed.is_nan() || speed <= 0.0 {
         return Ok(0.0);
     }

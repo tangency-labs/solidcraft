@@ -2482,7 +2482,7 @@ fn sweep_about(
                 s - z * s.dot(z)
             })
             .max_by(|a, b| a.length().total_cmp(&b.length()))?;
-        (r.length() > 0.0).then(|| r.dot(y).atan2(r.dot(x)) * 180.0 / PI)
+        (r.length() > 0.0).then(|| det::atan2(r.dot(y), r.dot(x)) * 180.0 / PI)
     };
     let meridian = |end: bool| -> Option<f64> {
         if swap_uv {
@@ -2610,7 +2610,7 @@ fn cone_conventions_on(
         return Ok(None);
     };
     let y = step_z.cross(x);
-    let mut sweep = end.dot(y).atan2(end.dot(x)) * 180.0 / PI;
+    let mut sweep = det::atan2(end.dot(y), end.dot(x)) * 180.0 / PI;
     if sweep.abs() < EFF_ZERO_SQRT {
         sweep = 360.0;
     } else if sweep < 0.0 {

@@ -31,6 +31,7 @@ use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 // The case's transform certificate log (test builds only).
 #[cfg(test)]
 use super::topology_brep_p5::transform_certificate::Fired as CertificateLog;
+use solidcore::math::det;
 
 /// The runner of `SmBrep::Mirror`.
 pub struct Runner;
@@ -290,7 +291,7 @@ impl UnitDiff for Runner {
             file: (*file).into(),
             ..Inputs::default()
         };
-        let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
         if rng.below(3) == 0 {
             // a plane perpendicular to a coordinate axis (Z of X x Y)
             {
@@ -358,7 +359,7 @@ impl UnitDiff for Runner {
 fn generate_matrix(rng: &mut Rng) -> Option<Value> {
     let file = FILES.get(rng.below(FILES.len() as u64) as usize)?;
     let (a, c) = (rng.uniform(-3.2, 3.2), rng.uniform(-3.2, 3.2));
-    let (ca, sa, cc, sc) = (a.cos(), a.sin(), c.cos(), c.sin());
+    let (ca, sa, cc, sc) = (det::cos(a), det::sin(a), det::cos(c), det::sin(c));
     // a rotation about Z then X
     let rot = [[ca, sa, 0.], [-sa * cc, ca * cc, sc], [sa * sc, -ca * sc, cc]];
     let d = match rng.below(9) {
@@ -374,9 +375,9 @@ fn generate_matrix(rng: &mut Rng) -> Option<Value> {
         ],
         4 => [-1., 1., 1.],
         5 => [-rng.uniform(0.2, 5.0), rng.uniform(0.2, 5.0), 1.],
-        6 => [1., 1., 10f64.powi(-(rng.range_i64(3, 10) as i32))],
+        6 => [1., 1., det::powi(10f64, -(rng.range_i64(3, 10) as i32))],
         7 => {
-            let s = 10f64.powi(rng.range_i64(-6, 6) as i32);
+            let s = det::powi(10f64, rng.range_i64(-6, 6) as i32);
             [s, s, s]
         }
         _ => [1., 1., 0.],
@@ -395,7 +396,7 @@ fn generate_matrix(rng: &mut Rng) -> Option<Value> {
             *x += shear;
         }
     }
-    let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+    let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
     let t = [
         rng.uniform(-10., 10.) * scale,
         rng.uniform(-10., 10.) * scale,

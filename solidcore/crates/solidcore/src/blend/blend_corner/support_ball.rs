@@ -65,6 +65,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -983,7 +984,7 @@ pub fn support_ball_edge_geom(
     let to_c = geo.centre - geo.origin;
     let y = (to_c - x * to_c.dot(x)).unitize()?;
     let z = x.cross(y);
-    let turn_deg = rad_to_deg(to_c.dot(y).atan2(to_c.dot(x)));
+    let turn_deg = rad_to_deg(det::atan2(to_c.dot(y), to_c.dot(x)));
     if turn_deg <= 0.0 {
         return Err(unbuildable(OP_BUILD, CornerStep::SweptTorusOffVertex));
     }

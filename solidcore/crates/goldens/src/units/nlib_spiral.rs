@@ -30,6 +30,7 @@ use solidcore::{Result as SolidResult};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2000;
@@ -231,7 +232,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- generator --------------------------------------------------------------------
 
 fn log_uniform(rng: &mut Rng, lo: f64, hi: f64) -> f64 {
-    (lo.ln() + (hi.ln() - lo.ln()) * rng.unit()).exp()
+    det::exp(det::ln(lo) + (det::ln(hi) - det::ln(lo)) * rng.unit())
 }
 
 fn gen_radius(rng: &mut Rng) -> f64 {

@@ -791,6 +791,7 @@ pub fn join_tolerance_deg(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn exact(value: f64) -> Bounded {
         Bounded { value, bound: 0.0 }
@@ -812,10 +813,10 @@ mod tests {
     #[test]
     fn the_overlap_gap_computes_its_formula() {
         let beta = 5.9e-5_f64;
-        let (c, s) = (exact(beta.cos()), exact(beta.sin()));
+        let (c, s) = (exact(det::cos(beta)), exact(det::sin(beta)));
         // equal reaches, straight edges: R (sec beta - 1)
         let gap = overlap_gap([exact(1.0); 2], c, s, [straight(1.0); 2]).unwrap();
-        let want = 1.0 / beta.cos() - 1.0;
+        let want = 1.0 / det::cos(beta) - 1.0;
         assert!(gap.value >= want && gap.value <= want + 1e-15, "{gap:?}");
         assert!(gap.bound < 1e-14, "{gap:?}");
         // a rail of an edge of curvature 0.625 at reach 1: kr = 0.625 / 0.375, the sagitta
@@ -826,9 +827,9 @@ mod tests {
         };
         let gap = overlap_gap([exact(1.0); 2], c, s, [bent, straight(1.0)]).unwrap();
         let kr = 0.625 / 0.375;
-        let x = 2.0 * beta.tan();
+        let x = 2.0 * det::tan(beta);
         let sag = kr * x * x / (1.0 + (1.0 - kr * kr * x * x).sqrt());
-        let want = 1.0 / beta.cos() - 1.0 + sag / beta.cos();
+        let want = 1.0 / det::cos(beta) - 1.0 + sag / det::cos(beta);
         assert!(
             gap.value >= want && close(gap.value, want),
             "{gap:?} {want}"
@@ -924,8 +925,8 @@ mod tests {
         );
         // a curvature bound over less edge than the rail runs: 1.05 X
         let beta = 1e-3_f64;
-        let x = 2.0 * beta.tan();
-        let (c, s) = (exact(beta.cos()), exact(beta.sin()));
+        let x = 2.0 * det::tan(beta);
+        let (c, s) = (exact(det::cos(beta)), exact(det::sin(beta)));
         assert_eq!(
             overlap_gap(one, c, s, [straight(1.04 * x), straight(1.0)]),
             None

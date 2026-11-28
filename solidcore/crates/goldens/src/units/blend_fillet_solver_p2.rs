@@ -76,6 +76,7 @@ use super::topology_edgeuse_p1::{
     gen_surface, sel, surface_of, BrepIn, BssIn, CrvIn, SrfIn, FILES,
 };
 use crate::{HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Largest `extra` (unknowns beyond the two UV points) of the shim's solver.
 const MAX_EXTRA: usize = 5;
@@ -1564,7 +1565,7 @@ fn gen_torus(rng: &mut Rng) -> Inputs {
     };
     let mut ts = vec![
         tsect([rho, 0.0], [0.0, r], 0.0),
-        tsect([rho * phi.cos(), rho * phi.sin()], [0.0, r], 1.0),
+        tsect([rho * det::cos(phi), rho * det::sin(phi)], [0.0, r], 1.0),
     ];
     if on_axis {
         if let Some(t) = ts.first_mut() {

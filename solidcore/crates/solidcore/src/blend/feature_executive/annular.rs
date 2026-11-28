@@ -13,6 +13,7 @@ use crate::error::defeature::DefeatureFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::tol::{self, SmallTopoType};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::query::api_queries::brep_is_manifold_solid;
 use crate::surface::cone::Cone;
@@ -239,7 +240,7 @@ impl Closure {
             }
         }
         let available = [lo.max_extension, hi.max_extension];
-        let [lo_scale, hi_scale] = [lo, hi].map(|s| s.slope.hypot(1.0));
+        let [lo_scale, hi_scale] = [lo, hi].map(|s| det::hypot(s.slope, 1.0));
         let (intersection, shortfall) = if surface_lies_on(k, b, z, &locus)? {
             let missing = gap - (lo.max_extension / lo_scale + hi.max_extension / hi_scale);
             // Any division closes a shared generator. One sufficient pair leaves

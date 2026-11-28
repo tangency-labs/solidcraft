@@ -43,6 +43,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -1381,7 +1382,7 @@ fn arc_candidates(
     radius: f64,
     ends: [(f64, f64); 3],
 ) -> Vec<(f64, f64)> {
-    let angle = |(x, y): (f64, f64)| (y - oy).atan2(x - ox);
+    let angle = |(x, y): (f64, f64)| det::atan2(y - oy, x - ox);
     let turn = |a: f64, from: f64| (a - from).rem_euclid(crate::math::TWO_PI);
     let [s, m, f] = ends.map(angle);
     let [(sx, sy), _, (fx, fy)] = ends;
@@ -1414,10 +1415,10 @@ fn arc_candidates(
     let (vx, vy) = (-ox, -2.0 * r - oy);
     let l = (vx * vx + vy * vy).sqrt();
     if l > radius {
-        let phi = (radius / l).acos();
+        let phi = det::acos(radius / l);
         let (ux, uy) = (vx / l, vy / l);
         for sign in [1.0, -1.0] {
-            let (sn, cs) = (sign * phi).sin_cos();
+            let (sn, cs) = det::sin_cos(sign * phi);
             points.push((
                 ox + radius * (ux * cs - uy * sn),
                 oy + radius * (ux * sn + uy * cs),

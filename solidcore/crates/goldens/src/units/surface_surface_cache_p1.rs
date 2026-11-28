@@ -52,6 +52,7 @@ use crate::case::CaseContext;
 use crate::cases::contract::{self, Limits};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 800;
@@ -1306,8 +1307,8 @@ pub(crate) fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
                         // cylinder-like: v straight lines, u bent
                         2 => {
                             let t = i as f64 / n as f64 * 2.5;
-                            x = t.cos() * 3.0;
-                            z = t.sin() * 3.0;
+                            x = det::cos(t) * 3.0;
+                            z = det::sin(t) * 3.0;
                             y = j as f64;
                         }
                         // u = 0 side collapsed to a point
