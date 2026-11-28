@@ -28,7 +28,7 @@ use egui::{
 use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
 use crate::painter::Painter;
@@ -36,9 +36,34 @@ use egui_wgpu::{RenderState, WgpuConfiguration, WgpuError};
 
 /// What runs in the main window.
 pub trait App {
+    /// The app's logic, before each pass's UI, and alone when the loop is asked for it
+    /// ([`Waker::run_logic`]) without painting.
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &Frame<'_>) {}
+
     /// One pass of the main window's UI. `frame` has the window's graphics state once the device
     /// is up. Pop-out windows are egui viewports shown from here.
     fn ui(&mut self, ui: &mut egui::Ui, frame: &Frame<'_>);
+
+    /// Change the main window's input before its pass sees it.
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, _raw: &mut egui::RawInput) {}
+
+    /// Whether a main-window event asks for a pass; `None` keeps egui-winit's answer.
+    fn repaint_on_window_event(&mut self, _event: &WindowEvent) -> Option<bool> {
+        None
+    }
+
+    /// Whether a device event (raw mouse motion) asks for a pass; `None` keeps egui-winit's answer.
+    fn repaint_on_device_event(&mut self, _event: &winit::event::DeviceEvent) -> Option<bool> {
+        None
+    }
+
+    /// Save what the app keeps across runs: every [`App::auto_save_interval`] and before exit.
+    fn save(&mut self) {}
+
+    /// How often [`App::save`] runs while the app runs.
+    fn auto_save_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(30)
+    }
 
     /// The colour the main window is cleared to before egui draws.
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
@@ -61,9 +86,32 @@ impl Frame<'_> {
     }
 }
 
+/// What the app is made with, once the main window and its device are up.
+pub struct Created {
+    pub ctx: egui::Context,
+    pub render_state: Option<RenderState>,
+    /// Wakes the loop from other threads.
+    pub waker: Waker,
+}
+
+/// Wakes the loop from any thread.
+#[derive(Clone)]
+pub struct Waker(EventLoopProxy<UserEvent>);
+
+impl Waker {
+    /// Run the app's logic once now, without painting (a control request on a window the
+    /// compositor gives no frames, #743).
+    pub fn run_logic(&self) {
+        // The loop is gone once the main window has closed: nothing to wake.
+        let _ = self.0.send_event(UserEvent::RunLogicNow);
+    }
+}
+
 /// How the main window is opened and drawn.
 pub struct RunOptions {
     pub viewport: ViewportBuilder,
+    /// Changes winit's event loop before it is built (X11 instead of Wayland, for one).
+    pub event_loop_builder: Option<Box<dyn FnOnce(&mut winit::event_loop::EventLoopBuilder<UserEvent>)>>,
     /// The device and surfaces, as eframe takes them (`NativeOptions::wgpu_options`).
     pub wgpu: WgpuConfiguration,
     pub renderer: egui_wgpu::RendererOptions,
@@ -86,17 +134,25 @@ pub enum RunError {
 pub enum UserEvent {
     /// egui asked `viewport` to repaint at `when`, during the pass numbered `cumulative_pass_nr`.
     Repaint { viewport: ViewportId, when: Instant, cumulative_pass_nr: u64 },
+    /// [`Waker::run_logic`].
+    RunLogicNow,
 }
 
-/// Opens the main window and runs `app` in it until it closes.
+/// Opens the main window, makes the app with `create` once the window and its device are up, and
+/// runs it until the main window closes.
 ///
 /// # Errors
 /// The event loop, the main window or the graphics device could not be created.
-pub fn run(options: RunOptions, app: impl App + 'static) -> Result<(), RunError> {
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+pub fn run(mut options: RunOptions, create: impl FnOnce(Created) -> Box<dyn App> + 'static) -> Result<(), RunError> {
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    if let Some(change) = options.event_loop_builder.take() {
+        change(&mut builder);
+    }
+    let event_loop = builder.build()?;
     let ctx = egui::Context::default();
     ctx.set_embed_viewports(false);
     let proxy = event_loop.create_proxy();
+    let waker = Waker(proxy.clone());
     ctx.set_request_repaint_callback(move |info| {
         let when = Instant::now() + info.delay;
         let cumulative_pass_nr = info.current_cumulative_pass_nr;
@@ -115,7 +171,7 @@ pub fn run(options: RunOptions, app: impl App + 'static) -> Result<(), RunError>
             None => run_without_window(ctx, immediate),
         }
     });
-    let mut runner = Runner { shared, app: Box::new(app), error: None };
+    let mut runner = Runner { shared, app: None, create: Some(Box::new(create)), waker, saved_at: Instant::now(), error: None };
     event_loop.run_app(&mut runner)?;
     match runner.error.take() {
         Some(error) => Err(error),
@@ -361,7 +417,12 @@ fn run_without_window(ctx: &egui::Context, immediate: ImmediateViewport<'_>) {
 
 struct Runner {
     shared: Rc<RefCell<Shared>>,
-    app: Box<dyn App>,
+    /// Made once the main window is up.
+    app: Option<Box<dyn App>>,
+    create: Option<Box<dyn FnOnce(Created) -> Box<dyn App>>>,
+    waker: Waker,
+    /// When the app last saved.
+    saved_at: Instant,
     /// The error that ended the loop.
     error: Option<RunError>,
 }
@@ -373,12 +434,60 @@ impl Runner {
             log::error!("The window could not be opened: {error}");
             self.error = Some(error);
             event_loop.exit();
+            return;
+        }
+        if self.app.is_none()
+            && let Some(create) = self.create.take()
+        {
+            let (ctx, render_state) = {
+                let shared = self.shared.borrow();
+                (shared.ctx.clone(), shared.painter.render_state())
+            };
+            self.app = Some(create(Created { ctx, render_state, waker: self.waker.clone() }));
+        }
+    }
+
+    /// The app's logic alone, without painting: no input is taken, so the next pass still has it.
+    fn run_logic(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(app) = self.app.as_mut() else { return };
+        let (ctx, render_state, mut raw) = {
+            let shared = self.shared.borrow();
+            let mut raw = egui::RawInput { viewport_id: ViewportId::ROOT, ..Default::default() };
+            raw.viewports = shared.viewports.iter().map(|(id, v)| (*id, v.info.clone())).collect();
+            (shared.ctx.clone(), shared.painter.render_state(), raw)
+        };
+        app.raw_input_hook(&ctx, &mut raw);
+        let output = ctx.run_logic(&raw, |ctx| app.logic(ctx, &Frame { render_state: render_state.as_ref() }));
+        let mut shared = self.shared.borrow_mut();
+        if let Some(viewport) = shared.viewports.get_mut(&ViewportId::ROOT)
+            && let (Some(window), Some(state)) = (viewport.window.clone(), viewport.state.as_mut())
+        {
+            state.handle_platform_output_with_event_loop(&window, event_loop, output.platform_output);
+        }
+        for (id, commands) in output.viewport_commands {
+            let ctx = shared.ctx.clone();
+            if let Some(viewport) = shared.viewports.get_mut(&id) {
+                match &viewport.window {
+                    Some(window) => egui_winit::process_viewport_commands(&ctx, &mut viewport.info, commands, window, &mut viewport.actions),
+                    None => viewport.deferred_commands.extend(commands),
+                }
+            }
+        }
+    }
+
+    /// The app saves every [`App::auto_save_interval`].
+    fn maybe_save(&mut self) {
+        let Some(app) = self.app.as_mut() else { return };
+        if self.saved_at.elapsed() >= app.auto_save_interval() {
+            app.save();
+            self.saved_at = Instant::now();
         }
     }
 
     /// Runs viewport `id`'s pass and paints it. An immediate viewport is painted in its parent's.
     fn paint(&mut self, event_loop: &ActiveEventLoop, id: ViewportId) {
-        let (input, ui_cb, render_state, ctx) = {
+        let Some(app) = self.app.as_mut() else { return };
+        let (mut input, ui_cb, render_state, ctx) = {
             let mut shared = self.shared.borrow_mut();
             let Some(viewport) = shared.viewports.get_mut(&id) else { return };
             viewport.repaint_at = None;
@@ -394,18 +503,27 @@ impl Runner {
             (input, ui_cb, shared.painter.render_state(), shared.ctx.clone())
         };
         // No borrow is held here: immediate viewports shown by this pass take it.
+        let root = ui_cb.is_none();
+        if root {
+            app.raw_input_hook(&ctx, &mut input);
+        }
+        let close_requested = root && input.viewport().close_requested();
         let output = match &ui_cb {
             Some(ui_cb) => ctx.run_ui(input, |ui| ui_cb(ui)),
-            None => {
-                let app = &mut self.app;
-                ctx.run_ui(input, |ui| app.ui(ui, &Frame { render_state: render_state.as_ref() }))
-            }
+            None => ctx.run_ui(input, |ui| {
+                let frame = Frame { render_state: render_state.as_ref() };
+                app.logic(ui.ctx(), &frame);
+                app.ui(ui, &frame);
+            }),
         };
-        let clear = if ui_cb.is_none() { self.app.clear_color(&ctx.global_style().visuals) } else { [0.0; 4] };
-        let mut shared = self.shared.borrow_mut();
-        shared.finish(id, output, clear, Some(event_loop));
-        if shared.viewports.get(&ViewportId::ROOT).is_some_and(|root| root.info.close_requested()) {
+        // The app answers a close with `ViewportCommand::CancelClose` in the same pass.
+        let canceled = output.viewport_output.get(&ViewportId::ROOT).is_some_and(|root| root.commands.contains(&egui::ViewportCommand::CancelClose));
+        let clear = if root { app.clear_color(&ctx.global_style().visuals) } else { [0.0; 4] };
+        self.shared.borrow_mut().finish(id, output, clear, Some(event_loop));
+        if close_requested && !canceled {
             event_loop.exit();
+        } else if root {
+            self.maybe_save();
         }
     }
 }
@@ -415,8 +533,9 @@ impl ApplicationHandler<UserEvent> for Runner {
         self.open_pending(event_loop);
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
+            UserEvent::RunLogicNow => self.run_logic(event_loop),
             UserEvent::Repaint { viewport, when, cumulative_pass_nr } => {
                 let mut shared = self.shared.borrow_mut();
                 // A request from a pass that has since been followed by another is already met.
@@ -452,10 +571,16 @@ impl ApplicationHandler<UserEvent> for Runner {
             }
             _ => {}
         }
-        if let (Some(window), Some(state)) = (viewport.window.clone(), viewport.state.as_mut())
-            && state.on_window_event(&window, &event).repaint
-        {
-            viewport.ask_repaint(Instant::now());
+        if let (Some(window), Some(state)) = (viewport.window.clone(), viewport.state.as_mut()) {
+            let repaint = state.on_window_event(&window, &event).repaint;
+            // The app may answer for the main window's events (pointer motion that changes nothing).
+            let asked = match self.app.as_mut() {
+                Some(app) if id == ViewportId::ROOT => app.repaint_on_window_event(&event).unwrap_or(repaint),
+                _ => repaint,
+            };
+            if asked {
+                viewport.ask_repaint(Instant::now());
+            }
         }
     }
 
@@ -463,12 +588,18 @@ impl ApplicationHandler<UserEvent> for Runner {
         let winit::event::DeviceEvent::MouseMotion { delta } = event else { return };
         let mut shared = self.shared.borrow_mut();
         // Raw motion goes to the focused window, as in eframe.
-        for viewport in shared.viewports.values_mut() {
+        for (id, viewport) in shared.viewports.iter_mut() {
             if viewport.info.focused == Some(true)
                 && let Some(state) = viewport.state.as_mut()
-                && state.on_mouse_motion(delta)
             {
-                viewport.ask_repaint(Instant::now());
+                let repaint = state.on_mouse_motion(delta);
+                let asked = match self.app.as_mut() {
+                    Some(app) if *id == ViewportId::ROOT => app.repaint_on_device_event(&event).unwrap_or(repaint),
+                    _ => repaint,
+                };
+                if asked {
+                    viewport.ask_repaint(Instant::now());
+                }
             }
         }
     }
@@ -488,7 +619,10 @@ impl ApplicationHandler<UserEvent> for Runner {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.app.on_exit();
+        if let Some(app) = self.app.as_mut() {
+            app.save();
+            app.on_exit();
+        }
         self.shared.borrow_mut().painter.destroy();
     }
 }
