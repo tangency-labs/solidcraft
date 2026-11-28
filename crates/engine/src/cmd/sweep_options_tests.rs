@@ -507,7 +507,6 @@ fn a_sweep_along_each_edge_of_a_coil_is_its_closed_form_or_refused() {
     }
 }
 
-
 /// The path: a 40 x 20 rounded rectangle about the origin on XY, corner radius 2, as lines
 /// `l1`..`l4` and corner arcs `a1`..`a4` from (-18, -10); and a profile `Prof` across its bottom
 /// line at x = 0, `2 w` wide (`w` each side of the path) and 1 high.
