@@ -783,3 +783,223 @@ fn the_command_help_names_the_sketched_cell() {
         assert!(help.contains(word), "{word}: {help}");
     }
 }
+
+// A grid on a cylinder wall (#23010). The tube stands on XY round Z: outer radius 30, bore 27,
+// 40 high, so the wall is t = 3 thick and V0 = pi (30² - 27²) 40 = 6840 pi = 21488.5.
+
+/// The tube: outer radius 30, bore 27, from z 0 to 40.
+fn tube() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 30, "height": 40, "base": [0, 0, 0], "body_name": "Tube"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 27, "height": 50, "base": [0, 0, -5], "operation": "cut", "targets": ["Tube"]}));
+    s
+}
+
+const TUBE_V0: f64 = 6840.0 * std::f64::consts::PI;
+
+/// The pitch of 18 cells round a wall of radius `r`: 2 pi r / 18, so a web of 2 leaves the size
+/// 2 pi r / 18 - 2 (8.47198 on the outside, r = 30; 7.42478 in the bore, r = 27).
+fn pitch_18(r: f64) -> f64 {
+    2.0 * std::f64::consts::PI * r / 18.0
+}
+
+/// Square cells, 18 round the outside wall (the size is the expression of [`pitch_18`] less the
+/// web), whole cells only, with the keys of `extra` set over them.
+fn wall(s: &mut Session, extra: Value) -> Result<Value, crate::EngineError> {
+    let base = json!({"face": [30, 0, 20], "shape": "square", "size": "2 * pi * 30 mm / 18 - 2 mm", "web": 2, "clip": "whole"});
+    s.execute("solid.cell_grid", &with(base, extra))
+}
+
+fn no_cell_grid(s: &Session) -> bool {
+    s.doc.features.iter().all(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::CellGrid { .. }))
+}
+
+#[test]
+fn square_cells_through_a_tubes_outside_wall_remove_exactly_their_sectors() {
+    // p = 2 pi 30 / 18 = 10.47198, s = p - 2 = 8.47198. The default anchor puts a cell centre at
+    // x = p/2 round the wall and z = 20: rows at z = 20 + k p. Rows k = -1, 0, 1 span 5.29..34.71;
+    // k = ±2 would reach z = -5.18 and 45.18, so whole cells are 3 rows x 18 = 54. Each is a
+    // sector of s / 30 rad, s high, through the wall: s / 30 / 2 (30² - 27²) s = 2.85 s².
+    // V = 21488.5 - 54 x 2.85 x 71.7744 = 10442.4.
+    let mut s = tube();
+    let faces_before: usize = s.model.state().bodies.iter().map(|b| b.body.face_count()).sum();
+    // Angle 0 is the record's own frame x axis, where the outside's seam edge lies: the kernel
+    // does not put it on +X, so it is read off the wall before the cut.
+    let seam = {
+        let st = s.model.state();
+        let [b] = st.bodies.as_slice() else { panic!("one tube") };
+        let w = (0..b.body.face_count())
+            .filter_map(|f| solidcraft_kernel::cylinder_wall(&b.body, f).ok())
+            .find(|w| (w.radius - 30.0).abs() < 1e-6)
+            .expect("the outside wall");
+        assert_eq!(w.axis, [0.0, 0.0, 1.0], "{w:?}");
+        w.x_dir[1].atan2(w.x_dir[0])
+    };
+    wall(&mut s, json!({})).unwrap();
+    let size = pitch_18(30.0) - 2.0;
+    let expect = TUBE_V0 - 54.0 * 2.85 * size * size;
+    assert!((expect - 10442.4).abs() < 0.1, "{expect}");
+    assert!((volume(&s) - expect).abs() < 1e-6 * expect, "{} vs {expect}", volume(&s));
+    let st = s.model.state();
+    let [body] = st.bodies.as_slice() else { panic!("one body: {}", st.bodies.len()) };
+    assert_eq!(body.body.shell_count(), 1);
+    assert!(body.body.validity().is_empty(), "{:?}", body.body.validity());
+    // The tube's faces (4: outside, bore, two ends, unless the kernel splits a cylinder at its
+    // seam, so counted before) and 4 cut faces per cell: its two sides and its top and bottom.
+    // The outside and the bore are not split by the holes.
+    assert_eq!(body.body.face_count(), faces_before + 4 * 54);
+    // The seam sits mid-web, and the first cell's centre is p/2 round from it, at 10 deg. Both
+    // at R = 28.5, inside the wall.
+    let at = |deg: f64| {
+        let a = seam + deg.to_radians();
+        solidcore_record::Vec3::new(28.5 * a.cos(), 28.5 * a.sin(), 20.0)
+    };
+    assert_eq!(body.body.classify_point(at(10.0)).unwrap(), solidcraft_kernel::PointClass::Outside, "a cell centre is cut");
+    assert_eq!(body.body.classify_point(at(0.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "the web at the seam stays");
+    // The feature keeps the pick and the body, and no sketch.
+    let kept = s.doc.features.iter().find_map(|f| match &f.kind {
+        solidcraft_doc::FeatureKind::CellGrid { sketch, face, body, .. } => Some((*sketch, *face, body.clone())),
+        _ => None,
+    });
+    assert!(matches!(kept, Some((None, Some(_), _))), "{kept:?}");
+}
+
+#[test]
+fn through_all_and_no_depth_both_cut_through_the_wall() {
+    let mut s = tube();
+    wall(&mut s, json!({})).unwrap();
+    let mut t = tube();
+    wall(&mut t, json!({"through_all": true})).unwrap();
+    assert!((volume(&s) - volume(&t)).abs() < 1e-6, "{} vs {}", volume(&s), volume(&t));
+}
+
+#[test]
+fn square_cells_through_the_bore_remove_their_sectors_of_the_bore() {
+    // In the bore, r = 27: p = 2 pi 27 / 18 = 9.42478, s = 7.42478. Rows at z = 20 + k p; k = ±2
+    // would reach z = -2.56 and 42.56, so again 3 rows x 18 = 54 cells. Each is a sector of
+    // s / 27 rad: s / 27 / 2 (30² - 27²) s = (171 / 54) s², so V = V0 - 171 s².
+    let mut s = tube();
+    wall(&mut s, json!({"face": [27, 0, 20], "size": "2 * pi * 27 mm / 18 - 2 mm"})).unwrap();
+    let size = pitch_18(27.0) - 2.0;
+    let expect = TUBE_V0 - 54.0 * (171.0 / 54.0) * size * size;
+    assert!((volume(&s) - expect).abs() < 1e-6 * expect, "{} vs {expect}", volume(&s));
+    let st = s.model.state();
+    assert!(st.bodies.iter().all(|b| b.body.validity().is_empty() && b.body.shell_count() == 1));
+}
+
+#[test]
+fn square_cells_cut_to_a_depth_leave_the_rest_of_the_wall() {
+    // 1.5 deep from the outside: the sectors span r 28.5..30, s / 30 / 2 (30² - 28.5²) s =
+    // (87.75 / 60) s² = 1.4625 s² each, 54 of them.
+    let mut s = tube();
+    wall(&mut s, json!({"depth": 1.5})).unwrap();
+    let size = pitch_18(30.0) - 2.0;
+    let expect = TUBE_V0 - 54.0 * 1.4625 * size * size;
+    assert!((volume(&s) - expect).abs() < 1e-6 * expect, "{} vs {expect}", volume(&s));
+    // A depth of the whole wall cuts as through does.
+    let mut t = tube();
+    wall(&mut t, json!({"depth": 3})).unwrap();
+    let through = TUBE_V0 - 54.0 * 2.85 * size * size;
+    assert!((volume(&t) - through).abs() < 1e-6 * through, "{} vs {through}", volume(&t));
+}
+
+#[test]
+fn free_cells_at_an_open_end_are_notches_out_of_the_end() {
+    // With clip free the rows k = ±2 are trimmed to the wall: row -2 spans z 20 - 2p ± s/2, its
+    // top at 20 - 2p + (p - 2)/2 = 19 - 1.5 p = 3.29204, so 18 notches h = 19 - 1.5 p high open
+    // at z = 0, and 18 the same at z = 40. Each notch is s / 30 / 2 (30² - 27²) h = 2.85 s h.
+    let mut s = tube();
+    wall(&mut s, json!({"clip": "free"})).unwrap();
+    let p = pitch_18(30.0);
+    let (size, h) = (p - 2.0, 19.0 - 1.5 * p);
+    let expect = TUBE_V0 - 54.0 * 2.85 * size * size - 36.0 * 2.85 * size * h;
+    assert!((volume(&s) - expect).abs() < 1e-6 * expect, "{} vs {expect}", volume(&s));
+    let st = s.model.state();
+    assert!(st.bodies.iter().all(|b| b.body.validity().is_empty() && b.body.shell_count() == 1));
+}
+
+#[test]
+fn a_rod_takes_a_grid_to_a_depth_and_refuses_one_through_it() {
+    // A solid rod of radius 30: 1.5 deep the sectors are 1.4625 s² each, as on the tube.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 30, "height": 40, "base": [0, 0, 0], "body_name": "Rod"}));
+    let before = volume(&s);
+    assert!(wall(&mut s, json!({})).is_err(), "no bore under the wall to cut through to");
+    assert!(wall(&mut s, json!({"through_all": true})).is_err());
+    assert!(no_cell_grid(&s));
+    wall(&mut s, json!({"depth": 1.5})).unwrap();
+    let size = pitch_18(30.0) - 2.0;
+    let expect = before - 54.0 * 1.4625 * size * size;
+    assert!((volume(&s) - expect).abs() < 1e-6 * expect, "{} vs {expect}", volume(&s));
+}
+
+#[test]
+fn a_size_that_does_not_go_round_names_the_two_nearest_that_do() {
+    // Size 8 and web 2 (pitch 10) round 188.50: 18 cells close at size 8.472, 19 at 7.921.
+    let mut s = tube();
+    let e = wall(&mut s, json!({"size": 8})).unwrap_err().to_string();
+    assert!(e.contains("8.472") && e.contains("7.921"), "{e}");
+    assert!(no_cell_grid(&s));
+    assert!((volume(&s) - TUBE_V0).abs() < 1e-6 * TUBE_V0);
+}
+
+#[test]
+fn what_a_wall_grid_does_not_take_is_refused_before_a_feature_is_made() {
+    let mut s = tube();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    for p in [
+        json!({"shape": "hexagon"}),
+        json!({"shape": null}),
+        json!({"mode": "raised", "depth": 1}),
+        json!({"direction": "negative"}),
+        json!({"sketch": "Field"}),
+        json!({"profiles": [0]}),
+        json!({"depth": 4}),
+        json!({"depth": 0}),
+        json!({"angle": "30 deg"}),
+        json!({"targets": ["Tube", "Other"]}),
+        json!({"targets": ["*"]}),
+        json!({"face": [28.5, 0, 40]}),
+        json!({"face": null}),
+        json!({"face": [1, 2]}),
+        json!({"face": "no such face"}),
+    ] {
+        assert!(wall(&mut s, p.clone()).is_err(), "{p}");
+    }
+    assert!(no_cell_grid(&s));
+    // A turn of 90 deg is the same lattice.
+    wall(&mut s, json!({"angle": "90 deg"})).unwrap();
+}
+
+#[test]
+fn a_cone_a_sphere_and_a_mesh_are_not_cylinder_walls() {
+    let mut cone = Session::default();
+    run(&mut cone, "solid.cone", json!({"radius": 30, "top_radius": 20, "height": 40, "body_name": "Cone"}));
+    // Half way up the side is at radius 25.
+    assert!(wall(&mut cone, json!({"face": [25, 0, 20], "depth": 1})).is_err());
+    assert!(no_cell_grid(&cone));
+    let mut ball = Session::default();
+    run(&mut ball, "solid.sphere", json!({"radius": 30, "center": [0, 0, 0], "body_name": "Ball"}));
+    assert!(wall(&mut ball, json!({"face": [30, 0, 0], "depth": 1})).is_err());
+    assert!(no_cell_grid(&ball));
+    // The tube through STL is a mesh body: its wall has no exact cylinder.
+    let dir = std::env::temp_dir().join(format!("solidcraft-23010-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Tube.stl");
+    let mut s = tube();
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut mesh = Session::default();
+    run(&mut mesh, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(wall(&mut mesh, json!({})).is_err());
+    assert!(no_cell_grid(&mesh));
+}
+
+#[test]
+fn the_command_help_names_the_wall_face() {
+    let help = crate::cmd::find_command("solid.cell_grid").map(|c| c.params).unwrap_or_default();
+    assert!(help.contains("face?: [x,y,z]|name") && help.contains("cylinder wall"), "{help}");
+}

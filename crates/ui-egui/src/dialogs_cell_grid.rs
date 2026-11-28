@@ -1,10 +1,10 @@
-//! Cell Grid (`solid.cell_grid`): the sketch's profiles to fill, the bodies to cut, the cell and
-//! the grid. The command checks the values. A row for an option the command gains later is one
+//! Cell Grid (`solid.cell_grid`): the sketch's profiles to fill (or a cylinder wall to wrap the
+//! grid round), the bodies to cut, the cell and the grid. The command checks the values. A row for an option the command gains later is one
 //! field here, one row in [`rows`] and one key in [`commands`] and [`for_feature`].
 use crate::{
     SolveApp,
     dialogs::{Kind, check, shown_expr},
-    selection::{BODIES, PROFILES, SelInput, SelectionExt as _},
+    selection::{BODIES, FACES, PROFILES, SelInput, SelectionExt as _},
     ui_kit::{choice_row, expr_row, row},
 };
 use serde_json::{Map, Value, json};
@@ -31,11 +31,14 @@ const KEEPOUT_CLIPS: [Option<&str>; 4] = [None, Some("whole"), Some("snap"), Som
 const MODES: [&str; 2] = ["cut", "raised"];
 const DIRECTIONS: [&str; 3] = ["positive", "negative", "symmetric"];
 /// The inputs, in order: the profiles (their sketch and keep-outs), the bodies, the anchor, the
-/// cell's profile (a sketched cell only: its sketch is the cell sketch).
+/// cell's profile (a sketched cell only: its sketch is the cell sketch), the cylinder wall to wrap
+/// the grid round (instead of profiles). The wall comes last so the earlier inputs keep their
+/// places.
 const PROFILES_INPUT: usize = 0;
 const BODIES_INPUT: usize = 1;
 const ANCHOR_INPUT: usize = 2;
 const CELL_INPUT: usize = 3;
+const WALL_INPUT: usize = 4;
 /// The dialog's own note (not a command key) of the point the anchor field was filled with when
 /// the dialog opened on a stored grid: a field still holding it is not a new pick.
 const ANCHOR_SHOWN: &str = "anchor_shown";
@@ -89,6 +92,8 @@ pub struct CellGrid {
     pub cell_angle: String,
     /// Mirror every other sketched cell.
     pub flip: bool,
+    /// A wall is picked: the grid takes no profiles, so their row is hidden ([`follow_wall`]).
+    pub walled: bool,
 }
 
 impl Default for CellGrid {
@@ -113,6 +118,7 @@ impl Default for CellGrid {
             stagger: "0".into(),
             cell_angle: "0 deg".into(),
             flip: false,
+            walled: false,
         }
     }
 }
@@ -168,6 +174,8 @@ fn inputs() -> Vec<SelInput> {
         SelInput::new("Anchor", ANCHOR_PICKS, false).tip("ui.cell_grid.anchor_tip"),
         // One profile: its sketch is the cell sketch. Shown with the Sketch shape only.
         SelInput::new("ui.cell_grid.cell_sketch", PROFILES, false).tip("ui.cell_grid.cell_sketch_tip"),
+        // A round wall of a body: the grid is wrapped round it. Direction and Mode do not apply.
+        SelInput::new("ui.cell_grid.wall", FACES, false).tip("ui.cell_grid.wall_tip"),
     ]
 }
 
@@ -175,15 +183,33 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "solid.cell_grid").then(|| (crate::length_input::defaults(&app.session.doc, Kind::CellGrid(CellGrid::default())), inputs()))
 }
 
-/// The pick rows to show, as runs of the dialog's inputs: the cell's profile only for a sketched cell.
-pub fn shown_picks(c: &CellGrid) -> std::ops::Range<usize> {
-    0..if c.sketched() { CELL_INPUT + 1 } else { CELL_INPUT }
+/// The pick rows to show, in order: the cell's profile only for a sketched cell, the profiles
+/// only without a wall, the wall always.
+pub fn shown_picks(c: &CellGrid) -> Vec<usize> {
+    (0..=WALL_INPUT).filter(|&i| (i != CELL_INPUT || c.sketched()) && (i != PROFILES_INPUT || !c.walled)).collect()
 }
 
-pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput]) -> bool {
+/// Follow the wall pick: with a wall the profiles row is hidden, and a hidden row never waits for
+/// the next click; the wall's row does (an edited wall grid opened on the empty Profiles row).
+pub(crate) fn follow_wall(c: &mut CellGrid, inputs: &[SelInput], active: &mut usize) {
+    c.walled = !crate::selection::items(inputs, WALL_INPUT).is_empty();
+    if c.walled && !shown_picks(c).contains(active) {
+        *active = WALL_INPUT;
+    }
+}
+
+pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, inputs: &[SelInput]) -> bool {
     // A sketched cell has no snapped cells; the choice moves to whole cells (see `settled`).
     *c = c.settled();
-    choice_row(ui, app.tr("ui.cell_grid.mode"), "cell_grid_mode", &mut c.mode, &[app.tr("ui.cell_grid.cut"), app.tr("ui.cell_grid.raised")]);
+    // A wall wraps cut cells round the cylinder: no Mode (always cut) and no Direction (the cut
+    // goes into the wall).
+    let walled = !crate::selection::items(inputs, WALL_INPUT).is_empty();
+    if walled {
+        c.mode = 0;
+        crate::ui_kit::text(ui, app.tr("ui.cell_grid.wall_web_note"), crate::ui_kit::Text::Note("cell_grid_wall_web"));
+    } else {
+        choice_row(ui, app.tr("ui.cell_grid.mode"), "cell_grid_mode", &mut c.mode, &[app.tr("ui.cell_grid.cut"), app.tr("ui.cell_grid.raised")]);
+    }
     choice_row(
         ui,
         app.tr("Shape"),
@@ -229,13 +255,15 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
     if !c.through_all {
         enter |= expr_row(ui, app.tr("ui.depth"), &mut c.depth);
     }
-    choice_row(
-        ui,
-        app.tr("ui.direction"),
-        "cell_grid_direction",
-        &mut c.direction,
-        &[app.tr("ui.cell_grid.positive"), app.tr("ui.cell_grid.negative"), app.tr("ui.symmetric")],
-    );
+    if !walled {
+        choice_row(
+            ui,
+            app.tr("ui.direction"),
+            "cell_grid_direction",
+            &mut c.direction,
+            &[app.tr("ui.cell_grid.positive"), app.tr("ui.cell_grid.negative"), app.tr("ui.symmetric")],
+        );
+    }
     if c.sketched() {
         // Snap is not offered: whole is 0 and free is 2 in [`CLIPS`], same, whole and free 0, 1
         // and 3 in [`KEEPOUT_CLIPS`].
@@ -283,21 +311,36 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
 pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let c = &c.settled();
     let picked = crate::selection::items(inputs, PROFILES_INPUT).profiles();
-    let Some(sketch) = picked.first().map(|(sketch, _)| *sketch) else { return Err(app.tr("error.cell_grid_profiles").into()) };
-    // The command fills one sketch: profiles of a second sketch are refused, not dropped.
-    if picked.iter().any(|(s, _)| *s != sketch) {
-        return Err(app.tr("error.cell_grid_one_sketch").into());
-    }
-    let profiles: Vec<usize> = picked.iter().map(|(_, index)| *index).collect();
+    let wall = crate::selection::items(inputs, WALL_INPUT).first();
     let mut p = json!({
-        "sketch": sketch,
-        "profiles": profiles,
         "shape": SHAPES.get(c.shape).copied().unwrap_or("hexagon"),
         "web": c.web,
         "angle": c.angle,
         "clip": CLIPS.get(c.clip).copied().unwrap_or("snap"),
-        "direction": DIRECTIONS.get(c.direction).copied().unwrap_or("positive"),
     });
+    // The wall's body and a point on it: the command resolves the face from them.
+    let mut wall_body = None;
+    if let Some(wall) = wall {
+        // A wall and profiles are two fields: refused, not one dropped.
+        if !picked.is_empty() {
+            return Err(app.tr("error.cell_grid_wall_sketch").into());
+        }
+        let Sel::Face { body, point, index } = wall else { return Err(app.tr("error.cell_grid_wall").into()) };
+        if body.is_empty() || *index == usize::MAX || !point.is_finite() {
+            return Err(app.tr("error.cell_grid_wall").into());
+        }
+        wall_body = Some((body.clone(), *point));
+    } else {
+        let Some(sketch) = picked.first().map(|(sketch, _)| *sketch) else { return Err(app.tr("error.cell_grid_profiles").into()) };
+        // The command fills one sketch: profiles of a second sketch are refused, not dropped.
+        if picked.iter().any(|(s, _)| *s != sketch) {
+            return Err(app.tr("error.cell_grid_one_sketch").into());
+        }
+        let profiles: Vec<usize> = picked.iter().map(|(_, index)| *index).collect();
+        p["sketch"] = json!(sketch);
+        p["profiles"] = json!(profiles);
+        p["direction"] = json!(DIRECTIONS.get(c.direction).copied().unwrap_or("positive"));
+    }
     if let Value::Object(args) = &mut p {
         if c.sketched() {
             // The cell is the one profile picked: its sketch holds it. Size is not used.
@@ -325,11 +368,13 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         if c.on_dots() {
             args.insert("dot_grid".into(), json!(DOT_GRIDS.get(c.dot_grid).copied().unwrap_or("hexagonal")));
         }
+        // A wall always cuts: a raised choice kept from before the wall was picked is dropped.
+        let raised = c.raised() && wall_body.is_none();
         // Cut is the command's default: left out, as before the choice existed.
-        if c.raised() {
+        if raised {
             args.insert("mode".into(), json!("raised"));
         }
-        if c.through_all && !c.raised() {
+        if c.through_all && !raised {
             args.insert("through_all".into(), json!(true));
         } else {
             args.insert("depth".into(), json!(c.depth));
@@ -344,9 +389,15 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         if c.takes_margin() && !c.margin.trim().is_empty() {
             args.insert("margin".into(), json!(c.margin));
         }
-        let bodies = crate::selection::items(inputs, BODIES_INPUT).body_names();
-        if !bodies.is_empty() {
-            args.insert("targets".into(), json!(bodies));
+        if let Some((body, point)) = &wall_body {
+            // The wall's own body is the only target.
+            args.insert("face".into(), crate::selection::point_value(*point));
+            args.insert("targets".into(), json!([body]));
+        } else {
+            let bodies = crate::selection::items(inputs, BODIES_INPUT).body_names();
+            if !bodies.is_empty() {
+                args.insert("targets".into(), json!(bodies));
+            }
         }
         // Editing: the stored anchor stays as typed (it may follow parameters) while the field
         // still holds the point it was filled with, even if a parameter has moved the anchor
@@ -400,6 +451,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         through_all,
         direction,
         targets,
+        face,
+        body,
         ..
     } = kind
     else {
@@ -450,12 +503,19 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         stagger: stagger.as_ref().map_or(defaults.stagger, |e| shown_expr(e, ValueKind::Unitless)),
         cell_angle: cell_angle.as_ref().map_or(defaults.cell_angle, |e| shown_expr(e, ValueKind::Angle)),
         flip: *flip,
+        walled: face.is_some(),
     };
     let mut inputs = inputs();
     let state = crate::open_meshing::session_world(&app.session);
     if let Some(input) = inputs.get_mut(PROFILES_INPUT) {
-        let items = state.sketch(sketch.0).map(|ss| crate::dialogs::profile_indices(ss, profiles)).unwrap_or_default();
-        input.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+        // A cell grid on a wall has no sketch.
+        if let Some(sketch) = sketch {
+            let items = state.sketch(sketch.0).map(|ss| crate::dialogs::profile_indices(ss, profiles)).unwrap_or_default();
+            input.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+        }
+    }
+    if let (Some(input), Some(face)) = (inputs.get_mut(WALL_INPUT), face) {
+        input.items = crate::dialogs::face_sel_on(&app.session, body.as_deref(), face.0).into_iter().collect();
     }
     if let (Some(input), Some(id)) = (inputs.get_mut(CELL_INPUT), cell_sketch) {
         // The cell sketch holds one profile: the field shows it.

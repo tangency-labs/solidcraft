@@ -204,6 +204,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "cell_grid",
             json!({"type": "cell_grid", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "sides": "cell_grid.sides", "size": "cell_grid.size", "web": "cell_grid.web", "angle": "cell_grid.angle", "margin": "cell_grid.margin", "anchor": ["cell_grid.x", "cell_grid.y", "cell_grid.z"], "depth": "cell_grid.depth"}),
         ),
+        (
+            "cell_grid_wall",
+            json!({"type": "cell_grid", "face": o, "size": "cell_grid_wall.size", "web": "cell_grid_wall.web", "anchor": ["cell_grid_wall.x", "cell_grid_wall.y", "cell_grid_wall.z"], "depth": "cell_grid_wall.depth"}),
+        ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
         (
@@ -375,6 +379,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
             json!({"body": "B"})
         }
         "sheet_bead" => json!({"body": "B"}),
+        "cell_grid_wall" => json!({"body": "B", "targets": ["B"]}),
         "combine" => json!({"target": "B", "tools": ["B"]}),
         "pattern_rectangular" | "pattern_circular" | "pattern_path" | "mirror" => json!({"bodies": ["B"]}),
         "hole_simple" | "hole_drilled" | "hole_counterbore" | "hole_countersink" => json!({"points": {"sketch": 3, "ids": ["p"]}}),

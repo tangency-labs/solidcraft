@@ -1,0 +1,44 @@
+{
+  "en": {
+    "ui.cell_grid.wall": "Wall",
+    "ui.cell_grid.wall_tip": "A round wall (tube or rod) to wrap the grid round, instead of profiles. The cells are cut through the wall, or to the depth.",
+    "ui.cell_grid.wall_web_note": "On a wall the size is the cell's width round the wall; the web is the rib between cells. The grid must close round the wall.",
+    "error.cell_grid_wall": "Pick a round wall (a cylinder face) of one body",
+    "error.cell_grid_wall_sketch": "Pick either profiles or a wall, not both"
+  },
+  "ar": {
+    "ui.cell_grid.wall": "الجدار",
+    "ui.cell_grid.wall_tip": "جدار دائري (أنبوب أو قضيب) تُلَفّ الشبكة حوله بدلاً من المقاطع. تُقطع الخلايا عبر الجدار أو حتى العمق المحدد.",
+    "ui.cell_grid.wall_web_note": "على الجدار يكون الحجم عرض الخلية حول الجدار، والشبكة هي الضلع بين الخلايا. يجب أن تُغلق الشبكة حول الجدار.",
+    "error.cell_grid_wall": "حدّد جداراً دائرياً (وجه أسطوانة) لجسم واحد",
+    "error.cell_grid_wall_sketch": "حدّد مقاطع أو جداراً، وليس كليهما"
+  },
+  "he": {
+    "ui.cell_grid.wall": "דופן",
+    "ui.cell_grid.wall_tip": "דופן עגולה (צינור או מוט) שסביבה כורכים את הרשת, במקום פרופילים. התאים נחתכים דרך הדופן, או עד העומק.",
+    "ui.cell_grid.wall_web_note": "על דופן הגודל הוא רוחב התא סביב הדופן; הרשת היא הצלע בין התאים. הרשת חייבת להיסגר סביב הדופן.",
+    "error.cell_grid_wall": "בחר דופן עגולה (פאת גליל) של גוף אחד",
+    "error.cell_grid_wall_sketch": "בחר פרופילים או דופן, לא את שניהם"
+  },
+  "ja": {
+    "ui.cell_grid.wall": "壁",
+    "ui.cell_grid.wall_tip": "プロファイルの代わりに、グリッドを巻き付ける円形の壁(筒または棒)。セルは壁を貫通するか、指定の深さまで切り込まれます。",
+    "ui.cell_grid.wall_web_note": "壁ではサイズは壁を一周するセルの幅で、ウェブはセル間のリブです。グリッドは壁の周囲で閉じる必要があります。",
+    "error.cell_grid_wall": "1つのボディの円形の壁(円柱面)を選択してください",
+    "error.cell_grid_wall_sketch": "プロファイルか壁のどちらか一方を選択してください"
+  },
+  "vi": {
+    "ui.cell_grid.wall": "Thành",
+    "ui.cell_grid.wall_tip": "Một thành tròn (ống hoặc thanh) để quấn lưới quanh, thay cho các biên dạng. Các ô được cắt xuyên qua thành hoặc đến độ sâu đã chọn.",
+    "ui.cell_grid.wall_web_note": "Trên thành, kích thước là chiều rộng ô quanh thành; gân là phần nối giữa các ô. Lưới phải khép kín quanh thành.",
+    "error.cell_grid_wall": "Chọn một thành tròn (mặt trụ) của một vật thể",
+    "error.cell_grid_wall_sketch": "Chọn biên dạng hoặc thành, không chọn cả hai"
+  },
+  "zh": {
+    "ui.cell_grid.wall": "壁",
+    "ui.cell_grid.wall_tip": "代替轮廓、用于环绕网格的圆形壁(管或杆)。单元会穿透壁面,或切到指定深度。",
+    "ui.cell_grid.wall_web_note": "在壁上,尺寸是单元绕壁方向的宽度;筋是单元之间的肋。网格必须绕壁闭合。",
+    "error.cell_grid_wall": "请选择一个实体的圆形壁(圆柱面)",
+    "error.cell_grid_wall_sketch": "请选择轮廓或壁,不能同时选择"
+  }
+}

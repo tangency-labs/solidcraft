@@ -159,6 +159,10 @@ cell_grid
   moves: anchor[0], anchor[1], anchor[2]
   profiles: 1 indices
   placement: cell_grid.x, cell_grid.y, cell_grid.z
+cell_grid_wall
+  moves: anchor[0], anchor[1], anchor[2], face[0], face[1], face[2]
+  face points: [0, 0, 0]
+  placement: cell_grid_wall.x, cell_grid_wall.y, cell_grid_wall.z
 sheet_base
   profiles: 1 all
 sheet_contour

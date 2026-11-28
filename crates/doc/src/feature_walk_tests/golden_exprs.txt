@@ -384,6 +384,12 @@ cell_grid
     Margin = cell_grid.margin (Length)
     Depth = cell_grid.depth (Length)
   expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.margin, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
+cell_grid_wall
+  inputs:
+    Cell size = cell_grid_wall.size (Length)
+    Web = cell_grid_wall.web (Length)
+    Depth = cell_grid_wall.depth (Length)
+  expressions: cell_grid_wall.size, cell_grid_wall.web, cell_grid_wall.depth, cell_grid_wall.x, cell_grid_wall.y, cell_grid_wall.z
 sheet_base
 sheet_contour
   inputs:

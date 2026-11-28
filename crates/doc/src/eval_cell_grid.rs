@@ -61,10 +61,18 @@ pub(crate) fn tools(
         direction,
         targets,
         mode,
+        face,
         ..
     } = &f.kind
     else {
         return Err(DocError::Invalid("not a cell grid".into()));
+    };
+    // A grid on a cylinder wall is planned on the unrolled wall, not in a sketch's plane.
+    if face.is_some() {
+        return crate::eval_cell_grid_wall::wall_tools(doc, vals, f, st, warning);
+    }
+    let Some(sketch) = sketch else {
+        return Err(DocError::Invalid("a cell grid needs a sketch or a wall `face`".into()));
     };
     // A cut of a sheet metal body is read back onto the sheet's panels, which a grid of cells is not
     // yet. Only the bodies the cut reaches count: its targets, else its participants, else its

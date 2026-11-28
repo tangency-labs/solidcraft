@@ -56,6 +56,7 @@ pub(crate) mod region;
 mod sketch;
 pub(crate) mod snap;
 mod vec;
+mod wall;
 
 #[cfg(test)]
 mod tests;
@@ -73,6 +74,10 @@ use vec::{ring_next, Vec2Ext};
 
 pub use lattice::MAX_CELLS;
 pub use sketch::{plan_sketch, sketch_cell_center, SketchCell, MAX_CELL_REACH, MAX_CELL_SEGMENTS};
+pub use wall::{
+    closing_steps, default_anchor, plan_wall, unroll_point, CylinderWall, SectorMaster,
+    WallCellPlan, WallDepth, WallSector, REVOLVE_SIGN,
+};
 
 /// Most sides of a polygon cell.
 pub const MAX_SIDES: u32 = 64;

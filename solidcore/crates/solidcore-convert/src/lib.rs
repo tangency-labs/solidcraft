@@ -41,6 +41,7 @@
 pub mod blend;
 pub mod brep;
 pub mod cell_grid;
+pub mod cell_grid_wall;
 pub mod develop;
 pub mod frame;
 pub mod round_face;

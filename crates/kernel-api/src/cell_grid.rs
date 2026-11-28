@@ -2,8 +2,10 @@
 //! outer loop is the field, a loop inside it a keep-out), each cell's opening as regions to cut
 //! or raise. The spec, the plan and the cells are the record's (`solidcore_record::cell_grid`).
 
+use solidcore_record::brep::Brep;
 use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell, SketchCell};
-use solidcore_record::{Loop2, Region2};
+use solidcore_record::cell_grid_wall::{CylinderWall, WallCellPlan, WallDepth};
+use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 
 use crate::Backend;
 
@@ -36,4 +38,17 @@ pub trait CellGrid: Backend {
     /// The opening of `cell` as regions: each counter-clockwise loop an outer loop, each clockwise
     /// loop a hole of the outer loop that holds it.
     fn cell_regions(&self, cell: &GridCell) -> Result<Vec<Region2>, Self::Error>;
+    /// The whole-turn cylinder wall of face `face` of `body`, outside or bore, as the unrolling
+    /// measures it. A face that is not such a wall (a plane, a sphere, a cone, a part of a turn, a
+    /// wall with openings) is the kernel's error, in its words.
+    fn cylinder_wall(&self, body: &Brep, face: usize) -> Result<CylinderWall, Self::Error>;
+    /// The cells of the grid `spec` round `wall`, each an annular sector to revolve once per
+    /// distinct master and place, cut `depth` into the wall. A size that does not close round the
+    /// wall, a shape not supported on a wall, or too many cells is the kernel's error.
+    fn plan_wall_cell_grid(&self, wall: &CylinderWall, spec: &CellGridSpec, depth: WallDepth) -> Result<WallCellPlan, Self::Error>;
+    /// The point `p` on `wall` as unrolled coordinates: arc length from the wall's angle zero along
+    /// its tangent, and height along the axis from the wall's axis point.
+    fn unroll_wall_point(&self, wall: &CylinderWall, p: Vec3) -> Result<Vec2, Self::Error>;
+    /// The anchor a cell grid on `wall` gets when none is given, in unrolled coordinates.
+    fn default_wall_anchor(&self, wall: &CylinderWall, spec: &CellGridSpec) -> Result<Vec2, Self::Error>;
 }

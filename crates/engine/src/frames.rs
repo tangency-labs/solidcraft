@@ -129,7 +129,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
         "sheet.perforate" | "sheet.tab" | "sheet.bead" => &[("body", Body)],
-        "solid.cell_grid" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
+        // A wall grid's `face` is a pick on the wall's body, mapped into that body's frame as
+        // `solid.dome`'s is (#23010).
+        "solid.cell_grid" => &[("anchor", Make), ("face", Pick), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         // Its planes are sketched as `sketch.create`'s, and measured against the body first.
         "mesh.section_stack" => &[("plane", HerePlane)],

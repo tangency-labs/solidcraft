@@ -555,6 +555,9 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
             continue;
         }
+        if input.label == "ui.cell_grid.wall" {
+            continue; // Cell Grid's wall is an alternative to its profiles: the form checks it apart
+        }
         let name = if index == 1 && command != "surface.ruled" { "Body2" } else { "Body1" };
         let point = if index == 1 && command != "surface.ruled" { Vec3::new(30.0, 0.0, 5.0) } else { Vec3::new(0.0, 0.0, 5.0) };
         input.items = if command == "construct.point.along_path" {
@@ -1160,6 +1163,85 @@ fn cell_grid_form_shows_the_rows_of_the_chosen_shape_and_clip() {
     check_form_with("solid.cell_grid", &sketched, &["Cell size", "Margin", "Inset rows"], cell(5, 2, 3));
     // A snap kept from another shape is whole cells for a sketched cell.
     check_form_with("solid.cell_grid", &[&sketched[..], &["Margin"]].concat(), &["Cell size", "Inset rows"], cell(5, 1, 2));
+}
+
+/// A cell grid on a wall: with a wall picked the form hides Mode and Direction, shows the wall
+/// row and its note.
+#[test]
+fn cell_grid_wall_hides_mode_and_direction() {
+    let wall = |d: &mut Dialog| {
+        d.inputs[0].items.clear();
+        d.inputs[4].items = vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(10.0, 0.0, 2.5) }];
+    };
+    let rest = ["Shape", "Cell size", "Web", "Through all", "Depth", "Clip", "Keep-out clip", "Inset rows", "Angle"];
+    check_form_with("solid.cell_grid", &rest, &["Mode", "Direction"], wall);
+}
+
+/// A wall grid takes no profiles: with a wall picked the Profiles row is not drawn and does not
+/// wait for the next click (an edited wall grid opened on it, empty and reading Select); the
+/// wall's row does. Without the wall the Profiles row is back.
+#[test]
+fn cell_grid_wall_hides_the_profiles_row_and_waits_on_the_wall() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.cell_grid");
+    d.inputs[0].items.clear();
+    d.inputs[4].items = vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(10.0, 0.0, 2.5) }];
+    // The first empty pick, as a dialog opens on it.
+    d.active = 0;
+    let draw = |h: &mut Harness, d: &mut Dialog| {
+        scenario::clear_handles();
+        let mut out = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+            |ui| {
+                ui.set_width(264.0);
+                rows(&mut h.app, &h.ctx, d, ui);
+            },
+        );
+        out.textures_delta.clear();
+    };
+    draw(&mut h, &mut d);
+    let profiles = format!("dialog:field:{}", d.inputs[0].label);
+    let wall = format!("dialog:field:{}", d.inputs[4].label);
+    assert!(scenario::rect_of(&profiles).is_none(), "a wall grid draws no Profiles row");
+    assert!(scenario::rect_of(&wall).is_some(), "the Wall row is drawn");
+    assert_ne!(d.active, 0, "the focused pick is not Profiles");
+    assert_eq!(d.active, 4, "the focused pick is the Wall");
+    let Kind::CellGrid(c) = &d.kind else { panic!() };
+    assert!(!crate::dialogs_cell_grid::shown_picks(c).contains(&0), "{c:?}");
+    // The wall cleared: Profiles is drawn again.
+    d.inputs[4].items.clear();
+    draw(&mut h, &mut d);
+    assert!(scenario::rect_of(&profiles).is_some(), "without a wall the Profiles row is back");
+}
+
+/// A cell grid on a wall sends the face (a point on it) and the wall's body as the only target,
+/// and no sketch, profiles, direction or mode; a wall with profiles is refused with its own
+/// message; and without a wall the command is as before.
+#[test]
+fn cell_grid_wall_sends_the_face_and_the_body_and_no_sketch() {
+    let (h, sketch, _) = repeated_profile_fixture();
+    let point = Vec3::new(10.0, 0.0, 2.5);
+    let mut d = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
+    d.inputs[1].items = vec![Sel::Body { name: "Other".into() }];
+    d.inputs[4].items = vec![Sel::Face { body: "Tube".into(), index: 2, point }];
+    if let Kind::CellGrid(c) = &mut d.kind {
+        // Raised and a direction are the form's to drop for a wall.
+        (c.mode, c.direction, c.through_all) = (1, 2, true);
+    }
+    let p = apply_commands(&h.app, &d).unwrap()[0].1.clone();
+    assert_eq!(p["face"], json!([10.0, 0.0, 2.5]), "{p}");
+    assert_eq!(p["targets"], json!(["Tube"]), "{p}");
+    for absent in ["sketch", "profiles", "direction", "mode"] {
+        assert!(p.get(absent).is_none(), "{absent} in {p}");
+    }
+    assert_eq!(p["through_all"], json!(true), "{p}");
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_wall_sketch")));
+    d.inputs[0].items.clear();
+    d.inputs[4].items = vec![Sel::Face { body: "Tube".into(), index: usize::MAX, point }];
+    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_wall")));
+    d.inputs[4].items.clear();
+    assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_profiles")));
 }
 
 /// A sketched cell: the sketch of the picked profile is the cell sketch, the layout goes as typed

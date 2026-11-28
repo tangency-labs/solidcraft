@@ -392,6 +392,27 @@ and `dot_grid` are not used by a sketched cell. `clip` defaults to `whole` for a
 (`snap` for the built-in shapes), `free` trims the cells at the edge, and `snap` is refused.
 A cell sketch with no closed profile, or with several, is refused with the sketch's name.
 
+### On a cylinder wall
+
+Give `face` instead of `sketch` and the cells are wrapped round a round tube: pick the whole-turn
+cylinder wall, on the outside or in the bore, and the grid is cut through it. There is no field
+sketch; the grid runs round the whole wall and along its length. `clip` and `web` work as on a flat
+sketch, and `anchor` sets where the first cell sits (by default the grid starts half a pitch from the
+wall's own angle zero, so the seam of the wall falls between two cells).
+
+- Only square cells are supported, with `angle` 0 or 90. Each cell is cut as a true curved piece of
+  the wall, not a flat cut.
+- The cut goes through the wall by default. `depth` cuts only that far in from the picked face, and
+  must not be more than the wall thickness. On a solid rod there is no wall to go through, so give a
+  `depth`.
+- The cells must go round evenly: `size` plus `web` has to fit a whole number of times in the wall's
+  circumference. If it does not, the grid is refused and the message names the two nearest sizes that
+  do close. Nothing is resized silently.
+- A cone, a wall that is not a whole turn, a wall that is split or has holes, other cell shapes,
+  `mode: raised`, `direction`, and `face` together with `sketch` are refused.
+
+In the Cell Grid dialog, pick the wall in the **Wall** row; Direction and Mode are then hidden.
+
 In the Cell Grid dialog, choose **Shape: Sketch**, pick one profile of the cell sketch, and fill in
 **Pitch X**, **Pitch Y**, **Stagger**, **Cell angle** and **Flip alternate cells**. Cell size and
 Snap are not offered, and the cell's origin is the profile's centroid (set `cell_origin` through the
