@@ -1,0 +1,99 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2672",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3295",
+ "test": "crates/kernel/tests/chamfer_curved_holder.rs (SolidCraft); this fixture is an own minimal reproduction, not that test's geometry",
+ "summary": "A 1 mm chamfer on the tangent chain starting at the straight edge of a slot-shaped (stadium) boss must follow the whole tangent chain: the two straight edges and the two end arcs. On truck, above a part size of about 200 mm only the straight edge was chamfered. The reproduction here is a stadium prism alone (straight sides y = +-5 from x = -20 to 20, end arcs R5 centred at (+-20, 0), height 10), chamfered on the whole top rim, a point on each of its four edges (0, 5, 10), (0, -5, 10), (25, 0, 10), (-25, 0, 10): the fillet API chamfers only the edges it is given, and following a tangent chain from one click is SolidCraft's selection step, so the fixture lists the chain explicitly (a single pick (0, 5, 10) chamfers the straight edge alone here: 1 more face, 21.65 mm^3 removed). Closed form: the two straight edges remove 2 * 40 * d^2/2 = 40 mm^3 (d = 1); each end arc removes a right-triangle ring of area d^2/2 whose centroid is d/3 inside the wall, so by Pappus the two half arcs remove pi * (5 - 1/3) * d^2 = 14.6608 mm^3; total 54.6608. The chamfered body must also have 4 more faces than the plain prism (2 planar and 2 conical chamfer faces: 6 -> 10); the runner has no faces expectation, so only the lump count and volume are checked, and the face count is reported in the run output. The solver takes distance as the rolling-ball radius, which is the leg on each face at these right-angle edges between plane and plane or plane and cylinder.",
+ "cases": [
+  {
+   "name": "stadium_chain_d1",
+   "note": "#2672: the whole tangent chain (2 lines, 2 half arcs) chamfered at once; the removed volume must be that of all four edges, not of the straight pair or of one edge.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "boss",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        -20,
+        -5
+       ],
+       "to": [
+        20,
+        -5
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        20,
+        0
+       ],
+       "radius": 5,
+       "start_deg": -90,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        20,
+        5
+       ],
+       "to": [
+        -20,
+        5
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        -20,
+        0
+       ],
+       "radius": 5,
+       "start_deg": 90,
+       "end_deg": 270
+      }
+     ],
+     "distance": 10
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "boss",
+     "edges": [
+      [
+       0,
+       5,
+       10
+      ],
+      [
+       0,
+       -5,
+       10
+      ],
+      [
+       25,
+       0,
+       10
+      ],
+      [
+       -25,
+       0,
+       10
+      ]
+     ],
+     "distance": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 4730.737397680696,
+     "tol": 0.05,
+     "formula": "10*(40*10 + pi*5^2) - (2*40*1^2/2 + pi*(5 - 1/3)*1^2)"
+    }
+   }
+  }
+ ]
+}
