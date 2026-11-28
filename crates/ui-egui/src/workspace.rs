@@ -2577,6 +2577,33 @@ mod tests {
         assert!(h.widget("Add configuration").is_some());
     }
 
+    #[test]
+    fn reference_and_surface_edit_command_metadata_matches_the_ribbon() {
+        for (tab, panel, commands) in [
+            (
+                "SKETCH",
+                "REFERENCE",
+                &[
+                    "sketch.project",
+                    "sketch.intersect",
+                    "sketch.include_3d",
+                    "sketch.project_to_surface",
+                    "sketch.intersection_curve",
+                    "sketch.spun_profile",
+                    "sketch.isoparametric_curve",
+                    "sketch.fit_curves_to_section",
+                ][..],
+            ),
+            ("SURFACE", "EDIT", &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"][..]),
+        ] {
+            for id in commands {
+                let command = solidcraft_engine::find_command(id).unwrap();
+                assert_eq!(destination(command), Some((tab, panel)), "{id}");
+                assert_eq!((command.tab, command.panel), (tab, panel), "{id}");
+            }
+        }
+    }
+
     /// Weld graphics are available beside the frame members they describe.
     #[test]
     fn weld_create_is_next_to_frame_member_in_the_create_section() {

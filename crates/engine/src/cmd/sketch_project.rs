@@ -45,39 +45,39 @@ const BREAK_LINK_CONTRACT: TypedContract<SketchBreakLinkParams> = TypedContract:
 const AUTO_PROJECT_CONTRACT: TypedContract<AutoProjectParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.project", "Project", crate::checked!("sketch.project", project_cmd)).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).contract(&PROJECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
+    CommandSpec::new("sketch.project", "Project", crate::checked!("sketch.project", project_cmd)).at("SKETCH", "REFERENCE").icon("project").key("P").enabled(in_sketch).contract(&PROJECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
         concat!(refs_doc!(), "; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", occurrence_doc!(), created_doc!()),
     ),
-    CommandSpec::new("sketch.intersect", "Intersect", crate::checked!("sketch.intersect", intersect_cmd)).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).contract(&INTERSECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
+    CommandSpec::new("sketch.intersect", "Intersect", crate::checked!("sketch.intersect", intersect_cmd)).at("SKETCH", "REFERENCE").icon("intersect").enabled(in_sketch).contract(&INTERSECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
         concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", occurrence_doc!(), created_doc!()),
     ),
     CommandSpec::new("sketch.include_3d", "Include 3D Geometry", crate::checked!("sketch.include_3d", include_cmd))
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "REFERENCE")
         .icon("include")
         .enabled(in_sketch)
         .contract(&INCLUDE_3D_CONTRACT).output(output_schema_for::<ProjectResult>).params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it; construction?: bool (default the session's preference, off: the created curves are construction geometry)", occurrence_doc!(), created_doc!())),
     CommandSpec::new("sketch.project_to_surface", "Project To Surface", crate::checked!("sketch.project_to_surface", project_to_surface))
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "REFERENCE")
         .icon("project_surface")
         .enabled(in_sketch)
         .contract(&PROJECT_TO_SURFACE_CONTRACT).output(output_schema_for::<ProjectToSurfaceResult>).params(concat!("curves: [{sketch, curve}…] (curves of other sketches), face: [x,y,z] point on the target face, body?: projected along the active sketch's normal onto the face, as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.intersection_curve", "Intersection Curve", crate::checked!("sketch.intersection_curve", intersection_curve))
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "REFERENCE")
         .icon("intersection_curve")
         .enabled(in_sketch)
         .contract(&INTERSECTION_CURVE_CONTRACT).output(output_schema_for::<SketchLinkResult>).params(concat!("a, b: {body} | {face: [x,y,z], body?} | {sketch, curve} (a curve of another sketch, standing in for its extrusion along that sketch's normal): where they meet, as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.spun_profile", "Spun Profile", crate::checked!("sketch.spun_profile", spun_profile))
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "REFERENCE")
         .icon("spun")
         .enabled(in_sketch)
         .contract(&SPUN_PROFILE_CONTRACT).output(output_schema_for::<SketchLinkResult>).params(concat!("body: name, axis: a line of the active sketch (curve id) | X|Y|Z: the body's outline revolved about the axis, in the sketch plane", created_doc!())),
     CommandSpec::new("sketch.isoparametric_curve", "Isoparametric Curve", crate::checked!("sketch.isoparametric_curve", iso_curve))
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "REFERENCE")
         .icon("iso_curve")
         .enabled(in_sketch)
         .contract(&ISO_CURVE_CONTRACT).output(output_schema_for::<SketchLinkResult>).params(concat!("face: [x,y,z] point on the face (the curve passes through it), body?, direction?: u|v|[x,y,z] (default u): linked 3D curve", created_doc!())),
     CommandSpec::new("sketch.fit_curves_to_section", "Fit Curves to Mesh Section", crate::checked!("sketch.fit_curves_to_section", fit_section))
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "REFERENCE")
         .icon("fit_section")
         .enabled(in_sketch)
         .contract(&FIT_SECTION_CONTRACT).output(output_schema_for::<FitSectionResult>).params(concat!("body: name (a mesh or solid body): its section with the sketch plane, fitted with lines and arcs, as normal (unlinked) geometry", created_doc!())),
