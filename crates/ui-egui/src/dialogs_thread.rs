@@ -381,6 +381,19 @@ fn pitches(form: ThreadForm, d: f64, current: f64) -> Vec<f64> {
     pitches
 }
 
+/// The Size choice's diameters: the table's, in its order, and a custom `current` one before the
+/// first larger diameter.
+fn size_diameters(table: &[(f64, f64)], current: Option<f64>) -> Vec<f64> {
+    let mut diameters: Vec<f64> = table.iter().map(|(d, _)| *d).collect();
+    if let Some(d) = current
+        && !diameters.iter().any(|n| same(*n, d))
+    {
+        let at = diameters.iter().position(|n| *n > d).unwrap_or(diameters.len());
+        diameters.insert(at, d);
+    }
+    diameters
+}
+
 /// A typical designation of the form, for the field's hint.
 fn example(form: ThreadForm) -> String {
     if form == ThreadForm::Custom {
@@ -602,13 +615,7 @@ fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggest
             None => name,
         }
     };
-    let mut diameters: Vec<f64> = table.iter().map(|(d, _)| *d).collect();
-    if let Some((d, _)) = current
-        && !diameters.iter().any(|n| same(*n, d))
-    {
-        diameters.push(d);
-        diameters.sort_by(f64::total_cmp);
-    }
+    let diameters = size_diameters(&table, current.map(|(d, _)| d));
     form_row(ui, "Size", |ui| {
         let labels: Vec<String> = diameters
             .iter()
@@ -1133,6 +1140,14 @@ mod contribution_tests {
             }
             assert!(apply_commands(&app, &d).is_err(), "{designation}");
         }
+    }
+    #[test]
+    fn a_custom_size_is_listed_before_the_first_larger_standard_size() {
+        let table = [(6.0, 1.0), (8.0, 1.25), (56.0, 5.5), (1.0, 0.25), (7.0, 1.0)];
+        assert_eq!(super::size_diameters(&table, Some(7.3)), [6.0, 7.3, 8.0, 56.0, 1.0, 7.0]);
+        assert_eq!(super::size_diameters(&table, Some(70.0)), [6.0, 8.0, 56.0, 1.0, 7.0, 70.0]);
+        assert_eq!(super::size_diameters(&table, Some(7.0)), [6.0, 8.0, 56.0, 1.0, 7.0]);
+        assert_eq!(super::size_diameters(&table, None), [6.0, 8.0, 56.0, 1.0, 7.0]);
     }
     #[test]
     fn contribution_thread_catalogue_is_parseable_and_rendering_keeps_custom_designations() {
