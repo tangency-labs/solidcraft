@@ -866,3 +866,334 @@ fn a_single_zero_length_line_in_a_closed_path_remains_a_writable_open_polyline()
     assert!(!closed);
     assert_eq!(scalar(&entities[0], 70), 128.0);
 }
+
+fn strict_drawing(shapes: &[DxfShape]) -> String {
+    let mut file = DxfFile::new().unwrap();
+    for shape in shapes {
+        file.push(file.default_layer(), shape.clone(), None).unwrap();
+    }
+    write_dxf_file(&file).unwrap()
+}
+
+fn assert_closed_triangle_readback(text: &str, vertices: [Vec2; 3]) {
+    let expected = [(vertices[0], vertices[1]), (vertices[1], vertices[2]), (vertices[2], vertices[0])];
+    let actual = read_dxf(text).unwrap();
+    assert_eq!(actual.len(), 3, "{actual:?}");
+    let lines: Vec<_> = actual
+        .iter()
+        .map(|geom| match geom {
+            Geom2::Line(a, b) => (*a, *b),
+            other => panic!("expected triangle line edge, got {other:?}"),
+        })
+        .collect();
+    assert!(
+        (0..3).any(|shift| {
+            (0..3).all(|i| {
+                let (a, b) = lines[(i + shift) % 3];
+                let (ea, eb) = expected[i];
+                a.dist(ea) < POSITION_EPS && b.dist(eb) < POSITION_EPS
+            })
+        }),
+        "readback {lines:?} did not match triangle {expected:?}"
+    );
+}
+
+#[test]
+fn zero_length_line_before_sub_grid_sliver_in_open_polyline_writes_and_reads_back() {
+    let p = Vec2::new(100.0, 100.0);
+    let p_sliver = Vec2::new(100.0 + 3e-14, 100.0);
+    let q = Vec2::new(120.0, 100.0);
+
+    // Issue #221 exact reproducer: stored zero-length line followed by a sub-grid sliver and real line.
+    let repro = [Seg2::Line { a: p, b: p }, Seg2::Line { a: p, b: p_sliver }, Seg2::Line { a: p_sliver, b: q }];
+    let shapes = path_shapes(DxfPath::Open(&repro), DxfPathStyle::Polyline).unwrap();
+    let text = strict_drawing(&shapes);
+    assert_readback(&text, &[Seg2::Line { a: p, b: q }]);
+    invalid(&repro, DxfPathStyle::Exact);
+
+    // Zero-length line + sliver at the end of an open path keeps a writable two-vertex polyline.
+    let end_only = [Seg2::Line { a: p, b: p }, Seg2::Line { a: p, b: p_sliver }];
+    let end_shapes = path_shapes(DxfPath::Open(&end_only), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(one_polyline(&end_shapes, false).len(), 2);
+    let end_text = strict_drawing(&end_shapes);
+    let end_entities = raw_entities(&end_text);
+    assert_eq!(end_entities.len(), 1);
+    let (raw_verts, closed) = raw_polyline(&end_entities[0]);
+    assert!(!closed);
+    assert_eq!(raw_verts.len(), 2);
+    point_near(raw_verts[0].at, p);
+    point_near(raw_verts[1].at, p);
+}
+
+#[test]
+fn mid_run_zero_length_lines_and_chained_or_curved_slivers_write_and_read_back() {
+    let p0 = Vec2::new(10.0, 20.0);
+    let p = Vec2::new(100.0, 100.0);
+    let p1 = Vec2::new(100.0 + 3e-14, 100.0);
+    let p2 = Vec2::new(100.0 + 6e-14, 100.0 - 2e-14);
+    let q = Vec2::new(120.0, 100.0);
+
+    let chained = [
+        Seg2::Line { a: p0, b: p },
+        Seg2::Line { a: p, b: p },
+        Seg2::Line { a: p, b: p },
+        Seg2::Line { a: p, b: p1 },
+        Seg2::Line { a: p1, b: p2 },
+        Seg2::Line { a: p2, b: q },
+    ];
+    let chained_text = strict_drawing(&path_shapes(DxfPath::Open(&chained), DxfPathStyle::Polyline).unwrap());
+    assert_readback(&chained_text, &[Seg2::Line { a: p0, b: p }, Seg2::Line { a: p, b: q }]);
+
+    let cubic_sliver = Seg2::Cubic { p0: p, p1: Vec2::new(p.x + 1e-14, p.y + 1e-14), p2: Vec2::new(p.x + 2e-14, p.y + 1e-14), p3: p1 };
+    let with_cubic = [Seg2::Line { a: p0, b: p }, Seg2::Line { a: p, b: p }, cubic_sliver, Seg2::Line { a: p1, b: q }];
+    let cubic_text = strict_drawing(&path_shapes(DxfPath::Open(&with_cubic), DxfPathStyle::Polyline).unwrap());
+    assert_readback(&cubic_text, &[Seg2::Line { a: p0, b: p }, Seg2::Line { a: p, b: q }]);
+
+    let arc = Seg2::Arc { center: Vec2::new(90.0, 100.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 };
+    let arc_end = arc.end();
+    let arc_end_sliver = Vec2::new(arc_end.x + 3e-14, arc_end.y);
+    let with_arc = [arc, Seg2::Line { a: arc_end, b: arc_end }, Seg2::Line { a: arc_end, b: arc_end_sliver }, Seg2::Line { a: arc_end_sliver, b: q }];
+    let arc_text = strict_drawing(&path_shapes(DxfPath::Open(&with_arc), DxfPathStyle::Polyline).unwrap());
+    assert_readback(&arc_text, &[arc, Seg2::Line { a: arc_end, b: q }]);
+}
+
+#[test]
+fn closed_loops_with_zero_length_lines_and_slivers_write_and_read_back_all_edges() {
+    let p = Vec2::new(100.0, 100.0);
+    let p_sliver = Vec2::new(100.0 + 3e-14, 100.0);
+    let q = Vec2::new(120.0, 100.0);
+    let r = Vec2::new(110.0, 120.0);
+
+    let cases = [
+        // (a) zero-length + sliver at start
+        vec![
+            Seg2::Line { a: p, b: p },
+            Seg2::Line { a: p, b: p_sliver },
+            Seg2::Line { a: p_sliver, b: q },
+            Seg2::Line { a: q, b: r },
+            Seg2::Line { a: r, b: p },
+        ],
+        // (b) zero-length + sliver in middle
+        vec![
+            Seg2::Line { a: r, b: p },
+            Seg2::Line { a: p, b: p },
+            Seg2::Line { a: p, b: p_sliver },
+            Seg2::Line { a: p_sliver, b: q },
+            Seg2::Line { a: q, b: r },
+        ],
+        // (c) zero-length + sliver at end
+        vec![
+            Seg2::Line { a: p_sliver, b: q },
+            Seg2::Line { a: q, b: r },
+            Seg2::Line { a: r, b: p },
+            Seg2::Line { a: p, b: p },
+            Seg2::Line { a: p, b: p_sliver },
+        ],
+        // (d) leading sliver + trailing zero-length
+        vec![
+            Seg2::Line { a: p, b: p_sliver },
+            Seg2::Line { a: p_sliver, b: q },
+            Seg2::Line { a: q, b: r },
+            Seg2::Line { a: r, b: p },
+            Seg2::Line { a: p, b: p },
+        ],
+        // (e) trailing zero-length alone
+        vec![Seg2::Line { a: p, b: q }, Seg2::Line { a: q, b: r }, Seg2::Line { a: r, b: p }, Seg2::Line { a: p, b: p }],
+    ];
+
+    for segs in cases {
+        let lp = Loop2 { segs };
+        let shapes = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Polyline).unwrap();
+        let text = strict_drawing(&shapes);
+        assert_closed_triangle_readback(&text, [p, q, r]);
+    }
+}
+
+#[test]
+fn interleaved_zero_length_lines_and_slivers_write_and_read_back_in_open_and_closed_paths() {
+    let p0 = Vec2::new(100.0, 100.0);
+    let p1 = Vec2::new(100.0 + 3e-14, 100.0);
+    let p2 = Vec2::new(100.0 + 6e-14, 100.0 - 2e-14);
+    let p3 = Vec2::new(100.0 + 9e-14, 100.0);
+    let q = Vec2::new(120.0, 100.0);
+    let r = Vec2::new(110.0, 120.0);
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let v = |at: Vec2| DxfVertex { at, bulge: 0.0 };
+
+    let open = [line(p0, p0), line(p0, p1), line(p1, p1), line(p1, p2), line(p2, p2), line(p2, p3), line(p3, q)];
+    let shapes = path_shapes(DxfPath::Open(&open), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(one_polyline(&shapes, false), &[v(p3), v(p3), v(p3), v(p3), v(q)]);
+    assert_readback(&strict_drawing(&shapes), &[line(p0, q)]);
+
+    let closed_cases = [
+        // (a) interleaved at start (exercises `lead` closure)
+        (
+            vec![line(p0, p0), line(p0, p1), line(p1, p1), line(p1, p2), line(p2, q), line(q, r), line(r, p0)],
+            true,
+            vec![v(p2), v(p2), v(p2), v(q), v(r)],
+        ),
+        // (b) interleaved in middle
+        (
+            vec![line(r, p0), line(p0, p0), line(p0, p1), line(p1, p1), line(p1, p2), line(p2, q), line(q, r)],
+            true,
+            vec![v(r), v(p2), v(p2), v(p2), v(q)],
+        ),
+        // (c) interleaved at end (first and last vertices encode to the same point, so stays open)
+        (
+            vec![line(p2, q), line(q, r), line(r, p0), line(p0, p0), line(p0, p1), line(p1, p1), line(p1, p2)],
+            false,
+            vec![v(p2), v(q), v(r), v(p2), v(p2), v(p2)],
+        ),
+    ];
+
+    for (segs, expected_closed, expected_vertices) in closed_cases {
+        let lp = Loop2 { segs };
+        let shapes = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Polyline).unwrap();
+        assert_eq!(one_polyline(&shapes, expected_closed), expected_vertices.as_slice());
+        let text = strict_drawing(&shapes);
+        assert_closed_triangle_readback(&text, [p0, q, r]);
+    }
+}
+
+#[test]
+fn nonzero_edge_or_arc_and_disjoint_or_conic_sliver_edge_cases_in_dxf_export() {
+    let a = Vec2::new(80.0, 100.0);
+    let p0 = Vec2::new(100.0, 100.0);
+    let p1 = Vec2::new(100.0 + 3e-14, 100.0);
+    let p2 = Vec2::new(100.0 + 6e-14, 100.0);
+    let p3 = Vec2::new(100.0 + 9e-14, 100.0);
+    let q = Vec2::new(120.0, 100.0);
+    let d = Vec2::new(150.0, 100.0);
+    let e = Vec2::new(160.0, 100.0);
+    let line = |start: Vec2, end: Vec2| Seg2::Line { a: start, b: end };
+    let v = |at: Vec2| DxfVertex { at, bulge: 0.0 };
+
+    // Non-zero straight edge immediately before zero-length + chained slivers: earlier vertex stays at `a`.
+    let after_line = [line(a, p0), line(p0, p0), line(p0, p0), line(p0, p1), line(p1, p2), line(p2, q)];
+    let shapes = path_shapes(DxfPath::Open(&after_line), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(one_polyline(&shapes, false), &[v(a), v(p2), v(p2), v(p2), v(q)]);
+    assert_readback(&strict_drawing(&shapes), &[line(a, p0), line(p0, q)]);
+
+    // Non-zero arc immediately before zero-length + chained slivers: arc start vertex & bulge stay untouched.
+    let arc = Seg2::Arc { center: Vec2::new(90.0, 100.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 };
+    let arc_end = arc.end();
+    let arc_p1 = Vec2::new(arc_end.x + 3e-14, arc_end.y);
+    let arc_p2 = Vec2::new(arc_end.x + 6e-14, arc_end.y);
+    let after_arc = [arc, line(arc_end, arc_end), line(arc_end, arc_end), line(arc_end, arc_p1), line(arc_p1, arc_p2), line(arc_p2, q)];
+    let shapes = path_shapes(DxfPath::Open(&after_arc), DxfPathStyle::Polyline).unwrap();
+    let verts = one_polyline(&shapes, false);
+    assert_eq!(verts.len(), 5);
+    assert_eq!(verts[0].at, arc.start());
+    number_near(verts[0].bulge, (FRAC_PI_2 * 0.25).tan(), BULGE_EPS);
+    assert_eq!(&verts[1..], &[v(arc_p2), v(arc_p2), v(arc_p2), v(q)]);
+    assert_readback(&strict_drawing(&shapes), &[arc, line(arc_end, q)]);
+
+    // Disjoint line immediately after zero-length + chained slivers flushes shifted vertices at `p2`.
+    let disjoint = [line(a, p0), line(p0, p0), line(p0, p0), line(p0, p1), line(p1, p2), line(d, e)];
+    let shapes = path_shapes(DxfPath::Open(&disjoint), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(
+        shapes,
+        vec![
+            DxfShape::BulgedPolyline { vertices: vec![v(a), v(p2), v(p2), v(p2)], closed: false },
+            DxfShape::BulgedPolyline { vertices: vec![v(d), v(e)], closed: false },
+        ]
+    );
+    assert_readback(&strict_drawing(&shapes), &[line(a, p0), line(d, e)]);
+
+    // Exact entity (cubic spline) immediately after zero-length + chained slivers flushes shifted vertices.
+    let cubic = Seg2::Cubic { p0: p2, p1: Vec2::new(105.0, 105.0), p2: Vec2::new(115.0, 105.0), p3: d };
+    let with_exact = [line(a, p0), line(p0, p0), line(p0, p1), line(p1, p2), cubic];
+    let shapes = path_shapes(DxfPath::Open(&with_exact), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(shapes.len(), 2);
+    assert_eq!(shapes[0], DxfShape::BulgedPolyline { vertices: vec![v(a), v(p2), v(p2)], closed: false });
+    assert!(matches!(shapes[1], DxfShape::Spline { .. }));
+    let exact_text = strict_drawing(&shapes);
+    let exact_entities = raw_entities(&exact_text);
+    assert_eq!(exact_entities.len(), 2);
+    assert_eq!(exact_entities[0].0, "LWPOLYLINE");
+    assert_eq!(exact_entities[1].0, "SPLINE");
+
+    // Closed loop of only zero-length lines + chained slivers stays open with all vertices at final endpoint.
+    let only_slivers = Loop2 { segs: vec![line(p0, p0), line(p0, p0), line(p0, p1), line(p1, p2), line(p2, p2), line(p2, p3)] };
+    let shapes = path_shapes(DxfPath::Closed(&only_slivers), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(one_polyline(&shapes, false), &[v(p3); 4]);
+    let raw_text = drawing(&shapes);
+    let raw = raw_entities(&raw_text);
+    assert_eq!(raw.len(), 1);
+    let (raw_verts, raw_closed) = raw_polyline(&raw[0]);
+    assert!(!raw_closed);
+    assert_eq!(raw_verts.len(), 4);
+    for vert in raw_verts {
+        point_near(vert.at, p3);
+    }
+
+    // Curved `Seg2::Conic` sub-grid slivers (`a == b` with `apex != a`, and `a != b`) after zero-length lines.
+    let conic_same = Seg2::Conic { a: p0, apex: Vec2::new(p0.x + 2e-14, p0.y + 2e-14), b: p0, w: FRAC_1_SQRT_2 };
+    let shapes = path_shapes(DxfPath::Open(&[line(a, p0), line(p0, p0), conic_same, line(p0, q)]), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(one_polyline(&shapes, false), &[v(a), v(p0), v(p0), v(q)]);
+    assert_readback(&strict_drawing(&shapes), &[line(a, p0), line(p0, q)]);
+
+    let conic_01 = Seg2::Conic { a: p0, apex: Vec2::new(p0.x + 1e-14, p0.y + 2e-14), b: p1, w: FRAC_1_SQRT_2 };
+    let conic_12 = Seg2::Conic { a: p1, apex: Vec2::new(p1.x + 1e-14, p1.y - 2e-14), b: p2, w: FRAC_1_SQRT_2 };
+    let shapes =
+        path_shapes(DxfPath::Open(&[line(a, p0), line(p0, p0), line(p0, p0), conic_01, conic_12, line(p2, q)]), DxfPathStyle::Polyline).unwrap();
+    assert_eq!(one_polyline(&shapes, false), &[v(a), v(p2), v(p2), v(p2), v(q)]);
+    assert_readback(&strict_drawing(&shapes), &[line(a, p0), line(p0, q)]);
+}
+
+#[test]
+fn long_path_with_zero_length_lines_and_slivers_exports_in_linear_time() {
+    use std::time::{Duration, Instant};
+
+    let n = 99_999usize;
+    let cell_pt = |i: usize| Vec2::new(1.0 + (i as f64) * 1e-15, 1.0);
+    let p = cell_pt(0);
+    let end = cell_pt(n);
+    let q = Vec2::new(20.0, 1.0);
+
+    // Block pattern inside a single 1e-9 cell: n zero-length lines + n chained sub-grid slivers + 1 real line (199,999 segs).
+    let block_elapsed = {
+        let mut block = Vec::with_capacity(2 * n + 1);
+        for _ in 0..n {
+            block.push(Seg2::Line { a: p, b: p });
+        }
+        for i in 0..n {
+            block.push(Seg2::Line { a: cell_pt(i), b: cell_pt(i + 1) });
+        }
+        block.push(Seg2::Line { a: end, b: q });
+
+        let start = Instant::now();
+        let block_shapes = path_shapes(DxfPath::Open(&block), DxfPathStyle::Polyline).unwrap();
+        let elapsed = start.elapsed();
+        let block_verts = one_polyline(&block_shapes, false);
+        assert_eq!(block_verts.len(), n + 2);
+        assert!(block_verts[..=n].iter().all(|vert| vert.at == end));
+        assert_eq!(block_verts[n + 1].at, q);
+        elapsed
+    };
+
+    // Interleaved pattern inside a single 1e-9 cell: (zero-length, sliver) repeated n times + 1 real line (199,999 segs).
+    let interleaved_elapsed = {
+        let mut interleaved = Vec::with_capacity(2 * n + 1);
+        for i in 0..n {
+            let pi = cell_pt(i);
+            interleaved.push(Seg2::Line { a: pi, b: pi });
+            interleaved.push(Seg2::Line { a: pi, b: cell_pt(i + 1) });
+        }
+        interleaved.push(Seg2::Line { a: end, b: q });
+
+        let start = Instant::now();
+        let interleaved_shapes = path_shapes(DxfPath::Open(&interleaved), DxfPathStyle::Polyline).unwrap();
+        let elapsed = start.elapsed();
+        let interleaved_verts = one_polyline(&interleaved_shapes, false);
+        assert_eq!(interleaved_verts.len(), n + 2);
+        assert!(interleaved_verts[..=n].iter().all(|vert| vert.at == end));
+        assert_eq!(interleaved_verts[n + 1].at, q);
+        elapsed
+    };
+
+    assert!(
+        block_elapsed < Duration::from_millis(2_500) && interleaved_elapsed < Duration::from_millis(2_500),
+        "expected linear-time export (< 2500 ms), got block={block_elapsed:?}, interleaved={interleaved_elapsed:?}"
+    );
+}

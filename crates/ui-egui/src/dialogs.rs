@@ -1674,6 +1674,9 @@ impl Dialog {
                 }
                 _ => None,
             });
+            if *cmd == "solid.coil" && d.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. })) {
+                *at = None;
+            }
         }
         // With nothing pre-selected, a single profile in the sketch being used is taken (#684:
         // not one a feature already builds from).
@@ -2196,6 +2199,17 @@ impl Dialog {
         })
     }
 
+    /// Whether a click that would take `face` into the active input takes a profile behind it
+    /// instead: an input taking profiles takes the closed region of a shown sketch under the
+    /// pointer even where a body's face hides it, as where a sketch on a plane runs through a
+    /// part. Before, only a click right beside the sketch's lines reached it there. A face that
+    /// is Extrude's automatic To Object stays the target; Select Other still offers the face.
+    pub(crate) fn profile_behind(&self, s: &Session, face: &Hit, picked: &Sel) -> bool {
+        self.active_input().is_some_and(|i| i.accept & selection::PROFILES != 0)
+            && matches!((face, picked), (Hit::Face { .. }, Sel::Face { .. }))
+            && self.extrude_target(s, face).is_none()
+    }
+
     /// With automatic To Object enabled and profiles picked, a face or vertex off their plane,
     /// or a parallel plane, is the target rather than another profile. An explicitly active
     /// To Object or From Object input accepts parallel planes regardless of the automatic
@@ -2348,6 +2362,9 @@ impl Dialog {
         // A new placement plane replaces the saved direction; the Direction field can override it afterward.
         if self.active == 0 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }) && matches!(sel, Sel::Plane { .. }) {
             self.extra.remove("axis");
+            if let Kind::Primitive { at, .. } = &mut self.kind {
+                *at = None;
+            }
         }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
@@ -2535,6 +2552,9 @@ impl Dialog {
             && self.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. }))
         {
             self.extra.remove("axis");
+            if let Kind::Primitive { at, .. } = &mut self.kind {
+                *at = None;
+            }
         }
         self.sync_thread(s);
         self.sync_material(s);
@@ -6745,7 +6765,9 @@ fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
 
 /// The world plane of an origin plane or a construction plane by name, where it is shown.
 pub(crate) fn plane_by_name(s: &Session, name: &str) -> Option<solidcore_record::Plane> {
-    if let Some(p) = solidcore_record::Plane::named(name) {
+    // A legacy construction plane can share an origin alias such as Top. The selected
+    // feature keeps its own plane; aliases are only a fallback when no feature has the name.
+    if let Some(p) = solidcore_record::Plane::named(name).filter(|_| s.doc.find_feature(name).is_none()) {
         return Some(p);
     }
     let st = crate::open_meshing::session_world(s);
@@ -8329,6 +8351,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 common["designation"] = json!(designation.trim());
             }
             crate::dialogs_thread::put_params(&mut common, length, options, &d.inputs);
+            if options.tip != crate::dialogs_thread::sent_tip(options, &app.session.doc) {
+                common["tip"] = json!(crate::dialogs_thread::sent_tip(options, &app.session.doc));
+            }
             let mut seen = std::collections::BTreeSet::new();
             let mut faces = Vec::new();
             for pick in sels(d, 0) {

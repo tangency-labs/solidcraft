@@ -216,7 +216,7 @@ pub(crate) fn snap_trim_ends(record: &mut solidcore_record::brep::Brep) {
 /// The first of the import's record checks `record` fails, in a sentence, or `None` where it
 /// passes them all.
 pub(crate) fn import_check_failure(record: &solidcore_record::brep::Brep) -> Option<String> {
-    if let Err(e) = crate::record_check::validate(record) {
+    if let Err(e) = crate::record_check::validate_built(record) {
         return Some(format!("the completed record is invalid: {e}"));
     }
     if let Err(e) = crate::record_check::agreement(record) {

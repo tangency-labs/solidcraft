@@ -1857,7 +1857,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .on(!visibility_bodies.is_empty()),
     );
     if bodies_hidden(app) {
-        v.push(act("ui.showAll", "Show All Bodies", "eye"));
+        v.push(act("ui.showAllBodies", "Show All Bodies", "eye"));
     }
     if let Some(item) = isolate_component_item(app, id, &bodies) {
         v.push(item);
@@ -2500,6 +2500,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             // One command and so one undo step: everything shown, folders and placements included.
             let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
         }
+        "ui.showAllBodies" => {
+            // Bodies, placements and the Bodies folders and groups only, in one step: hidden
+            // sketches, construction items and joints stay hidden (#22707).
+            let _ = app.run("browser.visibility", json!({ "folder": "bodies", "visible": true }));
+        }
         "ui.isolate" => {
             // The picked bodies stay (shown if they were hidden) and everything else goes, other
             // components as components (#7896), in one step.
@@ -2508,8 +2513,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.unisolate" => {
-            // What the Isolates hid comes back, or everything when none is in effect (#8120); one
-            // undo step, as Isolate is.
+            // What the Isolates hid comes back, or every body when none is in effect (#8120,
+            // #22707); one undo step, as Isolate is.
             let _ = app.run("browser.visibility", json!({ "visible": true, "unisolate": true }));
         }
         "ui.lock" => {

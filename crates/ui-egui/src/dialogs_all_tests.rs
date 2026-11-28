@@ -3392,7 +3392,9 @@ fn a_square_ended_coil_edited_onto_a_profile_is_accepted() {
 fn coil_revolutions_arrows_step_whole_turns() {
     let mut h = fixture();
     h.app.run("parameters.add", json!({"name":"turns","expression":"3","unit":""})).unwrap();
-    h.app.dialog = Some(Dialog::for_command(&h.app, "solid.coil").unwrap());
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.preview_enabled = false; // Count arrows exercise command parameters, not preview geometry.
+    h.app.dialog = Some(d);
     h.settle();
     let sent = |h: &Harness| {
         let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
@@ -4279,4 +4281,81 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     // Two more placements of each (a quantity of 3), and no new bodies.
     assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
+}
+
+/// Legacy construction names keep selecting that exact plane rather than an origin alias.
+#[test]
+fn coil_plane_pick_keeps_a_construction_plane_named_like_an_origin_alias() {
+    for (alias, base, point, normal) in [
+        ("Top", "YZ", [50.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        ("Front", "XY", [0.0, 0.0, 50.0], [0.0, 0.0, 1.0]),
+        ("Right", "XY", [0.0, 0.0, 50.0], [0.0, 0.0, 1.0]),
+    ] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("construct.plane.offset", json!({"base":base,"offset":50,"name":"Old plane"})).unwrap();
+        // The command disallows these reserved names today; older designs can contain them.
+        let id = h.app.session.doc.features.iter().find(|f| f.name == "Old plane").unwrap().id;
+        h.app.session.doc_mut().feature_mut(id).unwrap().name = alias.into();
+        assert!(h.app.session.model.rename_feature(&h.app.session.doc, id));
+        let authored = h.app.session.doc.to_json();
+        let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+        d.preview_enabled = false;
+        d.pick(&h.app.session, Sel::Plane { name: alias.into() });
+        h.app.dialog = Some(d);
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap();
+        for commands in [crate::dialogs::preview_commands(&h.app, d).unwrap(), apply_commands(&h.app, d).unwrap()] {
+            let (_, p) = commands.iter().find(|(id, _)| id == "solid.coil").unwrap();
+            assert_eq!(coil_plane_coordinates(&h, &p["base"]), point, "{alias}: {p}");
+            assert_eq!(coil_plane_coordinates(&h, &p["axis"]), normal, "{alias}: {p}");
+        }
+        h.step(&json!({"expect":{"shown":json!(normal).to_string()}})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), authored);
+    }
+}
+
+/// Once a plane places Coil, its chip is the placement source. Clearing it must not revive an
+/// earlier point or leave a misleading Position row that offers to clear a different source.
+#[test]
+fn coil_plane_pick_replaces_the_previous_point_placement_and_clears_to_origin() {
+    for selection in 0..3 {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":50,"name":"Plane1"})).unwrap();
+        let vertex = Sel::Vertex { body: String::new(), point: Vec3::new(7.0, 8.0, 9.0) };
+        h.app.session.selection = vec![vertex.clone()];
+        let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+        assert!(matches!(&d.kind, Kind::Primitive { at: Some((point, _)), .. } if *point == Vec3::new(7.0, 8.0, 9.0)));
+        let plane = Sel::Plane { name: "Plane1".into() };
+        match selection {
+            0 => d.pick(&h.app.session, plane),
+            1 => d.take_box(&h.app.session, vec![plane], false),
+            _ => {
+                h.app.session.selection = vec![vertex, plane];
+                d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+            }
+        }
+        assert!(matches!(&d.kind, Kind::Primitive { at: None, .. }), "the plane replaces the old point, entry={selection}");
+        d.preview_enabled = false;
+        d.extra.insert("axis".into(), json!("Y"));
+        h.app.dialog = Some(d);
+        let authored = h.app.session.doc.to_json();
+        h.frames(3);
+        h.step(&json!({"expect":{"not_shown":"7.00, 8.00, 9.00"}})).unwrap();
+        let params = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+        assert_eq!(coil_plane_coordinates(&h, &params["base"]), [0.0, 0.0, 50.0]);
+        assert_eq!(params["axis"], json!("Y"), "later typed Direction remains authoritative");
+        h.step(&json!({"click":{"handle":"dialog:clear:Profile"}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(d.inputs[0].items.is_empty());
+        assert!(matches!(&d.kind, Kind::Primitive { at: None, .. }));
+        for commands in [crate::dialogs::preview_commands(&h.app, d).unwrap(), apply_commands(&h.app, d).unwrap()] {
+            let p = &commands.iter().find(|(id, _)| id == "solid.coil").unwrap().1;
+            assert!(p.get("base").is_none(), "clearing the sole placement source restores the default origin: {p}");
+            assert_eq!(p["axis"], json!("Y"), "clearing a placement does not erase typed Direction");
+        }
+        assert_eq!(h.app.session.doc.to_json(), authored);
+    }
 }
