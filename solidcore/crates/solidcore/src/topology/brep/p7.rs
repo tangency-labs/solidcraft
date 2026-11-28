@@ -2791,7 +2791,7 @@ fn copy_faces_named(
         // tolerances. A drafted wall that a plane nearly fits otherwise becomes a plane
         // that misses the wall's corner by more than that, though within the zone
         // tolerance.
-        let mut within = k.tolerances.zone_tol_3d;
+        let mut within = f64::INFINITY;
         for e in crate::topology::face::p4::edges(src, f, None, false, None)? {
             within = within.min(0.5 * ed::tolerance(src, e)?);
         }
