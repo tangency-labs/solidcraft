@@ -89,6 +89,40 @@ impl<T: ?Sized> RwLock<T> {
         parking_lot::RwLockReadGuard::map(guard, |v| v)
     }
 
+    /// SolidCraft: read-access for a thread that already holds read-access to this lock.
+    ///
+    /// [`Self::read`] waits behind a waiting writer even while readers hold the lock, so a second
+    /// read on a thread that already holds one waits on that writer, which waits on the thread:
+    /// a deadlock whenever another thread asks for write-access between the two reads. This read
+    /// goes ahead of a waiting writer while the lock is read-held.
+    ///
+    /// ## Panics
+    /// Will panic in debug builds if the lock can't be acquired within 10 seconds.
+    #[inline(always)]
+    #[cfg_attr(debug_assertions, track_caller)]
+    pub fn read_recursive(&self) -> RwLockReadGuard<'_, T> {
+        let guard = if cfg!(debug_assertions) {
+            self.0
+                .try_read_recursive_for(DEADLOCK_DURATION)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "DEBUG PANIC: Failed to acquire RwLock read after {}s. Deadlock?",
+                        DEADLOCK_DURATION.as_secs()
+                    )
+                })
+        } else {
+            self.0.read_recursive()
+        };
+        parking_lot::RwLockReadGuard::map(guard, |v| v)
+    }
+
+    /// SolidCraft: whether a writer holds the lock, or has claimed it and waits for its readers
+    /// to leave. While this thread holds read-access, `true` means a writer is waiting.
+    #[inline(always)]
+    pub fn is_locked_exclusive(&self) -> bool {
+        self.0.is_locked_exclusive()
+    }
+
     /// Try to acquire write-access to the lock.
     ///
     /// ## Panics

@@ -281,9 +281,9 @@ impl LiveGeometryInsertion<'_> {
         managed: EdgeId,
     ) -> Result<()> {
         let binding = curve.ok_or_else(|| {
-            SolidError::blend_missing(
+            built_defect(
                 "SmTopologyIntersector::MergeCurveOnSurfaces",
-                "the curve's binding",
+                "the managed edge and the rail a corner merges are edges of the bodies the fillet built, each with its curve",
             )
         })?;
         let actual = match binding.object {
@@ -420,31 +420,29 @@ impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
         managed: EdgeId,
         deleted: &mut Vec<EdgeId>,
     ) -> Result<()> {
-        let primary = edgeuse::p1::primary_edgeuse(pseudo.brep(), edge)?.ok_or_else(|| {
-            SolidError::blend_missing(
-                "SmFilletEdge::GetOriginalUVCurve",
-                "the edge's primary edge use",
-            )
-        })?;
-        let mate = edgeuse::p1::mate(pseudo.brep(), primary)?.ok_or_else(|| {
-            SolidError::blend_missing("SmFilletEdge::GetOriginalUVCurve", "the edge use's mate")
-        })?;
+        let primary = edgeuse::p1::primary_edgeuse(pseudo.brep(), edge)?
+            .ok_or_else(|| built_defect("SmFilletEdge::GetOriginalUVCurve", PSEUDO_EDGE_USES))?;
+        let mate = edgeuse::p1::mate(pseudo.brep(), primary)?
+            .ok_or_else(|| built_defect("SmFilletEdge::GetOriginalUVCurve", PSEUDO_EDGE_USES))?;
         let uv = pseudo
             .original_uv_curve(edge)?
             .map(|_| FilletObject::UvCurve(FilletBody::Pseudo, mate));
-        // An open rail's isolated contact with a hole must be imprinted, even
-        // though it does not cross the rim. MergeInterval splits the rim there;
-        // its first span joins the outer and inner loops, and its next span cuts
-        // off the removed face. The kept boundary visits the shared vertex twice
-        // in one loop (docs/validity-and-tolerances.md, section 4). Ignoring the
-        // contact instead leaves two touching loops, which fail Face 38.
-        // Only a face with a hole has a hole's edge to touch; any other face
-        // keeps ignoring tangent contacts as before.
-        let open_rail = pseudo.fillet_edge(edge)?.fillet_edge_type() == FilletEdgeType::Rail
-            && !crate::topology::edge::is_closed(pseudo.brep(), edge)?
+        // A rail's isolated contact with a hole must be imprinted, even though it
+        // does not cross the rim. MergeInterval splits the rim there; its first
+        // span joins the two loops, and its next span cuts off the removed face.
+        // The kept boundary visits the shared vertex twice in one loop
+        // (docs/validity-and-tolerances.md, section 4), or, where a closed rail
+        // touches the other loop at several points, the face parts there into one
+        // face per stretch between them. Ignoring the contact instead leaves two
+        // touching loops, which fail Face 38. That holds for an open rail and a
+        // closed one alike (a round on a closed edge whose contact line touches a
+        // hole's edge, #21748). Only a face with more than one loop has another
+        // loop to touch; any other face keeps ignoring tangent contacts as before.
+        let rail_on_holed_face = pseudo.fillet_edge(edge)?.fillet_edge_type()
+            == FilletEdgeType::Rail
             && crate::topology::face::p2::loops(target, face, false, None)?.len() > 1;
         let ignore_tangency = self.ti.ignore_tangency;
-        if open_rail {
+        if rail_on_holed_face {
             self.ti.ignore_tangency = false;
         }
         let result = self.merge_actual_curve(
@@ -697,6 +695,20 @@ impl FilletSession<'_> {
         self.objects.target.set_editing_enabled(editing);
         result
     }
+}
+
+/// Why a pseudo body edge has its primary edge use and its mate: the fillet builds the pseudo
+/// body's edges between two faces, each with both edge uses.
+const PSEUDO_EDGE_USES: &str =
+    "the fillet builds each edge of its pseudo body between two faces, with both edge uses";
+
+/// A reviewed defect: something of the bodies the fillet built (the pseudo and intermediate
+/// bodies) is missing, `why` saying why it is there. Status `SM_ERR_NULL_POINTER`, the
+/// fork's `NER`, as the phrase cause it replaces had.
+fn built_defect(op: &'static str, why: &'static str) -> SolidError {
+    crate::error::Failure::new(op, crate::error::blend::BlendFailure::Defect { why })
+        .with_status(crate::error::SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
 #[cfg(test)]

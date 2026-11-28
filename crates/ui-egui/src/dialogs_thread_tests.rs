@@ -227,6 +227,53 @@ fn a_form_change_keeps_what_still_applies() {
     assert_eq!((&p["hand"], &p["starts"], &p["length"], &p["ease_out"]), (&json!("left"), &json!(3), &json!("4 mm"), &json!("standard")));
 }
 
+/// Unified offers the shared UNC/UNF sizes by their full designation, including the pitch;
+/// displaying an authored class must keep it in the command and saved dialog.
+#[test]
+fn unified_form_offers_catalogue_sizes_and_keeps_an_authored_class() {
+    let mut h = shaft();
+    choose(&mut h, "Form", "thread.form_unified");
+    assert_eq!(options(&h).form, ThreadForm::Unified);
+    assert_eq!(params(&h)["form"], "unified");
+    assert!(params(&h).get("designation").is_none(), "the Unified face size is automatic");
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Thread { designation, .. } if designation == "5/16-18 UNC"));
+    click(&mut h, &["dialog:Automatic size"]);
+    choose(&mut h, "Size", "#10-32 UNF");
+    assert_eq!(params(&h)["designation"], "#10-32 UNF");
+    type_in(&mut h, "Designation", "5/16-24 UNF-2A");
+    h.frames(2);
+    assert_eq!(params(&h)["designation"], "5/16-24 UNF-2A");
+    let (command, args) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    h.app.run(&command, args).unwrap();
+    let saved = h.app.session.doc.features.last().unwrap().clone();
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+    crate::dialogs_thread::reopen(&mut dialog, &h.app.session, &saved);
+    assert!(
+        matches!(dialog.kind, Kind::Thread { designation, options, .. } if designation == "5/16-24 UNF-2A" && options.form == ThreadForm::Unified)
+    );
+}
+
+/// An ISO metric class typed after the size stays through a pitch or size change (the Size and
+/// Pitch rows still read the size), and reaches the command and the reopened dialog.
+#[test]
+fn metric_form_keeps_an_authored_class() {
+    let mut h = shaft();
+    type_in(&mut h, "Designation", "M8-6g");
+    assert_eq!(params(&h)["designation"], "M8-6g");
+    choose(&mut h, "Size", "3 mm");
+    assert_eq!(params(&h)["designation"], "M3-6g", "a new size starts with its coarse pitch");
+    type_in(&mut h, "Designation", "M8-6g");
+    choose(&mut h, "Pitch", "1 mm");
+    assert_eq!(params(&h)["designation"], "M8x1-6g");
+    let (command, args) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    h.app.run(&command, args).unwrap();
+    assert_eq!(h.app.session.model.state().threads[0].designation, "M8x1-6g");
+    let saved = h.app.session.doc.features.last().unwrap().clone();
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+    crate::dialogs_thread::reopen(&mut dialog, &h.app.session, &saved);
+    assert!(matches!(dialog.kind, Kind::Thread { designation, .. } if designation == "M8x1-6g"));
+}
+
 /// The dialog shows the command's own error text for options it cannot build.
 #[test]
 fn the_command_error_is_what_the_dialog_shows() {
@@ -250,6 +297,7 @@ fn the_forms_are_the_documents_and_square_is_not_offered() {
     assert_eq!(parse(ThreadForm::Trapezoidal, "M10x1"), None);
     assert_eq!(pitches(ThreadForm::Metric, 8.0, 1.25), [1.25, 1.0, 0.75, 0.5, 0.35, 0.25, 0.2]);
     assert_eq!(example(ThreadForm::ButtressAsme), "2.5-8 BUTT");
+    assert_eq!(example(ThreadForm::Custom), "C10x1.5x90");
     assert_eq!(example(ThreadForm::Trapezoidal), "Tr20x4");
 }
 
@@ -329,6 +377,7 @@ fn a_saved_thread_reopens_with_every_option() {
         ),
         (json!({"designation":"M20","from":[10,0,20],"up_to":[10,0,5]}), vec!["Cylindrical face", START_END, UP_TO]),
         (json!({"designation":"M20","up_to":"XY","from":[10,0,20]}), vec!["Cylindrical face", START_END, UP_TO]),
+        (json!({"designation":"M20","length":"8 mm","offset":"3 mm","from":[10,0,20]}), vec!["Cylindrical face", START_END]),
     ] {
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1600,"height":1400}));
@@ -484,7 +533,7 @@ fn thread_box_selection_keeps_one_face_until_explicit_add() {
         // Start/Up To inputs keep their existing single-selection contract.
         let Kind::Thread { options, .. } = &mut d.kind else { panic!("Thread") };
         options.extent = UP_TO_EXTENT;
-        sync_inputs(&mut d.inputs, &mut d.active, options);
+        sync_inputs(&mut d.inputs, &mut d.active, options, &h.app.session.doc);
         let up_to = d.inputs.iter().position(|i| i.label == UP_TO).unwrap();
         d.active = up_to;
         d.take_box(&h.app.session, picks[..2].to_vec(), false);
@@ -511,7 +560,7 @@ fn a_legacy_multi_face_thread_reopens_in_group_selection_mode() {
     let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("Thread") };
     target_bodies.clear();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     assert_eq!(h.app.session.model.state().threads.len(), 2);
     h.app.edit_feature(id);
     h.frames(2);
@@ -758,7 +807,7 @@ fn a_grouped_thread_reopens_named_faces_after_its_shafts_move() {
     assert_eq!(face.0.x, 3.0, "the saved point remains at its original location");
     assert_eq!(additional_faces[0].0.x, 33.0);
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     let features = h.app.session.doc.features.len();
     h.app.edit_feature(id);
     h.frames(2);
@@ -802,7 +851,7 @@ fn an_unchanged_grouped_thread_edit_keeps_its_exact_saved_parameters() {
     let id = h.app.run("solid.thread", json!({"faces":points,"designation":"M6x0.75"})).unwrap()["feature"].as_u64().unwrap();
     let before = h.app.session.doc.feature(id).unwrap().kind.clone();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let d = h.app.dialog.take().expect("the unchanged group can be edited");
@@ -826,7 +875,7 @@ fn a_single_thread_face_keeps_the_selected_body_when_shafts_coincide() {
     let id = h.app.session.doc.features.last().unwrap().id;
     h.app.run("body.rename", json!({"body":"B","name":"Renamed"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let d = h.app.dialog.take().unwrap();
@@ -868,7 +917,7 @@ fn grouped_thread_dialog_preserves_coincident_body_identities_and_missing_slots(
     let id = h.app.run("solid.thread", json!({"faces":[{"body":"B","point":[4,0,2]},{"body":"A","point":[4,0,2]}],"designation":"M8"})).unwrap()["feature"].as_u64().unwrap();
     h.app.run("body.rename", json!({"body":"B","name":"Renamed"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let mut d = h.app.dialog.take().unwrap();
@@ -888,4 +937,100 @@ fn grouped_thread_dialog_preserves_coincident_body_identities_and_missing_slots(
     let d = crate::dialogs::for_feature(&app, id, None).unwrap();
     assert_eq!(d.inputs[0].items.len(), 2, "the failed saved reference is not silently dropped");
     assert!(apply_commands(&app, &d).is_err());
+}
+
+/// A stud is chamfered at both ends: with the start chamfered, "Chamfer both ends" sends the
+/// command's `tip: both`, and unticking it goes back to the start alone (#20629).
+#[test]
+fn a_thread_can_be_chamfered_at_both_ends() {
+    let mut h = shaft();
+    // A checkbox, not a labelled row: its own handle is what is drawn.
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_none(), "only offered once the start is chamfered");
+    choose(&mut h, "Start", "Chamfer");
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_some());
+    assert_eq!(params(&h)["tip"], "start");
+    click(&mut h, &["dialog:Chamfer both ends"]);
+    assert_eq!(params(&h)["tip"], "both");
+    assert_eq!(options(&h).tip, ThreadTip::Both);
+    click(&mut h, &["dialog:Chamfer both ends"]);
+    assert_eq!(params(&h)["tip"], "start");
+    choose(&mut h, "Start", "None");
+    assert!(params(&h).get("tip").is_none());
+}
+
+/// #23145: a typed offset goes into the command and a blank one stays out, and with one the end to
+/// start from can be picked even on a Full thread. An offset that comes to 0 is none, as the
+/// command takes it; one that can't be worked out, or is negative, counts as given.
+#[test]
+fn an_offset_is_sent_only_when_typed_and_asks_for_the_start_end() {
+    let mut doc = Document::default();
+    doc.set_param("lead_in", "0 mm", Some("mm"), None).unwrap();
+    let mut o = Options::default();
+    let mut p = json!({});
+    put_params(&mut p, "", &o, &[]);
+    assert_eq!(p.get("offset"), None, "{p}");
+    assert!(!o.starts_at_an_end(&doc));
+    for none in ["  ", "0", "0 mm", "0 in", "lead_in"] {
+        o.offset = none.into();
+        assert!(!o.has_offset(&doc) && !o.starts_at_an_end(&doc), "`{none}` is no offset");
+    }
+    for given in ["4 mm", "-1 mm", "no_such_param"] {
+        o.offset = given.into();
+        assert!(o.has_offset(&doc) && o.starts_at_an_end(&doc), "`{given}` is an offset");
+    }
+    o.offset = "4 mm".into();
+    let mut p = json!({});
+    put_params(&mut p, "", &o, &[]);
+    assert_eq!(p["offset"], "4 mm");
+}
+
+/// Review of #23145: with an offset the start lies inside the face, so the Start row's Chamfer is
+/// the command's `tip: both`, the far end, as the refusal of `tip: start` advises; "Chamfer both
+/// ends" is then fixed on (the tip sent is `both`). The stud it makes builds, the far end its free one. An offset of 0 is
+/// none: the start-end pick stays away and Chamfer is the start again.
+#[test]
+fn a_chamfer_with_an_offset_is_the_far_ends_and_a_zero_offset_is_none() {
+    let inputs = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs.iter().map(|i| i.label).collect::<Vec<_>>();
+    let mut h = shaft();
+    type_in(&mut h, "Offset", "0 mm");
+    assert_eq!(inputs(&h), ["Cylindrical face"], "an offset of 0 starts at no end in particular");
+    choose(&mut h, "Start", "Chamfer");
+    assert_eq!(params(&h)["tip"], "start");
+    choose(&mut h, "Start", "None");
+    type_in(&mut h, "Offset", "2 mm");
+    assert_eq!(inputs(&h), ["Cylindrical face", START_END], "an offset starts at an end");
+    choose(&mut h, "Start", "Chamfer");
+    assert!(shown("Chamfer Angle") && shown("Chamfer Depth"));
+    click(&mut h, &["dialog:Modeled"]);
+    let (cmd, mut p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!((&p["tip"], &p["offset"]), (&json!("both"), &json!("2 mm")), "{p}");
+    // From the top of the 10 mm shaft: the thread runs z 8 down to 0, whose end is free.
+    p["from"] = json!([0, 0, 10]);
+    h.app.session.execute(&cmd, &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+}
+
+/// Review of #23317: clearing the offset brings back the chamfer the user chose. With an offset the
+/// start's chamfer is sent as `tip: both`, but the window keeps the user's Start, so an offset of 0
+/// (none) sends `tip: start` again and "Chamfer both ends" is not left ticked.
+#[test]
+fn clearing_the_offset_brings_back_the_chosen_start_chamfer() {
+    let mut h = shaft();
+    type_in(&mut h, "Offset", "2 mm");
+    choose(&mut h, "Start", "Chamfer");
+    assert_eq!(params(&h)["tip"], "both");
+    assert_eq!(options(&h).tip, ThreadTip::Start, "the window keeps the user's choice");
+    type_in(&mut h, "Offset", "0 mm");
+    assert_eq!(params(&h)["tip"], "start");
+    assert_eq!(options(&h).tip, ThreadTip::Start);
+}
+
+/// Review of #23317: the offset is a length like the thread's own, so a bare number in an inch
+/// design is inches (sent with its unit), not millimetres.
+#[test]
+fn an_offset_typed_in_an_inch_design_is_inches() {
+    let mut h = shaft();
+    h.app.run("document.units", json!({ "units": "in" })).unwrap();
+    h.frames(2);
+    type_in(&mut h, "Offset", "0.1");
+    assert_eq!(params(&h)["offset"], "0.1 in");
 }

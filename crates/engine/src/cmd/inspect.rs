@@ -9,18 +9,18 @@ use solidcore_record::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list};
+use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::inspect::{
     BodiesDetail, ClassifiedPoint, ClassifyPointsParams, ClassifyPointsResult, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow,
 };
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
-    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
-    DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch, FaceCylinder, KernelCounts, ListedMaterial,
-    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, MeasureTotal, Measured,
-    MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
-    PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile, SketchWire,
-    SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DiskStamp, DocInfoParams, DocInfoResult,
+    DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch,
+    FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
+    MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
+    ModelThread, ModelThreads, ModelThreadsParams, PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected,
+    SketchPoint, SketchProfile, SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo, WireControlInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -33,6 +33,7 @@ const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract:
 const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
 const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
 const DOCUMENT_REVISION_CONTRACT: TypedContract<DocumentRevisionParams> = TypedContract::new();
+const DOC_INFO_CONTRACT: TypedContract<DocInfoParams> = TypedContract::new();
 const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
 const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
 const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
@@ -73,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); within?: {min:[x,y,z], max:[x,y,z]} (world mm); mode?: intersects|inside (default intersects, includes touching); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections, or 3-64 round edges or cylinder faces with parallel axes] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle; three or more round items (a row of holes, a bolt circle): spacing {pattern: line|circle|none, order, gaps (centre to centre, in order along the row or round the circle), span, even, pitch, odd_gaps, and for a circle pcd, pcd_center, angle_deg}"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
         .noundo().read_only()
@@ -94,6 +95,21 @@ pub static COMMANDS: &[CommandSpec] = &[
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
+    CommandSpec::new("doc.info", "Design File Info", crate::checked!("doc.info", design_file_info))
+        .any_part()
+        .doc_only()
+        .icon("inspect")
+        .noundo()
+        .read_only()
+        .contract(&DOC_INFO_CONTRACT)
+        .output(output_schema_for::<DocInfoResult>)
+        .params(
+            "→ path (the design's file; null until it is first saved), read_only (a save to its own file is refused), \
+             unsaved (changes its file does not hold, as document.inspect's dirty), disk ({len, modified_ns}: size in bytes and \
+             modification time in nanoseconds since the Unix epoch as a decimal string, when it was opened or last saved; \
+             null without a file, in the browser, or when they could not be read), \
+             document_id (as document.revision). In a plugin run: the design the run started on, as it was before the run. Read-only",
+        ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
@@ -159,9 +175,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("appearance.favorite", "Favorite Look", crate::checked!("appearance.favorite", appearance_gestures::favorite)).icon("star").noundo().doc_only()
         .contract(&FAVORITE_CONTRACT).output(crate::schema::output_schema_for::<AppearanceFavoriteResult>)
         .params("look: appearance.assign look keys (appearance, or color/name/opacity/pbr); favorite: true to mark, false to unmark → the validated look and the preference; UI library preference only, no document change or dialogs."),
-    CommandSpec::new("appearance.chain", "Appearance Chain", appearance_chain::chain).icon("inspect").noundo().params(
-        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
-    ),
+    CommandSpec::new("appearance.chain", "Appearance Chain", crate::checked!("appearance.chain", appearance_chain::chain)).icon("inspect").noundo()
+        .contract(&CHAIN_CONTRACT).output(crate::schema::output_schema_for::<AppearanceChainResult>)
+        .params(
+            "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
+        ),
     CommandSpec::new("appearance.replace", "Replace Appearance", crate::checked!("appearance.replace", appearance_chain::replace))
         .icon("appearance")
         .contract(&REPLACE_CONTRACT)
@@ -180,7 +198,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&LIST_CONTRACT)
         .output(crate::schema::output_schema_for::<AppearanceListResult>)
-        .params("body?: name (or a placed copy's, `KB (K:2)`: the body it shows) → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
+        .params(
+            "body?: name (or a placed copy's, `KB (K:2)`: the body it shows); active_only?: bool (default false; true omits overrides whose body or component is not in the active model) → assigned appearances (inactive_bodies lists body overrides absent from the active model); with body, its resolved look and its faces' (face index, look)",
+        ),
     CommandSpec::new("material.list", "List Materials", crate::checked!("material.list", material_list))
         .icon("list")
         .noundo()
@@ -241,7 +261,7 @@ fn measure_sheet(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_
     let name = b.name.clone();
     match measure_body(b, definitions) {
         Ok(m) => {
-            let closed = encloses_volume(&b.body);
+            let closed = b.is_closed();
             let outcome = BodyOutcome::Measured(BodyFigures {
                 closed,
                 volume_mm3: closed.then_some(m.volume),
@@ -287,17 +307,63 @@ impl BodyMeasurement {
     }
 }
 
+/// Parse the region before any measurement; a malformed box must never become an unfiltered query.
+fn measure_region(p: &Value, cmd: &str) -> Result<Option<(solidcraft_geom::Aabb3, bool)>> {
+    let Some(region) = p.get("within") else {
+        if p.get("mode").is_some() {
+            return Err(bad(cmd, "`mode` requires `within`"));
+        }
+        return Ok(None);
+    };
+    let min = region.get("min").and_then(vec3).ok_or_else(|| bad(cmd, "`within.min` must be a point [x, y, z]"))?;
+    let max = region.get("max").and_then(vec3).ok_or_else(|| bad(cmd, "`within.max` must be a point [x, y, z]"))?;
+    let bounds = solidcraft_geom::Aabb3 { min, max };
+    if bounds.is_empty() {
+        return Err(bad(cmd, "`within.min` must not exceed `within.max`"));
+    }
+    let inside = match p.get("mode") {
+        None => false,
+        Some(Value::String(mode)) if mode == "intersects" => false,
+        Some(Value::String(mode)) if mode == "inside" => true,
+        _ => return Err(bad(cmd, "`mode` must be intersects or inside")),
+    };
+    Ok(Some((bounds, inside)))
+}
+
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
     if let Some(items) = p.get("items") {
+        if p.get("within").is_some() || p.get("mode").is_some() {
+            return Err(bad(cmd, "`within` and `mode` cannot be combined with `items`"));
+        }
         return super::measure_sel::measure_items(s, items);
     }
+    let region = measure_region(p, cmd)?;
     let want = string_list(cmd, p, "bodies")?;
     let definitions = s.model.state();
     let st = s.world_state()?;
-    let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
+    let mut selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     if !want.is_empty() && selected.len() != want.len() {
         return Err(bad(cmd, "unknown body name"));
+    }
+    if let Some((region, inside)) = region {
+        let bounds_list: Vec<solidcraft_kernel::Result<solidcraft_geom::Aabb3>> = if selected.len() > 1 {
+            solidcraft_kernel::map_on_threads(&selected, 16, |b| b.body.exact_bounds())
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|| Err(solidcraft_kernel::KernelError::Internal("bounding this body failed".into()))))
+                .collect()
+        } else {
+            selected.iter().map(|b| b.body.exact_bounds()).collect()
+        };
+        let mut matches = Vec::new();
+        for (body, bounds) in selected.into_iter().zip(bounds_list) {
+            let bounds = bounds.map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
+            let matches_region = if inside { region.contains(bounds.min) && region.contains(bounds.max) } else { region.meets(&bounds) };
+            if !bounds.is_empty() && matches_region {
+                matches.push(body);
+            }
+        }
+        selected = matches;
     }
     if bool_(p, "names_only").unwrap_or(false) {
         let bodies: Vec<_> = selected.iter().map(|b| BodyName { name: b.name.clone(), definition: b.definition_name().to_string() }).collect();
@@ -511,6 +577,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 end: a.end.into(),
                 sweep_deg: solidcraft_sketch::arc_sweep(&a).to_degrees(),
             }),
+            control: w.control.map(|c| WireControlInfo { degree: c.degree, points: w.fit.iter().map(|&p| p.into()).collect() }),
         })
         .collect();
     Some(SketchInspected {
@@ -630,6 +697,27 @@ fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
     out
 }
 
+impl Session {
+    /// What `doc.info` says of this session's own design (a scratch copy names its source's file).
+    pub(crate) fn doc_info(&self) -> DocInfoResult {
+        DocInfoResult {
+            path: self.path.clone().or_else(|| self.source_path.clone()),
+            read_only: self.read_only,
+            unsaved: self.is_dirty(),
+            disk: self.disk.map(|d| DiskStamp { len: d.len, modified_ns: d.modified_ns.map(|ns| ns.to_string()) }),
+            document_id: self.document_id.clone(),
+            param_warnings: Vec::new(),
+        }
+    }
+}
+
+/// `doc.info`: in a plugin run, the design the run started on as it was before the run
+/// (`AppState::caller_design`); a design the run opened itself, or any other session, answers for itself.
+fn design_file_info(s: &mut Session, _p: &Value) -> Result<Value> {
+    let info = s.plugin_state.caller_design.clone().filter(|c| c.document_id == s.document_id).unwrap_or_else(|| s.doc_info());
+    reply("doc.info", info)
+}
+
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let timeline_detail = TimelineDetail::read(p.get("timeline")).map_err(|e| bad("document.inspect", e))?;
     let bodies_detail = BodiesDetail::read(p.get("bodies")).map_err(|e| bad("document.inspect", e))?;
@@ -685,32 +773,39 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     });
-    let definitions = s.model.state();
-    // Only bodies given in full are measured.
-    let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
     let with_counts = bool_(p, "sketch_counts").unwrap_or(false);
-    // Each body is measured on its own: on all cores, in body order (as `inspect.measure`).
-    let mut measured =
-        if with_measure { solidcraft_kernel::map_on_threads(&st.bodies, 16, |b| measure_sheet(b, Some(&definitions))) } else { Vec::new() }
-            .into_iter();
-    let bodies: Vec<DocumentBody> = st
-        .bodies
-        .iter()
-        .map(|b| {
-            let detail = match measured.next() {
-                Some(m) => {
-                    DocumentBodyDetail::Measured(Box::new(m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into()))))
-                }
-                None => DocumentBodyDetail::Listed { name: b.name.clone(), feature: b.feature },
-            };
-            // Editing a sketch rolls the timeline back; a body deleted further on is `removed_later`.
-            DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
-        })
-        .collect();
-    let bodies = match bodies_detail {
-        BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
-        BodiesDetail::Names => Some(DocumentBodies::Names(st.bodies.iter().map(|b| b.name.clone()).collect())),
-        BodiesDetail::Left => None,
+    let bodies = if bodies_detail == BodiesDetail::Left {
+        None
+    } else {
+        // Body names and measurements describe every placement in the world, as inspect.measure
+        // does. Sketches and timeline entries below still describe their definitions once.
+        let world = s.world_state()?;
+        // Sheet perforations belong to the definition and are placed by measure_sheet.
+        let definitions = s.model.state();
+        // Only bodies given in full are measured; names alone never need their geometry measured.
+        let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
+        let mut measured =
+            if with_measure { solidcraft_kernel::map_on_threads(&world.bodies, 16, |b| measure_sheet(b, Some(&definitions))) } else { Vec::new() }
+                .into_iter();
+        let bodies: Vec<DocumentBody> = world
+            .bodies
+            .iter()
+            .map(|b| {
+                let detail = match measured.next() {
+                    Some(m) => DocumentBodyDetail::Measured(Box::new(
+                        m.unwrap_or_else(|| measure_failed(b.name.clone(), "measuring this body failed".into())),
+                    )),
+                    None => DocumentBodyDetail::Listed { name: b.name.clone(), feature: b.feature },
+                };
+                // A rolled-back removal and visibility both use the placed body's world name.
+                DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
+            })
+            .collect();
+        match bodies_detail {
+            BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
+            BodiesDetail::Names => Some(DocumentBodies::Names(world.bodies.iter().map(|b| b.name.clone()).collect())),
+            BodiesDetail::Left => None,
+        }
     };
     let sketches: Vec<DocumentSketch> = st
         .sketches
@@ -796,7 +891,7 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 /// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
 fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::schema::FaceRef;
-    use solidcore_ops::{ClassifiedPoint as KernelPoint, PointNormalFace};
+    use solidcraft_kernel::points::{ClassifiedPoint as KernelPoint, PointNormalFace};
 
     let cmd = "inspect.classify_points";
     let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
@@ -858,7 +953,7 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 index: f.index,
                 name: names.get(f.index).cloned(),
                 exact: solidcraft_doc::naming::face_name_exact(b, f.index),
-                area: f.area,
+                area: super::measure_exact::face_area(&b.body, f.index).unwrap_or(f.area),
                 centroid: f.centroid.into(),
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
@@ -928,11 +1023,12 @@ fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() || bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
+    let doc = s.doc_mut();
     for b in &bodies {
-        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
-            s.doc_mut().materials.remove(b);
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL && !doc.has_copy_material_lineage(b) {
+            doc.materials.remove(b);
         } else {
-            s.doc_mut().materials.insert(b.clone(), canonical.clone());
+            doc.materials.insert(b.clone(), canonical.clone());
         }
     }
     typed_reply(cmd, MaterialAssignResult { bodies, material: canonical, param_warnings: Vec::new() })
@@ -954,16 +1050,17 @@ pub(crate) fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 use crate::schema::appearance::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceFavoriteParams, AppearanceFavoriteResult,
-    AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult, AppearancePasteParams, AppearanceReplaceParams,
-    AppearanceReplaceResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply,
-    PbrReply, PlainAppearance, StarterAppearance,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceChainParams, AppearanceChainResult, AppearanceCopyParams, AppearanceCopyResult,
+    AppearanceFavoriteParams, AppearanceFavoriteResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
+    AppearancePasteParams, AppearanceReplaceParams, AppearanceReplaceResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot,
+    LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance, StarterAppearance,
 };
 
 const ASSIGN_CONTRACT: TypedContract<AppearanceAssignParams> = TypedContract::new();
 const LIBRARY_CONTRACT: TypedContract<AppearanceLibraryParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<AppearanceListParams> = TypedContract::new();
 const COPY_CONTRACT: TypedContract<AppearanceCopyParams> = TypedContract::new();
+const CHAIN_CONTRACT: TypedContract<AppearanceChainParams> = TypedContract::new();
 const PASTE_CONTRACT: TypedContract<AppearancePasteParams> = TypedContract::new();
 const FAVORITE_CONTRACT: TypedContract<AppearanceFavoriteParams> = TypedContract::new();
 const REPLACE_CONTRACT: TypedContract<AppearanceReplaceParams> = TypedContract::new();
@@ -982,20 +1079,28 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
-    // Faces: a point on each, on the named body or the nearest one.
+    // Faces: a point on each, on the named body or the nearest one, or a face's name (#22984).
     let mut faces: Vec<(String, solidcore_record::Vec3)> = Vec::new();
     if let Some(list) = p.get("faces") {
-        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+        let wrong = || bad(cmd, "`faces` must list points [x, y, z] or face names");
+        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(wrong)?;
         for v in list {
-            let pt = crate::params::vec3(v)
-                .or_else(|| v.get("point").and_then(crate::params::vec3))
-                .ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+            if let Some(name) = v.as_str() {
+                crate::cmd::face_ref_form(v).map_err(|why| bad(cmd, why))?;
+                let body = str_(p, "body");
+                let hit = solidcraft_doc::naming::locate_one(&st, body, name).map_err(|why| bad(cmd, why))?;
+                let on = st.bodies.get(hit.body).ok_or_else(wrong)?.name.clone();
+                let pt = solidcraft_doc::naming::named_face_point(&st, Some(&on), name).map_err(|why| bad(cmd, why))?;
+                faces.push((on, pt));
+                continue;
+            }
+            let pt = crate::params::vec3(v).or_else(|| v.get("point").and_then(crate::params::vec3)).ok_or_else(wrong)?;
             let on = |b: &solidcraft_doc::ModelBody| solidcraft_doc::appearance::face_index_at(b, pt).is_some();
             let body = match v.get("body").and_then(Value::as_str).or_else(|| str_(p, "body")) {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
-            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt}")))?, pt));
         }
     }
     let mut comps: Vec<u64> = Vec::new();
@@ -1022,6 +1127,11 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
             Some(l) => a.bodies.insert(b.clone(), l.clone()),
             None => a.bodies.remove(b),
         };
+        // A mesh body has one face, the whole body: a look on that face would hide every body
+        // look from then on, so the body's look replaces it (#22573).
+        if st.body(b).is_some_and(|mb| mb.body.is_mesh()) {
+            a.faces.retain(|f| f.body != *b);
+        }
     }
     for (body, pt) in &faces {
         // One entry per face: a new one replaces any at the same spot.
@@ -1225,7 +1335,25 @@ fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("active_only").is_some_and(|v| !v.is_boolean() && !v.is_null()) {
+        return Err(bad("appearance.list", "`active_only` must be a boolean"));
+    }
+    let active_only = bool_(p, "active_only").unwrap_or(false);
+    let st = s.model.state();
+    let live_bodies: std::collections::BTreeSet<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+    let live_components: std::collections::BTreeSet<u64> = s.doc.components.iter().map(|c| c.id).collect();
     let a = &s.doc.appearances;
+    let inactive_bodies: Vec<String> = a
+        .bodies
+        .keys()
+        .chain(a.faces.iter().map(|f| &f.body))
+        .filter(|name| !live_bodies.contains(name.as_str()))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let include_body = |name: &str| !active_only || live_bodies.contains(name);
+    let include_component = |id: u64| !active_only || live_components.contains(&id);
     // "In this design": each look used, with where.
     type Used = Vec<(solidcraft_doc::appearance::Look, Vec<String>, Vec<FaceSpot>, Vec<u64>)>;
     let mut used: Used = Vec::new();
@@ -1238,19 +1366,19 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
-    for (b, l) in &a.bodies {
+    for (b, l) in a.bodies.iter().filter(|&(b, _)| include_body(b)) {
         let i = slot(&mut used, l);
         if let Some(u) = used.get_mut(i) {
             u.1.push(b.clone());
         }
     }
-    for f in &a.faces {
+    for f in a.faces.iter().filter(|f| include_body(&f.body)) {
         let i = slot(&mut used, &f.look);
         if let Some(u) = used.get_mut(i) {
             u.2.push(FaceSpot { body: f.body.clone(), point: [f.point.x, f.point.y, f.point.z] });
         }
     }
-    for (c, l) in &a.components {
+    for (c, l) in a.components.iter().filter(|&(c, _)| include_component(*c)) {
         let i = slot(&mut used, l);
         if let Some(u) = used.get_mut(i) {
             u.3.push(*c);
@@ -1260,18 +1388,24 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
         used.into_iter().map(|(l, bodies, faces, components)| LookInDesign { look: LookReply::from(&l), bodies, faces, components }).collect();
     let mut out = AppearanceListResult {
         in_design,
-        bodies: a.bodies.iter().map(|(b, l)| (b.clone(), LookReply::from(l))).collect(),
+        bodies: a.bodies.iter().filter(|&(b, _)| include_body(b)).map(|(b, l)| (b.clone(), LookReply::from(l))).collect(),
         faces: a
             .faces
             .iter()
+            .filter(|f| include_body(&f.body))
             .map(|f| FaceLookReply { body: f.body.clone(), point: [f.point.x, f.point.y, f.point.z], appearance: LookReply::from(&f.look) })
             .collect(),
-        components: a.components.iter().map(|(c, l)| ComponentLookReply { component: *c, appearance: LookReply::from(l) }).collect(),
+        components: a
+            .components
+            .iter()
+            .filter(|&(c, _)| include_component(*c))
+            .map(|(c, l)| ComponentLookReply { component: *c, appearance: LookReply::from(l) })
+            .collect(),
+        inactive_bodies,
         body: None,
         param_warnings: Vec::new(),
     };
     if let Some(name) = str_(p, "body") {
-        let st = s.model.state();
         // A placed copy's name (`KB (K:2)`) means the body it shows, as appearance.assign takes
         // it (#9740): the reply names that body.
         let own = s.own_body_name(name);

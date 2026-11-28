@@ -24,8 +24,8 @@ use super::features::FeatureResult;
 use super::motion::require;
 use super::surface_boundary::message;
 use super::types::{
-    FeatureCommon, IdOrName, LengthExpr, OperationParam, PlaneParam, Point3, ProfilesParam, RailFitParam, SketchRef, TouchingParam, feature_common,
-    guide_rails_problem, present,
+    AngleExpr, FeatureCommon, IdOrName, LengthExpr, OperationParam, PlaneParam, Point3, ProfilesParam, RailFitParam, SketchRef, TouchingParam,
+    feature_common, guide_rails_problem, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -240,6 +240,10 @@ pub struct OffsetParams {
     /// How far a fitted face may stray from the true offset. Default: 0.01 mm.
     #[serde(default)]
     pub tolerance: Option<LengthExpr>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -443,17 +447,17 @@ fn extend_edges_schema(generator: &mut SchemaGenerator) -> Schema {
 fn extend_mode<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     match Value::deserialize(d)? {
         Value::Null => Ok(None),
-        Value::String(m) if ["natural", "tangent", "curvature"].contains(&m.trim()) => Ok(Some(m)),
-        Value::String(m) => Err(D::Error::custom(whole(format!("`mode` must be natural, tangent or curvature, not `{}`", m.trim())))),
-        _ => Err(D::Error::custom("must be natural, tangent or curvature")),
+        Value::String(m) if ["natural", "tangent", "curvature", "law"].contains(&m.trim()) => Ok(Some(m)),
+        Value::String(m) => Err(D::Error::custom(whole(format!("`mode` must be natural, tangent, curvature or law, not `{}`", m.trim())))),
+        _ => Err(D::Error::custom("must be natural, tangent, curvature or law")),
     }
 }
 
 fn extend_mode_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "How the surface continues: natural, the surface itself continued; tangent, tangent to it across the edge (G1); curvature, keeping its curvature across the edge too (G2). Default: natural.",
+        "description": "How the surface continues: natural, the surface itself continued; tangent, tangent to it across the edge (G1); curvature, keeping its curvature across the edge too (G2); law, a ruled strip built from the picked edges themselves (one chain; trimmed edges too) leaving them at `angle` to the surface. Default: natural.",
         "type": "string",
-        "enum": ["natural", "tangent", "curvature"]
+        "enum": ["natural", "tangent", "curvature", "law"]
     })
 }
 
@@ -472,10 +476,16 @@ fn face_on_body(generator: &mut SchemaGenerator) -> Schema {
 
 fn up_to_schema(generator: &mut SchemaGenerator) -> Schema {
     let face = face_on_body(generator);
+    let whole = json_schema!({
+        "type": "object",
+        "properties": {"body": {"type": "string", "description": "The body, by name."}},
+        "required": ["body"],
+        "additionalProperties": false
+    });
     let plane = generator.subschema_for::<PlaneParam>();
     json_schema!({
-        "description": "Extend up to this instead of by `distance`: `bounds`, back to the surface's own bounds (natural mode only); a face, its surface extended; or a plane.",
-        "anyOf": [{"const": "bounds"}, face, plane]
+        "description": "Extend up to this instead of by `distance`: `bounds`, back to the surface's own bounds (natural mode only); a face, its surface extended; a whole body, where the surface first runs into any of its faces (natural mode only); or a plane.",
+        "anyOf": [{"const": "bounds"}, face, whole, plane]
     })
 }
 
@@ -502,6 +512,11 @@ pub struct SurfaceExtendParams {
     #[serde(default, deserialize_with = "extend_mode", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "extend_mode_schema")]
     pub mode: Option<String>,
+    /// Law mode only: the strip's angle to the surface at the edge, strictly between -90 and 90
+    /// deg; 0 is tangent to the surface, positive turns toward the side the face's normal points
+    /// to. Default: 0 deg.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
     // Kept as given: the handler reads its forms, with its messages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "up_to_schema")]
@@ -510,6 +525,10 @@ pub struct SurfaceExtendParams {
     /// sides run square to the edge. Default: true.
     #[serde(default)]
     pub neighbours: Option<bool>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -561,7 +580,8 @@ fn trim_with_schema(_: &mut SchemaGenerator) -> Schema {
 
 fn trim_tool_schema(generator: &mut SchemaGenerator) -> Schema {
     let mut face = face_on_body(generator);
-    face.insert("description".into(), json!("A face to cut with, its surface extended."));
+    face.insert("description".into(), json!("The whole bounded cutting sheet (`body`), or one extended face (`body` and `point`)."));
+    face.insert("required".into(), json!(["body"]));
     face
 }
 
@@ -572,7 +592,7 @@ fn trim_curves_schema(_: &mut SchemaGenerator) -> Schema {
         "properties": {
             "sketch": {"description": "The sketch: its id or name.", "type": ["integer", "string"]},
             "curves": {"description": "Curve ids, chains meeting end to end. Default: every curve.", "type": "array", "items": {"type": "string"}, "maxItems": 1000},
-            "direction": {"description": "`normal`, along the sketch's normal (the default), or a direction [x, y, z] to sweep the curves onto the surface along."}
+            "direction": {"description": "`normal`, along the sketch's normal (the default), or a direction [x, y, z] to sweep the curves onto the surface along; or `face_normal`, to project them along the surface's own normal (each point of a curve to its nearest point of the surface)."}
         },
         "required": ["sketch"],
         "additionalProperties": false
@@ -840,6 +860,16 @@ pub struct SurfaceLoftParams {
     /// How the rails reshape the sections. Default: scale. Used only with `rails`.
     #[serde(default)]
     pub rail_fit: Option<RailFitParam>,
+    /// Through planar sketch sections, the walls face out of the region closed sections bound,
+    /// as `solid.loft`'s faces do, and along an open section's direction crossed with its sketch
+    /// normal, as `surface.extrude`'s. Default: true. False keeps each wall along its skinned
+    /// surface's normal, as surface lofts saved before it build.
+    #[serde(default)]
+    pub faced: Option<bool>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -194,6 +194,7 @@ fn warning_word(warning: Warning) -> &'static str {
         Warning::Chars { .. } => "chars",
         Warning::Height => "height",
         Warning::Width => "width",
+        Warning::Clipped => "clipped",
     }
 }
 

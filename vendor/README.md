@@ -57,6 +57,18 @@ crates to this tree the same way, with
 `[patch.crates-io] egui-wgpu = { path = ".../vendor/egui/crates/egui-wgpu" }` and the same for the others.
 
 SolidCraft changes to egui and eframe:
+- `crates/egui/src/context.rs`, `crates/epaint/src/mutex.rs`: a `Context` read taken on a thread
+  that already holds a read of the same context goes ahead of a waiting writer
+  (`RwLock::read_recursive`). parking_lot holds new readers back behind a waiting writer, so a
+  closure given to `Context::data` that called the context again (`ctx.viewport_id()`) froze the
+  window for good when a worker's `request_repaint` came between the two reads
+  (#21091). The context tracks the locks each thread holds for this.
+  `Context::record_nested_locks` reports nested ones so tests can keep them out; it builds only
+  with the `lock_nesting_report` feature (`crates/egui/Cargo.toml`), which SolidCraft's crates
+  enable from their dev-dependencies. epaint's `RwLock::is_locked_exclusive` lets the egui test
+  see the writer queue. Tests:
+  `a_nested_read_does_not_wait_on_a_waiting_writer` (egui) and
+  `the_window_never_locks_its_context_inside_its_own_lock_while_a_check_runs` (`crates/ui-egui`).
 - `crates/egui/src/data/input/raw_input.rs`, `crates/egui/src/input_state/mod.rs`,
   `crates/eframe/src/epi.rs`, `crates/eframe/src/native/{winit,wgpu,glow}_integration.rs`:
   backport of emilk/egui#8768 (open upstream, against egui's `main`). `RawInput::repaint_on_pointer_move`
@@ -82,80 +94,65 @@ SolidCraft changes to egui and eframe:
   system refuses is tried again for up to 150 ms (Windows refuses while another process has the
   file open). `lib.rs` re-exports `save_to_disk`, hidden, for SolidCraft's tests
   (`settings_saved_at_once_from_two_windows_stay_whole` in `apps/solidcraft/src/startup.rs`).
+- `crates/eframe/src/epi.rs`, `crates/eframe/src/native/run.rs`,
+  `crates/eframe/src/native/winit_integration.rs`: `NativeOptions::event_loop_ready` hands the app
+  the event loop's proxy before the loop starts (dropped when the options are cloned, like the other
+  native hooks), and `UserEvent::RunLogicNow { viewport_id }` runs that viewport's logic-only pass at
+  once. The control channel (#743) serves a request with it without waiting for the compositor's
+  next frame: on Wayland a window that gets no frames (off-screen, on another workspace) otherwise
+  stalled each request for up to a second. Normal redraws still paint.
+- `crates/egui/src/viewport.rs`, `crates/egui-winit/src/lib.rs`, `winit/src/platform/macos.rs`,
+  `winit/src/platform_impl/macos/window_delegate.rs`: `ViewportCommand::TitlebarButtonsHidden(bool)`
+  hides or shows the traffic lights of an open macOS window (winit's `with_titlebar_buttons_hidden`
+  only worked at creation, and changing it by recreating the window loses the native frame). No
+  effect on other systems.
+
+- `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
+  `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
+  `Extra3` to `Extra13` (buttons 6 to 16; `NUM_POINTER_BUTTONS` is 16), `PointerButton::ALL`,
+  `number` and `from_number`. egui-winit turns winit's `MouseButton::Other(code)` into them by
+  each platform's code (`other_button_number`) and the web runner its `button` 5 and up, where
+  upstream drops them. Tests: `buttons_are_numbered_in_order` (egui) and
+  `further_mouse_buttons_reach_egui_by_number` (egui-winit).
+- `crates/egui/src/data/input/viewport_info.rs`, `crates/egui-winit/src/lib.rs`
+  (`update_viewport_info`): `ViewportInfo::native_window`, the handle of the native window a
+  viewport is shown in (the `HWND` on Windows, `None` elsewhere). Windows asks a window what is
+  under the pointer by that handle, and a window's title bar is laid out by its viewport: with
+  the handle each window, the main one and every pop-out, publishes its own bar for one window
+  procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
+
+- `crates/egui/src/widgets/text_edit/{builder.rs,mod.rs}`, `crates/egui/src/widgets/mod.rs`,
+  `crates/egui/src/atomics/container_atom.rs`, `crates/egui/src/lib.rs`: a vertically centred
+  `TextEdit` lifts its single row of text so the middle of a capital's ink lands in the middle of
+  the field, not the middle of the font's row box (SolidCraft #23381). A row box is not where
+  capitals sit: the ascent exceeds the cap height and a descent hangs below the baseline, so
+  centring the row box puts the text low in the frame — 1.5 pt with egui's own font. The lift
+  comes from `cap_ink_rise`; it lays out one fixed probe glyph, so it follows the font, its size
+  and the pixels-per-point, and the baseline never moves while one types. `galley_cap_ink_rise`
+  applies it to a laid-out galley (zero for multi-row galleys, which centre as a block); both are
+  exported for SolidCraft's ui-kit to centre hand-drawn pills the same way. The atom layout
+  applies the lift to every [`AtomKind::Text`] atom whose cross-axis alignment is centred, so
+  `TextEdit`'s hint, prefix and suffix atoms share its lifted baseline and centred labels in
+  other atom containers read centred too. Only `Align::Center` rows are touched; top- and
+  bottom-aligned edits are unchanged. Tests: `crates/egui/tests/text_edit_centering.rs`.
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
 SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
 separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
-- `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu
-  request when the requested card is unavailable or incompatible with the window surface.
-- `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
-  exposing the effective sample count so host paint callbacks can match it.
-- `src/winit.rs`: use that same effective count for depth and resolve attachments.
-- `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
-  or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
-- Other backends retain requested MSAA, without another adapter or device probe.
-- `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
-  depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a
-  device without it failed pipeline validation, a panic at start.
-- `src/setup.rs`: the default device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` when
-  the adapter has it, so 2x and 8x work where the adapter supports them (WebGPU only
-  guarantees 1x and 4x).
-- `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
-  instead of exactly 8192.
-- `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
-  device and the window's surface up (instance, surface, adapter request, the chosen adapter,
-  device, renderer, surface configure, first present), so the app's crash journal can say which
-  step a crash inside the graphics driver happened in.
 - `src/lib.rs`, `src/winit.rs`: a window larger than the device's largest texture gets a surface
   clamped to it (`clamp_surface_extent`, aspect ratio kept) and egui is drawn at the matching
   smaller scale, instead of a `Surface::configure` validation panic (#869). The resize path and
   an unsupported surface no longer unwrap.
 - `src/winit.rs`: acquire a drawable before preparing paint callbacks, so a skipped
   surface frame cannot discard initialization commands for cached viewport meshes.
-- `src/lib.rs`, `src/winit.rs`: surfaces are configured under `capture_errors` (error scopes):
-  a configuration the device refuses (D3D12 "Failed to wait for GPU to come idle before
-  reconfiguring the Surface", #1935) is logged, the frame is skipped and the configure is tried
-  again, instead of the device's uncaptured-error handler panicking. A streak of refusals warns
-  once (debug after), waits 16 ms doubling up to 1 s between tries and recreates the surface
-  every `SURFACE_RECREATE_AFTER` refusals (`ConfigureRetry`). Each surface keeps the deadline of
-  its next try: until it is due, no configure or recreate happens, whether the repaint comes
-  from input, an animation, a resize (its size is kept for the retry) or an outdated surface,
-  and the frame is skipped with a repaint asked for when it is due. The streak and the deadline
-  survive a recreate; a configure the device takes ends the streak, a recreate it asked for
-  included. A recreate for a lost surface goes ahead as before.
-- `src/lib.rs`, `src/winit.rs`: a window other than the main one (an immediate viewport, drawn
-  and presented inside the main window's frame) is configured with Mailbox, else Immediate,
-  when the configured mode waits for vsync and the surface offers one (`viewport_present_mode`).
-  Waiting on both surfaces in one frame halved the frame rate, and on Wayland a window the
-  compositor wasn't showing stalled the main window behind its present.
-- `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
-  (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
-  submits a command buffer holding a debug marker (`DeviceLost::probe`), so a device the
-  driver lost is found by opening that command list rather than by the first queue write,
-  which panicked inside wgpu-core (`PendingWrites::activate`, #4172). An empty submission
-  only signalled a fence, which a reset D3D12 device let through (#6528).
-  A reset that lands after the probe is still met by a queue write or the present: the painter
-  runs the frame under `DeviceLost::survive`, which takes that panic for the loss once the probe
-  then finds the device lost, and lets any other panic carry on (#10240).
-- `src/lib.rs`, `src/winit.rs`: a surface configure that meets a lost device is not taken as
-  configured (`configure_captured`): wgpu reports device-loss errors to no error scope, and on
-  D3D12 a driver reset found by the configure has already dropped the surface's configuration.
-  The next acquire failed with "Surface is not configured for presentation" and the device's
-  default handler panicked (#7007). An unsupported surface is a refused configure too. The
-  acquire runs under `capture_errors`, and the `Validation` status it then returns reconfigures
-  the surface instead of skipping every later frame.
-- `src/lib.rs`, `src/winit.rs`: the painter holds an acquired frame as `AcquiredFrame`, which
-  destroys a second handle to the frame's texture once the frame is presented or dropped. On a
-  lost device wgpu's present and discard keep the frame's image in the surface, and dropping
-  the surface (the window closing for the restart) then panicked in wgpu-hal ("Trying to
-  destroy a SwapchainAcquireSemaphore that is still in use by a SurfaceTexture", #7148); the
-  destroy takes the image back whatever the device's state.
-- `src/lib.rs`: creation of the egui renderer uses validation, internal and out-of-memory
-  error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
-  `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
-  eframe so startup can retry another backend instead of invoking wgpu's panic handler.
+- `src/renderer.rs`, `src/winit.rs`: `FrameCompositor`, an optional owner of a whole frame
+  (`Renderer::frame_compositor`, unset unless the blur behind panels is on, #8876), and
+  `Renderer::render_with_mesh_offset`, which continues an uploaded frame in another render pass;
+  the blur (`crates/ui-kit/src/blur_native.rs`) draws through them.
+- `src/renderer.rs`: `Callback::downcast_ref` (and `CallbackTrait: Any`), so tests can count the
+  kinds of paint callbacks a frame emitted (`crates/ui-egui/src/gpu.rs`).
 
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 
@@ -229,3 +226,70 @@ SolidCraft changes:
 - `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
   would have sized the window 0x0, so it fills the monitor the window is on instead, and never
   applies a zero-area size (#20645).
+- `src/platform_impl/windows/drop_handler.rs`, `src/platform_impl/linux/x11/event_processor.rs`:
+  while files are dragged over a window, send `WindowEvent::CursorMoved` with where the drag is
+  (Windows: `IDropTarget`'s `DragEnter`, `DragOver` and `Drop`, screen to client coordinates;
+  X11: each `XdndPosition`, root to window coordinates). winit 0.30 gives `HoveredFile` and
+  `DroppedFile` no position, and neither platform sends the window pointer motion while a drag
+  runs, so the app could not tell where files were dropped (the design tabs open files dropped
+  on them at that place). macOS and Wayland are unchanged.
+- `src/platform_impl/windows/definitions.rs`: `IDropTarget`'s `pt` is a `POINTL` passed by value,
+  as COM declares it; winit 0.30 declared a pointer, harmless only while nothing read it.
+- `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
+  (`WindowFlags::adjust_rect`): a resizable undecorated window with the undecorated shadow keeps
+  the system frame on the left, right and bottom (its invisible resize borders and drop shadow)
+  and has none at the top. This replaces winit's client area moved down by 1 px, which blurred
+  text (#3927) and with which Windows 11 offered no snap layouts on a restored window's maximize
+  button, although the hit test answered `HTMAXBUTTON` (#13996). A window that is all client
+  area gets no snap layouts either: Windows 11 shows them only over a window that keeps a frame
+  of its own, so the frame is kept here and the app's window procedure leaves this answer alone.
+  `adjust_rect` grows an inner size by the same frame, so requested and saved sizes and DPI
+  changes keep the client area's size. The two places must agree, which is why the calculation
+  is here and not in the app. A window that cannot be resized (the preview of a view dragged out
+  of the window) has no resize borders to keep and is winit's own, as is a maximized one. The
+  hit test itself is the app's (`apps/solidcraft/src/native_frame.rs`): nothing of it is in this
+  copy.
+- `src/platform_impl/windows/event_loop.rs`, `util.rs`, `mod.rs`, `src/platform/windows.rs`
+  (`set_touchpad_wheels`): a process-wide switch, off by default, which is winit's own behaviour.
+  Windows sends a precision touchpad's two-finger scroll as the wheel messages a mouse sends, so
+  winit reported it as lines, and in the SolidCraft presets it zoomed (vertical) or did nothing
+  (horizontal) (#15353). On, the event loop thread is registered with
+  `RegisterTouchpadCapableThread` (looked up by name; absent or failing means off), touchpad
+  `WM_POINTER` contacts go to `DefWindowProc` instead of becoming touches, and a touchpad's wheel
+  message is reported as `PixelDelta`: 40 px per `WHEEL_DELTA` (120), times the window scale
+  factor, which is egui's default line speed, so a pinch keeps its speed. Mouse wheels stay
+  `LineDelta`. The registration is undone when the event loop drops.
+- `src/platform_impl/windows/keyboard_layout.rs`, `window_state.rs`, `event_loop.rs`
+  (`get_agnostic_mods_async`, `effective_modifiers`): while unfocused or gaining focus, read
+  modifier keys with `GetAsyncKeyState` (keeping AltGr filtering) and hold any pre-focus
+  modifiers in `WindowState::inherited_modifiers` until the thread's synchronous `GetKeyState`
+  observes them or the key is physically released. Clicking into an unfocused window while holding
+  Ctrl/Shift/Alt from another application otherwise saw stale `GetKeyState == 0` until the
+  modifier was released and pressed again (#20352). Test:
+  `effective_modifiers_tracks_unfocused_and_inherited_keys` (Windows).
+- `src/window.rs` (`WindowAttributes::with_owned_by`), `src/platform_impl/windows/window.rs`,
+  `linux/x11/window.rs`, `linux/wayland/window/mod.rs`, `macos/window_delegate.rs`, `macos/window.rs`:
+  a top-level window can name a live owner (#20252). Windows gives it a Win32 owner, X11 a
+  transient hint and Wayland an XDG toplevel parent. On macOS the owner keeps a list of the windows
+  it owns and puts them right above itself whenever it becomes the key window
+  (`raise_owned_windows`), which is what an owner does there: they come forward with it. When
+  it is minimized it takes them off the screen, and it brings those back when it is restored
+  (`hide_owned_windows`, `show_owned_windows`). When it moves, they move by what its top left
+  corner moved, as a child window does (`move_owned_windows`). While it is full screen they are
+  full-screen auxiliary windows that move to the active space, so they show in its space above
+  it and raising them does not leave that space; one on another screen stays there
+  (`owned_windows_join_full_screen`, undone by `owned_windows_leave_full_screen`). They are not AppKit child
+  windows. A child window is kept on its parent's screen, so one dragged to another screen
+  jumped back when the drag ended, and one opened on another screen did not come forward with
+  its parent (#22313). A window with an explicit parent
+  (`WindowAttributes::with_parent_window`) is a child window as in winit.
+
+## occt-capi (MIT OR Apache-2.0; Open CASCADE itself LGPL-2.1-only WITH OCCT-exception-1.0)
+
+`vendor/occt-capi` is the Open CASCADE (OCCT) C ABI module behind `solidcraft-kernel`'s opt-in
+`backend-occt` feature, an experiment that checks the kernel interface fits a second kernel
+(`docs/kernel-support.md`). Its build files and two shim files come from text-to-cad-rs
+(`crates/occt-capi-sys`); `vendor/occt-capi/README.md` says which and what changed. It is not a
+`[patch]`: `solidcraft-kernel` depends on it by path, only with the feature, and no build we ship
+turns that on. OCCT is downloaded and built into the module at build time and is never stored here;
+the licence terms are in `vendor/occt-capi/README.md`.

@@ -61,7 +61,8 @@ pub(crate) mod tangle;
 pub(crate) mod uv;
 
 pub use size::MAX_ANGLE_BOUNDARY;
-pub use crate::stats::{PlanStats, RefusedFace};
+pub use crate::stats::PlanStats;
+pub use crate::stats::RefusedFace;
 
 use crate::vec::VecExt as _;
 use std::collections::HashMap;
@@ -161,6 +162,8 @@ pub(crate) enum Sides {
     /// It may not: the rounds of splitting ran out ([`MAX_SPLIT_ROUNDS`]); where that leaves
     /// it short, the face is named ([`crate::ShapeLimit::Rounds`]).
     Exhausted,
+    /// An incident edge reached the node limit during optional shaping.
+    EdgeNodes,
 }
 
 /// Rounds of putting the boundary sides the mesh path's shaping splits on their edges and
@@ -322,13 +325,22 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
     let mut slots: Vec<Option<Result<(FacePlan, PlanStats)>>> = faces.iter().map(|_| None).collect();
     // The faces whose shaping split only sides on no edge: planned with their sides whole.
     let mut kept = vec![false; faces.len()];
+    let mut capped = vec![false; faces.len()];
     let mut todo: Vec<usize> = (0..faces.len()).collect();
     for round in 0..=MAX_SPLIT_ROUNDS {
         let last = round == MAX_SPLIT_ROUNDS;
         let done = crate::par::map("face tessellation", &todo, curved >= PARALLEL_FACES, |&fi| {
             let purpose = match shape {
                 Some(shape) => {
-                    let sides = if last { Sides::Exhausted } else if kept.get(fi).copied().unwrap_or(true) { Sides::Kept } else { Sides::Split };
+                    let sides = if capped.get(fi) == Some(&true) {
+                        Sides::EdgeNodes
+                    } else if last {
+                        Sides::Exhausted
+                    } else if kept.get(fi).copied().unwrap_or(true) {
+                        Sides::Kept
+                    } else {
+                        Sides::Split
+                    };
                     Purpose::Mesh(Shape { sides, ..shape })
                 }
                 None => Purpose::Display,
@@ -363,9 +375,19 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         let (mut moved, mut lost): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
         for (e, ts) in &split {
             let fs = edge_faces.get(*e).map_or(&[][..], Vec::as_slice);
-            let inserted = nodes.get_mut(*e).map_or(Ok(()), |n| edges::insert_at(b, *e, n, ts));
+            let inserted = nodes.get_mut(*e).map_or(Ok(true), |n| edges::insert_at(b, *e, n, ts));
             match inserted {
-                Ok(()) => moved.extend(fs),
+                Ok(true) => moved.extend(fs),
+                Ok(false) => {
+                    // Shape refinement is optional. Replan both sides against the same,
+                    // unchanged boundary, even if another incident edge moves this round.
+                    for &fi in fs {
+                        if let Some(limit) = capped.get_mut(fi) {
+                            *limit = true;
+                        }
+                    }
+                    again.extend(fs);
+                }
                 // An edge that cannot take the nodes leaves out the faces it bounds, naming it.
                 Err(why) => {
                     for &fi in fs {
@@ -396,6 +418,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
                     again.push(fi);
                 }
                 Err(e) => {
+                    lost.push(fi);
                     if let Some(slot) = slots.get_mut(fi) {
                         *slot = Some(Err(e));
                     }
@@ -716,12 +739,18 @@ fn boundary(
     // most the chord tolerance, finer than which the mesh resolves nothing (a vertex tolerance
     // as large as the surface's features would make a pole of every node near one).
     let mut reach: f64 = 0.0;
-    for oe in face_edges(face) {
-        let (Some(edge), Some([p0, p1])) = (b.edges.get(oe.edge as usize), oe.pcurve.interval()) else { continue };
-        let tol = edge.vertices.get(usize::from(!oe.forward)).and_then(|v| b.vertices.get(*v as usize)).map_or(0.0, |v| v.tolerance.min(rules.tol));
-        let Some(q) = solidcore_convert::curve2(&oe.pcurve).eval(if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
-        if tol.is_finite() && tol > reach && (0..2).any(|d| s.pole(q, d, tol)) {
-            reach = tol;
+    // A positive-radius cylinder has no geometric poles. Its NURBS can be a very
+    // short axial extrusion: the vertex tolerance may cover its entire width
+    // without collapsing any of its generators. Keep the exact pole check on
+    // its parameterization, but do not promote nearby points to poles.
+    if !matches!(face.surface, brep::Surface::Cylinder { radius, .. } if radius.is_finite() && radius > 0.0) {
+        for oe in face_edges(face) {
+            let (Some(edge), Some([p0, p1])) = (b.edges.get(oe.edge as usize), oe.pcurve.interval()) else { continue };
+            let tol = edge.vertices.get(usize::from(!oe.forward)).and_then(|v| b.vertices.get(*v as usize)).map_or(0.0, |v| v.tolerance.min(rules.tol));
+            let Some(q) = solidcore_convert::curve2(&oe.pcurve).eval(if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
+            if tol.is_finite() && tol > reach && (0..2).any(|d| s.pole(q, d, tol)) {
+                reach = tol;
+            }
         }
     }
     let pole_along = |q: [f64; 2], d: usize| s.pole(q, d, reach);
@@ -763,8 +792,11 @@ fn boundary(
             let mut ep: Vec<Vec3> = n.points.clone();
             let mut es: Vec<bool> = n.params.iter().map(|t| n.snapped.contains(t)).collect();
             let mut eq: Vec<[f64; 2]> = Vec::with_capacity(ep.len());
+            let pcurve = solidcore_convert::curve2(&oe.pcurve).evaluator();
             for (k, (t, p)) in n.params.iter().zip(&n.points).enumerate() {
-                let q = solidcore_convert::curve2(&oe.pcurve).eval(t.clamp(p0, p1))
+                let q = pcurve
+                    .as_ref()
+                    .and_then(|pc| pc.eval(t.clamp(p0, p1)))
                     .ok_or_else(|| fail(oe.edge, format!("its pcurve does not evaluate at t = {t}")))?;
                 let q = map.to_eval(q);
                 let on =
@@ -1623,7 +1655,18 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     for seam::Loop { uv: luv, pts } in &projected {
         let start = uvs.len();
         let n = luv.len();
+        // A loop with every node within the reach of a collapsed line, though not one point (a
+        // face narrower than the reach all along, a sliver) has no node to split: it is meshed
+        // by its nodes as they are. A loop that is one point is not a sliver: its nodes are
+        // split as at any pole, and [`pole_caps`] refuses it.
+        let whole = seam::Loop { uv: luv.clone(), pts: pts.clone() };
+        let sliver = all_at_pole(s, &whole, reach) && !collapsed_at_pole(s, &whole, reach);
         for (k, (q, p)) in luv.iter().zip(pts).enumerate() {
+            if sliver {
+                uvs.push(*q);
+                fixed.push(*p);
+                continue;
+            }
             // At a pole the parameter along the degenerate direction is free: one copy with
             // the previous node's value, one with the next node's.
             let (prev, next) = (luv.get((k + n - 1) % n).copied(), luv.get((k + 1) % n).copied());
@@ -1656,6 +1699,55 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     Ok(Polygons { uvs, fixed, ranges, seamed })
 }
 
+/// Whether every node of `l` is at a pole of the surface (within `reach`).
+fn all_at_pole(s: &poles::Face, l: &seam::Loop, reach: f64) -> bool {
+    !l.uv.is_empty() && l.uv.iter().all(|q| (0..2).any(|d| s.pole(*q, d, reach)))
+}
+
+/// Whether every node of `l` is at a pole of the surface (within `reach`) and all of them lie
+/// within `reach` of the first node's point in 3D: the loop is one point.
+fn collapsed_at_pole(s: &poles::Face, l: &seam::Loop, reach: f64) -> bool {
+    let Some(first) = l.pts.first() else { return false };
+    l.uv.len() == l.pts.len() && all_at_pole(s, l, reach) && l.pts.iter().all(|p| p.dist(*first) <= reach)
+}
+
+/// Whether the face lies on the surface's side of `l`, a loop that is one point at a pole: the
+/// loop runs once round a closed direction of the surface along the parameter line of the pole,
+/// and the face lies left of it ([`seam::cut`]), so it has the surface's whole patch on its left
+/// when the parameter range goes on that way past the line, and nothing when the line is the
+/// range's end. A loop that does not run round (one node repeated) bounds no area.
+fn point_loop_has_area(s: &poles::Face, l: &seam::Loop) -> bool {
+    let dom = uv::domain(s);
+    // A loop that spans both parameters bounds a patch of the surface (a tiny one on an open
+    // surface, which has no period to run round): zero area is not established, so it is kept.
+    // Only a loop along one parameter line, the pole's, can be a line with no patch beside it.
+    let spans = |d: usize| {
+        let (lo, hi) = l.uv.iter().map(|q| comp(q, d)).fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        let scale = dom.range.get(d).copied().flatten().map_or(1.0, |(a, b)| (b - a).abs().max(f64::MIN_POSITIVE));
+        // Absent only to rounding of the coordinate itself (a pole line's nodes differ by an ulp or
+        // two): a span that is real, however small, bounds a patch.
+        hi - lo > 64.0 * f64::EPSILON * scale.max(lo.abs()).max(hi.abs())
+    };
+    if spans(0) && spans(1) {
+        return true;
+    }
+    (0..2).any(|d| {
+        let Some(per) = dom.period.get(d).copied().flatten() else { return false };
+        let drift = seam::drift(l, d, per);
+        if !drift.is_finite() || drift.abs() <= per * 0.5 {
+            return false;
+        }
+        let other = 1 - d;
+        let Some((lo, hi)) = dom.range.get(other).copied().flatten() else { return true };
+        let at = l.uv.iter().map(|q| comp(q, other)).sum::<f64>() / l.uv.len().max(1) as f64;
+        let room = (hi - lo).abs() * 1e-9;
+        // The face is left of the loop: above the line (larger `other`) when a loop along u
+        // runs towards larger u, and below it when a loop along v does.
+        let above = (drift > 0.0) == (d == 0);
+        if above { at < hi - room } else { at > lo + room }
+    })
+}
+
 /// A pole of the surface on a face's boundary, which the mesh path fans on its own
 /// ([`pole_caps`]).
 struct PoleCap {
@@ -1681,7 +1773,13 @@ struct PoleCap {
 /// to a collapsed side), the nodes of that stretch, each within the reach of a collapsed line
 /// of the surface, whatever its point. No ring could lie between two of them, so they are one
 /// cap, fanned from the run.
-fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], ranges: &[std::ops::Range<usize>], reach: f64) -> std::result::Result<Vec<PoleCap>, String> {
+fn pole_caps(
+    s: &poles::Face,
+    uvs: &[[f64; 2]],
+    fixed: &[Vec3],
+    ranges: &[std::ops::Range<usize>],
+    reach: f64,
+) -> std::result::Result<Vec<PoleCap>, String> {
     let is_pole = |k: usize| uvs.get(k).is_some_and(|q| (0..2).any(|d| s.pole(*q, d, reach)));
     let mut caps = Vec::new();
     for (lp, r) in ranges.iter().enumerate() {
@@ -1693,7 +1791,15 @@ fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], ranges: &[std::ops::Range<usize>
         let pole: Vec<bool> = (0..n).map(|k| is_pole(at(k))).collect();
         let pole_at = |k: usize| pole.get(k % n).copied().unwrap_or(false);
         if pole.iter().all(|p| *p) {
-            return Err(format!("a loop of {n} nodes all at one pole"));
+            // A loop that is one point in 3D bounds no area to fan or mesh: refused. A face
+            // narrower than the reach all along (a sliver, [`polygons`]) has its nodes at a
+            // pole too, but they are not one point: it has no cap to fan, and is meshed by its
+            // boundary nodes.
+            let one_point = fixed.get(r.clone()).is_some_and(|ps| ps.first().is_some_and(|f| ps.iter().all(|p| p.dist(*f) <= reach)));
+            if one_point {
+                return Err(format!("a loop of {n} nodes all at one pole"));
+            }
+            continue;
         }
         for k in 0..n {
             // A run starts at a pole node whose predecessor is not a pole.
@@ -2077,6 +2183,24 @@ fn plan_face(
     // The memory bounds that limit this face, if any ([`crate::Cap`]).
     let mut caps: Vec<crate::Cap> = Vec::new();
     let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
+    // On the mesh path a loop whose every node is at a pole, all within the reach of one point
+    // in 3D, is that point, not a boundary to mesh. Where the face lies on the side of it that
+    // is outside the surface's parameter range, it bounds no area and the loop is left out; a
+    // face with no other loop has no triangles. Where the face is the surface's patch on the
+    // other side, it has area: the loop is kept and the face is refused as before ("a loop of N
+    // nodes all at one pole", [`pole_caps`]), never left empty or meshed from a boundary that is
+    // one point.
+    let drops = |l: &seam::Loop| matches!(purpose, Purpose::Mesh(_)) && collapsed_at_pole(s, l, reach) && !point_loop_has_area(s, l);
+    let kept: Vec<seam::Loop>;
+    let loops = if loops.iter().any(&drops) {
+        kept = loops.iter().filter(|l| !drops(l)).cloned().collect();
+        if kept.is_empty() {
+            return Ok(Planned::Face(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() }));
+        }
+        kept.as_slice()
+    } else {
+        loops
+    };
     let Polygons { uvs, fixed, ranges, seamed } = polygons(s, loops, rules, h, reach).map_err(fail)?;
     if uvs.len() < 3 {
         return Err(fail("degenerate boundary"));
@@ -2127,7 +2251,7 @@ fn plan_face(
         // by the rings instead. Nodes are numbered: the boundary's, the rings', then the ones
         // refinement adds.
         let nb = uvs.len();
-        let caps = pole_caps(s, &uvs, &ranges, reach).map_err(|why| fail(&why))?;
+        let caps = pole_caps(s, &uvs, &fixed, &ranges, reach).map_err(|why| fail(&why))?;
         // A ring through boundary nodes farther from the pole than a ring may lie would have
         // chords off the surface by more than the tolerance at the fan's angle: the edges take
         // nodes at the ring's reach first, and the face is planned again ([`plan_at`]).
@@ -2248,6 +2372,7 @@ fn plan_face(
             Sides::Split => None,
             Sides::Kept => Some(crate::ShapeLimit::SidesOnNoEdge),
             Sides::Exhausted => Some(crate::ShapeLimit::Rounds),
+            Sides::EdgeNodes => Some(crate::ShapeLimit::EdgeNodes),
         };
         let shaping = shape::Rules {
             min_angle: shape.min_angle.to_radians(),
@@ -2399,7 +2524,7 @@ fn plan_face(
         // The mesh path's triangles are the surface's Delaunay ones, shaped in 3D: flips toward
         // the surface's normals, for shading, would undo their shape.
         if matches!(purpose, Purpose::Display) {
-            sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
+            sag::flip_with_pos(s, tol, &poles, &refinement.pos, &all, &mut triangles);
         }
         // Measure finished triangles with their held positions when a bound or a remaining
         // departure involving the shared boundary can leave them outside the tolerance.

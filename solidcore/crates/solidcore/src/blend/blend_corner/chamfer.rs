@@ -63,6 +63,14 @@
 //! round so that the faces' normals point out of the material, chosen from the polygon's
 //! own normal.
 //!
+//! Three chamfers of both convexities (tangency-labs/solidcraft#23136; own design): one
+//! face's angle at V is reflex, the face between the two chamfers of one convexity, and the
+//! rail of a chamfer on that face lies on the far side of its edge from the face's other
+//! edge. The mitre is the same three lines `X_i`-`M`, with other signs in its tests, and `M`
+//! lies past the pair's rails on the odd chamfer's faces ([`MitreForms`]); the pair's
+//! surfaces are continued to hold it ([`continue_chamfer_surfaces`]). A Facet asked there is
+//! refused.
+//!
 //! The chamfers' own surfaces are the solvers': [`chamfer_corner_edge_geom`] requires
 //! them to hold the exact lines to the corner's tolerance, as [`place_chamfer_vertices`]
 //! requires of their crossings. A constant ball's are its planes to rounding; a constant
@@ -80,11 +88,13 @@
 //! | [`create_chamfer_patch`]     | the facet's face or the corner patch's faces            |
 //! | `MakeTopology`               | the 3x3 corner's (`make_convex_nxn_corner_topology`): the bevel's for the Mitre, the ring's for the Facet and the corner patch |
 //!
-//! Deviations: not a port. Opt-in: `Kernel::fixes.fillet_chamfer_corner` (WR-716). No
-//! recursion.
+//! Deviations: not a port; the only chamfer corner where it classifies the event (WR-716;
+//! a corner it declines is still the pinned 3x3 one). No recursion.
 
-use super::{foot_on_surface, swept::fmt_g, BlendChamferCorner};
-use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
+use super::{foot_on_surface, foot_step, swept::fmt_g, BlendChamferCorner};
+use crate::blend::fillet_corner::p1::{
+    check_face_complimentary_corner_concavity, face_by_two_edgeuses,
+};
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_executive::FitKind;
 use crate::blend::fillet_geom::p1::{FilStatus, FilletBrep, FilletEdgeType, FilletErrorType};
@@ -93,7 +103,8 @@ use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, SolverFailure};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
@@ -101,17 +112,132 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::extend::Continuity;
 use crate::surface::plane::Plane;
+use crate::surface::side::BoxSide;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
-use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, VertexId};
+use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 const OP_CLASSIFY: &str = "blend::blend_corner::chamfer::classify_chamfer";
 const OP_PLACE: &str = "blend::blend_corner::chamfer::place_chamfer_vertices";
 const OP_EDGES: &str = "blend::blend_corner::chamfer::chamfer_corner_edge_geom";
 const OP_PATCH: &str = "blend::blend_corner::chamfer::create_chamfer_patch";
+
+/// A defect of `op` where something the kernel built is missing (`why`), with the
+/// `SM_ERR_NULL_POINTER` status of the null pointer it replaces.
+#[track_caller]
+fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
+/// construction reads (`input`), about `entity` where the check reads one, with the status
+/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// and take a caller's corner.
+#[track_caller]
+fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
+    corner_input(op, input, entity).into_error()
+}
+
+/// [`bad_input`] with the site's own `status` where its C++ reports the condition otherwise
+/// than the kind's default ([`CornerInput::upstream_status`]): a failed state check,
+/// `SE(SM_ERR)`, where the default is `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn bad_input_status(op: &'static str, input: CornerInput, status: i32) -> SolidError {
+    corner_input(op, input, None)
+        .with_status(status)
+        .into_error()
+}
+
+/// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
+#[track_caller]
+fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> Failure {
+    let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+}
+
+/// A face of the caller's body that the corner reads, `face`, has no surface: the caller's
+/// input, [`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER` (the
+/// site's).
+#[track_caller]
+fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
+/// An edge of the caller's body that the corner reads, `edge`, has no curve: the caller's
+/// input, [`BlendFailure::EdgeWithoutCurve`] at the edge, status `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_without_curve(op: &'static str, edge: EdgeId) -> SolidError {
+    SolidError::blend_at(op, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
+}
+
+/// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
+/// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        op,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
+
+/// Invalid input to `op`: the caller's fillet solver set-up lacks what the corner reads
+/// (`cause`, [`BlendFailure::Solver`]), about `entity` where the check reads one; status
+/// the cause's, `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn solver_input(op: &'static str, cause: SolverFailure, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::Solver(cause));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
+}
+
+/// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
+/// not there (`part`), about `entity` where the check reads one; status
+/// `SM_ERR_NULL_POINTER`, the site's.
+#[track_caller]
+fn bad_setup(op: &'static str, part: FilletSetUp, entity: Option<EntityRef>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .into_error()
+}
+
+/// [`bad_input`], chaining the error of the step that failed (`cause`).
+#[track_caller]
+fn bad_input_caused(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+    cause: SolidError,
+) -> SolidError {
+    corner_input(op, input, entity)
+        .caused_by(cause)
+        .into_error()
+}
+
+/// The corner has no construction at `step` (status `SM_ERR`).
+#[track_caller]
+fn unbuildable(op: &'static str, step: CornerStep) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerUnbuildable(step))
+}
 
 /// The part-scale rounding gate, relative to the part's size.
 const GATE: f64 = 1e-13;
@@ -266,10 +392,6 @@ pub enum ChamferClass {
     Declined(&'static str),
     /// The event's configuration, but the corner type does not exist there.
     Refused(ChamferRefusal),
-    /// The event's configuration (straight edges, distinct planes, constant widths) at a
-    /// vertex of three, but for chamfers of both convexities: no corner builds their mitre
-    /// yet.
-    MixedConvexity,
 }
 
 // ---- the closed forms ------------------------------------------------------------------
@@ -280,6 +402,10 @@ struct ChamferPlane {
     n: Vec3,
     h: f64,
 }
+
+/// A chamfer's plane in its ring ([`chamfer_planes_at`]): the plane, its setbacks on `F_i` and
+/// `F_(i+1)`, and its rails' unit directions away from the edge into those faces.
+type RingPlane = (ChamferPlane, [f64; 2], [Vec3; 2]);
 
 /// The solution of `a_k . y = b_k`, k = 0..3 (Cramer's rule), `None` where the planes
 /// do not meet in one point.
@@ -333,6 +459,20 @@ fn mitre_rows(planes: &[ChamferPlane]) -> Option<[Vec3; 3]> {
     Some([planes.first()?.n, planes.get(1)?.n, planes.get(2)?.n])
 }
 
+/// The index before `i` in a ring of `n`: `n - 1` before 0 (0 in an empty ring).
+fn before(i: usize, n: usize) -> usize {
+    i.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1))
+}
+
+/// The index after `i` in a ring of `n`: 0 after the last.
+fn after(i: usize, n: usize) -> usize {
+    if i.saturating_add(1) < n {
+        i.saturating_add(1)
+    } else {
+        0
+    }
+}
+
 /// The unit part of `v` square to the unit `t`, `None` where it has none.
 fn square_to(v: Vec3, t: Vec3) -> Option<Vec3> {
     (v - t * v.dot(t)).unitize().ok()
@@ -340,22 +480,47 @@ fn square_to(v: Vec3, t: Vec3) -> Option<Vec3> {
 
 /// The ring's chamfer planes relative to V, from the edges' unit directions `t` and the
 /// widths; with each, its setbacks on `F_i` and `F_(i+1)`. `Err` names why there is none.
+/// Every face's angle at V is below a half turn ([`chamfer_planes_at`] with no reflex face).
+#[cfg(test)] // the tests' entry for corners of one convexity
 fn chamfer_planes(
     t: &[Vec3],
     widths: &[ChamferWidth],
 ) -> core::result::Result<Vec<(ChamferPlane, [f64; 2])>, &'static str> {
+    Ok(chamfer_planes_at(t, widths, &vec![false; t.len()])?
+        .into_iter()
+        .map(|(plane, setbacks, _)| (plane, setbacks))
+        .collect())
+}
+
+/// The ring's chamfer planes relative to V, from the edges' unit directions `t` and the
+/// widths, where face i's angle at V may be reflex (`reflex[i]`, above a half
+/// turn: the face between the two edges of one convexity at a vertex of three of both
+/// convexities); with each plane also its rails' unit directions away from the edge, into
+/// `F_i` and into `F_(i+1)`. Into a face is towards its other edge where its angle is below
+/// a half turn, and away from that edge where it is reflex: the face then lies on the far
+/// side of the edge's line from the other edge.
+fn chamfer_planes_at(
+    t: &[Vec3],
+    widths: &[ChamferWidth],
+    reflex: &[bool],
+) -> core::result::Result<Vec<RingPlane>, &'static str> {
     let n = t.len();
     let mut out = Vec::new();
     for (i, width) in widths.iter().enumerate() {
-        let (Some(&ti), Some(&tp), Some(&tn)) =
-            (t.get(i), t.get((i + n - 1) % n), t.get((i + 1) % n))
+        let (Some(&ti), Some(&tp), Some(&tn)) = (t.get(i), t.get(before(i, n)), t.get(after(i, n)))
         else {
             return Err("the ring is incomplete");
         };
-        // into each face, away from the edge: towards the face's other edge
+        let (Some(&ra), Some(&rb)) = (reflex.get(i), reflex.get(after(i, n))) else {
+            return Err("the ring is incomplete");
+        };
+        // into each face, away from the edge: towards the face's other edge, or away from it
+        // where the face's angle at V is reflex
         let (Some(qa), Some(qb)) = (square_to(tp, ti), square_to(tn, ti)) else {
             return Err("two edges at the vertex leave it along one line");
         };
+        let qa = if ra { -qa } else { qa };
+        let qb = if rb { -qb } else { qb };
         let cos = qa.dot(qb);
         let sin = qa.cross(qb).length();
         if sin <= EFF_ZERO_SQRT {
@@ -386,7 +551,7 @@ fn chamfer_planes(
             nrm = -nrm;
             h = -h;
         }
-        out.push((ChamferPlane { n: nrm, h }, [sa, sb]));
+        out.push((ChamferPlane { n: nrm, h }, [sa, sb], [qa, qb]));
     }
     Ok(out)
 }
@@ -435,16 +600,68 @@ fn points_error(mu: &[Vec3], planes: &[ChamferPlane], xs: &[Vec3], s: f64) -> f6
     worst
 }
 
-/// The mitre's linear forms at three chamfers, each positive where it holds: M on the
-/// blend's side of each face, and each `X_i` on the kept side of the third chamfer.
+/// Which linear forms make up a mitre's tests at three chamfers ([`mitre_tests_of`]).
+///
+/// At chamfers of one convexity: M on the blend's side of each face (`sides`, each face
+/// once, positive), and each `X_i` on the kept side of the third chamfer (`third` = 1).
+///
+/// At chamfers of both convexities (a vertex of three: one face's angle is reflex, the face
+/// between the two chamfers of one convexity, and the third chamfer is the odd one). The
+/// corner near V is the faces' material with the odd chamfer's wedge added or taken off and
+/// the pair's wedges taken off or added, the pair's planes run on until they meet the odd
+/// one's: `(K_p u K_q) n K_r` where the odd chamfer is concave and the pair convex, `(K_p n
+/// K_q) u K_r` where the odd one is convex, `K_j` the material side of chamfer j's plane.
+/// Its mitre lines are those of the convex corner, `X_i`-`M` on chamfers i - 1 and i, but
+/// the line of the pair is a crease of the other convexity: there each set operation is the
+/// other one, so a mitre line lies on the corner's boundary where `X_i` is on V's side of
+/// the third chamfer (`third` = -1). M lies between the odd chamfer's rails, and on the
+/// pair's side of the reflex face (`sides`: a face with the sign of the other rail of the
+/// chamfer the test is for, so the form is positive where M is on that rail's side); M lies
+/// past the pair's rails on the odd chamfer's faces, where the pair's planes run on over the
+/// odd chamfer's wedge, so those are no tests.
+#[derive(Debug, Clone, PartialEq)]
+struct MitreForms {
+    /// `(face, sign)`: the form `sign * mu_face . M`.
+    sides: Vec<(usize, f64)>,
+    /// The sign of each `X_i`'s form `n_k . X_i - h_k` against the third chamfer k.
+    third: f64,
+}
+
+impl MitreForms {
+    /// The forms at chamfers of one convexity.
+    fn one_convexity() -> Self {
+        Self {
+            sides: (0..3).map(|j| (j, 1.0)).collect(),
+            third: 1.0,
+        }
+    }
+}
+
+/// The mitre's linear forms at three chamfers of one convexity, each positive where it
+/// holds ([`MitreForms::one_convexity`]).
+#[cfg(test)] // the tests' entry for corners of one convexity
 fn mitre_tests(mu: &[Vec3], planes: &[ChamferPlane], scale: &[f64]) -> Option<Vec<f64>> {
+    mitre_tests_of(mu, planes, &MitreForms::one_convexity(), scale)
+}
+
+/// The mitre's linear forms at three chamfers ([`MitreForms`]), each positive where it
+/// holds.
+fn mitre_tests_of(
+    mu: &[Vec3],
+    planes: &[ChamferPlane],
+    forms: &MitreForms,
+    scale: &[f64],
+) -> Option<Vec<f64>> {
     let m = mitre_point(planes, scale)?;
     let xs = crossings(mu, planes, scale)?;
-    let mut out: Vec<f64> = mu.iter().map(|&mj| mj.dot(m)).collect();
+    let mut out = Vec::new();
+    for &(j, sign) in &forms.sides {
+        out.push(sign * mu.get(j)?.dot(m));
+    }
     for (i, x) in xs.iter().enumerate() {
         let k = (i + 1) % 3;
         let (ck, sk) = (planes.get(k)?, scale.get(k)?);
-        out.push(ck.n.dot(*x) - sk * ck.h);
+        out.push(forms.third * (ck.n.dot(*x) - sk * ck.h));
     }
     Some(out)
 }
@@ -452,15 +669,29 @@ fn mitre_tests(mu: &[Vec3], planes: &[ChamferPlane], scale: &[f64]) -> Option<Ve
 /// The chamfer whose size is too large for the mitre (its tests fail at its size and
 /// hold below some bound with the others fixed), and that bound as a factor on its size;
 /// the least bound where several are. `None` where no one chamfer's size is the cause.
+#[cfg(test)] // the tests' entry for corners of one convexity
 fn too_wide(mu: &[Vec3], planes: &[ChamferPlane]) -> Option<(usize, f64)> {
-    let mut best: Option<(usize, f64)> = None;
+    too_wide_of(mu, planes, &MitreForms::one_convexity()).map(|(i, hi, _)| (i, hi))
+}
+
+/// The chamfer whose size is too large for the mitre of `forms` (its tests fail at its size
+/// and hold below some bound with the others fixed), with the open interval of factors on
+/// its size where they hold, `(upper, lower)`: the upper bound is at most 1, the lower one
+/// may be below 0 (no lower bound). The least upper bound where several chamfers are.
+/// `None` where no one chamfer's size is the cause.
+fn too_wide_of(
+    mu: &[Vec3],
+    planes: &[ChamferPlane],
+    forms: &MitreForms,
+) -> Option<(usize, f64, f64)> {
+    let mut best: Option<(usize, f64, f64)> = None;
     for i in 0..planes.len() {
         let mut scale = vec![1.0; planes.len()];
-        let at1 = mitre_tests(mu, planes, &scale)?;
+        let at1 = mitre_tests_of(mu, planes, forms, &scale)?;
         if let Some(slot) = scale.get_mut(i) {
             *slot = 0.0;
         }
-        let at0 = mitre_tests(mu, planes, &scale)?;
+        let at0 = mitre_tests_of(mu, planes, forms, &scale)?;
         // each test is a + b s in this chamfer's factor s
         let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
         let mut empty = false;
@@ -477,11 +708,58 @@ fn too_wide(mu: &[Vec3], planes: &[ChamferPlane]) -> Option<(usize, f64)> {
         if empty || hi <= lo || hi <= 0.0 || hi > 1.0 || hi.is_nan() {
             continue;
         }
-        if best.is_none_or(|(_, b)| hi < b) {
-            best = Some((i, hi));
+        if best.is_none_or(|(_, b, _)| hi < b) {
+            best = Some((i, hi, lo));
         }
     }
     best
+}
+
+/// The [`MitreForms`] of three chamfers of both convexities: `concave` per chamfer, `reflex`
+/// per face (face i between chamfers i - 1 and i), each plane with its rails' directions into
+/// `F_i` and `F_(i+1)` ([`chamfer_planes_at`]). The sign of a face's form is that of the other
+/// rail of the chamfer it is for, off that face. `None` where the convexities or the reflex
+/// face are not one odd chamfer and the face between the other two, or a rail lies in the
+/// plane of the face its form is taken on.
+fn mixed_forms(
+    mu: &[Vec3],
+    planes: &[RingPlane],
+    concave: &[bool],
+    reflex: &[bool],
+) -> Option<MitreForms> {
+    let n = 3;
+    if concave.len() != n || reflex.len() != n || planes.len() != n || mu.len() != n {
+        return None;
+    }
+    let odd = (0..n).find(|&i| {
+        concave.get(after(i, n)) == concave.get(before(i, n))
+            && concave.get(i) != concave.get(after(i, n))
+    })?;
+    // the face between the pair: between chamfers odd + 1 and odd + 2
+    let pair_face = before(odd, n);
+    if !reflex.get(pair_face).copied()? || reflex.iter().filter(|&&r| r).count() != 1 {
+        return None;
+    }
+    // `sign * mu_face . M` positive where M is on the side of `face` that `other` points to
+    let form = |face: usize, other: Vec3| -> Option<(usize, f64)> {
+        let lean = mu.get(face)?.dot(other);
+        (lean.abs() > EFF_ZERO_SQRT).then_some((face, lean.signum()))
+    };
+    let rails = |i: usize| planes.get(i).map(|(_, _, q)| *q);
+    let [odd_a, odd_b] = rails(odd)?;
+    // chamfer p = pair_face - 1 has its rail b on the pair's face (its other rail is a), and
+    // chamfer q = pair_face has its rail a there (its other rail is b)
+    let [p_a, _] = rails(before(pair_face, n))?;
+    let [_, q_b] = rails(pair_face)?;
+    Some(MitreForms {
+        sides: vec![
+            form(odd, odd_b)?,
+            form(after(odd, n), odd_a)?,
+            form(pair_face, p_a)?,
+            form(pair_face, q_b)?,
+        ],
+        third: -1.0,
+    })
 }
 
 /// The plane through the points `xs` relative to V (Newell's normal), oriented with V on
@@ -561,7 +839,7 @@ fn facet_fails(
 // ---- Classify ---------------------------------------------------------------------------
 
 /// The ring's faces: face i between edge uses i - 1 and i.
-fn ring_faces(b: &Brep, all_eus: &[EdgeuseId]) -> Result<Vec<Option<crate::topology::FaceId>>> {
+fn ring_faces(b: &Brep, all_eus: &[EdgeuseId]) -> Result<Vec<Option<FaceId>>> {
     let n = all_eus.len();
     let mut out = Vec::new();
     for i in 0..n {
@@ -576,13 +854,24 @@ fn ring_faces(b: &Brep, all_eus: &[EdgeuseId]) -> Result<Vec<Option<crate::topol
     Ok(out)
 }
 
+/// The fit `size` where it is above `lower`, the lower end of the sizes that build (in the
+/// size's own unit): `None` where the fit margin took it to that end or below, so it names
+/// no size that builds.
+fn fit_above(size: f64, lower: f64) -> Option<f64> {
+    (size > lower).then_some(size)
+}
+
 /// The refusal of a chamfer too wide for the corner: its edge and its fit, the bound
-/// `hi` on its size factor less the fit margin.
+/// `hi` on its size factor less the fit margin. The sizes that build end below at the factor
+/// `lo` too (at chamfers of both convexities the mitre point leaves the odd chamfer's rails
+/// on either side); where the margin takes the fit to that end, the refusal names the edge
+/// and no size.
 fn too_wide_refusal(
     b: &Brep,
     kind: BlendChamferCorner,
     edge_of: Option<(EdgeId, ChamferWidth)>,
     hi: f64,
+    lo: f64,
 ) -> Result<ChamferRefusal> {
     let what = match kind {
         BlendChamferCorner::Mitre => "the chamfers' mitre point falls outside the corner",
@@ -599,16 +888,25 @@ fn too_wide_refusal(
         });
     };
     let margin = 1000.0 * edge::tolerance(b, e)?;
-    let (size, fit_kind) = match width {
+    let (size, lower, fit_kind) = match width {
         ChamferWidth::Offsets { prev, next }
             if (prev - next).abs() <= EFF_ZERO * prev.max(next) =>
         {
-            (hi * prev - margin, FitKind::Radius)
+            (hi * prev - margin, lo * prev, FitKind::Radius)
         }
-        ChamferWidth::Offsets { prev, next } => (hi - margin / prev.max(next), FitKind::Scale),
-        ChamferWidth::Chord(d) => (hi * d - margin, FitKind::Chord),
+        ChamferWidth::Offsets { prev, next } => (hi - margin / prev.max(next), lo, FitKind::Scale),
+        ChamferWidth::Chord(d) => (hi * d - margin, lo * d, FitKind::Chord),
     };
-    let size = size.max(0.0);
+    let Some(size) = fit_above(size.max(0.0), lower) else {
+        return Ok(ChamferRefusal {
+            error: FilletErrorType::NoRoom,
+            comment: format!(
+                "Fillet Error: {what} (one chamfer is too wide for the others); the sizes of that chamfer that close it are narrower than the fit margin, so none is named"
+            ),
+            fit_edge: Some(e),
+            fit: None,
+        });
+    };
     let named = match fit_kind {
         FitKind::Scale => format!("scale that chamfer by {} at most", fmt_g(size)),
         _ => format!("that chamfer builds up to {}", fmt_g(size)),
@@ -632,18 +930,25 @@ fn unsupported(why: String) -> ChamferClass {
 
 /// Classify: whether the chamfer corner at `vertex` (every edge there chamfered: the
 /// edge uses `all_eus` in ring order, each blended with a linear section) is the chamfer
-/// event, and of type `kind`. It is where every edge is a straight line and every face a
-/// plane, the faces distinct, the chamfers of one convexity, each of constant width
+/// event, and of type `asked` (the Mitre where the caller asked none). It is where every edge is a straight line and every face a
+/// plane, the faces distinct, the chamfers of one convexity or three of both convexities
+/// ([`MitreForms`]: one face's angle at V reflex), each of constant width
 /// (a constant ball or a constant chord), and at three chamfers the faces' normals
 /// independent; else it declines, naming why, and the corner is the pinned one. Three
-/// chamfers that are otherwise the event's but for their convexities are
-/// [`ChamferClass::MixedConvexity`], which the session refuses where the corner is a bevel. The event
+/// chamfers of both convexities are a Mitre (a Facet asked there is refused), and where
+/// their mitre point is outside the corner they are refused with the fit whether a type was
+/// asked or not: the pinned corner builds nothing there. The event
 /// is refused where its type does not exist: a mitre point outside the corner (with the
 /// too wide chamfer's fit), a mitre of four or more chamfers, a facet whose crossings are
 /// not in one plane or that would cut the chamfers; and it is refused where the chamfer
 /// planes are so nearly coplanar that the points where they meet are not determined to the
-/// part's rounding ([`solve3_error`] above the gate). The event's corner keeps its
-/// [`ChamferCornerDefinition`].
+/// part's rounding ([`solve3_error`] above the gate). Where the caller asked no type, a
+/// refusal of the type is no refusal: at four or more chamfers whose crossings lie in one
+/// plane the corner is the Facet (the mitre is not built there), and where no event
+/// closes the corner (three chamfers' mitre point outside the corner, overlapping ends
+/// at four or more, a facet that would cut the chamfers) it declines to the pinned
+/// corner, as before the event. Only the nearly coplanar planes stay refused. The event's
+/// corner keeps its [`ChamferCornerDefinition`].
 ///
 /// # Errors
 ///
@@ -654,16 +959,11 @@ pub fn classify_chamfer(
     b: &mut Brep,
     vertex: VertexId,
     all_eus: &[EdgeuseId],
-    kind: BlendChamferCorner,
+    asked: Option<BlendChamferCorner>,
     tol: f64,
     solvers: &dyn ChamferSolvers,
 ) -> Result<ChamferClass> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_CLASSIFY,
-            "topology or a solver the chamfer corner's classification reads",
-        )
-    };
+    let mut kind = asked.unwrap_or(BlendChamferCorner::Mitre);
     let n = all_eus.len();
     if !(3..=MAX_CHAMFERS).contains(&n) {
         return Ok(ChamferClass::Declined(
@@ -677,9 +977,10 @@ pub fn classify_chamfer(
     let mut edges = Vec::new();
     let mut concave0 = None;
     let mut mixed = false;
+    let mut concave = Vec::new();
     for &eu in all_eus {
-        let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
-        let curve = edge::curve(b, e)?.ok_or_else(nul)?;
+        let e = eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu))?;
+        let curve = edge::curve(b, e)?.ok_or_else(|| edge_without_curve(OP_CLASSIFY, e))?;
         let Some((_, dir)) = curve.is_line(k, 10, tol)? else {
             return Ok(ChamferClass::Declined(
                 "an edge at the vertex is not a straight line",
@@ -690,18 +991,31 @@ pub fn classify_chamfer(
                 "an edge at the vertex has no direction",
             ));
         };
-        let start = edge::vertex(b, e)?.ok_or_else(nul)?;
+        let start = edge::vertex(b, e)?.ok_or_else(|| {
+            bad_input(
+                OP_CLASSIFY,
+                CornerInput::EdgeWithoutVertex,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
         let other = if start == vertex {
-            edge::other_vertex(b, e, Some(start))?.ok_or_else(nul)?
+            edge::other_vertex(b, e, Some(start))?.ok_or_else(|| {
+                bad_input(
+                    OP_CLASSIFY,
+                    CornerInput::EdgeWithoutVertex,
+                    Some(EntityRef::Edge(e)),
+                )
+            })?
         } else {
             start
         };
         if dir.dot(vertex::point(b, other)? - v) < 0.0 {
             dir = -dir;
         }
-        let concave = is_concave_edge(k, b, e)?;
-        mixed |= concave0.is_some_and(|c| c != concave);
-        concave0 = Some(concave);
+        let this_concave = is_concave_edge(k, b, e)?;
+        mixed |= concave0.is_some_and(|c| c != this_concave);
+        concave0 = Some(this_concave);
+        concave.push(this_concave);
         t.push(dir);
         edges.push(e);
     }
@@ -718,7 +1032,8 @@ pub fn classify_chamfer(
         if faces.iter().filter(|f| **f == Some(face)).count() > 1 {
             return Ok(ChamferClass::Declined("a face meets the vertex twice"));
         }
-        let surface = face2::surface(b, face)?.ok_or_else(nul)?;
+        let surface =
+            face2::surface(b, face)?.ok_or_else(|| face_without_surface(OP_CLASSIFY, face))?;
         let planar = surface.is_planar(k, tol)?;
         if !planar.is_planar {
             return Ok(ChamferClass::Declined(
@@ -764,7 +1079,9 @@ pub fn classify_chamfer(
                 let offset = |r: usize| -> Result<f64> {
                     Ok(solver
                         .surface(r)?
-                        .ok_or_else(nul)?
+                        .ok_or_else(|| {
+                            bad_setup(OP_CLASSIFY, FilletSetUp::SolverOffsetSurface, None)
+                        })?
                         .surface
                         .offset_distance()
                         .abs())
@@ -776,23 +1093,57 @@ pub fn classify_chamfer(
             }
         });
     }
-    // every other test of the configuration has passed: only the convexities differ
-    if mixed {
-        return Ok(if n == 3 {
-            ChamferClass::MixedConvexity
-        } else {
-            ChamferClass::Declined("chamfers of both convexities meet at the vertex")
-        });
+    // chamfers of both convexities: three, whose mitre is built (four or more are declined:
+    // their planes meet in one point only by coincidence, as at one convexity)
+    if mixed && n != 3 {
+        return Ok(ChamferClass::Declined(
+            "chamfers of both convexities meet at the vertex",
+        ));
     }
-    let planes = match chamfer_planes(&t, &widths) {
+    // at a vertex of three of both convexities, the face between the two chamfers of one
+    // convexity has a reflex angle at V, the others not
+    let mut reflex = vec![false; n];
+    if mixed {
+        for (i, slot) in reflex.iter_mut().enumerate() {
+            let (Some(&prev), Some(&this)) = (all_eus.get(before(i, n)), all_eus.get(i)) else {
+                return Ok(ChamferClass::Declined("the ring is incomplete"));
+            };
+            *slot = check_face_complimentary_corner_concavity(k, b, vertex, prev, this, None)?;
+        }
+        if reflex.iter().filter(|&&r| r).count() != 1 {
+            return Ok(ChamferClass::Declined(
+                "chamfers of both convexities meet at a vertex whose faces' angles are not one reflex and two below a half turn",
+            ));
+        }
+        // a Facet of both convexities is not designed: the mitre closes the corner
+        if asked == Some(BlendChamferCorner::Facet) {
+            return Ok(unsupported(
+                "Fillet Error: a facet of chamfers of convex and of concave edges is not built; the mitre (the default corner) closes them"
+                    .to_owned(),
+            ));
+        }
+    }
+    let planes = match chamfer_planes_at(&t, &widths, &reflex) {
         Ok(planes) => planes,
         Err(why) => return Ok(ChamferClass::Declined(why)),
     };
     let setback = planes
         .iter()
-        .flat_map(|(_, s)| s.iter().copied())
+        .flat_map(|(_, s, _)| s.iter().copied())
         .fold(0.0_f64, f64::max);
-    let planes: Vec<ChamferPlane> = planes.into_iter().map(|(p, _)| p).collect();
+    let forms = if mixed {
+        match mixed_forms(&mu, &planes, &concave, &reflex) {
+            Some(forms) => forms,
+            None => {
+                return Ok(ChamferClass::Declined(
+                    "a chamfer's rail lies in the plane of a face it does not touch",
+                ))
+            }
+        }
+    } else {
+        MitreForms::one_convexity()
+    };
+    let planes: Vec<ChamferPlane> = planes.into_iter().map(|(p, _, _)| p).collect();
     let gate = GATE * (1.0 + v.max_dimension() + setback);
     let ones = vec![1.0; n];
     let Some(xs) = crossings(&mu, &planes, &ones) else {
@@ -813,28 +1164,46 @@ pub fn classify_chamfer(
     }
 
     if n == 3 {
-        let Some(tests) = mitre_tests(&mu, &planes, &ones) else {
+        let Some(tests) = mitre_tests_of(&mu, &planes, &forms, &ones) else {
             return Ok(ChamferClass::Declined(
                 "the three chamfers do not meet at one point",
             ));
         };
         if tests.iter().any(|&g| g <= gate) {
-            let edge_of = too_wide(&mu, &planes)
-                .and_then(|(i, hi)| Some(((*edges.get(i)?, *widths.get(i)?), hi)));
-            let hi = edge_of.map_or(0.0, |(_, hi)| hi);
+            // no type asked: neither exists (the facet would cut the chamfers there,
+            // `a_mitre_point_outside_the_corner_is_refused_with_its_fit`), and the pinned
+            // corner closes the body; at both convexities the pinned corner builds nothing,
+            // so the mitre is refused with its fit whether a type was asked or not
+            if asked.is_none() && !mixed {
+                return Ok(ChamferClass::Declined(
+                    "the mitre point is outside the corner and no corner type was asked",
+                ));
+            }
+            let edge_of = too_wide_of(&mu, &planes, &forms)
+                .and_then(|(i, hi, lo)| Some(((*edges.get(i)?, *widths.get(i)?), hi, lo)));
+            let (hi, lo) = edge_of.map_or((0.0, f64::NEG_INFINITY), |(_, hi, lo)| (hi, lo));
             return Ok(ChamferClass::Refused(too_wide_refusal(
                 b,
                 kind,
-                edge_of.map(|(e, _)| e),
+                edge_of.map(|(e, _, _)| e),
                 hi,
+                lo,
             )?));
         }
     } else if spread(&xs).is_none_or(|s| s > gate) {
         // four or more whose crossings are not in one plane: the corner patch
         let convex = concave0 != Some(true);
-        return Ok(corner_patch(
-            kind, v, &planes, xs, &edges, &widths, convex, gate,
-        ));
+        let patch = corner_patch(kind, v, &planes, xs, &edges, &widths, convex, gate);
+        // no type asked: chamfer ends that overlap leave the corner to the pinned one
+        if asked.is_none() && matches!(patch, ChamferClass::Refused(_)) {
+            return Ok(ChamferClass::Declined(
+                "the chamfers' ends overlap and no corner type was asked",
+            ));
+        }
+        return Ok(patch);
+    } else if kind == BlendChamferCorner::Mitre && asked.is_none() {
+        // no type asked: the crossings lie in one plane, so the facet is the corner
+        kind = BlendChamferCorner::Facet;
     } else if kind == BlendChamferCorner::Mitre {
         return Ok(unsupported(
             "Fillet Error: a mitre of four or more chamfers at a vertex is not built yet; their rails' crossings lie in one plane, which the facet closes"
@@ -858,6 +1227,12 @@ pub fn classify_chamfer(
                 fails
             }
         };
+        if fails.is_some() && asked.is_none() {
+            // no type asked (the facet taken for a mitre of four or more): the pinned corner
+            return Ok(ChamferClass::Declined(
+                "the facet would cut the chamfers and no corner type was asked",
+            ));
+        }
         if fails.is_some() {
             return Ok(unsupported(
                 "Fillet Error: the facet through the chamfers' rail crossings would cut the chamfers instead of closing them"
@@ -1005,21 +1380,25 @@ fn corner_patch(
 /// `SM_ERR` where the corner is not as its topology made it or a solved crossing is not
 /// at its exact point; [`SolidError::null_pointer`] without the event.
 pub fn place_chamfer_vertices(pseudo: &mut FilletBrep, corner: &FilletCorner) -> Result<()> {
-    let err = || SolidError::blend_failed(OP_PLACE, "a chamfer vertex could not be placed");
     let event = &corner
         .chamfer_corner
         .as_ref()
-        .ok_or_else(|| SolidError::blend_missing(OP_PLACE, "the chamfer corner's event"))?
+        .ok_or_else(|| bad_input(OP_PLACE, CornerInput::EventNotSet, None))?
         .definition;
     let count = event.crossings.len();
     if corner.vertices.len() != count + usize::from(event.mitre.is_some()) {
-        return Err(err());
+        return Err(bad_input(OP_PLACE, CornerInput::TopologyMismatch, None));
     }
     for (&fv, &x) in corner.vertices.iter().zip(&event.crossings) {
-        if !pseudo.fillet_vertex(fv)?.is_processed()
-            || pseudo.vertex_point(fv)?.distance(x) > corner.approx_tol_3d
-        {
-            return Err(err());
+        if !pseudo.fillet_vertex(fv)?.is_processed() {
+            return Err(bad_input(
+                OP_PLACE,
+                CornerInput::VertexNotProcessed,
+                Some(EntityRef::Vertex(fv)),
+            ));
+        }
+        if pseudo.vertex_point(fv)?.distance(x) > corner.approx_tol_3d {
+            return Err(unbuildable(OP_PLACE, CornerStep::ChamferCrossingOffExact));
         }
         pseudo.set_vertex_point(fv, x)?;
     }
@@ -1072,6 +1451,108 @@ fn uv_line(
     Ok(Some(Curve::from(line)))
 }
 
+/// `surface` continued past the sides of its parameter box that `point` lies past, so that
+/// it holds `point`: `None` where its box holds the point's foot already. A mitre line of
+/// chamfers of both convexities ends past a rail of each of the pair's chamfers, where their
+/// planes run on over the odd chamfer's wedge ([`MitreForms`]); a chamfer's surface ends at
+/// its rails. The continuation is the surface itself (its boundary span's polynomial, exact:
+/// [`Surface::extended_by_distance`]), on the same parameters, so the surface's curves stay
+/// as they are. The foot is one Newton step from the box's middle: the surface is affine in
+/// its parameters to the corner's tolerance, which the caller's UV line then requires of it.
+///
+/// # Errors
+///
+/// `SM_ERR` where the continuation is on other parameters than the surface; those of the
+/// evaluators and of [`Surface::extended_by_distance`].
+fn reaching(k: &Kernel, surface: &Surface, point: Point3, tol: f64) -> Result<Option<Surface>> {
+    let mut out: Option<Surface> = None;
+    // one side of each direction at most
+    for _ in 0..2 {
+        let now = out.as_ref().unwrap_or(surface);
+        let dom = now.natural_uv_domain_with_nurb(k)?;
+        let mid = dom.mid();
+        let Some((du, dv)) = foot_step(k, now, point, mid)? else {
+            return Ok(out);
+        };
+        let (u, v) = (mid.x + du, mid.y + dv);
+        // how far past each side, in parameters, and that side's length per parameter
+        let past = [
+            (BoxSide::UMin, dom.u_min() - u, true),
+            (BoxSide::UMax, u - dom.u_max(), true),
+            (BoxSide::VMin, dom.v_min() - v, false),
+            (BoxSide::VMax, v - dom.v_max(), false),
+        ];
+        let Some(&(side, over, along_u)) = past
+            .iter()
+            .filter(|(_, over, _)| *over > 0.0)
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return Ok(out);
+        };
+        let (a, b, span) = if along_u {
+            (
+                Point2::new(dom.u_min(), mid.y),
+                Point2::new(dom.u_max(), mid.y),
+                dom.x_length(),
+            )
+        } else {
+            (
+                Point2::new(mid.x, dom.v_min()),
+                Point2::new(mid.x, dom.v_max()),
+                dom.y_length(),
+            )
+        };
+        let across = now
+            .evaluate_point(k, a)?
+            .distance(now.evaluate_point(k, b)?);
+        if !(span > 0.0 && across.is_finite()) {
+            return Ok(out);
+        }
+        let distance = over * across / span;
+        if distance <= tol {
+            return Ok(out);
+        }
+        // a margin past the point: the surface's box is open at the point otherwise
+        let Some(extended) =
+            now.extended_by_distance(k, &dom, side, Continuity::Natural, 1.25 * distance + tol)?
+        else {
+            return Ok(out);
+        };
+        if extended.sides != BoxSide::ALL {
+            return Err(unbuildable(OP_EDGES, CornerStep::ChamferSurfaceOffEdgeLine));
+        }
+        out = Some(extended.surface);
+    }
+    Ok(out)
+}
+
+/// Continue the chamfers' surfaces that end at a rail short of the corner's mitre point
+/// ([`FilletCorner::chamfer_reach`], noted by [`chamfer_corner_edge_geom`]) so that each holds
+/// its point ([`reaching`]): after the rails are trimmed, before the faces are made. A surface
+/// two corners continue is continued by each in turn, on the same parameters.
+///
+/// # Errors
+///
+/// Those of [`reaching`] and of the fillet geometry's lookups.
+pub fn continue_chamfer_surfaces(
+    k: &Kernel,
+    pseudo: &mut FilletBrep,
+    corner: &mut FilletCorner,
+) -> Result<()> {
+    let tol = corner.approx_tol_3d;
+    for (g, point) in std::mem::take(&mut corner.chamfer_reach) {
+        let Some(surface) = pseudo.geom(g)?.fillet_surface(None)?.cloned() else {
+            continue;
+        };
+        if let Some(longer) = reaching(k, &surface, point, tol)? {
+            if let Some(slot) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? {
+                *slot = longer;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The corner's edges as exact lines (before the edges' own kinds compute theirs): each
 /// edge of the corner (the mitres X_i-M, or the facet's sides X_i-X_(i+1)) is the line
 /// between its exact vertices, its UV curve on each chamfer it bounds the exact line in
@@ -1089,18 +1570,17 @@ pub fn chamfer_corner_edge_geom(
     pseudo: &mut FilletBrep,
     corner: &mut FilletCorner,
 ) -> Result<()> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_EDGES,
-            "topology or geometry the chamfer corner's edges are built from",
-        )
+    let Some(event) = corner.chamfer_corner.as_mut() else {
+        return Err(bad_input(OP_EDGES, CornerInput::EventNotSet, None));
     };
-    let err =
-        || SolidError::blend_failed(OP_EDGES, "the chamfer corner's edges could not be built");
-    let event = &corner.chamfer_corner.as_ref().ok_or_else(nul)?.definition;
-    let mitre = event.is_mitre();
+    let mitre = event.definition.is_mitre();
     let mut size = 1.0_f64;
-    for p in event.crossings.iter().chain(event.mitre.iter()) {
+    for p in event
+        .definition
+        .crossings
+        .iter()
+        .chain(event.definition.mitre.iter())
+    {
         size = size.max(1.0 + p.max_dimension());
     }
     // the facet's plane is ours, exact to rounding; a chamfer's surface is the solver's,
@@ -1108,6 +1588,7 @@ pub fn chamfer_corner_edge_geom(
     // place_chamfer_vertices holds to the same)
     let exact = GATE * size;
     let solved = corner.approx_tol_3d.max(exact);
+    let mut reach = Vec::new();
     let edge_type = if mitre {
         FilletEdgeType::FilletXFillet
     } else {
@@ -1115,16 +1596,44 @@ pub fn chamfer_corner_edge_geom(
     };
     for &e in &corner.edges {
         if pseudo.fillet_edge(e)?.fillet_edge_type() != edge_type {
-            return Err(err());
+            return Err(bad_input(
+                OP_EDGES,
+                CornerInput::TopologyMismatch,
+                Some(EntityRef::Edge(e)),
+            ));
         }
-        let start = edge::vertex(pseudo.brep(), e)?.ok_or_else(nul)?;
-        let end = edge::other_vertex(pseudo.brep(), e, Some(start))?.ok_or_else(nul)?;
+        let start = edge::vertex(pseudo.brep(), e)?.ok_or_else(|| {
+            bad_setup(
+                OP_EDGES,
+                FilletSetUp::EdgeVertices,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
+        let end = edge::other_vertex(pseudo.brep(), e, Some(start))?.ok_or_else(|| {
+            bad_setup(
+                OP_EDGES,
+                FilletSetUp::EdgeVertices,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
         let (p, q) = (pseudo.vertex_point(start)?, pseudo.vertex_point(end)?);
         let line = Curve::from(Line::create_line_segment(3, p, q, None)?);
         let ivl = line.natural_interval();
         let span = [ivl.min(), ivl.max()];
-        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(nul)?;
-        let mate = eu1::mate(pseudo.brep(), prim)?.ok_or_else(nul)?;
+        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| {
+            bad_setup(
+                OP_EDGES,
+                FilletSetUp::PrimaryEdgeUse,
+                Some(EntityRef::Edge(e)),
+            )
+        })?;
+        let mate = eu1::mate(pseudo.brep(), prim)?.ok_or_else(|| {
+            bad_setup(
+                OP_EDGES,
+                FilletSetUp::PrimaryEdgeUseMate,
+                Some(EntityRef::Edgeuse(prim)),
+            )
+        })?;
         for eu in [prim, mate] {
             let Some(g) = pseudo.fillet_edgeuse(eu)?.fillet_geom() else {
                 continue; // the facet's side of a facet edge: the patch's own loop
@@ -1132,9 +1641,33 @@ pub fn chamfer_corner_edge_geom(
             let surface = pseudo
                 .geom(g)?
                 .fillet_surface(None)?
-                .ok_or_else(nul)?
+                .ok_or_else(|| {
+                    solver_input(
+                        OP_EDGES,
+                        SolverFailure::FilletGeomWithoutSurface { fillet_geom: g },
+                        None,
+                    )
+                })?
                 .clone();
-            let uv = uv_line(k, &surface, p, q, span, solved)?.ok_or_else(err)?;
+            // a mitre line of chamfers of both convexities ends past the surface's rail:
+            // its UV line is taken on the surface continued, which keeps its parameters,
+            // and the chamfer's own surface is continued once its rails are trimmed
+            // ([`continue_chamfer_surfaces`])
+            let mut surface = surface;
+            for end in [p, q] {
+                if let Some(longer) = reaching(k, &surface, end, solved)? {
+                    reach.push((g, end));
+                    surface = longer;
+                }
+            }
+            // the chamfer's surface is its solver's; its feet are searches and its
+            // parameters need not be affine along the line
+            let uv = uv_line(k, &surface, p, q, span, solved)?.ok_or_else(|| {
+                SolidError::blend(
+                    OP_EDGES,
+                    BlendFailure::CornerUnbuildable(CornerStep::ChamferSurfaceOffEdgeLine),
+                )
+            })?;
             pseudo.set_edgeuse_uv_curve(eu, Some(uv), true, true)?;
             pseudo.geom_mut(g)?.add_side_fillet_edgeuse(eu);
         }
@@ -1143,10 +1676,10 @@ pub fn chamfer_corner_edge_geom(
             .fillet_edge_mut(e)?
             .set_fillet_edge_type(FilletEdgeType::Precomputed);
     }
+    corner.chamfer_reach = reach;
     if mitre {
         return Ok(());
     }
-    let event = corner.chamfer_corner.as_mut().ok_or_else(nul)?;
     if let Some(patch) = event.definition.patch.clone() {
         return patch_faces(event, &patch);
     }
@@ -1154,22 +1687,27 @@ pub fn chamfer_corner_edge_geom(
     // the facet: its plane through the crossings, its normal out of the material, the
     // loop counterclockwise about it
     let xs = &event.definition.crossings;
+    // classify_chamfer gives a facet event (neither a mitre nor a patch) its unit normal
     let normal = event
         .definition
         .facet_normal
-        .ok_or_else(err)?
+        // the site reports a missing facet normal as a failed check, `SM_ERR`
+        .ok_or_else(|| bad_input_status(OP_EDGES, CornerInput::FacetNormalNotSet, SM_ERR))?
         .unitize()
-        .map_err(|_| err())?;
+        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, None, cause))?;
     let count = xs.len();
     let mut centre = Vec3::default();
     for x in xs {
         centre += *x;
     }
     let centre = centre * (1.0 / count as f64);
-    let first = xs.first().copied().ok_or_else(err)?;
+    let first = xs
+        .first()
+        .copied()
+        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EventMalformed, None))?;
     let x_axis = (first - centre - normal * (first - centre).dot(normal))
         .unitize()
-        .map_err(|_| err())?;
+        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, None, cause))?;
     let y_axis = normal.cross(x_axis);
     let uv_of = |p: Point3| Point2::new((p - centre).dot(x_axis), (p - centre).dot(y_axis));
     let (mut lo, mut hi) = (
@@ -1189,24 +1727,23 @@ pub fn chamfer_corner_edge_geom(
 
     // the loop: the facet's sides in ring order, turned counterclockwise about the normal
     let mut area = 0.0;
-    for (i, x) in xs.iter().enumerate() {
-        let (a, b) = (uv_of(*x), uv_of(*xs.get((i + 1) % count).ok_or_else(err)?));
+    for (x, y) in xs.iter().zip(xs.iter().cycle().skip(1)) {
+        let (a, b) = (uv_of(*x), uv_of(*y));
         area += a.x * b.y - b.x * a.y;
     }
-    let mut order: Vec<usize> = (0..count).collect();
+    let mut order: Vec<Point3> = xs.clone();
     if area < 0.0 {
         order.reverse();
     }
     let mut curves_3d = Vec::new();
     let mut uv_curves = Vec::new();
     let mut orients = Vec::new();
-    for (j, &i) in order.iter().enumerate() {
-        let next = *order.get((j + 1) % count).ok_or_else(err)?;
-        let (p, q) = (*xs.get(i).ok_or_else(err)?, *xs.get(next).ok_or_else(err)?);
+    for (&p, &q) in order.iter().zip(order.iter().cycle().skip(1)) {
         // the side's line, as the corner's edge from p to q, run as the loop runs
         let curve = Curve::from(Line::create_line_segment(3, p, q, None)?);
         let ivl = curve.natural_interval();
-        let uv = uv_line(k, &surface, p, q, [ivl.min(), ivl.max()], exact)?.ok_or_else(err)?;
+        let uv = uv_line(k, &surface, p, q, [ivl.min(), ivl.max()], exact)?
+            .ok_or_else(|| unbuildable(OP_EDGES, CornerStep::ChamferFacetOffPlane))?;
         curves_3d.push(curve);
         uv_curves.push(uv);
         orients.push(OrientType::Same);
@@ -1271,10 +1808,7 @@ fn bilinear_face(
     ];
     let mut curves_3d = Vec::new();
     let mut uv_curves = Vec::new();
-    for (i, &(p, a)) in corners.iter().enumerate() {
-        let (q, b) = *corners.get((i + 1) % 4).ok_or_else(|| {
-            SolidError::blend_failed(OP_EDGES, "a corner past the bilinear face's four")
-        })?;
+    for (&(p, a), &(q, b)) in corners.iter().zip(corners.iter().cycle().skip(1)) {
         let curve = Curve::from(Line::create_line_segment(3, p, q, None)?);
         let ivl = curve.natural_interval();
         uv_curves.push(uv_segment(a, b, [ivl.min(), ivl.max()])?);
@@ -1300,26 +1834,24 @@ fn bilinear_face(
 /// `SM_ERR` where the order does not cover the crossings; those of the surface and curve
 /// constructions.
 fn patch_faces(event: &mut ChamferCorner, patch: &ChamferPatch) -> Result<()> {
-    let err = || SolidError::blend_failed(OP_EDGES, "the chamfer patch's faces could not be built");
     let xs = &event.definition.crossings;
     let n = patch.around.len();
-    if n != xs.len() || n < 4 {
-        return Err(err());
+    // the crossings in the patch's turn
+    let ring: Vec<Point3> = patch
+        .around
+        .iter()
+        .filter_map(|&i| xs.get(i).copied())
+        .collect();
+    if n != xs.len() || n < 4 || ring.len() != n {
+        return Err(bad_input(OP_EDGES, CornerInput::EventMalformed, None));
     }
-    let at = |m: usize| -> Result<Point3> {
-        patch
-            .around
-            .get(m % n)
-            .and_then(|&i| xs.get(i))
-            .copied()
-            .ok_or_else(err)
-    };
     let mut faces = Vec::new();
-    if n == 4 {
-        faces.push(bilinear_face(at(0)?, at(1)?, at(2)?, at(3)?, [-1.0, 1.0])?);
+    if let &[a, b, c, d] = ring.as_slice() {
+        faces.push(bilinear_face(a, b, c, d, [-1.0, 1.0])?);
     } else {
-        for m in 0..n {
-            let (prev, x, next) = (at(m + n - 1)?, at(m)?, at(m + 1)?);
+        let before = ring.iter().cycle().skip(n - 1);
+        let after = ring.iter().cycle().skip(1);
+        for ((&prev, &x), &next) in before.zip(&ring).zip(after) {
             faces.push(bilinear_face(
                 patch.centre,
                 (prev + x) * 0.5,
@@ -1347,13 +1879,18 @@ pub fn create_chamfer_patch(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::blend_missing(OP_PATCH, "the chamfer corner's event or topology");
-    let event = corner.chamfer_corner.as_mut().ok_or_else(nul)?;
+    let event = corner
+        .chamfer_corner
+        .as_mut()
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet, None))?;
     let faces = std::mem::take(&mut event.faces);
     if faces.is_empty() {
-        return Err(nul());
+        return Err(bad_input(OP_PATCH, CornerInput::FacesNotBuilt, None));
     }
-    let fillet = env.fillet.as_mut().ok_or_else(nul)?;
+    let fillet = env
+        .fillet
+        .as_mut()
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven, None))?;
     for face in faces {
         let input = FaceCurvesInput {
             loops: vec![face.curves_3d.len()],
@@ -1378,7 +1915,12 @@ pub fn create_chamfer_patch(
             &face_ref,
             &mut fillet.notify,
         )?;
-        let made = made.face.ok_or_else(nul)?;
+        let made = made.face.ok_or_else(|| {
+            missing_defect(
+                OP_PATCH,
+                "making a chamfer corner face returned no face, though the face construction succeeded",
+            )
+        })?;
         corner.surfaces.push(face.surface);
         corner.surface_faces.push(made);
     }
@@ -1388,6 +1930,62 @@ pub fn create_chamfer_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A caller's corner with no chamfer event (the entry point is public and takes a
+    /// caller-built corner) is refused as the caller's input, with the
+    /// `SM_ERR_NULL_POINTER` status the missing event had (#20725's second review).
+    #[test]
+    fn a_caller_corner_without_its_event_is_invalid_input() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        let corner = FilletCorner::new(FilletCornerKind::NByTwo, None, None, None, 1e-6, 1e-3);
+        let err = place_chamfer_vertices(&mut FilletBrep::new(), &corner).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::EventNotSet,
+                entity: None,
+            }),
+            "{err:?}"
+        );
+        assert!(!err.is_defect(), "{err:?}");
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(SM_ERR_NULL_POINTER)
+        );
+    }
+
+    /// A caller's facet event with no normal is refused as the caller's input with the
+    /// `SM_ERR` status the site had before (a failed check, not the kind's
+    /// `SM_ERR_NULL_POINTER` default; #20725's third review).
+    #[test]
+    fn a_facet_event_without_its_normal_keeps_the_sites_status() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        let mut corner =
+            FilletCorner::new(FilletCornerKind::ConvexNByN, None, None, None, 1e-6, 1e-3);
+        corner.chamfer_corner = Some(ChamferCorner {
+            definition: ChamferCornerDefinition {
+                kind: BlendChamferCorner::Facet,
+                vertex: Point3::ZERO,
+                chamfers: Vec::new(),
+                crossings: Vec::new(),
+                mitre: None,
+                facet_normal: None,
+                patch: None,
+            },
+            faces: Vec::new(),
+        });
+        let k = Kernel::default();
+        let err = chamfer_corner_edge_geom(&k, &mut FilletBrep::new(), &mut corner).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid {
+                input: CornerInput::FacetNormalNotSet,
+                entity: None,
+            }),
+            "{err:?}"
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
+    }
 
     /// The square corner's frame: the edges along u, v, w; face i between edges i - 1
     /// and i, so face 0 (edges w, u) is v = 0, face 1 (u, v) is w = 0, face 2 (v, w) is
@@ -1578,5 +2176,105 @@ mod tests {
             (m - Vec3::new(0.0, 0.0, -5.0 / 16.0)).length() < 1e-14,
             "{m:?}"
         );
+    }
+    /// The planes, face normals and forms of an inner corner of an L block (the material
+    /// `x < 0` or `y < 0` below `z = 0`): the edges leave V along -z (concave), +x and +y
+    /// (convex), face 0 the wall `x = 0`, face 1 the wall `y = 0`, face 2 the top, whose
+    /// angle at V is reflex. The chamfers' sizes are constant balls' offsets, which are
+    /// their setbacks at these right angles.
+    fn l_corner(sizes: [f64; 3]) -> (Vec<Vec3>, Vec<ChamferPlane>, MitreForms) {
+        let t = [
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        let reflex = [false, false, true];
+        let w = sizes.map(|r| ChamferWidth::Offsets { prev: r, next: r });
+        let planes = chamfer_planes_at(&t, &w, &reflex).unwrap();
+        let mu = vec![
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ];
+        let forms = mixed_forms(&mu, &planes, &[true, false, false], &reflex).unwrap();
+        let planes = planes.into_iter().map(|(p, _, _)| p).collect();
+        (mu, planes, forms)
+    }
+
+    /// The L block's inner corner with chamfers of size s: the concave chamfer's plane is
+    /// `x + y = s`, the convex ones' `y + z = -s` and `x + z = -s` (their rails on the top
+    /// at `y = -s` and `x = -s`, on the reflex face's far side of their edges), so
+    /// `M = (s / 2, s / 2, -3 s / 2)`, past the convex chamfers' rails on the walls. The
+    /// crossings are `(0, s, -s)` on the wall `x = 0`, `(s, 0, -s)` on the wall `y = 0` and
+    /// `(-s, -s, 0)` on the top. Every form of the mixed mitre holds; those of a corner of
+    /// one convexity do not (the crossings are on V's side of the third chamfer).
+    #[test]
+    fn an_l_corner_s_mixed_mitre_point_is_past_the_convex_chamfers_rails() {
+        let s = 2.0;
+        let (mu, planes, forms) = l_corner([s; 3]);
+        let ones = [1.0; 3];
+        let m = mitre_point(&planes, &ones).unwrap();
+        assert!(
+            (m - Vec3::new(0.5 * s, 0.5 * s, -1.5 * s)).length() < 1e-14,
+            "{m:?}"
+        );
+        let xs = crossings(&mu, &planes, &ones).unwrap();
+        let want = [
+            Vec3::new(0.0, s, -s),
+            Vec3::new(s, 0.0, -s),
+            Vec3::new(-s, -s, 0.0),
+        ];
+        for (x, w) in xs.iter().zip(&want) {
+            assert!((*x - *w).length() < 1e-14, "{x:?} vs {w:?}");
+        }
+        let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
+        assert!(tests.iter().all(|&g| g > 0.5), "{tests:?}");
+        let one = mitre_tests(&mu, &planes, &ones).unwrap();
+        assert!(one.iter().any(|&g| g < -0.5), "{one:?}");
+    }
+
+    /// With the concave chamfer c and the convex ones a (along x) and b (along y) the planes
+    /// `x + y = c`, `y + z = -a` and `x + z = -b` meet at `x = (c + a - b) / 2`,
+    /// `y = (c + b - a) / 2`: between the concave chamfer's rails (`x, y > 0`) where
+    /// `|a - b| < c`. At c = 1/2, a = 1, b = 2 the chamfer along y is too wide, and holds
+    /// up to `a + c = 3/2`, the factor 3/4 on its size; at b = 7/5 the mitre holds.
+    #[test]
+    fn an_l_corner_s_unequal_convex_chamfers_hold_while_they_differ_by_less_than_the_concave_one() {
+        let ones = [1.0; 3];
+        let (mu, planes, forms) = l_corner([0.5, 1.0, 2.0]);
+        let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
+        assert!(tests.iter().any(|&g| g < -0.1), "{tests:?}");
+        let (i, hi, lo) = too_wide_of(&mu, &planes, &forms).unwrap();
+        assert_eq!(i, 2);
+        assert!((hi - 0.75).abs() < 1e-14, "{hi}");
+        // and from a - c = 1/2 up, the factor 1/4
+        assert!((lo - 0.25).abs() < 1e-14, "{lo}");
+
+        let (mu, planes, forms) = l_corner([0.5, 1.0, 1.4]);
+        let m = mitre_point(&planes, &ones).unwrap();
+        assert!((m - Vec3::new(0.05, 0.45, -1.45)).length() < 1e-14, "{m:?}");
+        let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
+        assert!(tests.iter().all(|&g| g > 0.01), "{tests:?}");
+    }
+
+    /// A concave chamfer of 0.0002 with convex ones of 1 and 2: the chamfer of 2 builds only
+    /// between `a - c = 0.9998` and `a + c = 1.0002`, the factors 0.4999 and 0.5001 on its
+    /// size. With the fit margin of 0.001 (1000 edge tolerances of 1e-6) the fit would be
+    /// 0.9992, below the sizes that build, so no size is named; with a concave chamfer of
+    /// 0.01 the fit 1.009 is above the lower end 0.99 and is named.
+    #[test]
+    fn a_fit_the_margin_takes_below_the_sizes_that_build_is_not_named() {
+        let (mu, planes, forms) = l_corner([0.0002, 1.0, 2.0]);
+        let (i, hi, lo) = too_wide_of(&mu, &planes, &forms).unwrap();
+        assert_eq!(i, 2);
+        assert!((hi - 0.5001).abs() < 1e-12, "{hi}");
+        assert!((lo - 0.4999).abs() < 1e-12, "{lo}");
+        let margin = 0.001;
+        assert_eq!(fit_above(hi * 2.0 - margin, lo * 2.0), None);
+
+        let (mu, planes, forms) = l_corner([0.01, 1.0, 2.0]);
+        let (_, hi, lo) = too_wide_of(&mu, &planes, &forms).unwrap();
+        let fit = fit_above(hi * 2.0 - margin, lo * 2.0).unwrap();
+        assert!((fit - 1.009).abs() < 1e-12, "{fit}");
     }
 }

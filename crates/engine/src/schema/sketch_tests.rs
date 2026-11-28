@@ -1,26 +1,28 @@
 use serde_json::{Value, json};
 
 use super::{
-    CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, ConstraintResult, EqualParams, EqualResult, FixParams, FixResult,
-    HorizontalVerticalParams, MidpointParams, Operand, ParallelParams, PerpendicularParams, PointOperand, SketchKey, SymmetryParams, SymmetryResult,
-    TangentParams, TangentResult,
+    AxisAlignParams, CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, ConstraintResult, EqualParams, EqualResult, FixParams,
+    FixResult, HorizontalVerticalParams, MidpointParams, Operand, ParallelParams, PerpendicularParams, PointOperand, SketchKey, SymmetryParams,
+    SymmetryResult, TangentParams, TangentResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, issues, output_schema_for};
 
-const IDS: [&str; 11] = [
+const IDS: [&str; 13] = [
     "sketch.constraint.coincident",
     "sketch.constraint.collinear",
     "sketch.constraint.concentric",
     "sketch.constraint.equal",
     "sketch.constraint.fix",
+    "sketch.constraint.horizontal",
     "sketch.constraint.horizontal_vertical",
     "sketch.constraint.midpoint",
     "sketch.constraint.parallel",
     "sketch.constraint.perpendicular",
     "sketch.constraint.symmetry",
     "sketch.constraint.tangent",
+    "sketch.constraint.vertical",
 ];
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -58,6 +60,7 @@ fn output_conforms<T: schemars::JsonSchema>(r: &Value) {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<AxisAlignParams>(), &["if_redundant", "line", "points", "sketch"]);
     assert_keys(input_schema_for::<CoincidentParams>(), &["a", "b", "if_redundant", "sketch"]);
     assert_keys(input_schema_for::<CollinearParams>(), &["a", "b", "if_redundant", "sketch"]);
     assert_keys(input_schema_for::<ConcentricParams>(), &["a", "b", "if_redundant", "sketch"]);
@@ -97,6 +100,8 @@ fn keys_the_handler_needs_are_required_in_the_schema() {
     assert_eq!(schema.as_value()["anyOf"], json!([{"required": ["a", "b"]}, {"required": ["point", "line"]}]));
     let schema = input_schema_for::<HorizontalVerticalParams>();
     assert_eq!(schema.as_value()["anyOf"], json!([{"required": ["line"]}, {"required": ["points"]}]));
+    let schema = input_schema_for::<AxisAlignParams>();
+    assert_eq!(schema.as_value()["anyOf"], json!([{"required": ["line"]}, {"required": ["points"]}]));
     let schema = input_schema_for::<FixParams>();
     assert_eq!(schema.as_value()["anyOf"], json!([{"required": ["entity"]}, {"required": ["entities"]}]));
 }
@@ -116,6 +121,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.constraint.tangent", on(json!({"a": {"point": 1}, "b": "x"}))),
         ("sketch.constraint.tangent", on(json!({"b": "x"}))),
         ("sketch.constraint.parallel", on(json!({"a": true, "b": "x"}))),
+        // A planar model face is a 3D sketch's plane (#10616): the handler reads it.
+        ("sketch.constraint.parallel", on(json!({"a": "w1", "b": {"face": [0, 0, 10]}}))),
         ("sketch.constraint.perpendicular", on(json!({"a": "x", "b": 3}))),
         ("sketch.constraint.collinear", on(json!({"a": [1], "b": "x"}))),
         ("sketch.constraint.equal", on(json!({"a": 5, "b": "l1"}))),
@@ -203,6 +210,13 @@ fn the_types_read_each_key_as_the_handlers_do() {
     assert!(matches!(p.a, Some(Operand::Model(_))));
     let p: ParallelParams = parse(json!({})).unwrap();
     assert_eq!((p.a, p.b), (None, None), "left out: the handler's to refuse");
+    // Parallel, and only Parallel, also takes a planar model face: in a 3D sketch the plane a
+    // drawn 3D line is held parallel to (#10616). The handler checks the point.
+    let face = json!({"face": [0, 0, 10], "body": "Body1"});
+    let p: ParallelParams = parse(json!({"a": "w1", "b": face})).unwrap();
+    assert_eq!(p.b, Some(Operand::Face(face.clone())));
+    let e = parse::<PerpendicularParams>(json!({"a": "w1", "b": face})).map(|_| ()).unwrap_err();
+    assert_eq!(whole_message(e), "`b` must be a curve id, or x / y for a sketch axis");
     let e = parse::<ParallelParams>(json!({"a": 5, "b": "y"})).map(|_| ()).unwrap_err();
     assert_eq!(whole_message(e), "`a` must be a curve id, or x / y for a sketch axis");
     let e = parse::<ConcentricParams>(json!({"a": "c1", "b": {"midpoint": "l1"}})).map(|_| ()).unwrap_err();
@@ -331,6 +345,13 @@ fn replies_match_the_output_schemas_and_real_calls_get_no_warnings() {
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": ["c1.center", {"midpoint": "l4"}]}));
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": ["l5.start", "l5.end"], "line": 7}));
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": "not a list", "line": "l6", "mode": "x"}));
+
+    // Horizontal and Vertical on their own: a line, and two points, with no `mode`.
+    let mut s = new();
+    assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.horizontal", json!({"line": "l1"}));
+    assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.vertical", json!({"line": "l2"}));
+    assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.horizontal", json!({"points": ["c1.center", {"midpoint": "l4"}]}));
+    assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.vertical", json!({"points": ["l5.start", "l5.end"]}));
 
     // Coincident: two points, a point on a curve, a point on an axis, a line's middle, two lines,
     // two circles, and a pair that is joined already.
@@ -470,6 +491,17 @@ fn off_leaves_the_replies_as_they_were() {
     let mut keys: Vec<_> = r.as_object().into_iter().flat_map(|o| o.keys().cloned()).collect();
     keys.sort();
     assert_eq!(keys, ["created", "result", "sketch"], "{r}");
+}
+
+/// Horizontal and Vertical on their own take no `mode`: the command says which way, so strict
+/// refuses one.
+#[test]
+fn horizontal_and_vertical_take_no_mode() {
+    for id in ["sketch.constraint.horizontal", "sketch.constraint.vertical"] {
+        let mut s = scene(ParamCheck::Strict);
+        let e = s.execute(id, &json!({"line": "l1", "mode": "vertical"})).unwrap_err().to_string();
+        assert!(e.contains("unknown key"), "{id}: {e}");
+    }
 }
 
 /// A model edge or vertex is an operand: projected into the sketch first, and the call gets no

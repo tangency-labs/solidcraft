@@ -188,7 +188,6 @@ impl ExecutiveAccess<Handle> for Access {
     fn solver_rails_fit_judged(&mut self, _: &mut Kernel, _: Handle) -> Result<RailsFit> {
         Ok(RailsFit {
             fit: true,
-            touches_rim: false,
             rolls_over: false,
             into_material: false,
             boundaries_into_material: false,
@@ -377,6 +376,10 @@ impl ExecutiveAccess<Handle> for Access {
     }
     // the fake has no blend geometry: no face is taken whole (WR-320)
     fn solvers_faces_outlast(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(true)
+    }
+    // nor do any two blends' bands overlap (WR-542)
+    fn solvers_bands_clear_other_rails(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
         Ok(true)
     }
     fn piecewise_merge(&mut self, k: &mut Kernel, _: &mut FilletExecutive<Handle>) -> Result<()> {
@@ -818,7 +821,6 @@ fn state() -> FilletExecutive<Handle> {
         fit_kind: FitKind::Radius,
         fit_setback: -1.0,
         rollover_adjusting: false,
-        rolled_beside_band: false,
     }
 }
 

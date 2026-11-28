@@ -1,0 +1,84 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b0": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b0"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.0,
+                  65.0,
+                  5.0
+                ],
+                [
+                  5.0,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 50
+            }
+          ],
+          "points": [
+            [
+              5.0,
+              32.5,
+              5.0
+            ]
+          ],
+          "tolerance": 6.49619052838329
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "22186-inside-edge-at-rounded-pocket-opening",
+  "expected": {
+    "body_count": 1,
+    "method": "The original block is the Minkowski sum of a 65 mm cube and a radius 5 mm ball. A square cut removes 65^3 mm3. The inside fillet returns a prism 65 mm long of section (2^2 - pi*2^2/4) mm2. The expected volume is 6*65^2*5 + 3*pi*65*5^2 + 4*pi*5^3/3 + 65*(4-pi).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#22186"
+    ],
+    "tolerance": {
+      "abs_mm": 0.001
+    },
+    "volume_mm3": 142644.65943936518,
+    "what": "A radius 2 mm along one concave edge of a 65 mm square pocket ending at the opening of a rounded 75 mm cube."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "22186-inside-edge-at-rounded-pocket-opening.bodies.json.gz",
+  "result": [
+    {
+      "made": "b1"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#22186"
+  ],
+  "ungraded": [],
+  "what": "A radius 2 mm along one concave edge of a 65 mm square pocket ending at the opening of a rounded 75 mm cube.",
+  "why_not": []
+}

@@ -14,11 +14,12 @@ use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::face_flux::face_flux;
 use solidcore_ops::pcurve;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Curve2};
 use solidcraft_geom::Ring;
-use solidcraft_geom::brep::eval::{SurfaceEval, face_flux};
+use solidcraft_geom::brep::eval::SurfaceEval;
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};
@@ -1129,6 +1130,111 @@ pub(crate) struct Assembled {
     pub edges: Vec<Option<usize>>,
 }
 
+/// Turns coaxial cylinder, cone, sphere and torus faces that share a circle edge onto one quarter
+/// grid so that each shared circle's NURBS form has an exact linear pcurve on every coaxial face
+/// it bounds (#21829). Faces with caller-supplied pcurves or non-turnable surfaces act as fixed
+/// anchors; among all-turnable groups, prefers a member's frame that keeps every face in the
+/// group within four quarters.
+fn align_coaxial_frames(faces: &mut [PartFace], edges: &[PartEdge], tol: f64) {
+    let nf = faces.len();
+    let face_frames: Vec<Option<b::Frame>> = faces.iter().map(|f| solidcraft_geom::brep::form::frame_of(&f.surface)).collect();
+    let mut given_on = vec![false; edges.len()];
+    for u in faces.iter().flat_map(|f| f.loops.iter().flatten()).filter(|u| u.given.is_some()) {
+        if let Some(slot) = given_on.get_mut(u.edge as usize) {
+            *slot = true;
+        }
+    }
+    let turnable: Vec<bool> = faces
+        .iter()
+        .map(|f| {
+            matches!(f.surface, b::Surface::Cylinder { .. } | b::Surface::Cone { .. } | b::Surface::Sphere { .. } | b::Surface::Torus { .. })
+                && f.loops.iter().flatten().all(|u| u.given.is_none())
+        })
+        .collect();
+    let mut edge_faces: Vec<Vec<usize>> = vec![Vec::new(); edges.len()];
+    for (fi, f) in faces.iter().enumerate() {
+        if face_frames[fi].is_none() {
+            continue;
+        }
+        for u in f.loops.iter().flatten() {
+            if let Some(slot) = edge_faces.get_mut(u.edge as usize)
+                && !slot.contains(&fi)
+            {
+                slot.push(fi);
+            }
+        }
+    }
+    let mut parent: Vec<usize> = (0..nf).collect();
+    for ((e, &given), users) in edges.iter().zip(&given_on).zip(&edge_faces) {
+        if e.nurbs.is_some() || given || users.len() < 2 || !matches!(e.curve, b::Curve::Circle { .. }) {
+            continue;
+        }
+        let coaxial: Vec<usize> = users
+            .iter()
+            .copied()
+            .filter(|&fi| face_frames[fi].as_ref().is_some_and(|fr| solidcraft_geom::brep::form::on_frame(&e.curve, e.interval, fr, tol).is_some()))
+            .collect();
+        if let Some(&first) = coaxial.first() {
+            for &other in coaxial.iter().skip(1) {
+                join(&mut parent, first, other);
+            }
+        }
+    }
+    let mut groups: Vec<Vec<usize>> = vec![Vec::new(); nf];
+    for (fi, frame) in face_frames.iter().enumerate() {
+        if frame.is_some() {
+            let r = root(&mut parent, fi);
+            groups[r].push(fi);
+        }
+    }
+    for g in &groups {
+        if g.len() < 2 {
+            continue;
+        }
+        let fits = |ref_frame: &b::Frame| -> bool {
+            g.iter().all(|&fj| {
+                if !turnable[fj] {
+                    return true;
+                }
+                let f = &faces[fj];
+                let Some(aligned) = solidcraft_geom::brep::form::aligned_to_frame(&f.surface, ref_frame, tol) else {
+                    return false;
+                };
+                let boundary: Vec<Vec<(&b::Curve, [f64; 2], bool)>> = f
+                    .loops
+                    .iter()
+                    .map(|l| {
+                        let edge_of = |u: &PartUse, forward: bool| edges.get(u.edge as usize).map(|edge| (&edge.curve, edge.interval, forward));
+                        if f.forward {
+                            l.iter().filter_map(|u| edge_of(u, u.forward)).collect()
+                        } else {
+                            l.iter().rev().filter_map(|u| edge_of(u, !u.forward)).collect()
+                        }
+                    })
+                    .collect();
+                solidcraft_geom::brep::form::extent(&aligned, &boundary)
+                    .and_then(|ex| solidcraft_geom::brep::form::turn_quarters(&aligned, ex, 0.0))
+                    .is_some_and(|q| q <= 4)
+            })
+        };
+        let anchor = g
+            .iter()
+            .copied()
+            .find(|&fi| !turnable[fi])
+            .and_then(|fi| face_frames[fi].as_ref())
+            .or_else(|| g.iter().filter_map(|&fi| face_frames[fi].as_ref()).find(|fr| fits(fr)))
+            .or_else(|| g.iter().find_map(|&fi| face_frames[fi].as_ref()));
+        let Some(ref_frame) = anchor else { continue };
+        for &fj in g {
+            if turnable[fj]
+                && let Some(aligned) = solidcraft_geom::brep::form::aligned_to_frame(&faces[fj].surface, ref_frame, tol)
+            {
+                faces[fj].surface = aligned;
+            }
+        }
+    }
+}
+
 /// The schema 4 record of `parts`: each face its pcurves (the caller's exact ones where given,
 /// else `pcurve::pcurves`) and parameter box; the faces grouped into shells through shared edges;
 /// closed shells (every edge used twice in them) enclosing material, or a cavity where the
@@ -1138,11 +1244,14 @@ pub(crate) struct Assembled {
 pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     let _span = solidcraft_profile::span("kernel", "assemble");
     let fail = |m: String| KernelError::Invalid(format!("sew: {m}"));
-    let Parts { vertices, edges, faces, tolerance: tol } = parts;
+    let Parts { vertices, edges, mut faces, tolerance: tol } = parts;
     let nf = faces.len();
     if nf == 0 {
         return Err(fail("no faces".into()));
     }
+    // Faces sharing a circle edge about the same axis must share one quarter grid so the edge's
+    // NURBS form has an exact linear pcurve on every coaxial face it bounds (#21829).
+    align_coaxial_frames(&mut faces, &edges, tol);
     // The loops as the record keeps them: relative to the surface's natural normal.
     let loops: Vec<Vec<Vec<(u32, bool, Option<&Curve2>)>>> = faces
         .iter()
@@ -1549,6 +1658,17 @@ mod tests {
         assert!(sew(&hostile).unwrap_err().to_string().contains("budget"));
     }
 
+    /// Two boxes sharing a face touch face to face: at each edge of that face two faces leave
+    /// the same way and lie on each other, so which faces bound which box there is ambiguous. The
+    /// touching sew refuses that rather than guess (a sheet's fold must never hand it such faces).
+    #[test]
+    fn faces_lying_on_each_other_at_an_edge_are_refused_as_ambiguous() {
+        let mut faces = box_faces(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0));
+        faces.extend(box_faces(Vec3::X * 2.0, Vec3::new(2.0, 3.0, 4.0)));
+        let e = sew_touching_traced(&faces).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("ambiguous edge contact"), "{e}");
+    }
+
     #[test]
     fn flat_arcs_far_from_the_origin_keep_their_ends_and_their_faces_planes() {
         // A 12 x 30 x 2 slab 1000 mm out whose y = 0 side bows 0.00008 mm (a 225 m radius).
@@ -1815,5 +1935,63 @@ mod tests {
         let p = Vec3::new(0.0, 0.0, 10.0);
         flat[1] = quad(p, p + Vec3::X * 3.0, p + Vec3::X * 7.0, p + Vec3::X * 10.0);
         assert!(sew(&flat).unwrap_err().to_string().contains("not on one plane"));
+    }
+
+    /// #21829: coaxial cone faces whose frames start at different azimuths (as a cone roll's caps
+    /// and rim walls do at any non-90° sweep) must align onto one quarter grid during `sew`,
+    /// regardless of face ordering (caps before walls or walls before caps).
+    #[test]
+    fn coaxial_cones_sharing_circle_edges_sew_at_non_quarter_sweeps() {
+        // Cross-section from #21829: outer cone (60, 0) -> (30, 40), inner cone (59.2, -0.6) -> (29.2, 39.4).
+        let pt = |r: f64, z: f64, deg: f64| {
+            let (s, c) = deg.to_radians().sin_cos();
+            Vec3::new(r * c, r * s, z)
+        };
+        let arc = |r: f64, z: f64, a0: f64, a1: f64| EdgeSpec::Arc { a: pt(r, z, a0), b: pt(r, z, a1), mid: pt(r, z, 0.5 * (a0 + a1)) };
+        let line = |a: Vec3, b: Vec3| EdgeSpec::Line { a, b };
+        let build_frustum = |sweep_deg: f64, walls_first: bool| {
+            let (a0, a1) = (0.0, sweep_deg);
+            let angle = sweep_deg.to_radians();
+            let (ob0, ob1) = (pt(60.0, 0.0, a0), pt(60.0, 0.0, a1));
+            let (ot0, ot1) = (pt(30.0, 40.0, a0), pt(30.0, 40.0, a1));
+            let (ib0, ib1) = (pt(59.2, -0.6, a0), pt(59.2, -0.6, a1));
+            let (it0, it1) = (pt(29.2, 39.4, a0), pt(29.2, 39.4, a1));
+            let outer = FaceSpec {
+                loops: vec![vec![arc(60.0, 0.0, a0, a1), line(ob1, ot1), arc(30.0, 40.0, a1, a0), line(ot0, ob0)]],
+                surface: SurfSpec::Revolved { a: ob0, b: ot0, axis_origin: Vec3::ZERO, axis: Vec3::Z, angle },
+                probe: Some((pt(45.0, 20.0, 0.5 * a1), pt(0.8, 0.6, 0.5 * a1))),
+            };
+            let inner = FaceSpec {
+                loops: vec![vec![arc(59.2, -0.6, a1, a0), line(ib0, it0), arc(29.2, 39.4, a0, a1), line(it1, ib1)]],
+                surface: SurfSpec::Revolved { a: ib0, b: it0, axis_origin: Vec3::ZERO, axis: Vec3::Z, angle },
+                probe: Some((pt(44.2, 19.4, 0.5 * a1), pt(-0.8, -0.6, 0.5 * a1))),
+            };
+            // Top rim wall starts at `a1` (turned by `sweep_deg` from the caps' frame!).
+            let top_rim = FaceSpec {
+                loops: vec![vec![arc(30.0, 40.0, a0, a1), line(ot1, it1), arc(29.2, 39.4, a1, a0), line(it0, ot0)]],
+                surface: SurfSpec::Revolved { a: ot1, b: it1, axis_origin: Vec3::ZERO, axis: Vec3::Z, angle },
+                probe: Some((pt(29.6, 39.7, 0.5 * a1), pt(-0.6, 0.8, 0.5 * a1))),
+            };
+            let bot_rim = FaceSpec {
+                loops: vec![vec![arc(60.0, 0.0, a1, a0), line(ob0, ib0), arc(59.2, -0.6, a0, a1), line(ib1, ob1)]],
+                surface: SurfSpec::Revolved { a: ob1, b: ib1, axis_origin: Vec3::ZERO, axis: Vec3::Z, angle },
+                probe: Some((pt(59.6, -0.3, 0.5 * a1), pt(0.6, -0.8, 0.5 * a1))),
+            };
+            let end0 =
+                FaceSpec { loops: vec![vec![line(ob0, ot0), line(ot0, it0), line(it0, ib0), line(ib0, ob0)]], surface: SurfSpec::Plane, probe: None };
+            let end1 =
+                FaceSpec { loops: vec![vec![line(ob1, ib1), line(ib1, it1), line(it1, ot1), line(ot1, ob1)]], surface: SurfSpec::Plane, probe: None };
+            if walls_first { vec![top_rim, bot_rim, end0, end1, outer, inner] } else { vec![outer, inner, top_rim, bot_rim, end0, end1] }
+        };
+        // Analytic volume of the 1 mm thick frustum: area (50 mm²) * centroid radius (44.6 mm) * sweep_rad.
+        for (deg, want_vol) in [(100.0, 3_892.084), (200.0, 7_784.168), (359.0, 13_972.582)] {
+            for walls_first in [false, true] {
+                let body = sew(&build_frustum(deg, walls_first)).unwrap_or_else(|e| panic!("{deg}° walls_first={walls_first}: {e}"));
+                assert_eq!(body.face_count(), 6);
+                assert!(body.validity().is_empty(), "{deg}° walls_first={walls_first}: {:?}", body.validity());
+                let vol = crate::measure(&body).unwrap().volume;
+                assert!((vol - want_vol).abs() < 0.05, "{deg}° walls_first={walls_first}: got {vol:.3}, want {want_vol:.3}");
+            }
+        }
     }
 }

@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 mod assemble;
+mod backend;
 mod blend;
 mod blend_corner;
 mod blend_smlib;
@@ -35,8 +36,12 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+pub mod dogbone;
+mod dome;
 mod draft_corners;
+pub mod drawing_centre_mark;
 mod emboss;
+mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
 pub mod failure;
@@ -44,12 +49,14 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+pub mod finger_joint;
 mod form_cell;
 mod freeform;
 pub mod fuzz;
 mod heal;
 mod helix;
 pub mod history;
+pub mod hlr;
 mod iges_in;
 mod iges_out;
 mod intersection;
@@ -91,11 +98,12 @@ mod loft_rails_tests;
 mod loft_region_tests;
 mod matchsurf;
 mod measure;
-mod mesh_convert;
+mod memory;
 mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
 mod native;
+pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
@@ -105,11 +113,17 @@ mod outline_tests;
 mod par;
 #[cfg(test)]
 mod split_cone_tests;
-pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
+pub use memory::{available_memory_bytes, with_available_memory_for_test};
+pub use par::KERNEL_STACK;
+pub use par::for_each_on_threads;
+pub use par::kernel_thread;
+pub use par::map_on_threads;
+pub use par::map_with_local_pools;
 #[cfg(test)]
 mod display_plan_tests;
 #[cfg(test)]
 mod pinch_tests;
+mod placement;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
@@ -122,15 +136,22 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
+#[cfg(test)]
+mod record_eval_tests;
 mod repair;
+mod round_face;
+mod route;
 #[cfg(test)]
 mod seam_faces_tests;
+pub mod services;
 mod sew;
 mod smlib_boolean;
 mod smlib_sweeps;
 #[cfg(test)]
 mod smlib_sweeps_tests;
 mod smooth_edges;
+#[cfg(test)]
+mod sphere_area_tests;
 #[cfg(test)]
 mod sphere_lens_tests;
 mod splitface;
@@ -146,6 +167,7 @@ mod surface_second_derivative_tests;
 mod surface_trim;
 mod surface_untrim;
 mod surfaces;
+mod sweep_api;
 mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
@@ -165,110 +187,535 @@ mod validation;
 mod validity;
 pub mod watch;
 
-pub use blend::{
-    ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edge_middles, blend_edges, chamfer, chamfer_carrying_face, chamfer_max,
-    chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, chamfer_sides_max_why, fillet, fillet_each, fillet_g2, fillet_g2_corners,
-    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note,
-    named_fit, names_largest_fit, scale_fit_note, smooth_picks, tangent_chain, tangent_chain_beyond_points, tangent_chain_edges, with_fit_note,
-    without_fit_note,
-};
+pub use backend::Solidcore;
+pub use blend::BlendFit;
+pub use blend::ChamferSide;
+pub use blend::FilletTurn;
+pub use blend::FitSearch;
+pub use blend::SETBACK_AT_LEAST;
+pub use blend::blend_edge_middles;
+pub use blend::blend_edges;
+pub use blend::chamfer_max;
+pub use blend::chamfer_max_why;
+pub use blend::chamfer_sides_max_why;
+pub use blend::fillet_g2;
+pub use blend::fillet_g2_corners;
+pub use blend::fillet_g2_with_g2_corners;
+pub use blend::fillet_least_setback;
+pub use blend::fillet_max;
+pub use blend::fillet_max_each;
+pub use blend::fillet_max_why;
+pub use blend::largest_fit_note;
+pub use blend::named_blend_fit;
+pub use blend::named_fit;
+pub use blend::names_largest_fit;
+pub use blend::scale_fit_note;
+pub use blend::smooth_picks;
+pub use blend::tangent_chain;
+pub use blend::tangent_chain_beyond_points;
+pub use blend::tangent_chain_closes;
+pub use blend::tangent_chain_edges;
+pub use blend::with_fit_note;
+pub use blend::without_fit_note;
 pub use blend_corner::fillet_radii;
-pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
-pub use body::{
-    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, KernelForms, MESH_MIN_ANGLE,
-    MeshSpec, MeshTolerance, OUTLINE_TRIM_SAMPLES, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, placed_mesh,
-};
-pub use boundary::{Boundary, boundary_patch};
-pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
-pub use bridge::{Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
-pub use build::{
-    PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
-    loft_with_rails, offset_loop, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, symmetric_offset_intervals,
-    symmetric_offset_probe_points, torus,
-};
-pub use continuity::{
-    ContinuityReport, ContinuityTolerances, DEFAULT_SAMPLES, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst,
-    pick_edges, seam_diagnostics,
-};
-pub use continuity_order::{Construction, Continuity};
-pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
-pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, edge_middle, iso_comb};
+pub use blend_variable::RadiusSpline;
+pub use blend_variable::Taper;
+pub use blend_variable::fillet_chord;
+pub use blend_variable::fillet_tapered;
+pub use blend_variable::fillet_variable;
+pub use blend_variable::fillet_variable_points;
+pub use blend_variable::fillet_variable_spline;
+pub use blend_variable::fillet_variable_spline_chain;
+pub use blend_variable::taper;
+pub use body::Body;
+pub use body::COLOUR_NAME_MAX;
+pub use body::CapSignature;
+pub use body::DISPLAY_ANGLE;
+pub use body::DisplayShare;
+pub use body::EdgeInfo;
+pub use body::EdgeLines;
+pub use body::FaceInfo;
+pub use body::FacePaint;
+pub use body::FaceSource;
+pub use body::MESH_MIN_ANGLE;
+pub use body::MeshSpec;
+pub use body::MeshTolerance;
+pub use body::OUTLINE_TRIM_SAMPLES;
+pub use body::Paint;
+pub use body::PlanStats;
+pub use body::PointClass;
+pub use body::RayPick;
+pub use body::Refusal;
+pub use body::ShapeLimit;
+pub use body::SketchPlane;
+pub use body::SurfaceKind;
+pub use body::Unshaped;
+pub use body::colour_name;
+pub use body::display_tolerance;
+pub use body::placed_mesh;
+pub use body::straight_direction;
+pub use body::{KernelFormMask, KernelForms};
+pub use boundary::Boundary;
+pub use boundary::boundary_patch;
+pub use boundary_network::BoundaryCurve;
+pub use boundary_network::CurveSource;
+pub use boundary_network::MAX_CHAIN_CURVES;
+pub use boundary_network::MAX_EDGE_PICKS;
+pub use boundary_network::boundary_join;
+pub use boundary_network::boundary_surface;
+pub use bridge::Frame;
+pub use bridge::blend_between;
+pub use bridge::bridge;
+pub use bridge::chain;
+pub use bridge::chain_closes;
+pub use bridge::curve_chain_of_edges;
+pub use bridge::frames;
+pub use bridge::frames_across;
+pub use bridge::sample_grid;
+pub use bridge::tangent_face_chain_of_faces;
+pub use build::PathSeg;
+pub use build::canonical_revolve_axis;
+pub use build::level_on_plane;
+pub use build::offset_loop;
+pub use build::path_polyline;
+pub use build::planar_face_record;
+pub use build::plane_gap;
+pub use build::plane_raised;
+pub use build::plane_rise;
+pub use build::slab_sides;
+pub use build::symmetric_offset_intervals;
+pub use build::symmetric_offset_probe_points;
+pub use continuity::ContinuityReport;
+pub use continuity::ContinuityTolerances;
+pub use continuity::DEFAULT_SAMPLES;
+pub use continuity::EdgePick;
+pub use continuity::MAX_SAMPLES;
+pub use continuity::MIN_SAMPLES;
+pub use continuity::SeamReport;
+pub use continuity::SeamStation;
+pub use continuity::SeamVerdict;
+pub use continuity::SeamWorst;
+pub use continuity::pick_edges;
+pub use continuity::seam_diagnostics;
+pub use continuity_order::Construction;
+pub use continuity_order::Continuity;
+pub use corner_g2::CURVATURE_SHARE;
+pub use corner_g2::DEFAULT_SETBACK_FACTOR;
+pub use curvature_comb::CombTooth;
+pub use curvature_comb::MAX_COMB_TEETH;
+pub use curvature_comb::MIN_COMB_TEETH;
+pub use curvature_comb::comb_edge_near;
+pub use curvature_comb::edge_comb;
+pub use curvature_comb::edge_distance;
+pub use curvature_comb::edge_middle;
+pub use curvature_comb::iso_comb;
 pub use delete_face::delete_faces;
-pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
-pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
-pub use emboss::{
-    cylinder_emboss_anchor, emboss_anchor, emboss_cylinder, emboss_cylinder_at, emboss_project_face, has_cylinder_emboss_wall, infer_cylinder_emboss,
-};
+pub use distance::BodyDistance;
+pub use distance::DistanceShape;
+pub use distance::Members;
+pub use distance::body_distance;
+pub use distance::edges_closest;
+pub use distance::faces_closest;
+pub use distance::interiors_disjoint;
+pub use distance::overlap_witness;
+pub use distance::point_closest;
+pub use distance::segment_closest;
+pub use dome::dome;
+pub use draft_corners::CornerFill;
+pub use draft_corners::CornerOption;
+pub use draft_corners::CornerRefusal;
+pub use draft_corners::CornerReport;
+pub use draft_corners::DraftCorner;
+pub use draft_corners::draft_corners;
+pub use emboss::cylinder_emboss_anchor;
+pub use emboss::emboss_anchor;
+pub use emboss::emboss_cylinder;
+pub use emboss::emboss_cylinder_at;
+pub use emboss::emboss_project_face;
+pub use emboss::has_cylinder_emboss_wall;
+pub use emboss::infer_cylinder_emboss;
 pub use failure::ErrorCode;
-pub use fair::{
-    FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
-    fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,
-};
-pub use fill::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, patch_edges_crowned, patch_edges_report, patch_edges_with};
-pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial};
-pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
+pub use fair::FairCurve;
+pub use fair::FairNet;
+pub use fair::FairOptions;
+pub use fair::FairReport;
+pub use fair::MAX_FAIR_ITERATIONS;
+pub use fair::MAX_FAIR_POINTS;
+pub use fair::fair_bspline_curve;
+pub use fair::fair_bspline_surface;
+pub use fair::fair_curve;
+pub use fair::fair_faces;
+pub use fair::fair_net;
+pub use fair::fair_nurbs_curve;
+pub use fair::fair_nurbs_surface;
+pub use fair::fair_surface;
+pub use fill::PATCH_ANGLE_TOL_DEG;
+pub use fill::PatchReport;
+pub use fill::PatchSpec;
+pub use fill::patch_edges_crowned;
+pub use fill::patch_edges_report;
+pub use fill::patch_edges_with;
+pub use helix::MAX_HELIX_TURNS;
+pub use helix::require_unfolded_screw_section;
+pub use helix::sweep_helix_mesh;
+pub use iges_in::MAX_IGES_BYTES;
+pub use iges_in::iges_import;
+pub use iges_in::iges_native_system;
+pub use iges_in::iges_to_step;
+pub use iges_in::max_bytes as iges_max_bytes;
+pub use iges_in::set_max_bytes as set_iges_max_bytes;
 pub use iges_out::iges_export_bodies;
-pub use intersection::{MeetingEdge, meeting_edges};
-pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
-pub use lip::{LipRefusal, raise_band, rim_band};
+pub use intersection::MeetingEdge;
+pub use intersection::meeting_edges;
+pub use iso::IsoLine;
+pub use iso::MAX_ISO_COUNT;
+pub use iso::iso_curves;
+pub use iso::iso_grid;
+pub use lip::LipRefusal;
+pub use lip::raise_band;
+pub use lip::rim_band;
 pub use loft_blend::loft_blend;
-pub use matchsurf::{match_surface, seam_continuity};
-pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
-pub use mesh_convert::convert_prismatic_mesh;
-pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
-pub use native::{body_from_smlib, smlib_body};
-pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
+pub use matchsurf::match_surface;
+pub use matchsurf::seam_continuity;
+pub use measure::BodyMeasure;
+pub use measure::MassMeasure;
+pub use measure::levels_along;
+pub use measure::line_meets_box;
+pub use measure::measure;
+pub use measure::measure_many;
+pub use measure::measure_mass;
+pub use measure::measure_mass_many;
+pub use measure::reach_past;
+pub use meshbody::MAX_TRIANGLES;
+pub use meshbody::mesh_body;
+pub use meshbody::mesh_body_with_normals;
+pub use meshbody::reduce_mesh;
+pub use native::body_from_smlib;
+pub use native::brep_record;
+pub use native::decode_native_body;
+pub use native::encode_native_body;
+pub use native::native_preview_mesh;
+pub use native::smlib_body;
 pub use offset::with_same_surface;
-pub use ops::{BoolOp, apart, boolean, half_space, join_apart, place_matrix, split_by_plane, transform, transform_matrix, union_all, union_apart};
-pub use point_path::{
-    PathPiece, PointPath, SpaceBezier, along_path, curve_path, edge_path, face_section_along, project_onto_face, sketch_record_curve,
-    sweep_point_path_with,
-};
+pub use ops::BoolOp;
+pub use ops::apart;
+pub use ops::half_space;
+pub use ops::join_apart;
+pub use ops::overlapping_piece_pairs;
+pub use ops::place_matrix;
+pub use ops::split_by_plane;
+pub use ops::transform;
+pub use ops::transform_matrix;
+pub use ops::union_all;
+pub use ops::union_apart;
+pub use point_path::PathPiece;
+pub use point_path::PointPath;
+pub use point_path::SpaceBezier;
+pub use point_path::along_path;
+pub use point_path::curve_path;
+pub use point_path::edge_path;
+pub use point_path::face_section_along;
+pub use point_path::polyline_fraction_at;
+pub use point_path::polyline_point_at;
+pub use point_path::project_onto_face;
+pub use point_path::sketch_record_curve;
 pub use polybool::faceted_boolean;
-pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
-pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
-pub use prism_curve::{PlanarPiece, PlanarSpline};
-pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
-pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
-pub use sew::{EdgeSpec, FaceSpec, MAX_CHAIN_POINTS, SurfSpec, sew, sew_touching, sew_touching_traced};
-pub use solidcore_ops::member_turn::{ParallelTurnError, parallel_turn};
+pub use polyhedron::HalfSpace;
+pub use polyhedron::convex_polyhedron;
+pub use polyhedron::offset_solid;
+pub use polyhedron::offset_tool;
+pub use prism::PLANAR_FIT_TOL;
+pub use prism::fill_channel;
+pub use prism::planar_regions_boolean;
+pub use prism::{ChannelFill, Contour, FillFailure, FillNote, FillOptions, FillRefusal, FillSide};
+pub use prism_curve::PlanarPiece;
+pub use prism_curve::PlanarSpline;
+pub use prism_measure::PrismSection;
+pub use prism_measure::certified_prism_equivalent;
+pub use prism_measure::certified_prism_section;
+pub use repair::Hole;
+pub use repair::RebuiltFace;
+pub use repair::RefusedFace;
+pub use repair::RepairOptions;
+pub use repair::RepairRefusal;
+pub use repair::RepairReport;
+pub use repair::SewnGap;
+pub use repair::repair;
+pub use round_face::round_face_beside_clear;
+pub use round_face::round_face_extent;
+pub use round_face::round_face_grow_block;
+pub use round_face::round_face_past_end;
+pub use round_face::round_face_stands_over;
+pub use round_face::round_face_whole_band;
+pub use route::CELL_GRID_LIMITS;
+pub use route::FRAME_MAX_REACH;
+pub use route::FRAME_VERTICAL_TOLERANCE;
+pub use route::Which;
+pub use route::affine;
+pub use route::boolean;
+pub use route::box_solid;
+pub use route::cell_regions;
+pub use route::chamfer;
+pub use route::chamfer_carrying_face;
+pub use route::chamfer_sides;
+pub use route::chamfer_sides_carrying_face;
+pub use route::check_bend_clearance;
+pub use route::curves;
+pub use route::cylinder;
+pub use route::default_cell_grid;
+pub use route::develop;
+pub use route::draft;
+pub use route::dxf;
+pub use route::extrude;
+pub use route::extrude_planar_regions;
+pub use route::extrude_tapered;
+pub use route::extrude_tapered_between;
+pub use route::extrude_whole_sides;
+pub use route::fillet;
+pub use route::fillet_each;
+pub use route::fillet_removing;
+pub use route::fillet_setback;
+pub use route::gusset_prepare;
+pub use route::gusset_support;
+pub use route::gusset_support_pick;
+pub use route::gusset_support_plane;
+pub use route::hatch;
+pub use route::hole_stacks;
+pub use route::loft;
+pub use route::loft_regions;
+pub use route::loft_to_point;
+pub use route::loft_to_point_with_rails;
+pub use route::loft_with_rails;
+pub use route::member_along;
+pub use route::member_axes;
+pub use route::member_axis;
+pub use route::member_extent;
+pub use route::mesh;
+pub use route::offset_faces;
+pub use route::orient_stock;
+pub use route::plan_cell_grid;
+pub use route::plan_sketch_cell_grid;
+pub use route::planar;
+pub use route::points;
+pub use route::profiles;
+pub use route::projection;
+pub use route::query;
+pub use route::read_cadir;
+pub use route::revolve;
+pub use route::revolve_joining_arcs;
+pub use route::revolve_whole;
+pub use route::revolve_whole_sides;
+pub use route::runtime;
+pub use route::sections;
+pub use route::shaft_spline;
+pub use route::shell;
+pub use route::sphere;
+pub use route::step_string;
+pub use route::stock_line;
+pub use route::stock_line_length;
+pub use route::stock_planar;
+pub use route::stock_retained_line;
+pub use route::stock_section_plane;
+pub use route::stock_spatial_arc;
+pub use route::stock_terminal_planes;
+pub use route::sweep;
+pub use route::sweep_helix;
+pub use route::sweep_helix_radial;
+pub use route::sweep_point_path_with;
+pub use route::sweep_with;
+pub use route::tessellate;
+pub use route::thicken;
+pub use route::torus;
+pub use route::trim_member;
+pub use route::tube_cope;
+pub use route::which;
+pub use route::write_cadir;
+pub use sew::EdgeSpec;
+pub use sew::FaceSpec;
+pub use sew::MAX_CHAIN_POINTS;
+pub use sew::SurfSpec;
+pub use sew::sew;
+pub use sew::sew_touching;
+pub use sew::sew_touching_traced;
+pub use solidcore_ops::MaterialSides;
+pub use solidcore_ops::dome::DomeRefusal;
+pub use solidcore_ops::dome::DomeShape;
+pub use solidcore_ops::measure::ParallelTurnError;
+pub use solidcore_ops::measure::directions_aligned;
+pub use solidcore_ops::measure::frame_z_deviation;
+pub use solidcore_ops::measure::rigid_pose_delta;
+pub use solidcore_ops::measure::turn_to_parallel;
+pub use solidcore_ops::measure::{Straight, StraightBy};
+/// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
+/// inputs and errors.
+pub use solidcraft_kernel_api as api;
+pub use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten};
+pub use solidcraft_kernel_api::{GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+
+pub use route::runtime::stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
-pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, split_body_by_faces, split_faces, split_faces_with_map};
-pub use step::{step_export, step_export_with_face_ids};
-/// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
-pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
-pub use step_in::records::{ImportRecords, RecordBody, RecordMesh, import_trims, records_import, records_import_shared, records_noted, records_text};
-pub use step_in::{
-    HealedBody, ImportChecks, ImportHeals, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading,
-    step_cache_alive, step_import, step_import_shared, step_orientation_errors, step_validate,
-};
+/// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
+/// scopes and counted work of the calls this process made.
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::write_kernel_profiles;
+
+pub use route::split_body;
+pub use route::split_body_by_faces;
+pub use route::split_body_by_sheet_where_it_cuts;
+pub use route::split_faces;
+pub use route::split_faces_with_map;
+pub use route::trim_keep;
+/// [`solidcraft_smlib::profiled`]: each solidcore-ops call's kernel profile, scoped per call
+/// (feature `solidcore-profile`).
+#[cfg(feature = "solidcore-profile")]
+pub use solidcraft_smlib::profiled;
+pub use splitface::SplitTool;
+pub use splitface::face_split_extended;
+pub use splitface::face_split_if_on_face;
+pub use splitface::has_cap_at;
+pub use splitface::split_at_facing_side;
+pub use splitface::{FieldKind, PieceSides, split_piece_sides};
+pub use step::step_export;
+pub use step::step_export_with_face_ids;
+pub use step_in::HealedBody;
+pub use step_in::ImportChecks;
+pub use step_in::ImportHeals;
+pub use step_in::ImportIssue;
+pub use step_in::ImportReport;
+pub use step_in::ImportedBody;
+pub use step_in::IssueKind;
+pub use step_in::LeftOut;
 /// An import's limits, which every reader of an assembly applies alike: the deepest nesting
 /// followed, the most bodies, and the most occurrences visited.
-pub use step_in::{MAX_ASSEMBLY_DEPTH as IMPORT_MAX_DEPTH, MAX_BODIES as IMPORT_MAX_BODIES, MAX_VISITS as IMPORT_MAX_VISITS};
-pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
-pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
-pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};
+pub use step_in::MAX_ASSEMBLY_DEPTH as IMPORT_MAX_DEPTH;
+pub use step_in::MAX_BODIES as IMPORT_MAX_BODIES;
+pub use step_in::MAX_VISITS as IMPORT_MAX_VISITS;
+pub use step_in::StepImport;
+pub use step_in::StepNode;
+pub use step_in::StepReading;
+/// The memory a STEP file may need, checked before it is opened to warn about it (#15588).
+pub use step_in::p21::check_memory as step_check_memory;
+/// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
+pub use step_in::p21::max_bytes as step_max_bytes;
+pub use step_in::p21::memory_to_spare as step_memory_to_spare;
+pub use step_in::p21::set_max_bytes as set_step_max_bytes;
+pub use step_in::p21::with_memory_to_spare as step_with_memory_to_spare;
+pub use step_in::records::ImportRecords;
+pub use step_in::records::RecordBody;
+pub use step_in::records::RecordMesh;
+pub use step_in::records::import_trims;
+pub use step_in::records::records_import;
+pub use step_in::records::records_import_shared;
+pub use step_in::records::records_import_shared_with_workers;
+pub use step_in::records::records_noted;
+pub use step_in::records::records_text;
+pub use step_in::step_cache_alive;
+pub use step_in::step_import;
+pub use step_in::step_import_shared;
+pub use step_in::step_import_shared_with_workers;
+pub use step_in::step_orientation_errors;
+pub use step_in::step_validate;
+pub use step_out::ExportBody;
+pub use step_out::ExportProduct;
+pub use step_out::StepExport;
+pub use step_out::StepHeader;
+pub use step_out::step_export_bodies;
+pub use step_out::step_export_bodies_with_face_ids;
+pub use step_out::step_export_products;
+pub use surface_extend::ExtendLimit;
+pub use surface_extend::ExtendMode;
+pub use surface_extend::ExtendOptions;
+pub use surface_extend::LAW_ANGLE_LIMIT;
+pub use surface_extend::extend_surface;
+pub use surface_kind::AxialPiece;
+pub use surface_kind::EdgeCircle;
+pub use surface_kind::FaceSurface;
+pub use surface_kind::axial_face_section;
+pub use surface_kind::edge_circle;
+pub use surface_kind::extended_levels;
+pub use surface_kind::face_edge_indices;
+pub use surface_kind::face_surface;
+pub use surface_kind::same_face_record_surface;
+pub use surface_kind::same_record_surface;
+pub use surface_kind::same_surface;
 pub use surface_offset::offset_surface;
-pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
-pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
-pub use surface_untrim::{UntrimHoles, untrim};
-pub use surfaces::{
-    copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces, revolve_sheet,
-    stitch, sweep_sheet, sweep_sheet_point_path_with, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
-};
-pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
-pub use tolerance_heal::{
-    HealFailure, HealPreferenceForTests, ToleranceHeal, heal_preference_for_tests, heal_tolerance_defects, heals_tolerance_defects,
-    set_heals_tolerance_defects,
-};
-pub use topo::{CylinderFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
-pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
+pub use surface_ruled::Ruled;
+pub use surface_ruled::RuledCorners;
+pub use surface_ruled::RuledMode;
+pub use surface_ruled::ruled_far_handles;
+pub use surface_ruled::ruled_surface;
+pub use surface_ruled::ruled_surface_with;
+pub use surface_trim::TrimKeep;
+pub use surface_trim::mutual_trim;
+pub use surface_trim::split_sheet_where_it_cuts;
+pub use surface_trim::stop_at_bodies;
+pub use surface_trim::trim;
+pub use surface_trim::trim_dropped_keep;
+pub use surface_trim::trim_sheet_keep;
+pub use surface_untrim::UntrimHoles;
+pub use surface_untrim::untrim;
+pub use surfaces::copy_faces;
+pub use surfaces::extend;
+pub use surfaces::extrude_sheet;
+pub use surfaces::extrude_sheet_tapered;
+pub use surfaces::loft_section_closed;
+pub use surfaces::loft_sheet;
+pub use surfaces::loft_sheet_planar_g1;
+pub use surfaces::loft_sheet_with_rails;
+pub use surfaces::loft_sheet_with_rails_legacy_sides;
+pub use surfaces::patch_edges;
+pub use surfaces::patch_region;
+pub use surfaces::remove_faces;
+pub use surfaces::reverse_faces;
+pub use surfaces::revolve_sheet;
+pub use surfaces::revolve_sheet_legacy_sides;
+pub use surfaces::stitch;
+pub use surfaces::sweep_sheet;
+pub use surfaces::sweep_sheet_point_path_with;
+pub use surfaces::sweep_sheet_points;
+pub use surfaces::sweep_sheet_points_with;
+pub use surfaces::sweep_sheet_with;
+pub use surfaces::unstitch;
+pub use sweep_path::RailFit;
+pub use sweep_path::SweepControl;
+pub use sweep_path::SweepOrientation;
+pub use sweep_path::sweep_path;
+pub use sweep_path::sweep_path_with;
+pub use tolerance_heal::HealFailure;
+pub use tolerance_heal::HealPreferenceForTests;
+pub use tolerance_heal::ToleranceHeal;
+pub use tolerance_heal::heal_preference_for_tests;
+pub use tolerance_heal::heal_tolerance_defects;
+pub use tolerance_heal::heals_tolerance_defects;
+pub use tolerance_heal::set_heals_tolerance_defects;
+pub use topo::CylinderFace;
+pub use topo::TopoCounts;
+pub use topo::cone_face;
+pub use topo::cylinder_between_rims;
+pub use topo::cylinder_end_at;
+pub use topo::cylinder_face;
+pub use topo::cylinder_face_at;
+pub use topo::material_in_ring;
+pub use topo::merged_topology;
+pub use topo::seam_flags;
+pub use topo::whole_edge;
 pub use tspline::tspline_sheet;
-pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};
-pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
+pub use validation::CheckFailure;
+pub use validation::FailedTest;
+pub use validation::KeptCheck;
+pub use validation::Validation;
+pub use validation::check_kept;
+pub use validation::detach_kept;
+pub use validation::failing_check;
+pub use validation::is_result_only_check_refusal;
+pub use validation::validating;
+pub use validity::SmlibCheck;
+pub use validity::Validity;
+pub use validity::smlib_dump_dir;
+pub use validity::validity;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum KernelError {
@@ -294,9 +741,16 @@ pub enum KernelError {
     /// run ([`heal_tolerance_defects`]).
     #[error("the operation failed: {0}")]
     Heal(#[from] HealFailure),
+    /// A dome the face or the height cannot take.
+    #[error("the operation failed: {0}")]
+    Dome(#[from] DomeRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
+/// the kernel does not depend on solidcore, so the number is repeated here.
+pub const MAX_LOFT_RAILS: usize = 16;
 
 /// The mesher's error as the kernel's: the same words.
 impl From<solidcore_tess::TessError> for KernelError {
@@ -334,6 +788,7 @@ impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcore_ops::pcurve::Error {}
+impl Cause for solidcraft_geom::brep::eval::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()
@@ -350,6 +805,22 @@ impl KernelError {
             None => KernelError::Failed(format!("{context}: {e}")),
         }
     }
+
+    /// The largest fitting size in mm named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn largest_fit(&self) -> Option<f64> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_fit(why),
+            _ => None,
+        }
+    }
+
+    /// The typed largest fitting size named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn blend_fit(&self) -> Option<BlendFit> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_blend_fit(why),
+            _ => None,
+        }
+    }
 }
 
 /// The native kernel call running right now (SMLib), for crash reports.
@@ -361,10 +832,10 @@ thread_local! {
     static GUARDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// Is this thread inside [`guard`]? (A panic now will be caught and turned into an error; the
-/// engine's crash reports mark it recovered.)
+/// Is this thread inside [`guard`], an SMLib call or the mesher's own guard? (A panic now will be
+/// caught and turned into an error; the engine's crash reports mark it recovered.)
 pub fn guarded() -> bool {
-    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call()
+    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call() || solidcore_tess::guarded()
 }
 
 /// A panic inside a solidcore call, caught there and reported as the kernel's internal error
@@ -470,3 +941,7 @@ mod tests;
 
 #[cfg(test)]
 mod trimmed_face_mesh_tests;
+
+// A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
+#[cfg(feature = "backend-occt")]
+pub use route::foreign;

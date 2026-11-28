@@ -314,7 +314,7 @@ fn fixture() -> (Harness, u64, u64, u64) {
 
 #[test]
 fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
-    for label in ["Show All", "Unisolate"] {
+    for label in ["Show All", "Exit Isolation"] {
         let (mut h, _, first, second) = fixture();
         h.app.session.selection.clear();
         let menu_item =
@@ -421,6 +421,37 @@ fn save_mesh_browser_pick_uses_the_body_of_the_clicked_placement() {
     let commands = crate::dialogs_save_mesh::commands(k, &d.inputs).unwrap();
     assert_eq!(commands[0].1["bodies"], json!(expected));
     assert_ne!(expected, h.app.session.occurrence_bodies(&[first], true).unwrap());
+}
+
+/// #8120: Isolate on an occurrence menu becomes Unisolate and restores sibling placements.
+#[test]
+fn occurrence_isolate_offers_unisolate_beside_it() {
+    let (mut h, _, first, second) = fixture();
+    let first_body = h.app.session.occurrence_bodies(&[first], true).unwrap()[0].clone();
+    let second_body = h.app.session.occurrence_bodies(&[second], true).unwrap()[0].clone();
+    let target = Target::Occurrence { path: vec![second] };
+    let isolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Isolate").expect("Isolate");
+    context_menu::run_item(&mut h.app, &isolate, egui::Pos2::ZERO);
+    assert!(!h.app.session.body_visible(&first_body));
+    assert!(h.app.session.body_visible(&second_body));
+
+    // The isolated placement: Isolate would change nothing, so Exit Isolation alone, with its key.
+    let own = context_menu::items(&h.app, &target);
+    assert!(!own.iter().any(|i| i.id == "ui.isolateOccurrence"), "no Isolate that changes nothing");
+    assert!(own.iter().any(|i| i.id == "ui.unisolate" && i.shortcut == crate::ui_kit::chord_label("Ctrl+Shift+I")));
+    // The hidden placement keeps its own Isolate, then Exit Isolation.
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![first] });
+    let at = items.iter().position(|i| i.id == "ui.isolateOccurrence").expect("Isolate on the hidden placement");
+    assert_eq!(items[at].params.as_ref().unwrap()["path"], json!([first]), "this placement's own Isolate");
+    assert_eq!(
+        (items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()),
+        (crate::ui_kit::chord_label("Ctrl+I").as_str(), "ui.unisolate", crate::ui_kit::chord_label("Ctrl+Shift+I").as_str())
+    );
+    let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Exit Isolation").expect("Exit Isolation");
+    context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
+    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Exit Isolation"), "gone once everything is back");
+    assert!(h.app.session.body_visible(&first_body) && h.app.session.body_visible(&second_body));
+    assert!(h.app.session.visibility.hidden_occurrences.is_empty());
 }
 
 #[test]
@@ -851,10 +882,21 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     let from = items.iter().find(|i| i.id == "component.from_bodies").unwrap();
     assert_eq!(from.params.as_ref().unwrap()["bodies"], json!(["Body1", "Second"]));
     assert!(has(&h, "ui.newGroup"), "on every component's menu");
-    assert!(!has(&h, "ui.showAll"), "Show All Bodies only while something is hidden");
+    assert!(!has(&h, "ui.showAllBodies"), "Show All Bodies only while something is hidden");
     h.app.run("browser.visibility", json!({"items": ["Second"], "visible": false})).unwrap();
-    assert!(has(&h, "ui.showAll"), "a hidden body anywhere brings it back");
-    h.app.run("browser.visibility", json!({"items": ["Second"], "visible": true})).unwrap();
+    assert!(has(&h, "ui.showAllBodies"), "a hidden body anywhere brings it back");
+    // #22707: it brings back bodies only; hidden sketches and the origin stay hidden.
+    h.app.run("browser.visibility", json!({"folder": "sketches", "visible": false})).unwrap();
+    h.app.run("browser.visibility", json!({"folder": "origin", "visible": false})).unwrap();
+    let (sketches, origin) = (h.app.session.visibility.hidden_sketches.clone(), h.app.session.visibility.hidden_origin.clone());
+    assert!(!origin.is_empty());
+    let show = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.showAllBodies").unwrap();
+    assert_eq!(solidcraft_ui_text::tr_command(&show.id, &show.label), "Show All Bodies", "its own label, not Show All's");
+    context_menu::run_item(&mut h.app, &show, egui::Pos2::ZERO);
+    assert!(h.app.session.visibility.hidden_bodies.is_empty(), "the body is back");
+    assert_eq!((&h.app.session.visibility.hidden_sketches, &h.app.session.visibility.hidden_origin), (&sketches, &origin));
+    assert!(h.app.session.visibility.shown_sketches.is_empty());
+    h.app.run("browser.visibility", json!({"folder": "all", "visible": true})).unwrap();
     assert!(!has(&h, "ui.groupSelected"), "nothing selected");
     h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Second".into() }];
     let group = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.groupSelected").unwrap();
@@ -1103,4 +1145,215 @@ fn construction_features_keep_their_labels_and_styling() {
     assert_eq!(crate::viewport::component_origin_item(&h.app, &xz), Some("XZ"));
     // The design's own origin keeps its bare name: not a placement's item, feature or not.
     assert_eq!(crate::viewport::component_origin_item(&h.app, "XY"), None);
+}
+
+/// A part inside an assembly, active, with a closed sketch of its own on XY: (harness, assembly,
+/// part).
+fn nested_part_active() -> (Harness, u64, u64) {
+    let mut h = Harness::new();
+    let assembly = h.app.run("component.create", json!({"name":"Assembly","grounded":false})).unwrap()["component"].as_u64().unwrap();
+    let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,20]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.ui.tab = "MODEL".into();
+    h.settle();
+    (h, assembly, part)
+}
+
+/// While a component other than the design is active, the MODEL tab ends with Activate Parent,
+/// which goes up one level a click; with the design active the group is gone (#18516).
+#[test]
+fn activate_parent_is_on_the_model_tab_only_while_a_component_is_active() {
+    let (mut h, assembly, _) = nested_part_active();
+    let group = || crate::scenario::rect_of("panel:MODEL:ACTIVE COMPONENT");
+    assert!(group().is_some(), "the part is active");
+    crate::test_support::click(&mut h, "button:component.activate.parent");
+    assert_eq!(h.app.session.active_component, assembly);
+    assert!(group().is_some(), "the assembly is active");
+    crate::test_support::click(&mut h, "button:component.activate.parent");
+    assert_eq!(h.app.session.active_component, 0);
+    assert!(group().is_none(), "the design is active: nothing to return from");
+    assert!(crate::scenario::handle_at("button:component.activate.parent").is_none());
+}
+
+/// A double-click on empty space in the view goes up one level, as Activate Parent does: only
+/// where nothing is under the pointer, with no window or sketch open, no key held, and
+/// "Double-click components" on (#18516).
+#[test]
+fn a_double_click_in_empty_space_returns_to_the_parent() {
+    let (mut h, assembly, part) = nested_part_active();
+    let cam = h.app.cam;
+    let rect = h.app.viewport.rect.unwrap();
+    let proj = crate::viewport::projection(&h.app, rect);
+    let drawable = h.app.viewport.layout.as_ref().unwrap().drawable;
+    let empty = [(0.3, 0.7), (0.7, 0.7), (0.3, 0.3), (0.7, 0.3), (0.5, 0.85)]
+        .into_iter()
+        .map(|(x, y)| drawable.left_top() + egui::vec2(drawable.width() * x, drawable.height() * y))
+        .find(|p| crate::viewport::pick(&h.app, &proj, *p).is_empty() && !crate::shell::covered(&h.app, *p))
+        .expect("a spot in the view with nothing under it");
+    let double = |h: &mut Harness, extra: serde_json::Value| {
+        // Past egui's double-click window, so this is a new double-click and not a triple.
+        h.frames(40);
+        h.app.cam = cam;
+        let mut click = json!({"x": empty.x, "y": empty.y, "double": true});
+        click.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        h.call("ui.click", click);
+        crate::test_support::play(h);
+    };
+    // Something under the pointer (the part's own sketch): it stays active.
+    h.step(&json!({"click":{"world":[10,10,0]},"double":true})).unwrap();
+    crate::test_support::play(&mut h);
+    assert_eq!(h.app.session.active_component, part, "a double-click on the sketch");
+    // The preference off, a window open, a sketch open, or Shift held: nothing changes.
+    h.app.preferences.double_click_components = false;
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, part, "the preference is off");
+    h.app.preferences.double_click_components = true;
+    h.app.start("solid.box");
+    h.frames(4);
+    assert!(h.app.dialog.is_some());
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, part, "a window is open");
+    crate::dialogs::cancel(&mut h.app);
+    h.settle();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, part, "a sketch is open");
+    h.app.run("sketch.cancel", json!({})).unwrap();
+    h.settle();
+    double(&mut h, json!({"shift": true}));
+    assert_eq!(h.app.session.active_component, part, "Shift is held");
+    // Up one level a double-click, then the design, where a double-click does nothing.
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, assembly);
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, 0);
+    double(&mut h, json!({}));
+    assert_eq!(h.app.session.active_component, 0);
+    assert!(h.app.messages.iter().all(|m| !m.error), "no refusal is shown for the design");
+}
+
+/// While the view moves, the pick under the pointer isn't taken, so nothing is under it as far as
+/// the view knows: a double-click then is not one in empty space, and the part stays active (#18516).
+#[test]
+fn a_double_click_while_the_view_moves_keeps_the_part_active() {
+    let (mut h, _, part) = nested_part_active();
+    let mut still = solidcraft_viewport::CameraAnim::new(h.app.cam, h.app.cam, h.app.now);
+    still.duration = 1e9;
+    h.app.cam_anim = Some(still);
+    h.step(&json!({"click":{"world":[10,10,0]},"double":true})).unwrap();
+    crate::test_support::play(&mut h);
+    assert!(h.app.cam_anim.is_some(), "the view is still moving");
+    assert_eq!(h.app.session.active_component, part, "a double-click on the sketch while the view moves");
+}
+
+#[test]
+fn nested_component_move_with_capture_false_preserves_world_expression_and_rebuilds() {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "dx", "expression": "15 mm"})).unwrap();
+    let outer = h.app.run("component.create", json!({"name": "Outer", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Inner", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "InnerBox"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": outer, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+
+    crate::dialogs_move::open_on_occurrence(&mut h.app, vec![outer, inner], false);
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("capture".into(), json!(false));
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "dx".into();
+        }
+    }
+    press_ok(&mut h);
+    assert!(h.app.session.pending_moves.contains_key(&inner));
+    let bounds = |h: &Harness| h.app.session.world_state().unwrap().body("InnerBox").unwrap().mesh().bounds();
+    let b1 = bounds(&h);
+    assert!((b1.min.x - 5.0).abs() < 1e-5 && (b1.max.x - 15.0).abs() < 1e-5, "moved along world +X: {b1:?}");
+
+    let cap = h.app.run("component.capture_position", json!({})).unwrap();
+    let cp_id = cap["feature"].as_u64().unwrap();
+    let solidcraft_engine::doc::FeatureKind::CapturePosition { moves, .. } = &h.app.session.doc.feature(cp_id).unwrap().kind else {
+        panic!("expected CapturePosition");
+    };
+    assert_eq!(moves[0].space, solidcraft_engine::doc::MoveSpace::World);
+    assert_eq!(moves[0].translate[0], "dx");
+
+    h.app.run("parameters.change", json!({"name": "dx", "expression": "30 mm"})).unwrap();
+    let b2 = bounds(&h);
+    assert!((b2.min.x - 20.0).abs() < 1e-5 && (b2.max.x - 30.0).abs() < 1e-5, "rebuilt along world +X: {b2:?}");
+}
+
+#[test]
+fn create_copy_on_component_with_expression_uses_solid_move() {
+    let (mut h, _, first, _) = fixture();
+    h.app.run("parameters.add", json!({"name": "dx", "expression": "20 mm"})).unwrap();
+    crate::dialogs_move::open_on_occurrence(&mut h.app, vec![first], false);
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("copy".into(), json!(true));
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "dx".into();
+        }
+    }
+    let cmds = crate::dialogs_move::commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "solid.move");
+    assert_eq!(cmds[0].1["copy"], json!(true));
+    assert_eq!(cmds[0].1["translate"], json!(["dx", "0 mm", "0 mm"]));
+}
+
+/// #22710: a sub-assembly whose part is defined in another component owns no bodies, but its
+/// placement shows that part. Its menu offers this placement's Isolate, and Zoom to Selection and
+/// Export are on, all aimed at the placement; a placement that shows nothing keeps them off.
+#[test]
+fn a_subassembly_of_parts_defined_elsewhere_can_be_isolated_and_zoomed_to() {
+    let mut h = Harness::new();
+    let a = h.app.run("component.create", json!({"name":"Slide drive","grounded":false})).unwrap();
+    let a_component = a["component"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = h.app.run("component.create", json!({"name":"Corner pulley","grounded":false})).unwrap();
+    let (b_occurrence, b_component) = (b["occurrence"].as_u64().unwrap(), b["component"].as_u64().unwrap());
+    // The pulley is made in Slide drive and placed twice there; one placement then moves to Corner
+    // pulley. Slide drive keeps the other, so the pulley stays defined there, as a part shared by
+    // two sub-assemblies is.
+    h.app.run("component.activate", json!({"component": a_component})).unwrap();
+    let part = h.app.run("component.create", json!({"name":"Pulley","grounded":false})).unwrap();
+    let (part_occurrence, part_component) = (part["occurrence"].as_u64().unwrap(), part["component"].as_u64().unwrap());
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    h.app.run("occurrence.copy", json!({"occurrence": part_occurrence, "translate": [20, 0, 0]})).unwrap();
+    h.app.run("occurrence.reparent", json!({"occurrence": part_occurrence, "parent": b_component})).unwrap();
+    assert!(h.app.session.doc.component_within(part_component, a_component), "the pulley is still defined in Slide drive");
+    assert!(context_menu::component_bodies(&h.app, b_component).is_empty(), "so Corner pulley owns no body");
+    let path = vec![b_occurrence];
+    assert!(!h.app.session.occurrence_bodies(&path, true).unwrap_or_default().is_empty(), "but its placement shows one");
+
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: path.clone() });
+    let find =
+        |id: &str| items.iter().find(|i| i.id == id).unwrap_or_else(|| panic!("no {id} in {:?}", items.iter().map(|i| &i.id).collect::<Vec<_>>()));
+    let isolate = find("ui.isolateOccurrence");
+    assert!(isolate.enabled);
+    assert_eq!(isolate.params.as_ref().unwrap()["path"], json!(path));
+    let zoom = find("ui.zoomTo");
+    assert!(zoom.enabled);
+    assert_eq!(zoom.params.as_ref().unwrap()["items"], json!([Sel::Occurrence { path: path.clone() }]));
+    let export = items.iter().flat_map(|i| i.children.iter()).find(|c| c.id == "ui.export").unwrap();
+    assert!(export.enabled && export.params.as_ref().unwrap()["bodies"].as_array().is_some_and(|b| !b.is_empty()));
+    assert!(items.iter().find(|i| i.children.iter().any(|c| c.id == "ui.export")).is_some_and(|g| g.enabled), "and its flyout row");
+
+    // Isolate does what it says: only the pulley's placement stays on screen.
+    context_menu::run_item(&mut h.app, isolate, egui::Pos2::ZERO);
+    assert!(h.app.session.visibility.before_isolate.is_some(), "isolated");
+
+    // An empty sub-assembly still offers neither.
+    h.app.run("browser.visibility", json!({"visible": true, "unisolate": true})).unwrap();
+    let empty = h.app.run("component.create", json!({"name":"Empty","grounded":false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![empty] });
+    assert!(!items.iter().any(|i| i.id == "ui.isolateOccurrence" || i.id == "ui.isolate"));
+    assert!(items.iter().find(|i| i.id == "ui.zoomTo").is_some_and(|z| !z.enabled));
 }

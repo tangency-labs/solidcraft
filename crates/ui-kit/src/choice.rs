@@ -13,6 +13,10 @@ use solidcraft_theme::Tokens;
 /// Text segments retain mixed states and optional compact clipping instead of dropdown fallback.
 #[derive(Default)]
 pub struct Segments<'a> {
+    /// PageSwitch presentation; normal segmented form choices keep their existing appearance.
+    pub page_switch: bool,
+    pub counts: &'a [usize],
+    pub reduced_motion: bool,
     /// Explicit focus requested by the owning form when a setting is opened for editing.
     pub focus: Option<usize>,
     /// Per-option availability; omitted entries are enabled. Unavailable options stay faded.
@@ -47,6 +51,9 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
         super::settings_search::reveal(ui);
     }
     let Segments {
+        page_switch,
+        counts,
+        reduced_motion,
         focus,
         enabled,
         disabled,
@@ -70,22 +77,13 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
     // Callers pass English source labels or text they translated; either way a segment shows it
     // translated, as the dropdown it falls back to does. Handles keep the option as passed.
     let shown: Vec<&str> = options.iter().map(|option| solidcraft_ui_text::tr_label(option)).collect();
-    let natural: Vec<_> = shown
-        .iter()
-        .enumerate()
-        .map(|(index, option)| {
-            ui.painter().layout_no_wrap((*option).to_owned(), crate::type_face::semibold(font_size), t.form_ink).size().x.ceil()
-                + t.space_16
-                + if icons.get(index).is_some() { t.space_14 + t.space_6 + t.space_4 } else { 0.0 }
-        })
-        .collect();
-    let total = natural.iter().sum::<f32>();
+    let natural = segment_widths(ui, &shown, icons, counts, page_switch, font_size);
+    let total = natural.iter().sum::<f32>() + if page_switch { t.space_2 * 2.0 } else { 0.0 };
     let segment_width = dimension(ui.available_width()) / options.len().max(1) as f32;
     let widest = shown
         .iter()
         .map(|option| ui.painter().layout_no_wrap((*option).to_owned(), crate::type_face::semibold(font_size), t.form_ink).size().x)
         .fold(0.0, f32::max);
-    // Judged on the whole row, which is what a scrollbar narrows, not on one segment.
     let need = if intrinsic { total } else { (widest + 2.0 * t.space_8) * options.len() as f32 };
     if enabled.is_empty()
         && disabled.is_empty()
@@ -100,10 +98,12 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
         return *selected != before;
     }
     let desired = if intrinsic { total.min(dimension(ui.available_width())) } else { dimension(ui.available_width()) };
-    let (rect, _) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         vec2(
             desired,
-            if catalog {
+            if page_switch {
+                t.control_height + t.space_2
+            } else if catalog {
                 t.space_16
             } else if small {
                 t.control_height - t.space_4
@@ -115,19 +115,35 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
         ),
         egui::Sense::hover(),
     );
-    ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
+    if page_switch {
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TabList, ui.is_enabled(), label(ui)));
+    }
+    if page_switch {
+        ui.painter().rect(rect, t.radius_lg, t.pref_well, t.container_border(t.dialog_rule), egui::StrokeKind::Inside);
+    } else {
+        ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
+    }
+    let highlight = page_switch.then(|| ui.painter().add(egui::Shape::Noop));
+    let mut page_rects = Vec::new();
     let equal_width = rect.width() / options.len().max(1) as f32;
     let mut clicked = false;
-    let mut x = rect.left();
+    let inset = if page_switch { t.space_2 } else { 0.0 };
+    let mut x = rect.left() + inset;
+    let usable = (rect.width() - inset * 2.0).max(0.0);
+    let natural_total = natural.iter().sum::<f32>();
     for (index, (option, text)) in options.iter().zip(&shown).enumerate() {
-        let width =
-            if (intrinsic || proportional) && total > 0.0 { natural.get(index).copied().unwrap_or(0.0) * rect.width() / total } else { equal_width };
+        let width = if (intrinsic || proportional) && natural_total > 0.0 {
+            natural.get(index).copied().unwrap_or(0.0) * usable / natural_total
+        } else {
+            equal_width
+        };
         let segment = egui::Rect::from_min_size(egui::pos2(x, rect.top()), vec2(width, rect.height()));
+        if page_switch {
+            page_rects.push(segment);
+        }
         x += width;
         let reason = disabled_reasons.get(index).copied().flatten().or_else(|| disabled.get(index).copied().flatten());
         let id = ui.make_persistent_id(("segment", index));
-        // The row is already allocated: a child scopes disabled painting and interaction
-        // without advancing the parent's cursor once per segment.
         let mut segment_ui = ui.new_child(egui::UiBuilder::new().max_rect(segment));
         if !enabled.get(index).copied().unwrap_or(true) || reason.is_some() {
             segment_ui.disable();
@@ -145,7 +161,7 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
             ne: if index + 1 == options.len() { t.control_radius } else { 0 },
             se: if index + 1 == options.len() { t.control_radius } else { 0 },
         };
-        if on || response.hovered() {
+        if !page_switch && (on || response.hovered()) {
             ui.painter().rect_filled(
                 segment,
                 rounding,
@@ -160,26 +176,34 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
                 },
             );
         }
-        if index > 0 {
+        if !page_switch && index > 0 {
             ui.painter().vline(segment.left(), segment.y_range(), t.control_border_stroke(t.control_border));
         }
         let font = if on { crate::type_face::semibold(font_size) } else { egui::FontId::proportional(font_size) };
         let galley = ui.painter().layout_no_wrap((*text).to_string(), font.clone(), t.form_ink);
         let icon_width = if icons.get(index).is_some() { t.space_14 + t.space_6 } else { 0.0 };
+        let count_width =
+            if page_switch { counts.get(index).map_or(0.0, |count| super::page_switch::badge_width(ui, *count) + t.space_6) } else { 0.0 };
         let text_rect = egui::Rect::from_min_size(
-            egui::pos2(segment.center().x - (galley.size().x + icon_width) / 2.0 + icon_width, segment.top()),
+            egui::pos2(segment.center().x - (galley.size().x + icon_width + count_width) / 2.0 + icon_width, segment.top()),
             vec2(galley.size().x, segment.height()),
         );
         if let Some(icon) = icons.get(index) {
-            let icon_rect = egui::Rect::from_center_size(
-                egui::pos2(text_rect.left() - t.space_6 - t.space_14 / 2.0, segment.center().y),
-                vec2(t.space_14, t.space_14),
+            crate::icons::paint_ink(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    egui::pos2(text_rect.left() - t.space_6 - t.space_14 / 2.0, segment.center().y),
+                    vec2(t.space_14, t.space_14),
+                ),
+                icon,
+                if on && workspace_accent { accent.ink } else { t.form_ink },
             );
-            crate::icons::paint_ink(ui.painter(), icon_rect, icon, if on && workspace_accent { accent.ink } else { t.form_ink });
         }
         let text_rect = if compact { text_rect.intersect(segment.shrink2(vec2(t.space_4, 0.0))) } else { text_rect };
         let ink = if !segment_enabled {
             t.form_dim
+        } else if page_switch {
+            if on { t.form_ink } else { t.form_dim }
         } else if on && primary {
             t.on_accent
         } else if on && workspace_accent {
@@ -192,9 +216,28 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
         match glyphs {
             Some(glyph) => glyph(ui.painter(), segment.shrink2(vec2(t.space_4, t.space_2)), index, ink),
             None => paint_text(ui, text_rect, text, font, ink, false),
+        };
+        if page_switch && let Some(count) = counts.get(index) {
+            super::page_switch::badge(
+                ui,
+                egui::Rect::from_min_size(
+                    egui::pos2(text_rect.right() + t.space_6, segment.top()),
+                    vec2((count_width - t.space_6).max(0.0), segment.height()),
+                ),
+                *count,
+                on,
+            );
         }
-        t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, segment_enabled, on, *text));
+        if !page_switch {
+            t.button_bevel_with_radius(ui, &response, on, rounding);
+        } else if response.has_focus() {
+            ui.painter().rect_stroke(segment.shrink(t.space_2), t.control_radius, t.control_border_stroke(t.form_primary), egui::StrokeKind::Inside);
+        }
+        let accessible =
+            if page_switch { counts.get(index).map(|count| format!("{text} {count}")).unwrap_or_else(|| text.to_string()) } else { text.to_string() };
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(if page_switch { egui::Role::Tab } else { egui::Role::Button }, segment_enabled, on, accessible.as_str())
+        });
         solidcraft_ui_registry::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
         if let Some(target) = targets.get(index) {
             let visible = segment.intersect(ui.clip_rect());
@@ -209,7 +252,12 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
             clicked = true;
         }
     }
-    if t.borders.bevel.is_none() {
+    if let Some(slot) = highlight
+        && let Some(target) = page_rects.get(*selected)
+    {
+        ui.painter().set(slot, super::page_switch::highlight(ui, rect, *target, reduced_motion));
+    }
+    if !page_switch && t.borders.bevel.is_none() {
         ui.painter().rect_stroke(
             rect,
             t.control_radius,
@@ -221,6 +269,19 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
     clicked
 }
 
+pub(super) fn segment_widths(ui: &Ui, shown: &[&str], icons: &[&str], counts: &[usize], page: bool, font_size: f32) -> Vec<f32> {
+    let t = Tokens::get();
+    shown
+        .iter()
+        .enumerate()
+        .map(|(index, option)| {
+            ui.painter().layout_no_wrap((*option).to_owned(), crate::type_face::semibold(font_size), t.form_ink).size().x.ceil()
+                + if page { t.space_24 } else { t.space_16 }
+                + if icons.get(index).is_some() { t.space_14 + t.space_6 + t.space_4 } else { 0.0 }
+                + if page { counts.get(index).map_or(0.0, |count| super::page_switch::badge_width(ui, *count) + t.space_6) } else { 0.0 }
+        })
+        .collect()
+}
 /// One segment of [`segmented_icons`]: a stable key (also the accessible fallback text), the icon
 /// master to draw and the hover text. The icon's colours come from the palette (its roles and the
 /// accent assigned to its id in `palette.toml`), not from the caller.
@@ -243,16 +304,18 @@ pub fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment
         ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
     }
     let width = rect.width() / options.len().max(1) as f32;
+    let rtl = ui.layout().main_dir() == egui::Direction::RightToLeft;
     let mut clicked = false;
     for (index, option) in options.iter().enumerate() {
-        let segment = egui::Rect::from_min_size(rect.min + vec2(index as f32 * width, 0.0), vec2(width, rect.height()));
+        let column = if rtl { options.len() - 1 - index } else { index };
+        let segment = egui::Rect::from_min_size(rect.min + vec2(column as f32 * width, 0.0), vec2(width, rect.height()));
         let response = ui.interact(segment, ui.make_persistent_id(("icon_segment", index)), egui::Sense::click());
         let on = states.get(index).copied().unwrap_or(*selected == index);
         let rounding = egui::CornerRadius {
-            nw: if index == 0 { t.control_radius } else { 0 },
-            sw: if index == 0 { t.control_radius } else { 0 },
-            ne: if index + 1 == options.len() { t.control_radius } else { 0 },
-            se: if index + 1 == options.len() { t.control_radius } else { 0 },
+            nw: if column == 0 { t.control_radius } else { 0 },
+            sw: if column == 0 { t.control_radius } else { 0 },
+            ne: if column + 1 == options.len() { t.control_radius } else { 0 },
+            se: if column + 1 == options.len() { t.control_radius } else { 0 },
         };
         if on || response.hovered() {
             ui.painter().rect_filled(
@@ -267,7 +330,7 @@ pub fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment
                 },
             );
         }
-        if index > 0 && !catalog {
+        if column > 0 && !catalog {
             ui.painter().vline(segment.left(), segment.y_range(), t.control_border_stroke(t.control_border));
         }
         // A square icon area inside the segment: dash gaps and dots need the room to read apart.
@@ -420,7 +483,7 @@ pub fn tool_choices<'a>(ui: &mut Ui, label: &str, current: &str, choices: &[Tool
                 egui::Button::new("")
                     .fill(fill)
                     .stroke(if on { egui::Stroke::new(t.sketch_mode_border, t.sketch_accent) } else { t.control_border_stroke(t.control_border) })
-                    .corner_radius(t.sketch_mode_radius)
+                    .corner_radius(t.control_radius)
                     .min_size(vec2(t.sketch_mode_size, t.sketch_mode_size)),
             );
             crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_6), choice.icon, f32::from(t.icon.a()) / 255.0);
@@ -451,6 +514,62 @@ pub fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bool, ico
     }
     solidcraft_ui_registry::publish_rect(&format!("dialog:{row}:{label}"), response.rect);
     response
+}
+
+/// One button of [`icon_choices`]: a registry handle, the icon to draw and its hover text.
+pub struct IconChoice<'a> {
+    pub key: &'a str,
+    pub icon: &'a str,
+    pub tip: &'a str,
+}
+
+/// A left-aligned row of square icon buttons; `on` says which are selected (one for a choice,
+/// any for toggles). A selected button has the surface's accent fill, and its icon is drawn for the
+/// ink that reads on that fill (the lighter dark-surface artwork under a light ink), so it follows
+/// the theme, the accent and the colour vision. `None`, drawing nothing, when the row is wider than
+/// the space left; else the row's response (changed on a click) and the clicked button.
+/// Buttons are a form row high, so the row fits a dialog row. Tokens: `control_height/radius, space_4/6, control_fill/border, hover, accent, on_accent, icon`.
+pub fn icon_choices(ui: &mut Ui, options: &[IconChoice<'_>], on: &[bool]) -> Option<(egui::Response, Option<usize>)> {
+    let t = Tokens::get();
+    let side = t.control_height;
+    let width = side * options.len() as f32 + t.space_4 * options.len().saturating_sub(1) as f32;
+    if options.is_empty() || width > ui.available_width() {
+        return None;
+    }
+    let (rect, mut row) = ui.allocate_exact_size(vec2(width, side), egui::Sense::hover());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
+    let ink = accent.on_fill(&t);
+    let light_ink = u16::from(ink.r()) + u16::from(ink.g()) + u16::from(ink.b()) > 3 * 128;
+    let rtl = ui.layout().main_dir() == egui::Direction::RightToLeft;
+    let mut clicked = None;
+    for (index, option) in options.iter().enumerate() {
+        let column = if rtl { options.len() - 1 - index } else { index };
+        let button = egui::Rect::from_min_size(rect.min + vec2(column as f32 * (side + t.space_4), 0.0), vec2(side, side));
+        let response = ui.interact(button, ui.make_persistent_id(("icon_choice", option.key)), egui::Sense::click());
+        let selected = on.get(index).copied().unwrap_or(false);
+        let fill = if selected {
+            accent.color
+        } else if response.hovered() {
+            t.hover
+        } else {
+            t.control_fill
+        };
+        ui.painter().rect_filled(button, t.control_radius, fill);
+        if !selected {
+            ui.painter().rect_stroke(button, t.control_radius, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
+        }
+        let opacity = f32::from(t.icon.a()) / 255.0;
+        let dark = selected.then_some(light_ink);
+        crate::icons::paint_on(ui.painter(), button.shrink(t.space_6), option.icon, dark, opacity);
+        t.button_bevel(ui, &response, selected);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, option.tip));
+        solidcraft_ui_registry::publish_target(option.key, button);
+        if response.backing_on_hover_text(option.tip).clicked() {
+            clicked = Some(index);
+            row.mark_changed();
+        }
+    }
+    Some((row, clicked))
 }
 
 #[cfg(test)]
@@ -520,10 +639,12 @@ pub struct SwatchPicker<'a> {
     pub textures: &'a [Option<egui::load::SizedTexture>],
     pub choose: &'a str,
     pub search_hint: &'a str,
+    /// Show a larger picture of the highlighted (else the chosen) option above the list.
+    pub preview: bool,
 }
 
 pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options: SwatchPicker<'_>) -> egui::Response {
-    let SwatchPicker { titles, textures, choose, search_hint } = options;
+    let SwatchPicker { titles, textures, choose, search_hint, preview } = options;
     let t = Tokens::get();
     let current = chosen.and_then(|index| titles.get(index)).map_or(choose, String::as_str);
     let grid = !titles.is_empty() && titles.len() == textures.len() && textures.iter().all(Option::is_some);
@@ -538,6 +659,21 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
             solidcraft_ui_registry::publish_target(&format!("swatch:{id}:search"), response.rect);
             ui.data_mut(|data| data.insert_temp(query_id, query.clone()));
         }
+        let hover_id = ui.make_persistent_id(("swatch_hover", id));
+        if preview {
+            // The highlighted option of the last frame, else the chosen one. The area is reserved
+            // whether or not a picture shows, so the tiles never move under the pointer.
+            let shown = ui.data(|data| data.get_temp::<usize>(hover_id)).or(*chosen);
+            let side = t.control_height * 6.0;
+            let (area, _) = ui.allocate_exact_size(vec2(ui.available_width().max(side), side), egui::Sense::hover());
+            if let Some(texture) = shown.and_then(|index| textures.get(index).copied().flatten()) {
+                let scale = (side / texture.size.x).min(side / texture.size.y);
+                let picture = egui::Rect::from_center_size(area.center(), texture.size * scale);
+                egui::Image::new(texture).paint_at(ui, picture);
+            }
+            solidcraft_ui_registry::publish_rect(&format!("swatch:{id}:preview"), area);
+        }
+        let mut hovered = None;
         let query = query.to_lowercase();
         let visible: Vec<_> = titles.iter().enumerate().filter(|(_, title)| !grid || title.to_lowercase().contains(&query)).collect();
         let side = if grid { t.control_height * 2.0 } else { t.control_height };
@@ -550,6 +686,9 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
                     let size = if grid { vec2(width, side + t.control_height + t.space_8) } else { vec2(ui.available_width(), side + t.space_8) };
                     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
                     let selected = *chosen == Some(*index);
+                    if response.hovered() {
+                        hovered = Some(*index);
+                    }
                     let fill = if selected {
                         t.selected_bg
                     } else if response.hovered() {
@@ -585,6 +724,16 @@ pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options:
                         *chosen = Some(*index);
                         ui.close();
                     }
+                }
+            });
+        }
+        if preview {
+            ui.data_mut(|data| match hovered {
+                Some(index) => {
+                    data.insert_temp(hover_id, index);
+                }
+                None => {
+                    data.remove::<usize>(hover_id);
                 }
             });
         }

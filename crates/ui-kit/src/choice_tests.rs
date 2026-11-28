@@ -17,7 +17,7 @@ fn swatch_picker_filters_titles_and_selects_original_option_indices() {
                 ui,
                 "finish",
                 &mut chosen,
-                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search finishes" },
+                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search finishes", preview: false },
             )
         });
     };
@@ -38,6 +38,44 @@ fn swatch_picker_filters_titles_and_selects_original_option_indices() {
     frame(&ctx, pointer(oak, true), &mut draw);
     frame(&ctx, pointer(oak, false), &mut draw);
     assert_eq!(chosen, Some(2));
+}
+
+/// The preview area is reserved from the first frame: highlighting an option, with nothing chosen,
+/// must not move the tiles away from under the pointer.
+#[test]
+fn swatch_picker_preview_keeps_the_tiles_in_place_when_an_option_is_highlighted() {
+    let ctx = context();
+    let texture = ctx.load_texture("synthetic", egui::ColorImage::filled([2, 2], egui::Color32::from_rgb(20, 90, 160)), Default::default());
+    let titles = vec!["Elbow".into(), "Tee".into(), "Cap".into()];
+    let textures = vec![Some(egui::load::SizedTexture::new(texture.id(), texture.size_vec2())); 3];
+    let mut chosen = None;
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Part", |ui| {
+            swatch_picker(
+                ui,
+                "part",
+                &mut chosen,
+                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search parts", preview: true },
+            )
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let trigger = registry::handle_at("dialog:Part").unwrap();
+    frame(&ctx, pointer(trigger, true), &mut draw);
+    frame(&ctx, pointer(trigger, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    let tile = || registry::rect_of("swatch:part:tile:0").unwrap();
+    let before = tile();
+    let preview = registry::rect_of("swatch:part:preview").expect("the preview area is reserved with nothing highlighted");
+    let over = registry::handle_at("swatch:part:option:2").unwrap();
+    for _ in 0..4 {
+        frame(&ctx, vec![egui::Event::PointerMoved(over)], &mut draw);
+        assert_eq!(tile(), before, "tiles stay put as the highlighted option's picture appears");
+        assert_eq!(registry::rect_of("swatch:part:preview"), Some(preview));
+    }
+    frame(&ctx, vec![egui::Event::PointerMoved(egui::pos2(-50.0, -50.0))], &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(tile(), before, "tiles stay put when the highlight goes away");
 }
 
 #[test]
@@ -444,4 +482,31 @@ fn a_checkbox_grid_gives_up_columns_for_labels_that_do_not_fit() {
     assert_eq!(fits(&[50.0, 120.0, 60.0], 300.0, 3), 2);
     assert_eq!(fits(&[50.0, 120.0, 60.0], 300.0, 1), 1, "a single column stays one");
     assert_eq!(fits(&[], 300.0, 2), 2, "no labels, no change");
+}
+
+/// A click reports its button and marks the row changed; a row wider than the space draws nothing,
+/// so the caller can draw its dropdown instead.
+#[test]
+fn icon_choices_report_the_clicked_button_and_refuse_a_row_that_does_not_fit() {
+    let ctx = context();
+    let keys = ["icons:a", "icons:b", "icons:c"];
+    let options: Vec<_> = keys.iter().map(|key| IconChoice { key, icon: "normal", tip: key }).collect();
+    let mut last = None;
+    let mut draw = |ui: &mut Ui| {
+        if let Some((response, clicked)) = icon_choices(ui, &options, &[true, false, false])
+            && clicked.is_some()
+        {
+            last = Some((clicked, response.changed()));
+        }
+    };
+    frame(&ctx, vec![], &mut draw);
+    let b = registry::handle_at("icons:b").unwrap();
+    frame(&ctx, pointer(b, true), &mut draw);
+    frame(&ctx, pointer(b, false), &mut draw);
+    assert_eq!(last, Some((Some(1), true)));
+
+    let many: Vec<_> = (0..20).map(|_| IconChoice { key: "icons:many", icon: "normal", tip: "Many" }).collect();
+    let mut drawn = true;
+    frame(&ctx, vec![], |ui: &mut Ui| drawn = icon_choices(ui, &many, &[]).is_some());
+    assert!(!drawn, "twenty buttons do not fit a dialog row");
 }

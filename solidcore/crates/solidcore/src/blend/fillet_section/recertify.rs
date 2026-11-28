@@ -40,11 +40,11 @@
 
 use core::cmp::Ordering;
 
-use super::certificate::{gn_certify_span, gn_certify_span_reusing, GnLaw, NurbsCurve, SpanReuse};
+use super::certificate::{gn_certify_span, gn_certify_span_reusing, NurbsCurve, SpanReuse};
 use super::continuation::{growth, section_degree, section_weight_range};
 use super::section::{
-    certificate_faces, crosses_knot, inner_knots, net_of_spans, param, varying, NetForm,
-    StationSystem, GN_THUMBWEIGHT_EQUAL_AREA,
+    certificate_faces, crosses_knot, inner_knots, net_of_spans, param, section_law, varying,
+    NetForm, StationSystem, GN_THUMBWEIGHT_EQUAL_AREA,
 };
 use super::series::Trunc;
 use super::station::{as_b_spline, GnStation, Nurbs, STATION_STEP};
@@ -642,10 +642,7 @@ fn recertify_in_frame(
     let any_defs = defs.faces.iter().any(Option::is_some);
     let face_n = [&n0, &n1];
     let leader_n = NurbsCurve::of(&d.leader)?;
-    let law = match &d.law {
-        Some(c) => Some(GnLaw::of(c)?),
-        None => None,
-    };
+    let law = section_law(d.law.as_ref(), d.chamfer)?;
 
     // the stations: the seeds' knots
     let [seed0, seed1] = &d.seeds;
@@ -656,16 +653,16 @@ fn recertify_in_frame(
             "the seeds are not on one set of stations",
         ));
     }
-    let r = match &law {
-        Some(l) => {
+    let r = match &d.law {
+        Some(curve) => {
             let first = sigma.first().copied().unwrap_or(f64::NAN);
-            let r0 = l.curve.evaluate_point(first)?.x;
+            let r0 = curve.evaluate_point(first)?.x;
             [r0, r0]
         }
         None => d.offsets,
     };
     let tr = Trunc::new(
-        if law.is_some() { 2 } else { 1 },
+        if d.law.is_some() { 2 } else { 1 },
         if n >= 2 { n } else { 0 },
     )?;
     let system = StationSystem {
@@ -1159,10 +1156,7 @@ fn spans_of_definition(
     let ([n0, n1], mut defs) = certificate_faces(k, faces, n, d.law.is_some())?;
     let any_defs = defs.faces.iter().any(Option::is_some);
     let leader_n = NurbsCurve::of(&d.leader)?;
-    let law = match &d.law {
-        Some(c) => Some(GnLaw::of(c)?),
-        None => None,
-    };
+    let law = section_law(d.law.as_ref(), d.chamfer)?;
     let [seed0, seed1] = &d.seeds;
     let sigma = seed0.knots(None)?.0;
     if seed1.knots(None)?.0 != sigma || sigma.len() < 2 {
@@ -1171,16 +1165,16 @@ fn spans_of_definition(
             "the seeds are not on one set of stations",
         ));
     }
-    let r = match &law {
-        Some(l) => {
+    let r = match &d.law {
+        Some(curve) => {
             let first = sigma.first().copied().unwrap_or(f64::NAN);
-            let r0 = l.curve.evaluate_point(first)?.x;
+            let r0 = curve.evaluate_point(first)?.x;
             [r0, r0]
         }
         None => d.offsets,
     };
     let tr = Trunc::new(
-        if law.is_some() { 2 } else { 1 },
+        if d.law.is_some() { 2 } else { 1 },
         if n >= 2 { n } else { 0 },
     )?;
     let system = StationSystem {

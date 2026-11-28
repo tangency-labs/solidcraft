@@ -7,6 +7,7 @@
 //! submodule.
 
 pub mod boundary_moves;
+pub(crate) mod clamped_sliver;
 pub(crate) mod cylinder_section;
 pub mod knot_lines;
 pub mod p1;

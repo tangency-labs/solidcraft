@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use serde_json::{Value, json};
 use solidcraft_doc::{Document, FeatureKind, ProfileSel};
-use solidcraft_geom::MeshGeom;
+use solidcraft_geom::{MeshGeom, Vec2Geom};
 
 use crate::Session;
 
@@ -35,6 +35,40 @@ fn healthy(session: &Session) {
 }
 
 #[test]
+fn a_pick_of_an_offset_loop_and_a_drawn_loop_saves_sides_for_the_drawn_loop() {
+    // The region inside the offset and the band between it and the rectangle, picked together:
+    // the offset's loop is saved by its roles alone, the rectangle's loop also by its sides, so
+    // it still names its region when a change makes a twin of it (#23291).
+    let (mut session, sketch, _, association) = rounded_offset(2.);
+    let count = session.model.state().sketch(sketch).unwrap().profiles.len();
+    assert_eq!(count, 2);
+    let extrusion =
+        run(&mut session, "solid.extrude", json!({"sketch":sketch,"profiles":[0, 1],"distance":2,"name":"Both"}))["feature"].as_u64().unwrap();
+    healthy(&session);
+    let Some(FeatureKind::Extrude { profiles: ProfileSel::Curves { loops, sides }, .. }) = session.doc.feature(extrusion).map(|f| &f.kind) else {
+        panic!("saved as {:?}", session.doc.feature(extrusion).map(|f| &f.kind));
+    };
+    assert_eq!((loops.len(), sides.len()), (2, 2), "one list of sides per loop: {sides:?}");
+    assert_eq!(sides.iter().filter(|sided| sided.is_empty()).count(), 1, "the offset loop has no sides: {sides:?}");
+    let drawn = sides.iter().find(|sided| !sided.is_empty()).cloned().unwrap();
+    let saved = session.doc.to_json();
+    let reopened = Session::new(Document::from_json(&saved).unwrap());
+    healthy(&reopened);
+    assert_eq!(reopened.doc.to_json(), saved);
+    // Breaking the offset renames the curves of its loop: that loop stays without sides, and the
+    // rectangle's loop keeps its own.
+    run(&mut session, "sketch.edit", json!({"sketch":sketch,"restore_marker":false}));
+    run(&mut session, "sketch.offset.break", json!({"curve":association}));
+    run(&mut session, "sketch.finish", json!({}));
+    healthy(&session);
+    let Some(FeatureKind::Extrude { profiles: ProfileSel::Curves { sides, .. }, .. }) = session.doc.feature(extrusion).map(|f| &f.kind) else {
+        panic!("saved as {:?}", session.doc.feature(extrusion).map(|f| &f.kind));
+    };
+    assert_eq!(sides.len(), 2, "{sides:?}");
+    assert_eq!(sides.iter().filter(|sided| !sided.is_empty()).collect::<Vec<_>>(), vec![&drawn]);
+}
+
+#[test]
 fn legacy_offset_capture_persists_reserved_curves_without_a_transient_association() {
     let (session, sketch, radius, _) = rounded_offset(2.);
     let mut document = (*session.doc).clone();
@@ -48,12 +82,13 @@ fn legacy_offset_capture_persists_reserved_curves_without_a_transient_associatio
     let state = session.model.state();
     let solved = state.sketch(sketch).unwrap();
     assert!(solved.sketch.offsets[0].topology.is_some(), "legacy upgrade belongs only to the evaluated copy");
-    let index = solidcraft_doc::profile_selection_indices(solved, &ProfileSel::Curves { loops: vec![reserved.clone()] }).unwrap()[0];
+    let index =
+        solidcraft_doc::profile_selection_indices(solved, &ProfileSel::Curves { loops: vec![reserved.clone()], sides: Vec::new() }).unwrap()[0];
     let extrusion = run(&mut session, "solid.extrude", json!({"sketch":sketch,"profiles":[index],"distance":2,"name":"Legacy inner"}))["feature"]
         .as_u64()
         .unwrap();
     assert!(
-        matches!(&session.doc.feature(extrusion).unwrap().kind,FeatureKind::Extrude {profiles:ProfileSel::Curves {loops},..} if loops == &vec![reserved.clone()])
+        matches!(&session.doc.feature(extrusion).unwrap().kind,FeatureKind::Extrude {profiles:ProfileSel::Curves {loops,..},..} if loops == &vec![reserved.clone()])
     );
     assert!(session.doc.sketch(sketch).unwrap().offsets[0].topology.is_none());
     run(&mut session, "parameters.change", json!({"name":radius,"expression":"1 mm"}));
@@ -134,4 +169,107 @@ fn pasted_offset_boundary_has_scoped_identity_and_independent_dimensions_and_mat
     let bounds = state.body(&copied_body).unwrap().mesh().bounds();
     assert!((bounds.min.x - (100. - 37.6)).abs() < 1e-6);
     assert!((bounds.max.x - (100. + 37.6)).abs() < 1e-6);
+}
+
+/// A design saved by the released SolidCraft 0.46.2, before picks that close a shape offset as one
+/// joined outline (#14788): `sketch-offsets-0.46.2.sc`, with the face and edge names 0.46.2 gave
+/// its bodies in `sketch-offsets-0.46.2.names.txt`. Sketch Arch holds a 20 × 20 mm rectangle and an
+/// arc across its top line, offset inwards by `gap` with the arc and the three lines below it
+/// picked; Sides holds the same arch, offset with its left and top lines picked; Box holds a plain
+/// rectangle, offset with one line picked. Frame (the outer ring of Arch) has a round on the corner
+/// between two of its offset lines, stored by name; Cap is bounded by the offset arc; Ring is Box's.
+#[test]
+fn offsets_of_a_design_saved_before_closed_picks_joined_replay_as_saved() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures");
+    let path = dir.join("sketch-offsets-0.46.2.sc");
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let mut session = Session::default();
+    run(&mut session, "doc.open", json!({"path": path.to_string_lossy()}));
+    healthy(&session);
+
+    // Every sketch solves to what the file holds: each curve and point where it was, each offset
+    // from the curves it was made from and with the curves it made, none joined to another.
+    let replays_as_saved = |session: &Session| {
+        let state = session.model.state();
+        let mut chains = Vec::new();
+        for feature in saved["features"].as_array().unwrap().iter().filter(|f| f["type"] == "sketch") {
+            let name = feature["name"].as_str().unwrap();
+            let mut was: solidcraft_sketch::Sketch = serde_json::from_value(feature["sketch"].clone()).unwrap();
+            let mut now = state.sketch(feature["id"].as_u64().unwrap()).unwrap().sketch.clone();
+            assert_eq!(now.points.len(), was.points.len(), "{name}");
+            for (p, q) in now.points.iter_mut().zip(&mut was.points) {
+                assert!(p.pos.dist(q.pos) < 1e-9, "{name}: {} at {:?}, saved at {:?}", p.id, p.pos, q.pos);
+                p.pos = q.pos;
+            }
+            assert_eq!(now, was, "{name}");
+            chains.push((name.to_string(), now.offsets.iter().map(|o| (o.sources.len(), o.closed)).collect::<Vec<_>>()));
+        }
+        chains
+    };
+    let unjoined = vec![
+        ("Arch".to_string(), vec![(1, false), (3, false)]),
+        ("Sides".to_string(), vec![(3, false), (1, false)]),
+        ("Box".to_string(), vec![(4, true)]),
+    ];
+    assert_eq!(replays_as_saved(&session), unjoined);
+
+    // Every face and edge has the name it had, so the stored round finds its edge.
+    let names = |session: &Session| {
+        let state = session.model.state();
+        let mut names: Vec<String> = state
+            .bodies
+            .iter()
+            .flat_map(|b| {
+                let faces = solidcraft_doc::naming::face_names(b).iter().map(|n| format!("{} face {n}", b.name)).collect::<Vec<_>>();
+                let edges = solidcraft_doc::naming::edge_names(b).iter().map(|n| format!("{} edge {n}", b.name)).collect::<Vec<_>>();
+                [faces, edges].concat()
+            })
+            .collect();
+        names.sort();
+        names
+    };
+    let recorded = std::fs::read_to_string(dir.join("sketch-offsets-0.46.2.names.txt")).unwrap();
+    let mut recorded: Vec<String> = recorded.lines().map(str::to_string).collect();
+    recorded.sort();
+    assert_eq!(names(&session), recorded);
+
+    // The bodies are the ones the saved offsets bound, at the saved distance and at another: the
+    // offsets follow `gap` without being made again. All are 10 mm high. Frame is the rectangle
+    // less the 20 - 2 gap wide, 20 - gap high space between the offset lines, plus what the 0.5 mm
+    // round adds in a corner. Cap is the part above the top line of the circle of the arc's centre
+    // and radius less gap. Ring is the rectangle less the one offset inwards all round.
+    let solids = |session: &Session, gap: f64| {
+        let radius = (10f64.powi(2) + 6.2f64.powi(2)) / (2. * 6.2);
+        let below = radius - 6.2;
+        let r = radius - gap;
+        let frame = 400. - (20. - 2. * gap) * (20. - gap) + (1. - std::f64::consts::FRAC_PI_4) * 0.25;
+        let cap = r * r * (below / r).acos() - below * (r * r - below * below).sqrt();
+        let ring = 400. - (20. - 2. * gap).powi(2);
+        for (name, area) in [("Frame", frame), ("Cap", cap), ("Ring", ring)] {
+            let body = session.model.state().bodies.iter().find(|b| b.name == name).unwrap().clone();
+            let volume = solidcraft_kernel::measure(&body.body).unwrap().volume;
+            assert!((volume - 10. * area).abs() < 1e-6, "{name}: {volume}, want {}", 10. * area);
+        }
+    };
+    solids(&session, 1.);
+    run(&mut session, "parameters.change", json!({"name": "gap", "expression": "2 mm"}));
+    healthy(&session);
+    solids(&session, 2.);
+    run(&mut session, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
+    healthy(&session);
+    assert_eq!(replays_as_saved(&session), unjoined);
+    assert_eq!(names(&session), recorded);
+
+    // Saved and opened again, or a sketch opened for editing and finished, it is the same.
+    let mut reopened = Session::new(Document::from_json(&session.doc.to_json()).unwrap());
+    healthy(&reopened);
+    assert_eq!(replays_as_saved(&reopened), unjoined);
+    assert_eq!(names(&reopened), recorded);
+    for sketch in ["Arch", "Sides", "Box"] {
+        run(&mut reopened, "sketch.edit", json!({"sketch": sketch}));
+        run(&mut reopened, "sketch.finish", json!({}));
+    }
+    healthy(&reopened);
+    assert_eq!(replays_as_saved(&reopened), unjoined);
+    assert_eq!(names(&reopened), recorded);
 }

@@ -291,48 +291,25 @@ impl FilletLaw {
     }
 
     /// `SmVariableRadiusFS::GetFilletRadius`: the radius [`FilletLaw::evaluate`] gives at
-    /// `parameter`. Upstream's `SER` inside that `double` function returns a failed
-    /// evaluation's `SmStatus` as the radius, and so does this, except for the errors that
-    /// are not statuses: an unported or cancelled callee, and a law continued past its
-    /// curve to a radius the solver cannot use, which stays the refusal naming its station
-    /// (#2706). A corner's law interval can be narrowed to its setback
+    /// `parameter`. A corner's law interval can be narrowed to its setback
     /// (`FilletCorner::adjust_vertex_law_intervals`), so a station of the edge itself can
     /// be past the law's curve.
     ///
+    /// Deviation: upstream's `SER` inside that `double` function returns a failed
+    /// evaluation's `SmStatus` (1001, 1007) as the radius; this returns the error instead
+    /// (#21908), as the solvers' other law evaluations do.
+    ///
     /// # Errors
-    /// [`SolidError::Unported`], [`SolidError::Cancelled`] and
-    /// [`SolidError::RoundRefused`] ([`RoundRefusal::LawRadiusUnusable`]) from
-    /// [`FilletLaw::evaluate`].
+    /// Those of [`FilletLaw::evaluate`], among them [`RoundRefusal::LawRadiusUnusable`]
+    /// for a law continued past its curve to a radius the solver cannot use (#2706).
     pub fn fillet_radius(
         &mut self,
         parameter: f64,
         interval: &Extent1d,
         reverse: bool,
     ) -> Result<f64> {
-        match self.evaluate(parameter, interval, reverse) {
-            Ok([radius, _, _]) => Ok(radius),
-            Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(
-                e @ SolidError::RoundRefused {
-                    refusal: RoundRefusal::LawRadiusUnusable { .. },
-                    ..
-                },
-            ) => Err(e),
-            Err(e) => Ok(f64::from(status_of(&e))),
-        }
-    }
-}
-
-/// The `SmStatus` upstream's `SER` returns for a failed callee.
-fn status_of(e: &SolidError) -> i32 {
-    if let Some(code) = e.upstream_status() {
-        return code;
-    }
-    match e {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            crate::error::SM_ERR_INVALID_INPUT
-        }
-        _ => crate::error::SM_ERR,
+        let [radius, _, _] = self.evaluate(parameter, interval, reverse)?;
+        Ok(radius)
     }
 }
 
@@ -828,12 +805,15 @@ pub struct ExecutiveObjects<O> {
     pub edge_attribute: O,
 }
 
+/// The least radius or chamfer width [`is_radius_supported`] takes, in B-rep tolerances.
+pub(crate) const SUPPORTED_TOLERANCES: f64 = 8.0;
+
 /// `SmFilletExecutive::IsRadiusSupported`: `false` for a radius or chamfer width below
-/// 8 times the B-rep tolerance `brep_tol` (below that, some fillets come out
-/// non-manifold, crash or hang), and for NaN.
+/// [`SUPPORTED_TOLERANCES`] (8) times the B-rep tolerance `brep_tol` (below that, some
+/// fillets come out non-manifold, crash or hang), and for NaN.
 #[must_use]
 pub fn is_radius_supported(radius: f64, brep_tol: f64) -> bool {
-    radius >= 8.0 * brep_tol * (1.0 - EFF_ZERO_SQRT)
+    radius >= SUPPORTED_TOLERANCES * brep_tol * (1.0 - EFF_ZERO_SQRT)
 }
 
 impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
@@ -882,7 +862,6 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             fit_kind: super::p3::FitKind::Radius,
             fit_setback: -1.0,
             rollover_adjusting: false,
-            rolled_beside_band: false,
         }
     }
 
@@ -1292,6 +1271,11 @@ pub enum CornerCreation<O> {
         /// The size of `fit_edge`'s blend that builds and what it sizes, where one does
         /// (the chamfer event's, WR-716); `None` notes 0, no size.
         fit: Option<(f64, crate::blend::fillet_executive::FitKind)>,
+        /// Not the fork's: the refusal as data where the corner names one (a Swept turn's
+        /// side edge the ball cannot pass,
+        /// [`crate::blend::blend_refusal::BlendRefusal::SweptTurnPastSharpEdge`]), which the
+        /// operation's failure carries.
+        refusal: Option<crate::blend::blend_refusal::BlendRefusal>,
     },
 }
 
@@ -1353,7 +1337,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`Self::create_fillet_corners`]; `SM_ERR` after a refused corner.
+    /// Those of [`Self::create_fillet_corners`]; `SM_ERR` after a refused corner: the refusal
+    /// of the corner last noted as data ([`SolidError::BlendRefused`]) where it has one, else
+    /// [`BlendFailure::CornerRefused`].
     pub fn create_fillet_corners_recording_vertex_errors(
         &mut self,
         k: &Kernel,
@@ -1364,6 +1350,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
         const OP: &str = "blend::fillet_executive::p1::FilletExecutive::create_fillet_corners";
         let mut refused = false;
+        // the typed refusal of the corner last noted, whose note the error info keeps
+        let mut typed = None;
         for &vertex in &self.filleted_vertices {
             let pending = match self.vertex_corner_map.get(&vertex) {
                 Some(VertexEntry::SolverEdgeuses(edgeuses)) => edgeuses,
@@ -1384,7 +1372,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     comment,
                     fit_edge,
                     fit,
+                    refusal,
                 } => {
+                    // `note_vertex_error` notes nothing for a null vertex
+                    if vertex.is_some() {
+                        typed = refusal;
+                    }
                     // NoteFitRadius(0.0, edge), or the size that builds where one does
                     if let Some(edge) = fit_edge {
                         let (size, kind) =
@@ -1423,7 +1416,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             info.assign(&self.error);
         }
         if refused {
-            return Err(SolidError::blend(OP, BlendFailure::CornerRefused));
+            return Err(match typed {
+                Some(refusal) => refusal.error(OP, crate::error::SM_ERR),
+                None => SolidError::blend(OP, BlendFailure::CornerRefused),
+            });
         }
         Ok(())
     }
@@ -1496,9 +1492,19 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             edges.push(edge_id);
             shares_edge_curve.push(shares);
         }
-        let mut bs_curves = access.smooth_with_target_mut(&edges, |target| {
+        let (mut bs_curves, turned) = access.smooth_with_target_mut(&edges, |target| {
+            let mut starts = Vec::new();
+            for &edge_id in &edges {
+                starts.push(topo_edge::start_vertex(target, edge_id)?);
+            }
             // fork 873c7c9 passes this on (SER)
             topo_edge::orient_edge_sequence(k, target, &edges)?;
+            // Not upstream: the edges the orientation reversed, whose solvers' laws must run
+            // back along their reversed curves to keep their radius where it was.
+            let mut turned = Vec::new();
+            for (&edge_id, start) in edges.iter().zip(&starts) {
+                turned.push(topo_edge::start_vertex(target, edge_id)? != *start);
+            }
 
             let mut prev_ivl = Extent1d::new();
             let mut curves = Vec::new();
@@ -1558,8 +1564,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 prev_ivl = edge_ivl;
                 prev_edge = Some(edge_id);
             }
-            Ok(curves)
+            Ok((curves, turned))
         })?;
+
+        for (&fs, &reversed) in sequence.iter().zip(&turned) {
+            if reversed {
+                access.smooth_reverse_solver_law(fs)?;
+            }
+        }
 
         for ((&fs, &edge_id), &shares) in sequence.iter().zip(&edges).zip(&shares_edge_curve) {
             if shares {
@@ -1620,15 +1632,7 @@ fn curve_as_bspline(
         CurveKind::Ellipse(e) => return Ok(e.base().clone()),
         CurveKind::Parabola(p) => return Ok(p.base().clone()),
         CurveKind::Hyperbola(h) => return Ok(h.base.clone()),
-        CurveKind::Hermite(_) => "Hermite",
-        CurveKind::Projected(_) => "projected",
-        CurveKind::Iso(_) => "iso-parametric",
-        CurveKind::Offset(_) => "offset",
-        CurveKind::Conic(_) => "conic",
-        CurveKind::CrvInVolume(_) => "curve-in-volume",
-        CurveKind::CrvOnSurf(_) => "curve-on-surface",
-        CurveKind::TangentField(_) => "tangent-field",
-        CurveKind::Composite(_) => "composite",
+        other => other.name(),
     };
     Err(SolidError::blend_at(
         op,
@@ -1743,6 +1747,16 @@ pub trait SmoothSequenceAccess<O: ClassObject + SolutionObject + Ord> {
     /// # Errors
     /// Solver lookup failure.
     fn smooth_set_solver_law_interval(&mut self, solver: O, interval: Extent1d) -> Result<()>;
+    /// Not upstream: flip a variable-radius solver's law orientation (`m_bLawOrientation`)
+    /// after `OrientEdgeSequence` reversed its edge, so the law keeps running along the edge
+    /// as it did: a law that varies along a chain (`FilletLaw::chain_of_radii`) then agrees
+    /// with its neighbours where the edges meet. Other solvers have no law: nothing to do.
+    ///
+    /// # Errors
+    /// Solver lookup failure.
+    fn smooth_reverse_solver_law(&mut self, _solver: O) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ---- RemoveTopoEdges -----------------------------------------------------------------------
@@ -1868,6 +1882,7 @@ pub(crate) fn remove_topo_edges_with_notifications(
                     if let Err(
                         e @ (SolidError::Unported { .. }
                         | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }
                         | SolidError::NotFound { .. }),
@@ -2109,8 +2124,8 @@ mod tests {
     fn the_fillet_radius_keeps_the_refusal_of_a_law_narrowed_to_its_setback() {
         // The law 1 to 1e308 on the edge [0, 10], its interval narrowed to [0, 5] by a
         // corner whose setback is at 5: the edge's end, 10, is the law's parameter 2, past
-        // its curve, where the continued radius overflows. GetFilletRadius's SER would read
-        // the failure as a status radius (1001); the refusal naming the station stays.
+        // its curve, where the continued radius overflows. The refusal naming the station
+        // stays.
         let mut law = bspline(
             radius_curve(&[1.0, 1e308], 1, 0.0, 1.0),
             Extent1d::from_min_max(0.0, 1.0),
@@ -2127,11 +2142,16 @@ mod tests {
             }) => assert!(close(at, 2.0), "{at}"),
             other => panic!("{other:?}"),
         }
-        // any other failed evaluation is still its status as the radius
+        // any other failed evaluation is its error, never its status number as a radius
+        // (#21908): a base law has no value
         let mut base = FilletLaw::new(FilletLawKind::Base);
-        assert_eq!(
-            base.fillet_radius(0.0, &narrowed, false).expect("status"),
-            f64::from(crate::error::SM_ERR)
+        let failed = base.fillet_radius(0.0, &narrowed, false);
+        assert!(
+            matches!(
+                failed.as_ref().map_err(SolidError::blend_failure),
+                Err(Some(BlendFailure::LawHasNoValue))
+            ),
+            "{failed:?}"
         );
     }
 
