@@ -371,6 +371,16 @@ fn a_profile_hidden_by_a_face_is_still_the_profiles_pick() {
     // Off the profile, the face is the pick as before.
     let beside = proj.to_screen(Vec3::new(60.0, 25.0, 10.0)).unwrap();
     assert!(matches!(candidate(&h.app, &pick(&h.app, &proj, beside)), Some((_, Sel::Face { .. }))));
+    // A profile that is not shown is not taken through the face: the face is the pick, whether the
+    // Browser hides the sketch's profiles or the sketch's own Show Profile is off.
+    h.app.session.visibility.hidden_profiles.push(sketch);
+    h.frames(2);
+    assert!(matches!(candidate(&h.app, &pick(&h.app, &proj, hidden)), Some((_, Sel::Face { .. }))));
+    h.app.session.visibility.hidden_profiles.retain(|&s| s != sketch);
+    h.app.run("sketch.options", json!({"sketch": sketch, "show_profile": false})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.active == 0), "Extrude stays open on its Profiles");
+    assert!(matches!(candidate(&h.app, &pick(&h.app, &proj, hidden)), Some((_, Sel::Face { .. }))));
 }
 
 /// With a Section Analysis on, `view.pick` must not answer with edges or vertices in the

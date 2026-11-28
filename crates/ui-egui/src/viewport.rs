@@ -6480,17 +6480,25 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
                 .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
         };
         let first = hits.iter().filter(|h| snap_allowed(app, snaps, h)).find_map(take);
-        // A profile a body's face hides is still the profiles input's pick (`Dialog::profile_behind`).
+        // A profile a body's face hides is still the profiles input's pick (`Dialog::profile_behind`),
+        // when its fill is shown: a profile with Show Profile off is not taken through the face.
+        let shown_profile = |h: &Hit| matches!(h, Hit::Profile { sketch, .. } if profile_fill_shown(app, *sketch));
         if let Some((face, picked)) = &first
             && d.profile_behind(&app.session, face, picked)
-            && let Some(profile) =
-                hits.iter().filter(|h| matches!(h, Hit::Profile { .. })).find_map(take).filter(|(_, s)| matches!(s, Sel::Profile { .. }))
+            && let Some(profile) = hits.iter().filter(|h| shown_profile(h)).find_map(take).filter(|(_, s)| matches!(s, Sel::Profile { .. }))
         {
             return Some(profile);
         }
         return first;
     }
     hits.iter().filter(|h| crate::selection_mode::allowed(app, h)).find_map(|h| hit_candidate(app, h))
+}
+
+/// Whether the view fills the profiles of `sketch`, as the sketch scene decides it: not when the
+/// Browser hides them or the sketch's Show Profile is off.
+fn profile_fill_shown(app: &SolveApp, sketch: u64) -> bool {
+    let st = crate::open_meshing::shown_world(app);
+    !app.session.visibility.hidden_profiles.contains(&sketch) && st.sketch(sketch).is_some_and(|ss| !ss.sketch.view.hide_profile)
 }
 
 /// Every hit a click could pick, in order, each with its selection (Select Other).
