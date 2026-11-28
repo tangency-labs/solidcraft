@@ -45,7 +45,7 @@ const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract:
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", crate::checked!("drawing.create", create)).any_part().icon("new").doc_only().contract(&CREATE_CONTRACT).params(
-        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json or .scdwg template file (drawing.template.save); first_sheet_name?: override the first sheet's name; first_sheet_paper?: override its {size, orientation, dpi}; omit_first_sheet_title_block?: true to start the first sheet without its template title block; standard_views?: true to place the front, top, right and isometric views at a fitted scale on the first sheet; language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json or .scdwg template file (drawing.template.save); first_sheet_name?: override the first sheet's name; first_sheet_paper?: override its {size, orientation, dpi}; omit_first_sheet_title_block?: true to start the first sheet without its template title block; standard_views?: true to place the front, top, right and isometric views at a fitted scale on the first sheet; language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. A template with a parts list requires the current design. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -64,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_SAVE_CONTRACT)
         .output(output_schema_for::<TemplateSaveResult>)
         .params(
-            "path: a .scdwg file (a .json name gets the .scdwg file beside it, with the same name) → {path: the file written, bytes, renamed_from?: the .json path asked for}. Writes the drawing open as a template: its sheets, borders, title blocks and the text typed over their cells, its projection, units, language and properties but its number, and nothing it draws or documents (its sources, views, dimensions, balloons, revision rows, and the component each sheet documents). drawing.create and drawing.template.apply take the file as their template; a drawing made from it keeps its own copy, so a later save changes no drawing.",
+            "path: a .scdwg file (a .json path gets a .scdwg file beside it with the same stem) → {path: the file written, bytes, renamed_from?: the requested .json path}. Saves the open drawing as a template with its sheets, borders, title blocks with their logos and plain-text overrides, sheet notes and sketches with fills, table layouts and symbol definitions, projection, units, language, revision numbering, and drawing properties. It clears the drawing number, sources, views and their notes, dimensions, balloons, placed images, revision rows, table row overrides, and the component each sheet documents. A parts list reads the current design's root when a drawing is created from the template. drawing.create and drawing.template.apply accept the template file. A drawing made from the template gets its own copy.",
         ),
     CommandSpec::new("drawing.template.list", "List Drawing Templates", crate::checked!("drawing.template.list", template_list))
         .any_part()
@@ -197,6 +197,14 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     // The design it is in, unless it draws another design's file.
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
     d.sources.push(Source { id: source, path: linked });
+    if d.tables.iter().any(|table| matches!(table.kind, Kind::PartsList(_))) {
+        s.drawn(&d, source).map_err(|why| bad(cmd, why.to_string()))?;
+    }
+    for table in d.tables.iter_mut() {
+        if let Kind::PartsList(list) = &mut Arc::make_mut(table).kind {
+            list.of = drawing::SheetComponent { source, component: 0 };
+        }
+    }
     if let Some(units) = request.units {
         d.units = units;
     }
@@ -207,8 +215,20 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if request.standard_views {
         d = super::drawing_view::first_standard_views(s, &d)?;
     }
+    let lists: Vec<_> = d
+        .tables
+        .iter()
+        .filter_map(|table| match &table.kind {
+            Kind::PartsList(list) => Some(list.request()),
+            _ => None,
+        })
+        .collect();
     s.open_drawing = Some(d.id);
     s.doc_mut().put_drawing(Arc::new(d));
+    for request in &lists {
+        // As drawing.table.add does: what is printed doesn't move when the design changes.
+        let _ = super::bom::keep_shown_numbers(s, request);
+    }
     inspect(s, &Value::Null)
 }
 
@@ -613,6 +633,7 @@ fn title_block_cells(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize) -
         Note::Fit(Warning::Chars { count, max }) => json!({"fit": "chars", "count": count, "max": max}),
         Note::Fit(Warning::Height) => json!({"fit": "height"}),
         Note::Fit(Warning::Width) => json!({"fit": "width"}),
+        Note::Fit(Warning::Clipped) => json!({"fit": "clipped"}),
         Note::Refused(why) => json!({"refused": why}),
     };
     let cell = |shown: &CellText| {

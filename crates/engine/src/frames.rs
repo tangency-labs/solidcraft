@@ -30,9 +30,9 @@ enum K {
     Make,
     /// A direction: turned with the command's frame.
     Dir,
-    /// A primitive's axis: a direction as `Dir`, or `[x, y, z]` / `{x, y, z}` with unitless
-    /// expressions (#18822), turned with the command's frame and kept as expressions. X, Y or Z
-    /// by name passes through: it names the component's own axis.
+    /// A primitive's axis: a direction as `Dir` (including X, Y or Z by name, #21098), or
+    /// `[x, y, z]` / `{x, y, z}` with unitless expressions (#18822), turned with the command's frame
+    /// and kept as expressions.
     PrimitiveAxis,
     /// A displacement with length expressions: turned without the frame's translation.
     Delta,
@@ -41,7 +41,12 @@ enum K {
     Moved,
     /// An arbitrary axis object in the authoring frame: {origin, dir}.
     Axis,
-    /// A plane object (`{face}`, `{origin, normal}`, `{origin, x_dir, y_dir}`) or a plane name.
+    /// A point or plane that limits or cuts the command's bodies (a thread's `from` and `up_to`, a
+    /// draft's neutral plane, a split plane): a point `[x, y, z]`, `{x, y, z}` or `{point}`, a
+    /// plane object (`{face}`, `{origin, normal}`, `{origin, x_dir, y_dir}`; an origin may be
+    /// length expressions) or a plane name. It goes into the frame of the command's first pick
+    /// (else of the body it names), whether or not it lies on a body: a point in the air or a
+    /// plane origin off the surface has no body under it to find the frame by.
     Plane,
     /// A body name, or a list of them.
     Body,
@@ -90,13 +95,13 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", PrimitiveAxis)],
         // Coil's axis may also be a reference (a named axis, an edge, `{origin, dir}`); `Axis`
-        // turns a bare direction as `PrimitiveAxis` does and passes X, Y or Z by name through.
+        // turns a bare direction (including X, Y or Z by name, #21098) as `PrimitiveAxis` does.
         "solid.coil" => &[("base", Make), ("center", Make), ("axis", Axis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
         "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", PrimitiveAxis), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
-        "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
+        "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Plane), ("up_to", Plane)],
         "shaft_spline.insert" => &[("shaft_face", Pick), ("shaft_start", Pick), ("bore_face", Pick), ("bore_start", Pick)],
         "solid.emboss" => &[("face", Make)],
         "solid.dome" => &[("face", Pick), ("body", Body)],
@@ -126,6 +131,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sheet.perforate" | "sheet.tab" | "sheet.bead" => &[("body", Body)],
         "solid.cell_grid" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
+        // Its planes are sketched as `sketch.create`'s, and measured against the body first.
+        "mesh.section_stack" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.repair_link" => &[("refs", Here), ("ref", Here)],
@@ -259,7 +266,19 @@ struct Mapper<'a> {
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
         // `[x, y, z]` or `{x, y, z}`: a direction given with it then turns with the picked body.
-        let p = crate::params::vec3(v)?;
+        // `{point: [x, y, z]}` (a thread face) maps that inner point and keeps sibling keys.
+        // A value that is already a point is not unwrapped again.
+        let Some(p) = crate::params::vec3(v) else {
+            let point = v.get("point").filter(|point| crate::params::vec3(point).is_some())?;
+            let mapped = self.pick(point, body)?;
+            let mut object = v.as_object()?.clone();
+            object.insert("point".into(), mapped);
+            // A body named with the point is the component's own name for it, as in `picks`.
+            if let Some(own) = v.get("body").and_then(Value::as_str).and_then(|b| self.own_name(b)) {
+                object.insert("body".into(), Value::String(own));
+            }
+            return Some(Value::Object(object));
+        };
         let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body) };
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
@@ -310,8 +329,13 @@ impl Mapper<'_> {
     }
 
     fn dir(&mut self, v: &Value) -> Option<Value> {
-        // `[x, y, z]` or `{x, y, z}`, as commands read a direction.
-        let d = crate::params::vec3(v)?;
+        // `[x, y, z]` or `{x, y, z}`, or X|Y|Z, as commands read a direction.
+        let d = crate::params::vec3(v).or_else(|| match v.as_str().map(str::trim).map(str::to_ascii_uppercase).as_deref() {
+            Some("X") => Some(Vec3::X),
+            Some("Y") => Some(Vec3::Y),
+            Some("Z") => Some(Vec3::Z),
+            _ => None,
+        })?;
         let m = self.first.unwrap_or(self.f.active);
         if is_identity(&m) {
             return None;
@@ -355,9 +379,175 @@ impl Mapper<'_> {
         }
     }
 
+    /// The frame a limit point or plane goes into: that of the command's first pick, else of the
+    /// body the command names.
+    fn limit_frame(&mut self, body: Option<&str>) -> Option<Mat> {
+        if self.first.is_none() {
+            let m = body.and_then(|b| self.f.bodies(self.s).iter().find(|(w, own, _)| w == b || own == b).map(|(.., m)| *m));
+            self.first = m;
+        }
+        self.first
+    }
+
+    /// A direction in `frame`'s local axes.
+    fn local_dir(&mut self, frame: &Mat, v: &Value) -> Option<Value> {
+        let d = crate::params::vec3(v)?;
+        if is_identity(frame) {
+            return None;
+        }
+        let Some(inv) = mat_inverse(frame) else {
+            refuse("a component placement cannot be inverted, so a direction cannot be mapped into its frame");
+            return None;
+        };
+        self.changed = true;
+        Some(pt(apply_vector(&inv, d)))
+    }
+
+    /// A point of a limit (see [`K::Plane`]): `[x, y, z]`, `{x, y, z}`, `{point}`, or coordinates
+    /// that are length expressions.
+    fn limit_point(&mut self, v: &Value, frame: Option<Mat>, body: Option<&str>) -> Option<Value> {
+        if let Some(p) = crate::params::vec3(v) {
+            return match frame {
+                Some(m) => self.local_point(&m, p),
+                None => self.pick(v, body),
+            };
+        }
+        if let Some(inner) = v.get("point").filter(|inner| inner.is_array() || inner.is_object()) {
+            let mapped = self.limit_point(inner, frame, body)?;
+            let mut object = v.as_object()?.clone();
+            object.insert("point".into(), mapped);
+            return Some(Value::Object(object));
+        }
+        self.map_expr(&frame.unwrap_or(self.f.active), v, map_point_expr)
+    }
+
+    /// A plane given by name, in the frame it is read in: a construction plane in its own
+    /// component's frame, an origin plane in the active component's. Where that is not the
+    /// frame of the command's bodies, the plane goes in as an explicit plane in that frame.
+    fn named_plane(&mut self, v: &Value, frame: Option<Mat>) -> Option<Value> {
+        let name = match v {
+            Value::String(n) => n.trim().to_string(),
+            Value::Number(n) => n.to_string(),
+            _ => return None,
+        };
+        let target = frame.unwrap_or(self.f.active);
+        let alike = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= 1e-9);
+        let (source, plane) = match self.s.doc.find_feature(&name) {
+            Some(f) if matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionPlane { .. }) => {
+                let source =
+                    if f.component == self.s.active_component { self.f.active } else { self.s.placed_document().component_transform(f.component) };
+                if alike(&source, &target) {
+                    return None;
+                }
+                let state = self.s.model.state();
+                let found = state.construct.iter().find(|c| c.feature == f.id).and_then(|c| match &c.geom {
+                    solidcraft_doc::construct::ConstructGeom::Plane(p) => Some(*p),
+                    _ => None,
+                });
+                match found {
+                    Some(p) => (source, p),
+                    None => {
+                        refuse(format!(
+                            "plane `{name}` is not built yet, so it cannot be mapped into the frame of a placed part; use an explicit {{origin, normal}} plane"
+                        ));
+                        return None;
+                    }
+                }
+            }
+            // Not a plane: the command refuses it.
+            Some(_) => return None,
+            None => match solidcore_record::Plane::named(&name) {
+                Some(p) => {
+                    if alike(&self.f.active, &target) {
+                        return None;
+                    }
+                    (self.f.active, p)
+                }
+                None => {
+                    // A component origin plane key (`o:N/origin/XY`) names a plane of that
+                    // occurrence's component, placed by its occurrence: read from the root it is
+                    // a world plane, so it is mapped into the frame of the command's bodies
+                    // (for the part's own body that is the part's plane, at its local position).
+                    let doc = self.s.placed_document();
+                    let datum = solidcraft_doc::construct::DatumRef::parse_key(&name);
+                    match datum.and_then(|d| solidcraft_doc::construct::resolve_datum(&doc, &d).ok()) {
+                        Some(solidcraft_doc::construct::ConstructGeom::Plane(p)) => (solidcraft_doc::IDENTITY, p),
+                        _ => {
+                            refuse(format!(
+                                "plane `{name}` cannot be mapped into the frame of a placed part; use an explicit {{origin, normal}} plane"
+                            ));
+                            return None;
+                        }
+                    }
+                }
+            },
+        };
+        let local = mat_inverse(&target).and_then(|inv| solidcraft_doc::map_plane(&inv, &solidcraft_doc::map_plane(&source, &plane)?));
+        let Some(local) = local else {
+            refuse(format!("plane `{name}` cannot be mapped into the frame of a placed part"));
+            return None;
+        };
+        self.changed = true;
+        Some(serde_json::json!({"origin": pt(local.origin), "x_dir": pt(local.x), "y_dir": pt(local.y)}))
+    }
+
+    /// A limit point or plane (see [`K::Plane`]).
+    fn limit(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
+        if self.here {
+            return self.plane(v);
+        }
+        let frame = self.limit_frame(body);
+        if frame.is_some_and(|m| !is_identity(&m) && mat_inverse(&m).is_none()) {
+            refuse("a component placement cannot be inverted, so a limit point or plane cannot be mapped into its frame");
+            return None;
+        }
+        if matches!(v, Value::String(_) | Value::Number(_)) {
+            return self.named_plane(v, frame);
+        }
+        let is_plane = v.as_object().is_some_and(|o| ["face", "origin", "normal", "x_dir", "y_dir"].iter().any(|k| o.contains_key(*k)));
+        if !is_plane {
+            return self.limit_point(v, frame, body);
+        }
+        let o = v.as_object()?;
+        let mut m = o.clone();
+        if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
+            m.insert("face".into(), x);
+        }
+        match (o.get("origin"), frame) {
+            (Some(origin), _) => {
+                if let Some(x) = self.limit_point(origin, frame, body) {
+                    m.insert("origin".into(), x);
+                }
+            }
+            // The command puts a plane without an origin through the world's origin.
+            (None, Some(f)) if !o.contains_key("face") => {
+                if let Some(x) = self.local_point(&f, Vec3::ZERO) {
+                    m.insert("origin".into(), x);
+                }
+            }
+            (None, _) => {}
+        }
+        for k in ["normal", "x_dir", "y_dir"] {
+            let new = match (o.get(k), frame) {
+                (Some(x), Some(f)) => self.local_dir(&f, x),
+                (Some(x), None) => self.dir(x),
+                _ => None,
+            };
+            if let Some(x) = new {
+                m.insert(k.into(), x);
+            }
+        }
+        Some(Value::Object(m))
+    }
+
     fn plane(&mut self, v: &Value) -> Option<Value> {
         // A point where a plane may be given (a thread's `up_to`): a pick.
+        // `{x, y, z}` is that point, as an array is. A plane (`{origin, normal}` or
+        // `{origin, x_dir, y_dir}`) is not: `vec3` is none for it.
         if v.is_array() {
+            return self.pick(v, None);
+        }
+        if crate::params::vec3(v).is_some() {
             return self.pick(v, None);
         }
         // A name, and among them a component origin key (`o:…/origin/XY`) in particular, passes
@@ -418,6 +608,8 @@ impl Mapper<'_> {
 }
 
 thread_local! {
+    /// Why the running command's coordinates cannot be mapped (the command is then refused).
+    static REFUSAL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     /// The outermost command's coordinates were mapped here (its table lists them).
     static MAPPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -426,6 +618,15 @@ thread_local! {
     static OUTER_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The picks of the running command.
     static PICKS: std::cell::RefCell<Vec<Pick>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Record that a coordinate of the running command cannot be mapped into its component's frame:
+/// `to_local` refuses the command with this reason rather than pass the coordinate through
+/// unmapped, which would silently use the wrong place.
+fn refuse(reason: impl Into<String>) {
+    REFUSAL.with(|r| {
+        r.borrow_mut().get_or_insert_with(move || reason.into());
+    });
 }
 
 /// A pick of the running command.
@@ -632,6 +833,15 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     {
         return Err(crate::params::bad(id, "_copy_frames is internal placement data, not a command parameter"));
     }
+    REFUSAL.with(|r| r.borrow_mut().take());
+    let mapped = to_local_unchecked(s, id, params);
+    match REFUSAL.with(|r| r.borrow_mut().take()) {
+        Some(reason) => Err(crate::params::bad(id, reason)),
+        None => mapped,
+    }
+}
+
+fn to_local_unchecked(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
     // Edit Feature of a revolve or coil restores its saved axis (and the origin's expressions) even
@@ -642,6 +852,17 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     let copying = id == "solid.move" && params.get("copy").and_then(Value::as_bool) == Some(true);
     let copy_edit = id == "timeline.redefine" && edited_copy_frames(s, params).is_some();
     if !picks || (!placed(s) && !axis_edit && grouped_thread.is_none() && !copying && !copy_edit) {
+        return Ok(None);
+    }
+    // Commands whose entries only map into the active component's frame (Make, Dir, PrimitiveAxis)
+    // never read world geometry: an identity active frame needs no mapping at all, and a moved
+    // active frame needs no `world_state()` build.
+    let active_only = !table(id).is_empty()
+        && !matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine" | "solid.move")
+        && !PICKED_PLANES.contains(&id)
+        && grouped_thread.is_none()
+        && table(id).iter().all(|(_, k)| matches!(k, Make | Dir | PrimitiveAxis));
+    if active_only && is_identity(&s.active_component_frame()) {
         return Ok(None);
     }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
@@ -662,26 +883,35 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     } else {
         None
     };
-    let world = match (placed, &thread_input) {
+    let world = match (placed && !active_only, &thread_input) {
         (true, Some(input)) => std::sync::Arc::new(solidcraft_doc::world_state(&s.placed_document(), input)?),
         (true, None) => s.world_state()?,
         (false, Some(input)) => input.clone(),
         (false, None) => s.model.state(),
     };
-    let mut normalized = params.clone();
-    if let Some(faces) = grouped_thread {
+    let has_grouped_thread = grouped_thread.is_some();
+    let normalized;
+    let params = if let Some(faces) = grouped_thread {
+        let mut copy = params.clone();
         let input = thread_input.clone().unwrap_or_else(|| s.model.state());
         let faces = Value::Array(thread_body_picks(s, &input, faces)?);
         if id == "timeline.redefine" {
-            normalized["params"]["faces"] = faces;
+            copy["params"]["faces"] = faces;
         } else {
-            normalized["faces"] = faces;
+            copy["faces"] = faces;
         }
-    }
-    if !placed && !axis_edit && !copying && !copy_edit {
-        return Ok(grouped_thread.map(|_| normalized));
-    }
-    Ok(map_local_with_input(s, &world, id, &normalized, thread_input.as_deref(), None).or_else(|| grouped_thread.map(|_| normalized)))
+        normalized = copy;
+        if !placed && !axis_edit && !copying && !copy_edit {
+            return Ok(Some(normalized));
+        }
+        &normalized
+    } else {
+        if !placed && !axis_edit && !copying && !copy_edit {
+            return Ok(None);
+        }
+        params
+    };
+    Ok(map_local_with_input(s, &world, id, params, thread_input.as_deref(), None).or_else(|| has_grouped_thread.then(|| params.clone())))
 }
 
 /// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
@@ -900,7 +1130,7 @@ fn map_local_with_input(
     }
     // Exact face capture retains the original world pick and occurrence identity; an explicit
     // plane with `frame: "component"` is already in the component's own coordinates (#6000).
-    if matches!(id, "sketch.create" | "sketch.redefine")
+    if matches!(id, "sketch.create" | "sketch.redefine" | "mesh.section_stack")
         && (params.get("plane").and_then(|plane| plane.get("face")).is_some() || params.get("frame").and_then(Value::as_str) == Some("component"))
     {
         return None;
@@ -996,9 +1226,9 @@ fn map_local_with_input(
                 Make => m.make(v),
                 Dir => m.dir(v),
                 // An axis holding expressions (#18822), as `[x, y, z]` or `{x, y, z}`, turns with
-                // the frame and stays expressions; a component's axis named X, Y or Z stays its
-                // own. One that comes out as numbers is written as numbers, as `Dir` writes them.
-                PrimitiveAxis if v.is_string() => None,
+                // the frame and stays expressions; an axis named X, Y or Z turns like the unit
+                // vector it names (#21098). One that comes out as numbers is written as numbers,
+                // as `Dir` writes them.
                 PrimitiveAxis => m.dir(v).or_else(|| {
                     let frame = m.first.unwrap_or(m.f.active);
                     let d = crate::cmd::axis_expr_form(v).ok()?;
@@ -1021,10 +1251,20 @@ fn map_local_with_input(
                 Axis => {
                     // A name, including a component origin key (`o:…/origin/X`), passes
                     // through untouched so the command keeps its persistent reference.
-                    // Coil takes a bare direction in either vector form. Use its parser to
-                    // distinguish an object direction from a saved axis reference.
-                    if vec3(v).is_some() || (id == "solid.coil" && v.is_object() && crate::cmd::axis_dir_form(v).is_ok()) {
+                    // Coil takes a bare direction in vector, expression, or letter form (#21098).
+                    // Use its parser to distinguish a direction from a saved axis reference.
+                    if vec3(v).is_some() || (id == "solid.coil" && crate::cmd::axis_dir_form(v).is_ok()) {
                         m.dir(v)
+                    } else if id == "solid.coil" && crate::cmd::axis_expr_form(v).is_ok() {
+                        let frame = m.first.unwrap_or(m.f.active);
+                        let d = crate::cmd::axis_expr_form(v).ok()?;
+                        let turned = m.map_expr(&frame, &serde_json::json!(d.map(|e| e.to_string())), map_dir_expr)?;
+                        let nums: Option<Vec<f64>> = turned
+                            .as_array()?
+                            .iter()
+                            .map(|c| c.as_str().and_then(|t| t.trim().parse::<f64>().ok()).filter(|x| x.is_finite()))
+                            .collect();
+                        Some(nums.map_or(turned, |n| serde_json::json!(n)))
                     } else if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
                         // An `{origin, dir}` axis without its origin passes through the world's,
@@ -1045,7 +1285,7 @@ fn map_local_with_input(
                         None
                     }
                 }
-                Plane => m.plane(v),
+                Plane => m.limit(v, body.as_deref()),
                 Body => m.body(v),
                 Here | HerePlane => {
                     // A new sketch or canvas goes into the active component.

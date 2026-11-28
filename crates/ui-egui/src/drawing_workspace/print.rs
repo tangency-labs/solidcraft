@@ -78,10 +78,13 @@ pub(crate) fn start(app: &mut SolveApp) {
         return;
     }
     // In a browser: made at once, its bytes as they are, then shown in a new tab.
-    let bytes = solidcraft_engine::print_pdf(&mut app.session).map_err(|e| format!("{}: {e}", tr("ui.drawing_print.failed")));
-    match (bytes, &app.services.open_bytes) {
-        (Ok(bytes), Some(open)) => match open(&name, "application/pdf", &bytes) {
-            Ok(()) => app.set_status(tr("ui.drawing_print.opened"), false),
+    let printed = solidcraft_engine::print_pdf(&mut app.session).map_err(|e| format!("{}: {e}", tr("ui.drawing_print.failed")));
+    match (printed, &app.services.open_bytes) {
+        (Ok(printed), Some(open)) => match open(&name, "application/pdf", &printed.bytes) {
+            Ok(()) => {
+                let objects = printed.outside_sheet.iter().map(|finding| (finding.object.kind, &finding.object.id));
+                app.set_status(opened_status(super::export::distinct(objects)), false);
+            }
             Err(e) => app.set_status(format!("{}: {e}", tr("ui.drawing_print.failed")), true),
         },
         (Ok(_), None) => app.set_status(tr("ui.drawing_print.unavailable"), true),
@@ -89,15 +92,26 @@ pub(crate) fn start(app: &mut SolveApp) {
     }
 }
 
-/// The PDF at `path` is written: opens it in the default viewer, and says what to do next, or why
-/// it couldn't and where the file is.
-pub(crate) fn written(app: &mut SolveApp, path: &str) {
+/// The status once the PDF is open in a viewer: to print it at actual size, and how many objects
+/// lie outside the sheet (`outside`) when any do.
+fn opened_status(outside: usize) -> String {
+    match outside {
+        0 => tr("ui.drawing_print.opened").into(),
+        1 => tr("ui.drawing_print.opened_outside_one").into(),
+        count => solidcraft_ui_text::format("ui.drawing_print.opened_outside_other", &[("count", &count.to_string())]),
+    }
+}
+
+/// The PDF at `path` is written, with `reply` what `drawing.print` answered: opens it in the default
+/// viewer, and says what to do next and what lies outside the sheet, or why it couldn't be opened
+/// and where the file is.
+pub(crate) fn written(app: &mut SolveApp, path: &str, reply: &serde_json::Value) {
     let opened = match &app.services.open_path {
         Some(open) => open(path),
         None => Err(tr("ui.drawing_print.unavailable").into()),
     };
     match opened {
-        Ok(()) => app.set_status(tr("ui.drawing_print.opened"), false),
+        Ok(()) => app.set_status(opened_status(super::export::outside_count(&reply["outside_sheet"])), false),
         Err(e) => app.set_status(solidcraft_ui_text::format("ui.drawing_print.not_opened", &[("path", path), ("reason", &e)]), true),
     }
 }
@@ -160,6 +174,45 @@ mod tests {
         }
         let _ = std::fs::remove_file(&paths[0]);
         let _ = std::fs::remove_dir(std::path::Path::new(&paths[0]).parent().unwrap());
+    }
+
+    /// With a table off the paper the PDF still opens, and the status says how many objects lie
+    /// outside the sheet after the note about printing at actual size: on the desktop, and in a
+    /// browser, where the PDF is made at once.
+    #[test]
+    fn print_says_how_many_objects_lie_outside_the_sheet() {
+        for desktop in [true, false] {
+            let mut h = Harness::new();
+            drawing_open(&mut h);
+            let count = super::super::export::tests::tables_put_off_the_paper(&mut h.app, &["revision"]);
+            let opened = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let seen = opened.clone();
+            if desktop {
+                h.app.services.open_path = Some(Box::new(move |path| {
+                    seen.lock().unwrap().push(path.to_string());
+                    Ok(())
+                }));
+            } else {
+                h.app.services.open_path = None;
+                h.app.services.open_bytes = Some(Box::new(move |name, _, bytes| {
+                    assert!(bytes.starts_with(b"%PDF-"));
+                    seen.lock().unwrap().push(name.to_string());
+                    Ok(())
+                }));
+            }
+            start(&mut h.app);
+            wait(&mut h);
+            let paths = opened.lock().unwrap().clone();
+            assert_eq!(paths.len(), 1, "desktop {desktop}: the PDF still opens: {paths:?}");
+            let key = if count == 1 { "ui.drawing_print.opened_outside_one" } else { "ui.drawing_print.opened_outside_other" };
+            let said = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+            assert_eq!(said, solidcraft_ui_text::format(key, &[("count", &count.to_string())]), "desktop {desktop}");
+            assert!(said.starts_with(tr("ui.drawing_print.opened")) && said.contains(&count.to_string()), "desktop {desktop}: {said}");
+            if desktop {
+                let _ = std::fs::remove_file(&paths[0]);
+                let _ = std::fs::remove_dir(std::path::Path::new(&paths[0]).parent().unwrap());
+            }
+        }
     }
 
     /// With no PDF viewer to open it, the status says so and names the file: never silent.

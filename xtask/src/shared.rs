@@ -70,9 +70,13 @@ pub fn run(root: &Path) -> Result<(), String> {
         let manifest = scratch_manifest(root, &root_manifest, &members, &shared_dirs)?;
         let text = toml::to_string(&manifest).map_err(|e| format!("{name}: scratch Cargo.toml: {e}"))?;
         write(&scratch.join("Cargo.toml"), &text)?;
+        // The scratch manifest is made from the root one: it is as new as that, so a build kept in
+        // the target directory (CI's target/ disk) stays fresh while the root manifest is unchanged.
+        same_time(&root.join("Cargo.toml"), &scratch.join("Cargo.toml"))?;
         let lock = root.join("Cargo.lock");
         if lock.is_file() {
             std::fs::copy(&lock, scratch.join("Cargo.lock")).map_err(|e| format!("{}: {e}", lock.display()))?;
+            same_time(&lock, &scratch.join("Cargo.lock"))?;
         }
         let mut c = crate::cargo();
         c.current_dir(&scratch).env("CARGO_TARGET_DIR", root.join(SCRATCH_TARGET)).args(["test", "--profile", "ci", "-p", name]);
@@ -333,9 +337,19 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
             }
         } else {
             std::fs::copy(&src, &dest).map_err(|e| format!("{} -> {}: {e}", src.display(), dest.display()))?;
+            same_time(&src, &dest)?;
         }
     }
     Ok(())
+}
+
+/// Give `dest` the modification time of `src`. Cargo decides what to rebuild by comparing a
+/// source's time with its artefact's, and a copy is new: without this every scratch workspace was
+/// compiled from scratch on every run, even over a target directory that held the same build.
+fn same_time(src: &Path, dest: &Path) -> Result<(), String> {
+    let modified = std::fs::metadata(src).and_then(|m| m.modified()).map_err(|e| format!("{}: {e}", src.display()))?;
+    let file = std::fs::OpenOptions::new().write(true).open(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    file.set_modified(modified).map_err(|e| format!("{}: {e}", dest.display()))
 }
 
 fn read_toml(path: &Path) -> Result<toml::Table, String> {

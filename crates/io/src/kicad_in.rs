@@ -14,7 +14,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::prelude::*;
 
@@ -350,7 +350,20 @@ pub struct KicadVia {
     pub size: f64,
     /// 0: no hole (the holes option left it out).
     pub drill: f64,
+    /// The copper layers it spans, from one end to the other (KiCad writes the two ends).
     pub layers: Vec<String>,
+    /// Whether the solder mask covers it on the front and on the back: its own setting, or the
+    /// board's (`(setup (tenting …))`) where it has none.
+    pub tented: [bool; 2],
+}
+
+impl KicadVia {
+    /// The outer faces its layers reach: front, back. A via the file names no layers for runs
+    /// through the board, as KiCad's own default is.
+    pub fn faces(&self) -> [bool; 2] {
+        let all = self.layers.is_empty() || self.layers.iter().any(|l| l == "*.Cu" || l == "F&B.Cu");
+        [all || self.layers.iter().any(|l| l == "F.Cu"), all || self.layers.iter().any(|l| l == "B.Cu")]
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -369,6 +382,9 @@ pub struct KicadDrill {
     /// The direction of a slot's width in the board frame, in radians anticlockwise from +X (its
     /// pad's rotation on the board).
     pub angle: f64,
+    /// A plated hole, with copper on its wall: a via's, or a `thru_hole` pad's. KiCad's drill files
+    /// put these in the plated (PTH) file and an `np_thru_hole` pad's in the unplated (NPTH) one.
+    pub plated: bool,
 }
 
 /// A KiCad board and the reusable component placements it references.
@@ -486,6 +502,8 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
     }
 
     let general = field(&root, "general");
+    // Vias are tented on both sides unless the board says otherwise (KiCad's default).
+    let tented = field(&root, "setup").map_or([true, true], |setup| tenting(setup, [true, true]));
     let thickness = general
         .and_then(|g| field(g, "thickness"))
         .and_then(|e| numbers(e, 1).ok())
@@ -580,7 +598,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
                 }
             }
             Some("via") => {
-                if let Some(via) = parse_via(item, &mut board.warnings) {
+                if let Some(via) = parse_via(item, tented, &mut board.warnings) {
                     if board.vias.len() >= MAX_VIAS {
                         board.warnings.push("additional vias were skipped".into());
                     } else {
@@ -927,12 +945,19 @@ fn pad_drill(transform: &Mat, pad: &KicadPad) -> Option<KicadDrill> {
     let [ux, uy] = pad_axis(pad);
     let ahead = apply2(transform, pad.at[0] + ux, pad.at[1] + uy);
     let angle = solidcraft_kernel::planar::direction_angle(center, ahead);
-    Some(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle })
+    Some(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle, plated: pad.kind == "thru_hole" })
 }
 
 /// A via's drilled hole on the board, unless it has none.
 fn via_drill(via: &KicadVia) -> Option<KicadDrill> {
-    (via.drill > 0.0).then(|| KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill, via.drill], angle: 0.0 })
+    // One that ends inside the board (blind, micro or buried) is not a hole through it: it does
+    // not come out on the other side, and a face it reaches sees its copper, not a hole.
+    (via.drill > 0.0 && via.faces() == [true, true]).then(|| KicadDrill {
+        center: [via.at[0], -via.at[1]],
+        size: [via.drill, via.drill],
+        angle: 0.0,
+        plated: true,
+    })
 }
 
 /// Leave out the drilled holes `holes` does not keep. The substrate stays whole there and the copper
@@ -1198,7 +1223,26 @@ fn parse_track_arc(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Option<KicadS
     Some(KicadStroke { layer, points: arc_points(a, m, b), closed: false, filled: true, width })
 }
 
-fn parse_via(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Option<KicadVia> {
+/// Which sides of a via the solder mask covers: `(tenting (front yes) (back no))`, where `none`
+/// (or a side left out) takes `default`, the board's setting. An older list of the tented sides,
+/// `(tenting front back)`, is read too.
+fn tenting(expr: &Expr<'_>, default: [bool; 2]) -> [bool; 2] {
+    let Some(tenting) = field(expr, "tenting") else { return default };
+    let listed: Vec<&str> = children(tenting).iter().skip(1).filter_map(atom).collect();
+    let mut out = default;
+    for (side, name) in out.iter_mut().zip(["front", "back"]) {
+        match field(tenting, name).and_then(|e| children(e).get(1)).and_then(atom) {
+            Some("yes") => *side = true,
+            Some("no") => *side = false,
+            Some(_) => {}
+            None if !listed.is_empty() => *side = listed.contains(&name),
+            None => {}
+        }
+    }
+    out
+}
+
+fn parse_via(expr: &Expr<'_>, tented: [bool; 2], warnings: &mut Vec<String>) -> Option<KicadVia> {
     let at = point_of(expr, "at")?;
     let size = field(expr, "size").and_then(|e| numbers(e, 1).ok()).and_then(|n| n.first().copied()).unwrap_or(0.6);
     let drill = field(expr, "drill").and_then(|e| numbers(e, 1).ok()).and_then(|n| n.first().copied()).unwrap_or(0.3);
@@ -1207,7 +1251,7 @@ fn parse_via(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Option<KicadVia> {
         return None;
     }
     let layers = field(expr, "layers").map(|e| children(e).iter().skip(1).filter_map(atom).map(str::to_string).collect()).unwrap_or_default();
-    Some(KicadVia { at, size, drill, layers })
+    Some(KicadVia { at, size, drill, layers, tented: tenting(expr, tented) })
 }
 
 /// The details a contour can lose before it is extruded (mm): KiCad's fills leave repeated
@@ -1500,9 +1544,11 @@ fn kicad_board_mesh_noted(board: &KicadBoard, thickness: f64, notes: &mut Vec<St
     })
 }
 
-/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
-/// feature, so its faces and edges can be picked and used like any other body.
-fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<String>)> {
+/// The board substrate as exact solids, its outline with cutouts and drilled holes extruded to
+/// `thickness`, with whether the drilled holes were lost and the notes on the half-holes. With
+/// `plating`, the wall of every plated hole takes the colour of the pads' plating, as a face colour:
+/// the board's own faces, so it costs no geometry.
+fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Vec<solidcraft_kernel::Body>, bool, Vec<String>)> {
     let loops = outline_loops(board)?;
     let mut notes = Vec::new();
     let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut notes);
@@ -1518,6 +1564,44 @@ fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
+    let plated: Vec<&KicadDrill> = board.drills.iter().filter(|drill| drill.plated).collect();
+    if !plating || plated.is_empty() {
+        return Ok((bodies, holes_lost, notes));
+    }
+    let bodies = bodies
+        .into_iter()
+        .map(|body| {
+            let faces: Vec<solidcraft_kernel::FacePaint> = body
+                .face_sources()
+                .unwrap_or_default()
+                .iter()
+                .enumerate()
+                .filter(|(_, source)| match source {
+                    Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => plated.iter().any(|drill| on_drill_wall(drill, segment)),
+                    _ => false,
+                })
+                .map(|(face, _)| solidcraft_kernel::FacePaint { face, color: PAD_COLOR, opacity: 1.0, name: None })
+                .collect();
+            if faces.is_empty() { body } else { body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1.0, faces, name: None, layer: None })) }
+        })
+        .collect();
+    Ok((bodies, holes_lost, notes))
+}
+
+/// Does the side `segment` lie on a drill's wall? A drill is a stadium, a round one with no straight
+/// part. Its ends and its middle must all be on the wall: a side that only passes near a drill is
+/// not. A half-hole is cut as chords of [`CURVE_TOLERANCE`] (see [`notch_loop`]) and a slot's ends
+/// are drawn as chords (see [`slot_loop`]), whose middles fall a little inside the wall; the
+/// kernel's test allows for that.
+fn on_drill_wall(drill: &KicadDrill, segment: &Seg2) -> bool {
+    let points = [segment.start(), segment.mid(), segment.end()].map(|p| [p.x, p.y]);
+    solidcraft_kernel::planar::side_on_hole_wall(drill.center, drill.size, drill.angle, &points, CURVE_TOLERANCE)
+}
+
+/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
+/// feature, so its faces and edges can be picked and used like any other body.
+fn board_solid(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(String, bool, Vec<String>)> {
+    let (bodies, holes_lost, notes) = board_bodies(board, thickness, plating)?;
     let exports: Vec<solidcraft_kernel::ExportBody<'_>> = bodies
         .iter()
         .enumerate()
@@ -1564,7 +1648,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     let mut plan = crate::MeshPlan::default();
     let mut board_step = None;
     if options.representation == KicadRepresentation::Brep {
-        match board_solid(&board, thickness) {
+        match board_solid(&board, thickness, options.copper != KicadCopper::None) {
             Ok((step, holes_lost, notes)) => {
                 warnings.extend(notes);
                 if holes_lost {
@@ -3286,11 +3370,11 @@ fn via_outlines(board: &KicadBoard) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) 
         if points.len() < 3 {
             continue;
         }
-        let two_sided = via.layers.iter().any(|l| l == "F.Cu" || l == "*.Cu" || l == "F&B.Cu");
-        if two_sided || via.layers.iter().any(|l| l == "F.Cu") {
+        let [on_front, on_back] = via.faces();
+        if on_front {
             front.push(points.clone());
         }
-        if two_sided || via.layers.iter().any(|l| l == "B.Cu") {
+        if on_back {
             back.push(points);
         }
     }
@@ -3329,7 +3413,7 @@ fn cut_lists(pads: &[Vec<[f64; 2]>], vias: &[Vec<[f64; 2]>], drills: &[Vec<[f64;
 /// one, whichever side it is on (a drill goes through the board).
 fn drill_outlines(board: &KicadBoard) -> Vec<Vec<[f64; 2]>> {
     let mut out = Vec::new();
-    for via in board.vias.iter().filter(|via| via.drill > 0.0) {
+    for via in board.vias.iter().filter(|via| via_drill(via).is_some()) {
         let center = [via.at[0], -via.at[1]];
         let points = circle_points(center, (via.drill * 0.5).abs());
         if points.len() >= 3 {
@@ -3598,13 +3682,17 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
     for via in &board.vias {
         let center = [via.at[0], -via.at[1]];
         let radius = via.size * 0.5;
-        let hole = via.drill * 0.5;
-        let two_sided = via.layers.iter().any(|l| l == "F.Cu" || l == "*.Cu" || l == "F&B.Cu");
-        if two_sided || via.layers.iter().any(|l| l == "F.Cu") {
-            add(&mut front, &|p| p.add_ring(center, radius, hole, top, bottom));
+        // A ring round a hole through the board; a disc where the via ends inside it. Where the
+        // mask leaves it open, it is bare plating, as a pad is.
+        let hole = if via_drill(via).is_some() { via.drill * 0.5 } else { 0.0 };
+        let [on_front, on_back] = via.faces();
+        if on_front {
+            let (plate, z1) = if via.tented[0] { (&mut front, bottom) } else { (&mut front_pads, bottom + PAD_PROUD) };
+            add(plate, &|p| p.add_ring(center, radius, hole, top, z1));
         }
-        if two_sided || via.layers.iter().any(|l| l == "B.Cu") {
-            add(&mut back, &|p| p.add_ring(center, radius, hole, under, under_top));
+        if on_back {
+            let (plate, z0) = if via.tented[1] { (&mut back, under) } else { (&mut back_pads, under - PAD_PROUD) };
+            add(plate, &|p| p.add_ring(center, radius, hole, z0, under_top));
         }
     }
     for zone in &board.zones {

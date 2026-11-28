@@ -26,7 +26,7 @@
 use crate::blend::fillet_section::certificate::no_part_of_the_box;
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::{v_hull, MAX_K, V3, VZ};
-use crate::blend::fillet_section::station::{ders_basis, knot, span, Nurbs, Partials};
+use crate::blend::fillet_section::station::{ders_basis_flat, knot, span, Nurbs, Partials};
 use crate::error::blend::{BlendFailure, SectionProof};
 use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
@@ -39,12 +39,6 @@ const OP: &str = "blend::fillet_section::certificate";
 #[inline]
 pub(crate) fn pw_at(pw: &[f64], i: usize) -> f64 {
     pw.get(i).copied().unwrap_or(f64::NAN)
-}
-
-/// `rM[i][j]` of a nested vector (0 outside; the fork's indices stay inside).
-#[inline]
-pub(crate) fn at2<T: Copy>(m: &[Vec<T>], i: usize, j: usize, zero: T) -> T {
-    m.get(i).and_then(|r| r.get(j)).copied().unwrap_or(zero)
 }
 
 /// `v[i]` of a vector (0 outside).
@@ -161,25 +155,28 @@ pub(crate) fn partials_over_piece(
     }
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
-    let nu = ders_basis(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
-    let nv = ders_basis(&cn.v, kv, cn.q, Ivl::from(vm), cn.q);
+    let nu = ders_basis_flat(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
+    let nv = ders_basis_flat(&cn.v, kv, cn.q, Ivl::from(vm), cn.q);
     let (la, lb) = (cn.p, cn.q);
+    let hm_cols = lb + 1;
     // homogeneous point derivatives Hm[a][b] (x, y, z, w) at the middle
-    let mut hm = vec![vec![[IZ; 4]; lb + 1]; la + 1];
-    for (a, row) in hm.iter_mut().enumerate() {
-        for (b, hab) in row.iter_mut().enumerate() {
+    let mut hm = vec![[IZ; 4]; (la + 1) * hm_cols];
+    for a in 0..=la {
+        for b in 0..=lb {
             let mut h = [IZ; 4];
             for i in 0..=cn.p {
                 for j in 0..=cn.q {
                     // ku >= p and kv >= q (sm_Span)
                     let li = 4 * ((ku + i - cn.p) * cn.nv + (kv + j - cn.q));
-                    let c = at2(&nu, a, i, IZ) * at2(&nv, b, j, IZ);
+                    let c = nu.at(a as isize, i as isize) * nv.at(b as isize, j as isize);
                     for (e, he) in h.iter_mut().enumerate() {
                         *he = *he + c * Ivl::from(pw_at(&cn.pw, li + e));
                     }
                 }
             }
-            *hab = h;
+            if let Some(hab) = hm.get_mut(a * hm_cols + b) {
+                *hab = h;
+            }
         }
     }
     // the point the quotient is taken about, and whether it is added back to P[0][0]
@@ -189,7 +186,7 @@ pub(crate) fn partials_over_piece(
         Shift::Middle => {
             // the surface's point at the middle, as doubles: any finite point is sound,
             // this one makes S − o smallest over the box
-            let h = at2(&hm, 0, 0, [IZ; 4]);
+            let h = hm.first().copied().unwrap_or([IZ; 4]);
             let w = h[3].mid();
             let o = [h[0].mid() / w, h[1].mid() / w, h[2].mid() / w];
             let finite = o.iter().all(|x| x.is_finite());
@@ -197,13 +194,11 @@ pub(crate) fn partials_over_piece(
         }
     };
     if let Some(o) = about {
-        for row in &mut hm {
-            for h in row.iter_mut() {
-                // (A − o w): the homogeneous form of S − o
-                let w = h[3];
-                for (he, &oe) in h.iter_mut().zip(&o) {
-                    *he = *he - Ivl::from(oe) * w;
-                }
+        for h in &mut hm {
+            // (A − o w): the homogeneous form of S − o
+            let w = h[3];
+            for (he, &oe) in h.iter_mut().zip(&o) {
+                *he = *he - Ivl::from(oe) * w;
             }
         }
     }
@@ -227,31 +222,30 @@ pub(crate) fn partials_over_piece(
             *pj = x;
         }
     }
-    let mut av = vec![vec![VZ; lk + 1]; lk + 1];
-    let mut wv = vec![vec![IZ; lk + 1]; lk + 1];
+    let k_cols = lk + 1;
+    let mut av = vec![VZ; k_cols * k_cols];
+    let mut wv = vec![IZ; k_cols * k_cols];
     for a in 0..=lk {
         for b in 0..=(lk - a) {
             let mut h = [IZ; 4];
             for i in a..=la {
                 for j in b..=lb {
                     let c = at1(&pu, i - a, IZ) * at1(&pv, j - b, IZ);
-                    let hij = at2(&hm, i, j, [IZ; 4]);
+                    let hij = hm.get(i * hm_cols + j).copied().unwrap_or([IZ; 4]);
                     for (he, &x) in h.iter_mut().zip(&hij) {
                         *he = *he + x * c;
                     }
                 }
             }
-            if let (Some(ab), Some(wab)) = (
-                av.get_mut(a).and_then(|r| r.get_mut(b)),
-                wv.get_mut(a).and_then(|r| r.get_mut(b)),
-            ) {
+            let idx = a * k_cols + b;
+            if let (Some(ab), Some(wab)) = (av.get_mut(idx), wv.get_mut(idx)) {
                 let [x, y, z, w] = h;
                 *ab = V3 { x, y, z };
                 *wab = w;
             }
         }
     }
-    let w00 = at2(&wv, 0, 0, IZ);
+    let w00 = wv.first().copied().unwrap_or(IZ);
     let w00 = match weights {
         Some(h) => Ivl::new(w00.lo.max(h.lo), w00.hi.min(h.hi)),
         None => w00,
@@ -265,10 +259,10 @@ pub(crate) fn partials_over_piece(
             BlendFailure::SectionNotProved(SectionProof::FaceWeightPositive),
         ));
     }
-    let mut out = Partials::default();
+    let mut out = Partials::with_order(lk);
     for a in 0..=lk {
         for b in 0..=(lk - a) {
-            let mut v3 = at2(&av, a, b, VZ);
+            let mut v3 = av.get(a * k_cols + b).copied().unwrap_or(VZ);
             let mut cka = 1.0_f64;
             for i in 0..=a {
                 if i > 0 {
@@ -282,7 +276,7 @@ pub(crate) fn partials_over_piece(
                     if i == 0 && j == 0 {
                         continue;
                     }
-                    let c = Ivl::from(cka * cbj) * at2(&wv, i, j, IZ);
+                    let c = Ivl::from(cka * cbj) * wv.get(i * k_cols + j).copied().unwrap_or(IZ);
                     let pij = out.at(a - i, b - j);
                     v3.x = v3.x - c * pij.x;
                     v3.y = v3.y - c * pij.y;

@@ -210,6 +210,19 @@ pub fn line_meets_box(b: &Aabb3, o: Vec3, d: Vec3) -> bool {
     !b.is_empty() && solidcore_ops::measure::line_meets_box(k(b.min), k(b.max), k(o), k(d), 1e-6).unwrap_or(false)
 }
 
+/// How far `b` runs past `end` along `toward` (mm), its greatest level above the plane through
+/// `end` square to `toward`, as solidcore-ops measures it
+/// ([`solidcore_ops::section_corners::reach_past`]); 0 when none of it lies past. A mesh body has
+/// no solidcore form and is refused.
+pub fn reach_past(b: &Body, end: solidcore_record::Vec3, toward: solidcore_record::Vec3) -> Result<f64> {
+    let Some(form) = b.ops_body() else {
+        return Err(crate::KernelError::Failed("how far the body runs past its end: the body has no solidcore form".into()));
+    };
+    let (ops, _) = &*form;
+    solidcore_ops::section_corners::reach_past(ops, end, toward)
+        .map_err(|e| crate::KernelError::Invalid(format!("how far the body runs past its end can't be measured: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,6 +363,38 @@ mod tests {
         let joined = crate::union_apart(&[plate.clone(), far.clone()]).unwrap().expect("apart");
         assert_eq!(joined.lumps().map_or(0, |l| l.len()), 2);
         assert!(plate.bounds.lock().unwrap().is_some() && far.bounds.lock().unwrap().is_some());
+    }
+
+    /// Overlapping cylinders whose only vertices lie on distant seams are still rejected by
+    /// `union_apart` using their analytic circle edges, without measuring any exact box.
+    #[test]
+    fn overlapping_cylinders_are_not_joined_apart_without_measuring() {
+        let a = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+        let b = cylinder(Vec3::new(6.0, 0.0, 0.0), Vec3::Z, 5.0, 10.0).unwrap();
+        assert!(crate::union_apart(&[a.clone(), b.clone()]).unwrap().is_none());
+        assert_eq!(*a.bounds.lock().unwrap(), None);
+        assert_eq!(*b.bounds.lock().unwrap(), None);
+    }
+
+    /// Contact tests reject clearly apart bodies from their exact boxes without meshing either,
+    /// while pairs within the contact-mesh chord margin (`gap + 2 * tol`) still run the mesh test.
+    #[test]
+    fn meets_rejects_apart_bodies_without_meshing() {
+        let a = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        let far = crate::box_solid(Vec3::new(50.0, 0.0, 0.0), Vec3::new(60.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        // Size is ~17.32, so `tol = size * 1e-4 ≈ 0.00173`, `gap = 2 * tol ≈ 0.00346`, and
+        // `gap + 2 * tol ≈ 0.00693`. A 0.005 gap sits past `gap` yet inside the chord margin, so
+        // the exact-box prefilter must not skip meshing it.
+        let near_chord = crate::box_solid(Vec3::new(10.005, 0.0, 0.0), Vec3::new(20.005, 10.0, 10.0)).unwrap().keeping_meshes();
+        let touching = crate::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap().keeping_meshes();
+        assert!(!a.meets(&far).unwrap());
+        assert_eq!(a.meets_each(std::slice::from_ref(&far)).unwrap(), vec![false]);
+        assert_eq!(a.cached_mesh_count(), 0);
+        assert_eq!(far.cached_mesh_count(), 0);
+        assert!(!a.meets(&near_chord).unwrap());
+        assert!(a.cached_mesh_count() > 0, "pair inside chord margin must not be skipped by exact-box prefilter");
+        assert!(a.meets(&touching).unwrap());
+        assert_eq!(a.meets_each(&[far, touching]).unwrap(), vec![false, true]);
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre

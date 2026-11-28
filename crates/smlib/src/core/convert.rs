@@ -243,31 +243,17 @@ const SURFACE_BALL_PATCH_I: i64 = SURFACE_BALL_PATCH as i64;
 
 /// The `SmBSplineCurve` part of a curve that is one (`IsKindOf(SmBSplineCurve_TYPE)`), with its
 /// NURB (`GetOrCreateGwNurbPointer`: a lazy line or conic makes it on a copy); `None` for the
-/// other kinds.
+/// other kinds. The kernel's [`Curve::bspline_part`], its failure named by the call that made
+/// the NURB.
 pub(super) fn bspline_curve_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
-    Ok(Some(match c.kind() {
-        CurveKind::BSpline(b) => Cow::Borrowed(b),
-        CurveKind::Line(l) => l.base_with_nurb().map_err(sc("SmLine::GetOrCreateGwNurbPointer"))?,
-        CurveKind::Ellipse(e) if e.base().gw_nurb().is_none() => {
-            let mut made = e.clone();
-            made.make_nurb(k).map_err(sc("SmEllipse::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Ellipse(e) => Cow::Borrowed(e.base()),
-        CurveKind::Hyperbola(h) if h.base().gw_nurb().is_none() => {
-            let mut made = h.clone();
-            made.make_nurb(None).map_err(sc("SmHyperbola::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Hyperbola(h) => Cow::Borrowed(h.base()),
-        CurveKind::Parabola(p) if p.base().gw_nurb().is_none() => {
-            let mut made = p.clone();
-            made.make_nurb(None).map_err(sc("SmParabola::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Parabola(p) => Cow::Borrowed(p.base()),
-        _ => return Ok(None),
-    }))
+    let call = match c.kind() {
+        CurveKind::Line(_) => "SmLine::GetOrCreateGwNurbPointer",
+        CurveKind::Ellipse(_) => "SmEllipse::MakeNurb",
+        CurveKind::Hyperbola(_) => "SmHyperbola::MakeNurb",
+        CurveKind::Parabola(_) => "SmParabola::MakeNurb",
+        _ => "SmCurve::GetOrCreateGwNurbPointer",
+    };
+    c.bspline_part(k).map_err(sc(call))
 }
 
 /// The `SmBSplineSurface` part of a surface that is one (`IsKindOf(SmBSplineSurface_TYPE)`), its
@@ -2098,7 +2084,7 @@ fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> R
 /// NURBS form, where the reader needs it and the kernel proves it
 /// (`Torus::from_label_unless_found_stands`). `found` is what SMLib's test ([`analytic_of_nurbs`])
 /// worked back out of the form, from circles through three points of each meridian. Where the form
-/// lies on it, it is the face's torus as this reader has always made it, to the last bit, and this
+/// proves it, it is the face's torus as this reader has always made it, to the last bit, and this
 /// is `None`. A tube that shows only a short arc fixes those circles to its rounding over the
 /// square of the arc's angle: the torus found was 1e-10 to 1e-9 off the form it was found in (a
 /// 1.2 degree arc of a tube of radius 13.7), which the body's own check then refused, and below
@@ -2398,7 +2384,7 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
             let found = analytic_of_nurbs(k, &nurbs, ty, xsect)?;
-            // a torus the form does not lie on, or that was not found: the arrays' own, where
+            // a torus the form does not prove, or that was not found: the arrays' own, where
             // the kernel proves the form on it
             let found = if ty == SURFACE_TORUS_I {
                 match torus_of_arrays(k, f, j_torus, &nurbs, found.as_ref())? {
