@@ -111,33 +111,53 @@ pub fn crashed_system(report: &Value, fields: &mut serde_json::Map<String, Value
     if !version.is_empty() {
         failed["version"] = json!(super::limited(version, 100));
     }
-    let mut lines = vec![format!("Crashed run: {environment}")];
-    if let Some(g) = solidcraft_engine::crash::graphics(&environment) {
-        let api = g.api_id().unwrap_or(g.api.as_str()).to_string();
-        let cpu = g.device_type.as_deref() == Some("Cpu");
-        fields.insert("renderer".into(), json!(if cpu { "CPU" } else { "GPU" }));
-        fields.insert("gpu".into(), json!(match &g.device_type {
-            Some(t) => format!("{} ({}, {t})", g.adapter, g.api),
-            None => g.adapter.clone(),
-        }));
-        fields.insert("graphics_api".into(), json!(api));
-        if let Some(d) = &g.driver {
-            fields.insert("driver".into(), json!(super::limited(d, 200)));
-            lines.push(format!("Crashed run's driver: {d}"));
+    // The text's graphics lines become the crashed run's; this run's go on a labelled line.
+    let (renderer_line, api_line) = match solidcraft_engine::crash::graphics(&environment) {
+        Some(g) => {
+            let api = g.api_id().unwrap_or(g.api.as_str()).to_string();
+            let renderer = if g.device_type.as_deref() == Some("Cpu") { "CPU" } else { "GPU" };
+            let gpu = match &g.device_type {
+                Some(t) => format!("{} ({}, {t})", g.adapter, g.api),
+                None => g.adapter.clone(),
+            };
+            let mut line = format!("Renderer: {renderer}, {gpu}");
+            if let Some(d) = &g.driver {
+                fields.insert("driver".into(), json!(super::limited(d, 200)));
+                line.push_str(&format!(", driver {d}"));
+            }
+            fields.insert("renderer".into(), json!(renderer));
+            fields.insert("gpu".into(), json!(gpu));
+            fields.insert("graphics_api".into(), json!(api));
+            failed["graphics_api"] = json!(api);
+            failed["gpu"] = json!(g.adapter);
+            (format!("{line} (the run that crashed)"), Some(format!("Graphics API: {api} (the run that crashed)")))
         }
-        failed["graphics_api"] = json!(api);
-        failed["gpu"] = json!(g.adapter);
-    }
+        None => (format!("{environment} (the run that crashed)"), None),
+    };
     fields.insert("crashed_run".into(), failed);
+    let mut lines: Vec<String> = Vec::new();
+    let mut placed = false;
+    for line in text.lines() {
+        if line.starts_with("Renderer:") || line.starts_with("Graphics API:") {
+            if !placed {
+                lines.push(renderer_line.clone());
+                lines.extend(api_line.clone());
+                placed = true;
+            }
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    if !placed {
+        lines.push(renderer_line);
+        lines.extend(api_line);
+    }
     if !from.is_empty() {
         let said: Vec<&str> = ["renderer", "gpu", "graphics_api"].iter().filter_map(|k| from.get(*k).and_then(Value::as_str)).collect();
         lines.push(format!("Reported from: {}", said.join(", ")));
         fields.insert("reported_from".into(), Value::Object(from));
     }
-    if !text.ends_with('\n') && !text.is_empty() {
-        text.push('\n');
-    }
-    text.push_str(&lines.join("\n"));
+    *text = lines.join("\n");
     text.push('\n');
 }
 
@@ -408,8 +428,13 @@ pub fn evidence(
     if let Some(r) = &report {
         crashed_system(r, &mut system_fields, &mut system_text);
     }
-    // About a crash: the crashed run's log, which may be several starts back by now.
-    let log = report.as_ref().and_then(crashed_log_lines).filter(|l| !l.is_empty()).unwrap_or_else(|| log_lines(app));
+    // About a crash: the crashed run's own log, which may be several starts back by now; none when
+    // the logs kept no longer have it (never another run's in its place). A report from before
+    // reports named their run gets the end of this run's and the run before's, as it did.
+    let log = match &report {
+        Some(r) if r.get("run").is_some() => crashed_log_lines(r).unwrap_or_default(),
+        _ => log_lines(app),
+    };
     payload::Evidence {
         system: system_text,
         system_fields,

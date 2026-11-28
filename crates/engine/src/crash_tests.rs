@@ -352,6 +352,7 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert_eq!(v["app"]["version"], "9.9.9");
     assert_eq!(v["app"]["commit"], "abc1234");
     assert_eq!(v["system"]["environment"], "Renderer: test");
+    assert!(v["run"]["pid"].as_u64().is_some() && v["run"]["start"].as_str().is_some(), "the run, for its log: {v}");
     assert!(v["message"].as_str().unwrap().contains("an internal error in a command"), "{v}");
     assert!(v["location"].as_str().unwrap().contains("diagnostics.rs"), "{v}");
     let bt = v["backtrace"].as_array().unwrap();
@@ -798,6 +799,10 @@ fn a_renderer_line_reads_back_as_api_adapter_and_driver() {
     // Earlier releases: the driver's name alone, then MSAA.
     let g = graphics("Renderer: Gl NVIDIA GeForce GT 220 (nvidia), MSAA 4x").unwrap();
     assert_eq!((g.api_id(), g.adapter.as_str(), g.device_type, g.driver.as_deref()), (Some("gl"), "NVIDIA GeForce GT 220", None, Some("nvidia")));
+    // A driver's own brackets stay in it.
+    let g = graphics("Renderer: Vulkan llvmpipe (LLVM 19.1.7, 256 bits) (Cpu, driver llvmpipe Mesa 25.0 (LLVM 19.1.7)), MSAA 4x").unwrap();
+    assert_eq!(g.adapter, "llvmpipe (LLVM 19.1.7, 256 bits)");
+    assert_eq!((g.device_type.as_deref(), g.driver.as_deref()), (Some("Cpu"), Some("llvmpipe Mesa 25.0 (LLVM 19.1.7)")));
     let g = graphics("Renderer: Vulkan Test GPU (driver 1.2.3)").unwrap();
     assert_eq!((g.adapter.as_str(), g.driver.as_deref()), ("Test GPU", Some("1.2.3")));
     assert_eq!(graphics("Renderer: CPU"), None);

@@ -3356,6 +3356,10 @@ mod tests {
         let unticked = payload::build(&crash_form, payload::Ticks { crash: false, ..t.ticks }, &t.evidence, "test");
         assert!(unticked.files.iter().all(|f| f.kind != "crash"), "{:?}", unticked.files);
         assert!(!unticked.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("crash")));
+        // A crash report that names its run gets that run's log or none, never this run's instead.
+        let named = json!({"id": "c2", "kind": "command_panic", "message": "boom", "run": {"pid": 1, "start": "2020-01-01T00:00:00Z"}});
+        let evidence = ticket::evidence(&app, None, None, Some(("c2".into(), named.to_string())));
+        assert!(evidence.log.is_empty(), "{:?}", evidence.log);
         assert_eq!(t.evidence.failing.as_ref().and_then(|f| f.origin.as_deref()), Some("app"), "from the crash's kind");
 
         // Only a refusal of the report itself is final; a busy or broken server is tried again.
@@ -3647,8 +3651,14 @@ mod tests {
         assert_eq!(fields["driver"], json!("Intel Corporation 31.0.101.2111"));
         assert_eq!(fields["crashed_run"]["version"], json!("0.50.0"));
         assert_eq!(fields["reported_from"]["gpu"], json!("Microsoft Basic Render Driver (Dx12, Cpu)"));
-        assert!(text.contains("Crashed run: Renderer: Vulkan Intel(R) UHD Graphics 620"), "{text}");
-        assert!(text.contains("Reported from: GPU, Microsoft Basic Render Driver (Dx12, Cpu), dx12"), "{text}");
+        assert_eq!(
+            text,
+            "SolidCraft 0.51.0\n\
+             Renderer: GPU, Intel(R) UHD Graphics 620 (Vulkan, IntegratedGpu), driver Intel Corporation 31.0.101.2111 (the run that crashed)\n\
+             Graphics API: vulkan (the run that crashed)\n\
+             Reported from: GPU, Microsoft Basic Render Driver (Dx12, Cpu), dx12\n",
+            "one set of graphics lines, the crashed run's; this run's only as reported from"
+        );
         // A crash report without a renderer leaves this start's as they are.
         let (mut same, mut said) = (fields.clone(), text.clone());
         ticket::crashed_system(&json!({"system": {"environment": ""}}), &mut same, &mut said);

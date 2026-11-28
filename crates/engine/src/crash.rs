@@ -603,9 +603,22 @@ pub fn graphics(environment: &str) -> Option<Graphics> {
         return None;
     }
     let rest = rest.trim();
-    let (adapter, inner) = match (rest.ends_with(')'), rest.rfind(" (")) {
-        (true, Some(i)) => (&rest[..i], Some(&rest[i + 2..rest.len() - 1])),
-        _ => (rest, None),
+    // The last bracketed group, brackets inside it (a driver's `Mesa 25.0 (LLVM 19.1.7)`) kept.
+    let open = rest.strip_suffix(')').and_then(|body| {
+        let mut depth = 0usize;
+        for (i, c) in body.char_indices().rev() {
+            match c {
+                ')' => depth += 1,
+                '(' if depth == 0 => return Some(i),
+                '(' => depth -= 1,
+                _ => {}
+            }
+        }
+        None
+    });
+    let (adapter, inner) = match open {
+        Some(i) => (&rest[..i], Some(&rest[i + 1..rest.len() - 1])),
+        None => (rest, None),
     };
     let (device_type, driver) = match inner {
         Some(inner) => match inner.split_once(", driver ") {
@@ -875,7 +888,8 @@ pub(crate) fn command_done(
             recent,
             base: json!("the design as it was when the command started"),
             notes: left_out,
-            fields: serde_json::Map::new(),
+            // This run, as its journal names it: the log the app keeps finds its lines by it.
+            fields: [("run".to_string(), json!({ "pid": std::process::id(), "start": utc(state.started) }))].into_iter().collect(),
             attach: Vec::new(),
         };
         write_report(state, kind, Some(&p), extra);
