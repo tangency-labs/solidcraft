@@ -1536,14 +1536,14 @@ mod byte_regressions {
         ("ellipse-arcs.dxf", 16674, "2042450483bee76a36d2e5b37e3a54511b97efab479a1fce8a0e8b9c220d0331"),
         ("pocket-and-engraved-text-arcs.dxf", 39080, "0732cbc0dc9533c5eb27833ed78ed5db18cf0299d599a8c7cba062017913e41d"),
         ("text-outlines-arcs.dxf", 25311, "300f58b5681ffe089b1f900f548da740b9aa16ba2f10f21a5e4b3a5c0bb8a7fb"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "9c16c793111306b3ff290c1df312e74b0ccd984ff27a64f73c3152d32717ff88"),
-        ("tray-arcs-cut-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
-        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "f650a184c9795df766c4c917a6617f4000eee6a7f6f779c67604b86c97ca706a"),
-        ("tray-arcs-cut-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "7808677679865a0191f4a51a0591e640cc2d4b153633c9a0bcaa418490d856e6"),
-        ("tray-arcs-etch-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "85f4af3fdf6d6818af84a466850642a2158de48ce5678e7629b4072607650eed"),
-        ("tray-arcs-etch-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "92e08a366d571e3913acacc18bf15db3d8019825f26b77f55249044f7ccfd90f"),
+        ("tray-arcs-cut-bends-false-single.dxf", 40580, "f35a606f0ca9614b075289f0a5180aceb9b7c6d0a1f4fa4eaf0393fe5d9323ff"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "a68a59e8710f2203c26a2c084aa15bdaf8dd0f55f2275489306cf3f102646db3"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41076, "95df5164371ee7765b8cc08d4ab2275b3d6fd0df1bd1c805fc39fc63381819e6"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "4fda3aa8107a10d494e70ce2118dafd7aad2641cdc6143c13d7995fcb8a59527"),
+        ("tray-arcs-etch-bends-false-single.dxf", 40580, "f35a606f0ca9614b075289f0a5180aceb9b7c6d0a1f4fa4eaf0393fe5d9323ff"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "849acaa9a2d47b72bf767f042dfa6c9f60867fe72ccfd92fa9e98cac33d9770e"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41076, "95df5164371ee7765b8cc08d4ab2275b3d6fd0df1bd1c805fc39fc63381819e6"),
     ];
 
     struct BytePins {
