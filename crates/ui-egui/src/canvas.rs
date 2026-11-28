@@ -535,7 +535,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         if let Some(t) = triad.as_ref() {
             place.handles = crate::gizmo::handles_region(proj, t);
         }
-        if let Some((end, _)) = rotation {
+        if let Some((end, ..)) = rotation {
             let grip = egui::Rect::from_center_size(end, vec2(20.0, 20.0));
             place.handles = Some(place.handles.map_or(grip, |triad| triad.union(grip)));
         }
