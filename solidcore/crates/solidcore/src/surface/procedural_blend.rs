@@ -1794,6 +1794,14 @@ pub enum BlendRef<'a> {
         /// The surface, its net.
         net: &'a Surface,
     },
+    /// A foot blend's section face ([`crate::blend::foot_blend`], a weld bead's, #15129) and
+    /// its definition.
+    FootBlend {
+        /// The definition.
+        blend: &'a crate::blend::foot_blend::FootBlendDefinition,
+        /// The surface, its net.
+        net: &'a Surface,
+    },
 }
 
 /// The definition a surface keeps beside its kind ([`Surface::procedural_blend`],
@@ -1811,6 +1819,8 @@ pub enum KeptDefinition {
     Draft(crate::offset::draft::DraftDefinition),
     /// A multi-section blend's ([`crate::sweep::section_blend`], #3140).
     SectionBlend(crate::sweep::section_blend::SectionBlendDefinition),
+    /// A foot blend's section face's ([`crate::blend::foot_blend`], a weld bead's, #15129).
+    FootBlend(Box<crate::blend::foot_blend::FootBlendDefinition>),
 }
 
 impl KeptDefinition {
@@ -1818,11 +1828,15 @@ impl KeptDefinition {
     /// under a uniform one ([`crate::surface::procedural_sweep::ProceduralSweep::follows`]);
     /// a round's, a corner's and a drafted face's always (their own transforms refuse what
     /// they cannot follow: a draft, a scale that is not uniform); a section blend's always (it
-    /// keeps the motion).
+    /// keeps the motion); a foot blend's only under a rigid one (no scale, or 1 on every
+    /// axis within rounding, [`crate::blend::foot_blend::FootBlendDefinition::follows`]): its
+    /// legs, sagitta and bound are lengths it does not scale, and a mirror turns
+    /// its sides, so a mirrored or scaled bead face is left behind as a sweep's is.
     #[must_use]
     pub fn follows(&self, scale: Option<Vec3>) -> bool {
         match self {
             Self::Sweep(_) => crate::surface::procedural_sweep::ProceduralSweep::follows(scale),
+            Self::FootBlend(_) => crate::blend::foot_blend::FootBlendDefinition::follows(scale),
             Self::Round(_) | Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => true,
         }
     }
@@ -1852,6 +1866,7 @@ impl KeptDefinition {
                 b.transform(rotate_n_move, scale);
                 Ok(())
             }
+            Self::FootBlend(b) => b.transform(rotate_n_move, scale),
         }
     }
 
@@ -1871,7 +1886,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.reparametrize_map(u, alpha, beta),
             Self::Sweep(s) => s.reparametrize_map(u, alpha, beta),
-            Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => {}
+            Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) | Self::FootBlend(_) => {}
         }
     }
 
@@ -1880,7 +1895,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.swap_map(),
             Self::Sweep(s) => s.swap_map(),
-            Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => {}
+            Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) | Self::FootBlend(_) => {}
         }
     }
 }
@@ -1898,6 +1913,10 @@ impl<'a> BlendRef<'a> {
                 (false, SurfaceKind::BSpline(b)) => BlendNet::Approx(b),
                 _ => BlendNet::Exact(net),
             },
+            Self::FootBlend { net, .. } => match net.kind() {
+                SurfaceKind::BSpline(b) => BlendNet::Approx(b),
+                _ => BlendNet::Exact(net),
+            },
         }
     }
 
@@ -1910,6 +1929,7 @@ impl<'a> BlendRef<'a> {
             Self::Corner { corner, .. } => corner.bound(),
             Self::Draft { draft, .. } => draft.bound(),
             Self::SectionBlend { blend, .. } => blend.bound(),
+            Self::FootBlend { blend, .. } => blend.bound(),
         }
     }
 
@@ -1920,8 +1940,9 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(p) => p.def.order,
             Self::Exact { round, .. } => round.order(),
             Self::Corner { corner, .. } => corner.order(),
-            // (a drafted face meets its neighbours where they are cut to it)
-            Self::Draft { .. } => 0,
+            // (a drafted face meets its neighbours where they are cut to it; a foot blend's
+            // section is the chord or its arc at a sagitta, order 0)
+            Self::Draft { .. } | Self::FootBlend { .. } => 0,
             // the least of the orders its two ends hold their frames to
             Self::SectionBlend { blend, .. } => {
                 let [a, b] = blend.orders();
@@ -1939,8 +1960,10 @@ impl<'a> BlendRef<'a> {
             Self::Exact { round, .. } => round.support(i),
             Self::Corner { corner, .. } => corner.support(i),
             Self::Draft { draft, .. } => (i == 0).then(|| draft.source()),
-            // (a section blend runs through its sections; it rolls on no surface)
-            Self::SectionBlend { .. } => None,
+            // (a section blend runs through its sections; it rolls on no surface. A foot
+            // blend's supports stay where the bead was made, before its motions: not the moved
+            // face's)
+            Self::SectionBlend { .. } | Self::FootBlend { .. } => None,
         }
     }
 
@@ -1952,7 +1975,8 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(_)
             | Self::Corner { .. }
             | Self::Draft { .. }
-            | Self::SectionBlend { .. } => None,
+            | Self::SectionBlend { .. }
+            | Self::FootBlend { .. } => None,
         }
     }
 
@@ -1964,7 +1988,8 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(_)
             | Self::Exact { .. }
             | Self::Draft { .. }
-            | Self::SectionBlend { .. } => None,
+            | Self::SectionBlend { .. }
+            | Self::FootBlend { .. } => None,
         }
     }
 
@@ -1976,7 +2001,8 @@ impl<'a> BlendRef<'a> {
             Self::Procedural(_)
             | Self::Exact { .. }
             | Self::Corner { .. }
-            | Self::SectionBlend { .. } => None,
+            | Self::SectionBlend { .. }
+            | Self::FootBlend { .. } => None,
         }
     }
 
@@ -1987,9 +2013,24 @@ impl<'a> BlendRef<'a> {
     ) -> Option<&'a crate::sweep::section_blend::SectionBlendDefinition> {
         match *self {
             Self::SectionBlend { blend, .. } => Some(blend),
-            Self::Procedural(_) | Self::Exact { .. } | Self::Corner { .. } | Self::Draft { .. } => {
-                None
-            }
+            Self::Procedural(_)
+            | Self::Exact { .. }
+            | Self::Corner { .. }
+            | Self::Draft { .. }
+            | Self::FootBlend { .. } => None,
+        }
+    }
+
+    /// The foot blend's definition, for a foot blend's section face (a weld bead's, #15129).
+    #[must_use]
+    pub const fn foot_blend(&self) -> Option<&'a crate::blend::foot_blend::FootBlendDefinition> {
+        match *self {
+            Self::FootBlend { blend, .. } => Some(blend),
+            Self::Procedural(_)
+            | Self::Exact { .. }
+            | Self::Corner { .. }
+            | Self::Draft { .. }
+            | Self::SectionBlend { .. } => None,
         }
     }
 
@@ -2006,6 +2047,7 @@ impl<'a> BlendRef<'a> {
             Self::Corner { corner, net } => corner.recertify(k, net),
             Self::Draft { draft, net } => draft.recertify(k, net),
             Self::SectionBlend { blend, net } => blend.recertify(net),
+            Self::FootBlend { blend, net } => blend.recertify(k, net),
         }
     }
 }
