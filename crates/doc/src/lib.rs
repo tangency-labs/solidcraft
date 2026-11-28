@@ -303,6 +303,8 @@ pub enum DocError {
     Expr(String),
     #[error("{0}")]
     Invalid(String),
+    #[error("the {axis} axis does not lie in the sketch plane")]
+    WorldRevolveAxisOutsideSketchPlane { axis: &'static str },
     #[error("unknown {0}")]
     Unknown(String),
     #[error(transparent)]

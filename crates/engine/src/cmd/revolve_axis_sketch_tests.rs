@@ -44,6 +44,123 @@ fn colliding_sketches() -> Session {
 /// The ring the profile makes about x = 0: π · (20² − 10²) · 10.
 const RING: f64 = PI * (400.0 - 100.0) * 10.0;
 
+fn rectangular_profile(plane: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": plane, "name": "ProfileSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10.0, 5.0], "p1": [20.0, 15.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+fn check_sketch_axis_suggestion(plane: &str, world_axis: &str, sketch_axis: &str) {
+    let mut s = rectangular_profile(plane);
+    let err = s
+        .execute("solid.revolve", &json!({"sketch": "ProfileSketch", "axis": world_axis}))
+        .expect_err("the world axis is perpendicular to the profile plane");
+
+    run(&mut s, "solid.revolve", json!({"sketch": "ProfileSketch", "axis": sketch_axis}));
+
+    let message = err.to_string();
+    assert!(message.split(|ch: char| !ch.is_alphanumeric()).any(|word| word == sketch_axis), "expected sketch axis {sketch_axis} in {message:?}");
+}
+
+#[test]
+fn revolve_with_world_y_off_the_profile_plane_suggests_sketch_y() {
+    check_sketch_axis_suggestion("XZ", "Y", "y");
+}
+
+#[test]
+fn revolve_with_world_x_off_the_profile_plane_suggests_sketch_x() {
+    check_sketch_axis_suggestion("YZ", "X", "x");
+}
+
+#[test]
+fn revolve_with_world_z_off_the_profile_plane_has_no_sketch_axis_suggestion() {
+    let mut s = rectangular_profile("XY");
+    let err = s.execute("solid.revolve", &json!({"sketch": "ProfileSketch", "axis": "Z"})).expect_err("world Z is perpendicular to XY");
+
+    let message = err.to_string();
+    assert!(message.ends_with("the Z axis does not lie in the sketch plane"), "expected the plain axis error in {message:?}");
+}
+
+#[test]
+fn revolve_world_axis_hint_is_omitted_for_crossing_profiles() {
+    for (plane, p0, p1, world, sketch) in [
+        (json!("YZ"), [10, -5], [20, 5], "X", "x"),
+        (json!("XZ"), [-5, 10], [5, 20], "Y", "y"),
+        // This plane's normal has nonzero X and Y components. The rectangle crosses both
+        // of its local axes, so neither is a viable replacement for an off-plane world axis.
+        (json!({"origin": [0, 0, 0], "x_dir": [1, 1, 0], "y_dir": [0, 0, 1]}), [-5, -5], [5, 5], "X", "x"),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": plane, "name": "ProfileSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+        run(&mut s, "sketch.finish", json!({}));
+
+        let err = s.execute("solid.revolve", &json!({"sketch": "ProfileSketch", "axis": sketch})).unwrap_err();
+        assert!(err.to_string().contains("profile crosses the revolve axis"), "{plane}, {sketch}: {err}");
+        let err = s.execute("solid.revolve", &json!({"sketch": "ProfileSketch", "axis": world})).unwrap_err();
+        assert!(err.to_string().ends_with(&format!("the {world} axis does not lie in the sketch plane")), "{plane}, {world}: {err}");
+    }
+}
+
+#[test]
+fn surface_revolve_world_axis_hint_requires_a_usable_curve_selection() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "ProfileSketch"}));
+    for (id, points) in
+        [("crossing", [[-3, 0], [3, 4]]), ("on_axis", [[0, 10], [0, 14]]), ("off_axis", [[3, 20], [3, 24]]), ("to_axis", [[0, 30], [3, 34]])]
+    {
+        run(&mut s, "sketch.line", json!({"points": points, "ids": [id]}));
+    }
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 40], "p1": [3, 44]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let mut false_hints = Vec::new();
+    for (selection, reason) in [
+        (json!({"curves": ["crossing"]}), "curves cross the revolve axis"),
+        (json!({"curves": ["on_axis"]}), "curves lie on the revolve axis"),
+        (json!({"profiles": [0]}), "closed curve touching the revolve axis"),
+        (json!({"curves": ["missing"]}), "curve `missing`"),
+    ] {
+        let mut params = selection.clone();
+        params["sketch"] = json!("ProfileSketch");
+        params["axis"] = json!("y");
+        let err = s.execute("surface.revolve", &params).unwrap_err();
+        assert!(err.to_string().contains(reason), "{selection}: {err}");
+        params["axis"] = json!("Y");
+        let err = s.execute("surface.revolve", &params).unwrap_err().to_string();
+        if err.contains("Did you mean") {
+            false_hints.push(format!("{selection}: {err}"));
+        }
+    }
+    for curve in ["off_axis", "to_axis"] {
+        let mut params = json!({"sketch": "ProfileSketch", "curves": [curve], "axis": "Y"});
+        let err = s.execute("surface.revolve", &params).unwrap_err();
+        assert!(err.to_string().contains(r#"Did you mean "y", the sketch's own axis?"#), "{curve}: {err}");
+        params["axis"] = json!("y");
+        run(&mut s, "surface.revolve", params);
+    }
+    assert!(false_hints.is_empty(), "invalid curve selections suggested an unusable axis: {false_hints:#?}");
+}
+
+#[test]
+fn saved_lowercase_world_z_uses_the_uppercase_axis_name_in_its_error() {
+    let mut s = rectangular_profile("XZ");
+    run(&mut s, "solid.revolve", json!({"sketch": "ProfileSketch", "axis": "Z"}));
+    let doc = std::sync::Arc::make_mut(&mut s.doc);
+    let feature = doc.features.last_mut().unwrap();
+    let solidcraft_doc::FeatureKind::Revolve { axis, .. } = &mut feature.kind else { panic!("expected the revolve feature") };
+    *axis = solidcraft_doc::AxisRef::World { axis: "z".into() };
+    let sketch = doc.features.iter_mut().find(|feature| feature.name == "ProfileSketch").unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut sketch.kind else { panic!("expected the profile sketch") };
+    *plane = solidcraft_doc::PlaneRef::Origin { name: "XY".into() };
+
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let err = reopened.model.results.last().unwrap().error.as_deref().expect("world Z is perpendicular to XY");
+    assert!(err.ends_with("the Z axis does not lie in the sketch plane"), "{err}");
+}
+
 #[test]
 fn revolve_axis_named_by_its_owning_sketch_uses_that_sketch() {
     let mut s = colliding_sketches();
