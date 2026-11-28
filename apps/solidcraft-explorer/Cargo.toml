@@ -1,0 +1,46 @@
+[package]
+name = "solidcraft-explorer"
+description = "Windows File Explorer thumbnails: a design's saved picture as the file's thumbnail"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The DLL Windows loads (a COM in-process server), and a Rust library for its tests.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The workspace lints, except unsafe_code: denied, not forbidden, so that src/com.rs can allow it:
+# a COM server's exported functions, its interfaces, the stream it reads and the bitmap it returns
+# have no safe API. Keep the rest in sync with [workspace.lints].
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+print_stderr = "deny"
+
+[dependencies]
+solidcraft-design-preview = { workspace = true }
+# Decodes the saved picture with an allocation limit (already in the tree).
+png = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# The COM interfaces (IClassFactory, IInitializeWithStream, IThumbnailProvider), IStream and the
+# DIB section. windows 0.62 is already in the tree (wgpu-hal, accesskit_windows, sysinfo, trash).
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
+# The #[implement] macro's expansion names windows_core directly (already in the tree).
+windows-core = "0.62"
+
+[dev-dependencies]
+# The tests build design containers with real pictures and keys.
+sha2 = { workspace = true }
+zip = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+# tests/com.rs loads the DLL and calls it (LoadLibraryW, GetProcAddress, SHCreateMemStream).
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }

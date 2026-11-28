@@ -181,7 +181,8 @@ to commands, with no geometry math.
 4. **Never crash.** People trust a CAD app with their work.
    - Non-test code never uses `unwrap`, `expect`, `panic!` or indexing on input-derived data.
      There's no `unsafe` outside `apps/solidcraft/src/open_documents.rs` (macOS file-open events),
-     `apps/solidcraft/src/native_crash.rs` (Windows native crash capture) and
+     `apps/solidcraft/src/native_crash.rs` (Windows native crash capture),
+     `apps/solidcraft-explorer/src/com.rs` (the Windows File Explorer thumbnail handler) and
      `crates/threedx-client/src/macos.rs` (the 3Dconnexion driver's client API on macOS), and the
      compiler denies it.
    - An unsupported case returns an error ("not supported yet: …"); it never panics.

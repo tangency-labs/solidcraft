@@ -26,6 +26,18 @@
   <RegistryValue Root="HKMU" Key="Software\Classes\solidcraft\DefaultIcon" Value="&quot;[#SolidcraftExe]&quot;,0" Type="string" />
   <RegistryValue Root="HKMU" Key="Software\Classes\solidcraft\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; --open-url &quot;%1&quot;" Type="string" />
 
+  <!-- File Explorer thumbnails (apps/solidcraft-explorer, #8034): Explorer shows the picture a
+       design keeps (cache/thumbnail.png) as the file's thumbnail. The handler is a COM in-process
+       server that Windows runs in its isolated thumbnail process (so DisableProcessIsolation is
+       never set) and that only reads the stream it is given. One class id for every architecture
+       and both scopes. The ShellEx values sit on the extensions, not the ProgId, so the thumbnails
+       stay when another app opens .sc files. -->
+  <RegistryValue Root="HKMU" Key="Software\Classes\CLSID\{34025B8F-2354-4B5F-8967-89BA0B71FDCF}" Value="SolidCraft design thumbnails" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\CLSID\{34025B8F-2354-4B5F-8967-89BA0B71FDCF}\InprocServer32" Value="[#SolidcraftExplorerDll]" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\CLSID\{34025B8F-2354-4B5F-8967-89BA0B71FDCF}\InprocServer32" Name="ThreadingModel" Value="Apartment" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.sc\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}" Value="{34025B8F-2354-4B5F-8967-89BA0B71FDCF}" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.solidcraft\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}" Value="{34025B8F-2354-4B5F-8967-89BA0B71FDCF}" Type="string" />
+
   <!-- "Open with" app list and the Run dialog (Win+R "solidcraft"). -->
   <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe" Name="FriendlyAppName" Value="SolidCraft" Type="string" />
   <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
