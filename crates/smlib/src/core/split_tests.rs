@@ -10,10 +10,8 @@ use super::{Body, area, counts, make_box, to_arrays, volume};
 use crate::Error;
 use crate::export::native;
 use crate::ssi::Spec;
-use solidcore::curve::curve::Curve;
-use solidcore::geom::vector3d::Vec3;
-use solidcore::primitive::api_curves::create_line_segment;
-use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore_ops::sweep::{Curve, SweepFrame, sweep_placed};
+use solidcore_record::brep::{Face, Surface};
 
 const X: [f64; 3] = [1.0, 0.0, 0.0];
 const Y: [f64; 3] = [0.0, 1.0, 0.0];
@@ -170,12 +168,8 @@ fn hostile_arguments_are_refused() {
 
 /// The one-face sheet [0, 10]^2 on z = 0: the line along x from the origin swept 10 along y.
 fn square_sheet() -> Body {
-    super::run("sheet", |k| {
-        let c = Curve::from(create_line_segment(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0))?);
-        create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 1.0, 0.0), 10.0, false)
-    })
-    .map(Body::from_kernel)
-    .unwrap()
+    let line = |end: [f64; 3]| Curve::Line { start: [0.0; 3], end };
+    sweep_placed(&[line([10.0, 0.0, 0.0])], &[line([0.0, 10.0, 0.0])], SweepFrame::Follow, false).unwrap().0
 }
 
 /// A sheet is no solid to split in two (`SMLIB_ERR_NOT_SOLID`).
@@ -210,41 +204,16 @@ fn a_sheet_is_not_split_by_a_whole_sphere() {
     assert_eq!(split_body(&sheet, &ball).err(), Some(Error::NotSolid));
 }
 
-/// Faces of the box -20..5 x -20..20 x -20..5 copied off it into a sheet (`CopyFaces` with merge,
-/// as the capi's test): the top z = 5 and, with `side`, the side x = 5 too.
+/// Faces of the box -20..5 x -20..20 x -20..5 left as a sheet (its other faces taken away): the
+/// top z = 5 and, with `side`, the side x = 5 too.
 fn lid(side: bool) -> Body {
-    use solidcore::EntityRef;
-    use solidcore::geom::tol::USE_DEFAULT;
-    use solidcore::query::api_queries::face_internal_point;
-    use solidcore::topology::brep::p1::faces;
-    use solidcore::topology::brep::p2::ArenaNotifyState;
-    use solidcore::topology::brep::p3::new_brep;
-    use solidcore::topology::brep::p7::copy_faces;
     let slab = make_box([-20.0; 3], [25.0, 40.0, 25.0]).unwrap();
-    super::run("sheet", |k| {
-        let mut whole = solidcore::topology::brep::p3::brep_copy(k, &slab.kernel())?;
-        let mut picked = Vec::new();
-        for f in faces(&whole, None)? {
-            let p = face_internal_point(k, &mut whole, f)?;
-            if (p.z - 5.0).abs() < 1e-9 || (side && (p.x - 5.0).abs() < 1e-9) {
-                picked.push(f);
-            }
-        }
-        assert_eq!(picked.len(), if side { 2 } else { 1 });
-        let mut w = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-        w.set_tolerance(whole.tolerance());
-        {
-            let mut state = ArenaNotifyState::new(&w);
-            let mut env = state.env(None);
-            let key_of = env.key_of;
-            let this_face = |f| key_of(EntityRef::Face(f));
-            copy_faces(k, &mut whole, &picked, &mut w, true, &this_face, &mut env)?;
-        }
-        w.refresh_cached_topology();
-        Ok(w)
-    })
-    .map(Body::from_kernel)
-    .unwrap()
+    let (rec, order) = slab.to_record().unwrap();
+    // the plane face lying in `axis` = 5
+    let at_5 = |f: &Face, axis: usize| matches!(&f.surface, Surface::Plane { origin, u_axis, v_axis } if origin[axis] == 5.0 && u_axis[axis] == 0.0 && v_axis[axis] == 0.0);
+    let gone: Vec<usize> = (0..rec.faces.len()).filter(|&i| !(at_5(&rec.faces[i], 2) || (side && at_5(&rec.faces[i], 0)))).collect();
+    assert_eq!(gone.len(), if side { 4 } else { 5 });
+    solidcore_ops::trim::remove_faces(&slab, &order, &gone).unwrap()
 }
 
 /// The capi's test of `smlib_split_body_by_sheet` (fork 2fc375f): a cube 0..10 cut by an L of two
@@ -285,44 +254,19 @@ fn the_body_stays_as_it_was() {
 }
 
 /// A one-face sheet on a B-spline surface (as SolidCraft's extrude of a sketch spline makes it:
-/// the cubic through (0, 0), (13, -8), (27, 8), (40, 0) in x and z, straight along y over
-/// [0, 40]) cut by four plane strips standing on the square [12, 28]^2: the strips meet the
+/// the cubic on (0, 0), (13, -8), (27, 8), (40, 0) in x and z, ruled along y over [0, 40]) cut by four plane strips standing on the square [12, 28]^2: the strips meet the
 /// face inside its bounds, so the face's surface is intersected through its face's trimmed
 /// cache. The square comes out as a face of its own, the sheet holed by it.
 #[test]
 fn a_spline_sheet_is_cut_by_strips_inside_it() {
-    use solidcore::geom::tol::USE_DEFAULT;
-    use solidcore::geom::vector3d::Vec3;
-    use solidcore::nurbs::b_spline_curve::p1::KnotType;
-    use solidcore::nurbs::b_spline_surface::p1::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
-    use solidcore::surface::surface::Surface;
-    use solidcore::topology::brep::p3::new_brep;
-    use solidcore::topology::brep::p8::create_face_from_surface;
-    // Control points u-major: the curve's four, each at y = 0 and y = 40.
+    // The curve's four control points at y = 0 and at y = 40, ruled between.
     let curve = [[0.0, 0.0], [13.0, -8.0], [27.0, 8.0], [40.0, 0.0]];
-    let pts: Vec<Vec3> = curve.iter().flat_map(|[x, z]| [Vec3::new(*x, 0.0, *z), Vec3::new(*x, 40.0, *z)]).collect();
-    let sheet = super::run("sheet", |k| {
-        let surface = Surface::from(BSplineSurface::create_canonical(&CanonicalSurfaceData {
-            u_degree: 3,
-            v_degree: 1,
-            control_points: &pts,
-            form: BSplineSurfaceForm::Unspecified,
-            u_multiplicities: &[4, 4],
-            v_multiplicities: &[2, 2],
-            u_knots: &[0.0, 1.0],
-            v_knots: &[0.0, 40.0],
-            knot_type: KnotType::Unspecified,
-            weights: None,
-            uv_domain: None,
-        })?);
-        let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-        let natural = surface.natural_uv_domain_with_nurb(k)?;
-        super::sweep::build_faces(&mut b, |s, fenv| create_face_from_surface(k, s, Some(surface), &natural, fenv))?;
-        b.refresh_cached_topology();
-        Ok(b)
-    })
-    .map(Body::from_kernel)
-    .unwrap();
+    let at = |y: f64| solidcore_record::brep::Curve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        points: curve.iter().map(|[x, z]| [*x, y, *z]).collect(),
+    };
+    let rec = solidcore_ops::surface::ruled(&at(0.0), &at(40.0), false).unwrap();
+    let sheet = Body::from_record(&rec, true).unwrap().0;
     assert_eq!(counts(&sheet).unwrap(), [1, 4, 4]);
     let whole = area(&sheet, 1e-8).unwrap();
     // The strip standing on the line from `o` along `d` (16 long), reaching past the sheet in z.

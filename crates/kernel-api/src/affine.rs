@@ -64,6 +64,10 @@ pub trait Affine: Backend {
     /// The orthonormal axes along `x` and in the plane of `x` and `y`, on `y`'s side (a direction
     /// the kernel chooses when `y` runs along `x` or has no length).
     fn orthonormal_axes(&self, x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused>;
+    /// The axes `x` and `y` of a frame whose normal runs along `d`: `y` along `v`'s part square
+    /// to `d` and `x = y × unit(d)`, both unit. Refused for numbers not finite, no length, or a `v`
+    /// whose part square to `d` is within its own rounding.
+    fn frame_axes(&self, d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused>;
     /// A plane's axes with the coordinates smaller than `noise` dropped, each unit again. `None`
     /// when nothing sound is left; the caller keeps its own axes.
     fn axis_squared_axes(&self, x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]>;
@@ -102,6 +106,12 @@ pub trait Affine: Backend {
     /// its bottom edge from `bl` to `br`, its top-left corner `top_left` when it may stretch, else
     /// `aspect` (height over width) times as high as wide. `None` for no area.
     fn rect_of_aspect(&self, bl: [f64; 2], br: [f64; 2], top_left: Option<[f64; 2]>, aspect: f64) -> Option<[[f64; 2]; 4]>;
+    /// The plane through `origin` with the unit, square axes `x` and `y` brought onto the line
+    /// through `at` along the unit direction `dir`: tilted by the least turn that makes it
+    /// parallel to the line, then moved along its normal until it holds the line; a plane that
+    /// already holds it comes back unchanged. The new origin and axes; `None` for a number not
+    /// finite or a line square to the plane.
+    fn plane_onto_line(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3], at: [f64; 3], dir: [f64; 3]) -> Option<([f64; 3], [[f64; 3]; 2])>;
     /// How a rectangle `aspect` times as high as wide fits a frame pinned at `bl`, `br` and `tl`:
     /// its width, and whether the frame stretches it. `None` for no area.
     fn fit_aspect(&self, bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)>;

@@ -2355,6 +2355,45 @@ pub fn face_normal_at_vertex(
     face_normal_at_clamped_uv(k, brep, f, uv, faceuse)
 }
 
+/// The unit direction into face `f` from the middle of its edge `e`'s interval: in the face's
+/// tangent plane there, square to the edge, pointing into the face (not upstream: the side a
+/// face lies on from its edge, read from its loop). It is the binormal of the face's use of the
+/// edge ([`evaluate_binormal`]: the face use's normal crossed with the edge use's tangent), so the
+/// side comes from the loop's orientation and the normal, not from where the face's points lie.
+/// The vector is rounded, not certified.
+///
+/// A seam (an edge a use of `f` runs along twice, such as a cylinder's) has the face on both of
+/// its sides, so it has no one direction into the face; it is refused.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge that does not bound `f`, a seam of `f`, or an edge
+/// interval that is not finite; those of [`evaluate_binormal`].
+pub fn edge_inward(k: &Kernel, brep: &mut Brep, e: EdgeId, f: FaceId) -> Result<Vec3> {
+    let eu = edge::edgeuse_of_face(brep, e, Some(f))?
+        .ok_or_else(|| SolidError::invalid_input(OP, "the edge does not bound the face"))?;
+    let mut uses: Vec<Option<FaceuseId>> = Vec::new();
+    for u in edge::edgeuses(brep, e, None, None)? {
+        if eu::face(brep, u)? == Some(f) {
+            let fu = eu::faceuse(brep, u)?;
+            if uses.contains(&fu) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a seam: the face lies on both sides",
+                ));
+            }
+            uses.push(fu);
+        }
+    }
+    let ivl = brep.edge(e)?.interval;
+    // halves first: no overflow for a huge finite interval (brett19 on #22066)
+    let t = 0.5 * ivl.min() + 0.5 * ivl.max();
+    if !t.is_finite() {
+        return Err(SolidError::invalid_input(OP, "edge interval not finite"));
+    }
+    Ok(evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?.binormal)
+}
+
 /// Where a planar face lies along `direction` when it is square to it: the signed distance from
 /// `origin` to the face's plane along the unit `direction`, measured at `on_face`, a point of the
 /// face (its centroid). `normal` is the face's unit normal with its proved `normal_bound`.
@@ -2588,6 +2627,50 @@ pub fn edge_face_gap_samples(
             })
         })
         .collect()
+}
+
+/// A proved bound on how far the trims of edge `e` stand from it (not upstream as a
+/// query): for every use of the edge that stores a trim, and every parameter of the edge's
+/// interval, the use's face at the trim is within the returned distance of the edge's curve
+/// ([`crate::blend::blend_corner::proved_trim::proved_trim_gap`]: enclosed, rounding
+/// counted, a round kept as its definition read on its net with the net's bound added).
+/// `None` where a trim is not proved within `within`; 0 for an edge none of whose uses
+/// stores a trim.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an edge
+/// without a curve, a use with a trim on a face without a surface, or an empty interval;
+/// those of the enclosure.
+pub fn edge_trim_gap_bound(k: &Kernel, brep: &Brep, e: EdgeId, within: f64) -> Result<Option<f64>> {
+    let interval = brep.edge(e)?.interval;
+    let curve = brep
+        .edge(e)?
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
+    if interval.max().partial_cmp(&interval.min()) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(OP, "empty edge interval"));
+    }
+    let mut largest = 0.0_f64;
+    for &used in &brep.edge(e)?.edgeuses {
+        let Some(trim) = brep.edgeuse(used)?.uv_trim_curve.as_ref() else {
+            continue;
+        };
+        let surface = eu::face(brep, used)?
+            .map(|f| brep.face(f))
+            .transpose()?
+            .and_then(|f| f.surface.as_ref())
+            .ok_or_else(|| SolidError::invalid_input(OP, "a trim on a face without a surface"))?;
+        let Some(gap) = crate::blend::blend_corner::proved_trim::proved_trim_gap(
+            k, surface, trim, curve, interval, within,
+        )?
+        else {
+            return Ok(None);
+        };
+        largest = largest.max(gap);
+    }
+    Ok(Some(largest))
 }
 
 /// The largest distance from `p` to the enclosure of S(`uv`), rounded up; `None` where

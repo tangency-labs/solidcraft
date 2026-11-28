@@ -111,6 +111,67 @@ shows the assigned shortcut.
 
 Help › Keyboard Shortcuts in the app lists the current bindings, including any you changed.
 
+### Keyboard profiles
+
+If you already know another CAD tool's keys, pick that tool in **Keyboard profile** at the top of
+File › Keyboard Shortcuts. A profile adds the other tool's keys to SolidCraft's own commands. A
+command keeps its SolidCraft key too, unless the profile gives that key to another command. Keys
+with no SolidCraft command are left out, and a profile never adds commands.
+
+Your own keys always win. A key you change is a change from the profile: it stays when you choose
+another profile or go back to **SolidCraft (default)**, and **Reset** on its row goes back to the
+profile's key. Under each command's name the list says **From** and the profile's name, or
+**Changed by you**. When the profile would take a key SolidCraft keeps for itself (Save, Open,
+Close, Preferences, Undo and the other keys in the window table above), or a key one of your own
+keys already uses, it leaves that key out and says so under the drop-down. Export and Import save
+and read the chosen profile with your keys. Choosing a mouse preset in Preferences › Navigation
+doesn't change the keyboard profile.
+
+SolidCraft's own keys already match Fusion's for most tools (E, H, Q, F, M, V, S, A, J, L, R, C,
+T, O, I, P, X and D). Each profile adds:
+
+| Profile | Key | SolidCraft command | Differences |
+|---|---|---|---|
+| Fusion | Shift+N | Component Colors | |
+| Fusion | Ctrl+Alt+B | Browser Tree (show or hide) | |
+| Fusion | Ctrl+Alt+N | Navigation Bar (show or hide) | |
+| Inventor | S | Create Sketch | Search Commands loses S |
+| Inventor | R | Revolve | in a sketch, R still draws a rectangle |
+| Inventor | F3, F4 | Zoom Mode, Orbit Mode | |
+| Inventor | F6 | Isometric View | not used: F6 fits the view in SolidCraft; Ctrl+7 is Isometric View |
+| Inventor | ], /, . | Plane, Axis, Point | |
+| Inventor | F2 | Pan Mode | not used: F2 renames in SolidCraft |
+| NX | Ctrl+F | Fit | Fit loses End |
+| NX | End | Isometric View | |
+| NX | F8 | Normal to Selection | with nothing selected, F8 faces the open sketch; it doesn't turn to the nearest standard view |
+| NX | Z, A | Line, 3-Point Arc (in a sketch) | |
+| NX | Ctrl+Q | Finish Sketch | |
+| NX | R | Revolve | in a sketch, R still draws a rectangle |
+| NX | Ctrl+Shift+A | Save As | Toggle Assistant loses Ctrl+Shift+A |
+| NX | Ctrl+W | Show/Hide Selection | not used: Ctrl+W closes the design in SolidCraft; V still shows and hides |
+| Onshape | Shift+E, Shift+F, Shift+W | Extrude, Fillet, Revolve | |
+| Onshape | Shift+S | Create Sketch; in a sketch, Point | |
+| Onshape | F | Fit | Fillet loses F |
+| Onshape | N | Normal to Selection | |
+| Onshape | Shift+1 to Shift+7 | Front, Back, Left, Right, Top, Bottom and Isometric View | Ctrl+1 to Ctrl+7 still work |
+| Onshape | Y | Show/Hide Selection | V is Vertical in a sketch, so Show/Hide loses V |
+| Onshape | P | Show/Hide Planes | Project moves to U |
+| Onshape | [ | Measure | I is Coincident in a sketch; Measure keeps I in the model |
+| Onshape | Shift+I | Isolate | SolidCraft hides the other parts; it doesn't make them see-through |
+| Onshape | Shift+X | Section Analysis | |
+| Onshape | L, A, R, G | Line, 3-Point Arc, Center Rectangle, 2-Point Rectangle (in a sketch) | Transform loses G |
+| Onshape | D, O, U, X, M, Q | Sketch Dimension, Offset, Project, Extend, Trim, Normal/Construction (in a sketch) | Move/Copy Sketch Entities loses M |
+| Onshape | I, E, H, V, T, B | Coincident, Equal, Horizontal, Vertical, Tangent, Parallel (in a sketch) | |
+| Onshape | Shift+O, Shift+U, Shift+J, Shift+M, Shift+L, Shift+Q | Concentric, Curvature, Fix/Unfix, MidPoint, Perpendicular, Symmetry (in a sketch) | |
+| Onshape | Shift+F | Fillet (in a sketch) | |
+| SolidWorks | F | Fit | Fillet loses F |
+
+Ctrl+1 to Ctrl+7 and Ctrl+8 already match SolidWorks' standard views and Normal To in every
+profile. Inventor's command aliases of two or more letters (such as CH for Chamfer) aren't
+supported, because a SolidCraft shortcut is a single key. Each profile is one file in
+`crates/ui-egui/keyboard-profiles/`, so a profile can be added or corrected without changing any
+code.
+
 With the **Touchpad** navigation preset, hold **Shift** while moving the pointer to pan, or
 **Alt/Option** to orbit, without pressing a mouse button. Vertical scrolling zooms. These
 viewport gestures are separate from rebindable command shortcuts; mouse-button selection

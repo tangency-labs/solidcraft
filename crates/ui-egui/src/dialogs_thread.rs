@@ -224,6 +224,7 @@ const FORMS: &[(&str, ThreadForm)] = &[
     ("thread.form_rp", ThreadForm::Rp),
     ("thread.form_bspt", ThreadForm::Bspt),
     ("thread.form_npt", ThreadForm::Npt),
+    ("thread.form_custom", ThreadForm::Custom),
 ];
 const HANDS: &[(&str, ThreadHand)] = &[("Right", ThreadHand::Right), ("Left", ThreadHand::Left), ("Both", ThreadHand::Both)];
 /// A tapped hole's and a pipe thread's hands: one groove, so never both.
@@ -371,6 +372,10 @@ fn pitches(form: ThreadForm, d: f64, current: f64) -> Vec<f64> {
 
 /// A typical designation of the form, for the field's hint.
 fn example(form: ThreadForm) -> String {
+    if form == ThreadForm::Custom {
+        // Its angle is in the designation alone: a 90° flank-to-flank thread.
+        return "C10x1.5x90".into();
+    }
     let sizes = form.sizes();
     match sizes.iter().min_by(|a, b| (a.0 - 20.0).abs().total_cmp(&(b.0 - 20.0).abs())) {
         Some((d, p)) => designation_of(form, *d, *p),
@@ -492,8 +497,14 @@ pub(crate) fn rows(
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
         // The start, a free end: plain or chamfered; and with it chamfered, every other free end
         // the thread reaches too (a stud's two ends, ISO 4753), the command's `tip: both`.
+        // A custom thread takes no chamfered tip (ISO 4753's is for ISO metric threads).
+        if f == ThreadForm::Custom {
+            o.tip = ThreadTip::None;
+        }
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
-        choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
+        if f != ThreadForm::Custom {
+            choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
+        }
         o.tip = match (chamfered, o.tip) {
             (0, _) => ThreadTip::None,
             (_, ThreadTip::None) => ThreadTip::Start,
@@ -560,9 +571,15 @@ fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggest
     // ISO 7-1 writes the internal taper thread Rc: a size picked for a hole the dialog sized Rc
     // stays Rc.
     let internal = f == ThreadForm::Bspt && ThreadForm::pipe_internal(designation);
+    // An authored ISO metric tolerance class (`M8-6g`) stays when the size or pitch changes.
+    let class = f.tolerance_class(designation).map(str::to_owned);
     let designation_of = |f: ThreadForm, d: f64, p: f64| {
         let name = designation_of(f, d, p);
-        if internal { name.replacen("R ", "Rc ", 1) } else { name }
+        let name = if internal { name.replacen("R ", "Rc ", 1) } else { name };
+        match &class {
+            Some(class) => format!("{name}-{class}"),
+            None => name,
+        }
     };
     let mut diameters: Vec<f64> = table.iter().map(|(d, _)| *d).collect();
     if let Some((d, _)) = current

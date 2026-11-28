@@ -503,12 +503,19 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
             return Err(Unsupported::NotYet("traced intersection curves"));
         }
         let (curve, interval): (KernelCurve, Extent1d) = match (&e.curve, &e.nurbs) {
+            // a conic label its form is not proved on is dropped, and the edge is its exact
+            // NURBS, as a face's is (#23062: a circle labelled on a torus found from its form,
+            // 2e-11 off the form's exact circle): a valid body is never refused
             (r::Curve::Circle { .. } | r::Curve::Ellipse { .. }, Some(n)) => {
-                let [lo, hi] = e.interval;
-                (
-                    curves::conic_on_form(k, &crate::curve(&e.curve)?, &crate::curve(n)?)?,
-                    Extent1d::from_raw(lo, hi),
-                )
+                let form = crate::curve(n)?;
+                let label = crate::curve(&e.curve)?;
+                if let Some(c) = curves::conic_on_form_if_proved(k, &label, &form)? {
+                    let [lo, hi] = e.interval;
+                    (c, Extent1d::from_raw(lo, hi))
+                } else {
+                    let c = curves::from_parameters(k, &form, e.interval)?;
+                    (c.curve, c.interval)
+                }
             }
             (_, Some(n)) => {
                 let c = curves::from_parameters(k, &crate::curve(n)?, e.interval)?;

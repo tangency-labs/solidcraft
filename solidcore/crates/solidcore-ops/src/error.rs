@@ -16,8 +16,8 @@ pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 pub enum Error {
     /// The kernel's own status (1001 `SM_ERR`, 1007 `SM_ERR_INVALID_INPUT`, …).
     Status(i32),
-    /// Input the kernel refuses, in its words (its `SolidError::InvalidInput`): the routine that
-    /// refused it and what was wrong, as the kernel states them. Displays as
+    /// Input the kernel refuses, in its words (`SolidError::InvalidInput` or a typed
+    /// refusal retained here): the routine and what was wrong, as the kernel states them. Displays as
     /// `"{operation}: {reason}"`.
     Refused {
         /// The kernel routine that refused the input.
@@ -698,6 +698,12 @@ pub enum OffsetRefusal {
         /// The largest draft angle that keeps a wall, radians.
         largest: f64,
     },
+    /// A drafted cone or cylinder whose radius would drop to zero or below within the face's
+    /// span: the draft angle closes the cone before the end of the face.
+    DraftConeCloses,
+    /// A drafted cone whose neutral plane is at or past its apex, so its radius on the neutral
+    /// plane is not positive and there is no hinge circle.
+    DraftNeutralPlanePastApex,
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -782,6 +788,12 @@ impl std::fmt::Display for OffsetRefusal {
                 "the drafted face would reach another shell of the body, closing the wall \
                  between them; the largest draft angle that keeps a wall is {largest} rad"
             ),
+            OffsetRefusal::DraftConeCloses => {
+                write!(f, "a drafted cone would close within the face")
+            }
+            OffsetRefusal::DraftNeutralPlanePastApex => {
+                write!(f, "the neutral plane is at or past a drafted cone's apex")
+            }
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,
@@ -1291,6 +1303,7 @@ pub(crate) fn status(e: SolidError) -> Error {
 /// [`status`]'s typing of the kernel error `e`.
 fn typed(e: SolidError) -> Error {
     use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::mass::MassFailure;
     use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
         SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },
@@ -1319,6 +1332,14 @@ fn typed(e: SolidError) -> Error {
             reason,
         },
         SolidError::PreparationRequired { .. } => Error::Exception,
+        // Duplicate cleanup's uncertified orientation must retain its actual reason.
+        // Other mass-property failures keep their existing mapping below.
+        e if matches!(e.mass_failure(), Some(MassFailure::MeshVolumeSignUncertain)) => {
+            Error::Refused {
+                operation: e.operation(),
+                reason: MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON,
+            }
+        }
         // compute_point_parameters' ambiguous point solve, by its type: the status stays `SM_ERR`
         // (the table in `error/intersect.rs`), the count travels with it
         e if matches!(

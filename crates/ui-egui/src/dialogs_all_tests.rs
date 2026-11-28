@@ -57,6 +57,35 @@ fn profile_refill_of_sided_twins_follows_a_change_of_the_regions() {
     assert_eq!(refilled, at(&h, &picks[1..]), "the lens and the crescent's two halves");
 }
 
+/// A region picked by a point is saved by its curves and the sides it lies on (#23291). When a
+/// change makes a twin bounded by the same curves, the dialog refills with the region the feature
+/// builds: a circle of radius 10, a fixed line through it, and a circle of radius r2 at (3, 10)
+/// that crosses the line on r2 = 4 mm.
+#[test]
+fn profile_refill_of_a_curve_pick_follows_its_sides_when_a_change_makes_a_twin() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "r2", "expression": "2 mm"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "s"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "c1", "fixed": true})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, -15], [0, 15]]})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "l1", "fixed": true})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [3, 10], "radius": 2})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities": ["c2"], "type": "diameter", "value": "2*r2"})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "c2.center", "fixed": true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let made = h.app.run("solid.extrude", json!({"sketch": sketch, "profiles": [{"point": [5, 0]}], "distance": 2})).unwrap();
+    let feature = made["feature"].as_u64().unwrap();
+    h.app.run("parameters.change", json!({"name": "r2", "expression": "4 mm"})).unwrap();
+    let Some(FeatureKind::Extrude { profiles, .. }) = h.app.session.doc.feature(feature).map(|f| f.kind.clone()) else { panic!("an extrude") };
+    assert!(matches!(&profiles, ProfileSel::Curves { sides, .. } if !sides.is_empty()), "{profiles:?}");
+    let state = h.app.session.world_state().unwrap();
+    let ss = state.sketch(sketch).unwrap();
+    let here = solidcraft_engine::doc::sketch::profile_at_point(&ss.profiles, solidcore_record::Vec2::new(5.0, 0.0)).unwrap();
+    assert_eq!(profile_indices(ss, &profiles), vec![here]);
+}
+
 #[test]
 fn profile_refill_resolves_each_region_once_for_extrude_and_sweep() {
     for command in ["solid.extrude", "solid.sweep"] {
@@ -74,7 +103,9 @@ fn profile_refill_resolves_each_region_once_for_extrude_and_sweep() {
         let curve = &state.sketch(path).unwrap().sketch.curves[0].id;
         let made = h.app.run(command, json!({"sketch":sketch,"profiles":[1,0],"distance":10,"path_sketch":path,"path":[curve]})).unwrap();
         let feature = made["feature"].as_u64().unwrap();
-        for selection in [ProfileSel::Points { points }, ProfileSel::Curves { loops }, ProfileSel::Indices { indices: order.clone() }] {
+        for selection in
+            [ProfileSel::Points { points }, ProfileSel::Curves { loops, sides: Vec::new() }, ProfileSel::Indices { indices: order.clone() }]
+        {
             let kind = &mut h.app.session.doc_mut().feature_mut(feature).unwrap().kind;
             match kind {
                 FeatureKind::Extrude { profiles, .. } | FeatureKind::Sweep { profiles, .. } => *profiles = selection,
@@ -659,7 +690,7 @@ fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl Fn
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
         "solid.pattern.path" => &["Flip direction"],
-        "construct.plane.at_angle" => &["Use axis direction only"],
+        "construct.plane.at_angle" => &["Through the axis", "Use axis direction only"],
         _ => &[],
     };
     for label in checks {
@@ -717,6 +748,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Inset By" | "Extent Type" => Role::ComboBox,
         "Thickness Placement" if command == "frame.gusset" => return None, // icon buttons, checked by the gusset interaction test
         "Outline" => Role::ComboBox,
+        "Style" if command == "solid.dogbone" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -738,6 +770,7 @@ macro_rules! form_case {
 form_case!(revolve, "solid.revolve", ["Angle", "Direction", "Type"]);
 form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
+form_case!(dogbone, "solid.dogbone", ["Bit diameter", "Style", "Largest angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
 form_case!(end_cap, "frame.end_cap", ["Thickness", "Direction", "Offset", "Corner Chamfer"]);
 form_case!(gusset, "frame.gusset", ["Outline", "First Leg", "Second Leg", "Thickness", "Corner Relief", "Joint Offset", "Thickness Placement"]);
@@ -2010,6 +2043,159 @@ fn face_editor_refills_named_faces_after_sketch_resize() {
     }
 }
 
+/// A 40 x 20 x 20 block with a pocket 10 deep from x 10 to 30 and y 5 to `d2 - 5`, relieved by
+/// `params`; then `d2` goes from 20 to 30, so the pocket's far wall moves from y 15 to y 25, and
+/// the Dogbone feature is opened for editing.
+fn resized_pocket_dogbone_editor(params: Value) -> (Harness, u64) {
+    let mut h = Harness::new();
+    for (id, params) in [
+        ("sketch.create", json!({"plane":"XY"})),
+        ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]})),
+        ("sketch.dimension", json!({"entities":["l1"],"value":40})),
+        ("sketch.dimension", json!({"entities":["l2"],"value":20})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance":20})),
+        ("solid.box", json!({"corner":[10,5,10],"length":20,"width":"d2 - 10","height":10,"operation":"cut"})),
+        ("solid.dogbone", params),
+        ("parameters.change", json!({"name":"d2","expression":"30"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let id = h.app.session.doc.features.last().unwrap().id;
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+    h.app.edit_feature(id);
+    (h, id)
+}
+
+fn apply_dogbone_editor(mut h: Harness, id: u64) {
+    let d = h.app.dialog.as_ref().unwrap();
+    let commands = apply_commands(&h.app, d).unwrap();
+    crate::dialogs::roll_marker(&mut h.app, None).unwrap();
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    assert_eq!(h.app.session.doc.features.last().unwrap().id, id);
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
+}
+
+/// The stored bare diameter 3 (millimetres) refills as "3 mm" in an inch design, not "3", which OK
+/// would read as 3 in. A bit diameter and gap typed as bare numbers there are inches: OK hands the
+/// command 3.175 mm and 0.254 mm, not 0.125 mm and 0.01 mm.
+#[test]
+fn dogbone_editor_reads_bare_lengths_in_the_design_unit() {
+    let (mut h, id) = resized_pocket_dogbone_editor(json!({"faces":[[20,10,10]],"diameter":3}));
+    crate::dialogs::cancel(&mut h.app);
+    h.app.run("document.units", json!({"units":"in"})).unwrap();
+    h.app.edit_feature(id);
+    let Some(crate::dialogs::Kind::Dogbone(k)) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no Dogbone editor") };
+    assert_eq!(k.diameter, "3 mm");
+    k.diameter = "0.125".into();
+    // Minimal, the style with a gap.
+    k.style = 1;
+    k.gap = "0.01".into();
+    // An edit is applied as a redefine of the feature, with the command's parameters inside.
+    let (command, redefine) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().into_iter().next().unwrap();
+    assert_eq!(command, "timeline.redefine", "{redefine}");
+    let params = &redefine["params"];
+    for (key, mm) in [("diameter", 3.175), ("gap", 0.254)] {
+        let text = params[key].as_str().unwrap_or_default();
+        let got = h.app.session.doc.eval(text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+        assert!(text.ends_with(" in") && (got - mm).abs() < 1e-9, "{key}: {text} is {got} mm");
+    }
+}
+
+#[test]
+fn dogbone_editor_refills_named_edges_after_sketch_resize() {
+    let (h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15],[30,5,15],[30,15,15],[10,15,15]],"diameter":3}));
+    let d = h.app.dialog.as_ref().unwrap();
+    let picks = &d.inputs[0].items;
+    assert_eq!(picks.len(), 4);
+    let s = &h.app.session;
+    let body = s.model.state().bodies.first().unwrap().clone();
+    let names = &s.doc.feature(id).unwrap().edge_names;
+    assert_eq!(names.len(), 4);
+    for (pick, name) in picks.iter().zip(names) {
+        let Sel::Edge { point, index, .. } = pick else { panic!("{pick:?}") };
+        let hit = solidcraft_engine::doc::naming::locate_edge(&body, name, *point).unwrap();
+        assert_eq!(*index, hit.edge);
+        assert!(hit.on_point, "{point:?} must lie on the moved corner edge");
+    }
+    let far: Vec<f64> = picks[2..].iter().map(|p| if let Sel::Edge { point, .. } = p { point.y } else { f64::NAN }).collect();
+    assert!(far.iter().all(|y| (y - 25.0).abs() < 1e-6), "{far:?}");
+    apply_dogbone_editor(h, id);
+}
+
+#[test]
+fn dogbone_editor_refills_named_faces_after_sketch_resize() {
+    let (h, id) = resized_pocket_dogbone_editor(json!({"faces":[[20,10,10]],"diameter":3}));
+    let d = h.app.dialog.as_ref().unwrap();
+    let picks = &d.inputs[0].items;
+    assert_eq!(picks.len(), 1, "the pocket's floor must refill");
+    let Sel::Face { point, .. } = picks.first().unwrap() else { panic!("{picks:?}") };
+    assert!((point.z - 10.0).abs() < 1e-6, "{point:?}");
+    apply_dogbone_editor(h, id);
+}
+
+/// A face pick Edit Feature cannot bring back (no stored name, and its point 2 mm above the
+/// pocket's floor, on no face) is not dropped: OK hands it to the command as stored, beside the
+/// edge pick that did come back, and it counts as a pick, so there is no "no corners" refusal.
+#[test]
+fn dogbone_editor_keeps_a_pick_it_cannot_bring_back() {
+    use solidcraft_engine::doc::FeatureKind;
+
+    let (h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15]],"faces":[[20,10,10]],"diameter":3}));
+    let mut f = h.app.session.doc.feature(id).unwrap().clone();
+    let FeatureKind::Dogbone { faces, .. } = &mut f.kind else { panic!("{:?}", f.kind) };
+    faces[0].0 = Vec3::new(20.0, 10.0, 12.0);
+    f.face_names.clear();
+    let (crate::dialogs::Kind::Dogbone(k), inputs, extra) = crate::dialogs_dogbone::for_feature(&h.app, &f).unwrap() else {
+        panic!("no Dogbone editor")
+    };
+    assert!(inputs[0].items.iter().all(|p| matches!(p, Sel::Edge { .. })), "{:?}", inputs[0].items);
+    assert_eq!(inputs[0].items.len(), 1, "the edge comes back, the face does not");
+    let commands = crate::dialogs_dogbone::commands(&h.app, &k, &inputs, &extra).unwrap();
+    let [(command, params)] = commands.as_slice() else { panic!("{commands:?}") };
+    assert_eq!(command, "solid.dogbone");
+    assert_eq!(params["faces"], json!([[20.0, 10.0, 12.0]]), "{params}");
+    assert_eq!(params["edges"].as_array().map(Vec::len), Some(1), "{params}");
+    for key in ["kept_edges", "kept_faces", "kept_body"] {
+        assert!(params.get(key).is_none(), "{key} must not reach the command: {params}");
+    }
+}
+
+/// The dialog shows a kept pick with a button that drops it (a kept point the command refuses
+/// would fail every OK): after the click, OK sends the edge that came back and no kept face, and
+/// the button is gone.
+#[test]
+fn dogbone_editor_drops_a_kept_pick_on_request() {
+    use solidcraft_engine::doc::FeatureKind;
+
+    let (mut h, id) = resized_pocket_dogbone_editor(json!({"edges":[[10,5,15]],"faces":[[20,10,10]],"diameter":3}));
+    let mut f = h.app.session.doc.feature(id).unwrap().clone();
+    let FeatureKind::Dogbone { faces, .. } = &mut f.kind else { panic!("{:?}", f.kind) };
+    faces[0].0 = Vec3::new(20.0, 10.0, 12.0);
+    f.face_names.clear();
+    let (kind, inputs, extra) = crate::dialogs_dogbone::for_feature(&h.app, &f).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    (d.kind, d.inputs, d.extra) = (kind, inputs, extra);
+    h.frames(2);
+    assert!(h.widget("Remove stored picks").is_some(), "the kept pick must show with its button");
+    h.step(&json!({"widget":"Remove stored picks"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Remove stored picks").is_none(), "nothing kept is left to remove");
+    let d = h.app.dialog.as_ref().unwrap();
+    for key in ["kept_edges", "kept_faces", "kept_body"] {
+        assert!(!d.extra.contains_key(key), "{key} must be dropped: {:?}", d.extra);
+    }
+    // An edit is applied as a redefine of the feature, with the command's parameters inside.
+    let commands = apply_commands(&h.app, d).unwrap();
+    let [(command, redefine)] = commands.as_slice() else { panic!("{commands:?}") };
+    assert_eq!(command, "timeline.redefine", "{redefine}");
+    let params = &redefine["params"];
+    assert!(params.get("faces").is_none(), "the kept face must not reach the command: {params}");
+    assert_eq!(params["edges"].as_array().map(Vec::len), Some(1), "{params}");
+}
+
 #[test]
 fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     use solidcraft_engine::doc::{Document, MeshData, naming};
@@ -2302,6 +2488,257 @@ fn rectangular_pattern_groups_each_direction_in_the_same_order() {
         }
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.settle();
+    }
+}
+
+fn coil_plane_coordinates(h: &Harness, point: &Value) -> [f64; 3] {
+    std::array::from_fn(|k| {
+        let value = point.get(k).or_else(|| point.get(["x", "y", "z"][k])).expect("a point or direction coordinate");
+        value.as_f64().unwrap_or_else(|| {
+            h.app.session.doc.eval(value.as_str().expect("a coordinate expression"), solidcraft_engine::doc::expr::Kind::Length).unwrap()
+        })
+    })
+}
+
+/// Plane picks place a primitive Coil; they are not sketch profiles. Both Browser rows and
+/// viewport picks must reach the same preview and the command run by the dialog's OK button.
+fn assert_coil_plane_pick(plane: &str, z: f64) {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.set_origin_shown(true);
+        if plane == "Plane1" {
+            h.app.run("construct.plane.offset", json!({"base":"XY", "offset":z, "name":plane})).unwrap();
+        }
+        h.call("ui.camera", json!({"target":[0,0,z], "distance":150}));
+        h.step(&json!({"start":"solid.coil"})).unwrap();
+        h.frames(4);
+        if browser {
+            let row = format!("row:{plane}");
+            if scenario::handle_at(&row).is_none() {
+                let folder = if plane == "Plane1" { "Construction" } else { "Origin" };
+                h.step(&json!({"click":{"handle":format!("fold:{folder}")}})).unwrap();
+                h.frames(2);
+            }
+            h.step(&json!({"click":{"handle":row}})).unwrap();
+        } else {
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("a visible viewport"));
+            let target = if plane == "XY" {
+                crate::viewport::origin_plane_target(&h.app, &proj, plane).expect("the visible XY origin plane")
+            } else {
+                let (_, _, quad) =
+                    crate::viewport::construction_quads(&h.app).into_iter().find(|(name, _, _)| name == plane).expect("the construction plane quad");
+                let middle = (quad[0] + quad[1] + quad[2] + quad[3]) / 4.0;
+                // Quarter centres stay well inside the rendered quad and clear of its axes.
+                quad.into_iter()
+                    .map(|corner| (middle + corner) / 2.0)
+                    .find(|point| {
+                        proj.to_screen(*point).is_some_and(|pixel| {
+                            matches!(crate::viewport::pick(&h.app, &proj, pixel).first(), Some(crate::viewport::Hit::Plane { name, .. }) if name == plane)
+                        })
+                    })
+                    .expect("an unobscured interior of the construction plane")
+            };
+            let pixel = proj.to_screen(target).expect("the plane target projects into the view");
+            assert!(
+                matches!(crate::viewport::pick(&h.app, &proj, pixel).first(), Some(crate::viewport::Hit::Plane { name, .. }) if name == plane),
+                "the viewport click must hit {plane} before testing Coil placement"
+            );
+            h.step(&json!({"click":{"world":[target.x,target.y,target.z]}})).unwrap();
+        }
+        h.settle();
+        let dialog = h.app.dialog.as_ref().expect("Coil remains open after the plane pick");
+        let commands = crate::dialogs::preview_commands(&h.app, dialog).unwrap();
+        let (command, params) = commands.iter().find(|(id, _)| id == "solid.coil").expect("Coil preview command");
+        assert_eq!(command, "solid.coil");
+        let base = coil_plane_coordinates(&h, params.get("base").expect("the picked plane places the Coil base"));
+        for (value, expected) in base.into_iter().zip([0.0, 0.0, z]) {
+            assert!((value - expected).abs() < 1e-9, "{plane}, Browser={browser}: {params}");
+        }
+        let axis = coil_plane_coordinates(&h, params.get("axis").expect("the picked plane supplies the Coil axis"));
+        assert_eq!(axis, [0.0, 0.0, 1.0], "{plane}, Browser={browser}: {params}");
+        assert!(params.get("sketch").is_none(), "a placement plane must not become a profile: {params}");
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{plane}, Browser={browser}: OK applies the Coil");
+        let measured = h.app.run("inspect.measure", json!({})).unwrap();
+        assert_eq!(measured["body_count"], json!(1));
+        let body = &measured["bodies"][0];
+        assert_eq!(body["closed"], json!(true));
+        // Default four turns at pitch 8, centred circular section of diameter 3: the
+        // coil extends 1.5 below the base and 32 + 1.5 above it, translated by the pick.
+        for (side, expected) in [("min", z - 1.5), ("max", z + 33.5)] {
+            let actual = body["bbox"][side][2].as_f64().unwrap();
+            assert!((actual - expected).abs() < 1e-6, "{plane}, Browser={browser}: {measured}");
+        }
+    }
+}
+
+#[test]
+fn coil_plane_pick_uses_the_xy_origin_plane() {
+    assert_coil_plane_pick("XY", 0.0);
+}
+
+#[test]
+fn coil_plane_pick_uses_an_offset_construction_plane() {
+    assert_coil_plane_pick("Plane1", 50.0);
+}
+
+/// A stale plane pick is refused by the real Coil command builder in the interface language.
+#[test]
+fn coil_missing_plane_error_uses_the_interface_language() {
+    let h = Harness::new();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.inputs[0].items = vec![Sel::Plane { name: "RemovedCoilPlane".into() }];
+    for (language, expected) in
+        [("en", "The selected plane is unavailable. Pick a plane again."), ("ja", "選択した平面は使用できません。平面を選び直してください。")]
+    {
+        let _language = solidcraft_ui_text::scope(language);
+        let error = apply_commands(&h.app, &d).unwrap_err();
+        assert_eq!(error, expected, "{language}: the Coil command builder localizes its refusal");
+        assert_eq!(crate::dialogs::shown_error(&error), expected, "{language}: the dialog keeps the localized refusal");
+    }
+}
+
+/// Plane placement supplies the Direction shown in the existing field. A later typed direction
+/// overrides that normal; clearing the field restores it, for each shared selection entry point.
+#[test]
+fn coil_plane_direction_shows_its_normal_and_keeps_a_later_typed_direction() {
+    for selection in 0..3 {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("construct.plane.offset", json!({"base":"YZ", "offset":50, "name":"Plane1"})).unwrap();
+        let plane = Sel::Plane { name: "Plane1".into() };
+        let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+        d.extra.insert("axis".into(), json!("Y"));
+        match selection {
+            0 => d.pick(&h.app.session, plane),
+            1 => d.take_box(&h.app.session, vec![plane], false),
+            _ => {
+                h.app.session.selection = vec![plane];
+                d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+            }
+        }
+        assert!(d.extra.get("axis").is_none(), "a new plane replaces the saved direction, selection={selection}");
+        h.app.dialog = Some(d);
+        h.frames(4);
+        let params = |h: &Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.clone();
+        let original = params(&h);
+        assert_eq!(coil_plane_coordinates(&h, &original["base"]), [50.0, 0.0, 0.0], "{original}");
+        assert_eq!(coil_plane_coordinates(&h, &original["axis"]), [1.0, 0.0, 0.0], "{original}");
+        h.step(&json!({"expect":{"shown":json!([1.0,0.0,0.0]).to_string()}})).unwrap();
+        let design = h.app.session.doc.to_json();
+        h.step(&json!({"click":{"handle":"dialog:ui.direction"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"Z"})).unwrap();
+        h.frames(2);
+        let typed = params(&h);
+        assert_eq!(typed["axis"], json!("Z"), "typing Direction must affect the command: {typed}");
+        assert_eq!(coil_plane_coordinates(&h, &typed["base"]), [50.0, 0.0, 0.0], "{typed}");
+        h.step(&json!({"click":{"handle":"dialog:ui.direction"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"key":"Backspace"})).unwrap();
+        h.frames(2);
+        let cleared = params(&h);
+        assert_eq!(coil_plane_coordinates(&h, &cleared["axis"]), [1.0, 0.0, 0.0], "clearing restores the plane normal: {cleared}");
+        assert_eq!(coil_plane_coordinates(&h, &cleared["base"]), [50.0, 0.0, 0.0], "{cleared}");
+        assert_eq!(h.app.session.doc.to_json(), design, "Direction edits change only the preview");
+    }
+}
+
+/// An explicit Axis pick keeps supplying its own line when the placement input holds a plane.
+#[test]
+fn coil_axis_pick_keeps_its_origin_and_direction_with_a_plane_selected() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("construct.plane.offset", json!({"base":"XY", "offset":50, "name":"Plane1"})).unwrap();
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[20,10,-20]},"b":{"point":[40,10,-20]},"name":"CoilAxis"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.inputs[0].items = vec![Sel::Plane { name: "Plane1".into() }];
+    d.active = 1;
+    d.pick(&h.app.session, Sel::Axis { name: "CoilAxis".into() });
+    assert_eq!(d.inputs[0].items, vec![Sel::Plane { name: "Plane1".into() }]);
+    for commands in [crate::dialogs::preview_commands(&h.app, &d).unwrap(), apply_commands(&h.app, &d).unwrap()] {
+        let (_, p) = commands.iter().find(|(id, _)| id == "solid.coil").expect("the Coil command");
+        assert_eq!(p["axis"], json!("CoilAxis"), "the explicit axis stays linked: {p}");
+        assert_eq!(coil_plane_coordinates(&h, &p["base"]), [20.0, 10.0, -20.0], "{p}");
+        assert!(p.get("sketch").is_none(), "the placement plane is not a profile: {p}");
+    }
+}
+
+/// A newly picked world plane is distinct from an unchanged saved component-local placement,
+/// even when both serialise to the same numbers. Preview and OK must use the picked plane.
+#[test]
+fn editing_a_coil_in_a_moved_component_uses_the_picked_world_plane() {
+    use solidcraft_engine::doc::{FeatureKind, apply_point, apply_vector};
+
+    for turned in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let owner = h.app.run("component.create", json!({"name":"Owner", "grounded":false})).unwrap();
+        let component = owner["component"].as_u64().unwrap();
+        h.app
+            .run(
+                "solid.coil",
+                json!({"name":"Coil", "body_name":"Spring", "base":[0,0,0], "axis":[0,0,1],
+                   "diameter":40, "revolutions":4, "pitch":8, "section_size":3}),
+            )
+            .unwrap();
+        let id = h.app.session.doc.find_feature("Coil").unwrap().id;
+        assert_eq!(h.app.session.doc.feature(id).unwrap().component, component, "the Coil belongs to the component being moved");
+        h.app.run("component.activate", json!({"component":"root"})).unwrap();
+        h.app
+            .run(
+                "occurrence.move",
+                json!({"occurrence":owner["occurrence"], "translate":[10,0,0], "axis":[0,1,0],
+                   "angle":if turned { "90 deg" } else { "0 deg" }}),
+            )
+            .unwrap();
+        let frame = h.app.session.placed_document().component_transform(component);
+        assert!((apply_point(&frame, Vec3::ZERO) - Vec3::new(10.0, 0.0, 0.0)).len() < 1e-9);
+        if turned {
+            assert!((apply_vector(&frame, Vec3::Z) - Vec3::X).len() < 1e-9);
+        }
+        h.app.edit_feature(id);
+        h.frames(3);
+        let plane = crate::dialogs::plane_by_name(&h.app.session, "XY").expect("the picked world XY plane");
+        assert_eq!(plane.origin, Vec3::ZERO, "Edit Feature resolves XY at the world origin");
+        assert_eq!(plane.normal(), Vec3::Z, "the picked plane has the world Z normal");
+        let saved = h.app.dialog.as_ref().expect("the Coil editor");
+        assert_eq!(coil_plane_coordinates(&h, &saved.extra["base"]), [0.0, 0.0, 0.0]);
+        assert_eq!(coil_plane_coordinates(&h, &saved.extra["axis"]), [0.0, 0.0, 1.0]);
+        {
+            let dialog = h.app.dialog.as_mut().expect("the Coil editor");
+            assert!(dialog.editing.is_some_and(|(edited, _)| edited == id));
+            assert_eq!(dialog.extra["base"].as_array().map(Vec::len), Some(3), "saved placement uses its existing coordinate-list form");
+            assert_eq!(dialog.extra["axis"].as_array().map(Vec::len), Some(3));
+            dialog.pick(&h.app.session, Sel::Plane { name: "XY".into() });
+            assert_eq!(dialog.inputs[0].items, vec![Sel::Plane { name: "XY".into() }]);
+        }
+        let commands = preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].0, "timeline.redefine");
+        let params = &commands[0].1["params"];
+        assert_eq!(coil_plane_coordinates(&h, &params["base"]), [0.0, 0.0, 0.0]);
+        assert_eq!(coil_plane_coordinates(&h, &params["axis"]), [0.0, 0.0, 1.0]);
+        let before = h.app.session.doc.to_json();
+        let preview = h.app.session.preview_world(&commands).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before, "preview preserves the design");
+        assert_eq!(preview.after.bodies.len(), 1);
+        let bounds = preview.after.bodies[0].mesh().bounds();
+        assert!(bounds.center().x.abs() < 1e-5 && bounds.center().y.abs() < 1e-5, "world-plane preview, turned={turned}: {bounds:?}");
+        assert!((bounds.min.z + 1.5).abs() < 1e-5 && (bounds.max.z - 33.5).abs() < 1e-5, "world Z preview, turned={turned}: {bounds:?}");
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "OK applies the Coil edit");
+        let FeatureKind::Coil { base, axis, .. } = &h.app.session.doc.feature(id).unwrap().kind else { panic!("the edited Coil") };
+        let local = h.app.session.doc.eval_point(base).unwrap();
+        let frame = h.app.session.placed_document().component_transform(component);
+        assert!(apply_point(&frame, local).len() < 1e-9, "the applied base lies at world XY, turned={turned}");
+        let local_axis = axis.each_ref().map(|component| h.app.session.doc.eval(component, solidcraft_engine::doc::expr::Kind::Unitless).unwrap());
+        let local_axis = solidcraft_engine::doc::unit_direction(Vec3::from(local_axis)).unwrap();
+        assert!((apply_vector(&frame, local_axis) - Vec3::Z).len() < 1e-9, "the applied axis follows world XY, turned={turned}");
+        assert_eq!(h.app.session.world_state().unwrap().bodies[0].mesh().bounds(), bounds, "OK matches the actual world preview");
     }
 }
 
@@ -2823,6 +3260,8 @@ fn coil_from_a_profile_hides_and_never_sends_the_section_options() {
     d.extra.insert("section".into(), json!("square"));
     d.extra.insert("section_position".into(), json!("outside"));
     d.extra.insert("start_angle".into(), json!("30 deg"));
+    // The profile's sketch is on XY, so the axis lies in its plane (the default axis is across it).
+    d.extra.insert("axis".into(), json!([0.0, 1.0, 0.0]));
     h.app.dialog = Some(d.clone());
     h.frames(2);
     for label in ["Section position", "Start angle"] {
@@ -2853,10 +3292,10 @@ fn coil_reverse_direction_winds_the_coil_down_its_axis() {
     let mut h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
     d.extra.insert("reversed".into(), json!(true));
-    d.extra.insert("axis".into(), json!([1.0, 0.0, 0.0]));
+    d.extra.insert("axis".into(), json!([0.0, 1.0, 0.0]));
     let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
-    assert_eq!((&p["axis"], &p["reversed"]), (&json!([1.0, 0.0, 0.0]), &json!(true)), "{p}");
-    d.extra.remove("axis");
+    assert_eq!((&p["axis"], &p["reversed"]), (&json!([0.0, 1.0, 0.0]), &json!(true)), "{p}");
+    // The profile's sketch is on XY, so the axis [0, 1, 0] lies in its plane, clear of the profile; it stays set.
     let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     h.app.dialog = Some(d.clone());
@@ -2889,6 +3328,42 @@ fn coil_reverse_direction_keeps_an_axis_of_expressions() {
         _ => None,
     });
     assert!(axis.as_ref().is_some_and(|a| solidcraft_engine::doc::literal_dir(a).is_none()), "still expressions: {axis:?}");
+}
+
+/// Picking a plane supplies the base and normal before Reverse Direction grows against it. A
+/// remembered axis must not replace the picked normal or lose the offset plane's origin.
+#[test]
+fn coil_reverse_direction_keeps_the_picked_plane_normal_and_origin() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("construct.plane.offset", json!({"base":"XY", "offset":50, "name":"Plane1"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("axis".into(), json!([1.0, 0.0, 0.0]));
+    d.pick(&h.app.session, Sel::Plane { name: "Plane1".into() });
+    assert!(d.extra.get("axis").is_none(), "the new plane replaces the saved direction");
+    d.extra.insert("reversed".into(), json!(true));
+    for commands in [crate::dialogs::preview_commands(&h.app, &d).unwrap(), apply_commands(&h.app, &d).unwrap()] {
+        let (_, p) = commands.iter().find(|(id, _)| id == "solid.coil").expect("the Coil command");
+        assert_eq!(coil_plane_coordinates(&h, p.get("base").unwrap()), [0.0, 0.0, 50.0], "{p}");
+        assert_eq!(coil_plane_coordinates(&h, p.get("axis").unwrap()), [0.0, 0.0, 1.0], "{p}");
+        assert_eq!(p["reversed"], json!(true), "{p}");
+        assert!(p.get("sketch").is_none() && p.get("flip").is_none(), "{p}");
+    }
+    h.app.dialog = Some(d);
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "OK applies the reversed Coil");
+    let measured = h.app.run("inspect.measure", json!({})).unwrap();
+    assert_eq!(measured["body_count"], json!(1));
+    let body = &measured["bodies"][0];
+    assert_eq!(body["closed"], json!(true));
+    // Four turns at pitch 8 extend down 32 from z=50; a centred diameter-3 section
+    // adds 1.5 at each end, giving z=16.5..51.5 independently of the dialog code.
+    for (side, expected) in [("min", 16.5), ("max", 51.5)] {
+        let actual = body["bbox"][side][2].as_f64().unwrap();
+        assert!((actual - expected).abs() < 1e-6, "{measured}");
+    }
 }
 
 /// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the

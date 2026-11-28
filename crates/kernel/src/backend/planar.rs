@@ -1,9 +1,9 @@
 //! solidcore's planar helpers ([`Planar`]): each the solidcore-ops call this crate's callers made
 //! before the interface existed, its refusal's words kept whole.
 
-use solidcore_ops::{board_drill, constraint, joint_turn, paper_gaps, section_corners, sketch_arc};
+use solidcore_ops::{board_drill, constraint, footprint, joint_turn, paper_gaps, section_corners, sketch_arc, stroke_runs};
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
-use solidcraft_kernel_api::planar::{Planar, PlanarRefused};
+use solidcraft_kernel_api::planar::{Planar, PlanarRefused, StrokeRun};
 
 use super::Solidcore;
 
@@ -26,6 +26,10 @@ impl Planar for Solidcore {
 
     fn is_square_to_radius(&self, centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool {
         sketch_arc::is_square_to_radius(centre, p, dir)
+    }
+
+    fn on_line(&self, p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+        sketch_arc::on_line(p, origin, dir, tol)
     }
 
     fn circumcentre(&self, a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]> {
@@ -68,12 +72,26 @@ impl Planar for Solidcore {
         section_corners::exit_through_box(end, toward, rect)
     }
 
-    fn exit_through_round(&self, start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64> {
-        section_corners::exit_through_round(start, toward, axis, radius)
+    fn reach_through_rounds(
+        &self,
+        end: Vec3,
+        toward: Vec3,
+        sections: &[[Vec3; 4]],
+        rounds: &[(Vec3, Vec3, f64)],
+        most: f64,
+    ) -> Result<f64, PlanarRefused> {
+        section_corners::reach_through_rounds(end, toward, sections, rounds, most).map_err(|e| PlanarRefused(e.to_string()))
     }
 
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
         paper_gaps::straight_length(a, b)
+    }
+
+    fn stroke_runs(&self, points: &[[f64; 2]], closed: bool, min_step: f64, smooth_turn_cos: f64) -> Vec<StrokeRun> {
+        stroke_runs::runs(points, closed, min_step, smooth_turn_cos)
+            .into_iter()
+            .map(|run| StrokeRun { points: run.points, closed: run.closed })
+            .collect()
     }
 
     fn projected_endpoints_are_distinct(&self, basis: Plane, ends: [Vec3; 2]) -> bool {
@@ -90,6 +108,10 @@ impl Planar for Solidcore {
 
     fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool {
         board_drill::side_on_hole_wall(center, size, angle, points, chord)
+    }
+
+    fn path_runs_inside(&self, path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margin: f64) -> bool {
+        footprint::path_runs_inside(path, regions, margin)
     }
 
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3] {
