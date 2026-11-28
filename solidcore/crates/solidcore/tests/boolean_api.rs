@@ -2513,12 +2513,11 @@ fn issue_21104_cylinder_sunk_the_contact_tolerance_on_its_seam_unions_as_tangent
 /// hit both the cylindrical pocket wall (large cylinder `u` parameter on the lower half of the
 /// circle) and the far outer planar face of the housing (smaller planar `u` parameter).
 ///
-/// With `ray_fire_nearest_solution` enabled, `SmBrep::RayFire` keeps the nearest intersection
-/// along the ray instead of letting a farther face with a smaller `param(0)` overwrite it, so
-/// point classification returns void (outside) everywhere inside the pocket and
-/// `boolean_intersection` is empty in both operand orders, at multiple disk seam angles, and at
-/// both identity and 180° Z rotation — while a disk truly embedded in a solid block still
-/// intersects to its full volume.
+/// `SmBrep::RayFire` keeps the nearest intersection along the ray instead of letting a farther
+/// face with a smaller `param(0)` overwrite it, so point classification returns void (outside)
+/// everywhere inside the pocket and `boolean_intersection` is empty in both operand orders, at
+/// multiple disk seam angles, and at both identity and 180° Z rotation — while a disk truly
+/// embedded in a solid block still intersects to its full volume.
 #[test]
 fn ray_fire_selects_nearest_hit_over_farther_face_with_smaller_u_param() {
     use solidcore::error::EntityRef;
@@ -2560,10 +2559,7 @@ fn ray_fire_selects_nearest_hit_over_farther_face_with_smaller_u_param() {
     };
 
     for rot180 in [false, true] {
-        let mut k = Kernel {
-            fixes: solidcraft_fixes::solidcraft_fixes(),
-            ..Kernel::default()
-        };
+        let mut k = Kernel::default();
         let mut housing = make_housing(&mut k, true, rot180);
         let query = BrepQuery::of_brep(&housing);
         let (dx, dy) = if rot180 { (-cx, -cy) } else { (cx, cy) };
