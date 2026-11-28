@@ -1887,7 +1887,9 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     // disagree with its geometry, but its size is not the reason it is refused.
     let mut large = completed.clone();
     large.edges[0].curve = Curve::Polyline {
-        points: (0..solidcore_record::brep::MAX_ITEMS).map(|i| [i as f64 * 1e-6, 0., 0.]).collect(),
+        points: (0..solidcore_record::brep::MAX_ITEMS)
+            .map(|i| [i as f64 * 1e-6, 0., 0.])
+            .collect(),
     };
     assert_eq!(large.validate().map_err(|e| e.0), Err("item budget"));
     let why = crate::pcurve::import_check_failure(&large).unwrap_or_default();
