@@ -348,6 +348,7 @@ mod tests {
         for path in ["part.igs", "model.FCStd", "shape.3dm"] {
             let v = Values::for_path(path, &[], &none).expect("imports");
             assert!(v.fields.iter().all(|f| f.param != "up"), "{path}: its up axis is the stand-up offer's");
+            assert!(v.fields.iter().all(|f| f.param != "split_to_files"), "{path}: split is STEP only");
         }
         let board = Values::for_path("b.kicad_pcb", &["components", "copper", "silkscreen", "holes", "color"], &none).unwrap();
         assert_eq!(board.fields.iter().map(|f| f.param).collect::<Vec<_>>(), ["thickness", "representation"], "`skip` leaves options out");

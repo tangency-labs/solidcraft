@@ -15,6 +15,11 @@ use crate::{EngineError, Result, Session};
 
 const CMD: &str = "file.split_step";
 
+/// A STEP file the split option applies to (`.step` / `.stp`), not IGES or a native CAD path.
+pub(super) fn is_step_file(path: &str) -> bool {
+    Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))
+}
+
 /// What [`write`] put on disk.
 pub(super) struct Written {
     /// The top assembly or the single part file.
@@ -29,6 +34,9 @@ pub(super) struct Written {
 pub(super) fn write(path: &str, options: &StepOptions, folder: &Path, overwrite: bool, validation: solidcraft_kernel::Validation) -> Result<Written> {
     if cfg!(target_arch = "wasm32") {
         return Err(bad(CMD, "saving split files needs a disk; it is not available in the web app"));
+    }
+    if !is_step_file(path) {
+        return Err(bad(CMD, "`split_to_files` is for a STEP file (`.step` / `.stp`)"));
     }
     if options.flatten {
         return Err(bad(CMD, "`flatten` and `split_to_files` cannot be used together: flattening removes the assembly tree to split"));

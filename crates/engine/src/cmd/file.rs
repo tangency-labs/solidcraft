@@ -78,7 +78,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "units?: for an STL or OBJ file (see file.insert_mesh); ",
             "origin?: bool for a mesh file (see file.insert_mesh); ",
             "folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
-            "split_to_files?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step; opens the written top `.sc`); ",
+            "split_to_files?: bool for a STEP file (see file.insert_step; opens the written top `.sc`); ",
             "split_folder?: folder path with `split_to_files` (default: the file's directory); ",
             "overwrite?: bool with `split_to_files` (default false: refuse when a target `.sc` already exists); ",
             "reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); ",
@@ -117,7 +117,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); ",
             "folder?: bool (default false; true: an assembly's import, which has subcomponents, goes into a new history folder named `Group #N`); ",
             "flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); refused with `split_to_files`); ",
-            "split_to_files?: bool (default false; true: write each leaf product once as a `.sc` and each assembly node as a `.sc` that links its children, under `split_folder`, then insert the top assembly; mutually exclusive with `flatten` → split_root, split_files); ",
+            "split_to_files?: bool (default false; a STEP `.step`/`.stp` file: true writes each leaf product once as a `.sc` and each assembly node as a `.sc` that links its children, under `split_folder`, then insert the top assembly; mutually exclusive with `flatten` → split_root, split_files); ",
             "split_folder?: folder path (with `split_to_files`; default: the STEP file's directory); ",
             "overwrite?: bool (with `split_to_files`; default false: refuse when a target `.sc` already exists); ",
             "name? (the feature's and the component's); ",
@@ -2068,7 +2068,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) || solidcraft_io::is_kicad_path(path) {
         // Split a STEP assembly to linked `.sc` files, then open the top assembly as a design.
-        if solidcraft_io::is_step_path(path) {
+        if split_step::is_step_file(path) {
             let mut options = step_options(p, "doc.open")?;
             if split_step::read_split_flags(p, "doc.open", &mut options)? {
                 let folder = split_step::split_folder_of(path, &options)?;

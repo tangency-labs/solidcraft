@@ -1037,7 +1037,7 @@ pub struct OpenParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "linked_bodies_schema")]
     pub linked_bodies: Option<String>,
-    /// For a STEP, IGES, FreeCAD or Rhino file: write each leaf product and assembly node as its
+    /// For a STEP file (`.step` / `.stp`): write each leaf product and assembly node as its
     /// own `.sc` under `split_folder`, then open the top assembly. Default: false.
     #[serde(default)]
     pub split_to_files: Option<bool>,

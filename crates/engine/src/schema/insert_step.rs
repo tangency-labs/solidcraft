@@ -202,9 +202,9 @@ pub struct InsertStepKeys {
     #[serde(default, deserialize_with = "envelope_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<EnvelopeParam>")]
     pub envelope: Option<String>,
-    /// true writes each leaf product once as a `.sc` and each assembly as a `.sc` that links its
-    /// children, under `split_folder`, then inserts the top assembly. Mutually exclusive with
-    /// `flatten`. Default: false.
+    /// On a STEP file (`.step` / `.stp`): true writes each leaf product once as a `.sc` and each
+    /// assembly as a `.sc` that links its children, under `split_folder`, then inserts the top
+    /// assembly. Mutually exclusive with `flatten`. Default: false.
     #[serde(default, deserialize_with = "split_to_files_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub split_to_files: Option<bool>,

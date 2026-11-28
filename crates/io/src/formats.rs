@@ -159,7 +159,10 @@ const SPLIT_FOLDER: OptionSpec = OptionSpec {
     kind: OptionKind::Text { default: "", hint: "Same folder as the STEP file" },
 };
 
-const BREP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, SPLIT_TO_FILES, SPLIT_FOLDER];
+const BREP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES];
+
+/// STEP Open / Insert options, including split-to-files (IGES, FreeCAD and Rhino stay on [`BREP_IMPORT`]).
+const STEP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, SPLIT_TO_FILES, SPLIT_FOLDER];
 
 /// What a FreeCAD file brings: its feature history rebuilt as features (sketches, Pad, Pocket,
 /// Revolution, Groove, Fillet, Chamfer, primitives), or only its solids (see `doc.open`).
@@ -169,7 +172,7 @@ const HISTORY: OptionSpec = OptionSpec {
     kind: OptionKind::Choice { choices: &[("features", "Rebuild its sketches and features"), ("solids", "Solids only")], default: 0 },
 };
 
-const FREECAD_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, HISTORY, SPLIT_TO_FILES, SPLIT_FOLDER];
+const FREECAD_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, HISTORY];
 
 /// What an OpenUSD file brings: its meshes as mesh bodies (the default, as before the option), or
 /// its exact B-rep where it has one (see `file.insert_mesh` and [`crate::UsdGeometry`]).
@@ -285,7 +288,7 @@ pub static FORMATS: &[FormatSpec] = &[
         label: "STEP",
         extensions: &["step", "stp"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: false }),
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: STEP_IMPORT, native_only: false }),
         export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
     FormatSpec {
