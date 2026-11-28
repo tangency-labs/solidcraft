@@ -63,6 +63,7 @@ pub mod develop;
 pub mod dogbone;
 pub mod dome;
 pub mod dxf;
+pub mod emboss;
 pub mod error;
 pub mod extend;
 pub mod extended_levels;

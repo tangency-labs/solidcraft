@@ -53,6 +53,7 @@ pub mod curve;
 pub mod deform;
 pub mod develop;
 pub mod dogbone;
+pub mod emboss;
 pub mod eval;
 pub mod finger_joint;
 pub mod gap_wedge;
