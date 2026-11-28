@@ -121,23 +121,26 @@ SolidCraft changes to egui and eframe:
   the handle each window, the main one and every pop-out, publishes its own bar for one window
   procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
 
+- `crates/egui/src/widgets/text_edit/{builder.rs,mod.rs}`, `crates/egui/src/widgets/mod.rs`,
+  `crates/egui/src/atomics/container_atom.rs`, `crates/egui/src/lib.rs`: a vertically centred
+  `TextEdit` lifts its single row of text so the middle of a capital's ink lands in the middle of
+  the field, not the middle of the font's row box (SolidCraft #23381). A row box is not where
+  capitals sit: the ascent exceeds the cap height and a descent hangs below the baseline, so
+  centring the row box puts the text low in the frame — 1.5 pt with egui's own font. The lift
+  comes from `cap_ink_rise`; it lays out one fixed probe glyph, so it follows the font, its size
+  and the pixels-per-point, and the baseline never moves while one types. `galley_cap_ink_rise`
+  applies it to a laid-out galley (zero for multi-row galleys, which centre as a block); both are
+  exported for SolidCraft's ui-kit to centre hand-drawn pills the same way. The atom layout
+  applies the lift to every [`AtomKind::Text`] atom whose cross-axis alignment is centred, so
+  `TextEdit`'s hint, prefix and suffix atoms share its lifted baseline and centred labels in
+  other atom containers read centred too. Only `Align::Center` rows are touched; top- and
+  bottom-aligned edits are unchanged. Tests: `crates/egui/tests/text_edit_centering.rs`.
+
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
 SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
 separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
-- `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
-  or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
-- `src/setup.rs`: the default device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` when
-  the adapter has it, so 2x and 8x work where the adapter supports them (WebGPU only
-  guarantees 1x and 4x).
-- `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
-  instead of exactly 8192.
-- `src/setup.rs`: the default device never asks for a limit the adapter does not offer
-  (`or_worse_values_from(adapter.limits())`). Older drivers (Mesa 20.3 on Debian 11) report
-  fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
-  defaults refused the device, so no window opened. An adapter at or above the defaults gets
-  the same request as before.
 - `src/lib.rs`, `src/winit.rs`: a window larger than the device's largest texture gets a surface
   clamped to it (`clamp_surface_extent`, aspect ratio kept) and egui is drawn at the matching
   smaller scale, instead of a `Surface::configure` validation panic (#869). The resize path and
