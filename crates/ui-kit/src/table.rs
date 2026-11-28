@@ -275,6 +275,20 @@ fn table_sized<'a, R>(
 /// The narrowest a user can drag a column.
 const MANUAL_MIN_WIDTH: f32 = 24.0;
 
+/// Minimum card width, before flexible columns share extra space. Callers can omit
+/// low-priority columns until this fits, using the same sizing as the rendered table.
+pub fn table_min_width(ui: &Ui, columns: &[Column<'_>]) -> f32 {
+    let columns = columns.get(..columns.len().min(MAX_COLUMNS)).unwrap_or_default();
+    let t = Tokens::get();
+    let frame = egui::Frame::NONE.outer_margin(egui::Margin::same(t.space_12 as i8)).stroke(t.container_border(t.border));
+    content_width(&column_widths(ui, columns, 0.0, false)) + frame.total_margin().sum().x
+}
+
+fn content_width(widths: &[f32]) -> f32 {
+    let t = Tokens::get();
+    widths.iter().sum::<f32>() + t.space_8 * (widths.len().saturating_sub(1) + 2) as f32 + t.space_4 * 2.0
+}
+
 /// Each column's width in points for a table `available` points wide: dragged columns keep their
 /// width, fixed columns measure their heading and controls, and flexible columns share the rest by
 /// weight, each frozen at its minimum before the others divide what remains.
@@ -621,8 +635,7 @@ impl<'a> Table<'a> {
     }
 
     fn width(&self) -> f32 {
-        let t = Tokens::get();
-        (self.widths.iter().sum::<f32>() + t.space_8 * (self.widths.len().saturating_sub(1) + 2) as f32 + t.space_4 * 2.0).max(self.min_width)
+        content_width(&self.widths).max(self.min_width)
     }
 
     fn is_empty(&self) -> bool {

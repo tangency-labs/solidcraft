@@ -977,6 +977,7 @@ pub enum Text<'a> {
     Error(&'a str),
     Heading(&'a str),
     Inline,
+    MonoInline,
     Cell,
     NameCell(bool),
     SelectedNameCell,
@@ -1061,7 +1062,7 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
     let fixed = matches!(style, Text::Cell | Text::NameCell(_) | Text::SelectedNameCell | Text::MonoCell | Text::Value(_, _));
     let ink = match style {
         Text::Hint(_) | Text::Note(_) | Text::MonoNote(_) => t.form_dim,
-        Text::Inline if in_catalog(ui) => t.form_dim,
+        Text::Inline | Text::MonoInline if in_catalog(ui) => t.form_dim,
         Text::Report(_, true) | Text::Value(_, true) | Text::Error(_) => t.form_error,
         Text::SelectedNameCell => t.selected_ink,
         _ => t.form_ink,
@@ -1071,7 +1072,7 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         Text::NameCell(true) | Text::SelectedNameCell => crate::type_face::semibold(t.font_label),
         Text::NameCell(false) => crate::type_face::medium(t.font_label),
         Text::Heading(_) => crate::type_face::semibold(t.font_button),
-        Text::MonoCell | Text::Value(_, _) => egui::FontId::monospace(t.font_body),
+        Text::MonoCell | Text::MonoInline | Text::Value(_, _) => egui::FontId::monospace(t.font_body),
         Text::MonoNote(_) => egui::FontId::monospace(t.font_small),
         Text::Hint(_) | Text::Error(_) => egui::FontId::proportional(t.font_body),
         Text::Note(_) => egui::FontId::proportional(t.font_small),
@@ -1119,14 +1120,14 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         response
     } else {
         let label = egui::Label::new(RichText::new(text).font(font).color(ink));
-        ui.add(if matches!(style, Text::Inline) { label.truncate() } else { label.wrap() })
+        ui.add(if matches!(style, Text::Inline | Text::MonoInline) { label.truncate() } else { label.wrap() })
     };
     let response = if matches!(style, Text::Hint(_)) { response.backing_on_hover_text(text) } else { response };
     let (kind, key) = match style {
         Text::Hint(key) => ("hint", key),
         Text::Note(key) | Text::MonoNote(key) => ("note", key),
         Text::Report(key, _) | Text::Value(key, _) | Text::Error(key) | Text::Heading(key) => ("report", key),
-        Text::Inline => ("inline", text),
+        Text::Inline | Text::MonoInline => ("inline", text),
         Text::Cell | Text::MonoCell | Text::NameCell(_) | Text::SelectedNameCell => ("cell", text),
     };
     let id = format!("dialog:{kind}:{key}");

@@ -46,6 +46,12 @@ pub(super) fn label_width(ui: &Ui, text: &str) -> f32 {
 pub struct ContentWidth;
 
 impl ContentWidth {
+    /// Width of native tabular text (`Text::MonoInline`) in the body font.
+    pub fn monospace(ui: &Ui, text: &str) -> f32 {
+        let t = Tokens::get();
+        ui.painter().layout_no_wrap(text.to_owned(), egui::FontId::monospace(t.font_body), t.form_ink).size().x.ceil()
+    }
+
     pub fn label(ui: &Ui, text: &str) -> f32 {
         label_width(ui, text)
     }
