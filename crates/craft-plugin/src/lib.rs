@@ -706,6 +706,15 @@ impl EntryKind {
     }
 }
 
+/// What an export slot returns through `export-file`: one file, or a zip of relative paths.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportOutput {
+    #[default]
+    File,
+    Files,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(from = "EntryDeclaration")]
 pub struct Entry {
@@ -726,6 +735,8 @@ pub struct Entry {
     /// then show the options, so they can match it. Absent or false shows the options first.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub file_first: bool,
+    /// Export slots returning multiple files return a zip archive of relative paths.
+    pub output: ExportOutput,
     pub effect: Effect,
     /// The entry's options, as an object schema. A format slot's options are drawn as a form
     /// before the import or export.
@@ -781,6 +792,8 @@ struct DeclaredEntry {
     needs_plugin_data: bool,
     #[serde(default)]
     file_first: bool,
+    #[serde(default)]
+    output: ExportOutput,
     /// A command's effect is `edit` unless it says `read`; an exporter's is `read`; an importer's is
     /// `open`. An importer that says `edit` (the only effect it could state before `open` existed)
     /// still opens a new design.
@@ -811,6 +824,7 @@ impl From<EntryDeclaration> for Entry {
                 label: String::new(),
                 needs_plugin_data: false,
                 file_first: false,
+                output: ExportOutput::File,
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
                 input_property_order: BTreeMap::new(),
@@ -826,6 +840,7 @@ impl From<EntryDeclaration> for Entry {
                 label: value.label.trim().to_string(),
                 needs_plugin_data: value.needs_plugin_data,
                 file_first: value.file_first,
+                output: value.output,
                 effect: match (value.kind, value.effect) {
                     (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
                     (_, Some(effect)) => effect,
@@ -1145,6 +1160,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     if !entry.label.is_empty() && !plain(&entry.label, 80) {
         return Err(invalid(format!("{field}.label"), "a slot's label is 1..80 printable characters"));
+    }
+    if entry.output == ExportOutput::Files && entry.kind != EntryKind::Exporter {
+        return Err(invalid(format!("{field}.output"), "only an export slot returns files"));
     }
     if entry.needs_plugin_data && entry.kind != EntryKind::Exporter {
         return Err(invalid(format!("{field}.needs_plugin_data"), "only an export slot reads the design's plugin data"));

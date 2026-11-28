@@ -1409,6 +1409,11 @@ pub(crate) struct EntryDialog {
     /// An export slot's extensions: its button chooses where to save, then exports the design
     /// with these options.
     pub(crate) writes: Option<Vec<String>>,
+    /// A multi-file exporter offers a folder and the original zip.
+    pub(crate) files_output: bool,
+    pub(crate) zip_target: bool,
+    /// The folder export's **Replace files** checkbox: the request carries `overwrite: true`.
+    pub(crate) replace_existing: bool,
     /// The design the selection fields' picks were made on. A change to it (an edit, an undo, an
     /// update) clears them: a reference into an older model never stands for another item.
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
@@ -1740,6 +1745,7 @@ fn open_entry_at(app: &mut SolveApp, p: usize, e: usize, source: Option<String>)
     {
         refresh_with_memory(fields, Some(saved));
     }
+    let files_output = entry.output == solidcraft_engine::plugin::ExportOutput::Files;
     let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
     app.plugin_menu.next_dialog += 1;
@@ -1787,6 +1793,9 @@ fn open_entry_at(app: &mut SolveApp, p: usize, e: usize, source: Option<String>)
         has_hook: false,
         hook_values: None,
         writes,
+        files_output,
+        zip_target: false,
+        replace_existing: false,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
@@ -2698,6 +2707,16 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     // with the options from this dialog. The dialog stays open with any error until it is done.
     if let Some(extensions) = dialog.writes.clone() {
         let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        if dialog.files_output && !dialog.zip_target {
+            let overwrite = dialog.replace_existing;
+            app.pick_folder("", move |app, path| {
+                let Some(path) = path else { return };
+                let request = json!({"command":"file.export","params":{"path":path,"format":format,"options":params,"overwrite":overwrite}});
+                queue(app, id, request, None);
+            });
+            return Ok(());
+        }
+        let extensions = if dialog.files_output { vec!["zip".to_string()] } else { extensions };
         let extension = extensions.first().cloned().unwrap_or_default();
         let name = std::format!("{}.{extension}", crate::export_name::offered(app, None, &app.session.doc.name));
         let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
@@ -3009,6 +3028,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let title = dialog.label.clone();
     let run_key = if dialog.opens.is_some() {
         if dialog.source.is_some() { "ui.plugin_dialog_open_file" } else { "ui.plugin_dialog_choose_file" }
+    } else if dialog.files_output {
+        "plugin_export.folder"
     } else if dialog.writes.is_some() {
         "plugin_export.button"
     } else if dialog.form_guard.is_some() {
@@ -3023,9 +3044,11 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };
     let mut claim = None;
     let icon = dialog.icon.clone();
+    let zip_label = app.tr("plugin_export.zip").to_owned();
     let (closed, action) = ui_kit::Window::new(dialog_window_id(dialog, app.preferences.plugin_remember_dialog_position), &icon, &title)
         .fields()
-        .actions(&run_label, &close_label, None)
+        .actions(&run_label, &close_label, dialog.files_output.then_some(zip_label.as_str()))
+        .apply_enabled(ready.is_ok() && !running)
         .show(ctx, ready.is_ok() && !running, |ui| {
             if let Some(source) = &dialog.source {
                 let name = dialog
@@ -3042,6 +3065,13 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
                 }
             }
             browse = body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim);
+            if dialog.files_output {
+                // Without it an export that would replace a file in the folder is refused and
+                // changes nothing; with it only the files the export writes are replaced.
+                let replace =
+                    ui.add_enabled_ui(!running, |ui| ui_kit::checkbox(ui, app.tr("plugin_export.replace"), &mut dialog.replace_existing)).inner;
+                crate::scenario::publish_target("plugin_dialog:replace", replace.rect);
+            }
             if dialog.opens.is_some() && dialog.fields.is_some() {
                 ui.horizontal_wrapped(|ui| {
                     let reset = ui
@@ -3093,7 +3123,11 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
             }
         });
     }
-    (true, action == ui_kit::Action::Ok, claim)
+    let run = action == ui_kit::Action::Ok || (dialog.files_output && action == ui_kit::Action::Apply);
+    if run && dialog.files_output {
+        dialog.zip_target = action == ui_kit::Action::Apply;
+    }
+    (true, run, claim)
 }
 
 /// Resets the values to the schema's; the **Remember these options** checkbox keeps its state. A

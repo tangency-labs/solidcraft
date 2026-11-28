@@ -128,15 +128,30 @@ fn tool_input(entry: &Entry) -> Value {
 fn format_schema(entry: &Entry) -> Value {
     let extensions: Vec<String> = entry.extensions.iter().map(|e| format!(".{e}")).collect();
     let action = if entry.kind == EntryKind::Exporter { "write" } else { "open" };
-    json!({
+    let destination = if entry.output == ExportOutput::Files {
+        "The destination folder, or a .zip file to keep the archive".to_string()
+    } else {
+        format!("The file to {action} ({})", extensions.join(", "))
+    };
+    let mut schema = json!({
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": format!("The file to {action} ({})", extensions.join(", "))},
+            "path": {"type": "string", "description": destination},
             "options": tool_input(entry),
         },
         "required": ["path"],
         "additionalProperties": false,
-    })
+    });
+    if entry.kind == EntryKind::Exporter
+        && entry.output == ExportOutput::Files
+        && let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut)
+    {
+        properties.insert(
+            "overwrite".into(),
+            json!({"type": "boolean", "description": "Replace files the folder already holds under the names this export writes. Without it such an export is refused and the folder is left as it was. Other files in the folder are kept."}),
+        );
+    }
+    schema
 }
 
 /// The refusal of a call that needs a grant `plugin` does not have.

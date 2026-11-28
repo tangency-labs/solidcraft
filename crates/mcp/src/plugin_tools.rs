@@ -132,7 +132,11 @@ pub fn call(b: &mut dyn Backend, name: &str, args: &Map<String, Value>) -> Resul
     match str_field(t, "kind") {
         "exporter" => {
             let options = args.get("options").cloned().unwrap_or_else(|| json!({}));
-            exec(b, "file.export", json!({"path": args.get("path"), "format": name, "options": options}))
+            let mut params = json!({"path": args.get("path"), "format": name, "options": options});
+            if let Some(overwrite) = args.get("overwrite") {
+                params["overwrite"] = overwrite.clone();
+            }
+            exec(b, "file.export", params)
         }
         "importer" => {
             let options = args.get("options").cloned().unwrap_or_else(|| json!({}));

@@ -292,7 +292,7 @@ pub struct ExportMjcfParams {
 pub struct ExportParams {
     // `path` is optional in the type and required in the schema: left out, the handler refuses it
     // with its own message.
-    /// The file to write.
+    /// The file to write. A multi-file plugin writes a zip for a .zip ending, otherwise a folder.
     #[serde(default)]
     pub path: Option<String>,
     /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, usd, 3dm, urdf, mjcf, sdf or json,
@@ -305,6 +305,9 @@ pub struct ExportParams {
     /// formats. Default: the slot's defaults.
     #[serde(default)]
     pub options: Option<serde_json::Map<String, Value>>,
+    /// Multi-file plugin folder output only: allow replacement of existing files (default false).
+    #[serde(default)]
+    pub overwrite: Option<bool>,
     /// The bodies to export, by name. Default: every body. Design JSON, URDF and MJCF export the
     /// complete design, so they refuse a list.
     #[serde(default)]
@@ -489,6 +492,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             path: None,
             format: None,
             options: None,
+            overwrite: None,
             bodies: None,
             quality: None,
             chord: None,
@@ -519,6 +523,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(_) => return Err(refuse::<D::Error>("`path` is required")),
         };
         out.format = text::<D::Error>(&m, "format")?;
+        out.overwrite = flag::<D::Error>(&m, "overwrite")?;
         out.options = match m.get("options") {
             None | Some(Value::Null) => None,
             Some(Value::Object(options)) => Some(options.clone()),
