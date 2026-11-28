@@ -1546,7 +1546,7 @@ mod web {
                 // meshes are drawn a call per pipeline (`solidcraft_viewport_gpu::INDIRECT_DRAWS`).
                 let base = create.device_descriptor.clone();
                 create.device_descriptor = std::sync::Arc::new(move |adapter| {
-                    let mut d = base(adapter);
+                    let mut d = solidcraft_viewport_gpu::window_device_request(adapter, base(adapter));
                     d.required_features |= adapter.features() & eframe::wgpu::Features::INDIRECT_FIRST_INSTANCE;
                     d
                 });

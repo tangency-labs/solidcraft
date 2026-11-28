@@ -890,6 +890,14 @@ pub fn fair_faces(body: &Body, faces: &[usize], opts: &FairOptions) -> Result<(B
     let mut changed: Vec<usize> = Vec::with_capacity(picked.len());
     for &i in &picked {
         let Some(face) = record.faces.get_mut(i) else { continue };
+        // A screw-swept wall is faired as its net: once faired it is no longer that wall, so it
+        // goes on as a plain B-spline face, as such a wall was recorded before it kept its
+        // definition.
+        if matches!(face.surface, b::Surface::Sweep { .. })
+            && let Some(net) = face.nurbs.take()
+        {
+            face.surface = net;
+        }
         if let Some(report) = held_face(&face.surface, &opts)? {
             reports.push(report);
             continue;

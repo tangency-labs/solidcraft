@@ -24,8 +24,8 @@ use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
 use crate::selection::{
-    AXES, BODIES, CONSTRUCTION_POINTS, EDGES, FACES, ORIGIN, PLANES, POINTS, PROFILES, SelInput, SelectionExt as _, VERTICES, items as sel_items,
-    point_value as pt, polyline_mid,
+    AXES, BODIES, CONSTRUCTION_POINTS, EDGES, FACES, ORIGIN, PLANAR_FACES, PLANES, POINTS, PROFILES, SelInput, SelectionExt as _, VERTICES,
+    items as sel_items, point_value as pt, polyline_mid, same_item,
 };
 use solidcraft_theme::Tokens;
 
@@ -180,6 +180,8 @@ pub enum Asm {
         /// Robot exports write it as a frame of its own.
         frame: bool,
         name: String,
+        /// Between Two Faces mode: two planar faces and an optional snap projected onto their midplane (#22615).
+        between_faces: bool,
         hover: Hover,
     },
     /// `whole_components`: each component picked whole, as As-Built keeps them (#23189).
@@ -277,6 +279,10 @@ pub struct JointForm {
     /// Edit Joint: the sides as the dialog opened on them. A side still that pick is not sent,
     /// so it keeps its origin exactly.
     pub sides: [Option<Sel>; 2],
+    /// Between Two Faces mode per primary UI row (0: Component 1, 1: Component 2). Default false (#22615).
+    pub between_faces: [bool; 2],
+    /// Edit Joint: loaded Between Two Faces picks `[face1, face2, snap]` per backend side.
+    pub between_sides: [Option<[Option<Sel>; 3]>; 2],
     /// Flip B relative to the mate (faces apart instead of together).
     pub flip: bool,
     pub angle: String,
@@ -336,6 +342,8 @@ impl JointForm {
             editing: None,
             kind: 0,
             sides: [None, None],
+            between_faces: [false, false],
+            between_sides: [None, None],
             flip: false,
             angle: "0 deg".into(),
             angle_shown: "0 deg".into(),
@@ -368,6 +376,18 @@ impl JointForm {
 
     pub(crate) fn joint_kind(&self) -> JointKind {
         TYPES.get(self.kind).and_then(|t| JointKind::parse(t)).unwrap_or(JointKind::Rigid)
+    }
+
+    fn side_start(&self, row: usize) -> usize {
+        if row == 0 { 0 } else { self.side_len(0) }
+    }
+
+    fn side_len(&self, row: usize) -> usize {
+        if self.between_faces[row] { 3 } else { 1 }
+    }
+
+    pub(crate) fn alignment_base(&self) -> usize {
+        self.side_len(0) + self.side_len(1)
     }
 
     /// Assembly constraints keep their reference geometry until converted to a plain joint.
@@ -449,7 +469,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Asm::Joint(Box::new(JointForm::new(true, &app.session.doc))),
             vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)],
         ),
-        "joint.origin" => (Asm::JointOrigin { name: String::new(), frame: false, hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
+        "joint.origin" => {
+            (Asm::JointOrigin { name: String::new(), frame: false, between_faces: false, hover: None }, vec![SelInput::new("Snap", SNAPS, false)])
+        }
         "joint.rigid_group" => (Asm::RigidGroup { whole_components: Vec::new() }, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
             let joint = picked_joint(app, true);
@@ -547,8 +569,130 @@ pub(crate) fn num(v: f64, unit: &str) -> String {
 }
 
 /// The two side inputs of the Joint dialog (Joint and Edit Joint): the picks of each origin.
-fn side_inputs() -> Vec<SelInput> {
-    vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)]
+fn between_faces_param(app: &SolveApp, inputs: &[SelInput], start: usize) -> Result<Value, String> {
+    let text = |id: &str| solidcraft_ui_text::tr(id).to_string();
+    let a = inputs.get(start).and_then(|i| i.items.first()).ok_or_else(|| text("joint_origin.pick_faces"))?;
+    let b = inputs.get(start + 1).and_then(|i| i.items.first()).ok_or_else(|| text("joint_origin.pick_faces"))?;
+    let face = |sel: &Sel| {
+        let snap = picked_snap(app, sel).ok_or_else(|| text("constrain.center_walls"))?;
+        snap.param.get("face").is_some().then_some(snap.param).ok_or_else(|| text("constrain.center_walls"))
+    };
+    let (a_param, b_param) = (face(a)?, face(b)?);
+    if a_param.get("path") != b_param.get("path") || a_param.get("occurrence") != b_param.get("occurrence") {
+        return Err(text("constrain.center_two_walls"));
+    }
+    if same_item(a, b) {
+        return Err(text("constrain.center_distinct"));
+    }
+    let mut param = json!({"faces": [a_param["face"], b_param["face"]]});
+    for key in ["occurrence", "path"] {
+        if let Some(value) = a_param.get(key) {
+            param[key] = value.clone();
+        }
+    }
+    if let Some(snap_input) = inputs.get(start + 2)
+        && let Some(snap_sel) = snap_input.items.first()
+        && let Some(snap) = snap_in(app, snap_input, snap_sel)
+    {
+        if snap.param.get("occurrence") != a_param.get("occurrence") || snap.param.get("path") != a_param.get("path") {
+            return Err(text("joint_origin.snap_same_part"));
+        }
+        param["snap"] = snap.param;
+    }
+    Ok(param)
+}
+
+/// Resolve a between-faces origin parameter into a viewport snap glyph (world coordinates)
+/// using the engine's exact resolver (no app-side geometry maths).
+fn between_faces_snap_pt(app: &SolveApp, param: &Value) -> Option<SnapPt> {
+    let origin = app.session.joint_origin_for_alignment(param).ok()?;
+    let m = app.session.doc.origin_world(&app.session.model.state(), &origin).ok()?;
+    Some(SnapPt {
+        at: Vec3::new(m[3][0], m[3][1], m[3][2]),
+        z: Vec3::new(m[2][0], m[2][1], m[2][2]),
+        kind: SnapKind::FaceCenter,
+        param: param.clone(),
+    })
+}
+
+fn sync_joint_origin_inputs(app: &SolveApp, between_faces: bool, inputs: &mut Vec<SelInput>, active: &mut usize) {
+    let planar = |sel: &Sel| match sel {
+        Sel::Face { body, index, .. } => crate::dialogs::planar_face(&app.session, body, *index).is_some(),
+        _ => false,
+    };
+    if between_faces {
+        let mut first = inputs.first().cloned().unwrap_or_else(|| SelInput::new("joint_origin.face_1", PLANAR_FACES, false));
+        first.label = "joint_origin.face_1";
+        first.accept = PLANAR_FACES;
+        first.items.retain(planar);
+        first.from_face.clear();
+        let second = SelInput::new("joint_origin.face_2", PLANAR_FACES, false);
+        let snap = SelInput::new("joint_origin.snap_optional", SNAPS, false);
+        *inputs = vec![first, second, snap];
+        *active = inputs.iter().position(|i| i.items.is_empty()).unwrap_or(0);
+    } else {
+        let kept =
+            inputs.get(2).filter(|i| !i.items.is_empty()).or_else(|| inputs.first()).cloned().unwrap_or_else(|| SelInput::new("Snap", SNAPS, false));
+        let mut single = SelInput::new("Snap", SNAPS, false);
+        single.items = kept.items;
+        single.from_face = kept.from_face;
+        *inputs = vec![single];
+        *active = 0;
+    }
+}
+
+fn sync_joint_side_inputs(app: &SolveApp, was: [bool; 2], f: &JointForm, inputs: &mut Vec<SelInput>, active: &mut usize) {
+    let planar = |sel: &Sel| match sel {
+        Sel::Face { body, index, .. } => crate::dialogs::planar_face(&app.session, body, *index).is_some(),
+        _ => false,
+    };
+    let old_base = (if was[0] { 3 } else { 1 }) + (if was[1] { 3 } else { 1 });
+    let align: Vec<SelInput> = if inputs.len() >= old_base {
+        inputs[old_base..].to_vec()
+    } else {
+        vec![SelInput::new("dialog.alignment_1_optional", ALIGNMENTS, false), SelInput::new("dialog.alignment_2_optional", ALIGNMENTS, false)]
+    };
+    let mut rebuilt = Vec::new();
+    let mut cursor = 0;
+    for (row, &was_between) in was.iter().enumerate() {
+        let old_len = if was_between { 3 } else { 1 };
+        let old_slice = inputs.get(cursor..cursor + old_len).unwrap_or(&[]);
+        cursor += old_len;
+        if f.between_faces[row] {
+            let (l1, l2, ls) = if row == 0 {
+                ("joint.side_1_face_1", "joint.side_1_face_2", "joint.side_1_snap")
+            } else {
+                ("joint.side_2_face_1", "joint.side_2_face_2", "joint.side_2_snap")
+            };
+            if was_between && old_slice.len() == 3 {
+                rebuilt.extend_from_slice(old_slice);
+            } else {
+                let mut f1 = SelInput::new(l1, PLANAR_FACES, false);
+                if let Some(old) = old_slice.first() {
+                    f1.items = old.items.iter().filter(|s| planar(s)).cloned().collect();
+                }
+                rebuilt.push(f1);
+                rebuilt.push(SelInput::new(l2, PLANAR_FACES, false));
+                rebuilt.push(SelInput::new(ls, SNAPS, false));
+            }
+        } else {
+            let label = if row == 0 { "Component 1" } else { "Component 2" };
+            if !was_between && let Some(old) = old_slice.first() {
+                rebuilt.push(old.clone());
+            } else {
+                let mut single = SelInput::new(label, SNAPS, false);
+                if let Some(old) = old_slice.get(2).filter(|i| !i.items.is_empty()).or_else(|| old_slice.first()) {
+                    single.items = old.items.clone();
+                    single.from_face = old.from_face.clone();
+                }
+                rebuilt.push(single);
+            }
+        }
+    }
+    rebuilt.extend(align);
+    *inputs = rebuilt;
+    let primary_end = f.alignment_base();
+    *active = inputs.iter().take(primary_end).position(|i| i.items.is_empty()).unwrap_or(0);
 }
 
 /// The pick a joint side shows in the side inputs: the face, edge, plane, or axis of its own
@@ -621,10 +765,16 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     placed_geometry_pick(s, o, pick, face, edge)
 }
 
-/// Each face of a saved between-faces origin, as a separate pick in Constrain.
+/// Each face of a saved between-faces origin, as a separate pick in Constrain or Edit Joint.
 pub(crate) fn between_face_picks(app: &SolveApp, o: &JointOrigin) -> Option<[Option<Sel>; 2]> {
-    let Snap::BetweenFaces { a, b } = &o.snap else { return None };
+    let Snap::BetweenFaces { a, b, .. } = &o.snap else { return None };
     Some([a, b].map(|f| placed_geometry_pick(&app.session, o, f.pick, Some(&f.face), None)))
+}
+
+/// The saved optional snap reference of a between-faces origin, as a pick in Edit Joint.
+fn between_snap_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
+    let Snap::BetweenFaces { snap: Some(inner), .. } = &o.snap else { return None };
+    side_pick(app, &JointOrigin { occurrence: o.occurrence, inside: o.inside.clone(), snap: inner.as_ref().clone() })
 }
 
 fn placed_geometry_pick(s: &Session, o: &JointOrigin, pick: Vec3, face: Option<&str>, edge: Option<&str>) -> Option<Sel> {
@@ -728,9 +878,28 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     f.editing = Some(id);
     f.show_position = true;
     f.sides = [side_pick(app, &j.a), side_pick(app, &j.b)];
-    let mut inputs = side_inputs();
-    for (input, pick) in inputs.iter_mut().zip(&f.sides) {
-        input.items = pick.iter().cloned().collect();
+    let mut inputs = Vec::new();
+    for (i, origin) in [&j.a, &j.b].into_iter().enumerate() {
+        if let Some([fa, fb]) = between_face_picks(app, origin) {
+            f.between_faces[i] = true;
+            let snap = between_snap_pick(app, origin);
+            let picks = [fa, fb, snap];
+            f.between_sides[i] = Some(picks.clone());
+            let (l1, l2, ls) = if i == 0 {
+                ("joint.side_1_face_1", "joint.side_1_face_2", "joint.side_1_snap")
+            } else {
+                ("joint.side_2_face_1", "joint.side_2_face_2", "joint.side_2_snap")
+            };
+            for (label, accept, pick) in [(l1, PLANAR_FACES, picks[0].clone()), (l2, PLANAR_FACES, picks[1].clone()), (ls, SNAPS, picks[2].clone())] {
+                let mut inp = SelInput::new(label, accept, false);
+                inp.items = pick.into_iter().collect();
+                inputs.push(inp);
+            }
+        } else {
+            let mut inp = SelInput::new(if i == 0 { "Component 1" } else { "Component 2" }, SNAPS, false);
+            inp.items = f.sides[i].iter().cloned().collect();
+            inputs.push(inp);
+        }
     }
     inputs.extend([SelInput::new("dialog.alignment_1_optional", ALIGNMENTS, false), SelInput::new("dialog.alignment_2_optional", ALIGNMENTS, false)]);
     f.kind = TYPES.iter().position(|t| JointKind::parse(t) == Some(j.kind)).unwrap_or(0);
@@ -1588,11 +1757,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             enter |= text_row(ui, "Name", &mut f.name, &hint).0;
             f.fit_limits(&app.session.doc);
             if !f.as_built {
+                let base = f.alignment_base();
                 let selected = f
                     .alignment_order
                     .iter()
                     .enumerate()
-                    .find_map(|(row, side)| (f.alignment[*side].is_some() || !sel_items(inputs, row + 2).is_empty()).then_some(*side));
+                    .find_map(|(row, side)| (f.alignment[*side].is_some() || !sel_items(inputs, row + base).is_empty()).then_some(*side));
                 let mut reverse = f.reverse_alignment[0] ^ f.reverse_alignment[1];
                 form_row(ui, "dialog.invert_alignment", |ui| {
                     let response = ui.add_enabled_ui(selected.is_some(), |ui| crate::ui_kit::checkbox(ui, "", &mut reverse)).inner;
@@ -1624,11 +1794,21 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                         enter |= expr_row(ui, l, v);
                     }
                 });
+                let was_between = f.between_faces;
+                let [b0, b1] = &mut f.between_faces;
                 crate::ui_kit::options(
                     ui,
                     "joint_options",
-                    &mut [("Flip", &mut f.flip), ("dialog.preview_alignment_on_hover", &mut f.preview_alignment_on_hover)],
+                    &mut [
+                        ("Flip", &mut f.flip),
+                        ("dialog.preview_alignment_on_hover", &mut f.preview_alignment_on_hover),
+                        ("joint.side_1_between_faces", b0),
+                        ("joint.side_2_between_faces", b1),
+                    ],
                 );
+                if was_between != f.between_faces {
+                    sync_joint_side_inputs(app, was_between, f, inputs, active);
+                }
             }
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
@@ -1691,7 +1871,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
             }
         }
-        Asm::JointOrigin { name, frame, .. } => {
+        Asm::JointOrigin { name, frame, between_faces, .. } => {
+            let mut mode = usize::from(*between_faces);
+            let modes = [solidcraft_ui_text::tr("joint_origin.mode_simple"), solidcraft_ui_text::tr("joint_origin.mode_between_faces")];
+            choice_row(ui, solidcraft_ui_text::tr("joint_origin.mode"), "jo_mode", &mut mode, &modes);
+            if (mode == 1) != *between_faces {
+                *between_faces = mode == 1;
+                sync_joint_origin_inputs(app, *between_faces, inputs, active);
+            }
             enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Joint Origin1")).0;
             crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Export as a robot frame"), frame);
         }
@@ -2179,65 +2366,81 @@ fn overlap_meshes(st: &solidcraft_engine::doc::ModelState, r: &Value) -> Vec<Mes
 }
 
 fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
+    use crate::ui_kit;
     let t = Tokens::get();
     if let Some(e) = r.get("error").and_then(Value::as_str) {
-        crate::ui_kit::status_line(ui, e, crate::ui_kit::StatusTone::Error);
+        ui_kit::status_line(ui, e, ui_kit::StatusTone::Error);
         return;
     }
-    let hits = r["overlaps"].as_array().cloned().unwrap_or_default();
     form_row(ui, "Checked", |ui| {
         ui.label(solidcraft_ui_text::format("dialog.bodies_count", &[("count", &r["bodies"].as_u64().unwrap_or(0).to_string())]));
     });
-    let unchecked = r["unchecked"].as_array().cloned().unwrap_or_default();
-    let near = r["near"].as_array().cloned().unwrap_or_default();
-    let pair = |h: &Value| format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or(""));
+    let list = |key: &str| r[key].as_array().map_or(&[][..], Vec::as_slice);
+    let (hits, unchecked, near) = (list("overlaps"), list("unchecked"), list("near"));
     if hits.is_empty() && unchecked.is_empty() {
-        crate::ui_kit::status_line(ui, "no interference", crate::ui_kit::StatusTone::Dim);
+        ui_kit::status_line(ui, "no interference", ui_kit::StatusTone::Dim);
     }
-    // Pairs closer than the clearance, nearest first.
-    if !near.is_empty() {
-        form_row(ui, "Too close", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for h in &near {
-        form_row(ui, &pair(h), |ui| {
-            ui.label(RichText::new(crate::prefs::show_mm(app, h["distance_mm"].as_f64().unwrap_or(0.0), 1)).color(t.warning));
-        });
-    }
-    // Each body's nearest neighbour.
-    let nearest = r["nearest"].as_object().cloned().unwrap_or_default();
-    if !nearest.is_empty() {
-        form_row(ui, "Nearest", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for (body, list) in &nearest {
-        let Some(n) = list.get(0) else { continue };
-        form_row(ui, &format!("{body} → {}", n["body"].as_str().unwrap_or("")), |ui| {
-            ui.label(crate::prefs::show_mm(app, n["distance_mm"].as_f64().unwrap_or(0.0), 1));
-        });
-    }
-    if hits.is_empty() && unchecked.is_empty() {
+    if hits.is_empty() && unchecked.is_empty() && near.is_empty() && r["nearest"].as_object().is_none_or(|map| map.is_empty()) {
         return;
     }
-    if !hits.is_empty() {
-        form_row(ui, "Interferes", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr_label("Volume")).semibold().color(solidcraft_theme::Tokens::get().text));
-        });
-    }
-    for h in hits {
-        form_row(ui, &format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(crate::prefs::show_mm(app, h["volume_mm3"].as_f64().unwrap_or(0.0), 3)).color(t.error));
-        });
-    }
-    // Pairs the check could not work out: not clear, not known to interfere.
-    for u in unchecked {
-        form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("dialog.could_not_be_checked")).color(t.warning))
-                .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
-        });
-    }
+    let columns = [
+        ui_kit::Column::new(solidcraft_ui_text::tr("ui.bodies"), 1.5).flex(),
+        ui_kit::Column::new(solidcraft_ui_text::tr_label("Value"), 1.0).flex(),
+    ];
+    ui_kit::report_list(ui, "interference_results", ui_kit::table_row_height() * 10.0, &columns, "", |ui, table| {
+        for (key, heading, metric, field, power, ink) in [
+            ("near", "Too close", "Distance", "distance_mm", 1, t.warning),
+            ("nearest", "Nearest", "Distance", "distance_mm", 1, t.text),
+            ("overlaps", "Interferes", "Volume", "volume_mm3", 3, t.error),
+            ("unchecked", "dialog.could_not_be_checked", "", "", 0, t.warning),
+        ] {
+            let pairs: Vec<_> = if key == "nearest" {
+                r[key]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|(body, list)| {
+                        let n = list.get(0)?;
+                        Some((format!("{body} → {}", n["body"].as_str().unwrap_or("")), n))
+                    })
+                    .collect()
+            } else {
+                list(key).iter().map(|h| (format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or("")), h)).collect()
+            };
+            if pairs.is_empty() {
+                continue;
+            }
+            let heading = if metric.is_empty() {
+                solidcraft_ui_text::tr(heading).to_owned()
+            } else {
+                format!("{} · {}", solidcraft_ui_text::tr_label(heading), solidcraft_ui_text::tr_label(metric))
+            };
+            let id = ui.make_persistent_id(("interference_results", key));
+            let mut open = ui.data(|data| data.get_temp(id)).unwrap_or(true);
+            table.group(ui, key, &heading, pairs.len(), &mut open);
+            ui.data_mut(|data| data.insert_temp(id, open));
+            if !open {
+                continue;
+            }
+            for (index, (pair, hit)) in pairs.iter().enumerate() {
+                let value = if power == 0 {
+                    solidcraft_ui_text::tr("dialog.could_not_be_checked").to_owned()
+                } else {
+                    crate::prefs::show_mm(app, hit[field].as_f64().unwrap_or(0.0), power)
+                };
+                let response = table.row(ui, &format!("{key}:{index}"), false, |row| {
+                    let label = row.cell(|ui| ui_kit::text(ui, pair, ui_kit::Text::Cell));
+                    let value = row.cell(|ui| {
+                        ui.add(egui::Label::new(RichText::new(&value).color(ink)).truncate())
+                            .backing_on_hover_text(hit["reason"].as_str().unwrap_or(&value))
+                    });
+                    crate::scenario::publish_rect(&format!("dialog:label:{pair}"), label.rect);
+                    crate::scenario::publish_rect(&format!("dialog:control:{pair}"), value.rect);
+                });
+                crate::scenario::publish_target(&format!("dialog:row:{pair}"), response.rect);
+            }
+        }
+    });
 }
 
 // ---- commands ----
@@ -2247,7 +2450,7 @@ pub(crate) fn alignment_side(k: &Kind, input: usize) -> Option<usize> {
     if f.as_built {
         return None;
     }
-    let side = input.checked_sub(2)?;
+    let side = input.checked_sub(f.alignment_base())?;
     f.alignment_order.get(side).copied()
 }
 
@@ -2258,8 +2461,8 @@ pub(crate) fn alignment_dialog(d: &Dialog) -> bool {
 fn alignment_primary_key(s: &Session, f: &JointForm, inputs: &[SelInput]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut key = std::collections::hash_map::DefaultHasher::new();
-    (s.revision, f.editing, f.primary_order).hash(&mut key);
-    for input in inputs.iter().take(2) {
+    (s.revision, f.editing, f.primary_order, f.between_faces).hash(&mut key);
+    for input in inputs.iter().take(f.alignment_base()) {
         format!("{:?}{:?}", input.items, input.from_face).hash(&mut key);
     }
     key.finish()
@@ -2274,7 +2477,40 @@ fn alignment_primary_origin(s: &Session, f: &JointForm, inputs: &[SelInput], sid
 
 fn resolve_primary_alignment_origin(s: &Session, f: &JointForm, inputs: &[SelInput], side: usize) -> Option<JointOrigin> {
     let row = f.primary_order[side];
-    let input = inputs.get(row)?;
+    let start = f.side_start(row);
+    if f.between_faces[row] {
+        if let Some(id) = f.editing
+            && let Some(saved) = f.between_sides[side].as_ref()
+            && (0..3).all(|k| inputs.get(start + k).and_then(|i| i.items.first()) == saved[k].as_ref())
+        {
+            let j = s.doc.assembly.joints.iter().find(|j| j.id == id)?;
+            return Some(if side == 0 { j.a.clone() } else { j.b.clone() });
+        }
+        let a = snap_of(s, inputs.get(start)?.items.first()?)?;
+        let b = snap_of(s, inputs.get(start + 1)?.items.first()?)?;
+        if a.param.get("face").is_none() || b.param.get("face").is_none() {
+            return None;
+        }
+        let mut param = json!({"faces": [a.param["face"], b.param["face"]]});
+        for key in ["occurrence", "path"] {
+            if let Some(value) = a.param.get(key) {
+                param[key] = value.clone();
+            }
+        }
+        if let Some(snap_input) = inputs.get(start + 2)
+            && let Some(pick) = snap_input.items.first()
+            && let Some(snap) = snap_input
+                .from_face
+                .iter()
+                .find(|(x, ..)| x == pick)
+                .and_then(|(_, kind, from)| face_tied(s, pick, *kind, from))
+                .or_else(|| snap_of(s, pick))
+        {
+            param["snap"] = snap.param;
+        }
+        return s.joint_origin_for_alignment(&param).ok();
+    }
+    let input = inputs.get(start)?;
     let pick = input.items.first();
     if let Some(id) = f.editing
         && pick == f.sides[side].as_ref()
@@ -2383,7 +2619,7 @@ pub(crate) fn resolve_alignment_order(s: &Session, d: &mut Dialog, interaction: 
         f.alignment_order_ready = false;
         return;
     };
-    let base = 2;
+    let base = f.alignment_base();
     if order != f.alignment_order && d.inputs.len() > base + 1 {
         let old_first = std::mem::take(&mut d.inputs[base].items);
         d.inputs[base].items = std::mem::replace(&mut d.inputs[base + 1].items, old_first);
@@ -2408,7 +2644,7 @@ pub(crate) fn alignment_input_available(d: &Dialog, index: usize) -> bool {
     if !f.alignment_order_ready {
         return false;
     }
-    let base = 2;
+    let base = f.alignment_base();
     index == base || f.alignment[f.alignment_order[0]].is_some() || !sel_items(&d.inputs, base).is_empty()
 }
 
@@ -2421,7 +2657,7 @@ pub(crate) fn alignment_hover_commands(app: &SolveApp, d: &Dialog) -> Option<Vec
     // Highlight and snap markers are always available, but the first reference must be
     // clicked before a counterpart can transiently change the assembled pose.
     let other = 1 - side;
-    let row = f.alignment_order.iter().position(|s| *s == other)? + 2;
+    let row = f.alignment_order.iter().position(|s| *s == other)? + f.alignment_base();
     if f.alignment[other].is_none() && sel_items(&d.inputs, row).is_empty() {
         return None;
     }
@@ -2618,9 +2854,10 @@ fn alignment_params(s: &Session, f: &JointForm, inputs: &[SelInput]) -> Result<[
     if f.as_built {
         return Ok(out);
     }
+    let base = f.alignment_base();
     for (side, slot) in out.iter_mut().enumerate() {
         let row = f.alignment_order.iter().position(|s| *s == side).ok_or("invalid alignment order")?;
-        let picked = sel_items(inputs, row + 2).first();
+        let picked = sel_items(inputs, row + base).first();
         *slot = match picked {
             Some(sel) => Some(alignment_pick(s, sel, matches!(sel, Sel::Edge { .. }))?),
             None => f.alignment[side].clone(),
@@ -2647,8 +2884,22 @@ pub(crate) fn body_of(sel: &Sel) -> Option<&str> {
 /// component: a STEP file with several parts often brings them as bodies of one component.
 fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String, Vec<String>)> {
     let Asm::Joint(f) = k else { return None };
-    let picks: Vec<&Sel> =
-        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
+    let picks: Vec<&Sel> = if f.as_built {
+        sel_items(inputs, 0).iter().collect()
+    } else {
+        (0..2)
+            .filter_map(|row| {
+                let start = f.side_start(row);
+                if f.between_faces[row] {
+                    // Require both faces before checking cross-component problems on this side.
+                    sel_items(inputs, start + 1).first()?;
+                    sel_items(inputs, start).first()
+                } else {
+                    sel_items(inputs, start).first()
+                }
+            })
+            .collect()
+    };
     if f.editing.is_some() || picks.len() < 2 {
         return None;
     }
@@ -2703,7 +2954,7 @@ pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput])
         // The components as OK counts them: a component picked whole is one.
         occs = occurrences(&app.session, sel_items(inputs, 0), &f.whole_components);
     } else {
-        for pick in (0..2).filter_map(|i| sel_items(inputs, i).first()) {
+        for pick in (0..2).filter_map(|row| sel_items(inputs, f.side_start(row)).first()) {
             let occ = side_occurrence(&app.session, pick)?;
             if !occs.contains(&occ) {
                 occs.push(occ);
@@ -2850,10 +3101,20 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 }
                 // A side picked again moves the joint's attachment there; one left as it was keeps its origin.
                 for (i, key) in ["a", "b"].into_iter().enumerate() {
-                    let picked = sel_items(inputs, i).first();
-                    if picked != f.sides[i].as_ref() {
-                        let what = if i == 0 { "component 1's joint origin" } else { "component 2's joint origin" };
-                        p[key] = snap(i, what)?.param;
+                    let start = f.side_start(i);
+                    if f.between_faces[i] {
+                        let unchanged = f.between_sides[i]
+                            .as_ref()
+                            .is_some_and(|saved| (0..3).all(|k| inputs.get(start + k).and_then(|inp| inp.items.first()) == saved[k].as_ref()));
+                        if !unchanged {
+                            p[key] = between_faces_param(app, inputs, start)?;
+                        }
+                    } else {
+                        let picked = sel_items(inputs, start).first();
+                        if f.between_sides[i].is_some() || picked != f.sides[i].as_ref() {
+                            let what = if i == 0 { "component 1's joint origin" } else { "component 2's joint origin" };
+                            p[key] = snap(start, what)?.param;
+                        }
                     }
                 }
                 let old = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or("joint no longer exists")?;
@@ -2910,7 +3171,16 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 }
                 return Ok(cmd("joint.as_built", p));
             }
-            let (a, b) = (snap(f.primary_order[0], "component 1's joint origin")?, snap(f.primary_order[1], "component 2's joint origin")?);
+            let side_snap = |row: usize, what: &str| -> Result<SnapPt, String> {
+                let start = f.side_start(row);
+                if f.between_faces[row] {
+                    let param = between_faces_param(app, inputs, start)?;
+                    Ok(between_faces_snap_pt(app, &param).unwrap_or(SnapPt { at: Vec3::ZERO, z: Vec3::Z, kind: SnapKind::FaceCenter, param }))
+                } else {
+                    snap(start, what)
+                }
+            };
+            let (a, b) = (side_snap(f.primary_order[0], "component 1's joint origin")?, side_snap(f.primary_order[1], "component 2's joint origin")?);
             let placed = |x: &SnapPt| (x.param.get("occurrence").cloned(), x.param.get("path").cloned());
             if a.param.get("occurrence").is_some() && placed(&a) == placed(&b) {
                 return Err("the two origins are on the same component".into());
@@ -2937,8 +3207,8 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("joint.create", p)
         }
-        Asm::JointOrigin { name, frame, .. } => {
-            let mut p = snap(0, "a snap")?.param;
+        Asm::JointOrigin { name, frame, between_faces, .. } => {
+            let mut p = if *between_faces { between_faces_param(app, inputs, 0)? } else { snap(0, "a snap")?.param };
             if !name.trim().is_empty() {
                 p["name"] = json!(name.trim());
             }
@@ -3185,7 +3455,13 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     let aligning = alignment_side(&d.kind, d.active).is_some();
     let center = matches!(&d.kind, Kind::Assembly(Asm::Constrain(f)) if f.center);
-    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES) || aligning;
+    let between_origin = matches!(&d.kind, Kind::Assembly(Asm::JointOrigin { between_faces: true, .. }));
+    let joint_between = match &d.kind {
+        Kind::Assembly(Asm::Joint(f)) => f.between_faces,
+        _ => [false, false],
+    };
+    let planar_pair = center || between_origin || joint_between.iter().any(|b| *b);
+    let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS || planar_pair && i.accept == PLANAR_FACES) || aligning;
     let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
     let center_frame = under
         .as_ref()
@@ -3229,9 +3505,29 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     if let Asm::Trace(f) = k {
         trace::overlay(painter, proj, f);
     }
-    // A joint and an ordinary constraint name their two picks. In Center, the first two
-    // picks share a part; mark both walls alike, leaving the part's picks in the other colour.
-    let two = !center && matches!(k, Asm::Joint(_) | Asm::Constrain(_));
+    // A joint and an ordinary constraint name their two picks. In Center or Between Two Faces,
+    // a side's wall picks share a colour, and the resolved midplane origin is shown once both
+    // faces are picked.
+    let two = !planar_pair && matches!(k, Asm::Joint(_) | Asm::Constrain(_));
+    let side_0_end = match k {
+        Asm::Joint(f) => f.side_len(0),
+        _ if center => 2,
+        _ => 1,
+    };
+    let midplane_glyphs: Vec<(SnapPt, Color32)> = match k {
+        Asm::JointOrigin { between_faces: true, .. } => {
+            between_faces_param(app, &d.inputs, 0).ok().and_then(|p| between_faces_snap_pt(app, &p)).map(|s| vec![(s, t.accent)]).unwrap_or_default()
+        }
+        Asm::Joint(f) => (0..2)
+            .filter(|row| f.between_faces[*row])
+            .filter_map(|row| {
+                let p = between_faces_param(app, &d.inputs, f.side_start(row)).ok()?;
+                let s = between_faces_snap_pt(app, &p)?;
+                Some((s, if row == 0 { t.accent } else { t.warning }))
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
     let hover = match k {
         Asm::Joint(f) => Some(&mut f.hover),
         Asm::JointOrigin { hover, .. } => Some(hover),
@@ -3245,15 +3541,18 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         .inputs
         .iter()
         .enumerate()
-        .filter(|(_, i)| i.accept == SNAPS || center && i.accept == crate::selection::PLANAR_FACES)
+        .filter(|(_, i)| i.accept == SNAPS || planar_pair && i.accept == PLANAR_FACES)
         .filter_map(|(n, i)| {
-            let color = if n < if center { 2 } else { 1 } { t.accent } else { t.warning };
+            let color = if between_origin || n < side_0_end { t.accent } else { t.warning };
             i.items.first().and_then(|x| snap_in(app, i, x).map(|snap| (placed_snap(app, x, snap), color)))
         })
         .collect();
     for (n, (s, c)) in picked.iter().enumerate() {
         let tag = format!("Component {}", n + 1);
         glyph(painter, proj, s, *c, app.cam.half_height(), two.then_some(tag.as_str()));
+    }
+    for (s, c) in &midplane_glyphs {
+        glyph(painter, proj, s, *c, app.cam.half_height(), None);
     }
     // The snap under the cursor (found again only when the hovered item changes).
 
@@ -3400,33 +3699,35 @@ pub fn open_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
 }
 
 /// A joint's menu (timeline and browser): Edit, Drive, Suppress, Delete.
-pub(crate) fn joint_menu(
+pub(crate) fn joint_menu_items(app: &SolveApp, (id, kind, suppressed): (u64, JointKind, bool)) -> Vec<crate::ui_kit::Item> {
+    use crate::ui_kit::Item;
+    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
+    let edit = if tagged { solidcraft_ui_text::tr("cmd.assembly_constraint_edit") } else { solidcraft_ui_text::tr_label("Edit Joint") };
+    let mut items = vec![Item::action("joint_menu.edit", edit, "edit")];
+    if kind != JointKind::Rigid {
+        items.push(Item::action("joint_menu.drive", solidcraft_ui_text::tr_label("Drive Joint"), "joint"));
+    }
+    items.extend([
+        Item::action("joint_menu.suppress", solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), "suppress"),
+        Item::sep(),
+        Item::action("joint_menu.delete", solidcraft_ui_text::tr_label("Delete"), "delete"),
+    ]);
+    items
+}
+
+pub(crate) fn run_joint_menu_item(
     app: &SolveApp,
-    ui: &mut egui::Ui,
-    (id, kind, suppressed): (u64, JointKind, bool),
+    picked: &crate::ui_kit::Item,
+    (id, suppressed): (u64, bool),
     open: &mut Option<Dialog>,
     run: &mut Option<(&'static str, Value)>,
 ) {
-    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
-    let edit = if tagged { solidcraft_ui_text::tr("cmd.assembly_constraint_edit") } else { solidcraft_ui_text::tr_label("Edit Joint") };
-    if crate::ui_kit::button(ui, edit, crate::ui_kit::Button::Normal).clicked() {
-        *open = open_joint(app, id);
-        ui.close();
-    }
-    if kind != JointKind::Rigid && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Drive Joint"), crate::ui_kit::Button::Normal).clicked() {
-        *open = drive_joint(app, id);
-        ui.close();
-    }
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), crate::ui_kit::Button::Normal)
-        .clicked()
-    {
-        *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed})));
-        ui.close();
-    }
-    ui.separator();
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete"), crate::ui_kit::Button::Normal).clicked() {
-        *run = Some(("selection.delete", json!({ "joints": [id] })));
-        ui.close();
+    match picked.id.as_str() {
+        "joint_menu.edit" => *open = open_joint(app, id),
+        "joint_menu.drive" => *open = drive_joint(app, id),
+        "joint_menu.suppress" => *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed}))),
+        "joint_menu.delete" => *run = Some(("selection.delete", json!({"joints": [id]}))),
+        _ => {}
     }
 }
 
@@ -3614,7 +3915,12 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
         if resp.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
             pick_joint(app, id, false);
         }
-        crate::ui_kit::Menu::context(&resp, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
+        if crate::ui_kit::Menu::context_active(&resp) {
+            let items = joint_menu_items(app, (id, kind, suppressed));
+            if let Some(picked) = crate::ui_kit::Menu::context_items(&resp, &items) {
+                run_joint_menu_item(app, &picked, (id, suppressed), &mut open, &mut run);
+            }
+        }
         x += 32.0;
     }
     if let Some((c, prm)) = run {
@@ -3705,7 +4011,12 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
         if response.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
             pick_joint(app, id, false);
         }
-        crate::ui_kit::Menu::context(&response, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
+        if crate::ui_kit::Menu::context_active(&response) {
+            let items = joint_menu_items(app, (id, kind, suppressed));
+            if let Some(picked) = crate::ui_kit::Menu::context_items(&response, &items) {
+                run_joint_menu_item(app, &picked, (id, suppressed), &mut open, &mut run);
+            }
+        }
     }
     if let Some((command, params)) = run {
         if command == "selection.delete" {

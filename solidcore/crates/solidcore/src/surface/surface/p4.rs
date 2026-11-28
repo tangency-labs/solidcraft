@@ -104,6 +104,7 @@ use crate::geom::tol::contact_tol_3d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{asin, sqrt as sm_sqrt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
     UNDEF_DOUBLE,
@@ -112,6 +113,7 @@ use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
+use crate::surface::surface_point_solve::p3::EmptyAnswer;
 
 use super::p1::get_surface_cache;
 use super::p1::{
@@ -1533,6 +1535,45 @@ impl Surface {
         Ok(solutions)
     }
 
+    /// [`Surface::global_point_solve_point_test_off`] with why an empty answer is empty
+    /// (#23057): [`EmptyAnswer::NoPointWithinTarget`] only when the global solve proved
+    /// that no point of the surface lies within `opt_target_distance`
+    /// ([`Surface::global_point_solve_1_answer`]); an empty answer is otherwise
+    /// [`EmptyAnswer::Unproved`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_point_solve`].
+    pub(crate) fn global_point_solve_point_test_off_answer<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        uv_domain: &Extent2d,
+        op: SolverOperation,
+        test_point: Point3,
+        src_zone_tol_3d: f64,
+        opt_target_distance: Option<f64>,
+        requested: SolutionRequested,
+    ) -> Result<(SolutionArray<O>, EmptyAnswer)> {
+        let mut solutions = SolutionArray::new();
+        let answer = self.global_point_solve_in(
+            k,
+            surface,
+            None,
+            None,
+            uv_domain,
+            op,
+            test_point,
+            src_zone_tol_3d,
+            opt_target_distance,
+            requested,
+            &mut solutions,
+            None,
+            true,
+        )?;
+        Ok((solutions, answer))
+    }
+
     /// [`Surface::global_point_solve_point_test_off`] with upstream's out-parameter, as
     /// [`Surface::global_point_solve_into`]: `solutions` keeps what was found when the
     /// call fails (for callers that ignore the status).
@@ -1567,6 +1608,7 @@ impl Surface {
             None,
             true,
         )
+        .map(|_| ())
     }
 
     /// [`Surface::global_point_solve`] with upstream's out-parameter: `solutions` keeps
@@ -1603,6 +1645,7 @@ impl Surface {
             None,
             false,
         )
+        .map(|_| ())
     }
 
     /// [`Surface::global_point_solve_into`] with lazy owning-face topology for
@@ -1641,6 +1684,7 @@ impl Surface {
             None,
             false,
         )
+        .map(|_| ())
     }
 
     /// [`Surface::global_point_solve_into_with_context`] with the surface cache's point
@@ -1680,6 +1724,7 @@ impl Surface {
             None,
             true,
         )
+        .map(|_| ())
     }
 
     /// [`Surface::global_point_solve`] of a face's surface by a caller that holds the
@@ -1740,7 +1785,7 @@ impl Surface {
         solutions: &mut SolutionArray<O>,
         face_test: Option<FaceTest<'_>>,
         point_test_off: bool,
-    ) -> Result<()> {
+    ) -> Result<EmptyAnswer> {
         // init output
         *solutions = SolutionArray::new();
 
@@ -1874,7 +1919,7 @@ impl Surface {
                 }
 
                 if !solutions.is_empty() {
-                    return Ok(()); // all done
+                    return Ok(EmptyAnswer::Unproved); // all done
                 }
             }
         }
@@ -1884,11 +1929,12 @@ impl Surface {
         // MAXIMIZE, but always for DIRECTED.
         let use_new =
             (op != SolverOperation::Maximize) || op == SolverOperation::Signed3dDirectedMaximize;
+        let mut answer = EmptyAnswer::Unproved;
         *solutions = if use_new {
             // upstream's seam solutions name this surface, whose natural UV domain
             // IsEqual (AddSortedSolution) reads: solve naming a stand-in for it, and
             // return the solutions without objects, as before
-            self.global_point_solve_1(
+            let (found, why) = self.global_point_solve_1_answer(
                 k,
                 uv_domain,
                 op,
@@ -1897,8 +1943,9 @@ impl Surface {
                 opt_target_distance,
                 requested,
                 Some(OperandObject::Surface(0, self.stand_in_key_domain(k)?)),
-            )?
-            .without_objects()
+            )?;
+            answer = why;
+            found.without_objects()
         } else if let Some(surface) = surface {
             self.global_point_solve_0_in(
                 k,
@@ -1947,7 +1994,7 @@ impl Surface {
             }
             out
         };
-        Ok(())
+        Ok(answer)
     }
 }
 
@@ -2140,7 +2187,7 @@ pub fn classify_curve_surface_xsect_point_with(
     // get the cosine of the angle between the surfaceSectionNormal plane and the plane
     // of the curve's osculating circle (needed for Meusnier's Theorem)
     let ang_rad = curve_binormal.angle_between(surface_normal)?;
-    let cos_phi = (ang_rad - PI / 2.0).cos().abs();
+    let cos_phi = det::cos(ang_rad - PI / 2.0).abs();
 
     // characterize the curve shape as a circle or a line
     let mut curve_line: bool;
@@ -2942,7 +2989,8 @@ mod tests {
                 None,
             )
             .unwrap()
-            .expect("the tree solve answers");
+            .expect("the tree solve answers")
+            .0;
         check(on_face.as_slice(), "the tree solve on a face's surface");
         assert_eq!(owned.owner(), Some(owner));
         assert!(!owned.has_trim_cache());

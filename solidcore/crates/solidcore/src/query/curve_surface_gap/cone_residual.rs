@@ -77,6 +77,7 @@ use crate::blend::fillet_section::station::{ders_basis, knot, span, Nurbs};
 use crate::curve::ellipse::Ellipse;
 use crate::geom::tol::{context_zone_tol_3d, SmallTopoType};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_DEG};
 use crate::surface::cone::Cone;
 use crate::Result;
@@ -408,9 +409,9 @@ impl Setup<'_> {
         }
         // (libm atan within 2 ulps; atan2 likewise)
         let widen = |x: f64| 4.5e-16 * x.abs() + 1.0e-300;
-        let (plo, phi) = (q.lo.atan(), q.hi.atan());
+        let (plo, phi) = (det::atan(q.lo), det::atan(q.hi));
         let phi_ivl = Ivl::new(plo - widen(plo), phi + widen(phi));
-        let base = ry.atan2(rx);
+        let base = det::atan2(ry, rx);
         let theta = (Ivl::new(base - 9.0e-16, base + 9.0e-16) + phi_ivl) * Ivl::from(180.0) / pi();
         let norm_ref = (Ivl::from(rx) * Ivl::from(rx) + Ivl::from(ry) * Ivl::from(ry)).sqrt();
         let a_lo = (dt / norm_ref).lo;

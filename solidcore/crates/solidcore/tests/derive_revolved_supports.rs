@@ -825,19 +825,21 @@ fn short_tube_torus(origin: Vec3, major: f64, minor: f64, mid: f64, arc: f64) ->
 }
 
 /// A reader that works a torus back out of a face's form keeps the torus it finds where the form
-/// lies on it, and takes the label's own numbers only where it does not
+/// proves it, and takes the label's own numbers only where it does not
 /// (`Torus::from_label_unless_found_stands`). A tool's section with a short arc in it, turned
 /// about a line, sweeps a torus of which the tube shows only that arc (the end of a tooth space
 /// cut with a round cutter). Such a form does not fix the tube's circle (a 0.1 degree arc of a
 /// circle of radius 13.7 is 0.024 long and 5e-6 high), so the torus worked back out of it is
 /// off it, or none is found. Over tubes that show from 60 down to 0.02 degrees:
 ///
-/// - where the form lies on the torus found, the label is not asked;
+/// - where the form proves the torus found, the label is not asked;
 /// - a torus the label gives carries the label's numbers exactly and evaluates as the form;
 /// - where the label gives none, the kernel's proof of the label on the form refuses it too.
 ///
-/// A tube that shows 60 degrees is found as it is, in every place. A label a thousandth off its
-/// form gives no torus.
+/// A tube that shows 60 degrees has its form on the torus found, in every place. The form proves
+/// that torus in most places; a tube of radius 1 at 26 from the axis, away from the origin, is found
+/// 1e-12 to 4e-12 off its parametrisation, and there the label's numbers are taken. A label a
+/// thousandth off its form gives no torus.
 #[test]
 fn a_reader_takes_a_torus_labels_own_numbers_only_where_the_form_is_off_the_torus_it_finds() {
     use solidcore::geom::axis2_placement::Axis2Placement;
@@ -871,8 +873,14 @@ fn a_reader_takes_a_torus_labels_own_numbers_only_where_the_form_is_off_the_toru
                         .ok()
                         .flatten()
                         .map(Surface::from);
-                    let stands = match found.as_ref().and_then(AnalyticSupport::of) {
+                    // the form lies on the torus found (the point set alone)
+                    let lies = match found.as_ref().and_then(AnalyticSupport::of) {
                         Some(of_found) => lies_on(&form, &of_found.implicit()).unwrap(),
+                        None => false,
+                    };
+                    // the form proves the torus found: it lies on it and evaluates as it
+                    let stands = match found.as_ref() {
+                        Some(found) => AnalyticSupport::proved_on(&k, found, &form).unwrap(),
                         None => false,
                     };
                     let own = Torus::from_label_unless_found_stands(
@@ -885,12 +893,20 @@ fn a_reader_takes_a_torus_labels_own_numbers_only_where_the_form_is_off_the_toru
                     )
                     .unwrap_or_else(|e| panic!("{at}: {e}"));
                     if arc >= 60.0 {
-                        assert!(stands, "{at}: the form lies on the torus found in it");
+                        assert!(lies, "{at}: the form lies on the torus found in it");
+                        // a tube of radius 1 at 26 from the axis, away from the origin, is found
+                        // 1e-12 to 4e-12 off its parametrisation (margin 1.7 to 2.8): not proved
+                        let unproved = major == 26.0 && minor == 1.0 && origin.length() != 0.0;
+                        assert_eq!(stands, !unproved, "{at}: the form proves the torus found");
                     }
                     match own {
                         _ if stands => assert!(own.is_none(), "{at}: the torus found is kept"),
                         Some(torus) => {
                             assert_eq!(AnalyticSupport::of(&torus), Some(label), "{at}");
+                            assert!(
+                                AnalyticSupport::proved_on(&k, &torus, &form).unwrap(),
+                                "{at}: the label's torus is not proved on the form"
+                            );
                             let size = origin.length() + major + minor;
                             let d = form.natural_uv_domain();
                             for (a, b) in [(0.0, 0.4567), (0.4567, 0.7654), (0.9, 0.1)] {

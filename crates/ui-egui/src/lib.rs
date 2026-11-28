@@ -242,7 +242,7 @@ pub(crate) mod frame_watch;
 #[cfg(test)]
 mod history_off_thread_tests;
 mod move_preview;
-pub use file_picker::FilePickerFuture;
+pub use file_picker::{FilePickerFuture, FilesPickerFuture};
 #[cfg(test)]
 mod blend_arrow_tests;
 #[cfg(test)]
@@ -638,11 +638,22 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
-    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
-    /// Browse button and the text field still accepts a pasted path, the document library cannot
-    /// choose a folder, and Settings › Design hides the folder settings.
+    /// Open a dialog for several files at once (the agent chat's files): the types it names listed
+    /// under its label, or any type when it names none (a coding agent reads them itself). `None`:
+    /// one file, with `pick_file`.
+    pub pick_files: Option<Box<dyn Fn(&str, &[&str]) -> FilesPickerFuture>>,
+    /// Open one dialog for files and folders together, several at once, where the system's dialog
+    /// can (macOS). `None` elsewhere: the chat offers files and folders apart.
+    pub pick_files_or_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used):
+    /// a plugin field's Browse button, the document library's folder, or one the agent chat
+    /// attaches. `None` on the web build and when the host has no folder picker: a plugin field
+    /// shows no Browse button and the text field still accepts a pasted path, the document library
+    /// cannot choose a folder, and Settings › Design hides the folder settings.
     pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
+    /// Open a dialog for several folders at once (the agent chat's files). `None`: one, with
+    /// `pick_folder`.
+    pub pick_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -2476,7 +2487,8 @@ impl SolveApp {
                     self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
-                    self.cam = Camera::default();
+                    // A design opens at its own Home: its orientation, when it has one.
+                    self.cam = Camera { frame: self.session.doc.view_frame, ..Camera::default() };
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
@@ -3339,6 +3351,23 @@ impl SolveApp {
             }
         }
         self.prepared_edit_starts.remove(&self.session.uid);
+        // Finishing the sketch puts the timeline back and drops the selection, because a face
+        // picked on a later feature would no longer exist. A profile of this sketch still does,
+        // and Extrude and Revolve are started to use it (#22673).
+        let kept_profiles = if matches!(id, "solid.extrude" | "solid.revolve") {
+            previous_sketch
+                .map(|sketch| {
+                    self.session
+                        .selection
+                        .iter()
+                        .filter(|sel| matches!(sel, solidcraft_engine::Sel::Profile { sketch: owner, .. } if *owner == sketch))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let finished = match crate::sketch_view::prepare_edit(self, id, &Value::Null) {
             Ok(event) => event,
             Err(error) => {
@@ -3346,6 +3375,11 @@ impl SolveApp {
                 return;
             }
         };
+        for sel in kept_profiles {
+            if !self.session.selection.iter().any(|have| crate::selection::same_item(have, &sel)) {
+                self.session.selection.push(sel);
+            }
+        }
         let finished_sketch = finished.filter(|event| matches!(event.domain, solidcraft_engine::SketchDomain::Model)).map(|event| event.sketch);
         if starts_edit {
             self.prepared_edit_starts.insert(self.session.uid, id.into());
@@ -4360,6 +4394,17 @@ impl SolveApp {
         }
     }
 
+    /// The design's own FRONT and TOP changed (#6455): the camera takes them and keeps the picture
+    /// it shows, roll included. A Set as turns it to the face itself (`view.frame` sets the camera).
+    pub fn follow_view_frame(&mut self) {
+        let (right, _, back) = self.cam.basis();
+        self.cam_anim = None;
+        self.cam.frame = self.session.doc.view_frame;
+        if let Some(turned) = self.cam.with_frame(right, back) {
+            self.cam = turned;
+        }
+    }
+
     /// Frame the model at once (programmatic use; the toolbar animates).
     /// Make `up` the world's up axis: the camera turns to the same standard view in that world
     /// (home) and frames the model.
@@ -4844,6 +4889,9 @@ impl SolveApp {
         self.now = ctx.input(|i| i.time);
         if self.cam.up != self.ui.up_axis {
             self.set_up_axis(self.ui.up_axis);
+        }
+        if self.cam.frame != self.session.doc.view_frame {
+            self.follow_view_frame();
         }
         self.step_view_animation(ctx);
         self.poll_control_jobs(ctx);

@@ -315,7 +315,7 @@ fn buttons_active(app: &SolveApp, ctx: &egui::Context, focused: bool) -> bool {
         // The keyboard shortcuts wait for a report draft too (`SolveApp::logic`).
         && app.issue_report.draft.is_none()
         && !crate::keymap::capturing(app)
-        && !egui::Popup::is_any_open(ctx)
+        && !(egui::Popup::is_any_open(ctx) || crate::ui_kit::Menu::any_open(ctx))
         && !ctx.egui_wants_keyboard_input()
         && !crate::dim_view::editing()
         && !crate::dialogs_save_mesh::popup_open(ctx)
