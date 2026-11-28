@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::io::BufReader;
 
 use gerber_parser::gerber_types::{
-    ApertureBlock, AxisSelect, Command, CoordinateMode, CoordinateNumber, DCode, ExtendedCode, FunctionCode, GCode, ImageMirroring, ImagePolarity,
-    ImageRotation, InterpolationMode, MCode, Operation, Polarity, QuadrantMode, StepAndRepeat, Unit,
+    ApertureBlock, AxisSelect, Command, CommentContent, CoordinateMode, CoordinateNumber, DCode, ExtendedCode, FunctionCode, GCode, ImageMirroring,
+    ImagePolarity, ImageRotation, InterpolationMode, MCode, Operation, Polarity, QuadrantMode, StepAndRepeat, Unit,
 };
 use gerber_parser::{ContentError, GerberParserErrorWithContext};
 use solidcore_record::Vec2;
@@ -72,6 +72,13 @@ const MAX_QUOTE: usize = 40;
 const MM_PER_INCH: f64 = 25.4;
 /// An arc whose sweep is at most this is within one quadrant (single-quadrant mode).
 const QUADRANT: f64 = std::f64::consts::FRAC_PI_2 + 1e-6;
+/// What the pre-pass hands the parser for G90 and G91, which the parser does not read: comments
+/// (the file's own comments never reach the parser, so these cannot come from the file).
+const SAY_ABSOLUTE: &str = "SolidCraft G90";
+const SAY_INCREMENTAL: &str = "SolidCraft G91";
+/// The next operation's X is the current point's (the pre-pass writes an X the parser needs;
+/// only the reader knows the absolute position).
+const SAY_SAME_X: &str = "SolidCraft same X";
 
 /// Read a Gerber board outline layer.
 pub fn read_gerber_outline(text: &str) -> Result<GerberOutline> {
@@ -245,8 +252,6 @@ struct Reader {
     seen_format: bool,
     /// The format statement asks for incremental coordinates.
     prep_incremental: bool,
-    /// The last X written (sign and digits), for arcs that give only their offsets.
-    last_x: String,
     file_function: Option<String>,
     /// The file has an end command (M00/M01/M02).
     has_end: bool,
@@ -280,6 +285,27 @@ struct Reader {
     /// The region contour being drawn.
     contour: Vec<Seg>,
     items: Vec<Item>,
+    /// The open step and repeat block (`%SR%`), when it repeats.
+    repeat: Option<Repeat>,
+    /// Every object of the image layer so far, a region by its segments, in step and repeat
+    /// blocks or not: one count against one limit, checked before anything is added.
+    placed: u64,
+    /// The pre-pass said the next operation keeps the current X (an arc given by its offsets
+    /// alone, in absolute coordinates).
+    same_x: bool,
+    /// The operation being read keeps the current X.
+    keep_x: bool,
+}
+
+/// An open step and repeat block: how often and how far apart (file units) it repeats, and
+/// where its objects start.
+struct Repeat {
+    nx: u32,
+    ny: u32,
+    dx: f64,
+    dy: f64,
+    geom_start: usize,
+    items_start: usize,
 }
 
 impl Reader {
@@ -354,16 +380,22 @@ impl Reader {
             match g {
                 // A comment after another G code: the rest of the block is text.
                 4 => return Ok(lines),
-                // Deprecated "prepare flash" before a D03 (the D03 says it already), and
-                // absolute coordinates, the parser's default.
-                55 | 90 => {}
+                // Deprecated "prepare flash" before a D03 (the D03 says it already).
+                55 => {}
+                // Deprecated absolute and incremental coordinates: the reader is told by a comment.
+                90 => {
+                    self.prep_incremental = false;
+                    lines.push(format!("G04 {SAY_ABSOLUTE}*"));
+                }
+                91 => {
+                    self.warn("The file uses incremental coordinates (G91), a deprecated command; read anyway.".into());
+                    self.prep_incremental = true;
+                    lines.push(format!("G04 {SAY_INCREMENTAL}*"));
+                }
                 1 | 2 | 3 | 36 | 37 | 54 | 74 | 75 => lines.push(format!("G{g:02}*")),
                 // Deprecated units; the parser reads only the extended form.
                 70 => lines.extend(self.say_unit("MOIN")),
                 71 => lines.extend(self.say_unit("MOMM")),
-                91 => {
-                    return Err(IoError::Invalid("the Gerber file switches to incremental coordinates with G91, which is not supported".into()));
-                }
                 _ => self.warn(format!("Skipped an unknown G code G{g:02}.")),
             }
         }
@@ -378,10 +410,14 @@ impl Reader {
         }
         let mut op = String::new();
         // The parser reads an operation only when it starts with X or Y: an arc given by its
-        // offsets alone gets the current X back.
+        // offsets alone gets an X that moves nowhere. Incremental, that is 0; absolute, the
+        // reader is told to keep its current X (the last X written here can be a raw
+        // incremental value after G91 → G90).
         if words.x.is_none() && words.y.is_none() && (words.i.is_some() || words.j.is_some()) {
-            op.push('X');
-            op.push_str(if self.prep_incremental || self.last_x.is_empty() { "0" } else { &self.last_x });
+            if !self.prep_incremental {
+                lines.push(format!("G04 {SAY_SAME_X}*"));
+            }
+            op.push_str("X0");
         }
         for (letter, (negative, digits)) in words.coordinates() {
             op.push(letter);
@@ -389,9 +425,6 @@ impl Reader {
                 op.push('-');
             }
             op.push_str(digits);
-        }
-        if let Some((negative, digits)) = words.x {
-            self.last_x = format!("{}{digits}", if negative { "-" } else { "" });
         }
         match words.d {
             Some(d @ 1..=3) => op.push_str(&format!("D0{d}")),
@@ -584,6 +617,7 @@ impl Reader {
             self.close_contour();
             self.warn("The file ends inside a region (G36 without G37).".into());
         }
+        self.end_repeat_at_end()?;
         if !self.has_end {
             self.warn("The file has no end command (M02); it may be cut short.".into());
         }
@@ -598,10 +632,19 @@ impl Reader {
 
     /// Add an object of an image.
     fn item(&mut self, shape: Shape) -> Result<()> {
-        if self.items.len() >= MAX_ENTITIES {
+        self.count(1)?;
+        self.items.push(Item { clear: self.clear, shape });
+        Ok(())
+    }
+
+    /// Counts `more` objects (segments of a region) of the image layer before they are added; an
+    /// error past the limit.
+    fn count(&mut self, more: u64) -> Result<()> {
+        let placed = self.placed.saturating_add(more);
+        if placed > MAX_ENTITIES as u64 {
             return Err(IoError::Invalid(format!("the Gerber layer has more than {MAX_ENTITIES} objects")));
         }
-        self.items.push(Item { clear: self.clear, shape });
+        self.placed = placed;
         Ok(())
     }
 
@@ -610,6 +653,7 @@ impl Reader {
             self.close_contour();
             self.warn("The file ends inside a region (G36 without G37).".into());
         }
+        self.end_repeat_at_end()?;
         if !self.has_end {
             self.warn("The file has no end command (M02); it may be cut short.".into());
         }
@@ -638,12 +682,20 @@ impl Reader {
     }
 
     fn command(&mut self, c: &Command) -> Result<()> {
+        // The pre-pass's "same X" holds for the command right after it, an operation.
+        let same_x = std::mem::take(&mut self.same_x);
         match c {
             Command::FunctionCode(FunctionCode::GCode(g)) => self.g_code(g),
-            Command::FunctionCode(FunctionCode::DCode(DCode::Operation(op))) => return self.operate(op),
+            Command::FunctionCode(FunctionCode::DCode(DCode::Operation(op))) => {
+                self.keep_x = same_x;
+                let done = self.operate(op);
+                self.keep_x = false;
+                return done;
+            }
             // Selects an aperture; its shape does not change a centre line, only an image.
             Command::FunctionCode(FunctionCode::DCode(DCode::SelectAperture(code))) => self.aperture = Some(*code),
             Command::FunctionCode(FunctionCode::MCode(MCode::EndOfFile)) => self.ended = true,
+            Command::ExtendedCode(ExtendedCode::StepAndRepeat(sr)) => return self.step_and_repeat(sr),
             Command::ExtendedCode(e) => self.extended(e),
         }
         Ok(())
@@ -670,6 +722,9 @@ impl Reader {
             GCode::QuadrantMode(QuadrantMode::Multi) => self.quadrant = Quadrant::Multi,
             GCode::Unit(u) => self.unit = Some(unit_mm(*u)),
             GCode::CoordinateMode(m) => self.incremental = *m == CoordinateMode::Incremental,
+            GCode::Comment(CommentContent::String(said)) if said.trim() == SAY_ABSOLUTE => self.incremental = false,
+            GCode::Comment(CommentContent::String(said)) if said.trim() == SAY_INCREMENTAL => self.incremental = true,
+            GCode::Comment(CommentContent::String(said)) if said.trim() == SAY_SAME_X => self.same_x = true,
             GCode::Comment(_) | GCode::SelectAperture => {}
         }
     }
@@ -682,9 +737,6 @@ impl Reader {
                 self.block_depth = self.block_depth.saturating_add(1);
             }
             ExtendedCode::ApertureBlock(ApertureBlock::Close) => self.block_depth = self.block_depth.saturating_sub(1),
-            ExtendedCode::StepAndRepeat(StepAndRepeat::Open { repeat_x, repeat_y, .. }) if *repeat_x > 1 || *repeat_y > 1 => {
-                self.warn("Step and repeat (%SR%) is not supported; the repeated part was read once.".into());
-            }
             ExtendedCode::MirrorImage(m) if *m != ImageMirroring::None => self.image_setting("MI"),
             ExtendedCode::RotateImage(r) if *r != ImageRotation::None => self.image_setting("IR"),
             ExtendedCode::OffsetImage(o) if o.a != 0.0 || o.b != 0.0 => self.image_setting("OF"),
@@ -701,6 +753,96 @@ impl Reader {
             // none of them moves a centre line.
             _ => {}
         }
+    }
+
+    /// `%SR%`: a block opens (closing the one before) or closes; a closed block is placed again
+    /// at each of its positions.
+    fn step_and_repeat(&mut self, sr: &StepAndRepeat) -> Result<()> {
+        self.end_repeat()?;
+        if let StepAndRepeat::Open { repeat_x, repeat_y, distance_x, distance_y } = *sr {
+            if repeat_x == 0 || repeat_y == 0 {
+                self.warn("A step and repeat (%SR%) asks for no copies; its block was read once.".into());
+            } else if repeat_x > 1 || repeat_y > 1 {
+                self.repeat = Some(Repeat {
+                    nx: repeat_x,
+                    ny: repeat_y,
+                    dx: distance_x,
+                    dy: distance_y,
+                    geom_start: self.geom.len(),
+                    items_start: self.items.len(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn end_repeat_at_end(&mut self) -> Result<()> {
+        if self.repeat.is_some() {
+            self.warn("The file ends inside a step and repeat block (%SR% without its closing %SR%).".into());
+        }
+        self.end_repeat()
+    }
+
+    /// Places the open block's objects at every further position of its grid.
+    fn end_repeat(&mut self) -> Result<()> {
+        let Some(r) = self.repeat.take() else { return Ok(()) };
+        if self.in_region {
+            self.close_contour();
+        }
+        let unit = self.unit();
+        let (dx, dy) = (r.dx * unit, r.dy * unit);
+        check_range(dx * f64::from(r.nx - 1))?;
+        check_range(dy * f64::from(r.ny - 1))?;
+        let block = if self.image { self.items.len().saturating_sub(r.items_start) } else { self.geom.len().saturating_sub(r.geom_start) };
+        if block == 0 {
+            return Ok(());
+        }
+        // A region counts its segments: each copy repeats them.
+        let weight: usize = if self.image {
+            self.items
+                .get(r.items_start..)
+                .unwrap_or_default()
+                .iter()
+                .map(|it| if let Shape::Region(segs) = &it.shape { segs.len().max(1) } else { 1 })
+                .sum()
+        } else {
+            block
+        };
+        // The copies join everything the layer already holds (an outline its lines and arcs, an
+        // image its objects, a region by its segments) against one limit, checked before any
+        // copy is made.
+        let copies = u64::from(r.nx) * u64::from(r.ny) - 1;
+        let held = if self.image { self.placed } else { self.geom.len() as u64 };
+        let placed = held.saturating_add(copies.saturating_mul(weight as u64));
+        if placed > MAX_ENTITIES as u64 {
+            return Err(IoError::Invalid(format!("the Gerber file's step and repeat makes more than {MAX_ENTITIES} objects")));
+        }
+        if self.image {
+            self.placed = placed;
+        }
+        for j in 0..r.ny {
+            for i in 0..r.nx {
+                if i == 0 && j == 0 {
+                    continue;
+                }
+                let off = Vec2::new(dx * f64::from(i), dy * f64::from(j));
+                for k in 0..block {
+                    if self.image {
+                        let Some(item) = self.items.get(r.items_start + k).cloned() else { break };
+                        let shape = moved_shape(&item.shape, off)?;
+                        if self.items.len() >= MAX_ENTITIES {
+                            return Err(IoError::Invalid(format!("the Gerber layer has more than {MAX_ENTITIES} objects")));
+                        }
+                        self.items.push(Item { clear: item.clear, shape });
+                    } else {
+                        let Some(g) = self.geom.get(r.geom_start + k).cloned() else { break };
+                        let g = moved_geom(&g, off)?;
+                        self.push(g)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn image_setting(&mut self, code: &str) {
@@ -730,7 +872,7 @@ impl Reader {
     /// incremental mode, relative to the current point.
     fn target(&mut self, x: Option<CoordinateNumber>, y: Option<CoordinateNumber>) -> Result<Vec2> {
         let mut t = self.current;
-        if let Some(x) = x {
+        if let Some(x) = x.filter(|_| !self.keep_x) {
             let v = self.mm(x)?;
             t.x = if self.incremental { v + self.current.x } else { v };
         }
@@ -835,9 +977,7 @@ impl Reader {
             });
         }
         if self.in_region {
-            if self.contour.len().saturating_add(self.items.len()) >= MAX_ENTITIES {
-                return Err(IoError::Invalid(format!("the Gerber layer has more than {MAX_ENTITIES} objects")));
-            }
+            self.count(1)?;
             self.contour.push(seg);
             return Ok(());
         }
@@ -881,6 +1021,39 @@ impl Reader {
         }
         Some(Seg::Arc { from: start, to: end, c: centre, ccw })
     }
+}
+
+/// A point moved by `off`, refused when that takes it out of range.
+fn moved(p: Vec2, off: Vec2) -> Result<Vec2> {
+    let q = p + off;
+    check_range(q.x)?;
+    check_range(q.y)?;
+    Ok(q)
+}
+
+fn moved_seg(s: Seg, off: Vec2) -> Result<Seg> {
+    Ok(match s {
+        Seg::Line(a, b) => Seg::Line(moved(a, off)?, moved(b, off)?),
+        Seg::Arc { from, to, c, ccw } => Seg::Arc { from: moved(from, off)?, to: moved(to, off)?, c: moved(c, off)?, ccw },
+    })
+}
+
+fn moved_shape(s: &Shape, off: Vec2) -> Result<Shape> {
+    Ok(match s {
+        Shape::Flash(p, code) => Shape::Flash(moved(*p, off)?, *code),
+        Shape::Stroke(seg, code) => Shape::Stroke(moved_seg(*seg, off)?, *code),
+        Shape::Region(segs) => Shape::Region(segs.iter().map(|seg| moved_seg(*seg, off)).collect::<Result<_>>()?),
+    })
+}
+
+/// An outline's line, arc or circle moved by `off` (the outline makes no other kind).
+fn moved_geom(g: &Geom2, off: Vec2) -> Result<Geom2> {
+    Ok(match g {
+        Geom2::Line(a, b) => Geom2::Line(moved(*a, off)?, moved(*b, off)?),
+        Geom2::Arc { c, a, b } => Geom2::Arc { c: moved(*c, off)?, a: moved(*a, off)?, b: moved(*b, off)? },
+        Geom2::Circle(c, r) => Geom2::Circle(moved(*c, off)?, *r),
+        other => other.clone(),
+    })
 }
 
 fn unit_mm(u: Unit) -> f64 {
