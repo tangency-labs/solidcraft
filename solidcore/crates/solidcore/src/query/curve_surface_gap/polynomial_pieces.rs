@@ -976,6 +976,7 @@ const MARGIN_ULPS: f64 = 16.0;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::math::Point3;
     use crate::nurbs::b_spline_curve::KnotType;
     use crate::nurbs::b_spline_surface::{
@@ -1137,7 +1138,7 @@ mod tests {
             .unwrap();
         for t in [0.3, 0.7] {
             let p = uv.evaluate_point(t).unwrap();
-            let off = ((p.x - 0.45).hypot(p.y - 0.45) - 0.4).abs();
+            let off = (det::hypot(p.x - 0.45, p.y - 0.45) - 0.4).abs();
             assert!(g >= off * (1.0 - 1e-9) && off > 1e-6, "{t}: {g:e} {off:e}");
         }
     }
@@ -1275,7 +1276,7 @@ mod tests {
         let same = {
             let p = uv.evaluate_point(0.5).unwrap();
             let c = curve.evaluate_point(0.5).unwrap();
-            (p.x - c.x).hypot(p.y - c.y)
+            det::hypot(p.x - c.x, p.y - c.y)
         };
         assert!(same > 0.1, "{same:e}");
         for accept in [0.0, 1e-5] {
@@ -1319,8 +1320,8 @@ mod tests {
             .unwrap();
         // the trim's point under the spike is off both of the spike's legs by `L h /
         // sqrt(L² + h²)` (`L` the leg's run on the plane, `h` its rise), in closed form
-        let run = (0.5_f64 / 64.0).hypot(0.3 / 64.0);
-        let off = run * 1e-3 / run.hypot(1e-3);
+        let run = det::hypot(0.5_f64 / 64.0, 0.3 / 64.0);
+        let off = run * 1e-3 / det::hypot(run, 1e-3);
         assert!(g >= off * (1.0 - 1e-9), "{g:e} {off:e}");
     }
 

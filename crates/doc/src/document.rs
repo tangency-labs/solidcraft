@@ -39,6 +39,28 @@ impl Param {
     }
 }
 
+/// How points of the target body are projected onto the base surface in `surface.morph`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MorphProjection {
+    /// Closest-point (normal) projection onto the base surface.
+    #[default]
+    Normal,
+    /// Parallel projection along a fixed direction vector.
+    Direction { dir: [f64; 3] },
+}
+
+/// How offsets from the base surface are carried onto the target surface in `surface.morph`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MorphMapMode {
+    /// Preserve signed normal distance along the target surface's unit normal.
+    #[default]
+    NormalToNormal,
+    /// Preserve the 3D offset vector directly (`P + (S_target - S_base)`).
+    Translate,
+}
+
 /// Where a sketch lies.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -477,6 +499,12 @@ pub struct Extent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]
     pub taper: Option<Expr>,
+    /// Two Sides: the second side's taper angle (expression; positive grows the profile away
+    /// from the start, as `taper` does on the first side). Only with `distance2`. Absent: the
+    /// second side takes `taper`, as both halves of a symmetric extrude do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Taper angle 2")]
+    pub taper2: Option<Expr>,
     /// How a taper closes the profile's sharp corners, when the user chose
     /// ([`solidcraft_kernel::draft_corners`] says what each rule gives at each corner). Without
     /// it each profile takes preserve curvature where the kernel can build it exactly and the
@@ -1428,6 +1456,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Length")]
         length: Option<Expr>,
+        /// How far from the end it starts at (`from`) the thread starts, leaving that much of the
+        /// face plain; `length` and `up_to` are measured from there. `None` (or 0): at that end.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
         /// Continuous flank faces for this feature. Missing in older designs: keep
@@ -2222,8 +2255,10 @@ pub enum FeatureKind {
         #[walk(angle = "Entry chamfer angle")]
         entry_chamfer_angle: Option<Expr>,
     },
-    /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
-    /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
+    /// A helical coil: a circular, square or triangular section swept `turns` times about `axis`,
+    /// rising `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or
+    /// outside). A picked circular edge, round face or flat end face (`axis_ref`) can give the
+    /// diameter when `diameter` is absent.
     Coil {
         #[serde(with = "point_expr")]
         #[walk(placement)]
@@ -3100,6 +3135,36 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
+    /// Morph a solid or sheet body (or selected `faces` of it) by mapping a base reference surface
+    /// (`base`, optional `base_face` pick) onto a target reference surface (`control`, optional
+    /// `control_face` pick) (`surface.morph`).
+    SurfaceMorph {
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        base: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_face: Option<Position>,
+        control: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control_face: Option<Position>,
+        #[serde(default)]
+        projection: MorphProjection,
+        #[serde(default)]
+        map_mode: MorphMapMode,
+        #[walk(unitless = "Scale factor")]
+        scale: Expr,
+        #[walk(length = "Tolerance")]
+        tolerance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_u: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_v: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        swap_uv: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_original: bool,
+    },
     /// A surface body trimmed by a plane, a complete bounded sheet (`tool_body`), a face of a
     /// body (`tool`, its surface extended), or sketch curves swept onto it (`curves`). A sheet
     /// keeps the connected region of `keep`; a plane or face keeps its side. With `keep_more`,
@@ -3884,6 +3949,9 @@ pub enum CoilSection {
     #[default]
     Circular,
     Square,
+    /// An equilateral triangle of side `section_size`, its point toward the axis: a thread-like
+    /// groove when cut, or a thread when joined.
+    Triangle,
 }
 
 /// Where a coil's wire ends: in a plane through the axis, or square to the wire.
@@ -4391,6 +4459,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "BoundaryFeature",
             FeatureKind::SurfaceMatch { .. } => "MatchFeature",
             FeatureKind::SurfaceFair { .. } => "FairFeature",
+            FeatureKind::SurfaceMorph { .. } => "MorphFeature",
             FeatureKind::Stitch { .. } => "StitchFeature",
             FeatureKind::Thicken { .. } => "ThickenFeature",
             FeatureKind::SurfaceTrim { .. } => "TrimFeature",
@@ -4498,6 +4567,7 @@ impl FeatureKind {
             FeatureKind::SurfaceNetwork { .. } => "surface_network",
             FeatureKind::SurfaceMatch { .. } => "surface_match",
             FeatureKind::SurfaceFair { .. } => "surface_fair",
+            FeatureKind::SurfaceMorph { .. } => "surface_morph",
             FeatureKind::SurfaceTrim { .. } => "surface_trim",
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
@@ -4592,6 +4662,7 @@ impl FeatureKind {
             "BoundaryFeature" => "surface_boundary",
             "MatchFeature" => "surface_match",
             "FairFeature" => "surface_fair",
+            "MorphFeature" => "surface_morph",
             "StitchFeature" => "stitch",
             "ThickenFeature" => "thicken",
             "TrimFeature" => "surface_trim",
@@ -4696,6 +4767,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "Boundary",
             FeatureKind::SurfaceMatch { .. } => "Match",
             FeatureKind::SurfaceFair { .. } => "Fair",
+            FeatureKind::SurfaceMorph { .. } => "Morph",
             FeatureKind::Stitch { .. } => "Stitch",
             FeatureKind::Thicken { .. } => "Thicken",
             FeatureKind::SurfaceTrim { .. } => "Trim",
@@ -5205,6 +5277,10 @@ pub struct Document {
     /// plane's own coordinates, mm. Others are drawn at their automatic size. Display only.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub plane_extents: std::collections::BTreeMap<u64, [f64; 4]>,
+    /// The design's own FRONT and TOP (the axes navigator's Set as, #6455): its views, Home and the
+    /// orbit follow them instead of the up axis preference. None: the preference's.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "solidcraft_viewport::frame_or_none")]
+    pub view_frame: Option<solidcraft_viewport::ViewFrame>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -5336,6 +5412,10 @@ pub struct NamedView {
     pub roll: f64,
     #[serde(default)]
     pub up: solidcraft_viewport::UpAxis,
+    /// The design frame the angles above are in. None: the up axis preference, as older designs
+    /// saved them. A view applied in another frame turns into the design's own frame.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "solidcraft_viewport::frame_or_none")]
+    pub frame: Option<solidcraft_viewport::ViewFrame>,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
@@ -5565,6 +5645,7 @@ impl Document {
             home_view: None,
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
+            view_frame: None,
             notes: Vec::new(),
             welds: Vec::new(),
             visibility: Visibility::default(),

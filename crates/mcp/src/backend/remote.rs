@@ -372,12 +372,27 @@ pub struct Auto {
     token: Option<String>,
     progress: Option<ProgressReporter>,
     cancel_flag: Option<Arc<AtomicBool>>,
+    render_gpu: bool,
 }
 
 impl Auto {
     pub fn new(headless: Headless, discover: Box<dyn FnMut() -> Option<u16>>, token: Option<&str>) -> Self {
         let had_work = Self::headless_has_work(&headless);
-        Auto { headless: Some(headless), remote: None, had_work, discover, token: token.map(str::to_owned), progress: None, cancel_flag: None }
+        Auto {
+            headless: Some(headless),
+            remote: None,
+            had_work,
+            discover,
+            token: token.map(str::to_owned),
+            progress: None,
+            cancel_flag: None,
+            render_gpu: false,
+        }
+    }
+
+    pub fn with_render_gpu(mut self, render_gpu: bool) -> Self {
+        self.render_gpu = render_gpu;
+        self
     }
 
     fn headless_has_work(h: &Headless) -> bool {
@@ -402,6 +417,9 @@ impl Auto {
         }
         if let Some(port) = (self.discover)() {
             solidcraft_engine::note!("solidcraft mcp: the SolidCraft app is running now; bridged to 127.0.0.1:{port}");
+            if self.render_gpu {
+                solidcraft_engine::note!("solidcraft mcp: --render-gpu is ignored while bridged to the running app");
+            }
             let level = self.param_check();
             let mut remote = Remote::new(&format!("127.0.0.1:{port}"), self.token.as_deref()).with_param_check(level);
             remote.set_progress(self.progress.clone());

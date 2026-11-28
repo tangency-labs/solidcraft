@@ -343,7 +343,11 @@ pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -
             return Ok(());
         }
     }
-    let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
+    let shown = match d.kind {
+        Kind::Extrude { operation: CUT, .. } => solidcraft_engine::shown_scope_for(&app.session, solidcraft_engine::doc::Operation::Cut),
+        _ => solidcraft_engine::shown_scope(&app.session),
+    };
+    let Some(shown) = shown else { return Ok(()) };
     for (_, p) in cmds {
         // An Emboss or Deboss joins or cuts with no `operation`. With a Target Face it names
         // that face's body as its target, so `named` leaves it as it is.

@@ -122,7 +122,10 @@
 //!   (the cache's owner object and the solutions' object), as `GlobalLineIntersect`
 //!   does; it and `SmSPGlobalSolver::BranchMayContainAnswers` (which reads the cache
 //!   through the solver's `surface_cache`) run the solver whose leaf solve is
-//!   [`SpGlobalSolver::local_solve_branch`] (`surface.surface_p8`).
+//!   [`SpGlobalSolver::local_solve_branch`] (`surface.surface_p8`). Not upstream
+//!   (#23057): [`SpGlobalSolver::leaves_solved`] counts the leaves no enclosure
+//!   excluded, so [`Surface::global_point_solve_0_answer_in`] can say whether an
+//!   empty answer is a proof by the boxes' distances.
 //! - **Unported callees** (return [`SolidError::Unported`]): the surface cache and its
 //!   tree (`smsurf_GetSurfaceCache` through `SmSurface::CacheMakeOrValidate`, unit
 //!   `surface.surface_p1`; `SmSurfaceCache::GetTree` is
@@ -1707,7 +1710,7 @@ impl Surface {
         k: &Kernel,
         surface: O,
         cache: Option<&SurfaceCache<O>>,
-        mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
         point_test_off: bool,
         uv_domain: &Extent2d,
         op: SolverOperation,
@@ -1716,6 +1719,47 @@ impl Surface {
         opt_target_distance: Option<f64>,
         requested: SolutionRequested,
     ) -> Result<SolutionArray<O>> {
+        Ok(self
+            .global_point_solve_0_answer_in(
+                k,
+                surface,
+                cache,
+                context,
+                point_test_off,
+                uv_domain,
+                op,
+                test_point,
+                distance_tolerance,
+                opt_target_distance,
+                requested,
+            )?
+            .0)
+    }
+
+    /// [`Surface::global_point_solve_0_in`] with whether every leaf of the tree was
+    /// excluded by its enclosure (not upstream, #23057): `true` when no leaf reached the
+    /// leaf solve ([`SpGlobalSolver::leaves_solved`] is 0), so an empty answer is a
+    /// proof by the boxes' distances that no point lies within the bound; `false` when
+    /// any leaf was solved, whose one guess may have found nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_point_solve_0`].
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_point_solve_0_answer_in<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: O,
+        cache: Option<&SurfaceCache<O>>,
+        mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        point_test_off: bool,
+        uv_domain: &Extent2d,
+        op: SolverOperation,
+        test_point: Point3,
+        distance_tolerance: f64,
+        opt_target_distance: Option<f64>,
+        requested: SolutionRequested,
+    ) -> Result<(SolutionArray<O>, bool)> {
         // get surface spatial decomposition tree from Surface's cache
         let cache_from_caller = cache.is_some();
         let owned;
@@ -1780,7 +1824,7 @@ impl Surface {
             },
             &mut solutions,
         )?;
-        Ok(solutions)
+        Ok((solutions, gs.leaves_solved == 0))
     }
 
     /// The global curve/surface solve over `uv_domain` and the curve's `interval`
@@ -3423,6 +3467,11 @@ pub struct SpGlobalSolver<'t, 's, O> {
     pub modes: Option<SolveModes>,
     /// Prepared face classification shared with other caches in this operation.
     pub face_queries: Option<&'s dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
+    /// Not upstream (#23057): the leaves no enclosure excluded, which the leaf solve
+    /// ([`SpGlobalSolver::local_solve_branch`]) went on to solve. Its one guess may
+    /// find nothing, so an empty answer proves that no point lies within the bound
+    /// only when this stays 0: every leaf was then excluded by its box's distance.
+    pub leaves_solved: usize,
 }
 
 impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {

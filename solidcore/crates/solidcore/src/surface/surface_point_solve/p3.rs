@@ -29,7 +29,10 @@
 //! point off the surface whose Hessian has a negative eigenvalue) goes on from the least
 //! distance along that eigenvalue's direction ([`SurfPtSolveStepper::leave_saddle`]), within
 //! the same 35 steps, and ends no farther than the nearest point such a move reached;
-//! upstream reports the saddle as the minimum (`plan/upstream-issues/WR-23428--*`).
+//! upstream reports the saddle as the minimum (`plan/upstream-issues/WR-23428--*`). Not upstream
+//! (#23057): [`Surface::global_point_solve_1_answer`] also says why an empty answer is
+//! empty ([`EmptyAnswer`]): proved, when the tree solve answered with none and every
+//! leaf of its tree was excluded by its box's distance, or not.
 
 use super::p1::ErrorNormType;
 use super::p2::with_out_of_bounds_enabled_in_place;
@@ -589,6 +592,21 @@ impl SurfPtSolveStepper<'_> {
     }
 }
 
+/// Not upstream (#23057): why a global point solve answered with no solution, for a
+/// caller that must tell "no surface point within the target" from a solve that found
+/// nothing without proving it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptyAnswer {
+    /// Any answer that is not proved empty: solutions, no candidate, or a tree solve
+    /// that failed as upstream can (the global solver's drop stands unproved).
+    Unproved,
+    /// The global solver's minimum lay beyond the target distance by more than the
+    /// tolerance, and the tree solve answered with none, every leaf of its tree
+    /// excluded by its box's distance (none reached the leaf solve, whose one guess may
+    /// find nothing): no point of the surface lies within the target.
+    NoPointWithinTarget,
+}
+
 impl Surface {
     /// The new global surface-point solve (`GlobalPointSolve_1`).
     ///
@@ -621,6 +639,41 @@ impl Surface {
         requested: SolutionRequested,
         surface_object: Option<O>,
     ) -> Result<SolutionArray<O>> {
+        Ok(self
+            .global_point_solve_1_answer(
+                k,
+                domain,
+                op,
+                point,
+                distance_tolerance,
+                target_distance,
+                requested,
+                surface_object,
+            )?
+            .0)
+    }
+
+    /// [`Surface::global_point_solve_1`] with why an empty answer is empty (#23057):
+    /// [`EmptyAnswer::NoPointWithinTarget`] only when the solver dropped its minimum
+    /// beyond the target and the tree solve answered with none, every leaf excluded by
+    /// its enclosure; [`EmptyAnswer::Unproved`] for any other answer (solutions, no
+    /// candidate, a tree whose leaf solve ran, or a tree solve that failed as upstream
+    /// can, whose drop stands).
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_point_solve_1`].
+    pub(crate) fn global_point_solve_1_answer<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        domain: &Extent2d,
+        op: SolverOperation,
+        point: Point3,
+        distance_tolerance: f64,
+        target_distance: Option<f64>,
+        requested: SolutionRequested,
+        surface_object: Option<O>,
+    ) -> Result<(SolutionArray<O>, EmptyAnswer)> {
         let mut solver = SurfPtGlobalSolver::new(
             k,
             self,
@@ -633,10 +686,10 @@ impl Surface {
         )?;
         let found = solver.solve(k, surface_object)?;
         if !solver.dropped_beyond_target() {
-            return Ok(found);
+            return Ok((found, EmptyAnswer::Unproved));
         }
-        Ok(self
-            .tree_solve_within_target(
+        Ok(
+            match self.tree_solve_within_target(
                 k,
                 domain,
                 op,
@@ -645,13 +698,19 @@ impl Surface {
                 target_distance,
                 requested,
                 surface_object,
-            )?
-            .unwrap_or(found))
+            )? {
+                Some((tree, true)) if tree.is_empty() => (tree, EmptyAnswer::NoPointWithinTarget),
+                Some((tree, _)) => (tree, EmptyAnswer::Unproved),
+                None => (found, EmptyAnswer::Unproved),
+            },
+        )
     }
 
     /// The tree solve [`Surface::global_point_solve_1`] answers with when the global
     /// solver drops a minimum beyond the target: `None` when it fails as upstream can,
-    /// so the drop stands.
+    /// so the drop stands. Not upstream (#23057): with the answer, whether every leaf
+    /// of the tree was excluded by its enclosure
+    /// ([`Surface::global_point_solve_0_answer_in`]).
     pub(crate) fn tree_solve_within_target<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -662,7 +721,7 @@ impl Surface {
         target_distance: Option<f64>,
         requested: SolutionRequested,
         surface_object: Option<O>,
-    ) -> Result<Option<SolutionArray<O>>> {
+    ) -> Result<Option<(SolutionArray<O>, bool)>> {
         // the tree solve on the surface the distance is evaluated on: a curve-bounded
         // surface passes its evaluations to its basis
         let mut tree_on = self;
@@ -681,7 +740,7 @@ impl Surface {
         let _ = unowned.set_owner(None);
         let tree_on = &unowned;
         let tree = match surface_object {
-            Some(object) => tree_on.global_point_solve_0_in(
+            Some(object) => tree_on.global_point_solve_0_answer_in(
                 k,
                 object,
                 None,
@@ -697,7 +756,7 @@ impl Surface {
             // no handle for the solutions' objects: solve naming a stand-in and
             // return the solutions without objects
             None => tree_on
-                .global_point_solve_0_in(
+                .global_point_solve_0_answer_in(
                     k,
                     NoObject,
                     None,
@@ -710,7 +769,7 @@ impl Surface {
                     target_distance,
                     requested,
                 )
-                .map(|t| t.without_objects()),
+                .map(|(t, excluded)| (t.without_objects(), excluded)),
         };
         // a tree solve that fails as upstream can (a surface with no decomposition
         // tree, such as a STEP surface; a failed evaluation): the global solver's drop
