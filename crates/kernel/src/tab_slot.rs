@@ -2,10 +2,9 @@
 //! T meets S square): solidcore's plan and its cut ([`solidcore_ops::plate_contact`]), each inside
 //! [`guard`], with the bodies made back into this crate's [`Body`]. Computes nothing itself.
 
-pub use solidcore::plate_contact::{Contact, PairSkip, Plane};
-pub use solidcore::tab_slot::{Layout, SlotSkip, StretchSkip, TabSkip, stretch_seed};
 pub use solidcore_ops::plate_contact::{
-    JointSkip, MAX_TOOL_FACES, NearPair, SLOW_TOOL_FACES, StretchPlan, TabPlan, TabSlotPlan, TabSlotSpec, ToolFaceCap, check_tool_faces,
+    Contact, JointSkip, Layout, MAX_TOOL_FACES, NearPair, PairSkip, Plane, SLOW_TOOL_FACES, SlotSkip, StretchPlan, StretchSkip, TabPlan, TabSkip,
+    TabSlotPlan, TabSlotSpec, ToolFaceCap, check_tool_faces, stretch_seed,
 };
 
 use crate::body::Body;
@@ -90,9 +89,7 @@ pub fn slot_planes(slot: &Body, tol: f64) -> Vec<Plane> {
     let mut out: Vec<Plane> = Vec::new();
     for i in 0..slot.face_count() {
         let Some(f) = slot.planar_face(i) else { continue };
-        let (x, y) = (f.x, f.y);
-        let n = solidcore::Vec3::new(x.y * y.z - x.z * y.y, x.z * y.x - x.x * y.z, x.x * y.y - x.y * y.x);
-        let Ok(p) = Plane::through(solidcore::Point3::new(f.origin.x, f.origin.y, f.origin.z), n) else { continue };
+        let Ok(p) = solidcore_ops::plate_contact::face_plane(&f) else { continue };
         if !out.iter().any(|q| q.normal.dot(p.normal) > 1.0 - 1e-9 && (q.offset - p.offset).abs() <= tol) {
             out.push(p);
         }
@@ -113,7 +110,7 @@ pub fn joint_plane(tab: &Body, slot: &Body, near: Option<solidcore_record::Vec3>
     let (t, s) = ops_pair(tab, slot)?;
     let (t, s) = (&t.0, &s.0);
     let planes = slot_planes(slot, tol);
-    let near = near.map(|q| solidcore::Point3::new(q.x, q.y, q.z));
+    let near = near.map(|q| solidcore_ops::plate_contact::Point3::new(q.x, q.y, q.z));
     guard(WHAT, || t.plate_pair_near(s, &planes, near, tol).map_err(kernel_error))
 }
 
@@ -166,7 +163,7 @@ mod tests {
     fn fixture_f() -> (Body, Body, Plane) {
         let bottom = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(160.0, 100.0, 6.0)).unwrap();
         let wall = crate::box_solid(Vec3::new(20.0, 30.0, 6.0), Vec3::new(140.0, 36.0, 66.0)).unwrap();
-        (wall, bottom, Plane { normal: solidcore::Vec3::Z, offset: 6.0 })
+        (wall, bottom, Plane { normal: solidcore_ops::plate_contact::Vec3::Z, offset: 6.0 })
     }
 
     fn spec(layout: Layout, width: f64, end_distance: f64) -> TabSlotSpec {

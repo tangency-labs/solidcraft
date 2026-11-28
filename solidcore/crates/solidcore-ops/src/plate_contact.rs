@@ -4,9 +4,12 @@
 //! decides, and ops does no float maths of its own.
 
 use solidcore::math::Vec2;
-use solidcore::plate_contact::{self as pc, Contact, FarSide, PairJoint, PairSkip, Plane};
+use solidcore::plate_contact::{self as pc, FarSide, PairJoint};
+pub use solidcore::plate_contact::{Contact, PairSkip, Plane};
 use solidcore::prism::profile::{Loop2, Region2};
-use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip, TabSkip};
+use solidcore::tab_slot as ts;
+pub use solidcore::tab_slot::{stretch_seed, Layout, SlotSkip, StretchSkip, TabSkip};
+pub use solidcore::{Point3, Vec3};
 
 use crate::body::Body;
 use crate::boolean::{boolean, union_all, BooleanOp};
@@ -25,6 +28,17 @@ impl Answer for Pair {}
 pub type NearPair = core::result::Result<(Plane, PairJoint), PairSkip>;
 
 impl Answer for NearPair {}
+
+/// The plane of a planar face's frame (its origin and in-plane axes, as a body's planar face
+/// reads), its normal out of the material ([`Plane::spanned`]).
+///
+/// # Errors
+/// [`crate::Error::Refused`], in the kernel's words, for a non-finite origin or axes that are
+/// parallel or not finite.
+pub fn face_plane(face: &solidcore_record::Plane) -> Result<Plane> {
+    use solidcore_convert::vec3;
+    Plane::spanned(vec3(face.origin), vec3(face.x), vec3(face.y)).map_err(status)
+}
 
 /// What the Tab and Slot recipe is asked for (design 6, 7): the layout, the tab width `W`, the
 /// end distance `e`, the slot clearance `c` and the least land `MIN_LAND`, all the caller's.

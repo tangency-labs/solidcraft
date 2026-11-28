@@ -60,6 +60,17 @@ impl Plane {
             offset: normal.dot(point),
         })
     }
+
+    /// The plane through `origin` spanned by the in-plane axes `x` and `y`, its normal `x × y`
+    /// (unitized): a planar face's frame, whose axes are ordered so the normal points out of
+    /// its material.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Plane::through`]: a non-finite origin, or axes that are parallel or not finite.
+    pub fn spanned(origin: Point3, x: Vec3, y: Vec3) -> Result<Self> {
+        Self::through(origin, x.cross(y))
+    }
 }
 
 /// How one plane's normal stands to another's.

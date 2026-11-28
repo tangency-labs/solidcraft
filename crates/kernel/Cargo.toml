@@ -9,7 +9,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-solidcore = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }

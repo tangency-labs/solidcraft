@@ -6445,7 +6445,6 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
- "solidcore",
  "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
