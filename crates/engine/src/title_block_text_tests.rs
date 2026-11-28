@@ -371,7 +371,11 @@ fn paper_cell_runs_on(s: &Session, sheet_idx: usize, name: &str) -> String {
     runs(s, sheet.id)
         .into_iter()
         .filter(|r| match text.align {
-            solidcraft_geom::cell::HAlign::Centre => (r.origin + Vec2::new(width(&r.text, text.cap_mm) / 2.0, 0.0)).dist(anchor) < 1e-9,
+            // The run's own width: a value too wide for its box is set smaller, so its width isn't the cell's cap's.
+            solidcraft_geom::cell::HAlign::Centre => {
+                let own = r.glyphs.last().map_or(0.0, |g| g.x + g.advance);
+                (r.origin + Vec2::new(own / 2.0, 0.0)).dist(anchor) < 1e-9
+            }
             _ => value_box.contains(r.origin),
         })
         .map(|r| r.text)
@@ -483,4 +487,41 @@ fn mass_cell_unit_choice_survives_save_and_reopen() {
     assert_eq!(inspect_cell_on(&mut reopened, 1, "mass"), "12.4 g (0.0124 kg)");
     assert_eq!(paper_cell_runs_on(&reopened, 1, "mass"), "12.4 g (0.0124 kg)");
     assert_eq!(inspect_cell_on(&mut reopened, 1, "material"), "PLA");
+}
+
+/// A 128-character material name never reaches past its cell: a value too wide
+/// for its box is set smaller, and clipped with an ellipsis past the least size, with a note of each.
+#[test]
+fn a_128_character_material_designation_stays_inside_its_cell() {
+    let (mut s, sheet) = mass_drawing(100.0, 10.0, 10.0, None);
+    let long = "W".repeat(128);
+    run(&mut s, "material.create", json!({"name": long, "density_g_cm3": 2}));
+    run(&mut s, "material.assign", json!({"bodies": ["Part"], "material": long}));
+    let cell = placed(&s, "material").value_box;
+    let inside: Vec<TextRun> = runs(&s, sheet).into_iter().filter(|r| cell.contains(r.origin)).collect();
+    assert!(!inside.is_empty(), "the material is drawn in its cell");
+    for r in &inside {
+        let end = r.glyphs.last().map_or(r.origin.x, |g| r.origin.x + g.x + g.advance);
+        assert!(end <= cell.max.x + 1e-6, "`{}` ends at {end}, past its cell's {}", r.text, cell.max.x);
+    }
+    let said = notes(&mut s, "material");
+    assert!(said.as_array().unwrap().contains(&json!({"fit": "clipped"})), "{said}");
+}
+
+/// A value box narrower than the ellipsis at the least size draws nothing for the value, and the
+/// notes say it was too wide and clipped; the title block still builds (valid input is never refused).
+#[test]
+fn a_box_narrower_than_the_ellipsis_draws_nothing_and_notes_it() {
+    let (s, _) = mass_drawing(100.0, 10.0, 10.0, None);
+    let d = s.drawing("test").unwrap();
+    let fonts = solidcraft_sketch::PaperFonts::new("", "en", true);
+    let block = d.sheets[0].title_block.as_ref().unwrap();
+    let solidcraft_geom::title_block::CellKind::Text(text) = &block.cells.iter().find(|c| c.name == "material").unwrap().kind else {
+        panic!("material is a text cell");
+    };
+    let value_box = Aabb2 { min: Vec2::new(10.0, 10.0), max: Vec2::new(10.2, 14.0) };
+    let mut notes = Vec::new();
+    let (lines, _) = value_lines(text, value_box, &fonts, "WWWWW", &mut notes).unwrap();
+    assert!(lines.lines.iter().all(|(t, _)| t.is_empty()), "{:?}", lines.lines);
+    assert!(notes.contains(&Note::Fit(Warning::Width)) && notes.contains(&Note::Fit(Warning::Clipped)), "{notes:?}");
 }

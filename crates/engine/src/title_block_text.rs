@@ -271,8 +271,17 @@ pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, fonts: &PaperFonts, sh
     out
 }
 
+/// The least a value is shrunk to fit its box's width, as a part of its cap height.
+const MIN_SHRINK: f64 = 0.4;
+
+/// What stands for the characters a clipped value leaves off.
+const ELLIPSIS: &str = "...";
+
 /// `value`'s lines in `value_box`, as `fonts` sets them, by the cell text rule, and where the
-/// first starts; what doesn't fit is added to `notes`.
+/// first starts. A line wider than the box is set smaller, down to [`MIN_SHRINK`] of the cell's cap
+/// height, and past that its value is clipped to the box with [`ELLIPSIS`], so no ink reaches past
+/// the box (its first baseline stays where the cell's own size puts it); either is added to `notes` as [`Warning::Width`], and a clipped one as
+/// [`Warning::Clipped`] too. What else doesn't fit is added to `notes`.
 fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &str, notes: &mut Vec<Note>) -> Result<(PaperLines, Vec2), SketchError> {
     let width = value_box.size().x;
     let align = match text.align {
@@ -281,10 +290,41 @@ fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &st
         HAlign::Right => TextAlign::Right,
     };
     let style = TextStyle { align, ..TextStyle::default() };
-    let lines = fonts.lines(value, text.cap_mm, text.fit.wrap.then_some(width), &style)?;
+    let wrap = text.fit.wrap.then_some(width);
+    let widest = |lines: &PaperLines| lines.lines.iter().map(|(_, w)| *w).fold(0.0, f64::max);
+    let mut cap = text.cap_mm;
+    let mut lines = fonts.lines(value, cap, wrap, &style)?;
     notes.extend(text.fit.warn_chars(value).map(Note::Fit));
-    if lines.lines.iter().any(|(_, w)| *w > width + EPS) {
+    if widest(&lines) > width + EPS {
         notes.push(Note::Fit(Warning::Width));
+        cap = (cap * width / widest(&lines) * (1.0 - 1e-9)).max(cap * MIN_SHRINK);
+        lines = fonts.lines(value, cap, wrap, &style)?;
+        if widest(&lines) > width + EPS {
+            // Still too wide at the least size: keep the most characters that fit, with an ellipsis.
+            let chars: Vec<char> = value.chars().collect();
+            let with = |kept: usize| chars.iter().take(kept).chain(ELLIPSIS.chars().collect::<Vec<_>>().iter()).collect::<String>();
+            let (mut fits, mut over) = (None, chars.len());
+            let mut low = 0;
+            while low < over {
+                let mid = low + (over - low).div_ceil(2);
+                let tried = fonts.lines(&with(mid), cap, wrap, &style)?;
+                if widest(&tried) > width + EPS {
+                    over = mid - 1;
+                } else {
+                    low = mid;
+                    fits = Some(tried);
+                }
+            }
+            lines = match fits {
+                Some(lines) => lines,
+                None => fonts.lines(&with(0), cap, wrap, &style)?,
+            };
+            if widest(&lines) > width + EPS {
+                // Not even the ellipsis fits: the value draws nothing, and the notes say so.
+                lines = fonts.lines("", cap, wrap, &style)?;
+            }
+            notes.push(Note::Fit(Warning::Clipped));
+        }
     }
     let (at, height) = place_lines(value_box, lines.lines.len(), text.cap_mm, lines.pitch, text.align, text.fit.wrap)
         .map_err(|e| SketchError::Invalid(e.to_string()))?;
