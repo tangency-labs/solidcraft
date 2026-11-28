@@ -74,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
-         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed; a KiCad board opened from a .kicad_pcb is read again by SolidCraft with the options it was opened with, replacing the component's bodies, under the same folder rule",
+         features that newly fail and joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed; a KiCad board opened from a .kicad_pcb is read again by SolidCraft with the options it was opened with, replacing the component's bodies, under the same folder rule",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
         .icon("update")
@@ -2982,6 +2982,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     // A batch goes on past a source it cannot read: that link keeps its bodies and is named in
     // `failed`, so the others still come in as one step (#9743).
     let go_on = p.get("component").is_none();
+    let failing_before: std::collections::BTreeMap<u64, String> = s.model.results.iter().filter_map(|r| Some((r.id, r.error.clone()?))).collect();
     // Linked designs saved without bodies of their own follow the caller's rule as they open.
     let _reading = Opening::enter(s.path.as_deref(), LinkedRead::read(p, cmd)?);
     let links: Vec<(u64, DesignLink)> =
@@ -3483,8 +3484,16 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         link_warnings[slot].extend(tie_numbered_joint_warnings(s, &cname, &tie_before));
     }
     let mut warnings: Vec<String> = link_warnings.into_iter().flatten().collect();
-    // A reference whose face the design no longer has says so here, not only in the joint list.
+    // A reference whose face or edge the design no longer has says so here, both for timeline
+    // features that newly fail and for joints.
     if !updated.is_empty() {
+        for r in &s.model.results {
+            if let Some(why) = r.error.as_ref()
+                && failing_before.get(&r.id) != Some(why)
+            {
+                warnings.push(if why.starts_with(&format!("{}: ", r.name)) { why.clone() } else { format!("{}: {why}", r.name) });
+            }
+        }
         let sol = solidcraft_doc::joints::solve_holding_with_analysis(
             &s.doc,
             &s.model.state(),
@@ -7067,6 +7076,94 @@ mod tests {
             component_materials(&deferred_relink, comp),
             std::collections::BTreeMap::from([("Block".into(), "Copper".into()), ("Plate".into(), "Titanium".into())])
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// when an updated linked design removes the edge a chamfer in the assembly sits on,
+    /// `component.update_links {}` still updates every link at that level, marks the chamfer
+    /// failed with a reselect message, reports it in `warnings`, rebuilds the rest of the
+    /// assembly, and lets `timeline.edit` reselect the chamfer on the updated body.
+    #[test]
+    fn update_links_updates_level_when_dependent_chamfer_loses_reference() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-broken-ref-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (part_a, part_c, assembly) = (dir.join("part_a.sc"), dir.join("part_c.sc"), dir.join("assembly.sc"));
+
+        let mut a = Session::default();
+        run(&mut a, "parameters.add", json!({"name": "step_d", "expression": "12 mm"}));
+        run(&mut a, "solid.cylinder", json!({"diameter": 20, "height": 20, "body_name": "SteppedPin"}));
+        run(
+            &mut a,
+            "solid.cylinder",
+            json!({"diameter": "step_d", "height": 10, "base": [0, 0, 20], "operation": "join", "targets": ["SteppedPin"]}),
+        );
+        run(&mut a, "file.save", json!({"path": &part_a}));
+
+        save_box(&part_c, 10.0);
+
+        let mut b = Session::default();
+        run(&mut b, "component.insert_design", json!({"path": &part_a, "name": "Pin"}));
+        run(&mut b, "component.insert_design", json!({"path": &part_c, "name": "Spacer", "translate": [40, 0, 0]}));
+        let chamfer =
+            run(&mut b, "solid.chamfer", json!({"edges": [[6, 0, 20]], "distance": 1, "body": "SteppedPin", "name": "Chamfer3"}))["feature"]
+                .as_u64()
+                .unwrap();
+        let bracket =
+            run(&mut b, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "body_name": "Bracket"}))["feature"]
+                .as_u64()
+                .unwrap();
+        let hole = run(
+            &mut b,
+            "solid.cylinder",
+            json!({"diameter": 4, "height": 12, "base": [85, 5, -1], "operation": "cut", "targets": ["Bracket"], "name": "MountHole"}),
+        )["feature"]
+            .as_u64()
+            .unwrap();
+        run(&mut b, "file.save", json!({"path": &assembly}));
+        assert_eq!(feature_error(&b, chamfer), None);
+        assert_eq!(feature_error(&b, bracket), None);
+        assert_eq!(feature_error(&b, hole), None);
+
+        // Make the step flush with the Ø20 cylinder so the step edge Chamfer3 picked disappears,
+        // and resize the second linked design at the same level.
+        run(&mut a, "parameters.change", json!({"name": "step_d", "expression": "20 mm"}));
+        run(&mut a, "file.save", json!({}));
+        save_box(&part_c, 20.0);
+
+        let update = run(&mut b, "component.update_links", json!({}));
+        let updated: Vec<&str> = update["updated"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(updated.contains(&"Pin") && updated.contains(&"Spacer"), "both same-level links must update: {update}");
+        assert_eq!(update["failed"], json!([]), "{update}");
+
+        let links = run(&mut b, "component.links", json!({}));
+        for entry in links["links"].as_array().unwrap() {
+            assert_eq!(entry["changed"], json!(false), "{links}");
+        }
+
+        let err = feature_error(&b, chamfer).expect("Chamfer3 must be marked failed when its step edge is gone");
+        assert!(
+            solidcraft_doc::reselect_parts(&err).is_some() || (err.contains("no longer exists") && err.contains("reselect")),
+            "expected clear reselect error on Chamfer3, got: {err}"
+        );
+        let warnings: Vec<&str> = update["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(
+            warnings.iter().any(|w| w.contains("Chamfer3") && (w.contains("reselect") || w.contains("no longer exists"))),
+            "update_links warnings must report Chamfer3's lost reference: {update}"
+        );
+        assert_eq!(feature_error(&b, bracket), None, "other features in B must still rebuild");
+        assert_eq!(feature_error(&b, hole), None, "downstream features after Chamfer3 must still rebuild");
+
+        let expected_without_chamfer = std::f64::consts::PI * 100.0 * 30.0 + (10.0 * 20.0 * 20.0) + (1000.0 - std::f64::consts::PI * 4.0 * 10.0);
+        let actual = volume(&mut b);
+        assert!((actual - expected_without_chamfer).abs() < 1.0, "expected updated bodies volume {expected_without_chamfer}, got {actual}");
+
+        // Reselecting Chamfer3 onto a valid edge of the updated cylinder clears the error and rebuilds it.
+        run(&mut b, "timeline.edit", json!({"feature": chamfer, "set": {"edges": [[10, 0, 30]]}}));
+        assert_eq!(feature_error(&b, chamfer), None, "reselecting Chamfer3 must clear its error");
+        let after_reselect = volume(&mut b);
+        assert!(after_reselect < expected_without_chamfer - 1.0, "Chamfer3 must cut material after reselect: {after_reselect}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

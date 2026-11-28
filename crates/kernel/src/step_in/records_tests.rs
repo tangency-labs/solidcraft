@@ -257,6 +257,7 @@ fn a_record_bodys_paint_is_on_its_own_faces_within_range() {
             crate::FacePaint { face: usize::MAX, color: [0.0; 3], opacity: 1.0, name: None },
         ],
         name: Some("Body".into()),
+        layer: None,
     });
     records.bodies[0].color = Some([-1.0, 0.5, 2.0]);
     let imp = records_import(&records).unwrap();
