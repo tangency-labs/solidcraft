@@ -5498,7 +5498,7 @@ mod tests {
         let (mut partial, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate.clone(), &[], 1).unwrap();
         let e1 = partial.free_edge_at(Vec3::new(50.0, 0.0, 2.0)).unwrap().unwrap();
         let (js, sqs) =
-            partial.flanges_on(e1, &[(0.0, 0.85, 60.0, std::f64::consts::FRAC_PI_2, false)], 2.0, "inside", super::HeightFrom::Outer).unwrap();
+            partial.flanges_on(e1, &[(0.0, 0.85, 60.0, std::f64::consts::FRAC_PI_2, false)], 2.0, "inside", 0.0, super::HeightFrom::Outer).unwrap();
         partial.close_flange_corners(&js).unwrap();
         partial.slant_open_sides(&sqs).unwrap();
         partial.clear_of_neighbours(&js).unwrap();
@@ -5558,6 +5558,7 @@ mod tests {
                     &[(0.0, 0.98, 45.0, std::f64::consts::FRAC_PI_2, true), (0.98, 1.0, 45.0, std::f64::consts::FRAC_PI_2, true)],
                     2.0,
                     "inside",
+                    0.0,
                     super::HeightFrom::Outer,
                 )
                 .is_err()
