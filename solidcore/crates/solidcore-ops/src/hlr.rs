@@ -1,8 +1,9 @@
 //! Exact orthographic hidden lines for placed record bodies, and the silhouettes of their curved
 //! faces: the kernel's [`solidcore::hlr`] on the record. A body is validated, copied into the
-//! kernel's kinds through `solidcore-convert` (a blend face as its NURBS form: the blend's
-//! definition is no line of a drawing) and prepared once; scenes of its placements are drawn from
-//! it. The drawing comes back in the record's vectors and segments.
+//! kernel's kinds through `solidcore-convert` (a blend face as its NURBS form, its net, with the
+//! net's bound from the blend's definition, certified again as `face_surface` certifies it) and
+//! prepared once; scenes of its placements are drawn from it. The drawing comes back in the
+//! record's vectors and segments.
 //!
 //! Nothing here computes: every answer is the kernel's, its numbers copied field by field.
 
@@ -171,7 +172,33 @@ pub struct Silhouette {
     pub points: Vec<[f64; 2]>,
 }
 
-/// The body `b` in the kernel's kinds. A blend face is its NURBS form.
+/// How far face `face` of `b` may be drawn from what it is: a blend's net certified again
+/// against its rebuilt definition, its bound ε ([`crate::face_surface::Exact::Blend`]), 0 for an
+/// exact round, whose net is its definition, and for every other face, which is its surface.
+fn face_bound(b: &Brep, face: usize) -> Result<f64, HlrError> {
+    let Some(f) = b.faces.get(face) else {
+        return Err(HlrError::Invalid("face"));
+    };
+    if !matches!(f.surface, Surface::Blend { .. }) {
+        return Ok(0.);
+    }
+    match crate::face_surface::FaceSurface::of(b, face) {
+        Ok(s) => Ok(match s.exact() {
+            crate::face_surface::Exact::Blend { bound } => *bound,
+            _ => 0.,
+        }),
+        Err(crate::Error::DefinitionNotCertified { .. }) => Err(HlrError::Invalid(
+            "a blend face whose net its definition does not certify",
+        )),
+        Err(crate::Error::Cancelled) => Err(HlrError::Cancelled),
+        Err(_) => Err(HlrError::Unsupported(
+            "a blend face whose definition the kernel does not rebuild",
+        )),
+    }
+}
+
+/// The body `b` in the kernel's kinds. A blend face is its NURBS form, with its certified bound
+/// from its definition ([`face_bound`]).
 fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
     let curve = |c| solidcore_convert::curve(c).map_err(|_| HlrError::Unsupported("edge curve"));
     let surface = |s: &Surface| match s {
@@ -197,7 +224,8 @@ fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
     let faces = b
         .faces
         .iter()
-        .map(|f| {
+        .enumerate()
+        .map(|(fi, f)| {
             // A blend's label has no surface of its own: its face is drawn as its NURBS form.
             let (label, form) = match (&f.surface, &f.nurbs) {
                 (Surface::Blend { .. } | Surface::Sweep { .. }, Some(net)) => (net, None),
@@ -223,6 +251,7 @@ fn kernel_body(b: &Brep) -> Result<k::body::Brep, HlrError> {
                         Loop::Vertex { vertex } => k::body::Loop::Vertex { vertex: *vertex },
                     })
                     .collect(),
+                bound: face_bound(b, fi)?,
             })
         })
         .collect::<Result<_, HlrError>>()?;
@@ -774,6 +803,44 @@ mod tests {
                 "a blend face whose net its definition does not certify"
             ))
         ));
+    }
+
+    /// What a face is reaches the kernel: a procedural blend's face with its certified bound
+    /// ([`certified_bound`]), the round of a bore's rim (an exact round, its torus) and every
+    /// other face with 0.
+    #[test]
+    fn blend_faces_reach_the_kernel_with_their_certified_bound() {
+        let (rec, face) = variable_round();
+        let eps = certified_bound(&rec, face);
+        let body = kernel_body(&rec).unwrap();
+        for (i, f) in body.faces.iter().enumerate() {
+            assert_eq!(f.bound, if i == face { eps } else { 0. }, "face {i}");
+        }
+
+        let plate = crate::body::make_box([0.; 3], [30., 30., 10.]).unwrap();
+        let bore = crate::body::make_cylinder([15., 15., 0.], 5., 10.).unwrap();
+        let b = crate::boolean::boolean(plate, bore, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let (rim, _) = edge_and_vertex(&b, [20., 15., 10.], [0.; 3]);
+        crate::blend::blend(
+            &b,
+            crate::blend::Blend::Round,
+            &[rim],
+            &[0.3],
+            &[],
+            crate::blend::Corners::Filled,
+        )
+        .unwrap();
+        let (rec, face) = one_blend(&b);
+        assert!(matches!(
+            crate::face_surface::FaceSurface::of(&rec, face)
+                .unwrap()
+                .exact(),
+            crate::face_surface::Exact::Torus { .. }
+        ));
+        let body = kernel_body(&rec).unwrap();
+        assert!(body.faces.iter().all(|f| f.bound == 0.));
     }
 
     /// A deviation scales with the curve; an analytic curve stays analytic and a sampled zero

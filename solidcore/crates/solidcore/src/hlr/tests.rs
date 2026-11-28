@@ -525,6 +525,7 @@ impl Brep {
                     nurbs,
                     domain,
                     loops,
+                    bound: 0.,
                 }
             })
             .collect();
@@ -772,6 +773,162 @@ fn a_box_in_front_hides_the_middle_of_an_edge() {
         (got[0].1, got[2].1),
         (Visibility::Visible, Visibility::Visible)
     );
+}
+
+/// `b`'s kernel body with every face's [`k::Face::bound`] set by `bound` (from its index).
+fn bounded(b: &Brep, bound: impl Fn(usize) -> f64) -> k::Brep {
+    let (mut body, _) = b.body();
+    for (i, f) in body.faces.iter_mut().enumerate() {
+        f.bound = bound(i);
+    }
+    body
+}
+
+/// A slab in front of an edge whose faces stand within ε of what they are: seen along +y, the
+/// edge x = 1, y = 0, z in [0, 1] has the slab's near face 1 in front of it and its far face 2
+/// (both square to the view, so a face within ε crosses the ray within ε of where it is drawn),
+/// and the slab reaches 4 past the edge on every side. With ε = 1.5 the far face is still in
+/// front for certain (2 > 1.5), with ε = 2.5 neither face is: the edge is uncertain, not hidden.
+#[test]
+fn a_face_within_its_bound_of_an_edge_does_not_hide_it_for_certain() {
+    let back = || prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
+    let slab = cuboid([-5., -2., -5.], [5., -1., 5.]);
+    let view = View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap();
+    for (eps, want) in [
+        (0., Visibility::Hidden),
+        (1.5, Visibility::Hidden),
+        (2.5, Visibility::Uncertain),
+    ] {
+        let front = super::prepare(&bounded(&slab, |_| eps), &Options::default()).unwrap();
+        let d = hidden_lines(
+            &[back(), front],
+            &[identity(0, [0.; 3]), identity(1, [0.; 3])],
+            &view,
+            &Options::default(),
+            &never,
+        )
+        .unwrap();
+        // Edge 9 joins corners 1 (1,0,0) and 5 (1,0,1).
+        let got: Vec<Visibility> = edge_line(&d, 0, 9)
+            .pieces
+            .iter()
+            .map(|p| p.visibility)
+            .collect();
+        assert!(
+            !got.is_empty() && got.iter().all(|v| *v == want),
+            "ε {eps}: {got:?}"
+        );
+    }
+}
+
+/// A face whose surface stands ε off its own edges, as a blend's net may stand off the edges of
+/// its definition: the unit cube's top face drawn as the plane z = 1 + ε over its edges at
+/// z = 1, ε = 1e-3, far past the 1e-6 of the face a ray skips at its start. Seen from above,
+/// each top edge's ray crosses that plane ε / |n · d| from its start; within the face's bound
+/// that is the edge's own surface, so the top edges stay visible.
+#[test]
+fn a_faces_own_edges_are_not_hidden_by_its_surface_within_its_bound() {
+    let eps = 1e-3;
+    let mut body = bounded(&cuboid([0.; 3], [1.; 3]), |i| if i == 1 { eps } else { 0. });
+    // Face 1 is the top, the plane through corner 4 (0, 0, 1).
+    let Some(k::Surface::Plane { origin, .. }) = body.faces.get_mut(1).map(|f| &mut f.surface)
+    else {
+        panic!("the cuboid's face 1 is a plane");
+    };
+    origin[2] += eps;
+    let def = super::prepare(&body, &Options::default()).unwrap();
+    let view = View::new(Vec3::new(0.3, 0.2, -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let d = hidden_lines(
+        std::slice::from_ref(&def),
+        &[identity(0, [0.; 3])],
+        &view,
+        &Options::default(),
+        &never,
+    )
+    .unwrap();
+    let top: Vec<usize> = body
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            matches!(e.curve, k::Curve::Line { start, end } if start[2] == 1. && end[2] == 1.)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(top.len(), 4);
+    for e in top {
+        let got: Vec<Visibility> = edge_line(&d, 0, e)
+            .pieces
+            .iter()
+            .map(|p| p.visibility)
+            .collect();
+        assert!(
+            got.iter().all(|v| *v == Visibility::Visible),
+            "top edge {e}: {got:?}"
+        );
+    }
+}
+
+/// A cylinder's side within ε = 0.01 of what it is: its outline is drawn as the same exact lines
+/// at x = ±10, now bounded by ε instead of analytic, in a drawing and on its own.
+#[test]
+fn a_silhouette_on_a_surface_within_its_bound_is_bounded_by_it() {
+    let eps = 0.01;
+    let def = super::prepare(
+        &bounded(&cylinder(10., 30.), |i| if i == 0 { eps } else { 0. }),
+        &Options::default(),
+    )
+    .unwrap();
+    let view = View::new(Vec3::new(1., 0., -0.3), Vec3::new(0., 0., 1.)).unwrap();
+    let d = hidden_lines(
+        std::slice::from_ref(&def),
+        &[identity(0, [0.; 3])],
+        &view,
+        &Options::default(),
+        &never,
+    )
+    .unwrap();
+    let sil = silhouette_pieces(&d);
+    assert!(!sil.is_empty());
+    let alone =
+        super::silhouettes(&def, &identity(0, [0.; 3]), &view, &Options::default()).unwrap();
+    assert!(!alone.is_empty());
+    let bounded = CurveAccuracy::Bounded {
+        max_deviation_mm: eps,
+    };
+    let lines = sil
+        .iter()
+        .map(|p| (p.accuracy, &p.geometry))
+        .chain(alone.iter().map(|s| (s.accuracy, &s.geometry)));
+    for (accuracy, geometry) in lines {
+        assert_eq!(accuracy, bounded);
+        for g in geometry {
+            let Seg2::Line { a, b } = *g else {
+                panic!("a silhouette ruling is a line: {g:?}")
+            };
+            assert!(
+                (a.x.abs() - 10.).abs() < 1e-12 && (a.x - b.x).abs() < 1e-12,
+                "{g:?}"
+            );
+        }
+    }
+}
+
+/// A bound is a distance: a negative or non-finite one is refused.
+#[test]
+fn a_face_bound_that_is_no_distance_is_refused() {
+    for eps in [-1e-9, f64::NAN, f64::INFINITY] {
+        assert!(
+            matches!(
+                super::prepare(
+                    &bounded(&cuboid([0.; 3], [1.; 3]), |_| eps),
+                    &Options::default()
+                ),
+                Err(HlrError::Invalid("face bound"))
+            ),
+            "{eps}"
+        );
+    }
 }
 
 #[test]
@@ -5004,6 +5161,7 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
             },
             acc: CurveAccuracy::Analytic,
             own: Vec::new(),
+            bound: 0.,
             own_eps: 1e-6,
             samples: vec![(range[0], screen(range[0])), (range[1], screen(range[1]))],
             sags: vec![sag],
@@ -5309,6 +5467,7 @@ fn a_faces_chart_is_where_its_form_lies_on_its_label() {
         nurbs: Some(form.clone()),
         domain,
         loops: Vec::new(),
+        bound: 0.,
     };
     let s = S3::of_face(&face).unwrap();
     let [angle, tube] = s.domain();
@@ -5341,6 +5500,7 @@ fn a_faces_chart_is_where_its_form_lies_on_its_label() {
         nurbs: Some(form),
         domain,
         loops: Vec::new(),
+        bound: 0.,
     })
     .unwrap();
     assert_eq!(s.periods()[0], Some(std::f64::consts::TAU));
@@ -5396,6 +5556,7 @@ fn a_form_turned_against_its_label_keeps_the_face_on_the_loops_side() {
         }),
         domain: [domain[1], domain[0]],
         loops: vec![backward.clone()],
+        bound: 0.,
     };
     assert_eq!(
         form_turns(&turned.surface, turned.nurbs.as_ref(), turned.domain),
@@ -5412,6 +5573,7 @@ fn a_form_turned_against_its_label_keeps_the_face_on_the_loops_side() {
         nurbs: Some(form),
         domain,
         loops: vec![backward],
+        bound: 0.,
     };
     assert_eq!(
         form_turns(&plain.surface, plain.nurbs.as_ref(), plain.domain),
@@ -5462,6 +5624,7 @@ fn a_sphere_with_an_inner_hole_loop_keeps_its_interior_and_outlines() {
         nurbs: Some(form),
         domain,
         loops: vec![hole_loop],
+        bound: 0.,
     };
     let trimmed = trim::build(&holed_sphere, &curves, &chart, 64);
     assert!(trimmed.unsupported.is_none());
@@ -6187,6 +6350,7 @@ fn first_edge_track(def: &Prepared) -> Track<'_> {
         },
         acc: e.acc,
         own: e.faces.clone(),
+        bound: 0.,
         own_eps: 1e-6,
         samples: Vec::new(),
         sags: Vec::new(),
@@ -6370,6 +6534,7 @@ fn a_ball_corner_is_its_labels_sphere_and_needs_its_form() {
         nurbs: None,
         domain: [[0., 1.], [0., 1.]],
         loops: Vec::new(),
+        bound: 0.,
     };
     // The sphere is the label's, as it is.
     let sphere = surface::ball_sphere(&face([1., 2., 3.], 2.));
@@ -6406,6 +6571,7 @@ fn a_ball_corner_is_its_labels_sphere_and_needs_its_form() {
         nurbs: None,
         domain: [[0., 1.], [0., 1.]],
         loops: Vec::new(),
+        bound: 0.,
     };
     assert!(matches!(surface::ball_sphere(&plane), Ok(None)));
 }
