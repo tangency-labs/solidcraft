@@ -49,9 +49,9 @@
 //! wall the surface ruled between its ends. A draft whose height leans off the profile's
 //! plane (a normal near Z that `CreateTaperExtrude` snapped to Z) takes its sections in
 //! planes parallel to the profile's, each line offset by its offset's part in the plane
-//! (#2497; the fork reads the plane's normal as the height's, and refuses the draft). With
-//! `keep_exact_pcurves` (WR-722) an arc's wall on its cone covers just its face, so the
-//! B-rep's shrink keeps its exact pcurves. Every seam and pcurve is checked. With the tangent rule a
+//! (#2497; the fork reads the plane's normal as the height's, and refuses the draft). An
+//! arc's wall on its cone covers just its face (WR-722), so the B-rep's shrink keeps its
+//! exact pcurves. Every seam and pcurve is checked. With the tangent rule a
 //! corner that opens a gap continues an arc's end along its tangent line (a flat
 //! piece with no edge on the profile); a line's wall continues as itself.
 //!
@@ -847,20 +847,19 @@ fn on_cone(w: &Wall, h: Vec3) -> bool {
     w.arc && (h - along * w.axis).length() <= EFF_ZERO * (1.0 + along.abs())
 }
 
-/// The angles an arc's wall on its cone covers with `keep_exact_pcurves` (WR-722): just
-/// its face, from the least angle of its seams to the greatest ([`seam_angles`]; the
-/// face's bottom and top arcs run between the seams' ends), so `SmBrep::ShrinkGeometry`
-/// finds the face's domain its surface's and keeps its exact pcurves. The reach padded
-/// past the seams leaves the face short of its surface, which `ShrinkGeometry` trims,
-/// removing every trim curve to project the edges again (#2497). `None` otherwise.
+/// The angles an arc's wall on its cone covers (WR-722): just its face, from the least
+/// angle of its seams to the greatest ([`seam_angles`]; the face's bottom and top arcs
+/// run between the seams' ends), so `SmBrep::ShrinkGeometry` finds the face's domain its
+/// surface's and keeps its exact pcurves. The reach padded past the seams leaves the face
+/// short of its surface, which `ShrinkGeometry` trims, removing every trim curve to
+/// project the edges again (#2497). `None` for any other wall.
 fn cone_face_angles<'s>(
-    k: &Kernel,
     w: &Wall,
     seams: impl IntoIterator<Item = (&'s Seam, f64)>,
     n: Vec3,
     h: Vec3,
 ) -> Option<(f64, f64)> {
-    if !k.fixes.keep_exact_pcurves || !on_cone(w, h) {
+    if !on_cone(w, h) {
         return None;
     }
     let mut lo = f64::INFINITY;
@@ -2027,8 +2026,7 @@ fn walls_closing_at_apexes(
             .iter()
             .map(|seam| (seam, ref0))
             .chain(at_ref(&ends, i)?.iter().map(|seam| (seam, ref1)));
-        (w.lo, w.hi) =
-            cone_face_angles(a.kernel(kernel_brep)?, w, chains, n, h).unwrap_or((lo0, hi1));
+        (w.lo, w.hi) = cone_face_angles(w, chains, n, h).unwrap_or((lo0, hi1));
         w.breaks.clear();
         // an arc's wall on its cone: the cone's own equal spans (its seams' pcurves are cut
         // where they cross from one to the next) (the fork's tangency-labs/smlib@3ae7bfa)
