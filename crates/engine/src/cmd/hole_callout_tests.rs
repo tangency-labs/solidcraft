@@ -636,8 +636,10 @@ fn a_later_edit_that_widens_or_narrows_a_holes_wall_reads_failed() {
         run(&mut s, "solid.hole", p);
     }
     // Each wall moved 0.5 one way or the other (a hole's wall faces into the hole): it keeps its
-    // faces' names, but no longer is Ø5.
-    for (x, distance) in [(12.5, 0.5), (25.5, -0.5), (38.5, 0.5), (51.5, -0.5)] {
+    // faces' names, but no longer is Ø5. ThruB's widen goes first: after any other wall's offset the
+    // kernel refuses it ("the wall is too thick: it leaves no room inside the body"), though the
+    // walls stay 8 mm apart (tangency-labs/solidcore#3449).
+    for (x, distance) in [(51.5, -0.5), (12.5, 0.5), (25.5, -0.5), (38.5, 0.5)] {
         run(&mut s, "solid.offset_face", json!({"faces": [[x, 15, 6]], "body": "Plate", "distance": distance}));
     }
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
