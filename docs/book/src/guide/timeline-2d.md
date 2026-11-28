@@ -16,8 +16,10 @@ in the timeline itself:
 1. **The chevron**: At the right end of the timeline's header, a chevron points up in the 1D strip.
    Click it to raise the row to the 2D Timeline's standard height; the chevron then points down, and a
    click lowers the row back to the strip.
-2. **Dragging the top edge**: Drag the timeline's top edge up. Heights between the strip and the
-   2D Timeline's smallest height are skipped: the row snaps to the nearer side.
+2. **Dragging the top edge**: Drag the timeline's top edge up or down. The 2D Timeline is at least
+   two rows high. Heights between the strip and those two rows are skipped, and the row keeps the
+   view it has until you drag well past the middle of that gap. While a release would switch, the
+   preview names the switch, "Show 1D Timeline" or "Show 2D Timeline".
 3. **Control channel or agent tools**: Set `timeline_2d` through the control channel. The first
    request on a connection also needs a `"token"` parameter:
    ```json

@@ -1330,6 +1330,11 @@ fn registry() -> PanelResult<PanelRegistry> {
                 &PanelKind::new(product.kind())?,
                 vec![(bottom_height, bottom_height), (MIN_DOCK_HEIGHT + chrome_2d, MAX_LOGICAL)],
             )?;
+            // A drag across that deadzone runs the view icon's switch, and its preview says so.
+            registry.set_bottom_height_actions(
+                &PanelKind::new(product.kind())?,
+                vec![ControlId(TIMELINE_COLLAPSE.into()), ControlId(TIMELINE_EXPAND.into())],
+            )?;
         }
     }
     Ok(registry)

@@ -572,12 +572,16 @@ pub fn bottom_resize_height(layout: &Layout, registry: &PanelRegistry, env: &All
             [(lo, hi.min(env.inline_max_height)), (lo.max(expanded_min), hi)]
         })
         .collect();
+    // Hysteresis across a deadzone: the range the row is in wins until the request is three times nearer another.
+    let current =
+        layout.sections.iter().find(|section| section.location.zone() == Zone::Bottom && presented(section, env).is_some()).map(|s| s.size.height);
     let mut proposed = layout.clone();
-    let mut best: Option<f32> = None;
+    let mut best: Option<(f32, f64)> = None;
     for (mut low, mut high) in regions {
         if low > high {
             continue;
         }
+        let weight = if current.is_some_and(|height| low - 0.5 <= height && height <= high + 0.5) { 1.0 / 3.0 } else { 1.0 };
         let probe = requested.clamp(low, high);
         for section in &mut proposed.sections {
             if section.location.zone() == Zone::Bottom {
@@ -606,11 +610,12 @@ pub fn bottom_resize_height(layout: &Layout, registry: &PanelRegistry, env: &All
             continue;
         }
         let next = requested.clamp(low, high);
-        if best.is_none_or(|old| (f64::from(next) - f64::from(requested)).abs() < (f64::from(old) - f64::from(requested)).abs()) {
-            best = Some(next);
+        let distance = (f64::from(next) - f64::from(requested)).abs() * weight;
+        if best.is_none_or(|(_, old)| distance < old) {
+            best = Some((next, distance));
         }
     }
-    best.ok_or_else(|| error(Rule::IncompatibleTabs, "Bottom row has no feasible proposed thickness"))
+    best.map(|(height, _)| height).ok_or_else(|| error(Rule::IncompatibleTabs, "Bottom row has no feasible proposed thickness"))
 }
 
 /// Authoritative allocation for committed presentation and every proposal.

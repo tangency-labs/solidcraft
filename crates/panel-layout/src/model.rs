@@ -271,6 +271,7 @@ pub struct PanelRegistry {
     specs: BTreeMap<PanelKind, PanelSpec>,
     side_widths: BTreeMap<PanelKind, Vec<(f32, f32)>>,
     bottom_heights: BTreeMap<PanelKind, Vec<(f32, f32)>>,
+    bottom_height_actions: BTreeMap<PanelKind, Vec<ControlId>>,
 }
 
 impl PanelRegistry {
@@ -346,6 +347,19 @@ impl PanelRegistry {
             return Err(error(Rule::Bounds, "invalid bottom height intervals"));
         }
         self.bottom_heights.insert(kind.clone(), ranges);
+        Ok(())
+    }
+
+    /// Name, for each of the kind's Bottom height intervals ([`Self::set_bottom_heights`]), the header
+    /// action that brings the panel into it. A resize preview that lands in another interval shows
+    /// that action's label, so a drag across a gap says what its release does.
+    pub fn set_bottom_height_actions(&mut self, kind: &PanelKind, actions: Vec<ControlId>) -> PanelResult<()> {
+        let spec = self.get(kind)?;
+        let ranges = self.bottom_heights.get(kind).map_or(0, Vec::len);
+        if actions.len() != ranges || actions.iter().any(|id| !spec.header_actions.iter().any(|action| action.id == *id)) {
+            return Err(error(Rule::Bounds, "invalid bottom height actions"));
+        }
+        self.bottom_height_actions.insert(kind.clone(), actions);
         Ok(())
     }
 
@@ -1104,6 +1118,30 @@ pub fn bottom_height_ranges(layout: &Layout, registry: &PanelRegistry, shown: im
         }
     }
     Ok(ranges)
+}
+
+/// The header action a Bottom resize of `section` to `height` amounts to: set when the height lies in
+/// another of a tab's declared intervals than the section's current height
+/// ([`PanelRegistry::set_bottom_height_actions`]).
+pub fn bottom_range_action(
+    layout: &Layout,
+    registry: &PanelRegistry,
+    section: &SectionId,
+    height: f32,
+) -> PanelResult<Option<(InstanceId, ControlId)>> {
+    let section = layout.section(section)?;
+    if section.location.zone() != Zone::Bottom {
+        return Ok(None);
+    }
+    for id in &section.tabs {
+        let kind = &layout.instance(id)?.kind;
+        let (Some(ranges), Some(actions)) = (registry.bottom_heights.get(kind), registry.bottom_height_actions.get(kind)) else { continue };
+        let index = |h: f32| ranges.iter().position(|&(lo, hi)| lo - 0.5 <= h && h <= hi + 0.5);
+        if let Some(to) = index(height).filter(|to| Some(*to) != index(section.size.height)) {
+            return Ok(actions.get(to).map(|action| (id.clone(), action.clone())));
+        }
+    }
+    Ok(None)
 }
 
 /// Project onto the admitted heights; equal distances select the smaller height.
