@@ -2097,3 +2097,32 @@ fn undo_on_another_key_takes_back_a_handle_drag() {
     assert_eq!(taper(&h).as_deref(), Some("0 deg"));
     assert_eq!(h.app.session.undo.len(), depth);
 }
+
+/// #16088: other feature edit dialogs can rename their feature without
+/// passing a UI-only field to its geometry command.
+#[test]
+fn editing_a_revolve_can_rename_it_with_the_edit() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[2,0],"p1":[4,3]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.revolve", json!({"sketch":"Base","axis":"Y","angle":"360 deg","name":"Turned"})).unwrap();
+    let id = feature_id(&h, "Turned");
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert!(crate::scenario::handle_at("dialog:Name").is_some());
+    let d = h.app.dialog.as_mut().unwrap();
+    assert_eq!(d.extra.get("feature_edit_name"), Some(&json!("Turned")));
+    d.extra.insert("feature_edit_name".into(), json!("Base"));
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err().contains("another feature"));
+    h.app.dialog.as_mut().unwrap().extra.insert("feature_edit_name".into(), json!("  Collar "));
+    let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds.last().unwrap().0, "timeline.rename");
+    assert_eq!(cmds.last().unwrap().1["name"], "Collar");
+    assert!(cmds[0].1["params"].get("feature_edit_name").is_none());
+    h.frames(3);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!(h.app.session.doc.find_feature("Collar").is_some());
+    assert!(h.app.session.doc.find_feature("Turned").is_none());
+}

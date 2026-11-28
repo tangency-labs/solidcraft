@@ -1039,6 +1039,16 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         }
         _ => enter |= additional_rows(app, d, ui),
     }
+    if d.editing.is_some()
+        && !matches!(d.kind, Kind::Extrude { .. })
+        && let Some(name) = d.extra.get("feature_edit_name").and_then(Value::as_str)
+    {
+        let mut name = name.to_string();
+        form_row(ui, "Name", |ui| {
+            enter |= ui_kit::text_field(ui, &mut name, "").0;
+        });
+        d.extra.insert("feature_edit_name".into(), json!(name));
+    }
     enter |= body_name_row(d, ui);
     error_rows(app, ctx, d, ui);
     enter
