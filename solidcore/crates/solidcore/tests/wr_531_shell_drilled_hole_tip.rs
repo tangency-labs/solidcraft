@@ -14,6 +14,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -35,7 +36,7 @@ use solidcore::{Brep, Kernel};
 /// tip a 118 degree cone.
 fn drilled_box(k: &mut Kernel) -> Brep {
     let (r, top, depth) = (3.0, 20.0, 10.0);
-    let tip = r / 59.0_f64.to_radians().tan();
+    let tip = r / det::tan(59.0_f64.to_radians());
     let bottom = top - depth;
     let at = |x: f64, z: f64| Point3::new(20.0 + x, 20.0, z);
     let profile = [
@@ -64,7 +65,7 @@ fn drilled_box(k: &mut Kernel) -> Brep {
 
 /// The hole's tip (the cone's apex): the swept profile's end on the axis, exact.
 fn tip() -> Point3 {
-    Point3::new(20.0, 20.0, 10.0 - 3.0 / 59.0_f64.to_radians().tan())
+    Point3::new(20.0, 20.0, 10.0 - 3.0 / det::tan(59.0_f64.to_radians()))
 }
 
 /// The drilled box's vertex at the hole's tip (its one vertex with a single edge):

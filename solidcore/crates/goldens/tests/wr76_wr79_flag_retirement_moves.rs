@@ -110,6 +110,7 @@ use std::collections::BTreeMap;
 use goldens::case::repo_root;
 use goldens::{golden, registry, CaseContext, Output};
 use serde_json::Value;
+use solidcore::math::det;
 use solidcore::nurbs::math::gamma;
 
 /// The moved rows (see the module docs).
@@ -915,7 +916,7 @@ struct Circle {
 fn reference_circle(c: &Spline) -> Circle {
     let p = c.points()[0];
     Circle {
-        r: p[0].hypot(p[1]),
+        r: det::hypot(p[0], p[1]),
         z0: p[2],
     }
 }
@@ -1010,7 +1011,7 @@ fn unwrapped(pts: &[P3], start: f64) -> Vec<f64> {
     let mut out = Vec::with_capacity(pts.len());
     let mut prev = start;
     for p in pts {
-        let a = p[1].atan2(p[0]);
+        let a = det::atan2(p[1], p[0]);
         let k = ((prev - a) / std::f64::consts::TAU).round();
         let a = a + k * std::f64::consts::TAU;
         assert!(
@@ -1135,7 +1136,7 @@ fn check_offset(inputs: &Value, old: &Output, new: &Output) -> String {
         "the new end is {gap:.3e} from every earlier curve's start (tol {tol:.3e})"
     );
     let all = (f64::NEG_INFINITY, f64::INFINITY);
-    let start = op[0][1].atan2(op[0][0]);
+    let start = det::atan2(op[0][1], op[0][0]);
     let (old_all, a0, a1) = circle_bound(&oc, circle, start, all.0, all.1);
     let (new_all, _, b1) = circle_bound(&nc, circle, start, all.0, all.1);
     let (_, c0, c1) = circle_bound(&c, circle, b1, all.0, all.1);

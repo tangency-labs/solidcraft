@@ -24,6 +24,7 @@
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::approx_tol3d;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::primitive::api_primitives::{create_cylinder_surface, create_sphere};
@@ -104,7 +105,7 @@ fn wr_550_pole_tangent_keeps_the_projection_within_a_tight_tolerance() {
 fn roll_and_turned_ball(turn: f64, delta: f64) -> (Kernel, Extent2d, SurfaceIntersection) {
     let mut k = Kernel::default();
     let mut ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 6.0).unwrap();
-    let (s, c) = turn.sin_cos();
+    let (s, c) = det::sin_cos(turn);
     transform_matrix(
         &mut k,
         &mut ball,

@@ -21,6 +21,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -50,7 +51,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// (perpendicular), in closed form.
 fn removed_area(r: f64, w: f64, h: f64) -> f64 {
     let a = w.min(r);
-    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * (s / r).asin();
+    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * det::asin(s / r);
     let u_h = if h >= r {
         0.0
     } else {
@@ -534,7 +535,8 @@ fn two_rounds_past_two_flats_of_one_plane_build_as_each_alone() {
     // (3, -3). The R5 centre is (5, sqrt(60) - 3), eight from that centre;
     // their contact angle is acos(1/4). Integrating the two circular arcs around
     // the removed section gives 8 sqrt(15) - 9 - 8 acos(1/4) - 9 pi/4.
-    let removed = 8.0 * 15.0_f64.sqrt() - 9.0 - 8.0 * 0.25_f64.acos() - 2.25 * std::f64::consts::PI;
+    let removed =
+        8.0 * 15.0_f64.sqrt() - 9.0 - 8.0 * det::acos(0.25_f64) - 2.25 * std::f64::consts::PI;
     let exact_bar = 1295.0 + 510.0 * 2.0_f64.sqrt() - 90.0 * std::f64::consts::PI;
     assert!((bar_volume - exact_bar).abs() <= CLOSED_REL * exact_bar);
     for single in [v_low, v_high] {

@@ -1,6 +1,7 @@
 //! Non-C++ tests of the `surface.surface_p2` runner's actual pure SMS parser.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/surface_surface_p2_sms.rs"]
 mod sms;
@@ -87,7 +88,7 @@ fn invalid_counts_in_every_header_position() {
 
 #[test]
 fn exclusive_usize_bound_and_larger_counts() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     for value in [upper, upper * 2.] {
         for position in 0..4 {
             let mut header = vec!["0".to_owned(); 5];
@@ -99,7 +100,7 @@ fn exclusive_usize_bound_and_larger_counts() {
 
 #[test]
 fn checked_knot_sums() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     rejected(
         &format!("{half:.0} 0 {half:.0} 0 0"),
         "u knot count overflow",
@@ -112,7 +113,7 @@ fn checked_knot_sums() {
 
 #[test]
 fn checked_net_coordinate_and_total_arithmetic() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     let quarter = half / 2.;
     // Net multiplication, coordinate multiplication, then total including knots.
     for header in [
@@ -126,7 +127,7 @@ fn checked_net_coordinate_and_total_arithmetic() {
 
 #[test]
 fn huge_representable_headers_preflight_without_allocation() {
-    let below_upper = 2.0_f64.powi(usize::BITS as i32) - 4096.;
+    let below_upper = det::powi(2.0_f64, usize::BITS as i32) - 4096.;
     for position in 0..4 {
         let mut header = vec!["0".to_owned(); 5];
         header[position] = "1000000000".to_owned();

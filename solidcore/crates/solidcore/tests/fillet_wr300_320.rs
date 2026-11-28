@@ -17,6 +17,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol::contact_tol_3d;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -174,7 +175,7 @@ fn cube_with_round_hole(k: &mut Kernel) -> (Brep, EdgeId) {
             let p = curve
                 .evaluate_point(k, edge::interval(&b, e).unwrap().evaluate(0.5))
                 .unwrap();
-            (p.z - 10.0).abs() < 1e-9 && ((p.x - 5.0).hypot(p.y - 5.0) - 2.5).abs() < 1e-9
+            (p.z - 10.0).abs() < 1e-9 && (det::hypot(p.x - 5.0, p.y - 5.0) - 2.5).abs() < 1e-9
         })
         .unwrap();
     (b, rim)
@@ -401,7 +402,7 @@ fn circle_edge(k: &Kernel, b: &Brep, z: f64, radius: f64) -> EdgeId {
             let p = curve
                 .evaluate_point(k, edge::interval(b, e).unwrap().evaluate(0.5))
                 .unwrap();
-            (p.z - z).abs() < 1e-9 && (p.x.hypot(p.y) - radius).abs() < 1e-9
+            (p.z - z).abs() < 1e-9 && (det::hypot(p.x, p.y) - radius).abs() < 1e-9
         })
         .unwrap_or_else(|| panic!("no circle of radius {radius} at z {z}"))
 }
@@ -435,7 +436,7 @@ fn hole_through_wall(h: f64, depth: impl Fn(f64) -> f64) -> f64 {
     let n = 2000;
     let (a, b) = (-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
     let step = (b - a) / f64::from(n);
-    let f = |t: f64| 2.0 * h * h * t.cos() * t.cos() * depth(h * t.sin());
+    let f = |t: f64| 2.0 * h * h * det::cos(t) * det::cos(t) * depth(h * det::sin(t));
     let mut sum = f(a) + f(b);
     for i in 1..n {
         let weight = if i % 2 == 1 { 4.0 } else { 2.0 };
@@ -592,7 +593,7 @@ fn holed_cube_removed(size: f64, xsect: u32) -> f64 {
         // `r - sqrt(r^2 - t^2)`
         let r = size;
         let a = (r - 5.0).max(0.0);
-        let f = (a * (r * r - a * a).sqrt() + r * r * (a / r).asin()) / 2.0;
+        let f = (a * (r * r - a * a).sqrt() + r * r * det::asin(a / r)) / 2.0;
         (r * r * (1.0 - std::f64::consts::FRAC_PI_4), r * a - f)
     };
     10.0 * whole + 10.0 * (whole - 2.0 * past)
@@ -645,7 +646,7 @@ fn top_rim(k: &Kernel, b: &Brep) -> EdgeId {
             let c = edge::curve(b, e).unwrap().unwrap();
             let ivl = edge::interval(b, e).unwrap();
             let p = c.evaluate_point(k, ivl.min()).unwrap();
-            (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
+            (p.z - 20.0).abs() < 1e-6 && (det::hypot(p.x, p.y) - 10.0).abs() < 1e-6
         })
         .unwrap()
 }

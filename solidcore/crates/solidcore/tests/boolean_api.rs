@@ -5,6 +5,7 @@
 //! two solids touching at one point, on a seam or off it, also check clean at Level2. A body
 //! cut by an exact copy of itself leaves nothing, with STEP-sized tolerances too.
 #![allow(clippy::unwrap_used)] // test helpers
+use solidcore::math::det;
 
 #[path = "support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -106,7 +107,7 @@ fn operands(k: &mut Kernel, name: &str) -> solidcore::Result<(Brep, Brep, Op)> {
         ),
         // An r=2 sphere touching an r=3 one at latitude 30 of its seam meridian.
         "seam-sphere-sphere" => {
-            let (sin, cos) = (PI / 6.0).sin_cos();
+            let (sin, cos) = det::sin_cos(PI / 6.0);
             (
                 api::create_sphere(k, p(0.0, 0.0, 0.0), 3.0)?,
                 api::create_sphere(k, p(5.0 * cos, 0.0, 5.0 * sin), 2.0)?,
@@ -129,7 +130,7 @@ fn operands(k: &mut Kernel, name: &str) -> solidcore::Result<(Brep, Brep, Op)> {
         // meridian.
         "seam-torus-sphere" => {
             let a = PI / 4.0;
-            let (x, z) = (5.0 + 3.5 * a.cos(), 3.5 * a.sin());
+            let (x, z) = (5.0 + 3.5 * det::cos(a), 3.5 * det::sin(a));
             (
                 api::create_torus(k, p(0.0, 0.0, 0.0), 5.0, 1.5)?,
                 api::create_sphere(k, p(x, 0.0, z), 2.0)?,
@@ -270,7 +271,7 @@ struct PointContact {
 }
 
 fn point_contacts() -> Vec<PointContact> {
-    let sphere = |r: f64| 4.0 / 3.0 * PI * r.powi(3);
+    let sphere = |r: f64| 4.0 / 3.0 * PI * det::powi(r, 3);
     let torus = 2.0 * PI * PI * 5.0 * 1.5 * 1.5;
     let contact = |name, volume, faces| PointContact {
         name,
@@ -532,7 +533,7 @@ fn sphere_box_corner_volume(r: f64, delta: f64, zmin: f64) -> f64 {
         let s2 = (r * r - y * y).max(0.0);
         let s = s2.sqrt();
         let below = if d < s {
-            s2 * (d / s).acos() - d * (s2 - d * d).sqrt()
+            s2 * det::acos(d / s) - d * (s2 - d * d).sqrt()
         } else {
             0.0
         };
@@ -562,7 +563,7 @@ fn sphere_box_corner_volume(r: f64, delta: f64, zmin: f64) -> f64 {
 #[test]
 fn sphere_box_edge_cutting_a_shallow_cap() {
     let r: f64 = 3e-4;
-    let sphere = 4.0 / 3.0 * PI * r.powi(3);
+    let sphere = 4.0 / 3.0 * PI * det::powi(r, 3);
     let mut failures = Vec::new();
     for (delta, cap) in [(5e-5, 1.5e-5), (6e-5, 1.2e-5)] {
         let zmin = -r + cap;
@@ -696,7 +697,7 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
 #[test]
 fn sphere_box_edge_crossings_farther_apart_than_tolerance_are_two_vertices() {
     let r: f64 = 3e-4;
-    let sphere = 4.0 / 3.0 * PI * r.powi(3);
+    let sphere = 4.0 / 3.0 * PI * det::powi(r, 3);
     let mut failures = Vec::new();
     for (delta, cap) in [
         (6e-5, 1.6e-5),
@@ -713,7 +714,7 @@ fn sphere_box_edge_crossings_farther_apart_than_tolerance_are_two_vertices() {
         let block = size[0] * size[1] * size[2];
         let common = sphere_box_corner_volume(r, delta, -(r - cap));
         // the half chord of the box edge in the sphere: the crossings are twice it apart
-        let apart = 2.0 * (r * r - (r - cap).powi(2) - delta * delta).sqrt();
+        let apart = 2.0 * (r * r - det::powi(r - cap, 2) - delta * delta).sqrt();
         assert!(
             apart > 1.3e-4 && apart < 1.8e-4,
             "crossings {apart:e} apart"
@@ -801,7 +802,7 @@ fn disc_rect_area(rho: f64, c: [f64; 2], x: [f64; 2], y: [f64; 2]) -> f64 {
     // the integral of s from the centre to x
     let half_disc = |x: f64| {
         let t = ((x - c[0]) / rho).clamp(-1.0, 1.0);
-        0.5 * rho * rho * (t.asin() + t * (1.0 - t * t).sqrt())
+        0.5 * rho * rho * (det::asin(t) + t * (1.0 - t * t).sqrt())
     };
     let mut cuts = vec![a, b];
     for h in [y[1] - c[1], c[1] - y[0]] {
@@ -817,7 +818,7 @@ fn disc_rect_area(rho: f64, c: [f64; 2], x: [f64; 2], y: [f64; 2]) -> f64 {
             continue;
         };
         let m = 0.5 * (u + v);
-        let s = (rho * rho - (m - c[0]).powi(2)).max(0.0).sqrt();
+        let s = (rho * rho - det::powi(m - c[0], 2)).max(0.0).sqrt();
         if (c[1] + s).min(y[1]) - (c[1] - s).max(y[0]) <= 0.0 {
             continue;
         }
@@ -850,7 +851,7 @@ fn sphere_box_volume(c: [f64; 3], r: f64, o: [f64; 3], d: [f64; 3]) -> f64 {
     (0..n)
         .map(|i| {
             let z = z0 + (f64::from(i) + 0.5) * h;
-            let rho = (r * r - (z - c[2]).powi(2)).max(0.0).sqrt();
+            let rho = (r * r - det::powi(z - c[2], 2)).max(0.0).sqrt();
             disc_rect_area(rho, [c[0], c[1]], [o[0], o[0] + d[0]], [o[1], o[1] + d[1]])
         })
         .sum::<f64>()
@@ -888,7 +889,7 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
         0.001_441_225_834_284_898_7,
         0.000_394_815_843_801_023_2,
     ];
-    let sphere = 4.0 / 3.0 * PI * r.abs().powi(3);
+    let sphere = 4.0 / 3.0 * PI * det::powi(r.abs(), 3);
     let block = d[0] * d[1] * d[2];
     let common = sphere_box_volume(c, r.abs(), o, d);
     assert!((common - 5.424_275_463e-11).abs() < 1e-19, "{common:e}");
@@ -1152,7 +1153,7 @@ fn a_tiny_sphere_and_a_box_edge_grazing_it_across_its_seam_give_valid_solids() {
         0.000_535_188_654_593_634_2,
         0.000_719_601_710_449_030_5,
     ];
-    let sphere = 4.0 / 3.0 * PI * r.powi(3);
+    let sphere = 4.0 / 3.0 * PI * det::powi(r, 3);
     let block = d[0] * d[1] * d[2];
     let common = sphere_box_volume(c, r, o, d);
     // the lens between the side face's circle and the box edge
@@ -1436,15 +1437,15 @@ fn an_arc_bowing_past_a_coplanar_box_face_keeps_its_segment() {
     for b in [4e-5, 1e-3] {
         let mut k = Kernel::default();
         let r = 5.0_f64;
-        let alpha = (1.0 - b / r).acos();
-        let centre = (10.0 - r + b, 10.0 + r * alpha.sin());
+        let alpha = det::acos(1.0 - b / r);
+        let centre = (10.0 - r + b, 10.0 + r * det::sin(alpha));
         let end_deg = 36.0_f64;
         let top = (
-            centre.0 + r * end_deg.to_radians().cos(),
-            centre.1 + r * end_deg.to_radians().sin(),
+            centre.0 + r * det::cos(end_deg.to_radians()),
+            centre.1 + r * det::sin(end_deg.to_radians()),
         );
         let brep = arc_graze_union(&mut k, centre, r, -alpha.to_degrees(), end_deg, top).unwrap();
-        let segment = 0.5 * r * r * (2.0 * alpha - (2.0 * alpha).sin());
+        let segment = 0.5 * r * r * (2.0 * alpha - det::sin(2.0 * alpha));
         let want = 10.0 * (5.0 * top.1 + 125.0 + segment);
         // (the segment adds 1.07e-5 at b = 4e-5 and 1.33e-3 at 1e-3; the slack, 1.9e-6, is
         // below both)
@@ -1497,9 +1498,9 @@ fn relating_coincident_edges_needs_their_curves_within_tolerance() {
     for (dent, want) in [(1e-7, 1), (4e-5, 0), (1e-3, 0)] {
         let mut k = Kernel::default();
         let r = 5.0_f64;
-        let alpha = (1.0 - dent / r).acos();
-        let (cx, cy) = (10.0 - dent + r, 10.0 + r * alpha.sin());
-        let y2 = 10.0 + 2.0 * r * alpha.sin();
+        let alpha = det::acos(1.0 - dent / r);
+        let (cx, cy) = (10.0 - dent + r, 10.0 + r * det::sin(alpha));
+        let y2 = 10.0 + 2.0 * r * det::sin(alpha);
         let deg = alpha.to_degrees();
         let arc =
             Curve::from(curves::create_arc(p(cx, cy, 0.0), r, 180.0 - deg, 180.0 + deg).unwrap());
@@ -1601,7 +1602,8 @@ fn a_boss_a_hair_past_a_cylinders_rim_joins() {
 fn a_boss_a_hair_past_a_cut_balls_rim_joins() {
     let (big, cut, r, h) = (25.0_f64, 15.0_f64, 2.4_f64, 4.8_f64);
     let c = big - cut;
-    let want = 4.0 / 3.0 * PI * big.powi(3) - PI * c * c * (3.0 * big - c) / 3.0 + PI * r * r * h;
+    let want =
+        4.0 / 3.0 * PI * det::powi(big, 3) - PI * c * c * (3.0 * big - c) / 3.0 + PI * r * r * h;
     let kernel = |zone: f64| Kernel {
         fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::new(&solidcore::KernelOptions {
@@ -1642,8 +1644,8 @@ fn an_arc_tangent_to_a_coplanar_box_face_joins() {
     let mut k = Kernel::default();
     let theta = 36.0_f64;
     let (px, py) = (
-        5.0 + 5.0 * theta.to_radians().cos(),
-        10.0 + 5.0 * theta.to_radians().sin(),
+        5.0 + 5.0 * det::cos(theta.to_radians()),
+        10.0 + 5.0 * det::sin(theta.to_radians()),
     );
     let brep = arc_graze_union(&mut k, (5.0, 10.0), 5.0, 0.0, theta, (px, py)).unwrap();
     assert_closed_with_volume(&mut k, brep, 10.0 * (5.0 * py + 125.0), 1e-6 * 2000.0);
@@ -1792,7 +1794,8 @@ fn a_nearly_axial_bore_through_a_cylinder_with_step_tolerances() {
         key_of: &key_of,
     };
     let volume = brep_volume(&k, &mut result, 1e-9, &attrs).unwrap();
-    let expected = PI * 11.0 * (3.75_f64.powi(2) - 2.4_f64.powi(2) / 1e-5_f64.cos());
+    let expected =
+        PI * 11.0 * (det::powi(3.75_f64, 2) - det::powi(2.4_f64, 2) / det::cos(1e-5_f64));
     assert!(
         (volume - expected).abs() / expected < VOLUME_REL_TOL,
         "volume {volume} vs {expected}"
@@ -1846,7 +1849,7 @@ fn a_pocket_tangent_to_a_bore_just_past_its_axis_cuts() {
     // the pocket takes its box less the bore's part of it, the circle below the chord `h`
     // above its centre
     let h = top - cy;
-    let below = PI * r * r / 2.0 + h * (r * r - h * h).sqrt() + r * r * (h / r).asin();
+    let below = PI * r * r / 2.0 + h * (r * r - h * h).sqrt() + r * r * det::asin(h / r);
     let pocket_material = ((x1 - x0) * (top - bottom) - below) * 2.0;
     let want = 36.0 * height * length - PI * r * r * length - pocket_material;
     let got = volume_of(&k, &mut result);
@@ -1934,7 +1937,7 @@ fn counts(b: &Brep) -> [usize; 3] {
 fn unit_sphere_half_space_slab(delta: f64, hz: f64) -> f64 {
     let segment = |z: f64| {
         let rho = (1.0 - z * z).sqrt();
-        rho * rho * (delta / rho).acos() - delta * (rho * rho - delta * delta).sqrt()
+        rho * rho * det::acos(delta / rho) - delta * (rho * rho - delta * delta).sqrt()
     };
     let n = 20_000_u32;
     let h = 2.0 * hz / f64::from(n);
@@ -2189,8 +2192,8 @@ fn a_cone_lying_on_a_face_along_a_generator_touches_it_along_that_line() {
             (4.0, 2.0, 6.0, 0.0),
             (4.0, 2.0, 6.0, 137.0),
         ] {
-            let l = ((small - big).powi(2) + h * h).sqrt();
-            let (c, s) = (turn.to_radians().cos(), turn.to_radians().sin());
+            let l = (det::powi(small - big, 2) + h * h).sqrt();
+            let (c, s) = (det::cos(turn.to_radians()), det::sin(turn.to_radians()));
             // the radial direction at the turn goes to e, the tangent there to y
             let e = Vec3::new((small - big) / l, 0.0, -h / l);
             let place = Axis2Placement::new(
@@ -2308,7 +2311,7 @@ fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
                 .lines();
             assert!(lines.is_empty(), "{case}: {lines:?}");
             let e: f64 = 1.0 - d;
-            let s = e.acos() - e * (1.0 - e * e).sqrt();
+            let s = det::acos(e) - e * (1.0 - e * e).sqrt();
             let want = PI + 1.0 - s;
             let v = volume_of(&k, &mut u);
             assert!(
@@ -2415,7 +2418,7 @@ fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() 
             // [-0.5, 0.5], wider than the cylinder), within 1e-6 relative. That bound is
             // under pi r^2, so a union that dropped the cylinder fails.
             let e: f64 = r - d;
-            let s = r * r * (e / r).acos() - e * (r * r - e * e).sqrt();
+            let s = r * r * det::acos(e / r) - e * (r * r - e * e).sqrt();
             let want = PI * r * r + 1.0 - s;
             assert!(VOLUME_REL_TOL * want < PI * r * r, "r {r}");
             let v = volume_of(&k, &mut u);
@@ -2498,7 +2501,7 @@ fn issue_21104_cylinder_sunk_the_contact_tolerance_on_its_seam_unions_as_tangent
             .lines();
         assert!(lines.is_empty(), "{case}: {lines:?}");
         let e: f64 = r - d;
-        let segment = r * r * (e / r).acos() - e * (r * r - e * e).sqrt();
+        let segment = r * r * det::acos(e / r) - e * (r * r - e * e).sqrt();
         let want = 12000.0 + 1250.0 * PI - 40.0 * segment;
         let v = volume_of(&k, &mut u);
         assert!(

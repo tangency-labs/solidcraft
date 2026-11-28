@@ -40,6 +40,7 @@ use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_area, brep_volume_default};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -239,7 +240,7 @@ fn a_plate_classifies_its_points_the_same_with_its_holes_left_out() {
             let (x, y) = (PITCH * f64::from(i), PITCH * f64::from(j));
             points.push(Point3::new(x, y, 0.0));
             for a in 0..12 {
-                let (s, c) = (f64::from(a) * PI / 6.0 + 0.1).sin_cos();
+                let (s, c) = det::sin_cos(f64::from(a) * PI / 6.0 + 0.1);
                 for d in [0.0, 0.1, -0.1, 1.0, -1.0, 10.0, -10.0] {
                     let r = RADIUS + d * tol;
                     points.push(Point3::new(x + r * c, y + r * s, 0.0));

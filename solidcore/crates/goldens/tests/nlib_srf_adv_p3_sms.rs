@@ -1,6 +1,7 @@
 //! Non-C++ regression tests of the production SMS decoder (not the SMC reader).
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 #[path = "../src/units/fixtures/nlib_srf_adv_p3_sms.rs"]
 mod fixtures;
 
@@ -98,7 +99,7 @@ fn every_prefix_is_truncated() {
 
 #[test]
 fn counts_are_finite_integral_nonnegative_and_exclusively_bounded() {
-    let bound = 2.0_f64.powi(usize::BITS as i32);
+    let bound = det::powi(2.0_f64, usize::BITS as i32);
     for value in [
         "NaN".to_owned(),
         "inf".to_owned(),
@@ -125,7 +126,7 @@ fn ordered_header_errors_and_eager_lexical_errors() {
         assert_eq!(error(text), "fixture.sms: bad count -1");
     }
     let lexical = format!("fixture.sms: {}", "bad-tail".parse::<f64>().unwrap_err());
-    let huge = 2.0_f64.powi((usize::BITS - 1) as i32);
+    let huge = det::powi(2.0_f64, (usize::BITS - 1) as i32);
     for text in [
         "-1 bad-tail".to_owned(),
         "0 bad-tail".to_owned(),
@@ -138,13 +139,13 @@ fn ordered_header_errors_and_eager_lexical_errors() {
 
 #[test]
 fn huge_headers_and_checked_arithmetic_before_geometry_growth() {
-    let huge = 2.0_f64.powi((usize::BITS - 4) as i32);
+    let huge = det::powi(2.0_f64, (usize::BITS - 4) as i32);
     for slot in 0..4 {
         let mut header = vec!["0".to_owned(); 5];
         header[slot] = format!("{huge:.0}");
         assert_eq!(error(&header.join(" ")), "fixture.sms: truncated");
     }
-    let half = 2.0_f64.powi((usize::BITS - 1) as i32);
+    let half = det::powi(2.0_f64, (usize::BITS - 1) as i32);
     // n+p / m+q, rows*cols, points*stride, payload additions.
     for header in [
         format!("{half:.0} 0 {half:.0} 0 0"),
@@ -155,7 +156,7 @@ fn huge_headers_and_checked_arithmetic_before_geometry_growth() {
     ] {
         assert_eq!(error(&header), "fixture.sms: count overflow", "{header}");
     }
-    let exclusive = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32);
     let largest = if usize::BITS <= 53 {
         usize::MAX as f64
     } else {

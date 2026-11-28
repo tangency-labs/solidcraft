@@ -13,6 +13,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -169,7 +170,7 @@ fn rim(b: &Brep, radius: f64, z: f64) -> EdgeId {
             }
             let v = edge::start_vertex(b, e).unwrap().unwrap();
             let p = vertex::point(b, v).unwrap();
-            (p.z - z).abs() < 1e-6 && (p.x.hypot(p.y) - radius).abs() < 1e-6
+            (p.z - z).abs() < 1e-6 && (det::hypot(p.x, p.y) - radius).abs() < 1e-6
         })
         .collect();
     let [edge] = rims.as_slice() else {
@@ -239,6 +240,6 @@ fn ring_fillet_is_removed_beside_a_toroidal_seam() {
     let mut half = boolean_intersection(&mut k, torus, clip).unwrap();
 
     // The upper half takes half the tube's area around a circle of radius 6.
-    let expected = 24.0 * std::f64::consts::PI.powi(2);
+    let expected = 24.0 * det::powi(std::f64::consts::PI, 2);
     round_and_restore_rim(&mut k, &mut half, 8.0, 0.0, 0.5, expected);
 }

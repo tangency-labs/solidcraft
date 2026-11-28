@@ -18,6 +18,7 @@
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p1;
@@ -41,7 +42,7 @@ fn strip_cubes(k: &mut Kernel, d: f64) -> (Brep, Brep) {
     let a = create_box(k, Point3::new(-2.0, 16.0, 0.0), SIDE, SIDE, SIDE).unwrap();
     let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), SIDE, SIDE, SIDE).unwrap();
     let o = Point3::new(0.0, 0.0, 0.0);
-    let deg = SLOPE.atan().to_degrees();
+    let deg = det::atan(SLOPE).to_degrees();
     api_rotate(
         k,
         Some(TransformObject::Brep(&mut b)),

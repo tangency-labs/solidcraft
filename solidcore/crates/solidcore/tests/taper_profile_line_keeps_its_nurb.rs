@@ -24,6 +24,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::sweep::api_brep::create_draft_sweep;
@@ -74,7 +75,7 @@ fn square(lines: [bool; 4]) -> Vec<Curve> {
 
 /// The inset of the top per side.
 fn inset(angle: f64) -> f64 {
-    HEIGHT * angle.to_radians().tan()
+    HEIGHT * det::tan(angle.to_radians())
 }
 
 fn square_frustum(angle: f64) -> f64 {

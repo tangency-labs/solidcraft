@@ -17,6 +17,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::p1::BSplineCurveForm;
 use solidcore::primitive::api_curves::{create_canonical_curve, CanonicalCurveParams};
@@ -92,7 +93,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// The box (-14, 0, -14)-(14, 20, 14) less the disc y >= 50 - sqrt(1600 - x^2), over
 /// its 28 of z: 28 * 20 * 28 - 28 * (integral of sqrt(1600 - x^2) - 30 over -14..14).
 fn closed_form() -> f64 {
-    let circle = 14.0 * 1404.0_f64.sqrt() + 1600.0 * 0.35_f64.asin();
+    let circle = 14.0 * 1404.0_f64.sqrt() + 1600.0 * det::asin(0.35_f64);
     28.0 * 20.0 * 28.0 - 28.0 * (circle - 30.0 * 28.0)
 }
 

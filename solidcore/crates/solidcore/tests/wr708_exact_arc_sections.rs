@@ -31,6 +31,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives::create_box;
@@ -245,7 +246,7 @@ fn variable_round_end_sections_off_their_circles(k: &mut Kernel) -> f64 {
             for q in &points {
                 let h = (*q - centre).dot(n);
                 let rho = (*q - centre - n * h).length();
-                off = off.max(h.hypot(rho - radius));
+                off = off.max(det::hypot(h, rho - radius));
             }
         }
     }

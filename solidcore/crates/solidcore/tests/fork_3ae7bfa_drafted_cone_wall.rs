@@ -43,6 +43,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::query::api_queries::{get_edges, get_faces};
@@ -59,7 +60,7 @@ use solidcore::{Brep, Kernel};
 const PI: f64 = core::f64::consts::PI;
 
 fn tan5() -> f64 {
-    5.0_f64.to_radians().tan()
+    det::tan(5.0_f64.to_radians())
 }
 
 fn line(a: Point3, b: Point3) -> Curve {
@@ -167,7 +168,7 @@ fn cone_faces(k: &Kernel, b: &Brep) -> Vec<(f64, f64)> {
                 let u = dom.u_min() + (dom.u_max() - dom.u_min()) * f64::from(i) / 10.0;
                 let v = dom.v_min() + (dom.v_max() - dom.v_min()) * f64::from(j) / 10.0;
                 let q = s.evaluate_point(k, Point2::new(u, v)).unwrap();
-                let rho = (q.x - 40.0).hypot(q.y - 8.0);
+                let rho = det::hypot(q.x - 40.0, q.y - 8.0);
                 worst = worst.max((rho - (8.0 - q.z * tan5())).abs());
             }
         }
@@ -320,7 +321,7 @@ fn grid(k: &Kernel, s: &Surface) -> Vec<Point3> {
 #[test]
 fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     let a = 5.0_f64.to_radians();
-    let e2 = Vec3::new(0.0, a.cos(), a.sin());
+    let e2 = Vec3::new(0.0, det::cos(a), det::sin(a));
     let m = Vec3::X.cross(e2);
     let o = Point3::new(0.0, 0.0, 0.0);
     let mut k = Kernel::default();
@@ -334,7 +335,7 @@ fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     assert_eq!(counts(&b), (4, 6, 4));
     assert!(cone_faces(&k, &b).is_empty());
     let h = Vec3::new(0.0, 0.0, 10.0);
-    let e = 10.0 * tan5() * a.cos();
+    let e = 10.0 * tan5() * det::cos(a);
     let apex = o + (8.0 / e) * h;
     // each face's surface: a cap, the chord's wall or the arc's wall
     let (mut caps, mut chord, mut cone) = (0, 0, 0);
@@ -380,7 +381,7 @@ fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     check(&mut k, &mut b);
     let segment = |f: f64| {
         let (rho, c) = (8.0 - f * e, f * e);
-        rho * rho * (c / rho).acos() - c * (rho * rho - c * c).sqrt()
+        rho * rho * det::acos(c / rho) - c * (rho * rho - c * c).sqrt()
     };
     let want = h.dot(m) * simpson(segment);
     let v = volume(&k, &mut b, 1e-10);
@@ -421,7 +422,7 @@ fn segment_240(deg: f64) -> (Kernel, Brep) {
     let x = Vec3::new(0.0, -1.0, 0.0);
     let at = |deg: f64| {
         let t = deg.to_radians();
-        Point3::new(8.0 * t.cos(), 8.0 * t.sin(), 0.0)
+        Point3::new(8.0 * det::cos(t), 8.0 * det::sin(t), 0.0)
     };
     let cs = [arc(&k, o, 8.0, x, 240.0), line(at(150.0), at(-90.0))];
     let TaperExtrude::Solid(b) = draft(&mut k, &cs, deg) else {
@@ -453,7 +454,7 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
         let (mut k, mut b) = segment_240(deg);
         assert_eq!(counts(&b), (4, 6, 4), "{deg}");
         check(&mut k, &mut b);
-        let tan = deg.to_radians().tan();
+        let tan = det::tan(deg.to_radians());
         let cone = get_faces(&b)
             .unwrap()
             .into_iter()
@@ -480,7 +481,7 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
         );
         let off = grid(&k, s)
             .into_iter()
-            .map(|q| (q.x.hypot(q.y) - (8.0 - q.z * tan)).abs())
+            .map(|q| (det::hypot(q.x, q.y) - (8.0 - q.z * tan)).abs())
             .fold(0.0, f64::max);
         assert!(off < 1e-12, "{deg}: off the cone by {off:e}");
         let gap = cone_pcurve_gap(&k, &b);
@@ -522,7 +523,7 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
             let want = 10.0
                 * simpson(|f| {
                     let (rho, c) = (8.0 - f * e, 4.0 - f * e);
-                    rho * rho * (-c / rho).acos() + c * (rho * rho - c * c).sqrt()
+                    rho * rho * det::acos(-c / rho) + c * (rho * rho - c * c).sqrt()
                 });
             let v = volume(&k, &mut b, 1e-10);
             assert!((v - want).abs() <= 1e-11 * want, "volume {v} want {want}");
@@ -545,19 +546,19 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
 fn a_large_arcs_drafted_wall_keeps_its_seams() {
     let r = 746.6148;
     let half = 17.4_f64.to_radians();
-    let d = r * half.cos();
+    let d = r * det::cos(half);
     let o = Point3::new(0.0, 0.0, 0.0);
     for deg in [15.0_f64, -15.0] {
         let mut k = Kernel::default();
-        let at = |t: f64| Point3::new(r * t.cos(), r * t.sin(), 0.0);
-        let from = Vec3::new(half.cos(), -half.sin(), 0.0);
+        let at = |t: f64| Point3::new(r * det::cos(t), r * det::sin(t), 0.0);
+        let from = Vec3::new(det::cos(half), -det::sin(half), 0.0);
         let cs = [arc(&k, o, r, from, 2.0 * 17.4), line(at(half), at(-half))];
         let TaperExtrude::Solid(mut b) = draft(&mut k, &cs, deg) else {
             panic!("the {deg} degree draft is refused");
         };
         assert_eq!(counts(&b), (4, 6, 4), "{deg}");
         check(&mut k, &mut b);
-        let tan = deg.to_radians().tan();
+        let tan = det::tan(deg.to_radians());
         let cones: Vec<Surface> = get_faces(&b)
             .unwrap()
             .into_iter()
@@ -575,7 +576,7 @@ fn a_large_arcs_drafted_wall_keeps_its_seams() {
         );
         let off = grid(&k, &cones[0])
             .into_iter()
-            .map(|q| (q.x.hypot(q.y) - (r - q.z * tan)).abs())
+            .map(|q| (det::hypot(q.x, q.y) - (r - q.z * tan)).abs())
             .fold(0.0, f64::max);
         assert!(off < 1e-9, "{deg}: off the cone by {off:e}");
         let gap = cone_pcurve_gap(&k, &b);
@@ -599,7 +600,7 @@ fn a_large_arcs_drafted_wall_keeps_its_seams() {
             let off = pts
                 .iter()
                 .map(|q| {
-                    let cone = q.x.hypot(q.y) - (r - q.z * tan);
+                    let cone = det::hypot(q.x, q.y) - (r - q.z * tan);
                     let plane = q.x - (d + q.z * tan);
                     cone.abs().max(plane.abs())
                 })
@@ -611,7 +612,7 @@ fn a_large_arcs_drafted_wall_keeps_its_seams() {
         let want = 10.0
             * simpson(|f| {
                 let (rho, c) = (r - f * e, d + f * e);
-                rho * rho * (c / rho).acos() - c * (rho * rho - c * c).sqrt()
+                rho * rho * det::acos(c / rho) - c * (rho * rho - c * c).sqrt()
             });
         // (measured 1.1e-7 and 1.9e-8 short: the volume is taken over the faces' trims, and two
         // planar faces' pcurves are fits up to 8.8e-6 off their edges; the same segment of
@@ -674,7 +675,7 @@ fn a_horn_drafted_from_its_touching_tip_builds() {
     assert_eq!(cones, 1);
     // the tip keeps its vertex, where the bottom arc, the bottom line and the seam meet
     assert_eq!(edges_at(&b, t), Some(3));
-    let tan = 15.0_f64.to_radians().tan();
+    let tan = det::tan(15.0_f64.to_radians());
     let lean = (t.x - 406.0) / -s.y;
     let area = |f: f64| {
         let e = 10.0 * f * tan;
@@ -685,8 +686,8 @@ fn a_horn_drafted_from_its_touching_tip_builds() {
         let y = -(big * big - w * w).max(0.0).sqrt();
         let x1 = w + lean * (y - s.y);
         let y1 = -(big * big - x1 * x1).max(0.0).sqrt();
-        let g = |y: f64| 0.5 * (y * (big * big - y * y).sqrt() + big * big * (y / big).asin());
-        let strip = w * (y1 - y0) + 0.5 * lean * ((y1 - s.y).powi(2) - (y0 - s.y).powi(2));
+        let g = |y: f64| 0.5 * (y * (big * big - y * y).sqrt() + big * big * det::asin(y / big));
+        let strip = w * (y1 - y0) + 0.5 * lean * (det::powi(y1 - s.y, 2) - det::powi(y0 - s.y, 2));
         strip - (g(y1) - g(y0))
     };
     let want = 10.0 * simpson(|q| 2.0 * q * area(q * q));

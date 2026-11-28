@@ -1,6 +1,7 @@
 //! Non-C++ regression coverage for the runner's actual lazy SMS decoder.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/nlib_srf_nurb_sms.rs"]
 mod sms;
@@ -25,7 +26,7 @@ fn header_at(position: usize, value: &str) -> String {
 
 #[test]
 fn invalid_counts_in_every_position_are_rejected() {
-    let upper = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let upper = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for value in ["-1", "0.5", "NaN", "inf", "-inf", "1e100", &upper] {
         for position in 0..4 {
             assert_rejected(&header_at(position, value), "bad count");
@@ -35,7 +36,7 @@ fn invalid_counts_in_every_position_are_rejected() {
 
 #[test]
 fn huge_representable_counts_with_short_bodies_do_not_allocate() {
-    let huge = 2.0_f64.powi(usize::BITS as i32 - 4).to_string();
+    let huge = det::powi(2.0_f64, usize::BITS as i32 - 4).to_string();
     for position in 0..4 {
         assert_rejected(&header_at(position, &huge), "truncated");
         assert_rejected(
@@ -47,7 +48,7 @@ fn huge_representable_counts_with_short_bodies_do_not_allocate() {
 
 #[test]
 fn largest_f64_count_below_exclusive_limit_is_not_saturated_or_capped() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     let largest = f64::from_bits(upper.to_bits() - 1).floor().to_string();
     // In a degree field this value fits usize and its knot count fits on 64-bit
     // hosts. On 32-bit hosts +2 overflows, but it is still not a bad count.
@@ -65,8 +66,8 @@ fn largest_f64_count_below_exclusive_limit_is_not_saturated_or_capped() {
 
 #[test]
 fn checked_knot_net_coordinate_and_total_arithmetic_rejects_overflow() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
-    let quarter = 2.0_f64.powi(usize::BITS as i32 - 2);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
+    let quarter = det::powi(2.0_f64, usize::BITS as i32 - 2);
     assert_rejected(
         &format!("{half:.0} 0 {half:.0} 0 0"),
         "u knot count overflow",

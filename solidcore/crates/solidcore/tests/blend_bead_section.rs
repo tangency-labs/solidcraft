@@ -31,6 +31,7 @@ use solidcore::error::{ErrorKind, Reason, SolidError};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::create_cylinder;
@@ -81,14 +82,14 @@ fn segment_area(c: f64, h: f64) -> f64 {
         return 0.0;
     }
     let r = (c * c / 4.0 + h * h) / (2.0 * h);
-    let phi = (c / (2.0 * r)).asin();
+    let phi = det::asin(c / (2.0 * r));
     r * r * phi - c / 2.0 * (r - h)
 }
 
 /// The bead's section area for setbacks `d` at the wedge angle `alpha` with sagitta `h`.
 fn section_area(d: f64, alpha: f64, h: f64) -> f64 {
-    let c = 2.0 * d * (alpha / 2.0).sin();
-    let triangle = 0.5 * d * d * alpha.sin();
+    let c = 2.0 * d * det::sin(alpha / 2.0);
+    let triangle = 0.5 * d * d * det::sin(alpha);
     triangle + h.signum() * segment_area(c, h)
 }
 
@@ -96,7 +97,7 @@ fn section_area(d: f64, alpha: f64, h: f64) -> f64 {
 /// `LENGTH` along z: one arm's face runs along +x, the other's along the ray at `alpha` from it,
 /// each arm `ARM` thick on the material's side. The body and a point on the corner's edge.
 fn corner(k: &mut Kernel, alpha: f64) -> (Brep, [f64; 3]) {
-    let (s, c) = alpha.sin_cos();
+    let (s, c) = det::sin_cos(alpha);
     let reach = 40.0;
     // The second face's direction u and the normal n on its material side.
     let u = (c, s);
@@ -312,9 +313,9 @@ fn section_areas_match_the_closed_forms() {
 #[test]
 fn equal_setbacks_bound_both_sides() {
     let b = bead([5.0; 2], FRAC_PI_2, 1.0);
-    let half = 5.0 * (FRAC_PI_2 / 2.0).sin();
-    assert!((b.bound(-1.0) - half * (PI / 8.0).tan()).abs() < 1e-12);
-    assert!((b.bound(1.0) - half * (3.0 * PI / 8.0).tan()).abs() < 1e-12);
+    let half = 5.0 * det::sin(FRAC_PI_2 / 2.0);
+    assert!((b.bound(-1.0) - half * det::tan(PI / 8.0)).abs() < 1e-12);
+    assert!((b.bound(1.0) - half * det::tan(3.0 * PI / 8.0)).abs() < 1e-12);
     assert!((b.bound(-1.0) - 1.464_466).abs() < 1e-6);
     assert!((b.bound(1.0) - 8.535_534).abs() < 1e-6);
     assert!(bead([5.0; 2], FRAC_PI_2, -1.46).check().is_ok());
@@ -334,10 +335,10 @@ fn unequal_setbacks_take_the_toes_that_bind() {
     let [b1, b2] = b.toe_angles();
     assert!((b1 + b2 - FRAC_PI_2).abs() < 1e-12);
     // the toe on support 1 (setback 3) sees the far foot 6 up: atan(6 / 3)
-    assert!((b1 - 2.0_f64.atan()).abs() < 1e-12);
+    assert!((b1 - det::atan(2.0_f64)).abs() < 1e-12);
     let half = 45.0_f64.sqrt() / 2.0;
-    assert!((b.bound(-1.0) - half * (b2 / 2.0).tan()).abs() < 1e-12);
-    assert!((b.bound(1.0) - half * ((PI - b1) / 2.0).tan()).abs() < 1e-12);
+    assert!((b.bound(-1.0) - half * det::tan(b2 / 2.0)).abs() < 1e-12);
+    assert!((b.bound(1.0) - half * det::tan((PI - b1) / 2.0)).abs() < 1e-12);
 }
 
 #[test]
@@ -390,7 +391,7 @@ fn bead_section(alpha: f64, h: f64, z0: f64) -> (BeadDefinition, Vec<Curve>) {
         h,
     )
     .unwrap();
-    let (s, c) = alpha.sin_cos();
+    let (s, c) = det::sin_cos(alpha);
     let edge = Point3::new(0.0, 0.0, z0);
     let f1 = Point3::new(SETBACK, 0.0, z0);
     let f2 = Point3::new(SETBACK * c, SETBACK * s, z0);
@@ -403,7 +404,7 @@ fn bead_section(alpha: f64, h: f64, z0: f64) -> (BeadDefinition, Vec<Curve>) {
     } else {
         f2 - arc.centre
     };
-    let from = start.y.atan2(start.x).to_degrees();
+    let from = det::atan2(start.y, start.x).to_degrees();
     let line = |a: Point3, b: Point3| Curve::from(create_line_segment(a, b).unwrap());
     let curves = vec![
         line(edge, f1),
@@ -890,7 +891,7 @@ fn a_concave_throat_is_the_nearest_point_of_the_arc() {
             h,
         )
         .unwrap();
-        let (s, c) = f64::sin_cos(alpha);
+        let (s, c) = det::sin_cos(alpha);
         let f1 = Point3::new(d[0], 0.0, 0.0);
         let f2 = Point3::new(d[1] * c, d[1] * s, 0.0);
         let root = Point3::new(0.0, 0.0, 0.0);
@@ -968,7 +969,7 @@ fn a_bead_apart_past_its_sagitta_bound_is_refused_with_the_bound() {
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
-    let want = 50.0_f64.sqrt() / 2.0 * (3.0 * PI / 8.0).tan();
+    let want = 50.0_f64.sqrt() / 2.0 * det::tan(3.0 * PI / 8.0);
     assert!((fit.size - want).abs() < 1e-9, "{} {want}", fit.size);
     assert!(
         beads_apart(&mut k, &mut b, &[edge], &[size], fit.size, &[]).is_ok(),

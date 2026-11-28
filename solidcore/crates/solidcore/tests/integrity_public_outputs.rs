@@ -36,6 +36,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
 use solidcore::heal::heal_data::p1::api_heal_brep;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
@@ -57,7 +58,7 @@ fn section(z: f64, a: f64, b: f64) -> Curve {
     let mut pts: Vec<Point3> = (0..12)
         .map(|j| {
             let t = 2.0 * std::f64::consts::PI * f64::from(j) / 12.0;
-            p(a * t.cos(), b * t.sin(), z)
+            p(a * det::cos(t), b * det::sin(t), z)
         })
         .collect();
     pts.extend(pts.first().copied());

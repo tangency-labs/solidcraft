@@ -1,6 +1,7 @@
 //! Non-C++ regression coverage for the iso curve runner's actual SMS parser.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/iso_curve_sms.rs"]
 mod sms;
@@ -24,7 +25,7 @@ fn saturated_counts_are_rejected_without_panicking() {
 
 #[test]
 fn exclusive_usize_bound_is_rejected_in_every_position() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     for header in [
         format!("{upper:.0} 0 0 0 0"),
         format!("0 {upper:.0} 0 0 0"),
@@ -70,7 +71,7 @@ fn individually_representable_but_impossible_net_is_rejected() {
 
 #[test]
 fn individual_knot_count_overflow_is_rejected() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_rejected(
         &format!("{large:.0} 0 {large:.0} 0 0"),
         "u knot count overflow",
@@ -83,7 +84,7 @@ fn individual_knot_count_overflow_is_rejected() {
 
 #[test]
 fn knot_count_overflow_with_a_tiny_net_is_rejected() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     // One control point and one knot at each end: each count fits on its own,
     // but their combined payload cannot fit in usize.
     assert_rejected(
@@ -94,7 +95,7 @@ fn knot_count_overflow_with_a_tiny_net_is_rejected() {
 
 #[test]
 fn control_token_arithmetic_overflow_is_rejected() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_rejected(
         &format!("{large:.0} {large:.0} 0 0 0"),
         "required token count overflow",

@@ -18,6 +18,7 @@
 use solidcore::curve::curve::Curve;
 use solidcore::geom::tol::approx_tol3d;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
@@ -128,7 +129,7 @@ fn wr_80_quartic_contact_completes() {
     };
     let with_quartic = |x: f64, y: f64| {
         let (z, [zx, zy]) = without_quartic(x, y);
-        (z + y.powi(4), [zx, zy + 4.0 * y * y * y])
+        (z + det::powi(y, 4), [zx, zy + 4.0 * y * y * y])
     };
     let distance = |p: &Point3, (z, [zx, zy]): (f64, [f64; 2])| {
         (p.z - z).abs() / (1.0 + zx * zx + zy * zy).sqrt()

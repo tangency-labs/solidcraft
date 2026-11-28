@@ -13,6 +13,7 @@
 )]
 
 use serde_json::{json, Value};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
@@ -26,7 +27,7 @@ fn section(i: usize) -> BSplineCurve {
     let mut pts: Vec<Point3> = (0..12)
         .map(|j| {
             let t = 2.0 * std::f64::consts::PI * f64::from(j) / 12.0;
-            Point3::new(a * t.cos(), b * t.sin(), z)
+            Point3::new(a * det::cos(t), b * det::sin(t), z)
         })
         .collect();
     pts.extend(pts.first().copied());

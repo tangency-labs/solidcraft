@@ -25,6 +25,7 @@ use solidcore::blend::fillet_executive::p3::NoRoomReason;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::curve::curve::Curve;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -236,7 +237,7 @@ fn a_concave_round_crossing_a_finite_wall_is_trimmed_at_its_creases() {
     let volume = brep_volume(&k, &mut body, 1e-10, &attrs).unwrap();
     let full = 9.0 * (1.0 - std::f64::consts::PI / 4.0);
     let clipped =
-        6.0 - 9.0 * std::f64::consts::PI / 4.0 + 2.0_f64.sqrt() + 4.5 * (1.0_f64 / 3.0).asin();
+        6.0 - 9.0 * std::f64::consts::PI / 4.0 + 2.0_f64.sqrt() + 4.5 * det::asin(1.0_f64 / 3.0);
     let expected = 1550.0 + 10.0 * full + 10.0 * clipped;
     assert!(
         (volume - expected).abs() < 1e-8 * expected,

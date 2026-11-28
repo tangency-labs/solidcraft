@@ -60,6 +60,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -220,7 +221,7 @@ fn analytic_distance(s: &AnalyticSupport, x: Point3) -> (f64, Vec3) {
             let h = v.dot(a);
             let radial = v - a * h;
             let rho = radial.length();
-            let (sin, cos) = semi_angle_deg.to_radians().sin_cos();
+            let (sin, cos) = det::sin_cos(semi_angle_deg.to_radians());
             (
                 (rho - base_radius) * cos - h * sin,
                 radial * (cos / rho) - a * sin,
@@ -274,9 +275,9 @@ fn newton_corner(dist: impl Fn(Point3) -> [(f64, Vec3); 3], start: Point3) -> (P
     let [a, b, c] = rows.map(|(_, n)| n);
     let det = det3([a, b, c]);
     // the inverse's columns are the rows' pairwise cross products over the determinant
-    let inv_frobenius = ((b.cross(c)).length().powi(2)
-        + (c.cross(a)).length().powi(2)
-        + (a.cross(b)).length().powi(2))
+    let inv_frobenius = (det::powi((b.cross(c)).length(), 2)
+        + det::powi((c.cross(a)).length(), 2)
+        + det::powi((a.cross(b)).length(), 2))
     .sqrt()
         / det.abs();
     (x, inv_frobenius * 3.0_f64.sqrt() * residual)

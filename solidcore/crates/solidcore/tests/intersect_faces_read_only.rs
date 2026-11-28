@@ -20,6 +20,7 @@ use solidcore::intersect::api_intersectors::{
     intersect_faces, intersect_faces_read_only, FaceBodies, Intersections,
 };
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves::create_circle;
 use solidcore::primitive::api_curves::create_line_segment;
@@ -160,7 +161,7 @@ fn is_foot(k: &Kernel, got: &Intersections) {
         for i in 0..=8 {
             let t = span.min() + (span.max() - span.min()) * f64::from(i) / 8.0;
             let p = c.evaluate_point(k, t).unwrap();
-            let r = ((p.x - 50.0).powi(2) + (p.y - 50.0).powi(2)).sqrt();
+            let r = (det::powi(p.x - 50.0, 2) + det::powi(p.y - 50.0, 2)).sqrt();
             assert!(
                 (r - 15.0).abs() <= 1e-6 && (p.z - 10.0).abs() <= 1e-9,
                 "{p:?}"

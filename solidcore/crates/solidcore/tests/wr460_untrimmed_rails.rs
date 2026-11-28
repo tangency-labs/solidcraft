@@ -15,6 +15,7 @@
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -86,7 +87,7 @@ fn wr460_chamfered_box_top_loop_is_kept() {
     // which shortens the path by 2 c tan 22.5 degrees at each turn.
     let section = 4.0 - PI;
     let c = 2.0 * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
-    let path = 100.0 + 20.0 * 2.0_f64.sqrt() - 2.0 * c * 8.0 * (PI / 8.0).tan();
+    let path = 100.0 + 20.0 * 2.0_f64.sqrt() - 2.0 * c * 8.0 * det::tan(PI / 8.0);
     let want = 1150.0 * 20.0 - section * path;
     assert!((v - want).abs() < 1e-5 * want, "{v} vs {want}");
 }

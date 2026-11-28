@@ -16,6 +16,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::error::SolidError;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_circle, create_line_segment};
 use solidcore::sweep::cornered::cornered_sweep;
@@ -48,7 +49,7 @@ fn square(a: f64) -> Vec<Curve> {
 /// toward `x` by `turn`.
 fn ell(turn: f64) -> (Path, Vec3) {
     let c = Point3::new(0.0, 0.0, L1);
-    let t1 = Vec3::new(turn.sin(), 0.0, turn.cos());
+    let t1 = Vec3::new(det::sin(turn), 0.0, det::cos(turn));
     let path = Path {
         pieces: vec![
             Piece::Line {
@@ -125,7 +126,7 @@ fn a_square_along_an_l_keeps_its_area_times_the_length() {
             .map(|(i, j)| corner[i].distance(corner[j]))
             .collect();
         sides.sort_by(f64::total_cmp);
-        let stretched = A / (turn / 2.0).cos();
+        let stretched = A / det::cos(turn / 2.0);
         assert!((sides[0] - A).abs() <= 1e-12 * L1 && (sides[1] - A).abs() <= 1e-12 * L1);
         assert!((sides[2] - stretched).abs() <= 1e-12 * L1, "{sides:?}");
         assert!((sides[3] - stretched).abs() <= 1e-12 * L1, "{sides:?}");

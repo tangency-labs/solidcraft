@@ -165,6 +165,7 @@ use serde_json::Value;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::tol::is_zero;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::{Point2, Vec3, EFF_ZERO, INFINITE_PARAMETER, PI};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -411,7 +412,7 @@ fn read_state(r: &mut Rd) -> State {
 
 /// `tan` of an angle in degrees, as the cone takes it (`deg2rad(semi).tan()`).
 fn tan_deg(deg: f64) -> f64 {
-    (deg * PI / 180.0).tan()
+    det::tan(deg * PI / 180.0)
 }
 
 /// `|v|`'s largest coordinate.
@@ -486,7 +487,7 @@ impl Analytic {
     /// The STEP point at `(u, v)` degrees and height, by closed form.
     fn point(&self, u: f64, v: f64) -> Vec3 {
         let a = u * PI / 180.0;
-        self.o + self.radius(v) * (a.cos() * self.x + a.sin() * self.y) + v * self.z
+        self.o + self.radius(v) * (det::cos(a) * self.x + det::sin(a) * self.y) + v * self.z
     }
     /// The rounding of [`Self::point`] (and of any evaluator computing the same sum): per
     /// coordinate `γ_8` of the magnitudes summed, plus the angle's error (its conversion
@@ -538,7 +539,7 @@ impl Analytic {
             0.0
         };
         let (cx, cz) = (a0 + s * dx, v0 + s * dz);
-        let d = ((rho - cx).powi(2) + (z - cz).powi(2)).sqrt();
+        let d = (det::powi(rho - cx, 2) + det::powi(z - cz, 2)).sqrt();
         let m = mc(self.o) + mc(p) + a0.abs() + a1.abs() + v0.abs() + v1.abs();
         Some((d, gamma(32) * m))
     }
@@ -890,7 +891,7 @@ fn step_derivatives(
     let (u, v) = a.clamp(u, v);
     let th = u * PI / 180.0;
     let c = PI / 180.0;
-    let (cs, sn) = (th.cos(), th.sin());
+    let (cs, sn) = (det::cos(th), det::sin(th));
     let e = [
         cs * a.x + sn * a.y,
         -sn * a.x + cs * a.y,
@@ -913,7 +914,7 @@ fn step_derivatives(
     let b_r = v.abs() * a.t_bound();
     out[0] = Some((a.point(u, v), a.point_bound(u, v)));
     for i in 1..=hu.min(3) {
-        let ci = c.powi(i as i32);
+        let ci = det::powi(c, i as i32);
         let b = 3.0_f64.sqrt() * ci * (gamma(8) * rad + rad * angle_err + b_r) * (1.0 + gamma(4));
         out[idx(i, 0)] = Some((r * ci * e[i], b));
     }
@@ -924,7 +925,7 @@ fn step_derivatives(
         ));
     }
     let cross = |i: usize| {
-        let ci = c.powi(i as i32);
+        let ci = det::powi(c, i as i32);
         Some((
             a.t * ci * e[i],
             3.0_f64.sqrt() * ci * (b_rv + a.t.abs() * (gamma(8) + angle_err)) * (1.0 + gamma(4)),
@@ -2836,7 +2837,7 @@ fn cert_extrusion_cone(inputs: &Value, out: &Output, other: &Output) -> Verdict 
     let z = x.cross(y);
     let z = z * (1.0 / z.length());
     let bot = c["cone"]["bot"].as_f64().unwrap();
-    let t = c["cone"]["semi"].as_f64().unwrap().to_radians().tan();
+    let t = det::tan(c["cone"]["semi"].as_f64().unwrap().to_radians());
     let tol = inputs["tol"].as_f64().unwrap();
     let g = &inputs["surf"]["gen"];
     check(
@@ -2897,7 +2898,7 @@ fn cert_extrusion_cone(inputs: &Value, out: &Output, other: &Output) -> Verdict 
             let e = gamma(64) * (3.0 * qm * qm + rm * rm) + 2.0 * rnd * (qm + rm);
             // ρ² = f + R² ≥ R_min² − |f|, so ρ + R ≥ R_min + √(R_min² − |f|); the distance
             // from the cone in the meridian plane is |ρ − R| cos(semi)
-            let cos = c["cone"]["semi"].as_f64().unwrap().to_radians().cos();
+            let cos = det::cos(c["cone"]["semi"].as_f64().unwrap().to_radians());
             let fb = bern_bound(&f, (tol * 1.9 * rmin / cos - e).max(0.0), 16) + e;
             let den = rmin + (rmin * rmin - fb).max(0.0).sqrt();
             worst.1 = worst.1.max(fb / den * cos * (1.0 + gamma(8)));
@@ -3136,9 +3137,7 @@ fn p3_cones(
             for (cy, ang) in [(a, aang), (b, bang)] {
                 if ang != [0.0, 1.0] {
                     let r = base - cy.o;
-                    let th = r
-                        .dot(cy.y)
-                        .atan2(r.dot(cy.x))
+                    let th = det::atan2(r.dot(cy.y), r.dot(cy.x))
                         .to_degrees()
                         .rem_euclid(360.0);
                     let [c0, c1] = angles_covered(ang);
@@ -3478,7 +3477,7 @@ fn cert_sphere_cone(inputs: &Value, vals: &Values) -> Verdict {
         check(pts.len() == 5, "a curve point failed to evaluate")?;
         let on = |c: (f64, f64)| {
             pts.iter()
-                .map(|p| (p.x.hypot(p.y) - c.0).hypot(p.z - c.1))
+                .map(|p| det::hypot(det::hypot(p.x, p.y) - c.0, p.z - c.1))
                 .fold(0.0_f64, f64::max)
         };
         let Some((i, d)) = circles
@@ -3593,7 +3592,7 @@ fn input_cone(cone: &Value) -> Option<(Analytic, Option<[f64; 2]>)> {
         "cone_bounded" => {
             let (b, tp, h) = (num("bot"), num("top"), num("height"));
             let t = (tp - b) / h;
-            (b, t, t.atan() * 180.0 / PI, Some([0.0, h]))
+            (b, t, det::atan(t) * 180.0 / PI, Some([0.0, h]))
         }
         _ => return None,
     };
@@ -3723,7 +3722,7 @@ fn cert_p2_row(inputs: &Value, vals: &Values) -> Verdict {
             let (s, b) = state_with(&mut r, heights.is_some())?;
             let sign = (if swap { -1.0 } else { 1.0 }) * (if inside { -1.0 } else { 1.0 });
             let th = a.semi * PI / 180.0;
-            let (sn, cs) = (th.sin(), th.cos());
+            let (sn, cs) = (det::sin(th), det::cos(th));
             let off_r = cs * sign * d;
             let off_z = -sn * sign * d;
             let mut want = a;
@@ -4043,7 +4042,7 @@ fn rotation(axis: [f64; 3], angle: f64) -> [f64; 9] {
     }
     let (x, y, z) = (ax / l, ay / l, az / l);
     let a = angle * PI / 180.0;
-    let (s, c) = a.sin_cos();
+    let (s, c) = det::sin_cos(a);
     let t = 1.0 - c;
     [
         t * x * x + c,
@@ -4081,7 +4080,7 @@ fn cert_trim(a: &Analytic, heights: Option<[f64; 2]>, op: &Value, out: &[f64]) -
     let nz = v("x").cross(v("y"));
     let uy = (nz * (1.0 / nz.length())).cross(ux);
     let (rx, ry) = (op["rx"].as_f64().unwrap(), op["ry"].as_f64().unwrap());
-    let e = (rx * ux.dot(a.z)).hypot(ry * uy.dot(a.z));
+    let e = det::hypot(rx * ux.dot(a.z), ry * uy.dot(a.z));
     let h = (v("origin") - a.o).dot(a.z);
     let tol = op["tol"].as_f64().unwrap();
     let b = gamma(16) * (mc(v("origin")) + mc(a.o) + rx.abs() + ry.abs());
@@ -4097,10 +4096,10 @@ fn cert_trim(a: &Analytic, heights: Option<[f64; 2]>, op: &Value, out: &[f64]) -
     let inside = || {
         let perp = |w: Vec3| w - w.dot(a.z) * a.z;
         let c = v("origin") - a.o;
-        let rho = perp(c).length() + (rx * perp(ux).length()).hypot(ry * perp(uy).length());
+        let rho = perp(c).length() + det::hypot(rx * perp(ux).length(), ry * perp(uy).length());
         let (r_lo, r_hi) = (a.radius(h - e), a.radius(h + e));
         let r_min = r_lo.abs().min(r_hi.abs());
-        let margin = (r_min - rho) * (a.semi * PI / 180.0).cos();
+        let margin = (r_min - rho) * det::cos(a.semi * PI / 180.0);
         (r_lo > 0.0) == (r_hi > 0.0) && r_lo != 0.0 && margin > tol + b * (1.0 + a.t.abs())
     };
     check(
@@ -4500,9 +4499,9 @@ fn replay_coons(log: &CoonsTangencyLog) -> Result<Replay, Fail> {
             let x = nx.dot(mr);
             let (ylo, yhi) = ((y.v - y.e).max(0.0), y.v + y.e);
             let (xlo, xhi) = ((x.v.abs() - x.e).max(0.0), x.v.abs() + x.e);
-            let lo = (ylo / xhi).atan() * (1.0 - 8.0 * UNIT_RO);
+            let lo = det::atan(ylo / xhi) * (1.0 - 8.0 * UNIT_RO);
             let hi = if xlo > 0.0 {
-                ((yhi / xlo).atan() * (1.0 + 8.0 * UNIT_RO)).min(0.5 * PI * (1.0 + 4.0 * UNIT_RO))
+                (det::atan(yhi / xlo) * (1.0 + 8.0 * UNIT_RO)).min(0.5 * PI * (1.0 + 4.0 * UNIT_RO))
             } else {
                 0.5 * PI * (1.0 + 4.0 * UNIT_RO)
             };

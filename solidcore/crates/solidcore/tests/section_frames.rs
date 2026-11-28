@@ -8,6 +8,7 @@
     clippy::indexing_slicing
 )]
 
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_plane};
@@ -94,7 +95,7 @@ fn a_blend_reads_the_curvature_and_its_change_on_the_outgoing_span() {
             assert!(f.p.x.abs() < 1e-10 && f.p.z.abs() < 1e-10, "{:?}", f.p);
             assert!((f.bend.z - 1.0).abs() < 1e-9, "{:?}", f.bend);
             assert!(
-                (f.bend_change.z - 6.0 * leave.x.powi(3)).abs() < 1e-9,
+                (f.bend_change.z - 6.0 * det::powi(leave.x, 3)).abs() < 1e-9,
                 "{:?}",
                 f.bend_change
             );
@@ -145,7 +146,7 @@ fn a_cylinder_rim_left_down_its_wall_is_straight() {
     let frames = section_frames(&k, &b, &[rim], Vec3::new(0.0, 0.0, -1.0), &opts(9)).unwrap();
     assert_eq!(frames.len(), 9);
     for f in &frames {
-        assert!((f.p.z - 10.0).abs() <= 1e-9 && (f.p.x.hypot(f.p.y) - 5.0).abs() <= 1e-9);
+        assert!((f.p.z - 10.0).abs() <= 1e-9 && (det::hypot(f.p.x, f.p.y) - 5.0).abs() <= 1e-9);
         assert!(
             near(f.leave, Vec3::new(0.0, 0.0, -1.0), 1e-12),
             "{:?}",
@@ -409,7 +410,7 @@ fn a_cylinder_rim_left_outward_up_its_wall_is_straight() {
     let frames = section_frames_outward(&k, &mut b, &[rim], Vec3::Z, 9).unwrap();
     assert_eq!(frames.len(), 9);
     for f in &frames {
-        assert!((f.p.z - 10.0).abs() <= 1e-9 && (f.p.x.hypot(f.p.y) - 5.0).abs() <= 1e-9);
+        assert!((f.p.z - 10.0).abs() <= 1e-9 && (det::hypot(f.p.x, f.p.y) - 5.0).abs() <= 1e-9);
         assert!(near(f.leave, Vec3::Z, 1e-9), "{:?}", f.leave);
         assert!(f.bend.length() <= 1e-9, "{:?}", f.bend);
         assert!(f.bend_change.length() <= 1e-9, "{:?}", f.bend_change);

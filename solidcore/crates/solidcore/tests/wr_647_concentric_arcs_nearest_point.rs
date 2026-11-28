@@ -25,6 +25,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
@@ -187,7 +188,7 @@ fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
 /// start; minus at its end, linear in between): a B-spline, so `GlobalCurveIntersect`
 /// takes its general solver, not the analytic one.
 fn cubic(angle: f64, shift: f64) -> Curve {
-    let (c, s) = (angle.cos(), angle.sin());
+    let (c, s) = (det::cos(angle), det::sin(angle));
     let raw = [
         (-1.0, 0.0),
         (-1.0 / 3.0, 0.2),
@@ -827,8 +828,8 @@ fn wr_647_an_exact_overlap_with_a_conic_stays_a_range() {
         let s = arc_spline(lift);
         for i in 0..=20 {
             let p = s.evaluate_point(&k, 1.0 + f64::from(i) / 20.0).unwrap();
-            let rho = ((p.x - 0.5).powi(2) + (p.y - 1.0).powi(2)).sqrt();
-            let off = ((rho - 1.0).powi(2) + p.z * p.z).sqrt();
+            let rho = (det::powi(p.x - 0.5, 2) + det::powi(p.y - 1.0, 2)).sqrt();
+            let off = (det::powi(rho - 1.0, 2) + p.z * p.z).sqrt();
             assert!(
                 off <= 1e-15,
                 "lift {lift}: the middle span is off the circle by {off:e}"
@@ -886,16 +887,16 @@ fn arc_spline_stretched(
         -std::f64::consts::FRAC_PI_2 - h,
         -std::f64::consts::FRAC_PI_2 + h,
     );
-    let on = |a: f64| Point3::new(0.5 + a.cos(), 1.0 + a.sin(), 0.0);
+    let on = |a: f64| Point3::new(0.5 + det::cos(a), 1.0 + det::sin(a), 0.0);
     let (p2, p4) = (on(a0), on(a1));
-    let back = Vec3::new(a0.sin(), -a0.cos(), 0.0);
-    let ahead = Vec3::new(-a1.sin(), a1.cos(), 0.0);
+    let back = Vec3::new(det::sin(a0), -det::cos(a0), 0.0);
+    let ahead = Vec3::new(-det::sin(a1), det::cos(a1), 0.0);
     let z = Vec3::new(0.0, 0.0, 1.0);
     let pts = [
         p2 + back * ell + z * (4.0 * lift),
         p2 + back * (ell / 2.0) + z * lift,
         p2,
-        Point3::new(0.5, 1.0 - 1.0 / h.cos(), 0.0),
+        Point3::new(0.5, 1.0 - 1.0 / det::cos(h), 0.0),
         p4,
         p4 + ahead * (ell / 2.0) + z * lift,
         p4 + ahead * ell + z * (4.0 * lift),
@@ -911,7 +912,7 @@ fn arc_spline_stretched(
             ) * scale
         })
     };
-    let w = [1.0, 1.0, 1.0, h.cos(), 1.0, 1.0, 1.0];
+    let w = [1.0, 1.0, 1.0, det::cos(h), 1.0, 1.0, 1.0];
     Curve::from(
         BSplineCurve::create_canonical(&CanonicalData {
             dim: 3,
@@ -942,8 +943,8 @@ fn wr_647_short_exact_overlaps_with_a_conic_stay_ranges() {
             let s = arc_spline_of(theta, ell, lift);
             for i in 0..=20 {
                 let p = s.evaluate_point(&k, 1.0 + f64::from(i) / 20.0).unwrap();
-                let rho = ((p.x - 0.5).powi(2) + (p.y - 1.0).powi(2)).sqrt();
-                let off = ((rho - 1.0).powi(2) + p.z * p.z).sqrt();
+                let rho = (det::powi(p.x - 0.5, 2) + det::powi(p.y - 1.0, 2)).sqrt();
+                let off = (det::powi(rho - 1.0, 2) + p.z * p.z).sqrt();
                 assert!(
                     off <= 1e-15,
                     "{theta} degrees, lift {lift}: the middle span is off the circle by {off:e}"
@@ -1014,8 +1015,8 @@ fn wr_647_near_overlaps_within_the_zero_stay_ranges() {
         let zero = 1e-12 * (1.0 + 2.0 * scale);
         for i in 0..=20 {
             let p = s.evaluate_point(&k, 1.0 + f64::from(i) / 20.0).unwrap() * (1.0 / scale);
-            let rho = ((p.x - 0.5).powi(2) + (p.y - 1.0).powi(2)).sqrt();
-            let off = ((rho - 1.0).powi(2) + p.z * p.z).sqrt() * scale;
+            let rho = (det::powi(p.x - 0.5, 2) + det::powi(p.y - 1.0, 2)).sqrt();
+            let off = (det::powi(rho - 1.0, 2) + p.z * p.z).sqrt() * scale;
             assert!(
                 off <= zero / 2.0 && off >= (dr + dz) * scale / 4.0,
                 "{tag}: the middle span is off the circle by {off:e}"

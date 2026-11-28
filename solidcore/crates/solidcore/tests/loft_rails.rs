@@ -9,6 +9,7 @@
 use solidcore::curve::curve::Curve;
 use solidcore::error::sweep::SweepFailure;
 use solidcore::error::{Reason, SolidError};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::query::api_queries::surface_closest_point;
@@ -501,7 +502,7 @@ fn six_rails_round_a_circle_to_circle_frustum_stay_on_the_skin() {
         (0..=6_u32)
             .map(|i| {
                 let a = std::f64::consts::TAU * f64::from(i) / 6.0;
-                Point3::new(r * a.cos(), r * a.sin(), z)
+                Point3::new(r * det::cos(a), r * det::sin(a), z)
             })
             .collect()
     };

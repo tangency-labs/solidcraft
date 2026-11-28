@@ -31,6 +31,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, BIG_DOUBLE};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::create_box;
@@ -491,8 +492,8 @@ fn mitre_off(k: &Kernel, b: &Brep, side: [f64; 2], inward: [f64; 2], top: f64) -
         let p = c
             .evaluate_point(k, ivl.evaluate(f64::from(i) / 32.0))
             .unwrap();
-        let along_x = ((p.y - ya).hypot(p.z - za) - 1.0).abs();
-        let along_y = ((p.x - xa).hypot(p.z - za) - 1.0).abs();
+        let along_x = (det::hypot(p.y - ya, p.z - za) - 1.0).abs();
+        let along_y = (det::hypot(p.x - xa, p.z - za) - 1.0).abs();
         let bisector = ((p.x - side[0]).abs() - (p.y - side[1]).abs()).abs();
         worst = worst.max(along_x).max(along_y).max(bisector);
     }

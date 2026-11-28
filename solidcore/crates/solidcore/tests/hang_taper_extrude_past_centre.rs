@@ -33,6 +33,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::error::SolidError;
 use solidcore::geom::context::NotifyCallback;
 use solidcore::geom::object::{NotifyOperation, ObjectRef};
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
 };
@@ -118,7 +119,7 @@ const BOW: f64 = 0.001;
 fn bowed_polygon(sides: u64) -> Vec<Curve> {
     let corner = |i: u64| {
         let a = 2.0 * std::f64::consts::PI * i as f64 / sides as f64;
-        Vec3::new(RADIUS * a.cos(), RADIUS * a.sin(), 0.0)
+        Vec3::new(RADIUS * det::cos(a), RADIUS * det::sin(a), 0.0)
     };
     (0..sides)
         .map(|i| {
@@ -218,8 +219,8 @@ fn taper_extrude_past_the_centre_still_builds_its_pyramid() {
             (b.faces().len(), b.edges().len(), b.vertices().len()),
             (n, 2 * n, n + 1)
         );
-        let inradius = RADIUS * (std::f64::consts::PI / sides as f64).cos();
-        let apex_z = HEIGHT * inradius / (HEIGHT * 72.0_f64.to_radians().tan());
+        let inradius = RADIUS * det::cos(std::f64::consts::PI / sides as f64);
+        let apex_z = HEIGHT * inradius / (HEIGHT * det::tan(72.0_f64.to_radians()));
         let points: Vec<Point3> = b
             .vertices()
             .ids()
@@ -235,7 +236,7 @@ fn taper_extrude_past_the_centre_still_builds_its_pyramid() {
         );
         // the other vertices are the polygon's corners
         for p in points.iter().filter(|p| **p != apex) {
-            let r = p.x.hypot(p.y);
+            let r = det::hypot(p.x, p.y);
             assert!(
                 p.z.abs() < 1e-12 && (r - RADIUS).abs() < 1e-9 * RADIUS,
                 "{p:?}"
@@ -247,7 +248,7 @@ fn taper_extrude_past_the_centre_still_builds_its_pyramid() {
 /// The apex height of the `sides`-gon's pyramid drafted 72 degrees: where the walls' inward
 /// offset, `z tan 72°`, reaches the inradius `r cos(pi / n)`.
 fn apex_z(sides: u64) -> f64 {
-    RADIUS * (std::f64::consts::PI / sides as f64).cos() / 72.0_f64.to_radians().tan()
+    RADIUS * det::cos(std::f64::consts::PI / sides as f64) / det::tan(72.0_f64.to_radians())
 }
 
 /// The `sides`-gon tapered to `height` at 72 degrees with linear (tangent) corners and the
@@ -303,7 +304,7 @@ fn assert_open_pyramid_of(sides: u64, curves: &[Curve]) {
         "apex {apex:?}, expected z {want}"
     );
     for p in points.iter().filter(|p| **p != apex) {
-        let r = p.x.hypot(p.y);
+        let r = det::hypot(p.x, p.y);
         assert!(
             p.z.abs() < 1e-12 && (r - RADIUS).abs() < 1e-9 * RADIUS,
             "{p:?}"
@@ -340,7 +341,7 @@ fn assert_closed_pyramid(sides: u64) {
     };
     let v = brep_volume(&k, &mut b, 1e-10, &attributes).unwrap();
     let area =
-        sides as f64 * RADIUS * RADIUS * (2.0 * std::f64::consts::PI / sides as f64).sin() / 2.0;
+        sides as f64 * RADIUS * RADIUS * det::sin(2.0 * std::f64::consts::PI / sides as f64) / 2.0;
     let want = area * apex_z(sides) / 3.0;
     assert!(
         (v - want).abs() <= 2e-9 * want,
@@ -377,7 +378,7 @@ fn an_apex_on_the_far_end_is_still_refused() {
             panic!("built: {result:?}");
         };
         assert_eq!(refusal.reason, sweeps::TaperCornerRefusal::WallCloses);
-        let r = refusal.corner.x.hypot(refusal.corner.y);
+        let r = det::hypot(refusal.corner.x, refusal.corner.y);
         assert!(
             (r - RADIUS).abs() < 1e-9 * RADIUS && refusal.corner.z.abs() < 1e-12,
             "{refusal:?}"
@@ -405,7 +406,7 @@ const DRILL_DEG: f64 = 60.0;
 /// Where the drill point's wall reaches the circle's centre: its inward offset at height
 /// `z`, `z tan 60°`, is the radius at `z = r / tan 60°` (0.6928 mm).
 fn drill_apex() -> f64 {
-    DRILL_R / DRILL_DEG.to_radians().tan()
+    DRILL_R / det::tan(DRILL_DEG.to_radians())
 }
 
 /// The circle of radius [`DRILL_R`] about `(0, 0, z0)` in a plane parallel to XY, one full
@@ -489,7 +490,7 @@ fn assert_drill_point(height: f64, z0: f64, corner: sweeps::OffsetCornerType) {
         "apex {apex:?}, expected {want_z} past z0 {z0}"
     );
     for p in points.iter().filter(|p| **p != apex) {
-        let r = p.x.hypot(p.y);
+        let r = det::hypot(p.x, p.y);
         assert!(
             (p.z - z0).abs() < 1e-12 && (r - DRILL_R).abs() < 1e-9 * DRILL_R,
             "{p:?}"

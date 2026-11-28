@@ -19,6 +19,7 @@
     clippy::indexing_slicing,
     clippy::cast_precision_loss
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -129,14 +130,14 @@ fn round_generatrix(bulge: f64) -> Curve {
 fn round_generatrix_at(arcs: &[usize], bulge: f64) -> Curve {
     const N: usize = 32;
     let half = PI / 2.0 / N as f64 / 2.0;
-    let on = |a: f64, s: f64| Point3::new(10.0 + R * s * a.cos(), 0.0, R * s * a.sin());
+    let on = |a: f64, s: f64| Point3::new(10.0 + R * s * det::cos(a), 0.0, R * s * det::sin(a));
     let mut control = vec![on(0.0, 1.0)];
     let mut weights = vec![1.0];
     for j in 0..N {
         let a = (2 * j + 1) as f64 * half;
         let out = if arcs.contains(&j) { 1.0 + bulge } else { 1.0 };
-        control.push(on(a, out / half.cos()));
-        weights.push(half.cos());
+        control.push(on(a, out / det::cos(half)));
+        weights.push(det::cos(half));
         control.push(on(a + half, 1.0));
         weights.push(1.0);
     }
@@ -394,7 +395,7 @@ fn tilted_circle(k: &Kernel) -> Ellipse {
 fn profile_radius_range(k: &Kernel, gen: &Curve, t0: f64, t1: f64, n: usize) -> (f64, f64) {
     let profile = |t: f64| {
         let p = gen.evaluate_point(k, t).unwrap();
-        (p.x.hypot(p.y), p.z)
+        (det::hypot(p.x, p.y), p.z)
     };
     let h = (t1 - t0) / n as f64 * 1e-2;
     let (mut lo, mut hi) = (f64::INFINITY, 0.0_f64);
@@ -406,7 +407,7 @@ fn profile_radius_range(k: &Kernel, gen: &Curve, t0: f64, t1: f64, n: usize) -> 
             (c.0 - 2.0 * b.0 + a.0) / (h * h),
             (c.1 - 2.0 * b.1 + a.1) / (h * h),
         );
-        let rho = (r1 * r1 + z1 * z1).powf(1.5) / (r1 * z2 - z1 * r2).abs();
+        let rho = det::powf(r1 * r1 + z1 * z1, 1.5) / (r1 * z2 - z1 * r2).abs();
         lo = lo.min(rho);
         hi = hi.max(rho);
     }

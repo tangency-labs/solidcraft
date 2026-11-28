@@ -22,6 +22,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::KernelOptions;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec2, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_primitives::create_box;
@@ -34,7 +35,7 @@ use solidcore::{Brep, Kernel};
 /// The section between the planes z = 0 and x = 0 for the ball of radius r centred at
 /// (r, y, r), in (x, z): `T1(u) = (u r, 0)`, `T2(u) = (0, u r)`.
 fn closed_form(n: usize, w: f64, r: f64, t: f64) -> (f64, f64) {
-    let (a, b) = ((1.0 - t).powi(n as i32 + 1), t.powi(n as i32 + 1));
+    let (a, b) = (det::powi(1.0 - t, n as i32 + 1), det::powi(t, n as i32 + 1));
     let f = a / (a + b);
     let p1 = t / (1.0 - w + w * t);
     let p2 = t * (1.0 - w) / (1.0 - w * t);

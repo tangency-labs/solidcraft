@@ -16,6 +16,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_removal::{delete_fillet_face, delete_fillet_faces};
 use solidcore::boolean::api_brep::{boolean_intersection, boolean_union};
 use solidcore::mass::integrator::properties::{brep_area, brep_volume_default};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{
     create_box, create_cone, create_cylinder, create_sphere,
@@ -170,13 +171,13 @@ fn removes_chain(
 fn removes_split_ring(k: &mut Kernel, mut b: Brep, r: f64, z: f64, expected: [f64; 2]) {
     round_edges(k, &mut b, 1.0, |p| {
         p.iter()
-            .all(|p| (p.z - z).abs() < 1e-7 && (p.x.hypot(p.y) - r).abs() < 1e-7)
+            .all(|p| (p.z - z).abs() < 1e-7 && (det::hypot(p.x, p.y) - r).abs() < 1e-7)
     });
     let mut faces = round_faces(&b, z);
     assert_eq!(faces.len(), 2);
     faces.reverse();
-    let crest =
-        [0.41_f64, 1.9, 3.8, 5.7].map(|theta| Point3::new(r * theta.cos(), r * theta.sin(), z));
+    let crest = [0.41_f64, 1.9, 3.8, 5.7]
+        .map(|theta| Point3::new(r * det::cos(theta), r * det::sin(theta), z));
     removes_chain(k, &mut b, &faces, &crest, expected);
 }
 

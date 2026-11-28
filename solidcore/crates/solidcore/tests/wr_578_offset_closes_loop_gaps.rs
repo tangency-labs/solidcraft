@@ -22,6 +22,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -49,7 +50,7 @@ const SHELL_1494: f64 = 8864.598272772;
 fn box_and_cylinder(k: &mut Kernel, seam_deg: f64) -> Brep {
     let body = create_box(k, Point3::new(0.0, 0.0, 0.0), 47.5, 45.0, 30.0).unwrap();
     let mut cylinder = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 7.5, 30.0).unwrap();
-    let (s, c) = seam_deg.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(seam_deg.to_radians());
     // local z (the axis) along +x: x = (0, c, s), y = (0, -s, c), z = x cross y = +x
     let placement = Axis2Placement::new(
         Point3::new(47.5, 0.0, 10.0),

@@ -9,6 +9,7 @@
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::certified::Verdict;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
 use solidcore::query::contact::{boundary_distance, meets};
 use solidcore::topology::brep::mirror::transform_matrix;
@@ -27,7 +28,7 @@ fn cube(k: &mut Kernel, at: [f64; 3], size: f64) -> Brep {
 
 /// `b` turned by `angle` about the x axis, then moved by `by`.
 fn turned_about_x(k: &mut Kernel, b: &mut Brep, angle: f64, by: [f64; 3]) {
-    let (c, s) = (angle.cos(), angle.sin());
+    let (c, s) = (det::cos(angle), det::sin(angle));
     // row vectors (`p' = p A + t`): A's rows are the images of x, y and z, t the fourth row
     let m = [
         [1.0, 0.0, 0.0, 0.0],

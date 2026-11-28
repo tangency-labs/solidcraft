@@ -46,6 +46,7 @@ use goldens::{golden, registry, CaseContext};
 use serde_json::Value;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::PI;
 use solidcore::nurbs::math::{gamma, CPoint, NOW};
 use solidcore::surface::cone::Cone;
@@ -66,7 +67,7 @@ fn rotation(axis: [f64; 3], angle: f64) -> [f64; 9] {
     }
     let (x, y, z) = (ax / l, ay / l, az / l);
     let a = angle * PI / 180.0;
-    let (s, c) = a.sin_cos();
+    let (s, c) = det::sin_cos(a);
     let t = 1.0 - c;
     [
         t * x * x + c,
@@ -206,7 +207,7 @@ fn issue_17228_moved_row_is_off_every_cylinder_the_rebuild_tries() {
         let mid = (b + top) * 0.5;
         let gap = radius - (mid.x * mid.x + mid.y * mid.y).sqrt();
         let a = angle.abs() * PI / 180.0;
-        let closed = 2.0 * radius * (a / 4.0).sin().powi(2);
+        let closed = 2.0 * radius * det::powi(det::sin(a / 4.0), 2);
         let size = (radius * radius + height * height).sqrt();
         let rounding = gamma(8) * size;
         assert!(
@@ -304,7 +305,7 @@ fn issue_17228_rigidly_moved_rows_rebuild_on_the_centre_line() {
         // the tilt of both circles from the recorded centre line, up to its sign
         let tilt = axis_before.cross(axis_after).length();
         let a = angle.abs() * PI / 180.0;
-        let gap = radius * tilt * tilt / 2.0 + 2.0 * radius * (a / 4.0).sin().powi(2);
+        let gap = radius * tilt * tilt / 2.0 + 2.0 * radius * det::powi(det::sin(a / 4.0), 2);
 
         let before = edited.rev().base().gw_nurb().unwrap();
         let after = cone.rev().base().gw_nurb().unwrap();

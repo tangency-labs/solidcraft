@@ -16,6 +16,8 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
+
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
 use solidcore::blend::fillet_executive::api::fillet_edges;
@@ -193,7 +195,7 @@ fn residue_round_builds_by_default() {
             let rho = R + (f64::from(i) + 0.5) * step;
             let t = rho - R - RADIUS;
             let h = RADIUS - (RADIUS * RADIUS - t * t).max(0.0).sqrt();
-            (pi - 2.0 * (R / rho).min(1.0).acos()) * rho * h * step
+            (pi - 2.0 * det::acos((R / rho).min(1.0))) * rho * h * step
         })
         .sum();
     assert!(

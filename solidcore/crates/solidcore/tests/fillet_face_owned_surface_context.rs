@@ -29,6 +29,7 @@ use solidcore::blend::fillet_executive::NoRoomReason;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_area, brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::brep::{p1, p10::TopologyEnv, p7};
 use solidcore::topology::database_io::FileType;
@@ -271,7 +272,7 @@ fn a_rim_round_past_the_box_face_removes_the_band_inside_the_box() {
         if rho <= c {
             2.0 * PI
         } else {
-            2.0 * PI - 2.0 * (c / rho).acos()
+            2.0 * PI - 2.0 * det::acos(c / rho)
         }
     };
     let n = 2_000_000;

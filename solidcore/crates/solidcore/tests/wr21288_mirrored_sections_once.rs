@@ -17,6 +17,7 @@
 )] // test
 
 use solidcore::blend::fillet_executive::api::{surface_surface_fillet, FilletSurfaceArg};
+use solidcore::math::det;
 use solidcore::math::{Point2, Vec3};
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::surface::surface::Surface;
@@ -60,12 +61,13 @@ fn wr21288_mirrored_complement_round_is_its_cylinder() {
                 v.min() + (v.max() - v.min()) * f64::from(j) / 16.0,
             );
             let p = surface.evaluate_point(&k, uv).unwrap();
-            let rho = ((p.x - 5.0).powi(2) + p.z.powi(2)).sqrt();
+            let rho = (det::powi(p.x - 5.0, 2) + det::powi(p.z, 2)).sqrt();
             worst = worst.max((rho - 2.0).abs());
             if j == 8 {
                 // the section's middle is the 270 degree arc's far point
-                let far =
-                    ((p.x - (5.0 + 2f64.sqrt())).powi(2) + (p.z + 2f64.sqrt()).powi(2)).sqrt();
+                let far = (det::powi(p.x - (5.0 + 2f64.sqrt()), 2)
+                    + det::powi(p.z + 2f64.sqrt(), 2))
+                .sqrt();
                 assert!(
                     far <= tolerance,
                     "middle of the section at {uv:?}: {far:e} off"

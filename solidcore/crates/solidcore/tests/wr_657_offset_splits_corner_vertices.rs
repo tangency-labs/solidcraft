@@ -16,6 +16,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -531,9 +532,9 @@ fn off_the_translated_disk_boundary(p: Point3, height: f64) -> f64 {
         ((x * x + y * y).sqrt() - 5.0).abs()
     } else {
         // below the diameter: the nearest end of the semicircle
-        ((x - 5.0).powi(2) + y * y)
+        (det::powi(x - 5.0, 2) + y * y)
             .sqrt()
-            .min(((x + 5.0).powi(2) + y * y).sqrt())
+            .min((det::powi(x + 5.0, 2) + y * y).sqrt())
     };
     let dx = (x.abs() - 5.0).max(0.0);
     arc.min((dx * dx + y * y).sqrt())
@@ -690,7 +691,7 @@ fn polytope_volume(hs: &[HalfSpace]) -> f64 {
         let u = face[0] - c;
         let u = u / u.length();
         let w = n.cross(u);
-        let angle = |p: &Vec3| (*p - c).dot(w).atan2((*p - c).dot(u));
+        let angle = |p: &Vec3| det::atan2((*p - c).dot(w), (*p - c).dot(u));
         face.sort_by(|p, q| angle(p).total_cmp(&angle(q)));
         let area: f64 = (0..face.len())
             .map(|i| 0.5 * (face[i] - c).cross(face[(i + 1) % face.len()] - c).dot(n))

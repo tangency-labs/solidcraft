@@ -25,6 +25,7 @@ use solidcore::blend::fillet_executive::session::{FilletObject, FilletSession};
 use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::{edge, EdgeId};
@@ -119,7 +120,7 @@ fn variable_round_traced_farther_comes_out_the_same() {
 fn variable_round_trace_reaches_its_rails_only_with_the_flag() {
     assert_eq!(variable_round_reach(false), vec![(0.0, [[true; 2]; 2])]);
     let on = variable_round_reach(true);
-    let expect = (2.0 / (PI / 4.0).tan() + 1.0) * 30.0;
+    let expect = (2.0 / det::tan(PI / 4.0) + 1.0) * 30.0;
     assert_eq!(on.len(), 1);
     let (reach, across) = on[0];
     assert!((reach - expect).abs() <= 1e-12 * expect, "reach {reach}");

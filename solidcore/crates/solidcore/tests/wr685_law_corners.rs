@@ -34,6 +34,7 @@ use solidcore::geom::vector2d::Point2;
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
@@ -805,7 +806,7 @@ fn surface_normal_at(k: &Kernel, b: &Brep, f: FaceId, p: Point3) -> Vec3 {
 
 /// The angle between the lines along `a` and `b`.
 fn line_angle(a: Vec3, b: Vec3) -> f64 {
-    (a.dot(b).abs() / (a.length() * b.length())).min(1.0).acos()
+    det::acos((a.dot(b).abs() / (a.length() * b.length())).min(1.0))
 }
 
 /// jyviko's blend-definition rule (#2243, #2489): each face the blend made is a definition
@@ -1273,9 +1274,9 @@ fn balls_union(length: f64, corner: f64, radii: [f64; 3]) -> f64 {
     let area = |x: f64| {
         simpson(
             |u| {
-                let t = PI / 4.0 * (1.0 - (PI * u).cos());
-                let rho = first_contact(&pieces, x, t.cos() + t.sin());
-                rho.map_or(0.0, |rho| rho * rho * PI * PI / 8.0 * (PI * u).sin())
+                let t = PI / 4.0 * (1.0 - det::cos(PI * u));
+                let rho = first_contact(&pieces, x, det::cos(t) + det::sin(t));
+                rho.map_or(0.0, |rho| rho * rho * PI * PI / 8.0 * det::sin(PI * u))
             },
             0.0,
             1.0,

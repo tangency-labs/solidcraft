@@ -12,6 +12,7 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::edge;
@@ -33,7 +34,7 @@ fn top_rim_chamfer_passes_the_corner_edge_closure_check() {
             let c = edge::curve(&b, e).unwrap().unwrap();
             let ivl = edge::interval(&b, e).unwrap();
             let p = c.evaluate_point(&k, ivl.min()).unwrap();
-            (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
+            (p.z - 20.0).abs() < 1e-6 && (det::hypot(p.x, p.y) - 10.0).abs() < 1e-6
         })
         .unwrap();
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();

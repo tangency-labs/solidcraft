@@ -1,6 +1,7 @@
 //! Regression tests for the exact SMS decoder used by `nurbs.nurbs_srf`.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 #[path = "../src/units/fixtures/nurbs_nurbs_srf_sms.rs"]
 mod sms;
 
@@ -149,7 +150,7 @@ fn all_numeric_and_malformed_tails_are_ignored() {
 
 #[test]
 fn invalid_counts_are_ordered_before_later_headers() {
-    let bound = 2.0_f64.powi(usize::BITS as i32);
+    let bound = det::powi(2.0_f64, usize::BITS as i32);
     for slot in 0..4 {
         for bad in [
             "-1".into(),
@@ -173,7 +174,7 @@ fn invalid_counts_are_ordered_before_later_headers() {
 
 #[test]
 fn huge_representable_counts_do_not_allocate_from_headers() {
-    let bound = 2.0_f64.powi(usize::BITS as i32);
+    let bound = det::powi(2.0_f64, usize::BITS as i32);
     let largest = if usize::BITS > 53 {
         f64::from_bits(bound.to_bits() - 1)
     } else {
@@ -197,7 +198,7 @@ fn huge_representable_counts_do_not_allocate_from_headers() {
 
 #[test]
 fn checked_sizes_reject_overflow_without_payload() {
-    let bound = 2.0_f64.powi(usize::BITS as i32);
+    let bound = det::powi(2.0_f64, usize::BITS as i32);
     // Exact powers of two are representable on every host. Cover knot sums,
     // net product, polynomial/rational stride, and cumulative payload addition.
     let half = bound / 2.0;
@@ -215,7 +216,7 @@ fn checked_sizes_reject_overflow_without_payload() {
 
 #[test]
 fn header_errors_precede_size_checks() {
-    let huge = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let huge = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert!(error(&format!("{huge} 0 0 0 broken")).contains("invalid float"));
     assert!(error(&format!("{huge} 0 0 0")).contains("truncated"));
     assert!(error(&format!("{huge} -1 broken")).contains("bad count"));

@@ -18,6 +18,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -150,7 +151,7 @@ fn wr_530_step_on_the_imprinted_piece_is_built() {
 const AXIS: (f64, f64) = (30.0, 20.0);
 
 fn axis_distance(p: Point3) -> f64 {
-    (p.x - AXIS.0).hypot(p.y - AXIS.1)
+    det::hypot(p.x - AXIS.0, p.y - AXIS.1)
 }
 
 /// WR-530's part: a 60 x 40 x 10 plate, an r10 boss, an r2 round at the boss's base.

@@ -19,6 +19,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::mass::integrator::properties::{curve_properties, EdgeProperties};
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::math::CPoint;
 use solidcore::Kernel;
@@ -31,7 +32,7 @@ const POWERS: [i32; 8] = [1, 2, 2, 2, 1, 2, 2, 2];
 /// The quarter circle of `radius` about `center` in the plane `z = center.z`, from
 /// `+x` to `+y`: one exact rational quadratic span on `[0, 1]`.
 fn quarter(center: Vec3, radius: f64) -> Curve {
-    let w = FRAC_PI_4.cos();
+    let w = det::cos(FRAC_PI_4);
     let (cx, cy, cz) = (center.x, center.y, center.z);
     let cpw = [
         CPoint::new(cx + radius, cy, cz, 1.0),
@@ -142,7 +143,7 @@ fn sizes(length: f64, r: f64, reach: f64) -> [f64; 27] {
     for (m, &power) in POWERS.iter().enumerate() {
         let measure = measures[m / 4];
         for c in 0..3 {
-            out[3 + 3 * m + c] = measure * reach.powi(power);
+            out[3 + 3 * m + c] = measure * det::powi(reach, power);
         }
     }
     out
@@ -174,7 +175,7 @@ fn holds(
     let k = Kernel::default();
     let interval = Extent1d::from_min_max(0.0, 1.0);
     for e in exponents {
-        let accuracy = 10f64.powi(-e);
+        let accuracy = det::powi(10f64, -e);
         let got = curve_properties(&k, curve, &interval, accuracy, origin, r)
             .unwrap_or_else(|err| panic!("at accuracy {accuracy:e}: {err:?}"));
         let got = flatten(&got);
@@ -262,7 +263,7 @@ fn a_wire_without_a_cross_section_has_zero_tube_properties() {
     let k = Kernel::default();
     let interval = Extent1d::from_min_max(0.0, 1.0);
     for e in 6..=11 {
-        let accuracy = 10f64.powi(-e);
+        let accuracy = det::powi(10f64, -e);
         let got = flatten(&curve_properties(&k, &curve, &interval, accuracy, origin, 0.0).unwrap());
         assert!(((got[0] - FRAC_PI_2) / FRAC_PI_2).abs() <= accuracy);
         assert!(got[1..].iter().all(|v| *v == 0.0), "{got:?}");

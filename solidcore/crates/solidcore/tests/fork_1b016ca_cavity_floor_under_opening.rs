@@ -33,6 +33,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -169,8 +170,8 @@ fn region_under_no_opening_is_not_kept() {
     let a = 3.0 - 0.5 * 2.0_f64.sqrt();
     let body = 16.0 * 6.4 * 4.0 + 104.0 / 3.0;
     let cavity = 243.0
-        + 5.4 * ((a + 0.5).powi(2) - 2.7_f64.powi(2))
-        + 4.0 / 3.0 * (2.7_f64.powi(3) - (a - 2.0).powi(3));
+        + 5.4 * (det::powi(a + 0.5, 2) - det::powi(2.7_f64, 2))
+        + 4.0 / 3.0 * (det::powi(2.7_f64, 3) - det::powi(a - 2.0, 3));
     let want = body - cavity;
     let v = volume(&k, &mut wall).unwrap();
     assert!((v - want).abs() <= 1e-9 * want, "{v} against {want}");
@@ -245,7 +246,7 @@ fn round_past_a_curved_wall_meets_it() {
     );
     for v in wall.vertices().ids().collect::<Vec<_>>() {
         let p = wall.vertex(v).unwrap().point;
-        let r = p.x.hypot(p.y);
+        let r = det::hypot(p.x, p.y);
         assert!(
             p.z >= -1e-6 || r <= 4.5 + 1e-6 || r >= 5.0 - 1e-6,
             "a vertex inside the wall: {p:?}"
@@ -254,22 +255,22 @@ fn round_past_a_curved_wall_meets_it() {
     let pi = core::f64::consts::PI;
     let n = 200_000;
     let ring = simpson(
-        |rho| 2.0 * pi * rho * (1.2 - (1.44 - (rho - 2.4).powi(2)).max(0.0).sqrt()),
+        |rho| 2.0 * pi * rho * (1.2 - (1.44 - det::powi(rho - 2.4, 2)).max(0.0).sqrt()),
         1.2,
         2.4,
         n,
     );
     let body = pi * 25.0 * 10.0 + pi * 1.44 * 10.0 + ring;
     let around = |rho: f64| {
-        let c = (4.5_f64.powi(2) - 2.5_f64.powi(2) - rho * rho) / (2.0 * 2.5 * rho);
+        let c = (det::powi(4.5_f64, 2) - det::powi(2.5_f64, 2) - rho * rho) / (2.0 * 2.5 * rho);
         if c >= 1.0 {
             2.0 * pi
         } else {
-            2.0 * pi - 2.0 * c.acos()
+            2.0 * pi - 2.0 * det::acos(c)
         }
     };
     let moved_ring = simpson(
-        |rho| rho * around(rho) * (1.7 - (2.89 - (rho - 2.4).powi(2)).max(0.0).sqrt()),
+        |rho| rho * around(rho) * (1.7 - (2.89 - det::powi(rho - 2.4, 2)).max(0.0).sqrt()),
         0.7,
         2.4,
         n,

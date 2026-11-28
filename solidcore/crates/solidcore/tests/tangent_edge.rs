@@ -29,6 +29,7 @@
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
@@ -97,7 +98,7 @@ fn every_edge_of_a_box_is_square() {
 fn a_wedge_s_ridge_is_its_dihedral_s_supplement() {
     let mut k = Kernel::default();
     let h = 5.0;
-    let half = h * (PI / 6.0).tan();
+    let half = h * det::tan(PI / 6.0);
     let p = |y: f64, z: f64| Point3::new(0.0, y, z);
     let pts = [p(-half, 0.0), p(half, 0.0), p(0.0, h)];
     let curves: Vec<Curve> = (0..3)
@@ -141,7 +142,7 @@ fn a_cylinder_s_side_meets_its_caps_square() {
 fn a_thin_wedge_s_faces_are_nearly_opposite() {
     let mut k = Kernel::default();
     let h = 5.0;
-    let w = h * 2.5_f64.to_radians().tan();
+    let w = h * det::tan(2.5_f64.to_radians());
     let p = |y: f64, z: f64| Point3::new(0.0, y, z);
     let pts = [p(-w, 0.0), p(w, 0.0), p(0.0, h)];
     let curves: Vec<Curve> = (0..3)
@@ -164,7 +165,7 @@ fn a_frustum_s_side_meets_its_base_past_square() {
     let mut k = Kernel::default();
     let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, 4.0).unwrap();
     let base = pick(&k, &b, Point3::new(0.0, 5.0, 0.0));
-    parts_by(&k, &mut b, base, (-0.6_f64).acos(), 1e-6);
+    parts_by(&k, &mut b, base, det::acos(-0.6_f64), 1e-6);
 }
 
 /// The same frustum's top: its outward normal (0, 0, 1) is acos(3/5) (53.13 degrees) from the
@@ -174,7 +175,7 @@ fn a_frustum_s_side_meets_its_top_under_square() {
     let mut k = Kernel::default();
     let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, 4.0).unwrap();
     let top = pick(&k, &b, Point3::new(0.0, 2.0, 4.0));
-    parts_by(&k, &mut b, top, 0.6_f64.acos(), 1e-4);
+    parts_by(&k, &mut b, top, det::acos(0.6_f64), 1e-4);
 }
 
 /// Frustums from r 5 to r 2, 3 tan(a) high: the side and the top are `a` apart all along the
@@ -193,7 +194,7 @@ fn a_shallow_frustum_s_top_is_smooth_under_half_a_degree() {
         (0.51, Tangency::NotTangent),
         (1.0, Tangency::NotTangent),
     ] {
-        let h = 3.0 * f64::to_radians(deg).tan();
+        let h = 3.0 * det::tan(f64::to_radians(deg));
         let mut b = create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, h).unwrap();
         let top = pick(&k, &b, Point3::new(0.0, 2.0, h));
         assert_eq!(
@@ -214,9 +215,9 @@ fn an_oblique_cylinder_s_side_passes_square_along_its_caps() {
     let mut k = Kernel::default();
     let a = 30.0_f64.to_radians();
     let circle = Curve::from(create_circle(Point3::new(0.0, 0.0, 0.0), 3.0).unwrap());
-    let lean = Vec3::new(a.sin(), 0.0, a.cos());
+    let lean = Vec3::new(det::sin(a), 0.0, det::cos(a));
     let mut b = create_linear_sweep(&mut k, &[Some(&circle)], lean, 8.0, true).unwrap();
-    let top = Point3::new(8.0 * a.sin(), 3.0, 8.0 * a.cos());
+    let top = Point3::new(8.0 * det::sin(a), 3.0, 8.0 * det::cos(a));
     for at in [Point3::new(0.0, 3.0, 0.0), top] {
         let e = pick(&k, &b, at);
         parts_by(&k, &mut b, e, 2.0 * PI / 3.0, 1e-6);
@@ -372,7 +373,7 @@ fn kinked(k: &mut Kernel, a: f64) -> Brep {
     let pts = [
         p(0.0, 0.0),
         p(10.0, 0.0),
-        p(20.0, 10.0 * a.tan()),
+        p(20.0, 10.0 * det::tan(a)),
         p(20.0, 12.0),
         p(0.0, 12.0),
     ];
@@ -416,7 +417,7 @@ fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
     let phi = 4.0_f64.to_radians();
     let place = Axis2Placement::new(
         Point3::new(0.0, 20.0, 16.0),
-        Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+        Vec3::new(-det::sin(phi), 0.0, -det::cos(phi)),
         Vec3::new(0.0, 1.0, 0.0),
     );
     solidcore::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();
@@ -598,7 +599,7 @@ fn a_pcurve_1e_15_off_a_knot_line_is_on_its_own_side() {
         );
         let (z0, z1) = if n.y < 0.0 { (0.0, 5.0) } else { (5.0, 0.0) };
         let row = |x: f64, y: f64| vec![CPoint::new(x, y, z0, 1.0), CPoint::new(x, y, z1, 1.0)];
-        let net = [row(0.0, 0.0), row(10.0, 0.0), row(20.0, 10.0 * a.tan())];
+        let net = [row(0.0, 0.0), row(10.0, 0.0), row(20.0, 10.0 * det::tan(a))];
         let (u, v) = ([0.0, 0.0, 0.5, 1.0, 1.0], [0.0, 0.0, 1.0, 1.0]);
         let s = BSplineSurface::from_data(2, 1, 1, 1, 4, 3, &net, &u, &v).unwrap();
         b.face_mut(f).unwrap().surface = Some(Surface::from(s));

@@ -50,6 +50,7 @@ use goldens::case::repo_root;
 use goldens::{golden, registry, Case, CaseContext};
 use serde_json::{json, Map, Value};
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::Vec3;
 
 /// The goldens' default number of generated cases per unit (the seeds they were blessed with).
@@ -97,7 +98,7 @@ fn rewrite(v: &mut Value, r: &Replay) -> usize {
                 let h = mode["height"].as_f64().unwrap();
                 let swap = mode.get("swap").and_then(Value::as_bool).unwrap_or(false);
                 // `Cone::create_canonical_with_semi_angle`'s top radius, the same expression
-                let top = bot + (semi * (std::f64::consts::PI / 180.0)).tan() * h;
+                let top = bot + det::tan(semi * (std::f64::consts::PI / 180.0)) * h;
                 m.insert("mode".to_owned(), (r.mode)(bot, top, h, swap));
                 if r.placed {
                     let p = Axis2Placement::new(v3(m, "origin"), v3(m, "x"), v3(m, "y"));

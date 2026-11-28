@@ -21,6 +21,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
 use solidcore::primitive::api_surface_ops::create_offset_surface;
@@ -102,11 +103,11 @@ fn ball_and_peg_round_volume() -> f64 {
     // int rho (zc - sqrt(1 - (rho - 3)^2)) drho, u = rho - 3
     let arc = |u: f64| {
         let w = 1.0 - u * u;
-        -(w * w.sqrt()) / 3.0 + 3.0 * (u * w.sqrt() + u.asin()) / 2.0
+        -(w * w.sqrt()) / 3.0 + 3.0 * (u * w.sqrt() + det::asin(u)) / 2.0
     };
     let ball_part = zc * (2.5f64 * 2.5 - 2.0 * 2.0) / 2.0 - (arc(-0.5) - arc(-1.0));
     // int rho sqrt(25 - rho^2) drho
-    let sphere = |rho: f64| -(25.0 - rho * rho).powf(1.5) / 3.0;
+    let sphere = |rho: f64| -det::powf(25.0 - rho * rho, 1.5) / 3.0;
     let sphere_part = sphere(2.5) - sphere(2.0);
     2.0 * PI * (ball_part - sphere_part)
 }
@@ -136,7 +137,7 @@ fn revolved_off_spine(k: &Kernel, b: &Brep) -> f64 {
                     .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
                     .unwrap();
                 let rho = (p.x * p.x + p.y * p.y).sqrt();
-                let off = ((rho - 3.0).powi(2) + (p.z - zc).powi(2)).sqrt() - 1.0;
+                let off = (det::powi(rho - 3.0, 2) + det::powi(p.z - zc, 2)).sqrt() - 1.0;
                 worst = worst.max(off.abs());
             }
         }
@@ -663,7 +664,7 @@ fn short_rib_rounded(sweep: f64) -> (Kernel, Brep, f64, [usize; 3]) {
     let turn = -sweep.to_radians() / 2.0;
     let rib: Vec<Vec3> = SHORT_RIB
         .iter()
-        .map(|p| Vec3::new(p[0], p[1] * turn.cos(), p[1] * turn.sin()))
+        .map(|p| Vec3::new(p[0], p[1] * det::cos(turn), p[1] * det::sin(turn)))
         .collect();
     let mut k = Kernel {
         fixes: solidcore::kernel::UpstreamFixes::all(),
@@ -708,22 +709,22 @@ const SHORT_RIB: [[f64; 2]; 3] = [
 /// feet and the ball's centre, less the ball's sector between the feet, by Pappus.
 fn short_rib_round_per_radian() -> f64 {
     let unit = |d: [f64; 2]| {
-        let l = d[0].hypot(d[1]);
+        let l = det::hypot(d[0], d[1]);
         [d[0] / l, d[1] / l]
     };
     let c = SHORT_RIB[0];
     let back = unit([-1.0, -0.25]);
     let up = unit([SHORT_RIB[1][0] - c[0], SHORT_RIB[1][1] - c[1]]);
-    let phi = (back[0] * up[0] + back[1] * up[1]).acos();
-    let t = 1.0 / (phi / 2.0).tan();
+    let phi = det::acos(back[0] * up[0] + back[1] * up[1]);
+    let t = 1.0 / det::tan(phi / 2.0);
     let b = unit([back[0] + up[0], back[1] + up[1]]);
-    let centre = c[1] + b[1] / (phi / 2.0).sin();
+    let centre = c[1] + b[1] / det::sin(phi / 2.0);
     let foot = |d: [f64; 2]| c[1] + d[1] * t;
     let kite = t;
     let kite_rho = (2.0 * c[1] + foot(back) + foot(up) + 2.0 * centre) / 6.0;
     let half = (PI - phi) / 2.0;
     let sector = half;
-    let sector_rho = centre - b[1] * 2.0 * half.sin() / (3.0 * half);
+    let sector_rho = centre - b[1] * 2.0 * det::sin(half) / (3.0 * half);
     kite * kite_rho - sector * sector_rho
 }
 

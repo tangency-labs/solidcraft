@@ -1,6 +1,7 @@
 //! Non-C++ regressions exercising the surface-basic runner's actual SMS decoder.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/nlib_srf_basic_sms.rs"]
 mod sms;
@@ -26,7 +27,7 @@ fn header_with(position: usize, value: &str) -> String {
 
 #[test]
 fn every_count_rejects_malformed_and_unrepresentable_values() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     for position in 0..4 {
         for value in ["-1", "0.5", "NaN", "inf", "-inf", "1e100"] {
             rejected(&header_with(position, value), "count");
@@ -40,12 +41,12 @@ fn every_count_rejects_malformed_and_unrepresentable_values() {
 
 #[test]
 fn huge_representable_dimensions_do_not_allocate_from_headers() {
-    let huge = 2.0_f64.powi(usize::BITS as i32 - 5);
+    let huge = det::powi(2.0_f64, usize::BITS as i32 - 5);
     for position in 0..4 {
         rejected(&header_with(position, &format!("{huge:.0}")), "truncated");
     }
     // The greatest integral float below the exclusive bound must not saturate.
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     let below = if usize::BITS <= 53 {
         upper - 1.0
     } else {
@@ -63,7 +64,7 @@ fn huge_representable_dimensions_do_not_allocate_from_headers() {
 
 #[test]
 fn checked_size_sums_and_products_reject_overflow() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     let quarter = half / 2.0;
     for header in [
         format!("{half:.0} 0 {half:.0} 0 0"),    // u knot sum

@@ -23,6 +23,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )]
+use solidcore::math::det;
 
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
@@ -489,9 +490,9 @@ fn slanted_corner(k: &mut Kernel, alpha: f64) -> solidcore::Result<Brep> {
 fn a_round_meets_a_slanted_side_edge_on_its_law_ball() {
     let alpha: f64 = 15.0;
     let (sa, ca, ta) = (
-        alpha.to_radians().sin(),
-        alpha.to_radians().cos(),
-        alpha.to_radians().tan(),
+        det::sin(alpha.to_radians()),
+        det::cos(alpha.to_radians()),
+        det::tan(alpha.to_radians()),
     );
     let c = ta * (1.0 + sa);
     let foot = |t: f64| {

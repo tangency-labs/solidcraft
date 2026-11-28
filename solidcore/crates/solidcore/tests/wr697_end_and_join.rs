@@ -12,6 +12,8 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
+
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
 use solidcore::blend::blend_corner::{BlendCornerEvent, BlendEnd};
@@ -213,10 +215,10 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     let mut removed = 0.0;
     for i in 0..=n {
         let t = f64::from(i) * h;
-        let f = (2.0 - 2.0 * t.cos())
-            * (40.0 - (400.0 - (2.0 * t.sin() - 2.0).powi(2)).sqrt())
+        let f = (2.0 - 2.0 * det::cos(t))
+            * (40.0 - (400.0 - det::powi(2.0 * det::sin(t) - 2.0, 2)).sqrt())
             * 2.0
-            * t.cos();
+            * det::cos(t);
         let w = if i == 0 || i == n {
             1.0
         } else if i % 2 == 1 {
@@ -452,7 +454,7 @@ fn teardrop_area_and_length() -> (f64, f64) {
             let (c, d) = teardrop_point(0.5 * (a + b) + 0.5 * (b - a) * x);
             let w = w * 0.5 * (b - a);
             area += w * 0.5 * (c[0] * d[1] - c[1] * d[0]);
-            length += w * d[0].hypot(d[1]);
+            length += w * det::hypot(d[0], d[1]);
         }
     }
     (area, length)
@@ -478,7 +480,7 @@ fn a_closed_convex_rim_meeting_itself_at_an_angle_is_rounded() {
     let rim = [[15.5, 0.0, 10.0]];
     for r in [0.5, 1.0] {
         let want = 10.0 * area - length * r * r * (1.0 - PI / 4.0)
-            + (3.0 * PI / 4.0 + 1.0) * r.powi(3) * (5.0 / 3.0 - PI / 2.0);
+            + (3.0 * PI / 4.0 + 1.0) * det::powi(r, 3) * (5.0 / 3.0 - PI / 2.0);
         let mut k = all_fixes();
         let mut b = teardrop_prism(&mut k);
         round(&mut k, &mut b, &rim, r);
@@ -684,7 +686,7 @@ fn an_end_patch_off_its_support_is_refused() {
 /// halfway along the second; the corner's vertex at (50, 0, 2).
 fn kinked_plate(k: &mut Kernel, kink: f64, convex: bool) -> (Brep, [[f64; 3]; 2]) {
     let t = if convex { -kink } else { kink }.to_radians();
-    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let (u, n) = ([det::cos(t), det::sin(t)], [det::sin(t), -det::cos(t)]);
     let p = [
         [0.0, 0.0],
         [50.0, 0.0],
@@ -784,7 +786,11 @@ fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
             // behind it (reach R = 1 on the cap, the walls square to it)
             let gap = joint_gap(&k, &mut b, [50.0, 0.0, 2.0]);
             let beta = kink.to_radians();
-            let want_gap = if convex { 1.0 / beta.cos() - 1.0 } else { beta };
+            let want_gap = if convex {
+                1.0 / det::cos(beta) - 1.0
+            } else {
+                beta
+            };
             if want == Join {
                 assert!(
                     (gap - want_gap).abs() <= 1e-4 * want_gap,
@@ -940,7 +946,7 @@ fn drafted_plate(
     z: f64,
 ) -> (Brep, [[f64; 3]; 2], [f64; 3]) {
     let t = if convex { -kink } else { kink }.to_radians();
-    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let (u, n) = ([det::cos(t), det::sin(t)], [det::sin(t), -det::cos(t)]);
     let p = [
         [0.0, 0.0],
         [50.0, 0.0],
@@ -1004,9 +1010,9 @@ fn drafted_plate(
 fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
     let d = 30.0_f64.to_radians();
     let a_max = 2e-5_f64;
-    let (c, s) = (d.cos(), d.sin());
-    let a_max = 2.0 * (a_max / 2.0).atan();
-    let k_max = ((a_max.cos() - s * s) / (c * c)).acos().to_degrees();
+    let (c, s) = (det::cos(d), det::sin(d));
+    let a_max = 2.0 * det::atan(a_max / 2.0);
+    let k_max = det::acos((det::cos(a_max) - s * s) / (c * c)).to_degrees();
     for z in [0.0, -2.0] {
         for (f, want) in [
             (0.97, BlendCornerEvent::Join),

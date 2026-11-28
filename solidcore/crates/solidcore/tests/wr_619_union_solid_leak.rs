@@ -27,6 +27,7 @@ use solidcore::error::boolean::BooleanFailure;
 use solidcore::error::Reason;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p1;
@@ -49,7 +50,7 @@ fn operands(k: &mut Kernel) -> (Brep, Brep) {
     let a = create_box(k, Point3::new(-2.0, 16.0, 0.0), SIDE, SIDE, SIDE).unwrap();
     let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), SIDE, SIDE, SIDE).unwrap();
     let o = Point3::new(0.0, 0.0, 0.0);
-    let deg = SLOPE.atan().to_degrees();
+    let deg = det::atan(SLOPE).to_degrees();
     api_rotate(
         k,
         Some(TransformObject::Brep(&mut b)),
@@ -134,7 +135,7 @@ fn pocketed_operands(k: &mut Kernel, cut: (f64, f64), z0: f64, h: f64, d: f64) -
         Some(TransformObject::Brep(&mut b)),
         Point3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 0.0, 1.0),
-        SLOPE.atan().to_degrees(),
+        det::atan(SLOPE).to_degrees(),
     )
     .unwrap();
     let half = d / SLOPE;
