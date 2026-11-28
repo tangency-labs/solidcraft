@@ -525,6 +525,31 @@ pub fn double_click_entities(app: &mut SolveApp) -> bool {
     let Some(dialog) = app.dialog.as_mut() else {
         return false;
     };
+    // Sweep paths accept a chain from a sketch other than the profile sketch.
+    if matches!(dialog.kind, Kind::Sweep { .. } | Kind::Surface(crate::dialogs_surface::Surf::Sweep(_))) {
+        if dialog.active != 1 || app.viewport.hover.as_ref().and_then(|hit| dialog.candidate_on(&app.session, hit, None)).is_none() {
+            return false;
+        }
+        let Ok(v) = app.session.execute("sketch.chain", &json!({ "sketch": sketch, "curve": id })) else {
+            return false;
+        };
+        let Some(input) = dialog.inputs.get_mut(1) else {
+            return false;
+        };
+        let items: Vec<Sel> = v["curves"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str())
+            .map(|id| crate::selection::curve_pick(id, sketch, app.session.active_sketch))
+            .filter(|s| !input.rejects(s))
+            .collect();
+        if items.is_empty() {
+            return false;
+        }
+        input.toggle(items);
+        return true;
+    }
     // Project takes the curves of the other sketches, never the one being edited: the chain
     // joined to the curve goes into Geometry as one toggle, as for the Entities inputs below.
     if matches!(dialog.kind, Kind::SketchProject { .. }) {

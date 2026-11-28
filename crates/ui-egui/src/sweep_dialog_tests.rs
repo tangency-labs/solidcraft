@@ -490,3 +490,27 @@ fn edge_chain_inputs_offer_tangent_chain() {
         h.app.dialog = None;
     }
 }
+
+#[test]
+fn double_click_selects_connected_sweep_path_curves() {
+    let mut h = Harness::new();
+    let profile = setup(&mut h);
+    h.app.run("sketch.create", json!({"plane":"XZ","name":"Chain"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,-20],[10,-40]],"ids":["seg1","seg2"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[60,0],[60,10]],"ids":["lone"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Chain").unwrap().id;
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch: profile, index: 0 }];
+    d.active = 1;
+    h.app.viewport.hover = Some(Hit::SketchCurve { sketch, id: "seg1".into(), straight: true, point: Vec3::ZERO });
+    assert!(crate::sketch_modify_ui::double_click_entities(&mut h.app));
+    let items = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert_eq!(items.len(), 2);
+    for id in ["seg1", "seg2"] {
+        assert!(items.contains(&crate::selection::curve_pick(id, sketch, h.app.session.active_sketch)));
+    }
+    assert!(crate::sketch_modify_ui::double_click_entities(&mut h.app));
+    assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty());
+}
