@@ -1,0 +1,34 @@
+{
+  "en": {
+    "selection.length": "Length {length}",
+    "selection.length_total": "Length {length} ({count} edges)"
+  },
+  "ar": {
+    "selection.length": "الطول {length}",
+    "selection.length_total": "الطول {length} ({count} حواف)"
+  },
+  "de": {
+    "selection.length": "Länge {length}",
+    "selection.length_total": "Länge {length} ({count} Kanten)"
+  },
+  "he": {
+    "selection.length": "אורך {length}",
+    "selection.length_total": "אורך {length} ({count} מקצועות)"
+  },
+  "ja": {
+    "selection.length": "長さ {length}",
+    "selection.length_total": "長さ {length}（エッジ {count} 本）"
+  },
+  "ko": {
+    "selection.length": "길이 {length}",
+    "selection.length_total": "길이 {length} (모서리 {count}개)"
+  },
+  "vi": {
+    "selection.length": "Chiều dài {length}",
+    "selection.length_total": "Chiều dài {length} ({count} cạnh)"
+  },
+  "zh": {
+    "selection.length": "长度 {length}",
+    "selection.length_total": "长度 {length}（{count} 条边）"
+  }
+}

@@ -9089,8 +9089,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let overlay_rect = crate::shell::bottom_readout_rect(app, notice);
     let mut legends = Vec::new();
     if !card {
-        legends.extend(crate::viewport_details::legacy_legends(app, ui, overlay_rect));
+        let (free, placed) = crate::viewport_details::legacy_legends(app, ui, overlay_rect);
+        legends.extend(placed);
         placement_note(app, &painter, overlay_rect);
+        legends.extend(crate::selection_length::paint(app, &painter, free));
         crate::frame_rate::paint(app, ui, &painter, overlay_rect);
     }
 
