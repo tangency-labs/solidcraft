@@ -593,7 +593,7 @@ mod tests {
             .iter()
             .map(|face| solidcraft_kernel::FacePaint { face: face.index, color: [1., 0., 0.], opacity: 0.5, name: None })
             .collect();
-        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: None })), 1)
+        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: None, layer: None })), 1)
     }
 
     fn check_imported_appearance_precedence(body: &crate::ModelBody) {

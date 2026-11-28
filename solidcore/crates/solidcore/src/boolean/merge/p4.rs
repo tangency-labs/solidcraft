@@ -52,7 +52,7 @@
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
 //! upstream leaves it the flag it had, so the filled void stayed void.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use super::p1::{self, MergeOptions};
 use crate::error::boolean::{BooleanFailure, BooleanStage};
@@ -1060,6 +1060,18 @@ fn refresh_common(
     pairs(&state.vertices, &state.other_vertices)
 }
 
+fn retain_not_deleted<T: Eq + std::hash::Hash>(items: &mut Vec<T>, deleted: &[T]) {
+    if deleted.is_empty() {
+        return;
+    }
+    if deleted.len() > 8 {
+        let removed: HashSet<&T> = deleted.iter().collect();
+        items.retain(|x| !removed.contains(x));
+    } else {
+        items.retain(|x| !deleted.contains(x));
+    }
+}
+
 fn mark_common(
     kernels: &mut BooleanKernels<'_>,
     primary: &mut Brep,
@@ -1110,10 +1122,8 @@ fn mark_common(
                     &mut made,
                     &mut deleted,
                 ));
-                state
-                    .intersection_vertices
-                    .retain(|x| !deleted.0.contains(x));
-                state.intersection_edges.retain(|x| !deleted.1.contains(x));
+                retain_not_deleted(&mut state.intersection_vertices, &deleted.0);
+                retain_not_deleted(&mut state.intersection_edges, &deleted.1);
                 if status?.is_none() {
                     made = false;
                 }
@@ -1142,12 +1152,8 @@ fn mark_common(
         }
         if done && single.len() > 1 && manifold {
             let fixed = intersector.fix_gaps(kernels, primary, other, attributes, &single)?;
-            state
-                .intersection_vertices
-                .retain(|v| !fixed.deleted_vertices.contains(v));
-            state
-                .intersection_edges
-                .retain(|e| !fixed.deleted_edges.contains(e));
+            retain_not_deleted(&mut state.intersection_vertices, &fixed.deleted_vertices);
+            retain_not_deleted(&mut state.intersection_edges, &fixed.deleted_edges);
             if fixed.modified_topology {
                 done = false;
             }
@@ -3091,5 +3097,34 @@ mod tests {
             cup_and_lid_outer_shells(),
             [vec![true, false], vec![true, false]]
         );
+    }
+
+    #[test]
+    fn retain_not_deleted_preserves_order_for_small_and_large_deleted_slices() {
+        let base: Vec<u32> = (0..30).collect();
+
+        let mut empty_case = base.clone();
+        retain_not_deleted(&mut empty_case, &[]);
+        assert_eq!(empty_case, base);
+
+        let small_del = [2, 5, 11, 29];
+        let mut small_case = base.clone();
+        retain_not_deleted(&mut small_case, &small_del);
+        let expected_small: Vec<u32> = base
+            .iter()
+            .copied()
+            .filter(|x| !small_del.contains(x))
+            .collect();
+        assert_eq!(small_case, expected_small);
+
+        let large_del = [0, 3, 4, 7, 9, 12, 15, 18, 21, 24, 27, 29];
+        let mut large_case = base.clone();
+        retain_not_deleted(&mut large_case, &large_del);
+        let expected_large: Vec<u32> = base
+            .iter()
+            .copied()
+            .filter(|x| !large_del.contains(x))
+            .collect();
+        assert_eq!(large_case, expected_large);
     }
 }

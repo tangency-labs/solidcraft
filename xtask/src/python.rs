@@ -434,6 +434,14 @@ pub fn generate(commands: &[Value], tools: &[Value], version: &str) -> Result<Ve
 /// `beta` likewise `a`, `b`), and a nightly `0.51.0-nightly.20261127.123.1` is
 /// `0.51.0.dev202611271231`, a development release that sorts by date and run.
 pub fn pep440(version: &str) -> Result<String, String> {
+    // A post release of the Python package alone (`0.51.1.post1`, pypi.yml's source mode): already
+    // PEP 440, on top of the release whose CLI it downloads.
+    if let Some((base, n)) = version.split_once(".post")
+        && !n.is_empty()
+        && n.bytes().all(|b| b.is_ascii_digit())
+    {
+        return pep440(base).map(|b| format!("{b}.post{n}")).map_err(|_| format!("python wheel: `{version}` is not a version like 0.51.0.post1"));
+    }
     let (base, pre) = version.split_once('-').unwrap_or((version, ""));
     if base.split('.').count() != 3 || !base.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) {
         return Err(format!("python wheel: `{version}` is not a version like 0.51.0"));
@@ -645,6 +653,9 @@ mod tests {
         assert!(pep440("0.51").is_err());
         assert!(pep440("0.51.0-weird").is_err());
         assert!(pep440("0.51.0-rc.x").is_err());
+        assert_eq!(pep440("0.51.1.post1").unwrap(), "0.51.1.post1");
+        assert!(pep440("0.51.1.post").is_err());
+        assert!(pep440("0.51.post1").is_err());
     }
 
     #[test]

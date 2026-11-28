@@ -869,15 +869,9 @@ fn with_start(s: &Seg2, x: Vec2) -> Seg2 {
 /// Points a free curve is sampled at by [`meet`].
 const MEET_SAMPLES: usize = 48;
 
-/// Extrude one region by `length` along `dir_sign` × the plane normal with a taper angle
-/// (radians; positive grows the profile), its sharp corners closed by `corner`
-/// ([`crate::draft_corners`] says what each rule gives at each corner).
-pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f64, taper: f64, corner: DraftCorner) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "extrude_tapered");
-    extrude_tapered_between(plane, region, 0.0, length, 0.0, dir_sign, taper, corner)
-}
-
-/// [`extrude_tapered`] from `from` to `to` along `dir_sign` × the plane normal, the region
+/// One region extruded with a taper angle (radians; positive grows the profile), its sharp
+/// corners closed by `corner` ([`crate::draft_corners`] says what each rule gives at each corner),
+/// from `from` to `to` along `dir_sign` × the plane normal, the region
 /// being the section at 0: its sides run on through it, so `from` below 0 starts the solid
 /// that far before the profile (into a face the profile lies on), at the profile shrunk or
 /// grown by the taper. With a `foot` (a height, less than `to - from`), the sides stand

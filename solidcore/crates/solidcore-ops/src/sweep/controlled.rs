@@ -21,7 +21,7 @@ use solidcore::sweep::stations::{
 use solidcore::topology::{Brep, FaceId};
 
 use super::{bspline, parse, Affine, Curve, KCurve, Made};
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish_closed, Body, Expect};
 use crate::error::status;
 use crate::session::run;
 use crate::{Error, Result};
@@ -196,7 +196,7 @@ fn indices(order: &[FaceId], ids: &[FaceId]) -> Option<Vec<usize>> {
 /// from one curve of each section; the kernel's refusals of the path, the laws and
 /// the rails ([`Error::Refused`] for input it refuses, else [`Error::Status`]), with
 /// SolidCraft's least crossing angle and sine
-/// ([`MIN_PARALLEL_CROSSING`], [`MIN_DIRECTION_ACROSS`]); those of `finish`.
+/// ([`MIN_PARALLEL_CROSSING`], [`MIN_DIRECTION_ACROSS`]); those of `finish_closed`.
 pub fn sweep_controlled(
     profile: &[Curve],
     profile_normal: [f64; 3],
@@ -351,7 +351,7 @@ fn build(
         end: skin.end_faces,
         walls,
     };
-    Ok(match finish(k, skin.brep, Expect::SOLID)? {
+    Ok(match finish_closed(k, skin.brep, Expect::SOLID)? {
         Ok(b) => Ok((b, faces)),
         Err(e) => Err(e),
     })

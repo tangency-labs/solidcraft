@@ -1897,13 +1897,13 @@ mod tests {
         assert_eq!(name("breite = 50 mm"), "breite = 50 mm", "explicit definitions are unchanged");
         let mut inch = solidcraft_engine::doc::Document::new("Inch");
         inch.units = "in".into();
-        let length = inch.new_model_param("30", "mm");
+        let length = inch.new_model_param("30", "mm").unwrap();
         assert_eq!(
             dimension_value_or_definition(&inch, &inch, &length, "height", None),
             "height = 30 mm",
             "a legacy bare model length remains millimetres in an inch design"
         );
-        let angle = inch.new_model_param("45", "deg");
+        let angle = inch.new_model_param("45", "deg").unwrap();
         assert_eq!(dimension_value_or_definition(&inch, &inch, &angle, "sweep", None), "sweep = 45", "non-length expressions are unchanged");
         assert_eq!(
             dimension_value_or_definition(&inch, &inch, "missing", "driven", Some("20 mm")),
