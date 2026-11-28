@@ -21,13 +21,16 @@
 //! | [`WeldNote`]      | What the weld tool tells the user about a weld that built           |
 //! | [`NoGroove`]      | A joint with no groove modelled: its seams, and the mark on one     |
 //! | [`Seam`]          | Where the seam runs on one welded side                              |
+//! | [`groove_fillet_weld`] | The weld of a T joint's groove with a fillet over it            |
+//! | [`TFillet`]       | The legs of that fillet                                             |
 //! | [`GrooveRefusal`] | Why a joint is refused                                              |
 //!
 //! # Not covered
 //!
 //! A T joint's through part has no toe edge: its outer face is its only groove face, and its
 //! toe is where the stem's outer face meets it ([`groove_weld`]). A joint with no groove modelled
-//! gets a seam and a flat mark ([`NoGroove`]) only between butt plates. A joint whose section
+//! gets a seam and a flat mark ([`NoGroove`]) only between butt plates. A fillet over a groove
+//! ([`groove_fillet_weld`]) is built at T joints only, over the whole joint. A joint whose section
 //! changes along it, or whose parts do not run alongside each other all along it, is refused
 //! with the stretches that keep one section ([`GrooveRefusal::SectionChanges`], brett19 on
 //! #18500, Q56); each one builds on its own ([`groove_weld_over`]). Building them all at once
@@ -87,6 +90,9 @@ pub enum GrooveRefusal {
     /// end on it (a stem standing off it). Not built.
     #[error("the {part:?} part's groove does not end on the through part's outer face")]
     StemOffThroughPart { part: JointPart },
+    /// A fillet's leg on `part` ends off that part's outer face: the face is shorter than the leg.
+    #[error("the fillet's leg on the {part:?} part runs past its outer face")]
+    LegPastFace { part: JointPart },
     /// A part's outer face `face` is not a plane.
     #[error("the {part:?} part's outer face {face} is not a plane")]
     OuterFaceNotPlane { part: JointPart, face: usize },
@@ -512,6 +518,53 @@ pub fn groove_weld_over(picks: [&GroovePick<'_>; 2], options: &FillOptions, over
     }
 }
 
+/// The legs of a fillet over a T joint's groove (Q100): each measured from C, where the stem's
+/// side meets the through part's outer face.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TFillet {
+    /// The leg up the stem's side (z1, mm).
+    pub stem: f64,
+    /// The leg along the through part's outer face, away from the stem (z2, mm).
+    pub through: f64,
+}
+
+/// The weld of a T joint's groove with a fillet over it, as one body (Q23): the groove filled
+/// whole and the fillet's wedge between the stem's side and the through part's face filled as
+/// `options.face` asks ([`fill_channel`]), all along the joint. The legs are measured from C,
+/// where the stem's side meets the through part (Q100). A leg up the stem shorter than the
+/// groove leaves the groove flush with the stem's side from the stem's toe down to the fillet's
+/// toe (Q101). Nothing writes to a part.
+///
+/// # Errors
+/// [`GrooveRefusal::Invalid`] for a joint that is not a T joint, a depth (the groove is filled
+/// whole), or a leg that is not finite and longer than the zone tolerance;
+/// [`GrooveRefusal::LegPastFace`] where a leg ends off its part's outer face;
+/// [`GrooveRefusal::Fill`] for a face the fillet cannot take, with the size that builds;
+/// otherwise as [`groove_weld`].
+pub fn groove_fillet_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions, fillet: TFillet) -> Result<GrooveWeld> {
+    let zone = zone_tolerance()?;
+    if options.depth.is_some() {
+        return Err(GrooveRefusal::Invalid("a fillet over a groove fills the groove whole: no depth"));
+    }
+    let legs = [fillet.stem, fillet.through];
+    if !legs.iter().all(|&l| l.is_finite() && l > zone) {
+        return Err(GrooveRefusal::Invalid("a fillet's legs must be finite and longer than the zone tolerance"));
+    }
+    let (picks, parts, through) = stem_first(picks)?;
+    if !through {
+        return Err(GrooveRefusal::Invalid("a fillet over a groove needs a T joint: one part picks its outer face alone"));
+    }
+    let joint = cut(picks, parts, through, zone)?;
+    let (over, walls) = match joint.stretches.as_slice() {
+        [(s, walls)] if s.from <= zone && s.to >= joint.end - joint.start - zone => (*s, walls),
+        _ => return Err(joint.refusal()),
+    };
+    let piece = Piece { frame: &joint.frame, d: joint.d, along: [joint.start + over.from, joint.start + over.to], zone };
+    let fill = fillet_fill(picks, parts, walls, &piece, options, fillet)?;
+    let body = extrude_planar_regions(&joint.frame, std::slice::from_ref(&fill.region), piece.along[0], piece.along[1])?;
+    Ok(GrooveWeld { body, frame: joint.frame, fill, zone })
+}
+
 /// The picks with a T joint's stem first, their parts as passed, and whether the second is a
 /// T joint's through part (its outer face its only groove face).
 ///
@@ -532,6 +585,8 @@ struct Joint {
     /// The joint's frame, on the left part's first toe edge ([`signed_frame`]): every wall is
     /// read in it.
     frame: Plane,
+    /// The joint's direction, the frame's normal.
+    d: [f64; 3],
     /// Where the joint starts along the frame's normal, from its origin (mm).
     start: f64,
     /// Where it ends.
@@ -634,7 +689,7 @@ fn cut(picks: [&GroovePick<'_>; 2], parts: [JointPart; 2], through: bool, zone: 
     if let (true, Some(why)) = (stretches.is_empty(), why) {
         return Err(why);
     }
-    Ok(Joint { frame, start, end, stretches })
+    Ok(Joint { frame, d, start, end, stretches })
 }
 
 /// A piece of the joint: from `along[0]` to `along[1]` along `d`, measured from the frame's
@@ -791,6 +846,83 @@ fn ended_at(pick: &GroovePick<'_>, face: usize, wall: &[Seg2], root: Vec2, piece
         return Ok(None);
     }
     Ok(Some(before.iter().copied().chain([Seg2::Line { a, b: root }]).collect()))
+}
+
+/// The fill of a fillet over a T joint's groove, the stem's wall and the through part's wall
+/// `walls`: the fillet's wedge from its toes to C filled ([`fill_channel`]), its two legs then
+/// replaced by the groove under them, so the region is the whole weld's section. The other
+/// fields are the wedge's.
+///
+/// # Errors
+/// [`GrooveRefusal::LegPastFace`], [`GrooveRefusal::Fill`]; [`GrooveRefusal::Invalid`] for walls
+/// that are not a groove beside a face, or a wedge whose legs the fill did not keep as given;
+/// the errors of the kernel calls.
+fn fillet_fill(
+    picks: [&GroovePick<'_>; 2],
+    parts: [JointPart; 2],
+    walls: &[Vec<Seg2>; 2],
+    piece: &Piece<'_>,
+    options: &FillOptions,
+    fillet: TFillet,
+) -> Result<ChannelFill> {
+    let tol = piece.zone * ALLOWANCE;
+    let [stem, through] = walls;
+    let (Some(first), Some(&Seg2::Line { a: c, b: root })) = (stem.first(), through.first()) else {
+        return Err(GrooveRefusal::Invalid("a T joint's walls that are not a groove beside a face"));
+    };
+    let toe = ends(first).0;
+    // the fillet's toes: up the stem's side from C, and along the face away from the root
+    let (left, right) = (toward(c, toe, fillet.stem), toward(c, root, -fillet.through));
+    if fillet.stem > span(c, toe) && !on_face(picks[0], picks[0].outer, piece.in_space(left), tol)? {
+        return Err(GrooveRefusal::LegPastFace { part: parts[0] });
+    }
+    if !on_face(picks[1], picks[1].outer, piece.in_space(right), tol)? {
+        return Err(GrooveRefusal::LegPastFace { part: parts[1] });
+    }
+    let mut fill = match fill_channel(&[Seg2::Line { a: left, b: c }], &[Seg2::Line { a: right, b: c }], None, options)? {
+        Ok(fill) => fill,
+        Err(refusal) => return Err(GrooveRefusal::Fill { why: refusal.why, fit: refusal.fit }),
+    };
+    // the legs in the fill's loop, in turn: up the stem's leg to C, then out along the face
+    let segs = &fill.region.outer.segs;
+    let legs = |(s, t): (&Seg2, &Seg2)| match (*s, *t) {
+        (Seg2::Line { a, b }, Seg2::Line { a: p, b: q }) => near(a, left, tol) && near(b, c, tol) && near(p, c, tol) && near(q, right, tol),
+        _ => false,
+    };
+    let Some(at) = segs.iter().zip(segs.iter().cycle().skip(1)).position(legs) else {
+        return Err(GrooveRefusal::Invalid("a fillet's fill that did not keep its legs as given"));
+    };
+    let next = (at + 1) % segs.len();
+    // in their place: the groove's face flush with the stem's side to the stem's toe (or the stem's
+    // side down to it), the stem's wall to the root, and the face from the root to the toe
+    let mut groove: Vec<Seg2> = Vec::new();
+    if !near(left, toe, tol) {
+        groove.push(Seg2::Line { a: left, b: toe });
+    }
+    groove.extend(stem.iter().copied());
+    groove.push(Seg2::Line { a: root, b: right });
+    let mut out: Vec<Seg2> = Vec::new();
+    for (i, s) in segs.iter().enumerate() {
+        if i == at {
+            out.extend(groove.iter().copied());
+        } else if i != next {
+            out.push(*s);
+        }
+    }
+    fill.region.outer.segs = out;
+    Ok(fill)
+}
+
+/// How far apart `p` and `q` are. shortcut: plain arithmetic in the frame's plane, as [`ends`]
+/// reads arcs.
+fn span(p: Vec2, q: Vec2) -> f64 {
+    ((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y)).sqrt()
+}
+
+/// The point `by` mm from `from` towards `to` (away from it where `by` is negative).
+fn toward(from: Vec2, to: Vec2, by: f64) -> Vec2 {
+    let k = by / span(from, to);
+    Vec2::new(from.x + k * (to.x - from.x), from.y + k * (to.y - from.y))
 }
 
 /// Whether point `p` lies on record face `face` of `pick`'s part, within `tol`.
