@@ -204,3 +204,81 @@ The second row is the adapter's job, and its pull request shows it (kernel-layer
 
 Every stage: the full kernel rig base against branch, the naming corpus and goldens. A moved
 result needs its derivation (the test-change rule), and valid input is never refused.
+
+## Addendum, 2026-11-28: exact helix edges and straight trims
+
+### What the record of a thread is made of
+
+Measured on main at 2b7debcb04 with the `sweep` kind in place (the release CLI, a modelled M20 on
+a D20×40 cylinder and a modelled M30x1.5 on a D30×100 one, the saved body decoded):
+
+| M30x1.5 × 100 record | numbers |
+|---|---|
+| the two flank nets | about 40 000 |
+| 140 cubic spline edges on the flanks | about 143 000 |
+| pcurves on the flanks | about 97 000 |
+| pcurves on the 203 half-turn cylinder faces | about 114 000 |
+
+The nets are a small share, so leaving them out (stage 4 above) would save about 7% of a file.
+Stage 4 is dropped. The bulk is the trims, and they are fitted where the answer is exact:
+
+- **A flank meets the stock's cylinder along a helix.** A wall with no radial law cuts a coaxial
+  cylinder of radius R where its profile point is at R from the axis, at one profile parameter
+  `w₀` (or a few) and every turn. In the wall's own parameters that is a straight line,
+  `w = w₀`. Today the boolean traces and fits it: in the M20, each of those edges is a cubic
+  spline of 352 points with a pcurve of 352 points, whose `w` varies by 10⁻¹³ along it.
+- **The edge it stands for is exact.** The net's iso curve at `w₀`, `B(w₀, t)`, lies on the net by
+  construction, and at exactly the profile point's distance from the axis: the net turns every
+  control point on an exact rational quadratic arc, so the net's distance from the axis is the
+  profile's, whatever its lift error. So the iso curve lies on the cylinder too, to rounding. It
+  is a rational quadratic per span: the profile point's path, as `sweep::screw`'s `path_curve`
+  builds a profile vertex's edge today (those edges, 31 of them on the M20 flank, already have
+  straight 2-point pcurves).
+- **The cylinder's side is exact too.** On the cylinder the same edge is a helix, a straight
+  line in the cylinder's (angle, height) only where the lift is linear in the angle. The net's
+  lift is the rational quadratic of the lift (the bound's `E_l`), so on the cylinder's NURBS
+  form the pcurve is the arc's own parameter map: a rational quadratic per span, exact, with no
+  fitting.
+
+### What changes
+
+1. **The boolean takes the exact intersection.** When a face-face intersection pairs a
+   screw-swept wall (live definition, no radial law over the face) with a cylinder whose axis is
+   the screw's axis (within the record's tolerance, measured from the frames), the intersection
+   is the set of iso curves `w = w₀` at the profile's crossings of the radius: their 3D curves
+   the net's iso curves, their pcurves a straight line on the wall and the arc map on the
+   cylinder. Anything else (a law that varies over the face, a tilted or offset cylinder, a
+   tangent crossing where the profile touches R without crossing it) goes the general way, as
+   today. This is one more exact case of the intersection, like the existing plane and cylinder
+   ones: the general path stays as the fallback and nothing is refused.
+2. **The record gets a helix edge kind** so those edges don't cross files and kernels as long
+   splines: `Curve::ScrewPath { point, motion, stations, half_angles }`, the path of one point
+   under the same screw motion and stations as the wall it lies on, with the edge's `nurbs` the
+   rational quadratic the kernel builds (stored, as a sweep face's net is). The same reasoning
+   as for `sweep`: an older build fails to decode the body, which is a cache miss, and the design
+   is evaluated again from its timeline. It is one more file in
+   `crates/doc/src/format/pending/`. STEP writes the edge's NURBS form, as it writes a thread's
+   helix edges today.
+3. **Stitching and checking read the exact case.** A trim that is a straight iso line on a sweep
+   wall is proved on the wall by the definition (`w` fixed, so the deviation is the net's own,
+   zero), not by a branch and bound over a fitted curve. That is the share of a thread's time
+   that went to proving trim bounds.
+
+### How it is measured
+
+Against base main, for M20 full length, M30x1.5 × 100 and the 35 thread cases of the rig: time,
+saved size and volume. The volumes move: the fitted edges lay within their tolerance (2·10⁻⁵ mm in
+the M20) of the exact ones. Each moved rig row and golden gets that derivation, a bound on the
+volume between the fitted and the exact trim: the trim's tolerance times the length of the edge
+times the wall's extent across it. Every case must still pass its own expected values, and no
+valid case may refuse.
+
+### Stages
+
+6. The exact wall-cylinder intersection in solidcore, using the existing record kinds (the
+   helix edges are rational splines, as a profile vertex's are today). This is where the time and
+   most of the size go: straight pcurves on the flanks and arc-map pcurves on the cylinders, in
+   place of 352-point fits.
+7. The `ScrewPath` edge kind in the record, written and read like `sweep`, with its pending
+   file.
+8. Trim proofs from the definition on sweep walls.
