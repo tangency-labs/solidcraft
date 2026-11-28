@@ -7589,6 +7589,10 @@ fn light_whole_body(
     false
 }
 
+/// How wide the edge under the pointer is drawn: wide enough to stand out from the model's own
+/// edges on a light body, so it is clear which edge a click takes (#22042; 2 before).
+const HOVER_EDGE_W: f32 = 3.0;
+
 /// How wide an edge lit in `hover_edge_lit` is drawn: thin, the colour sets it apart.
 const LIT_EDGE_W: f32 = 1.0;
 
@@ -8352,7 +8356,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         Some(Hit::Edge { body, index, mid, .. }) if !moving(body) => {
             if let Some(b) = st.body(body) {
                 // Lit over the drawn edges (finer away from Normal display quality).
-                let (lit, w) = if lights_hovered_edge(app) { (lit_edge_colours(&mut feedback, &t), LIT_EDGE_W) } else { (hover_edge, 2.0) };
+                let (lit, w) = if lights_hovered_edge(app) { (lit_edge_colours(&mut feedback, &t), LIT_EDGE_W) } else { (hover_edge, HOVER_EDGE_W) };
                 let m = drawn(b);
                 // Measure measures the piece picked of an edge a seam splits: light that piece.
                 let pieces = if measuring_mesh_edges(app) { m.circular_rim(*index) } else { edge_pieces(b, &m, *index) };
@@ -18519,6 +18523,30 @@ mod tests {
         assert!(has(&app, t.hover_edge_lit), "the face's edges are lit");
         app.preferences.hover_edge_lit = false;
         assert!(!has(&app, t.hover_edge_lit), "off: the face lights up as before");
+    }
+
+    /// The edge under the pointer is drawn wider than the model's edges (#22042), in the theme's
+    /// hover colour: on a light body a 2 pt line was hard to tell from the edges around it.
+    #[test]
+    fn the_hovered_edge_is_drawn_wider_than_the_model_edges() {
+        let mut app = cylinder_app();
+        let st = app.session.world_state().unwrap();
+        let b = &st.bodies[0];
+        let m = b.mesh();
+        let top = m.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - 20.0).abs() < 1e-6)).unwrap();
+        let mid = polyline_mid(&m.edges[top]);
+        app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: top, mid, point: mid });
+        let scene = build_highlight(&app);
+        assert!(scene.palette.entries().contains(&c4(Tokens::get().hover_edge)), "in the theme's hover colour");
+        let merged = scene.merged();
+        // A line's width word: an `f32`, or a lifted line's eighths of a pixel under its top bit.
+        let width = |word: u32| if word & 0x8000_0000 == 0 { f32::from_bits(word) } else { ((word >> 24) & 0x7F) as f32 / 8.0 };
+        let widths: Vec<f32> = [&merged.lines, &merged.overlay]
+            .into_iter()
+            .flat_map(|bytes| bytes.as_chunks::<{ crate::gpu::LINE_SIZE }>().0)
+            .map(|line| width(u32::from_le_bytes([line[28], line[29], line[30], line[31]])))
+            .collect();
+        assert!(widths.contains(&HOVER_EDGE_W), "drawn {HOVER_EDGE_W} pt wide: {widths:?}");
     }
 
     /// A click on a face of a wall in pieces takes the whole wall (`grouped_selection`), so every
