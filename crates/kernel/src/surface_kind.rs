@@ -409,6 +409,26 @@ impl FaceSurface {
     }
 }
 
+/// The levels along `plane`'s normal where the line through each of `points` (in the plane) along
+/// it meets `surface` carried on without end (a torus: the span of its bounding sphere, which
+/// holds every meeting): where an extrusion over those points must run to reach it
+/// ([`solidcore_ops::extended_levels::extended_levels`]). Empty for a plane that spans none.
+#[must_use]
+pub fn extended_levels(surface: &FaceSurface, plane: &solidcore_record::Plane, points: &[Vec3]) -> Vec<f64> {
+    use solidcore_ops::extended_levels::{Carried, extended_levels};
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let unit = |u: UnitVec3| arr(u.vec());
+    let carried = match *surface {
+        FaceSurface::Plane { normal, point } => Carried::Plane { point: arr(point), normal: unit(normal) },
+        FaceSurface::Cylinder { origin, axis, radius } => Carried::Cylinder { origin: arr(origin), axis: unit(axis), radius },
+        FaceSurface::Cone { apex, axis, half_angle } => Carried::Cone { apex: arr(apex), axis: unit(axis), half_angle },
+        FaceSurface::Sphere { center, radius } => Carried::Sphere { center: arr(center), radius },
+        FaceSurface::Torus { center, major, minor, .. } => Carried::Torus { center: arr(center), major, minor },
+    };
+    let points: Vec<[f64; 3]> = points.iter().map(|p| arr(*p)).collect();
+    extended_levels(&carried, arr(plane.origin), arr(plane.x), arr(plane.y), &points).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
