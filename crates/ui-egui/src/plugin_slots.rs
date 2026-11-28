@@ -178,6 +178,7 @@ fn discovered(app: &mut SolveApp, inventory: Inventory) {
         }
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
     }
+    crate::plugin_workspaces::discovered(app, &inventory.plugins);
     let root = inventory.root.clone();
     // The Plugins menu and the Model tab's ribbon list what this scan found, once, here: no frame
     // reads the plugin folders itself (#21594).
@@ -568,6 +569,7 @@ mod tests {
             groups: Default::default(),
             ribbon_groups: Vec::new(),
             images: Default::default(),
+            declarations: Default::default(),
             swatches: Default::default(),
             updates: None,
             themes: Vec::new(),

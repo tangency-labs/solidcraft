@@ -50,6 +50,19 @@ class AppRunCli(unittest.TestCase):
         self.env["APPIMAGE"] = str(moved)
         self.run_apprun()
         self.assertIn(str(moved), self.wrapper.read_text())
+        out = subprocess.run([str(self.wrapper), "mcp"], env=self.env, capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(out, "solidcraft-cli mcp")
+
+    def test_wrapper_of_a_removed_appimage_says_so_in_one_line(self):
+        self.run_apprun()
+        self.image.unlink()
+        r = subprocess.run([str(self.wrapper), "--version"], env=self.env, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 127)
+        self.assertEqual(r.stdout, "")
+        lines = r.stderr.strip().splitlines()
+        self.assertEqual(len(lines), 1, r.stderr)
+        self.assertIn(f"no longer at {self.image}", lines[0])
+        self.assertIn("open SolidCraft once from where it is now", lines[0])
 
     def test_a_file_that_is_not_ours_is_left_alone(self):
         self.wrapper.parent.mkdir(parents=True)
@@ -103,6 +116,35 @@ class AppRunCli(unittest.TestCase):
         entry = (self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop").read_text()
         self.assertIn("X-SolidCraft-Generated=true", entry)
         self.assertIn(f'Exec="{self.image}" %F', entry)
+
+    def test_workshop_links_get_a_hidden_entry_of_their_own(self):
+        # The shipped entries: the visible one opens files as it always has (%f, no scheme), and
+        # solidcraft:// links have a hidden entry that passes the link after --open-url.
+        linux = ROOT / "assets/platforms/linux"
+        shipped = (linux / "io.tangencylabs.solidcraft.desktop").read_text()
+        handler = (linux / "io.tangencylabs.solidcraft.workshop-links.desktop").read_text()
+        self.assertIn("Exec=solidcraft %f\n", shipped)
+        self.assertNotIn("x-scheme-handler", shipped)
+        self.assertIn("Exec=solidcraft --open-url %u\n", handler)
+        self.assertIn("NoDisplay=true\n", handler)
+        self.assertIn("MimeType=x-scheme-handler/solidcraft;\n", handler)
+        apps = self.appdir / "usr/share/applications"
+        (apps / "io.tangencylabs.solidcraft.desktop").write_text(shipped)
+        (apps / "io.tangencylabs.solidcraft.workshop-links.desktop").write_text(handler)
+        self.run_apprun()
+        installed = self.home / ".local/share/applications"
+        entry = (installed / "io.tangencylabs.solidcraft.desktop").read_text()
+        self.assertIn(f'Exec="{self.image}" %F\n', entry)
+        self.assertNotIn("x-scheme-handler", entry)
+        links = (installed / "io.tangencylabs.solidcraft.workshop-links.desktop").read_text()
+        self.assertIn(f'Exec="{self.image}" --open-url %u\n', links)
+        self.assertIn("x-scheme-handler/solidcraft;", links)
+        self.assertIn("X-SolidCraft-Generated=true", links)
+        self.assertNotIn("TryExec", links)
+        # A launcher that manages AppImages owns the integration: both entries this script wrote go.
+        self.run_apprun(DESKTOPINTEGRATION="1")
+        self.assertFalse((installed / "io.tangencylabs.solidcraft.desktop").exists())
+        self.assertFalse((installed / "io.tangencylabs.solidcraft.workshop-links.desktop").exists())
 
     def test_unmarked_entry_is_never_rewritten(self):
         # A user-edited entry (no marker) survives untouched, even when the AppImage

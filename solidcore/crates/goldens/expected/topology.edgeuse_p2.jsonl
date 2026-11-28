@@ -2519,7 +2519,7 @@
 {"case":"ellips_ts2_cs5_2_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[166.42013542659407,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_cs5_3_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[165.42012510885584,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_cs5_4_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[165.4212494465883,"inf","NaN"]],"n":95}}}
-{"case":"ellips_ts2_cs5_4_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":720}}}
+{"case":"ellips_ts2_cs5_4_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"],[464.14961365034816,468.14961365034816,18364.3774537305]],"n":600}}}
 {"case":"ellips_ts2_cs5_5_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[166.39572862101392,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_cs5_6_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[165.42013548266902,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_cs5_7_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[165.42013548266902,"inf","NaN"]],"n":95}}}
@@ -2673,7 +2673,7 @@
 {"case":"ellips_ts2_x_cs24_0.1_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[108.08852338293903,"inf","NaN"]],"n":60}}}
 {"case":"ellips_ts2_x_cs24_1e-06_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[111.08852863406666,"inf","NaN"]],"n":60}}}
 {"case":"ellips_ts2_x_cs24_1e-09_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[108.08852338819014,"inf","NaN"]],"n":60}}}
-{"case":"ellips_ts2_x_cs27_0.001_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"],["-inf","inf","-inf"],[410.92766940407625,410.92766940407625,10180.292038777503]],"n":825}}}
+{"case":"ellips_ts2_x_cs27_0.001_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":735}}}
 {"case":"ellips_ts2_x_cs27_0.0_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[215.49107104560892,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_x_cs27_0.1_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[212.49107104560892,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_x_cs27_1e-06_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[212.49107629673657,"inf","NaN"]],"n":95}}}
@@ -2683,10 +2683,10 @@
 {"case":"ellips_ts2_x_cs30_0.1_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[145.1263046024352,"inf","NaN"]],"n":60}}}
 {"case":"ellips_ts2_x_cs30_1e-06_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"]],"n":105}}}
 {"case":"ellips_ts2_x_cs30_1e-09_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[148.1263046076863,"inf","NaN"]],"n":60}}}
-{"case":"ellips_ts2_x_cs33_0.001_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":480}}}
+{"case":"ellips_ts2_x_cs33_0.001_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":390}}}
 {"case":"ellips_ts2_x_cs33_0.0_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[91.34417737854385,"inf","NaN"]],"n":85}}}
 {"case":"ellips_ts2_x_cs33_0.1_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[91.34417737854385,"inf","NaN"]],"n":85}}}
-{"case":"ellips_ts2_x_cs33_1e-06_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":480}}}
+{"case":"ellips_ts2_x_cs33_1e-06_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":390}}}
 {"case":"ellips_ts2_x_cs33_1e-09_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[94.34417738379497,"inf","NaN"]],"n":85}}}
 {"case":"ellips_ts2_x_cs36_0.001_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":390}}}
 {"case":"ellips_ts2_x_cs36_0.0_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[104.33819511984002,"inf","NaN"]],"n":70}}}
@@ -2706,7 +2706,7 @@
 {"case":"ellips_ts2_x_cs6_0.001_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[214.49632217324967,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_x_cs6_0.0_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[211.49107104560892,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_x_cs6_0.1_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[211.49107104560892,"inf","NaN"]],"n":95}}}
-{"case":"ellips_ts2_x_cs6_1e-06_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"],["-inf","inf","-inf"],[351.1664745387901,355.1664745387901,7426.950394215108]],"n":825}}}
+{"case":"ellips_ts2_x_cs6_1e-06_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"],["-inf","inf","-inf"],["-inf","inf","-inf"]],"n":735}}}
 {"case":"ellips_ts2_x_cs6_1e-09_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[211.49107105086003,"inf","NaN"]],"n":95}}}
 {"case":"ellips_ts2_x_cs9_0.001_1","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[["-inf","inf","-inf"]],"n":165}}}
 {"case":"ellips_ts2_x_cs9_0.0_0","deferred":null,"error":null,"ints":{"failed":[0]},"topology":null,"values":{"state":{"blocks":[[107.08852338293903,"inf","NaN"]],"n":60}}}

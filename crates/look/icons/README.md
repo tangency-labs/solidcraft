@@ -129,3 +129,10 @@ method `ui.icon_audit` can diagnose requests in a running UI (see
 [control protocol](../../../docs/control-protocol.md)). Keep the Harness traversal
 current when adding menus. A successful traversal covers only the contexts it
 actually opens; document unreachable or untested contexts in the audit report.
+
+## Licence
+
+The SVG masters in `design/svg/` are SolidCraft's interface icon artwork, under the SolidCraft
+Brand Licence ([LICENSE-BRAND](../../../LICENSE-BRAND)) unless their row in ATTRIBUTION.md names
+another licence. The tools in `design/tools/`, the tables in `design/*.toml` and the code that
+compiles the masters are MIT OR Apache-2.0. ATTRIBUTION.md lists every file with its licence.

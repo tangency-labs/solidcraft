@@ -29,16 +29,34 @@ pub struct Bvh {
 impl Bvh {
     /// The hierarchy over `boxes` (empty boxes are left out).
     pub fn new(boxes: &[Aabb3]) -> Bvh {
-        let mut order: Vec<u32> =
-            (0..boxes.len().min(u32::MAX as usize)).filter(|&i| boxes.get(i).is_some_and(|b| !b.is_empty() && finite(b))).map(|i| i as u32).collect();
-        if order.is_empty() {
-            return Bvh::default();
+        Self::try_new(boxes).unwrap_or_default()
+    }
+
+    /// Fallible [`Bvh::new`]: returns `Err` instead of aborting the process if reserving the node
+    /// or index buffers fails under memory pressure.
+    pub fn try_new(boxes: &[Aabb3]) -> Result<Bvh, std::collections::TryReserveError> {
+        let count = boxes.len().min(u32::MAX as usize);
+        let mut order: Vec<u32> = Vec::new();
+        order.try_reserve_exact(count)?;
+        for i in 0..count {
+            if boxes.get(i).is_some_and(|b| !b.is_empty() && finite(b)) {
+                order.push(i as u32);
+            }
         }
+        if order.is_empty() {
+            return Ok(Bvh::default());
+        }
+        order.shrink_to_fit();
         let item = |i: u32| boxes.get(i as usize).copied().unwrap_or(Aabb3::EMPTY);
         let centre = |i: u32| item(i).center();
-        let mut nodes = vec![Node { bounds: Aabb3::EMPTY, first: 0, count: 0 }];
+        let mut nodes: Vec<Node> = Vec::new();
+        // A binary tree with at least 1 leaf per `LEAF` items needs roughly `2 * n / LEAF` nodes.
+        nodes.try_reserve((order.len() / LEAF).saturating_mul(2).max(1))?;
+        nodes.push(Node { bounds: Aabb3::EMPTY, first: 0, count: 0 });
         // (node, start, end) in `order` still to be filled in.
-        let mut todo = vec![(0usize, 0usize, order.len())];
+        let mut todo: Vec<(usize, usize, usize)> = Vec::new();
+        todo.try_reserve(64)?;
+        todo.push((0usize, 0usize, order.len()));
         while let Some((n, start, end)) = todo.pop() {
             let Some(span) = order.get_mut(start..end) else { continue };
             let mut bounds = Aabb3::EMPTY;
@@ -69,15 +87,25 @@ impl Bvh {
             let mid = span.len() / 2;
             span.select_nth_unstable_by(mid, |a, b| key(a).total_cmp(&key(b)));
             let left = nodes.len();
+            nodes.try_reserve(2)?;
             nodes.push(Node { bounds: Aabb3::EMPTY, first: 0, count: 0 });
             nodes.push(Node { bounds: Aabb3::EMPTY, first: 0, count: 0 });
             if let Some(node) = nodes.get_mut(n) {
                 *node = Node { bounds, first: left as u32, count: 0 };
             }
+            todo.try_reserve(2)?;
             todo.push((left, start, start + mid));
             todo.push((left + 1, start + mid, end));
         }
-        Bvh { nodes, order }
+        Ok(Bvh { nodes, order })
+    }
+
+    /// Rough heap footprint of this hierarchy in bytes.
+    pub fn estimated_bytes(&self) -> usize {
+        self.nodes
+            .capacity()
+            .saturating_mul(std::mem::size_of::<Node>())
+            .saturating_add(self.order.capacity().saturating_mul(std::mem::size_of::<u32>()))
     }
 
     /// The box around everything (empty for no items).
