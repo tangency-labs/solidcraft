@@ -71,6 +71,37 @@ pub struct State {
     pub(crate) sheet_selection: std::collections::HashMap<(u64, u64), u64>,
     pub(crate) sheet_picks: std::collections::HashMap<(u64, u64), Vec<solidcraft_engine::Sel>>,
     selection_sheet: Option<(u64, u64)>,
+    status_revision: Option<u64>,
+    status_drawing_id: Option<String>,
+    pub(crate) status_controller: crate::drawing_status_controller::DrawingStatusController,
+    status_dirty: bool,
+    status_error: Option<String>,
+    repair_ui: crate::drawing_repair_ui::RepairUiState,
+}
+
+pub(crate) fn invalidate_status(app: &mut SolveApp) {
+    app.drawing_workspace.status_controller.invalidate();
+    app.drawing_workspace.status_dirty = true;
+    app.drawing_workspace.status_error = None;
+    app.drawing_workspace.repair_ui.clear();
+}
+
+fn refresh_status_if_needed(app: &mut SolveApp) {
+    let revision = app.session.revision;
+    // A drawing may be closed and reopened without changing the source model revision.
+    // Never keep the transient "no drawing open" status error for the reopened sheet.
+    let drawing_id = app.session.drawing("drawing.inspect").ok().map(|drawing| solidcraft_engine::doc::ids::encode(drawing.id));
+    if !app.drawing_workspace.status_dirty
+        && app.drawing_workspace.status_revision == Some(revision)
+        && app.drawing_workspace.status_drawing_id == drawing_id
+    {
+        return;
+    }
+    app.drawing_workspace.repair_ui.clear();
+    app.drawing_workspace.status_drawing_id = drawing_id;
+    app.drawing_workspace.status_revision = Some(revision);
+    app.drawing_workspace.status_dirty = false;
+    app.drawing_workspace.status_error = crate::drawing_status_engine::refresh(&mut app.session, &mut app.drawing_workspace.status_controller).err();
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -2614,5 +2645,109 @@ mod tests {
         assert!(first.app.session.open_drawing.is_none());
         assert!(first.app.session.doc.drawings.is_empty(), "no Drawing or Sheet is created before confirmation");
         assert!(first.app.drawing_workspace.add_sheet.is_none());
+    }
+}
+
+#[cfg(test)]
+mod repair_through_the_browser {
+    use super::*;
+    use crate::scenario::Harness;
+    #[test]
+    fn repair_lost_bore_through_visible_buttons_review_confirm_and_undo() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+
+        // Real M2 acceptance plate, not a fixture card or a fake status response.
+        let recipe: serde_json::Value = serde_json::from_str(include_str!("../../../examples/acceptance/drawing_m2.json")).unwrap();
+        let executed = h.app.session.run_script(&recipe).unwrap();
+        assert_eq!(executed.len(), 27);
+        let view = executed.last().unwrap()["view"].clone();
+        let drawing = h.app.run("drawing.inspect", serde_json::json!({})).unwrap()["id"].as_str().unwrap().to_owned();
+        let added = h
+            .app
+            .run(
+                "drawing.dimension.add",
+                serde_json::json!({
+                    "view": view,
+                    "kind": {"radial": {"edge": [25, 20, 20]}}
+                }),
+            )
+            .unwrap();
+        let id = added["dimension"].as_str().unwrap().to_owned();
+        assert_eq!(added["status"], "ok");
+        enter(&mut h.app, true).unwrap();
+        h.frames(8);
+
+        // Round the upper Bore1 rim: engine reference is lost but a lower rim survives as a lead.
+        h.app.run("drawing.close", serde_json::json!({})).unwrap();
+        h.frames(3);
+        h.app
+            .run(
+                "solid.fillet",
+                serde_json::json!({
+                    "body": "Plate", "radius": 1, "edges": [[25, 20, 20]]
+                }),
+            )
+            .unwrap();
+        h.app.run("drawing.open", serde_json::json!({"drawing": drawing})).unwrap();
+        h.frames(10);
+        let before = h.app.run("drawing.dimension.inspect", serde_json::json!({"dimension": id})).unwrap();
+        assert_eq!(before["status"], "lost", "{before}");
+        let candidates = before["candidates"].as_array().expect("engine must supply repair leads");
+        assert!(!candidates.is_empty(), "{before}");
+        // Resolve the intended rim through the engine, then match its saved reference
+        // against the engine-provided candidates in independent scratch sessions.
+        let repair = |session: &mut solidcraft_engine::Session, pick: serde_json::Value| {
+            session.execute("drawing.dimension.repair", &serde_json::json!({"dimension":id,"slot":"edge","pick":pick}))
+        };
+        let mut expected_session = h.app.session.scratch();
+        repair(&mut expected_session, serde_json::json!({"edge":[25,20,19]})).expect("engine resolves known lower rim");
+        let expected = expected_session.execute("drawing.dimension.inspect", &serde_json::json!({"dimension":id})).unwrap();
+        assert!(expected["record"]["kind"].is_object());
+        let candidate_index = candidates
+            .iter()
+            .position(|pick| {
+                let mut scratch = h.app.session.scratch();
+                repair(&mut scratch, pick.clone()).is_ok()
+                    && scratch
+                        .execute("drawing.dimension.inspect", &serde_json::json!({"dimension":id}))
+                        .is_ok_and(|answer| answer["record"]["kind"] == expected["record"]["kind"])
+            })
+            .expect("engine candidate for known lower rim");
+        let pick = candidates[candidate_index].clone();
+        let undo_before = h.app.session.undo.len();
+        let action = format!("Repair {id}");
+
+        // These are actual egui accessibility widget clicks with pointer events.
+        assert!(h.widget(&action).is_some(), "Repair button must be visible");
+        h.step(&serde_json::json!({"widget":action})).unwrap();
+        h.frames(4);
+        assert!(h.widget("Review repair").is_some(), "repair panel opens");
+        assert_eq!(h.app.session.undo.len(), undo_before, "opening repair must not mutate drawing");
+        if Some(candidate_index) != candidates.iter().position(|pick| crate::drawing_repair_ui::candidate_matches_slot("edge", pick)) {
+            let first = candidates.iter().position(|pick| crate::drawing_repair_ui::candidate_matches_slot("edge", pick)).unwrap();
+            h.step(&serde_json::json!({"widget":format!("Candidate {}", first + 1)})).unwrap();
+            h.frames(2);
+            h.step(&serde_json::json!({"widget":pick.to_string()})).unwrap();
+            h.frames(2);
+        }
+        h.step(&serde_json::json!({"widget":"Review repair"})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.undo.len(), undo_before, "review is read-only");
+        assert!(h.widget("Confirm repair").is_some(), "only explicit confirmation may mutate");
+        h.step(&serde_json::json!({"widget":"Confirm repair"})).unwrap();
+        h.frames(6);
+        let repaired = h.app.run("drawing.dimension.inspect", serde_json::json!({"dimension":id})).unwrap();
+        assert_eq!(repaired["status"], "ok", "{repaired}");
+        assert_eq!(repaired["text"], "Ø10.00");
+        assert_eq!(repaired["record"]["kind"], expected["record"]["kind"]);
+        assert_eq!(h.app.session.undo.len(), undo_before + 1, "one undo step for confirmed repair");
+        assert!(h.widget(&format!("Repair {id}")).is_none(), "fixed dimension must stop asking for repair");
+
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        h.frames(4);
+        let undone = h.app.run("drawing.dimension.inspect", serde_json::json!({"dimension":id})).unwrap();
+        assert_eq!(undone["status"], "lost", "undo must restore the lost reference");
     }
 }
