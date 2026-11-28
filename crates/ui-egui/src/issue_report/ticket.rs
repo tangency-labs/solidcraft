@@ -274,7 +274,7 @@ fn design_for(app: &SolveApp, crash: Option<&Value>) -> DesignChoice {
             let name: String = entry.name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).take(80).collect();
             let name = format!("{}.sc", if name.trim().is_empty() { "recovered" } else { name.trim() });
             // A container, as the design's own file is: it carries binary data a JSON design can't.
-            if let Ok(bytes) = solidcraft_engine::io::write_design_container(&doc) {
+            if let Ok(bytes) = solidcraft_engine::io::write_design_container_as_is(&doc) {
                 return (
                     Some((name, bytes)),
                     Some("report.design_from_recovery"),
@@ -283,8 +283,9 @@ fn design_for(app: &SolveApp, crash: Option<&Value>) -> DesignChoice {
             }
         }
     }
-    // A container, as the design's own file is: it carries binary data a JSON design can't.
-    (solidcraft_engine::io::write_design_container(&app.session.doc).ok().map(|bytes| (design_name(app), bytes)), None, None)
+    // A container, as the design's own file is: it carries binary data a JSON design can't. Kept
+    // even when it would not open again: that may be the fault being reported.
+    (solidcraft_engine::io::write_design_container_as_is(&app.session.doc).ok().map(|bytes| (design_name(app), bytes)), None, None)
 }
 
 /// A failed importer reads a separate file; its error does not require the open design.

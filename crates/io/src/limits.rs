@@ -33,6 +33,10 @@ pub enum Kind {
 impl Kind {
     /// The limit in force for this kind, in bytes.
     pub fn limit(self) -> u64 {
+        #[cfg(test)]
+        if let (Kind::Design, Some(cap)) = (self, test_cap::get().filter(|_| !is_reading_back())) {
+            return cap as u64;
+        }
         let l = effective();
         match self {
             Kind::Step => l.step,
@@ -122,6 +126,23 @@ static PREFERRED_DESIGN: AtomicU64 = AtomicU64::new(FileLimits::DEFAULT.design);
 /// `--max-file-size` for this run, in bytes; 0 when not given.
 static OVERRIDE: AtomicU64 = AtomicU64::new(0);
 
+thread_local!(static READING_BACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+
+/// Run `f` with the largest limits this build allows ([`ceiling`]), on this thread only. A save
+/// reads back the file it has just written to check that it opens again; the limits for opening a
+/// file don't apply to that, as a save is never refused for its size (#18686): a design over them
+/// opens once the limit is raised.
+pub(crate) fn reading_back<T>(f: impl FnOnce() -> T) -> T {
+    let before = READING_BACK.with(|r| r.replace(true));
+    let out = f();
+    READING_BACK.with(|r| r.set(before));
+    out
+}
+
+fn is_reading_back() -> bool {
+    READING_BACK.with(std::cell::Cell::get)
+}
+
 /// Use these limits from now on (the saved preference). Refused, changing nothing, when out of
 /// range, and in the browser for anything but the defaults.
 pub fn set_preferred(limits: FileLimits) -> Result<(), String> {
@@ -168,6 +189,9 @@ pub fn override_bytes() -> Option<u64> {
 
 /// The limits in force: `--max-file-size` if given, else the preference; the defaults in the browser.
 pub fn effective() -> FileLimits {
+    if is_reading_back() {
+        return FileLimits::both(ceiling());
+    }
     resolve(ADJUSTABLE, preferred(), OVERRIDE.load(Ordering::Relaxed))
 }
 
@@ -195,7 +219,7 @@ pub fn max_step_bytes() -> usize {
 /// The largest design file read (and written) now.
 pub fn max_design_bytes() -> usize {
     #[cfg(test)]
-    if let Some(cap) = test_cap::get() {
+    if let Some(cap) = test_cap::get().filter(|_| !is_reading_back()) {
         return cap;
     }
     usize::try_from(effective().design).unwrap_or(usize::MAX)

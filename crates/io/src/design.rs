@@ -235,7 +235,23 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None)
+    reopens(write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None)?)
+}
+
+/// The design as it is, for a report (a crash, a bug report): written even when this build would
+/// not open it again, since that may be the fault being reported. Saving uses the writers above.
+pub fn write_design_container_as_is(doc: &Document) -> Result<Vec<u8>> {
+    write_container(doc, DesignCompression::Fast, None, None, None, max_design(), None, None)
+}
+
+/// Design file bytes, refused when this build would not open them again (a value a command let
+/// through that the reader refuses): the save says why instead of writing a file that will not
+/// reopen. They are read as opening the file reads them, but without the size limits for opening
+/// a file: a save is never refused for its size (#18686).
+pub(crate) fn reopens(bytes: Vec<u8>) -> Result<Vec<u8>> {
+    crate::limits::reading_back(|| crate::read_design(&bytes))
+        .map_err(|e| IoError::Invalid(format!("this design would not open again, so it was not written: {e}")))?;
+    Ok(bytes)
 }
 
 /// [`write_design_container_with_thumbnail`] reusing what `reuse` already holds: `reuse` is the
@@ -257,10 +273,10 @@ pub fn write_design_container_reusing(
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
     // Reusing is only ever a shortcut: a source that cannot be copied from (damaged or cut short
     // on disk) never fails a save the document alone would make.
-    match write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse)) {
+    reopens(match write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse)) {
         Err(_) if !crate::safe_write::cancelled() => write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None),
         result => result,
-    }
+    }?)
 }
 
 /// Write a container with one signed provenance record appended to `save.chain` (see
@@ -275,7 +291,7 @@ pub fn write_design_container_with_provenance(
     save: &ProvenanceSave<'_>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save), None)
+    reopens(write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save), None)?)
 }
 
 /// The common container writer. `provenance` records a signed record when present; the budget
@@ -1881,7 +1897,11 @@ mod tests {
         let bytes = write_design_container(&doc).unwrap();
         assert!(bytes.len() > max_design(), "{} bytes is not past the limit", bytes.len());
         assert!(is_design_container(&bytes));
+        // Opening it is refused under this limit, so the save's check that it opens again
+        // (`reopens`) reads it without the limits for opening a file.
+        assert!(crate::read_design(&bytes).unwrap_err().to_string().contains("too large"));
         crate::limits::test_cap::set(None);
+        assert!(crate::read_design(&bytes).is_ok());
     }
 
     /// A coloured cloud is 15 bytes a point, so one a cloud may hold can be over the open limit; the
@@ -3384,6 +3404,28 @@ mod tests {
             color: Some([0.25, 0.5, 0.75]),
             corner_normals: Default::default(),
         }
+    }
+
+    /// A design this build would not open again is refused by the writers a save uses, with the
+    /// reason, instead of written to a file that cannot be reopened; a report still keeps it.
+    #[test]
+    fn a_design_that_would_not_reopen_is_not_written() {
+        // The payloads (images among them) need a container; a plain design is also a .json one.
+        let (mut payloads, mut plain) = (document(), Document::new("Plain"));
+        assert!(write_design_container(&payloads).is_ok() && crate::write_design(&plain).is_ok());
+        let far = solidcraft_doc::NamedView {
+            name: "Far".into(),
+            target: solidcore_record::Vec3::new(1e12, 0.0, 0.0),
+            distance: 1.0,
+            ..Default::default()
+        };
+        payloads.named_views.push(far.clone());
+        plain.named_views.push(far);
+        for error in [write_design_container(&payloads).unwrap_err(), crate::write_design(&plain).unwrap_err()] {
+            assert!(error.to_string().contains("would not open again"), "{error}");
+        }
+        let kept = write_design_container_as_is(&payloads).unwrap();
+        assert!(crate::read_design(&kept).is_err());
     }
 
     fn document() -> Document {

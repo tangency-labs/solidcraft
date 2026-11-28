@@ -67,6 +67,7 @@ pub use design::read_drawing;
 pub use design::read_drawing_file;
 pub use design::take_last_cache_refusal;
 pub use design::write_design_container;
+pub use design::write_design_container_as_is;
 pub use design::write_design_container_reusing;
 pub use design::write_design_container_with_cache;
 pub use design::write_design_container_with_compression;
@@ -2014,7 +2015,7 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
-    Ok(doc.to_json_checked()?.into_bytes())
+    design::reopens(doc.to_json_checked()?.into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.
