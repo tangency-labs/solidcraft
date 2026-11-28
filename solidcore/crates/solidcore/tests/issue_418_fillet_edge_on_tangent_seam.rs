@@ -17,6 +17,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::get_edges;
@@ -167,8 +168,8 @@ fn simpson(to: f64, f: impl Fn(f64) -> f64) -> f64 {
 /// end at Y = +-sqrt(R^2 - X^2), smooth over t = 0..pi/2 (|X| <= 7 < R).
 fn notch_round_volume(r: f64) -> f64 {
     simpson(core::f64::consts::FRAC_PI_2, |t| {
-        let x = -5.0 - r + r * t.sin();
-        r * (1.0 - t.cos()) * 2.0 * (R * R - x * x).sqrt() * r * t.cos()
+        let x = -5.0 - r + r * det::sin(t);
+        r * (1.0 - det::cos(t)) * 2.0 * (R * R - x * x).sqrt() * r * det::cos(t)
     })
 }
 
@@ -183,7 +184,7 @@ fn notch_chamfer_volume(d: f64) -> f64 {
 /// The sharp bar's closed form: the block, the half disc over 30 - 6 of its height, less the
 /// notch's circular segment (X < -5) over 4.
 fn bar_with_slot_and_notch_volume() -> f64 {
-    let segment = R * R * (5.0 / R).acos() - 5.0 * (R * R - 25.0).sqrt();
+    let segment = R * R * det::acos(5.0 / R) - 5.0 * (R * R - 25.0).sqrt();
     25.0 * 19.0 * 30.0 + 24.0 * core::f64::consts::PI * R * R / 2.0 - 4.0 * segment
 }
 

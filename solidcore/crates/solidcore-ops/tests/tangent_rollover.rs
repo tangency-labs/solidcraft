@@ -18,6 +18,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -57,17 +58,17 @@ fn added_area(a: f64, r1: f64, r: f64) -> f64 {
     if r <= a {
         return r * r * (1.0 - PI / 4.0);
     }
-    let c = ((r + r1).powi(2) - (r - a).powi(2)).sqrt() - r1;
+    let c = (det::powi(r + r1, 2) - det::powi(r - a, 2)).sqrt() - r1;
     // the contact on the rim's round, at angle t1 about its centre
-    let t1 = (c + r1).atan2(r - a);
+    let t1 = det::atan2(c + r1, r - a);
     // the ball's contact with the round, at angle s0 about the ball's centre
     let s0 = t1 - PI;
     // ∮ (x dy - y dx) / 2: segments wall (0,c)->(0,0) and flat (0,0)->(a,0) give nothing (x = 0,
     // y = 0); the arcs give r^2 dt/2 + (centre x sin-ish terms)
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
         // ∫ (x y' - y x') / 2 dt for x = cx + rad cos t, y = cy + rad sin t
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
     // the boundary runs clockwise: wall down, flat out, round from pi/2 down to t1, ball from s0 to -pi
     let total = arc(a, -r1, r1, PI / 2.0, t1) + arc(r, c, r, s0, -PI);
@@ -102,17 +103,17 @@ fn the_area_oracle_agrees_with_a_polygon() {
         (1.0, 2.0, 3.0),
         (0.5, 1.0, 2.0),
     ] {
-        let c = ((r + r1).powi(2) - (r - a).powi(2)).sqrt() - r1;
-        let t1 = (c + r1).atan2(r - a);
+        let c = (det::powi(r + r1, 2) - det::powi(r - a, 2)).sqrt() - r1;
+        let t1 = det::atan2(c + r1, r - a);
         let mut pts = vec![(0.0, c), (0.0, 0.0), (a, 0.0)];
         let n = 20000;
         for i in 1..=n {
             let t = PI / 2.0 + (t1 - PI / 2.0) * f64::from(i) / f64::from(n);
-            pts.push((a + r1 * t.cos(), -r1 + r1 * t.sin()));
+            pts.push((a + r1 * det::cos(t), -r1 + r1 * det::sin(t)));
         }
         for i in 1..=n {
             let t = (t1 - PI) + (-PI - (t1 - PI)) * f64::from(i) / f64::from(n);
-            pts.push((r + r * t.cos(), c + r * t.sin()));
+            pts.push((r + r * det::cos(t), c + r * det::sin(t)));
         }
         let mut twice = 0.0;
         for (i, p) in pts.iter().enumerate() {
@@ -182,12 +183,12 @@ fn removed_area(a: f64, r1: f64, r: f64) -> f64 {
     if r <= a {
         return r * r * (1.0 - PI / 4.0);
     }
-    let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
+    let c = (det::powi(r1 - r, 2) - det::powi(r - a, 2)).sqrt() - r1;
     // the contact, at angle t about both centres (an inside tangency)
-    let t = (c + r1).atan2(r - a);
+    let t = det::atan2(c + r1, r - a);
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
     // back face and flat give nothing (x = 0, y = 0); the rim's round from pi/2 down to t, then
     // the ball from t up over its top to pi
@@ -208,17 +209,17 @@ const CONVEX_ROLLOVERS: &[(f64, f64, f64)] = &[
 fn the_removed_area_oracle_agrees_with_a_polygon() {
     for &(w, r1, r) in CONVEX_ROLLOVERS {
         let a = w - r1;
-        let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
-        let t = (c + r1).atan2(r - a);
+        let c = (det::powi(r1 - r, 2) - det::powi(r - a, 2)).sqrt() - r1;
+        let t = det::atan2(c + r1, r - a);
         let mut pts = vec![(0.0, 0.0), (a, 0.0)];
         let n = 20000;
         for i in 1..n {
             let u = PI / 2.0 + (t - PI / 2.0) * f64::from(i) / f64::from(n);
-            pts.push((a + r1 * u.cos(), -r1 + r1 * u.sin()));
+            pts.push((a + r1 * det::cos(u), -r1 + r1 * det::sin(u)));
         }
         for i in 0..=n {
             let u = t + (PI - t) * f64::from(i) / f64::from(n);
-            pts.push((r + r * u.cos(), c + r * u.sin()));
+            pts.push((r + r * det::cos(u), c + r * det::sin(u)));
         }
         let mut twice = 0.0;
         for (i, p) in pts.iter().enumerate() {
@@ -256,8 +257,8 @@ fn full_length_convex_rollover_builds() {
             .unwrap_or_else(|err| panic!("w {w} r1 {r1} r {r}: {err:?}"));
         let report = b.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "w {w} r1 {r1} r {r}: {report}");
-        let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
-        let t = (c + r1).atan2(r - a);
+        let c = (det::powi(r1 - r, 2) - det::powi(r - a, 2)).sqrt() - r1;
+        let t = det::atan2(c + r1, r - a);
         let order = b.to_record().unwrap().1;
         let faces: Vec<_> = (0..order.faces.len())
             .map(|i| {
@@ -289,12 +290,12 @@ fn full_length_convex_rollover_builds() {
         close(round.area, r * (PI - t) * LENGTH, "round's area");
         close(
             round.centroid[0],
-            r - r * t.sin() / (PI - t),
+            r - r * det::sin(t) / (PI - t),
             "round's centroid x",
         );
         close(
             round.centroid[1],
-            c + r * (t.cos() + 1.0) / (PI - t),
+            c + r * (det::cos(t) + 1.0) / (PI - t),
             "round's centroid y",
         );
         close(rim.area, r1 * t * LENGTH, "rim round's area");
@@ -384,16 +385,16 @@ fn arm_and_boss() -> Body {
 fn boss_round_area(r: f64) -> f64 {
     let (bx, by, rb) = (-54.0, -90.0, 18.0);
     let cy = -65.0 - r;
-    let cx = bx + ((rb + r).powi(2) - (cy - by).powi(2)).sqrt();
+    let cx = bx + (det::powi(rb + r, 2) - det::powi(cy - by, 2)).sqrt();
     let line = |a: (f64, f64), b: (f64, f64)| 0.5 * (a.0 * b.1 - b.0 * a.1);
     let arc = |ox: f64, oy: f64, rad: f64, from: f64, to: f64| {
-        0.5 * (rad * rad * (to - from) + ox * rad * (to.sin() - from.sin())
-            - oy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + ox * rad * (det::sin(to) - det::sin(from))
+            - oy * rad * (det::cos(to) - det::cos(from)))
     };
     // T1 straight above the ball's centre, T2 towards B: the ball's arc from T1 (angle pi/2) on
     // to T2, then the boss's arc from T2 (seen from B, the opposite direction) to angle 0 at
     // (-36, -90)
-    let toward_b = (by - cy).atan2(bx - cx);
+    let toward_b = det::atan2(by - cy, bx - cx);
     let from_b = toward_b - PI;
     let total = line((-36.0, -65.0), (cx, -65.0))
         + arc(cx, cy, r, PI / 2.0, toward_b)
@@ -406,18 +407,18 @@ fn boss_round_area(r: f64) -> f64 {
 fn the_boss_round_area_oracle_agrees_with_a_polygon() {
     for r in [26.0_f64, 28.0, 30.0] {
         let cy = -65.0 - r;
-        let cx = -54.0 + ((18.0 + r).powi(2) - (cy + 90.0).powi(2)).sqrt();
-        let toward_b = (-90.0 - cy).atan2(-54.0 - cx);
+        let cx = -54.0 + (det::powi(18.0 + r, 2) - det::powi(cy + 90.0, 2)).sqrt();
+        let toward_b = det::atan2(-90.0 - cy, -54.0 - cx);
         let from_b = toward_b - PI;
         let n = 20000;
         let mut pts = vec![(-36.0, -65.0)];
         for i in 0..=n {
             let t = PI / 2.0 + (toward_b - PI / 2.0) * f64::from(i) / f64::from(n);
-            pts.push((cx + r * t.cos(), cy + r * t.sin()));
+            pts.push((cx + r * det::cos(t), cy + r * det::sin(t)));
         }
         for i in 1..=n {
             let t = from_b - from_b * f64::from(i) / f64::from(n);
-            pts.push((-54.0 + 18.0 * t.cos(), -90.0 + 18.0 * t.sin()));
+            pts.push((-54.0 + 18.0 * det::cos(t), -90.0 + 18.0 * det::sin(t)));
         }
         let mut twice = 0.0;
         for (i, p) in pts.iter().enumerate() {
@@ -448,8 +449,8 @@ fn assert_boss_round_builds(r: f64) {
     assert!(report.is_valid(), "r {r}: {report}");
     // the rails: straight lines along z through the ball's contacts
     let cy = -65.0 - r;
-    let cx = -54.0 + ((18.0 + r).powi(2) - (cy + 90.0).powi(2)).sqrt();
-    let d = ((cx + 54.0).powi(2) + (cy + 90.0).powi(2)).sqrt();
+    let cx = -54.0 + (det::powi(18.0 + r, 2) - det::powi(cy + 90.0, 2)).sqrt();
+    let d = (det::powi(cx + 54.0, 2) + det::powi(cy + 90.0, 2)).sqrt();
     let t2 = (
         -54.0 + 18.0 * (cx + 54.0) / d,
         -90.0 + 18.0 * (cy + 90.0) / d,
@@ -491,7 +492,7 @@ fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
     // x = 0 ((18 + r)^2 - (r - 25)^2 = 86 r - 301 > 54^2): no ball fits, and it is refused as a
     // rail leaving its face.
     for r in [38.0_f64, 40.0] {
-        let cx = -54.0 + ((18.0 + r).powi(2) - (r - 25.0).powi(2)).sqrt();
+        let cx = -54.0 + (det::powi(18.0 + r, 2) - det::powi(r - 25.0, 2)).sqrt();
         assert!(cx > 0.0, "r {r}: the contact {cx} lies past x = 0");
         let b = arm_and_boss();
         let e = edge_at(&b, [-36.0, -65.0, height / 2.0]);
@@ -562,9 +563,9 @@ fn top_rim(b: &Body, r4: f64) -> Vec<usize> {
 /// contact on the torus.
 fn ball_on_foot_round(x: f64, y: f64, d: f64) -> ([f64; 3], [f64; 3]) {
     let (bx, by) = (-54.0, -90.0);
-    let rho = ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
+    let rho = (det::powi(x - bx, 2) + det::powi(y - by, 2)).sqrt();
     let reach = 5.0 + d;
-    let z = 10.0 - (reach * reach - (23.0 - rho).powi(2)).sqrt();
+    let z = 10.0 - (reach * reach - det::powi(23.0 - rho, 2)).sqrt();
     let q = [bx + 23.0 * (x - bx) / rho, by + 23.0 * (y - by) / rho, 10.0];
     let c = [x, y, z];
     let t = [
@@ -603,7 +604,7 @@ fn edge_near(b: &Body, p: [f64; 3]) -> usize {
 /// < 23^2. Along x = -36 the contact only nears B from V on, so the top is then narrower than the
 /// round the whole length from V to W.
 fn wholly_past(r4: f64, d: f64) -> bool {
-    (18.0 - d).powi(2) + (25.0 - r4).powi(2) < 23.0 * 23.0
+    det::powi(18.0 - d, 2) + det::powi(25.0 - r4, 2) < 23.0 * 23.0
 }
 
 /// The rim of the arm's top rounded `d` along [`top_rim`] on [`arm_boss_and_foot_round`]: built,
@@ -677,12 +678,12 @@ fn assert_rim_round_builds(r4: f64, d: f64, corpus: bool) {
     let (px, py) = (ax + 54.0, ay + 90.0);
     let m = (px * px + py * py).sqrt();
     let cosine = (23.0 * 23.0 - m * m - reach * reach) / (2.0 * reach * m);
-    let cross = py.atan2(px) + cosine.acos();
+    let cross = det::atan2(py, px) + det::acos(cosine);
     assert!(
         cross > FRAC_PI_2 && (cross < PI) == wholly_past(r4, d),
         "r4 {r4} d {d}: crossing at {cross}"
     );
-    let along = |th: f64, r: f64| (ax + r * th.cos(), ay + r * th.sin());
+    let along = |th: f64, r: f64| (ax + r * det::cos(th), ay + r * det::sin(th));
     let before = (FRAC_PI_2 + cross.min(PI)) / 2.0;
     let (x, y) = along(before, reach);
     on_rail([x, y, 5.0], "the contact on the top");
@@ -946,8 +947,8 @@ fn every_ball_on_the_r3_round_lies_past_the_end_at_or_above_the_cutoff() {
     // the End's plane through V, its normal along the edge into the span
     let past = |c: [f64; 3]| -(4.5 * (c[1] - vy) + 73.5_f64.sqrt() * (c[2] - 4.5));
     let centre = |r: f64, t: f64| {
-        let (x, z) = (3.0 + (3.0 - r) * t.cos(), 4.5 + (3.0 - r) * t.sin());
-        let y = 50.0 - ((10.0 + r).powi(2) - (x - 2.5).powi(2) - z * z).sqrt();
+        let (x, z) = (3.0 + (3.0 - r) * det::cos(t), 4.5 + (3.0 - r) * det::sin(t));
+        let y = 50.0 - (det::powi(10.0 + r, 2) - det::powi(x - 2.5, 2) - z * z).sqrt();
         [x, y, z]
     };
     for r in [rc, 1.97, 2.0, 2.5, 2.99] {
@@ -1067,10 +1068,13 @@ fn a_round_rolled_onto_a_taller_boss_ends_inside_the_boss_face() {
             assert!(report.is_valid(), "seam {seam:?} r {r}: {report}");
             // the ball's centre (cx, -65 - r) and its contact on the boss at theta2
             let cy = -65.0 - r;
-            let cx = -54.0 + ((18.0 + r).powi(2) - (cy + 90.0).powi(2)).sqrt();
-            let theta2 = (cy + 90.0).atan2(cx + 54.0);
+            let cx = -54.0 + (det::powi(18.0 + r, 2) - det::powi(cy + 90.0, 2)).sqrt();
+            let theta2 = det::atan2(cy + 90.0, cx + 54.0);
             assert!(theta2 < 0.0, "seam {seam:?} r {r}: theta2 {theta2}");
-            let t2 = (-54.0 + 18.0 * theta2.cos(), -90.0 + 18.0 * theta2.sin());
+            let t2 = (
+                -54.0 + 18.0 * det::cos(theta2),
+                -90.0 + 18.0 * det::sin(theta2),
+            );
             let (k, brep) = common::kernel_copy(&b);
             for (x, y) in [(cx, -65.0), t2] {
                 for z in [0.5, 2.5, 4.5] {
@@ -1157,9 +1161,10 @@ fn assert_b27_rails_on_faces(input: &Body, made: &Body, r: f64, tol: f64) {
         }
         let on_cylinder = pts
             .iter()
-            .all(|p| ((p.x - 3.0).hypot(p.z - 4.5) - 3.0).abs() <= tol);
+            .all(|p| (det::hypot(p.x - 3.0, p.z - 4.5) - 3.0).abs() <= tol);
         let on_sphere = pts.iter().all(|p| {
-            (((p.x - 2.5).powi(2) + (p.y - 50.0).powi(2) + p.z * p.z).sqrt() - 10.0).abs() <= tol
+            ((det::powi(p.x - 2.5, 2) + det::powi(p.y - 50.0, 2) + p.z * p.z).sqrt() - 10.0).abs()
+                <= tol
         });
         let on_top = pts.iter().all(|p| (p.z - 7.5).abs() <= tol);
         if on_cylinder {
@@ -1593,9 +1598,9 @@ fn boss_side_x() -> f64 {
 /// smooth.
 fn boss_edge_round_removed(r: f64) -> f64 {
     let f = |phi: f64| {
-        let y = -20.0 + r - r * phi.sin();
-        let end = -(5.5_f64 * 5.5 - (y + 19.0).powi(2)).sqrt();
-        r * (1.0 - phi.cos()) * (end + 40.0) * r * phi.cos()
+        let y = -20.0 + r - r * det::sin(phi);
+        let end = -(5.5_f64 * 5.5 - det::powi(y + 19.0, 2)).sqrt();
+        r * (1.0 - det::cos(phi)) * (end + 40.0) * r * det::cos(phi)
     };
     let n = 2000;
     let h = PI / 2.0 / f64::from(n);
@@ -2010,8 +2015,8 @@ fn assert_round_into_boss_builds(
                 SurfaceKind::Cone(c) if c.is_cylinder() && (c.bot_radius() - r).abs() < 1e-9 => {
                     let place = c.rev().position();
                     let (o, a) = (place.origin(), place.z_axis());
-                    (o.y - (-20.0 + r)).hypot(o.z - (30.0 - r)) < 1e-9
-                        && a.y.hypot(a.z) < 1e-9 * a.length()
+                    det::hypot(o.y - (-20.0 + r), o.z - (30.0 - r)) < 1e-9
+                        && det::hypot(a.y, a.z) < 1e-9 * a.length()
                 }
                 _ => false,
             }
@@ -2103,7 +2108,7 @@ fn obliquely_cut_bar() -> Body {
     // (0, 1, 0) x n, then out along n to the plane
     let (n, d) = CUT;
     let cutter = make_box([-60.0, 0.0, -60.0], [120.0, 120.0, 120.0]).unwrap();
-    let turn = rotation([0.0; 3], [n[2], 0.0, -n[0]], n[1].acos()).unwrap();
+    let turn = rotation([0.0; 3], [n[2], 0.0, -n[0]], det::acos(n[1])).unwrap();
     let out = translation([n[0] * d, n[1] * d, n[2] * d]).unwrap();
     cutter.transform(&then(&turn, &out).unwrap()).unwrap();
     boolean(bar, cutter, BooleanOp::Subtract).unwrap().unwrap()
@@ -2132,7 +2137,7 @@ fn edge_through(b: &Body, p: [f64; 3]) -> usize {
 /// from the axis, and r inside the plane, `n . c = d - r`.
 fn cut_bar_ball(r: f64, t: f64) -> [f64; 3] {
     let (n, d) = CUT;
-    let (x, z) = (3.0 + (3.0 - r) * t.cos(), 4.5 + (3.0 - r) * t.sin());
+    let (x, z) = (3.0 + (3.0 - r) * det::cos(t), 4.5 + (3.0 - r) * det::sin(t));
     [x, (d - r - n[0] * x - n[2] * z) / n[1], z]
 }
 
@@ -2142,12 +2147,16 @@ fn cut_bar_ball(r: f64, t: f64) -> [f64; 3] {
 /// y(t) = -12 - 2 x + 2 z; into the span from V it runs as t falls, from W as t rises.
 fn cut_bar_end_distances(c: [f64; 3]) -> [f64; 2] {
     let point = |t: f64| {
-        let (x, z) = (3.0 + 3.0 * t.cos(), 4.5 + 3.0 * t.sin());
+        let (x, z) = (3.0 + 3.0 * det::cos(t), 4.5 + 3.0 * det::sin(t));
         [x, -12.0 - 2.0 * x + 2.0 * z, z]
     };
     // d/dt of the crease: (-3 sin t, 6 sin t + 6 cos t, 3 cos t)
     let into = |t: f64, sense: f64| {
-        let v = [-3.0 * t.sin(), 6.0 * t.sin() + 6.0 * t.cos(), 3.0 * t.cos()];
+        let v = [
+            -3.0 * det::sin(t),
+            6.0 * det::sin(t) + 6.0 * det::cos(t),
+            3.0 * det::cos(t),
+        ];
         let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         [sense * v[0] / l, sense * v[1] / l, sense * v[2] / l]
     };
@@ -2173,7 +2182,7 @@ fn a_round_whose_balls_bend_back_between_the_ends_is_not_refused_past_an_end() {
     assert!(input.check(CheckLevel::All).unwrap().is_valid());
     let before = input.volume(1e-9).unwrap();
     let t = 3.0 * PI / 4.0;
-    let (x, z) = (3.0 + 3.0 * t.cos(), 4.5 + 3.0 * t.sin());
+    let (x, z) = (3.0 + 3.0 * det::cos(t), 4.5 + 3.0 * det::sin(t));
     let crease = [x, -12.0 - 2.0 * x + 2.0 * z, z];
     for r in [0.3, 0.4] {
         // the premise, in closed form
@@ -2287,7 +2296,7 @@ fn lobe_round_area(r: f64) -> f64 {
     let p = lobe_crossing();
     let c = lobe_ball(r);
     let [([ax, ay], ra), ([bx, by], rb)] = LOBES;
-    let angle = |cx: f64, cy: f64, q: (f64, f64)| (q.1 - cy).atan2(q.0 - cx);
+    let angle = |cx: f64, cy: f64, q: (f64, f64)| det::atan2(q.1 - cy, q.0 - cx);
     let short = |from: f64, to: f64| {
         let mut d = to - from;
         while d > PI {
@@ -2299,8 +2308,8 @@ fn lobe_round_area(r: f64) -> f64 {
         from + d
     };
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
     // the contacts: on each lobe's circle towards the ball's centre
     let toward = |cx: f64, cy: f64, rad: f64| {
@@ -2322,9 +2331,9 @@ fn lobe_round_area(r: f64) -> f64 {
 /// The lobes' section area: both discs less their lens, in closed form.
 fn lobes_area() -> f64 {
     let [([ax, ay], ra), ([bx, by], rb)] = LOBES;
-    let d = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
-    let lens = ra * ra * ((d * d + ra * ra - rb * rb) / (2.0 * d * ra)).acos()
-        + rb * rb * ((d * d + rb * rb - ra * ra) / (2.0 * d * rb)).acos()
+    let d = (det::powi(bx - ax, 2) + det::powi(by - ay, 2)).sqrt();
+    let lens = ra * ra * det::acos((d * d + ra * ra - rb * rb) / (2.0 * d * ra))
+        + rb * rb * det::acos((d * d + rb * rb - ra * ra) / (2.0 * d * rb))
         - 0.5 * ((-d + ra + rb) * (d + ra - rb) * (d - ra + rb) * (d + ra + rb)).sqrt();
     PI * (ra * ra + rb * rb) - lens
 }
@@ -2334,7 +2343,7 @@ fn the_lobe_round_area_oracle_agrees_with_the_triangle_less_its_sectors() {
     // a second closed form: the triangle of the three centres less the three sectors at its
     // corners, plus the half of the lens on the ball's side (counted in both lobes' sectors)
     let [([ax, ay], ra), ([bx, by], rb)] = LOBES;
-    let d = ((bx - ax).powi(2) + (by - ay).powi(2)).sqrt();
+    let d = (det::powi(bx - ax, 2) + det::powi(by - ay, 2)).sqrt();
     let lens = PI * (ra * ra + rb * rb) - lobes_area();
     // the R10 ball #17345 names
     let (cx, cy) = lobe_ball(10.0);
@@ -2345,11 +2354,11 @@ fn the_lobe_round_area_oracle_agrees_with_the_triangle_less_its_sectors() {
     for r in [2.0, 5.0, 6.02, 6.03, 10.0, 14.0] {
         let (cx, cy) = lobe_ball(r);
         let (e, f) = (ra + r, rb + r);
-        assert!(((cx - ax).hypot(cy - ay) - e).abs() < 1e-12);
-        assert!(((cx - bx).hypot(cy - by) - f).abs() < 1e-12);
+        assert!((det::hypot(cx - ax, cy - ay) - e).abs() < 1e-12);
+        assert!((det::hypot(cx - bx, cy - by) - f).abs() < 1e-12);
         let triangle = 0.5 * ((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)).abs();
         let corner = |opposite: f64, s: f64, t: f64| {
-            ((s * s + t * t - opposite * opposite) / (2.0 * s * t)).acos()
+            det::acos((s * s + t * t - opposite * opposite) / (2.0 * s * t))
         };
         let (alpha, beta, gamma) = (corner(f, d, e), corner(e, d, f), corner(d, e, f));
         let sectors = 0.5 * (ra * ra * alpha + rb * rb * beta + r * r * gamma);
@@ -2367,7 +2376,7 @@ fn the_lobe_round_area_oracle_agrees_with_the_triangle_less_its_sectors() {
 fn second_lobe_contact_deg(r: f64) -> f64 {
     let (cx, cy) = lobe_ball(r);
     let ([bx, by], _) = LOBES[1];
-    (cy - by).atan2(cx - bx).to_degrees().rem_euclid(360.0)
+    det::atan2(cy - by, cx - bx).to_degrees().rem_euclid(360.0)
 }
 
 /// The radius at which the ball's contact on the second lobe reaches its seam: there the
@@ -2445,7 +2454,7 @@ fn a_lone_round_between_two_cylinders_rolls_over_the_seam_of_one() {
             let (k, brep) = common::kernel_copy(&b);
             for ([lx, ly], lr) in LOBES {
                 let (dx, dy) = (cx - lx, cy - ly);
-                let l = dx.hypot(dy);
+                let l = det::hypot(dx, dy);
                 let (tx, ty) = (lx + lr * dx / l, ly + lr * dy / l);
                 for z in [0.5, 7.5, 14.5] {
                     let q = solidcore::Vec3::new(tx, ty, z);
@@ -2482,7 +2491,7 @@ fn a_lone_round_between_two_cylinders_rolls_over_the_seam_of_one() {
 fn on_second_lobe(deg: f64) -> (f64, f64) {
     let ([bx, by], rb) = LOBES[1];
     let a = deg.to_radians();
-    (bx + rb * a.cos(), by + rb * a.sin())
+    (bx + rb * det::cos(a), by + rb * det::sin(a))
 }
 
 /// A sharp edge where the seam was (#17345's lobes, a real defect next to the seam's
@@ -2500,7 +2509,10 @@ fn a_lone_round_between_two_cylinders_does_not_roll_over_a_sharp_edge() {
     let (p1, p2) = (on_second_lobe(a1), on_second_lobe(a2));
     // the cutter: the region beyond the chord, swept through the lobes' height
     let mid = 0.5 * (a1 + a2);
-    let out = (mid.to_radians().cos() * 30.0, mid.to_radians().sin() * 30.0);
+    let out = (
+        det::cos(mid.to_radians()) * 30.0,
+        det::sin(mid.to_radians()) * 30.0,
+    );
     let quad = [
         p1,
         p2,
@@ -2540,7 +2552,7 @@ fn a_lone_round_between_two_cylinders_does_not_roll_over_a_sharp_edge() {
     assert!(input.check(CheckLevel::All).unwrap().is_valid());
     // the segment the chord cuts off the ø60 disc
     let theta = (a2 - a1).to_radians();
-    let segment = 0.5 * 30.0 * 30.0 * (theta - theta.sin());
+    let segment = 0.5 * 30.0 * 30.0 * (theta - det::sin(theta));
     let reach = seam_reach();
     let (px, py) = lobe_crossing();
     for r in [5.0, 5.99] {
@@ -2637,10 +2649,10 @@ fn a_lone_round_between_two_hole_walls_rolls_over_the_seam_of_one() {
 /// r)^2, touches the top at (bx, 30) and the wall towards its centre; past the radius at which
 /// that contact reaches the seam, it rolls over it.
 fn slab_round(r: f64) -> ((f64, f64), (f64, f64), (f64, f64)) {
-    let bx = -20.0 + ((30.0 + r).powi(2) - (15.0 + r).powi(2)).sqrt();
+    let bx = -20.0 + (det::powi(30.0 + r, 2) - det::powi(15.0 + r, 2)).sqrt();
     let centre = (bx, 30.0 + r);
     let (dx, dy) = (bx + 20.0, 15.0 + r);
-    let l = dx.hypot(dy);
+    let l = det::hypot(dx, dy);
     (
         (bx, 30.0),
         (-20.0 + 30.0 * dx / l, 15.0 + 30.0 * dy / l),
@@ -2652,9 +2664,9 @@ fn slab_round(r: f64) -> ((f64, f64), (f64, f64), (f64, f64)) {
 /// ball's contact, the ball to its contact on the wall, and the wall back to the edge's point,
 /// by Green's theorem over its line and its two arcs.
 fn slab_round_area(r: f64) -> f64 {
-    let p = (-20.0 + 30.0 * 30.0_f64.to_radians().cos(), 30.0);
+    let p = (-20.0 + 30.0 * det::cos(30.0_f64.to_radians()), 30.0);
     let (t1, t2, c) = slab_round(r);
-    let angle = |cx: f64, cy: f64, q: (f64, f64)| (q.1 - cy).atan2(q.0 - cx);
+    let angle = |cx: f64, cy: f64, q: (f64, f64)| det::atan2(q.1 - cy, q.0 - cx);
     let short = |from: f64, to: f64| {
         let mut d = to - from;
         while d > PI {
@@ -2666,8 +2678,8 @@ fn slab_round_area(r: f64) -> f64 {
         from + d
     };
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
     let (s1, s2) = (angle(c.0, c.1, t1), angle(c.0, c.1, t2));
     let (q2, p2) = (angle(-20.0, 15.0, t2), angle(-20.0, 15.0, p));
@@ -2683,7 +2695,7 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
     // the radius at which the wall contact reaches the seam, by bisection on the closed form
     let deg = |r: f64| {
         let (_, t2, _) = slab_round(r);
-        (t2.1 - 15.0).atan2(t2.0 + 20.0).to_degrees()
+        det::atan2(t2.1 - 15.0, t2.0 + 20.0).to_degrees()
     };
     let (mut lo, mut hi) = (0.5_f64, 20.0_f64);
     assert!(deg(lo) < seam && deg(hi) > seam);
@@ -2699,22 +2711,22 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
     assert!(reach > 3.0 && reach < 8.0, "reach {reach}");
     // the area oracle against a fine polygon of the same boundary
     for r in [2.0, 8.0] {
-        let p = (-20.0 + 30.0 * 30.0_f64.to_radians().cos(), 30.0);
+        let p = (-20.0 + 30.0 * det::cos(30.0_f64.to_radians()), 30.0);
         let (t1, t2, c) = slab_round(r);
         let n = 20000;
         let mut pts = vec![p, t1];
         let (b0, b1) = (
-            (t1.1 - c.1).atan2(t1.0 - c.0),
-            (t2.1 - c.1).atan2(t2.0 - c.0),
+            det::atan2(t1.1 - c.1, t1.0 - c.0),
+            det::atan2(t2.1 - c.1, t2.0 - c.0),
         );
         for i in 1..=n {
             let a = b0 + (b1 - b0) * f64::from(i) / f64::from(n);
-            pts.push((c.0 + r * a.cos(), c.1 + r * a.sin()));
+            pts.push((c.0 + r * det::cos(a), c.1 + r * det::sin(a)));
         }
-        let (w0, w1) = ((t2.1 - 15.0).atan2(t2.0 + 20.0), 30.0_f64.to_radians());
+        let (w0, w1) = (det::atan2(t2.1 - 15.0, t2.0 + 20.0), 30.0_f64.to_radians());
         for i in 1..n {
             let a = w0 + (w1 - w0) * f64::from(i) / f64::from(n);
-            pts.push((-20.0 + 30.0 * a.cos(), 15.0 + 30.0 * a.sin()));
+            pts.push((-20.0 + 30.0 * det::cos(a), 15.0 + 30.0 * det::sin(a)));
         }
         let mut twice = 0.0;
         for (i, q) in pts.iter().enumerate() {
@@ -2729,9 +2741,9 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
         );
     }
     // the slab and the disc's segment above y = 30, h = 15 above the centre
-    let segment = 900.0 * 0.5_f64.acos() - 15.0 * (900.0_f64 - 225.0).sqrt();
+    let segment = 900.0 * det::acos(0.5_f64) - 15.0 * (900.0_f64 - 225.0).sqrt();
     let section = 120.0 * 50.0 + segment;
-    let edge = (-20.0 + 30.0 * 30.0_f64.to_radians().cos(), 30.0);
+    let edge = (-20.0 + 30.0 * det::cos(30.0_f64.to_radians()), 30.0);
     for corpus in [true, false] {
         if corpus {
             fixes();
@@ -2784,11 +2796,11 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
 /// circle, and the circle back to the corner, by Green's theorem over its line and two arcs.
 fn disc_corner_round_area(big: f64, h: f64, r: f64) -> f64 {
     let corner = ((big * big - h * h).sqrt(), h);
-    let centre = (((big - r).powi(2) - (h - r).powi(2)).sqrt(), h - r);
+    let centre = ((det::powi(big - r, 2) - det::powi(h - r, 2)).sqrt(), h - r);
     let t1 = (centre.0, h);
     let l = (big - r) / big;
     let t2 = (centre.0 / l, centre.1 / l);
-    let angle = |cx: f64, cy: f64, q: (f64, f64)| (q.1 - cy).atan2(q.0 - cx);
+    let angle = |cx: f64, cy: f64, q: (f64, f64)| det::atan2(q.1 - cy, q.0 - cx);
     let short = |from: f64, to: f64| {
         let mut d = to - from;
         while d > PI {
@@ -2800,8 +2812,8 @@ fn disc_corner_round_area(big: f64, h: f64, r: f64) -> f64 {
         from + d
     };
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
     let (s1, s2) = (angle(centre.0, centre.1, t1), angle(centre.0, centre.1, t2));
     let (q2, p2) = (angle(0.0, 0.0, t2), angle(0.0, 0.0, corner));
@@ -2827,8 +2839,8 @@ fn four_rounds_on_a_seamed_disc_build_across_its_seam() {
         input = boolean(input, cut, BooleanOp::Subtract).unwrap().unwrap();
     }
     // the premise: the (80, 60) round's contact on the disc lies past the seam
-    let centre_angle = (42.0_f64 / 82.0).asin();
-    assert!(centre_angle < LOBE_SEAM && 0.6_f64.atan2(0.8) > LOBE_SEAM);
+    let centre_angle = det::asin(42.0_f64 / 82.0);
+    assert!(centre_angle < LOBE_SEAM && det::atan2(0.6_f64, 0.8) > LOBE_SEAM);
     let corners = [[80.0, 60.0], [-80.0, 60.0], [80.0, -60.0], [-80.0, -60.0]];
     let b = input.copy().unwrap();
     let edges: Vec<usize> = corners
@@ -2842,7 +2854,7 @@ fn four_rounds_on_a_seamed_disc_build_across_its_seam() {
     // the band |y| <= 60 of the disc, less the four corners' rounds; a convex round's surface
     // is fitted to the kernel's approximation tolerance (5e-6), so the volume may differ from
     // the exact balls' by at most that times the four rounds' area (each under 30 x 18 pi)
-    let band = 2.0 * (60.0 * 80.0 + 10000.0 * 0.6_f64.asin());
+    let band = 2.0 * (60.0 * 80.0 + 10000.0 * det::asin(0.6_f64));
     let expected = 30.0 * (band - 4.0 * disc_corner_round_area(100.0, 60.0, 18.0));
     let v = b.volume(1e-9).unwrap();
     assert!(
@@ -2876,17 +2888,18 @@ fn pocket_with_floor_rounds() -> Body {
 /// on the floor round, the floor round up to the flat's end (0, -1) and the flat, by Green's
 /// theorem over its two lines and two arcs.
 fn pocket_rim_area(r: f64) -> f64 {
-    let c = ((3.0 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
-    let to_floor = (-1.0 + r).atan2(-3.0 - c);
-    let floor_contact = (-3.0 - 3.0 * to_floor.cos(), -1.0 - 3.0 * to_floor.sin());
-    let on_floor = (floor_contact.1 + 1.0).atan2(floor_contact.0 + 3.0);
+    let c = (det::powi(3.0 + r, 2) - det::powi(r - 1.0, 2)).sqrt() - 3.0;
+    let to_floor = det::atan2(-1.0 + r, -3.0 - c);
+    let floor_contact = (
+        -3.0 - 3.0 * det::cos(to_floor),
+        -1.0 - 3.0 * det::sin(to_floor),
+    );
+    let on_floor = det::atan2(floor_contact.1 + 1.0, floor_contact.0 + 3.0);
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
-    let ball_to = (floor_contact.1 + r)
-        .atan2(floor_contact.0 - c)
-        .rem_euclid(2.0 * PI);
+    let ball_to = det::atan2(floor_contact.1 + r, floor_contact.0 - c).rem_euclid(2.0 * PI);
     let total = arc(c, -r, r, PI / 2.0, ball_to) + arc(-3.0, -1.0, 3.0, on_floor, 0.0);
     total.abs()
 }
@@ -2933,7 +2946,7 @@ fn assert_pocket_rims_round(xs: &[f64]) {
         counts, topology,
         "rims {xs:?}: faces, edges, vertices, shells"
     );
-    let c = ((3.0_f64 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+    let c = (det::powi(3.0_f64 + r, 2) - det::powi(r - 1.0, 2)).sqrt() - 3.0;
     for &x in xs {
         let axis_x = if x > 20.0 { x + c } else { x - c };
         let rounds = brep
@@ -2947,8 +2960,8 @@ fn assert_pocket_rims_round(xs: &[f64]) {
                     {
                         let place = cone.rev().position();
                         let (o, a) = (place.origin(), place.z_axis());
-                        (o.x - axis_x).hypot(o.y - (10.0 - r)) < 1e-9
-                            && a.x.hypot(a.y) < 1e-9 * a.length()
+                        det::hypot(o.x - axis_x, o.y - (10.0 - r)) < 1e-9
+                            && det::hypot(a.x, a.y) < 1e-9 * a.length()
                     }
                     _ => false,
                 }
@@ -2981,25 +2994,26 @@ fn both_pocket_rims_roll_onto_their_floor_rounds_in_one_fillet() {
 fn the_pocket_rim_area_oracle_agrees_with_a_polygon() {
     // the closed form against a fine polygon of the same boundary, in the wall's frame
     for r in [1.5_f64, 2.0, 2.5, 3.0] {
-        let c = ((3.0 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+        let c = (det::powi(3.0 + r, 2) - det::powi(r - 1.0, 2)).sqrt() - 3.0;
         let ball = (c, -r);
-        let to_floor = (ball.1 + 1.0).atan2(ball.0 + 3.0);
-        let contact = (-3.0 + 3.0 * to_floor.cos(), -1.0 + 3.0 * to_floor.sin());
+        let to_floor = det::atan2(ball.1 + 1.0, ball.0 + 3.0);
+        let contact = (
+            -3.0 + 3.0 * det::cos(to_floor),
+            -1.0 + 3.0 * det::sin(to_floor),
+        );
         let (from, to) = (
             PI / 2.0,
-            (contact.1 - ball.1)
-                .atan2(contact.0 - ball.0)
-                .rem_euclid(2.0 * PI),
+            det::atan2(contact.1 - ball.1, contact.0 - ball.0).rem_euclid(2.0 * PI),
         );
         let mut pts = vec![(0.0, -1.0), (0.0, 0.0)];
         let n = 20000;
         for i in 0..=n {
             let t = from + (to - from) * f64::from(i) / f64::from(n);
-            pts.push((ball.0 + r * t.cos(), ball.1 + r * t.sin()));
+            pts.push((ball.0 + r * det::cos(t), ball.1 + r * det::sin(t)));
         }
         for i in 1..n {
             let t = to_floor + (0.0 - to_floor) * f64::from(i) / f64::from(n);
-            pts.push((-3.0 + 3.0 * t.cos(), -1.0 + 3.0 * t.sin()));
+            pts.push((-3.0 + 3.0 * det::cos(t), -1.0 + 3.0 * det::sin(t)));
         }
         let mut twice = 0.0;
         for (i, p) in pts.iter().enumerate() {
@@ -3070,7 +3084,7 @@ fn slotted_hole(slots: &[f64]) -> Body {
     let hole = make_cylinder([0.0, 0.0, HOLE_FLOOR], HOLE_R, 4.0).unwrap();
     let mut b = boolean(block, hole, BooleanOp::Subtract).unwrap().unwrap();
     for &deg in slots {
-        let (s, c) = deg.to_radians().sin_cos();
+        let (s, c) = det::sin_cos(deg.to_radians());
         let at =
             |along: f64, across: f64| [along * c - across * s, along * s + across * c, HOLE_FLOOR];
         let reach = HOLE_R + 0.5;
@@ -3113,7 +3127,7 @@ fn slotted_hole(slots: &[f64]) -> Body {
 /// The edges where the slot at `deg` meets the hole's wall, on its side at `+0.5` across and
 /// at `-0.5`, as `(side, edge index)`.
 fn slot_roots(b: &Body, deg: f64) -> [usize; 2] {
-    let (s, c) = deg.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(deg.to_radians());
     let along = (HOLE_R * HOLE_R - SLOT_W * SLOT_W / 4.0).sqrt();
     let mid = (HOLE_FLOOR + BLOCK_TOP) / 2.0;
     [SLOT_W / 2.0, -SLOT_W / 2.0]
@@ -3127,7 +3141,10 @@ fn slot_roots(b: &Body, deg: f64) -> [usize; 2] {
 /// segment between them.
 fn root_area(big_r: f64, r: f64, h: f64) -> f64 {
     let corner = ((big_r * big_r - h * h).sqrt(), h);
-    let centre = (((big_r + r).powi(2) - (h + r).powi(2)).sqrt(), h + r);
+    let centre = (
+        (det::powi(big_r + r, 2) - det::powi(h + r, 2)).sqrt(),
+        h + r,
+    );
     let on_side = (centre.0, h);
     let on_hole = (
         centre.0 * big_r / (big_r + r),
@@ -3138,9 +3155,9 @@ fn root_area(big_r: f64, r: f64, h: f64) -> f64 {
         .abs()
         / 2.0;
     let segment = |rad: f64, p: (f64, f64), q: (f64, f64)| {
-        let chord = (p.0 - q.0).hypot(p.1 - q.1);
-        let angle = 2.0 * (chord / (2.0 * rad)).asin();
-        rad * rad / 2.0 * (angle - angle.sin())
+        let chord = det::hypot(p.0 - q.0, p.1 - q.1);
+        let angle = 2.0 * det::asin(chord / (2.0 * rad));
+        rad * rad / 2.0 * (angle - det::sin(angle))
     };
     triangle - segment(r, on_side, on_hole) - segment(big_r, on_hole, corner)
 }
@@ -3175,8 +3192,8 @@ fn slot_roots_beside_a_hole_s_seam_round_in_one_fillet() {
             "slot at {deg}: volume {v}, expected {expected}"
         );
         let (_, brep) = common::kernel_copy(&b);
-        let centre_along = ((HOLE_R + r).powi(2) - (SLOT_W / 2.0 + r).powi(2)).sqrt();
-        let (s, c) = f64::to_radians(deg).sin_cos();
+        let centre_along = (det::powi(HOLE_R + r, 2) - det::powi(SLOT_W / 2.0 + r, 2)).sqrt();
+        let (s, c) = det::sin_cos(f64::to_radians(deg));
         for across in [SLOT_W / 2.0 + r, -(SLOT_W / 2.0 + r)] {
             let (x, y) = (centre_along * c - across * s, centre_along * s + across * c);
             let rounds = brep
@@ -3190,7 +3207,8 @@ fn slot_roots_beside_a_hole_s_seam_round_in_one_fillet() {
                         {
                             let place = cone.rev().position();
                             let (o, a) = (place.origin(), place.z_axis());
-                            (o.x - x).hypot(o.y - y) < 1e-9 && a.x.hypot(a.y) < 1e-9 * a.length()
+                            det::hypot(o.x - x, o.y - y) < 1e-9
+                                && det::hypot(a.x, a.y) < 1e-9 * a.length()
                         }
                         _ => false,
                     }
@@ -3204,7 +3222,7 @@ fn slot_roots_beside_a_hole_s_seam_round_in_one_fillet() {
 /// The angle on the hole's wall between a slot's middle and its side, in degrees: the side
 /// is the line `SLOT_W / 2` from the slot's middle.
 fn slot_half_angle() -> f64 {
-    (SLOT_W / 2.0 / HOLE_R).asin().to_degrees()
+    det::asin(SLOT_W / 2.0 / HOLE_R).to_degrees()
 }
 
 /// Controls for #18830: a second slot on the far side of the hole's seam, all four roots of
@@ -3351,7 +3369,7 @@ fn tube_with_fin(y0: f64) -> Body {
 fn fin_side(y: f64, yc: f64) -> ([f64; 2], [f64; 2], f64) {
     let d = TUBE + ROOT;
     let cx = (d * d - yc * yc).sqrt();
-    ([cx, y], [TUBE / d * cx, TUBE / d * yc], cx.hypot(y))
+    ([cx, y], [TUBE / d * cx, TUBE / d * yc], det::hypot(cx, y))
 }
 
 /// The volume the fin top's round `r` adds to [`tube_with_fin`]: the round is the torus the ball
@@ -3369,27 +3387,33 @@ fn fin_top_round_volume(y0: f64, r: f64) -> f64 {
     let d = TUBE + ROOT;
     let (_, _, wp) = fin_side(y1, y1 + ROOT);
     let (_, _, wm) = fin_side(y0, y0 - ROOT);
-    let centre = |yc: f64| yc.atan2((d * d - yc * yc).sqrt());
+    let centre = |yc: f64| det::atan2(yc, (d * d - yc * yc).sqrt());
     let (ap, am) = (centre(y1 + ROOT), centre(y0 - ROOT));
     let span = |p: f64| {
         // the angle at the tube's axis between a Root ball's centre and where the circle of
         // radius p meets that ball's circle
-        let delta = ((p * p + d * d - ROOT * ROOT) / (2.0 * d * p))
-            .min(1.0)
-            .acos();
-        let hi = if p < wp { ap - delta } else { (y1 / p).asin() };
-        let lo = if p < wm { am + delta } else { (y0 / p).asin() };
+        let delta = det::acos(((p * p + d * d - ROOT * ROOT) / (2.0 * d * p)).min(1.0));
+        let hi = if p < wp {
+            ap - delta
+        } else {
+            det::asin(y1 / p)
+        };
+        let lo = if p < wm {
+            am + delta
+        } else {
+            det::asin(y0 / p)
+        };
         hi - lo
     };
     let f = |phi: f64| {
-        let p = TUBE + r - r * phi.sin();
-        r * (1.0 - phi.cos()) * p * span(p) * r * phi.cos()
+        let p = TUBE + r - r * det::sin(phi);
+        r * (1.0 - det::cos(phi)) * p * span(p) * r * det::cos(phi)
     };
     let mut cuts = vec![0.0, PI / 2.0];
     for w in [wp, wm] {
         let s = (TUBE + r - w) / r;
         if s > 0.0 && s < 1.0 {
-            cuts.push(s.asin());
+            cuts.push(det::asin(s));
         }
     }
     cuts.sort_by(f64::total_cmp);
@@ -3445,11 +3469,13 @@ fn assert_fin_top_round_rolls_over(y0: f64, r: f64) -> (usize, usize, usize) {
     );
     let y1 = y0 + FIN;
     let sides = [(y1, y1 + ROOT), (y0, y0 - ROOT)];
-    let torus = |p: &solidcore::Vec3| (p.x.hypot(p.y) - (TUBE + r)).hypot(p.z - (FIN_TOP + r)) - r;
+    let torus = |p: &solidcore::Vec3| {
+        det::hypot(det::hypot(p.x, p.y) - (TUBE + r), p.z - (FIN_TOP + r)) - r
+    };
     // the distance from the Root round whose axis is at y = yc
     let root = |p: &solidcore::Vec3, yc: f64| {
         let ([cx, _], _, _) = fin_side(yc, yc);
-        (p.x - cx).hypot(p.y - yc) - ROOT
+        det::hypot(p.x - cx, p.y - yc) - ROOT
     };
     // on the fin's top face: between the sides, or beside one within its Root round's cap
     let on_top = |p: &solidcore::Vec3, tol: f64| {
@@ -3482,13 +3508,16 @@ fn assert_fin_top_round_rolls_over(y0: f64, r: f64) -> (usize, usize, usize) {
             continue;
         }
         let (first, last) = (&pts[0], &pts[64]);
-        if pts.iter().all(|p| (p.x.hypot(p.y) - TUBE).abs() <= tol) {
+        if pts
+            .iter()
+            .all(|p| (det::hypot(p.x, p.y) - TUBE).abs() <= tol)
+        {
             // the rail on the tube: r above the fin's top
             assert!(
                 pts.iter().all(|p| (p.z - FIN_TOP - r).abs() <= tol),
                 "y0 {y0} r {r}: {e:?}"
             );
-            tube_rail.extend(pts.iter().map(|p| p.y.atan2(p.x)));
+            tube_rail.extend(pts.iter().map(|p| det::atan2(p.y, p.x)));
         } else if pts.iter().all(|p| (p.z - FIN_TOP).abs() <= tol) {
             // the rail on the fin's top: on that face all along
             for p in &pts {
@@ -3544,7 +3573,7 @@ fn assert_fin_top_round_rolls_over(y0: f64, r: f64) -> (usize, usize, usize) {
         .fold((f64::MAX, f64::MIN), |(lo, hi), &a| (lo.min(a), hi.max(a)));
     let angle = |(y, yc): (f64, f64)| {
         let (_, v, _) = fin_side(y, yc);
-        v[1].atan2(v[0])
+        det::atan2(v[1], v[0])
     };
     assert!(
         (hi - angle(sides[0])).abs() <= 1e-9 && (lo - angle(sides[1])).abs() <= 1e-9,
@@ -3573,7 +3602,7 @@ fn assert_fin_top_round_rolls_over(y0: f64, r: f64) -> (usize, usize, usize) {
             on_torus += 1;
             continue;
         }
-        let known = (p.x.hypot(p.y) - TUBE).abs() <= tol
+        let known = (det::hypot(p.x, p.y) - TUBE).abs() <= tol
             || (p.z - 75.0).abs() <= tol
             || sides
                 .iter()
@@ -3954,7 +3983,7 @@ fn end_vertices_between(a: f64, b: f64, r: f64) -> [[f64; 3]; 2] {
     let s = (b - a) / 32.0;
     let c = a + 16.0 * s;
     let q = (1.0 + s * s).sqrt();
-    let x_at = |z: f64| 7.0 + ((3.0 - r).powi(2) - (z - 4.0).powi(2)).sqrt();
+    let x_at = |z: f64| 7.0 + (det::powi(3.0 - r, 2) - det::powi(z - 4.0, 2)).sqrt();
     let zc = b + q * r;
     let xc = x_at(zc);
     let f = 3.0 / (3.0 - r);
@@ -3993,7 +4022,10 @@ fn nearest_vertex(b: &Body, want: [f64; 3]) -> f64 {
         .iter()
         .map(|&v| {
             let p = solidcore::topology::vertex::point(&brep, v).unwrap();
-            ((p.x - want[0]).powi(2) + (p.y - want[1]).powi(2) + (p.z - want[2]).powi(2)).sqrt()
+            (det::powi(p.x - want[0], 2)
+                + det::powi(p.y - want[1], 2)
+                + det::powi(p.z - want[2], 2))
+            .sqrt()
         })
         .fold(f64::INFINITY, f64::min)
 }
@@ -4031,8 +4063,10 @@ fn a_round_whose_wall_contact_crosses_a_tangent_edge_partway_rolls_onto_the_cyli
             let near = points
                 .iter()
                 .map(|p| {
-                    ((p[0] - want[0]).powi(2) + (p[1] - want[1]).powi(2) + (p[2] - want[2]).powi(2))
-                        .sqrt()
+                    (det::powi(p[0] - want[0], 2)
+                        + det::powi(p[1] - want[1], 2)
+                        + det::powi(p[2] - want[2], 2))
+                    .sqrt()
                 })
                 .fold(f64::INFINITY, f64::min);
             assert!(near <= 1e-6, "r {r}: no vertex at {want:?} ({near})");

@@ -19,6 +19,7 @@
 )] // test helpers
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::surface::cone::Cone;
 use solidcore::Kernel;
@@ -115,7 +116,7 @@ fn each_cone(
 /// (1e-3 inside it), at the base, the issue's height 1 (or -1 past a negative cone's apex
 /// side), and far from the apex (1e4).
 fn unbounded_heights(bot: f64, semi: f64) -> Vec<f64> {
-    let apex = -bot / semi.to_radians().tan();
+    let apex = -bot / det::tan(semi.to_radians());
     let inward = if semi > 0.0 { 1.0 } else { -1.0 };
     vec![
         apex + inward * 1e-3,
@@ -194,14 +195,18 @@ fn issue_trigger_circles_are_through_the_point() {
     };
     let cone =
         Cone::create_canonical_with_semi_angle(&k, pl, 1.0, 10.0, None, false, true).unwrap();
-    check(&cone, 1.0 + 10f64.to_radians().tan(), "inside out, semi 10");
+    check(
+        &cone,
+        1.0 + det::tan(10f64.to_radians()),
+        "inside out, semi 10",
+    );
     for inside_out in [false, true] {
         let cone =
             Cone::create_canonical_with_semi_angle(&k, pl, 2.0, -15.0, None, false, inside_out)
                 .unwrap();
         check(
             &cone,
-            2.0 - 15f64.to_radians().tan(),
+            2.0 - det::tan(15f64.to_radians()),
             &format!("semi -15, inside out {inside_out}"),
         );
     }
@@ -215,7 +220,7 @@ fn unbounded_cone_domain_and_nurb_points_agree() {
     let pl = &placements()[0];
     let cone =
         Cone::create_canonical_with_semi_angle(&k, pl, 2.0, -15.0, None, false, false).unwrap();
-    let apex = 2.0 / 15f64.to_radians().tan();
+    let apex = 2.0 / det::tan(15f64.to_radians());
     assert!(
         close(cone.top_height(), apex, 1.0),
         "top {}",
@@ -263,7 +268,7 @@ fn create_canonical_negative_semi_angle_net_is_its_cone() {
     use solidcore::surface::implicit::{lies_on, Implicit};
 
     let k = kernel();
-    let t = (-20f64).to_radians().tan();
+    let t = det::tan((-20f64).to_radians());
     let apex = -1.0 / t;
     for (n, pl) in placements().iter().enumerate() {
         for inside_out in [false, true] {

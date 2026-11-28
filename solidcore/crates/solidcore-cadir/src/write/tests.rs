@@ -9,6 +9,7 @@
 use super::*;
 use crate::read_bodies;
 use cadmpeg_ir::document::CadIr;
+use solidcore::math::det;
 use solidcore_record::brep::{Curve2, Frame, Loop as RLoop};
 
 /// A NURBS form's point at `t`, as the kernel evaluates it.
@@ -399,8 +400,8 @@ fn arc_middle(e: &solidcore_record::brep::Edge) -> Option<P> {
         _ => return None,
     };
     let along = add(
-        scaled(rx * t.cos(), frame.x_axis),
-        scaled(ry * t.sin(), frame.y_axis),
+        scaled(rx * det::cos(t), frame.x_axis),
+        scaled(ry * det::sin(t), frame.y_axis),
     );
     Some(add(frame.origin, along))
 }
@@ -1069,7 +1070,7 @@ fn the_kernels_primitives_are_written_on_their_exact_surfaces() {
         .collect();
     assert_eq!(cones.len(), 1);
     let c = cones[0];
-    let tan = c.half_angle().get().tan();
+    let tan = det::tan(c.half_angle().get());
     assert!((tan.abs() - 5.0 / 8.0).abs() < 1e-12, "{tan}");
     let apex = add(
         v3(c.origin().get()),
@@ -1117,14 +1118,14 @@ fn a_curve_is_written_on_an_image_of_its_parameter() {
             let record = add(
                 frame.origin,
                 add(
-                    scaled(radii[0] * t.cos(), frame.x_axis),
-                    scaled(radii[1] * t.sin(), frame.y_axis),
+                    scaled(radii[0] * det::cos(t), frame.x_axis),
+                    scaled(radii[1] * det::sin(t), frame.y_axis),
                 ),
             );
             let s = p.apply(t);
             let cadir = add(
                 v3(e.center().get()),
-                add(scaled(a * s.cos(), x), scaled(b * s.sin(), y)),
+                add(scaled(a * det::cos(s), x), scaled(b * det::sin(s), y)),
             );
             assert!(close(record, cadir, 1e-12), "{radii:?} {t}");
         }
@@ -1178,22 +1179,25 @@ fn a_surface_is_written_with_an_image_of_its_parameters() {
     let fz = cross(frame.x_axis, frame.y_axis);
     for (u, v) in [(0.0_f64, 0.0_f64), (1.0, 2.0), (4.0, -1.0)] {
         let w = v + tube_start;
-        let ring = add(scaled(u.cos(), frame.x_axis), scaled(u.sin(), frame.y_axis));
+        let ring = add(
+            scaled(det::cos(u), frame.x_axis),
+            scaled(det::sin(u), frame.y_axis),
+        );
         let record = add(
             frame.origin,
             add(
-                scaled(major + minor * w.cos(), ring),
-                scaled(minor * w.sin(), fz),
+                scaled(major + minor * det::cos(w), ring),
+                scaled(minor * det::sin(w), fz),
             ),
         );
         let [s, t] = chart.apply([u, v]);
         let (big, small) = (to.major_radius().get(), to.minor_radius().get());
-        let ring = add(scaled(s.cos(), x), scaled(s.sin(), y));
+        let ring = add(scaled(det::cos(s), x), scaled(det::sin(s), y));
         let cadir = add(
             v3(to.center().get()),
             add(
-                scaled(big + small * t.cos(), ring),
-                scaled(small * t.sin(), z),
+                scaled(big + small * det::cos(t), ring),
+                scaled(small * det::sin(t), z),
             ),
         );
         assert!(close(record, cadir, 1e-12), "{u} {v}");
@@ -1295,9 +1299,9 @@ fn arc_edge(radius: f64, sweep: f64) -> (solidcore_record::brep::Edge, P, P) {
     let half = sweep / 2.0;
     let (p, q) = (
         [radius, 0.0, 0.0],
-        [radius * sweep.cos(), radius * sweep.sin(), 0.0],
+        [radius * det::cos(sweep), radius * det::sin(sweep), 0.0],
     );
-    let (mid, w) = ([radius, radius * half.tan(), 0.0], half.cos());
+    let (mid, w) = ([radius, radius * det::tan(half), 0.0], det::cos(half));
     let edge = solidcore_record::brep::Edge {
         curve: BCurve::Circle {
             frame: Frame {
@@ -1345,8 +1349,8 @@ fn a_circle_edge_on_its_form_keeps_the_arc_the_form_runs_along() {
     assert!(a1 - a0 > 0.0 && a1 - a0 < 1e-11, "{a0} {a1}");
     // Its ends are its vertices, within their tolerance.
     for (a, x) in [(a0, p), (a1, q)] {
-        let on = [1e9 * a.cos(), 1e9 * a.sin(), 0.0];
-        let gap = ((on[0] - x[0]).powi(2) + (on[1] - x[1]).powi(2)).sqrt();
+        let on = [1e9 * det::cos(a), 1e9 * det::sin(a), 0.0];
+        let gap = (det::powi(on[0] - x[0], 2) + det::powi(on[1] - x[1], 2)).sqrt();
         assert!(gap < 1e-6, "{a}: {gap}");
     }
 
@@ -1365,8 +1369,8 @@ fn a_closed_circle_edge_winding_twice_is_written_as_its_form() {
     // `turns` turns of the unit circle as rational quadratic quarter arcs, from (1, 0, 0).
     let wound = |turns: usize| {
         let quarters = 4 * turns;
-        let at = |a: f64, k: f64| [k * a.cos(), k * a.sin(), 0.0];
-        let w = FRAC_PI_4.cos();
+        let at = |a: f64, k: f64| [k * det::cos(a), k * det::sin(a), 0.0];
+        let w = det::cos(FRAC_PI_4);
         let mut homogeneous = Vec::new();
         for k in 0..quarters {
             let a = k as f64 * FRAC_PI_2;
@@ -1522,8 +1526,8 @@ fn a_line_named_against_its_edge_is_written_turned() {
 fn a_circle_edge_on_an_unevenly_parameterized_form_keeps_its_arc() {
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
     let uneven = |turn: f64| {
-        let (r, w) = (10.0, FRAC_PI_4.cos());
-        let at = |a: f64, k: f64, w: f64| [k * a.cos() * w, k * a.sin() * w, 0.0, w];
+        let (r, w) = (10.0, det::cos(FRAC_PI_4));
+        let at = |a: f64, k: f64, w: f64| [k * det::cos(a) * w, k * det::sin(a) * w, 0.0, w];
         let mut homogeneous = vec![at(0.0, r, 1.0)];
         for k in 0..3 {
             let a = turn * FRAC_PI_2 * k as f64;
@@ -1555,7 +1559,7 @@ fn a_circle_edge_on_an_unevenly_parameterized_form_keeps_its_arc() {
         };
         (edge, [r, 0.0, 0.0], q)
     };
-    let angle = |x: P| x[1].atan2(x[0]);
+    let angle = |x: P| det::atan2(x[1], x[0]);
 
     // Most of the turn is in the first 1/16 of the parameter.
     let (edge, p, q) = uneven(1.0);
@@ -1566,7 +1570,7 @@ fn a_circle_edge_on_an_unevenly_parameterized_form_keeps_its_arc() {
     let [a0, a1] = named_interval(&edge, p, q).unwrap();
     assert!(a0.abs() < 1e-9 && (a1 - 1.5 * PI).abs() < 1e-9, "{a0} {a1}");
     for k in 1..200 {
-        let t = (k as f64 / 200.0).powi(3);
+        let t = det::powi(k as f64 / 200.0, 3);
         let x = point_on(&form, t).unwrap();
         let a = angle(x).rem_euclid(TAU);
         assert!(a0 - 1e-9 <= a && a <= a1 + 1e-9, "{t}: {x:?} at {a}");
@@ -1616,22 +1620,22 @@ fn a_circle_edge_whose_form_turns_between_its_samples_keeps_its_arc() {
                 })
                 .collect::<Vec<_>>()
         };
-        let square = [1.0, e.cos(), 1.0];
+        let square = [1.0, det::cos(e), 1.0];
         let w = times(&times(&square, &square), &square);
         let c: f64 = 1000.0;
         (0..7)
             .map(|i| {
-                let k = 1e-8 * c.powi(i as i32);
+                let k = 1e-8 * det::powi(c, i as i32);
                 let a = e * i as f64;
-                [r * a.cos() * k, r * a.sin() * k, 0.0, w[i] * k]
+                [r * det::cos(a) * k, r * det::sin(a) * k, 0.0, w[i] * k]
             })
             .collect::<Vec<_>>()
     };
     let edge = |sign: f64| {
         // (z / |z|)⁶ ends at ±330°, at ∓30°.
         let q = [
-            r * (-sign * PI / 6.0).cos(),
-            r * (-sign * PI / 6.0).sin(),
+            r * det::cos(-sign * PI / 6.0),
+            r * det::sin(-sign * PI / 6.0),
             0.0,
         ];
         let edge = solidcore_record::brep::Edge {
@@ -1656,7 +1660,7 @@ fn a_circle_edge_whose_form_turns_between_its_samples_keeps_its_arc() {
         };
         (edge, [r, 0.0, 0.0], q)
     };
-    let angle = |x: P| x[1].atan2(x[0]);
+    let angle = |x: P| det::atan2(x[1], x[0]);
 
     // Clockwise: at t = 1/1001 it is at -165°, outside the 30° arc its ends make.
     let (cw, p, q) = edge(-1.0);
@@ -2326,9 +2330,9 @@ fn a_wire_edge_two_shells_list_is_refused() {
 /// radius `radius` about the standard frame, on a rational quadratic arc over [0, 1].
 fn arc_from(radius: f64, start: f64, sweep: f64) -> (solidcore_record::brep::Edge, P, P) {
     let half = sweep / 2.0;
-    let at = |a: f64, k: f64| [k * a.cos(), k * a.sin(), 0.0];
+    let at = |a: f64, k: f64| [k * det::cos(a), k * det::sin(a), 0.0];
     let (p, q) = (at(start, radius), at(start + sweep, radius));
-    let (mid, w) = (at(start + half, radius / half.cos()), half.cos());
+    let (mid, w) = (at(start + half, radius / det::cos(half)), det::cos(half));
     let edge = solidcore_record::brep::Edge {
         curve: BCurve::Circle {
             frame: Frame {

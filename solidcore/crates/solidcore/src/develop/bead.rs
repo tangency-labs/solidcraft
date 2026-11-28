@@ -22,6 +22,7 @@
 //!
 //! Deviations: none (no upstream counterpart).
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use super::fold::Fold;
@@ -339,7 +340,7 @@ impl Seg1 {
             Seg1::Line { u0, h0, u1, h1 } => (u0 + (u1 - u0) * s, h0 + (h1 - h0) * s),
             Seg1::Arc { cu, ch, r, a0, a1 } => {
                 let a = a0 + (a1 - a0) * s;
-                (cu + r * a.cos(), ch + r * a.sin())
+                (cu + r * det::cos(a), ch + r * det::sin(a))
             }
         }
     }
@@ -348,10 +349,10 @@ impl Seg1 {
     fn angle_at(ch_r: (f64, f64), a0: f64, a1: f64, h: f64) -> f64 {
         let (ch, r) = ch_r;
         let x = ((h - ch) / r).clamp(-1.0, 1.0);
-        if ((a0 + a1) / 2.0).cos() >= 0.0 {
-            x.asin()
+        if det::cos((a0 + a1) / 2.0) >= 0.0 {
+            det::asin(x)
         } else {
-            PI - x.asin()
+            PI - det::asin(x)
         }
     }
 
@@ -359,7 +360,9 @@ impl Seg1 {
     fn u_at(&self, h: f64) -> f64 {
         match *self {
             Seg1::Line { u0, h0, u1, h1 } => u0 + (h - h0) * (u1 - u0) / (h1 - h0),
-            Seg1::Arc { cu, ch, r, a0, a1 } => cu + r * Self::angle_at((ch, r), a0, a1, h).cos(),
+            Seg1::Arc { cu, ch, r, a0, a1 } => {
+                cu + r * det::cos(Self::angle_at((ch, r), a0, a1, h))
+            }
         }
     }
 
@@ -370,7 +373,7 @@ impl Seg1 {
             Seg1::Arc { r, a0, a1, .. } => {
                 let a = a0 + (a1 - a0) * s;
                 let k = r * (a1 - a0);
-                (-a.sin() * k, a.cos() * k)
+                (-det::sin(a) * k, det::cos(a) * k)
             }
         }
     }
@@ -391,14 +394,14 @@ impl Profile {
     /// (crown), in a sheet `t` thick: the raised one (its face at h = 0) or the one under it.
     fn new(angle: f64, depth: f64, rb: f64, rc: f64, t: f64, raised: bool) -> Profile {
         let ro = rc + t;
-        let half = (angle / 2.0).tan();
-        let uc = rb * half + depth / angle.tan() + ro * half;
+        let half = det::tan(angle / 2.0);
+        let uc = rb * half + depth / det::tan(angle) + ro * half;
         let (r_base, r_crown, base, top) = if raised {
             (rb, ro, 0.0, depth)
         } else {
             (rb + t, rc, -t, depth - t)
         };
-        let (s, c) = angle.sin_cos();
+        let (s, c) = det::sin_cos(angle);
         let (bu, bh) = (r_base * s, rb - r_base * c);
         let (cu, chh) = (uc - r_crown * s, depth - ro + r_crown * c);
         Profile {
@@ -498,15 +501,15 @@ impl BeadGeom {
         if !(s.base_radius >= MIN_BEAD_RADIUS && s.crown_radius >= MIN_BEAD_RADIUS) {
             return Err(BeadRefusal::Radius);
         }
-        let (alpha, beta) = (s.angle, (s.depth / s.end_length).atan());
+        let (alpha, beta) = (s.angle, det::atan(s.depth / s.end_length));
         let (rb, rc) = (s.base_radius, s.crown_radius);
-        let gentlest = rb.min(rc) * (1.0 - alpha.min(beta).cos());
+        let gentlest = rb.min(rc) * (1.0 - det::cos(alpha.min(beta)));
         if gentlest < MIN_BEND_RISE {
             return Err(BeadRefusal::GentleBend { rise: gentlest });
         }
         let ro = rc + t;
         // The flanks and the end ramps have length only if the bends' rises leave room.
-        let rise = |a: f64| (rb + ro) * (1.0 - a.cos());
+        let rise = |a: f64| (rb + ro) * (1.0 - det::cos(a));
         if s.depth <= rise(alpha) + 1e-6 {
             return Err(BeadRefusal::ShallowFlanks {
                 angle: alpha,
@@ -516,12 +519,12 @@ impl BeadGeom {
         if s.depth <= rise(beta) + 1e-6 {
             return Err(BeadRefusal::ShallowRamps { angle: beta });
         }
-        let half = |a: f64| (a / 2.0).tan();
-        let crown = s.width / 2.0 - s.depth / alpha.tan() - ro * half(alpha);
+        let half = |a: f64| det::tan(a / 2.0);
+        let crown = s.width / 2.0 - s.depth / det::tan(alpha) - ro * half(alpha);
         if crown < MIN_CROWN / 2.0 {
             return Err(BeadRefusal::NoCrown {
                 angle: alpha,
-                min_width: 2.0 * (s.depth / alpha.tan() + ro * half(alpha)) + MIN_CROWN,
+                min_width: 2.0 * (s.depth / det::tan(alpha) + ro * half(alpha)) + MIN_CROWN,
             });
         }
         let ramp = s.end_length + ro * half(beta);
@@ -650,16 +653,18 @@ impl BeadGeom {
         let (xf, sqo) = (self.xf, self.sq);
         let point = move |s: f64| -> Vec3 {
             let (up, vq, h) = match (param, sp, sq) {
-                (Param::Mitre { r, ch, cp, cq }, ..) => {
-                    (cp + r * s.cos(), cq + r * s.cos(), ch + r * s.sin())
-                }
+                (Param::Mitre { r, ch, cp, cq }, ..) => (
+                    cp + r * det::cos(s),
+                    cq + r * det::cos(s),
+                    ch + r * det::sin(s),
+                ),
                 (Param::PArc, Seg1::Arc { cu, ch, r, .. }, _) => {
-                    let h = ch + r * s.sin();
-                    (cu + r * s.cos(), sq.u_at(h), h)
+                    let h = ch + r * det::sin(s);
+                    (cu + r * det::cos(s), sq.u_at(h), h)
                 }
                 (Param::QArc, _, Seg1::Arc { cu, ch, r, .. }) => {
-                    let h = ch + r * s.sin();
-                    (sp.u_at(h), cu + r * s.cos(), h)
+                    let h = ch + r * det::sin(s);
+                    (sp.u_at(h), cu + r * det::cos(s), h)
                 }
                 _ => (sp.u_at(s), sq.u_at(s), s),
             };
@@ -1140,7 +1145,7 @@ pub fn bead_flank_angle(depth: f64, width: f64, crown_width: f64) -> Result<f64,
     if !(crown_width >= 0.0 && crown_width < width) {
         return Err(BeadRefusal::CrownWidth { crown_width, width });
     }
-    Ok((depth / ((width - crown_width) / 2.0)).atan())
+    Ok(det::atan(depth / ((width - crown_width) / 2.0)))
 }
 
 /// Where a note `height` high along bead `b` stands in the flat of a sheet `t` thick, folded as

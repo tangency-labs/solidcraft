@@ -15,6 +15,7 @@
 //! two boundaries meet: a trim past that range wraps round instead), or where a weight of the
 //! continued patch would not be positive.
 
+use solidcore::math::det;
 use solidcore_record::brep::Surface as BSurface;
 
 /// The farthest a patch is continued past an end, as a share of that end's span.
@@ -123,7 +124,7 @@ pub(super) fn closes(lines: &Lines, tol: f64) -> Option<bool> {
     for l in lines {
         let (s, e) = (l.first()?, l.last()?);
         let (a, b) = (euclid(s), euclid(e));
-        let d = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        let d = (det::powi(a[0] - b[0], 2) + det::powi(a[1] - b[1], 2) + det::powi(a[2] - b[2], 2)).sqrt();
         if !(d <= tol) {
             return Some(false);
         }

@@ -8,6 +8,7 @@ pub(crate) use solidcore::eval::plan::uv::{Domain, domain, unwrap};
 
 use super::edges::{QUARTER_TURN, turn};
 use super::size::Rules;
+use solidcore::math::det;
 
 /// Division of `range` along direction `d` so that between neighbouring lines the surface sags
 /// at most the tolerance from its chord, the chord is at most `h` long and the normal turns
@@ -71,7 +72,7 @@ pub(crate) fn fine_between(s: &EvalSurface, rules: &Rules, h: f64, a: [f64; 2], 
         })
     };
     match (normal(a, b, sua, sva), normal(b, a, sub, svb)) {
-        (Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+        (Some(na), Some(nb)) => !t.exceeds(det::acos(na.dot(nb).clamp(-1.0, 1.0)), sag),
         _ => true,
     }
 }
@@ -122,7 +123,7 @@ fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules
             let na = sua.cross(sva).normalized().or_else(|| normal(a + 1e-4 * (b - a), y));
             let nb = sub.cross(svb).normalized().or_else(|| normal(b - 1e-4 * (b - a), y));
             match (na, nb) {
-                (Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+                (Some(na), Some(nb)) => !t.exceeds(det::acos(na.dot(nb).clamp(-1.0, 1.0)), sag),
                 _ => true,
             }
         })

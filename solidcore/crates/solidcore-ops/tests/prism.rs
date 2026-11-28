@@ -12,6 +12,7 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
+use solidcore::math::det;
 use solidcore_ops::prism::{
     extrude_planar_regions, fill_channel, fitted_loop, loop_crosses_itself, loop_holds,
     planar_regions_boolean, prism_equivalent, prism_section, region_area, Contour, FillFailure,
@@ -55,8 +56,8 @@ fn start(s: &Seg2) -> Vec2 {
             start,
             ..
         } => v(
-            center.x + radius * start.cos(),
-            center.y + radius * start.sin(),
+            center.x + radius * det::cos(start),
+            center.y + radius * det::sin(start),
         ),
         Seg2::Cubic { p0, .. } => p0,
         Seg2::Bezier { p, .. } => p[0],
@@ -72,8 +73,8 @@ fn end(s: &Seg2) -> Vec2 {
             start,
             sweep,
         } => v(
-            center.x + radius * (start + sweep).cos(),
-            center.y + radius * (start + sweep).sin(),
+            center.x + radius * det::cos(start + sweep),
+            center.y + radius * det::sin(start + sweep),
         ),
         Seg2::Cubic { p3, .. } => p3,
         Seg2::Bezier { n, p } => p[usize::from(n)],
@@ -81,7 +82,7 @@ fn end(s: &Seg2) -> Vec2 {
 }
 
 fn dist(a: Vec2, b: Vec2) -> f64 {
-    (a.x - b.x).hypot(a.y - b.y)
+    det::hypot(a.x - b.x, a.y - b.y)
 }
 
 /// A line's or arc's length.
@@ -255,7 +256,7 @@ fn a_vertex_a_hair_beside_a_strip_edge_leaves_its_band_closed() {
         };
         let strip = rectangle(v(-1000.0, edge), v(1000.0, edge + width));
         // The tolerance the fold reads its band at: the plate's size over a billion.
-        let tol = 100.0_f64.hypot(200.0) * 1e-9;
+        let tol = det::hypot(100.0_f64, 200.0) * 1e-9;
         let band = planar_regions_boolean(
             std::slice::from_ref(&plate),
             std::slice::from_ref(&strip),
@@ -393,7 +394,7 @@ fn flange_cut_exact(flange: &[Vec2; 4], cut: &[Vec2; 5]) -> [Vec<Vec2>; 3] {
 /// most `δ |p_(i+1) - p_(i-1)| / 2`.
 fn sliver_bound(exact: &[Vec2], corner: Vec2, foot: Vec2, head: Vec2, tx: f64) -> f64 {
     let w = v(head.x - foot.x, head.y - foot.y);
-    let len = w.x.hypot(w.y);
+    let len = det::hypot(w.x, w.y);
     let off = ((corner.x - foot.x) * w.y - (corner.y - foot.y) * w.x).abs() / len;
     if off > tx {
         return 0.0;
@@ -878,12 +879,12 @@ fn tiny_tool_between_circle_and_display_chord_is_not_lost() {
     };
     // a chord of 1e-3 sagitta spans 2 sqrt(2 r s) of arc: the square sits outside that chord
     let half_angle = (2.0 * 10.0 * 1e-3_f64).sqrt() / 10.0;
-    let at = v(half_angle.cos(), half_angle.sin()) * 9.9998;
+    let at = v(det::cos(half_angle), det::sin(half_angle)) * 9.9998;
     let half = v(0.000025, 0.000025);
     let square = rectangle(at - half, at + half);
     assert!(9.9998 + 0.000025 * 2.0_f64.sqrt() < 10.0);
     assert!(
-        9.9998 - 0.000025 * 2.0_f64.sqrt() > 10.0 * half_angle.cos(),
+        9.9998 - 0.000025 * 2.0_f64.sqrt() > 10.0 * det::cos(half_angle),
         "outside the chord"
     );
     let cut = planar_regions_boolean(
@@ -905,7 +906,7 @@ fn tiny_tool_between_circle_and_display_chord_is_not_lost() {
 /// A 200 x 37 plate turned by `theta` about the origin, and the fillet region of one of its
 /// corners: an arc of radius `r` tangent to both edges, closed by two lines meeting `reach` out.
 fn plate_and_corner_fillet(theta: f64, r: f64, reach: f64) -> (Region2, Region2) {
-    let (sn, cs) = theta.sin_cos();
+    let (sn, cs) = det::sin_cos(theta);
     let rot = |x: f64, y: f64| v(x * cs - y * sn, x * sn + y * cs);
     let (w, lo, hi) = (200.0, -40.25, -3.25);
     let plate = Region2 {
@@ -996,7 +997,7 @@ fn an_arc_tangent_to_the_edges_it_ends_on_leaves_no_hairline_edges() {
 /// straight 50 mm, its corners on that edge rounded to the nanometre and moved by `off`; both
 /// turned by `theta`.
 fn plate_and_strip_by_a_bent_edge(theta: f64, slope: f64, off: Vec2) -> (Region2, Region2) {
-    let (sn, cs) = theta.sin_cos();
+    let (sn, cs) = det::sin_cos(theta);
     let rot = |x: f64, y: f64| v(x * cs - y * sn, x * sn + y * cs);
     let nm = |p: Vec2| v((p.x * 1e9).round() / 1e9, (p.y * 1e9).round() / 1e9) + off;
     let plate = [
@@ -1069,7 +1070,7 @@ fn a_bent_edge_crossing_its_neighbour_by_their_corner_leaves_no_sliver() {
     for k in 0..16 {
         for d in [1e-9, 4e-9] {
             let a = f64::from(k) * TAU / 16.0;
-            let off = v(a.cos() * d, a.sin() * d);
+            let off = v(det::cos(a) * d, det::sin(a) * d);
             union_is_whole(
                 plate_and_strip_by_a_bent_edge(0.0, 0.01, off),
                 &format!("off {off:?}"),
@@ -1490,7 +1491,7 @@ fn a_drilled_box_moved_is_the_prism_it_was() {
         Some(false)
     );
     // turned 0.7 rad about (1, 2, 3) through the origin, and moved: still the same prism
-    let (c, sn) = (0.7_f64.cos(), 0.7_f64.sin());
+    let (c, sn) = (det::cos(0.7_f64), det::sin(0.7_f64));
     let n = {
         let l = 14.0_f64.sqrt();
         [1.0 / l, 2.0 / l, 3.0 / l]
@@ -1660,7 +1661,7 @@ fn coarse_section_polygons_are_not_rounded_and_a_fine_one_is_the_exact_circle() 
         (0..n)
             .map(|i| {
                 let angle = i as f64 * TAU / n as f64;
-                v(angle.cos() * 10., angle.sin() * 10.)
+                v(det::cos(angle) * 10., det::sin(angle) * 10.)
             })
             .collect()
     };
@@ -1677,7 +1678,7 @@ fn coarse_section_polygons_are_not_rounded_and_a_fine_one_is_the_exact_circle() 
         panic!("not one arc: {fitted:?}")
     };
     assert!(
-        center.x.hypot(center.y) < 1e-9 && (radius - 10.).abs() < 1e-9,
+        det::hypot(center.x, center.y) < 1e-9 && (radius - 10.).abs() < 1e-9,
         "centre {center:?}, radius {radius}"
     );
     assert!((sweep.abs() - TAU).abs() < 1e-9, "sweep {sweep}");
@@ -1686,7 +1687,7 @@ fn coarse_section_polygons_are_not_rounded_and_a_fine_one_is_the_exact_circle() 
 /// The point of the circle about `c` of radius `r` at angle `deg` (degrees).
 fn on_circle(c: Vec2, r: f64, deg: f64) -> Vec2 {
     let a = deg.to_radians();
-    v(c.x + r * a.cos(), c.y + r * a.sin())
+    v(c.x + r * det::cos(a), c.y + r * det::sin(a))
 }
 
 /// A circle about `c` of radius `r` as two arcs, counter-clockwise, meeting at the angles `a`
@@ -1942,7 +1943,7 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
     let close = |got: f64, want: f64, what: &str| {
         assert!((got - want).abs() <= 1e-6 * want, "{what}: {got} != {want}");
     };
-    let t = 30.0_f64.to_radians().tan();
+    let t = det::tan(30.0_f64.to_radians());
     let top = 0.5 + 7.0 * t;
     let corners = [
         v(-40.0, 0.0),
@@ -1959,8 +1960,8 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
     let (_, order) = plate.to_record().unwrap();
     let normal = |f: usize| plate.face_plane_normal(&order, f).unwrap().unwrap().value;
     let stray = |f: usize, d: [f64; 3]| plate.face_straying(&order, f, d).unwrap().unwrap();
-    let cap = (39.5_f64.powi(2) + 8.0_f64.powi(2)).sqrt();
-    let bevel = ((7.0 * t).powi(2) + 7.0_f64.powi(2) + 120.0_f64.powi(2)).sqrt();
+    let cap = (det::powi(39.5_f64, 2) + det::powi(8.0_f64, 2)).sqrt();
+    let bevel = (det::powi(7.0 * t, 2) + det::powi(7.0_f64, 2) + det::powi(120.0_f64, 2)).sqrt();
     let (mut caps, mut bevels, mut tops) = (0, 0, 0);
     for f in 0..order.faces.len() {
         let n = normal(f);
@@ -2476,8 +2477,8 @@ fn a_prism_on_a_flat_segment_writes_its_record() {
         (0.1_f64, -33.3_f64),
         (20.0, -(4e5_f64 * 4e5 - 400.0).sqrt()),
     ] {
-        let r = h.hypot(cy);
-        let start = (-cy).atan2(h);
+        let r = det::hypot(h, cy);
+        let start = det::atan2(-cy, h);
         let segment = Region2 {
             outer: Loop2 {
                 segs: vec![
@@ -2485,7 +2486,7 @@ fn a_prism_on_a_flat_segment_writes_its_record() {
                         center: Vec2::new(0.0, cy),
                         radius: r,
                         start,
-                        sweep: (-cy).atan2(-h) - start,
+                        sweep: det::atan2(-cy, -h) - start,
                     },
                     Seg2::Line {
                         a: Vec2::new(-h, 0.0),
@@ -2508,7 +2509,7 @@ fn a_prism_on_a_flat_segment_writes_its_record() {
 #[test]
 fn a_channel_is_filled_in_the_records_types_and_a_refusal_comes_back_with_its_fit() {
     // a 60 degree V, 6 deep with a gap of 1: the walls from the toes (±(0.5 + 6 tan 30), 0)
-    let top = 0.5 + 6.0 * (PI / 6.0).tan();
+    let top = 0.5 + 6.0 * det::tan(PI / 6.0);
     let right = [Seg2::Line {
         a: v(top, 0.0),
         b: v(0.5, -6.0),
@@ -2525,7 +2526,7 @@ fn a_channel_is_filled_in_the_records_types_and_a_refusal_comes_back_with_its_fi
     let filled = fill_channel(&left, &right, None, &options(Contour::Flat))
         .unwrap()
         .unwrap();
-    let want = 6.0 + 36.0 * (PI / 6.0).tan();
+    let want = 6.0 + 36.0 * det::tan(PI / 6.0);
     assert!((area(&filled.region) - want).abs() <= 1e-9 * want);
     assert!(filled.through && (filled.channel_depth - 6.0).abs() <= 1e-12);
     // a concave face past what it touches: refused, as a value, with a depth that builds
@@ -2621,7 +2622,7 @@ fn faces_past_the_search_s_budget_are_undecided_not_refused() {
     let alpha = 0.9 * zone / (2.0 * 10.0 * 2.0_f64.sqrt());
     let plates: Vec<_> = (0..60)
         .map(|k| {
-            let (sin, cos) = (TAU * f64::from(k) / 60.0).sin_cos();
+            let (sin, cos) = det::sin_cos(TAU * f64::from(k) / 60.0);
             plate_facing([cos, alpha, sin], [-sin, 0.0, cos])
         })
         .collect();
@@ -2703,7 +2704,7 @@ fn a_short_arcs_wall_is_a_cylinder_in_the_record() {
     ] {
         let half = deg.to_radians() / 2.0;
         let start = FRAC_PI_2 - half;
-        let at = |t: f64| v(radius * t.cos(), radius * t.sin());
+        let at = |t: f64| v(radius * det::cos(t), radius * det::sin(t));
         let segment = Region2 {
             outer: Loop2 {
                 segs: vec![
@@ -2771,7 +2772,7 @@ fn a_short_arcs_wall_off_the_coordinate_planes_is_a_cylinder_in_the_record() {
     ] {
         let half = deg.to_radians() / 2.0;
         let start = FRAC_PI_2 - half;
-        let at = |t: f64| v(radius * t.cos(), radius * t.sin());
+        let at = |t: f64| v(radius * det::cos(t), radius * det::sin(t));
         let segment = Region2 {
             outer: Loop2 {
                 segs: vec![

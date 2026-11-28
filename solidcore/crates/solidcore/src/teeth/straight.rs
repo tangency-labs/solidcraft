@@ -28,6 +28,7 @@
 //! Lengths are millimetres, the flank angle of a serration degrees, angles of an outline radians.
 //! No proportions here are taken from a standard.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use crate::error::teeth::{TeethFailure, Why};
@@ -62,11 +63,11 @@ fn cross(a: Point, b: Point) -> f64 {
 }
 
 fn length(a: Point) -> f64 {
-    a[0].hypot(a[1])
+    det::hypot(a[0], a[1])
 }
 
 fn angle_of(a: Point) -> f64 {
-    a[1].atan2(a[0])
+    det::atan2(a[1], a[0])
 }
 
 fn mirrored(p: Point) -> Point {
@@ -169,7 +170,7 @@ fn turns_to(p: Point, sense: f64, towards: f64, ratio: f64) -> Vec<f64> {
     if !(ratio.abs() <= 1.0 + 1e-12) {
         return Vec::new();
     }
-    let half = ratio.clamp(-1.0, 1.0).acos();
+    let half = det::acos(ratio.clamp(-1.0, 1.0));
     let from = angle_of(p);
     [half, -half]
         .into_iter()
@@ -1076,10 +1077,10 @@ impl Serration {
         let half = in_range("flank angle", self.flank_angle, 0.0, 170.0)?.to_radians() / 2.0;
         // The flank turned by half the flank angle from the tooth's middle line, through the point
         // of the mean circle a quarter of a pitch from the middle of the tooth.
-        let normal = [half.sin(), half.cos()];
+        let normal = [det::sin(half), det::cos(half)];
         let quarter = PI / (2.0 * f64::from(teeth));
         let mean = (outer + inner) / 2.0;
-        let offset = dot(normal, [mean * quarter.cos(), mean * quarter.sin()]);
+        let offset = dot(normal, [mean * det::cos(quarter), mean * det::sin(quarter)]);
         let profile = Profile {
             teeth,
             normal,

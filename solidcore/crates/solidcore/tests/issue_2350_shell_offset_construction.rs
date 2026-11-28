@@ -15,6 +15,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -107,7 +108,7 @@ fn thicken(k: &mut Kernel, mut sheet: Brep, distance: f64) -> solidcore::Result<
 /// The arc length of the parabola y = (100 - x^2) / 20, x in [-10, 10].
 fn arc_length() -> f64 {
     // integral of sqrt(1 + x^2 / 100): [x/2 sqrt(1 + x^2/100) + 5 asinh(x / 10)]
-    let half = 5.0 * 2f64.sqrt() + 5.0 * 1f64.asinh();
+    let half = 5.0 * 2f64.sqrt() + 5.0 * det::asinh(1f64);
     2.0 * half
 }
 
@@ -121,7 +122,7 @@ fn tube(t: f64, towards: bool) -> f64 {
 fn distance_to_arc(x: f64, y: f64) -> f64 {
     let f = |s: f64| {
         let (px, py) = (-10.0 + 20.0 * s, 20.0 * s * (1.0 - s));
-        ((px - x).powi(2) + (py - y).powi(2)).sqrt()
+        (det::powi(px - x, 2) + det::powi(py - y, 2)).sqrt()
     };
     let n = 2000;
     let mut best = (f64::INFINITY, 0.0);
@@ -357,7 +358,7 @@ fn shell_removes_a_chamfered_ribs_vanished_cavity() {
         }
         let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
         assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
-        let want = 5710.0 - (20.0 - 2.0 * t).powi(2) * (14.0 - t);
+        let want = 5710.0 - det::powi(20.0 - 2.0 * t, 2) * (14.0 - t);
         let got = volume(&k, &mut made).unwrap();
         assert!((got - want).abs() < 1e-7, "t={t}: {got} vs {want}");
     }
@@ -428,7 +429,7 @@ fn shell_removes_a_rounded_ribs_vanished_cavity() {
         assert!(brep_is_manifold_solid(&made).unwrap());
         let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
         assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
-        let want = input - (20.0 - 2.0 * t).powi(2) * (14.0 - t);
+        let want = input - det::powi(20.0 - 2.0 * t, 2) * (14.0 - t);
         let got = volume(&k, &mut made).unwrap();
         assert!((got - want).abs() < 1e-7, "t={t}: {got} vs {want}");
     }

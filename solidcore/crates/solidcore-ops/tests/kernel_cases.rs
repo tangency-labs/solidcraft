@@ -60,6 +60,7 @@
     clippy::print_stdout,
     clippy::cast_precision_loss
 )] // test
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -3690,7 +3691,7 @@ fn draft_replay_preserves_faces_order_parameters_and_operand() {
         (false, 0.0, -1.0),
     ] {
         let angle = sign * std::f64::consts::PI / 18.0;
-        let tangent = angle.tan();
+        let tangent = det::tan(angle);
         let volume = 24000.0 - 70.0 * tangent * (200.0 - 20.0 * neutral_z)
             + tangent * tangent * (8000.0 / 3.0 - 400.0 * neutral_z + 20.0 * neutral_z * neutral_z);
         let mut input = input.clone();

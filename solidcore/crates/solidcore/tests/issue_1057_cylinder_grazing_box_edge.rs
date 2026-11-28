@@ -14,6 +14,7 @@
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p1;
@@ -28,7 +29,7 @@ const X0: f64 = 0.0003;
 
 /// The integral of sqrt(r^2 - u^2) over u = a..b.
 fn half_disc(r: f64, a: f64, b: f64) -> f64 {
-    let f = |u: f64| 0.5 * (u * (r * r - u * u).sqrt() + r * r * (u / r).asin());
+    let f = |u: f64| 0.5 * (u * (r * r - u * u).sqrt() + r * r * det::asin(u / r));
     f(b) - f(a)
 }
 

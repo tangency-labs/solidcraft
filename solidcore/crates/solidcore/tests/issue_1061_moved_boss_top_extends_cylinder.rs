@@ -18,6 +18,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -57,7 +58,7 @@ fn rim_off_circle(k: &Kernel, b: &Brep) -> f64 {
                     .unwrap()
             })
             .collect();
-        let radius = |p: &Point3| (p.x - 30.0).hypot(p.y - 20.0);
+        let radius = |p: &Point3| det::hypot(p.x - 30.0, p.y - 20.0);
         if pts
             .iter()
             .all(|p| (p.z - 22.0).abs() < 1e-3 && (radius(p) - 10.0).abs() < 1e-3)

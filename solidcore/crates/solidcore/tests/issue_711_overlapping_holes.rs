@@ -13,6 +13,7 @@
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -47,7 +48,7 @@ fn issue_711_second_overlapping_hole_cuts() {
 
     // the disc less the union of the two discs r 5 whose centres are 6 apart
     let (r, d) = (5.0_f64, 6.0_f64);
-    let lens = 2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt();
+    let lens = 2.0 * r * r * det::acos(d / (2.0 * r)) - 0.5 * d * (4.0 * r * r - d * d).sqrt();
     let holes = 2.0 * core::f64::consts::PI * r * r - lens;
     let want = (core::f64::consts::PI * 400.0 - holes) * 10.0;
     let got = volume(&k, &mut disc).unwrap();
@@ -60,7 +61,7 @@ fn issue_711_second_overlapping_hole_cuts() {
 #[test]
 fn issue_711_second_hole_cuts_below_the_tools_midpoint() {
     let (r, d) = (5.0_f64, 6.0_f64);
-    let lens = 2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt();
+    let lens = 2.0 * r * r * det::acos(d / (2.0 * r)) - 0.5 * d * (4.0 * r * r - d * d).sqrt();
     let holes = 2.0 * core::f64::consts::PI * r * r - lens;
     let want = (core::f64::consts::PI * 400.0 - holes) * 4.0;
     let mut k = Kernel::default();

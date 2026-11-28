@@ -158,6 +158,7 @@ impl Curve {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use solidcore::math::det;
     use solidcore_record::brep::{Curve as Record, Frame};
 
     fn near(a: [f64; 3], b: [f64; 3]) -> bool {
@@ -190,7 +191,8 @@ mod tests {
                     axis[2] * reference[0] - axis[0] * reference[2],
                     axis[0] * reference[1] - axis[1] * reference[0],
                 ];
-                [0, 1, 2].map(|i| center[i] + radius * (t.cos() * reference[i] + t.sin() * y[i]))
+                [0, 1, 2]
+                    .map(|i| center[i] + radius * (det::cos(t) * reference[i] + det::sin(t) * y[i]))
             }
             Curve::Nurbs { points, knots, .. } => {
                 let homogeneous = points
@@ -306,7 +308,8 @@ mod tests {
         let c = Curve::from_record(&ellipse, [0.3, 2.0]).unwrap();
         assert!(matches!(c[..], [Curve::Nurbs { .. }]), "{c:?}");
         // on the ellipse, from its point at 0.3 to its point at 2.0
-        let on = |p: [f64; 3]| ((p[0] / 6.0).powi(2) + (p[1] / 3.0).powi(2) - 1.0).abs() < 1e-9;
+        let on =
+            |p: [f64; 3]| (det::powi(p[0] / 6.0, 2) + det::powi(p[1] / 3.0, 2) - 1.0).abs() < 1e-9;
         for i in 0..=8 {
             assert!(on(sweep_at(&c[0], f64::from(i) / 8.0)));
         }

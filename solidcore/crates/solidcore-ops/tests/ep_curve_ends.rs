@@ -12,6 +12,7 @@
     clippy::disallowed_methods
 )]
 
+use solidcore::math::det;
 use solidcore_ops::curve::closest_point;
 use solidcore_ops::curve_fit::{
     ep_curve, ep_curve_with_end_conditions, ep_curve_with_ends, EndCondition,
@@ -37,7 +38,7 @@ fn angle(a: [f64; 3], b: [f64; 3]) -> f64 {
     ];
     let c = cross.iter().map(|x| x * x).sum::<f64>().sqrt();
     let d = a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
-    c.atan2(d)
+    det::atan2(c, d)
 }
 
 /// The tangent directions at the start and the end of a clamped spline: along its first and

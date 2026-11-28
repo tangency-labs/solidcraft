@@ -32,6 +32,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::api_files::read_brep_from_file;
@@ -163,11 +164,11 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 fn plate_closed_form() -> f64 {
     use core::f64::consts::PI;
     let (r, hole) = (2.0_f64, 3.175_f64);
-    let p1 = (2.2 / hole).acos();
+    let p1 = det::acos(2.2 / hole);
     let taken = simpson(
         |p: f64| {
-            let s = 2.2 - hole * p.cos();
-            2.0 * hole * hole * p.sin() * p.sin() * (2.0 - (4.0 - s * s).max(0.0).sqrt())
+            let s = 2.2 - hole * det::cos(p);
+            2.0 * hole * hole * det::sin(p) * det::sin(p) * (2.0 - (4.0 - s * s).max(0.0).sqrt())
         },
         0.0,
         p1,

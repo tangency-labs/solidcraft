@@ -32,6 +32,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -153,8 +154,8 @@ fn arc_ended_box_volume(r: f64) -> f64 {
     let cut = simpson(|x| (20.0 - end_at(x)) * 30.0, 0.0, 10.0, n);
     let removed = simpson(
         |t| {
-            let x = 10.0 - r + r * t.sin();
-            (r - r * t.cos()) * end_at(x) * r * t.cos()
+            let x = 10.0 - r + r * det::sin(t);
+            (r - r * det::cos(t)) * end_at(x) * r * det::cos(t)
         },
         0.0,
         PI / 2.0,

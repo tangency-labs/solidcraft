@@ -748,6 +748,7 @@ mod crease_end {
     use super::{assert_rel, blend, measured, solidcraft_kernel, volume, Kind};
     use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
     use solidcore::eval::Frame;
+    use solidcore::math::det;
     use solidcore::math::{Point2, Point3, Vec3};
     use solidcore::primitive::api_primitives::create_box;
     use solidcore::prism::extrude::extrude_region;
@@ -794,7 +795,7 @@ mod crease_end {
             size[2],
         )
         .unwrap();
-        let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+        let (c, s) = (det::cos(deg.to_radians()), det::sin(deg.to_radians()));
         let m = [
             [c, s, 0.0, 0.0],
             [-s, c, 0.0, 0.0],
@@ -821,12 +822,12 @@ mod crease_end {
         if x <= CREASE {
             0.0
         } else {
-            (x - CREASE) * TILT.to_radians().tan()
+            (x - CREASE) * det::tan(TILT.to_radians())
         }
     }
 
     fn side(x: f64, draft: f64) -> f64 {
-        DEPTH - (x - CREASE) * draft.to_radians().tan()
+        DEPTH - (x - CREASE) * det::tan(draft.to_radians())
     }
 
     fn block(k: &mut Kernel, draft: f64) -> Brep {
@@ -859,7 +860,7 @@ mod crease_end {
     /// The block's volume: the section's height over x times its depth to the side plane,
     /// integrated (a polynomial in x on each side of the crease).
     fn block_volume(draft: f64) -> f64 {
-        let (tt, td) = (TILT.to_radians().tan(), draft.to_radians().tan());
+        let (tt, td) = (det::tan(TILT.to_radians()), det::tan(draft.to_radians()));
         let w = LENGTH - CREASE;
         let flat = HEIGHT * (DEPTH * CREASE + td * CREASE * CREASE / 2.0);
         let rising = HEIGHT * DEPTH * w - (HEIGHT * td + DEPTH * tt) * w * w / 2.0
@@ -880,8 +881,8 @@ mod crease_end {
         let vertex = Vec3::new(CREASE, DEPTH, 0.0);
         let into = |a: Vec3, away: Vec3| if a.dot(away) > 0.0 { -a } else { a };
         // the faces' outward normals, the edge, and each face's way into the material across it
-        let side = Vec3::new(draft.tan(), 1.0, 0.0).unitize().unwrap();
-        let base = Vec3::new(tilt.tan(), 0.0, -1.0).unitize().unwrap();
+        let side = Vec3::new(det::tan(draft), 1.0, 0.0).unitize().unwrap();
+        let base = Vec3::new(det::tan(tilt), 0.0, -1.0).unitize().unwrap();
         let mut t = side.cross(base).unitize().unwrap();
         if t.x < 0.0 {
             t = -t;
@@ -890,12 +891,13 @@ mod crease_end {
         let along_base = into(t.cross(base).unitize().unwrap(), side);
         let phi = along_side.angle_between(along_base).unwrap();
         let bisector = (along_side + along_base).unitize().unwrap();
-        let d = r / (phi / 2.0).tan();
-        let to_centre = r / (phi / 2.0).sin();
+        let d = r / det::tan(phi / 2.0);
+        let to_centre = r / det::sin(phi / 2.0);
         let half_arc = (std::f64::consts::PI - phi) / 2.0;
         let area = d * r - half_arc * r * r;
-        let kite = d * r * (d * (phi / 2.0).cos() + to_centre) / 3.0;
-        let sector = half_arc * r * r * (to_centre - 2.0 * r * half_arc.sin() / (3.0 * half_arc));
+        let kite = d * r * (d * det::cos(phi / 2.0) + to_centre) / 3.0;
+        let sector =
+            half_arc * r * r * (to_centre - 2.0 * r * det::sin(half_arc) / (3.0 * half_arc));
         let c = vertex + bisector * ((kite - sector) / area);
         // the cap: through the vertex, its normal the edge's without its component along y
         let cap = Vec3::new(t.x, 0.0, t.z).unitize().unwrap();
@@ -940,11 +942,11 @@ mod crease_end {
     const ARM_RADIUS: f64 = 0.87;
 
     fn arm_top(x: f64) -> f64 {
-        8.0 + x * DRAFT.to_radians().tan()
+        8.0 + x * det::tan(DRAFT.to_radians())
     }
 
     fn boss_and_arm(k: &mut Kernel) -> Brep {
-        let t = WALL.to_radians().tan();
+        let t = det::tan(WALL.to_radians());
         let plan = Frame {
             origin: [0.0; 3],
             x_axis: [1.0, 0.0, 0.0],
@@ -995,7 +997,7 @@ mod crease_end {
         .unwrap_or_else(|e| panic!("refused {e:?}"));
         let added = measured(&mut k, &mut b).1 - before;
         let r = ARM_RADIUS;
-        let want = (1.0 - FRAC_PI_4) * r * r * (12.0 - PIECE) / DRAFT.to_radians().cos();
+        let want = (1.0 - FRAC_PI_4) * r * r * (12.0 - PIECE) / det::cos(DRAFT.to_radians());
         assert_rel(added, want, 1e-6, "the round added");
     }
 
@@ -1054,11 +1056,11 @@ mod crease_end {
         // side), y along z: its normal is the crease's direction
         let frame = Frame {
             origin: [0.0; 3],
-            x_axis: [sk.cos(), sk.sin(), 0.0],
+            x_axis: [det::cos(sk), det::sin(sk), 0.0],
             y_axis: [0.0, 0.0, 1.0],
         };
         let section = [
-            [-6.0, 6.0 * tilt.tan()],
+            [-6.0, 6.0 * det::tan(tilt)],
             [0.0, 0.0],
             [6.0, 0.0],
             [6.0, 8.0],
@@ -1066,7 +1068,7 @@ mod crease_end {
         ];
         let b = prism(k, &frame, &section, -4.0, 12.0);
         // everything on the side's outward side: a box over y > 0 turned `side` about x
-        let (c, s) = (side.to_radians().cos(), side.to_radians().sin());
+        let (c, s) = (det::cos(side.to_radians()), det::sin(side.to_radians()));
         let cut = placed_box(
             k,
             [-20.0, 0.0, -20.0],
@@ -1089,9 +1091,9 @@ mod crease_end {
             .unwrap_or_else(|e| panic!("side {side}: refused {e:?}"));
         let removed = before - measured(&mut k, &mut b).1;
         let (r, phi) = (SKEW_RADIUS, (90.0 + side).to_radians());
-        let d = r / (phi / 2.0).tan();
+        let d = r / det::tan(phi / 2.0);
         let a = (std::f64::consts::PI - phi) / 2.0;
-        let want = (d * r - a * r * r) * 6.0 / SKEW.to_radians().cos();
+        let want = (d * r - a * r * r) * 6.0 / det::cos(SKEW.to_radians());
         assert_rel(removed, want, 1e-7, "the round removed");
     }
 

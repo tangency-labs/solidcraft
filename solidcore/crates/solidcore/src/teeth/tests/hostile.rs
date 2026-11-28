@@ -7,6 +7,7 @@
 //! the sweep records every function it calls and fails when one on the list was not called: a new
 //! public function fails this test until the sweep calls it.
 
+use crate::math::det;
 use std::collections::BTreeSet;
 use std::f64::consts::PI;
 
@@ -1251,8 +1252,8 @@ fn sweep_seat_and_section(s: &mut Sweep) {
             role: Role::Tip,
         },
         Piece::Line {
-            from: [10.0 * 0.2_f64.cos(), 10.0 * 0.2_f64.sin()],
-            to: [8.0 * 0.3_f64.cos(), 8.0 * 0.3_f64.sin()],
+            from: [10.0 * det::cos(0.2_f64), 10.0 * det::sin(0.2_f64)],
+            to: [8.0 * det::cos(0.3_f64), 8.0 * det::sin(0.3_f64)],
             role: Role::Flank,
         },
     ];

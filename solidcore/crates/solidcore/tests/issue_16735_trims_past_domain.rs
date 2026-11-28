@@ -33,6 +33,7 @@ use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{
     brep_properties, MassPropertyBehavior, PreciseProperties, PropertyAttributes,
 };
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
@@ -136,7 +137,7 @@ fn cut_cube(deg: f64, cut: f64, both: bool) -> (Kernel, Brep, FaceId, Plane) {
 /// The cube's top found again after `cut_cube` or `open_cube` (the face whose middle is the
 /// turned (5, 5, 10)).
 fn top_face(k: &Kernel, b: &Brep, deg: f64) -> FaceId {
-    let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+    let (c, s) = (det::cos(deg.to_radians()), det::sin(deg.to_radians()));
     let top_mid = Point3::new(5.0, 5.0 * c - 10.0 * s, 5.0 * s + 10.0 * c);
     faces(b, None)
         .unwrap()
@@ -253,7 +254,10 @@ fn an_open_loop_is_origin_independent() {
 #[test]
 fn a_plane_trimmed_past_its_domain_is_integrated_unclamped() {
     let (k, mut b, _, _) = cut_cube(30.0, 1e-2, true);
-    let (c, s) = (30.0_f64.to_radians().cos(), 30.0_f64.to_radians().sin());
+    let (c, s) = (
+        det::cos(30.0_f64.to_radians()),
+        det::sin(30.0_f64.to_radians()),
+    );
     let middle = Point3::new(5.0, 5.0 * c - 5.0 * s, 5.0 * s + 5.0 * c);
     for origin in [
         middle,

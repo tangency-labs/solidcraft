@@ -1,5 +1,6 @@
 //! The boolean family on bodies whose answers are known.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -127,7 +128,7 @@ fn wedges_of_a_grooved_ring_unite_and_wedges_apart_pair_no_faces() {
     let a = boolean(wedge, torus, BooleanOp::Subtract).unwrap().unwrap();
     let b = a.copy().unwrap();
     // the reflection in the plane through z at 2°: I - 2nn', n = (-sin, cos, 0)
-    let (s, c) = step.sin_cos();
+    let (s, c) = det::sin_cos(step);
     let (nx, ny) = (-s, c);
     b.transform(&[
         [1.0 - 2.0 * nx * nx, -2.0 * nx * ny, 0.0, 0.0],
@@ -946,7 +947,7 @@ fn a_hole_whose_axis_misses_an_equal_crossing_holes_by_a_hair_cuts() {
 /// The area two circles of radius `r` whose centres are `d` apart have in common.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn lens_area(r: f64, d: f64) -> f64 {
-    2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt()
+    2.0 * r * r * det::acos(d / (2.0 * r)) - 0.5 * d * (4.0 * r * r - d * d).sqrt()
 }
 
 /// A drill of radius 2.5 into the box face y = 0 along +y, centred at (x, z): its wall `depth`
@@ -954,7 +955,7 @@ fn lens_area(r: f64, d: f64) -> f64 {
 #[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
 fn drill(x: f64, z: f64, depth: f64) -> Body {
     let (r, top) = (2.5, -1.0);
-    let tip = r / 59f64.to_radians().tan();
+    let tip = r / det::tan(59f64.to_radians());
     let p = |u: f64, y: f64| [x, y, z + u];
     let profile = [
         Curve::Line {
@@ -1006,7 +1007,7 @@ fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
         boolean(first, two, BooleanOp::Subtract).unwrap().unwrap()
     };
     let (r, depth) = (2.5, 5.0);
-    let tip = r / 59f64.to_radians().tan();
+    let tip = r / det::tan(59f64.to_radians());
     let lens = |eps: f64| {
         if eps > 0.0 {
             lens_area(r, 5.0 - eps)
@@ -1139,8 +1140,8 @@ fn cusp_block() -> CuspBlock {
     use solidcore_ops::sweep::{sweep_placed, SweepFrame};
     let (w, r0, c, r2) = (CUSP_W, CUSP_R0, CUSP_C, CUSP_R2);
     let rb = r0 + c;
-    let q = ((rb - r2).powi(2) - c * c).sqrt();
-    let phi_t = c.atan2(-q);
+    let q = (det::powi(rb - r2, 2) - c * c).sqrt();
+    let phi_t = det::atan2(c, -q);
     let x = [1.0, 0.0, 0.0];
     let profile = [
         cusp_arc_x([-w, 0.0, 0.0], r0, 0.0, PI / 2.0),
@@ -1161,8 +1162,8 @@ fn cusp_block() -> CuspBlock {
             axis: [0.0, 0.0, 1.0],
             reference: x,
             radius: r0,
-            start: ya(w).atan2(w),
-            end: ya(w).atan2(-w),
+            start: det::atan2(ya(w), w),
+            end: det::atan2(ya(w), -w),
         },
         Curve::Line {
             start: [-w, ya(w), 0.0],
@@ -1190,7 +1191,7 @@ fn cusp_block() -> CuspBlock {
     for s in [1.0_f64, -1.0] {
         let za = ya(s * w);
         let (a, b, cc) = ([s * w, 0.0, za], [0.0, 0.0, r0], [s * w, 0.0, r0]);
-        let ta = za.atan2(s * w);
+        let ta = det::atan2(za, s * w);
         let arc = |start: f64, end: f64| Curve::Arc {
             center: [0.0; 3],
             axis: [0.0, -1.0, 0.0],
@@ -1218,7 +1219,7 @@ fn cusp_block() -> CuspBlock {
     assert_eq!(body.counts().unwrap(), [9, 19, 12], "the block after cut 2");
     // cut 3's sketch plane: cut 2's end face
     let alpha = phi_t - PI / 2.0;
-    let v = [0.0, -alpha.sin(), alpha.cos()];
+    let v = [0.0, -det::sin(alpha), det::cos(alpha)];
     let u = [-1.0, 0.0, 0.0];
     let normal = [
         u[1] * v[2] - u[2] * v[1],
@@ -1243,7 +1244,7 @@ fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
     use solidcore_ops::sweep::{sweep_placed, SweepFrame};
     let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
     let rnd = |j: u32| {
-        let t = (f64::from(seed) * 12.9898 + f64::from(j) * 78.233).sin() * 43758.5453;
+        let t = det::sin(f64::from(seed) * 12.9898 + f64::from(j) * 78.233) * 43758.5453;
         (t - t.floor()) * 2.0 - 1.0
     };
     let pt = |j: u32, a: f64, b: f64| (a + noise * rnd(2 * j), b + noise * rnd(2 * j + 1));
@@ -1256,8 +1257,8 @@ fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
     let p6 = pt(6, -w, top);
     // an arc about `cen` from `a` to `b`, counter-clockwise, its radius to `a`
     let arc = |cen: (f64, f64), a: (f64, f64), b: (f64, f64)| {
-        let start = (a.1 - cen.1).atan2(a.0 - cen.0);
-        let mut sweep = (b.1 - cen.1).atan2(b.0 - cen.0) - start;
+        let start = det::atan2(a.1 - cen.1, a.0 - cen.0);
+        let mut sweep = det::atan2(b.1 - cen.1, b.0 - cen.0) - start;
         while sweep <= 1e-12 {
             sweep += 2.0 * PI;
         }
@@ -1265,7 +1266,7 @@ fn cusp_tools(block: &CuspBlock, seed: u32, noise: f64) -> Vec<Body> {
             center: block.sketch_point(cen),
             axis: block.normal,
             reference: block.u,
-            radius: ((a.0 - cen.0).powi(2) + (a.1 - cen.1).powi(2)).sqrt(),
+            radius: (det::powi(a.0 - cen.0, 2) + det::powi(a.1 - cen.1, 2)).sqrt(),
             start,
             end: start + sweep,
         }
@@ -1338,16 +1339,16 @@ fn a_cusp_swept_onto_a_coaxial_cylinder_cuts_whatever_the_sketch_rounding() {
             let (y, z) = (p[1] - yc, p[2]);
             [
                 p[0],
-                yc + y * beta.cos() - z * beta.sin(),
-                y * beta.sin() + z * beta.cos(),
+                yc + y * det::cos(beta) - z * det::sin(beta),
+                y * det::sin(beta) + z * det::cos(beta),
             ]
         };
         let (w, r0, c) = (CUSP_W, CUSP_R0, CUSP_C);
         let top = c + r0;
-        let mid_arc = (r0 * r0 - w * w).sqrt().atan2(w) / 2.0 + PI / 4.0;
+        let mid_arc = det::atan2((r0 * r0 - w * w).sqrt(), w) / 2.0 + PI / 4.0;
         let on_faces: Vec<[f64; 3]> = [1.0, -1.0]
             .iter()
-            .map(|&sgn: &f64| swept((sgn * r0 * mid_arc.cos(), c + r0 * mid_arc.sin())))
+            .map(|&sgn: &f64| swept((sgn * r0 * det::cos(mid_arc), c + r0 * det::sin(mid_arc))))
             .collect();
         let removed_points: Vec<[f64; 3]> = [1.0, -1.0]
             .iter()
@@ -2022,9 +2023,9 @@ fn sector_of_rounded_sketch(turn: f64) -> Body {
             center: [0.0; 3],
             axis: [0.0, 0.0, 1.0],
             reference: [1.0, 0.0, 0.0],
-            radius: x.hypot(y),
-            start: y.atan2(x),
-            end: y.atan2(-x),
+            radius: det::hypot(x, y),
+            start: det::atan2(y, x),
+            end: det::atan2(y, -x),
         },
         Curve::Line {
             start: [-x, y, 0.0],
@@ -2040,7 +2041,7 @@ fn sector_of_rounded_sketch(turn: f64) -> Body {
         true,
     )
     .unwrap();
-    let (s, c) = turn.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(turn.to_radians());
     b.transform(&[
         [c, -s, 0.0, 0.0],
         [s, c, 0.0, 0.0],
@@ -2066,8 +2067,8 @@ fn sector_of_rounded_sketch(turn: f64) -> Body {
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn sectors_of_a_rounded_sketch_turned_120_degrees_union() {
     session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
-    let r = 74.0452_f64.hypot(42.75);
-    let d = 30_f64.to_radians() - 42.75_f64.atan2(74.0452);
+    let r = det::hypot(74.0452_f64, 42.75);
+    let d = 30_f64.to_radians() - det::atan2(42.75_f64, 74.0452);
     let alpha = 2.0 * PI / 3.0 + 2.0 * d;
     let want = (2.0 * alpha - 2.0 * d) / 2.0 * r * r * 119.0;
     let u = boolean(
@@ -2093,9 +2094,12 @@ fn sectors_of_a_rounded_sketch_turned_120_degrees_union() {
 #[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
 fn sector(widen: f64, rho: f64, c: f64, turn: f64) -> Body {
     let half = PI / 3.0 + widen;
-    let p0 = [rho * (PI / 2.0 - half).cos(), rho * (PI / 2.0 - half).sin()];
+    let p0 = [
+        rho * det::cos(PI / 2.0 - half),
+        rho * det::sin(PI / 2.0 - half),
+    ];
     let p1 = [-p0[0], p0[1]];
-    let (ct, st) = (turn.cos(), turn.sin());
+    let (ct, st) = (det::cos(turn), det::sin(turn));
     let at = |p: [f64; 2]| [ct * p[0] - st * p[1], st * p[0] + ct * p[1], 0.0];
     let profile = [
         Curve::Line {
@@ -2106,9 +2110,9 @@ fn sector(widen: f64, rho: f64, c: f64, turn: f64) -> Body {
             center: at([0.0, c]),
             axis: [0.0, 0.0, 1.0],
             reference: at([1.0, 0.0]),
-            radius: (p0[0].powi(2) + (p0[1] - c).powi(2)).sqrt(),
-            start: (p0[1] - c).atan2(p0[0]),
-            end: (p1[1] - c).atan2(p1[0]),
+            radius: (det::powi(p0[0], 2) + det::powi(p0[1] - c, 2)).sqrt(),
+            start: det::atan2(p0[1] - c, p0[0]),
+            end: det::atan2(p1[1] - c, p1[0]),
         },
         Curve::Line {
             start: at(p1),
@@ -2231,14 +2235,10 @@ fn lens(r: f64, rho: f64, c: f64) -> f64 {
         return 0.0;
     }
     if c <= (r - rho).abs() {
-        return PI * r.min(rho).powi(2);
+        return PI * det::powi(r.min(rho), 2);
     }
-    let a1 = ((c * c + r * r - rho * rho) / (2.0 * c * r))
-        .clamp(-1.0, 1.0)
-        .acos();
-    let a2 = ((c * c + rho * rho - r * r) / (2.0 * c * rho))
-        .clamp(-1.0, 1.0)
-        .acos();
+    let a1 = det::acos(((c * c + r * r - rho * rho) / (2.0 * c * r)).clamp(-1.0, 1.0));
+    let a2 = det::acos(((c * c + rho * rho - r * r) / (2.0 * c * rho)).clamp(-1.0, 1.0));
     let k = ((-c + r + rho) * (c + r - rho) * (c - r + rho) * (c + r + rho))
         .max(0.0)
         .sqrt();
@@ -2253,8 +2253,11 @@ fn tanh_sinh(f: impl Fn(f64) -> f64, a: f64, b: f64, h: f64) -> f64 {
     let mut sum = 0.0;
     for k in 0..10_000 {
         let t = f64::from(k) * h;
-        let u = PI / 2.0 * t.sinh();
-        let (x, w) = (u.tanh(), PI / 2.0 * t.cosh() / u.cosh().powi(2));
+        let u = PI / 2.0 * det::sinh(t);
+        let (x, w) = (
+            det::tanh(u),
+            PI / 2.0 * det::cosh(t) / det::powi(det::cosh(u), 2),
+        );
         if w < 1e-300 || 1.0 - x < 1e-17 {
             break;
         }
@@ -2270,7 +2273,7 @@ fn tanh_sinh(f: impl Fn(f64) -> f64, a: f64, b: f64, h: f64) -> f64 {
 #[allow(clippy::disallowed_methods)] // the test's operand, not ops computing geometry
 fn ball(center: [f64; 3], turn: f64) -> Body {
     let b = make_sphere([0.0; 3], 6.0).unwrap();
-    let (s, c) = turn.sin_cos();
+    let (s, c) = det::sin_cos(turn);
     let [x, y, z] = center;
     b.transform(&[
         [c, s, 0.0, 0.0],
@@ -2536,12 +2539,12 @@ fn a_round_notch_overlapping_a_cones_seam_backwards_is_cut() {
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn notch_in_the_seam_cones_rim(c: [f64; 2]) -> f64 {
     let (r_base, r_top, height, r, depth) = (3.0, 0.5, 1000.0_f64, 0.06, 0.5);
-    let d = c[0].hypot(c[1]);
+    let d = det::hypot(c[0], c[1]);
     // the area the disc of radius `r` about `c` shares with the disc of radius `big` about the
     // axis, `big` - r < d < `big` + r
     let lens = |big: f64| {
-        let a = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
-        let b = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
+        let a = big * big * det::acos((d * d + big * big - r * r) / (2.0 * d * big));
+        let b = r * r * det::acos((d * d + r * r - big * big) / (2.0 * d * r));
         let k = (-d + big + r) * (d + big - r) * (d - big + r) * (d + big + r);
         a + b - 0.5 * k.sqrt()
     };
@@ -2590,7 +2593,7 @@ fn a_round_notch_a_tolerance_over_a_revolved_cones_seam_is_cut() {
     let c = [0.496_405_514_949_725_07, 0.059_846_175_546_130_59];
     for turn in [0.0, 1e-5_f64] {
         let notch = read(include_bytes!("data/issue_22813_notch.smb"));
-        let (s, co) = turn.sin_cos();
+        let (s, co) = det::sin_cos(turn);
         notch
             .transform(&[
                 [co, s, 0.0, 0.0],
@@ -3108,7 +3111,7 @@ fn stadium_area() -> f64 {
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn block_less_stadium_and_cut(h: f64) -> f64 {
     let r = 16.0;
-    let segment = r * r * ((r - h) / r).acos() - (r - h) * (2.0 * r * h - h * h).sqrt();
+    let segment = r * r * det::acos((r - h) / r) - (r - h) * (2.0 * r * h - h * h).sqrt();
     let above = stadium_area() - 38.0 * h - segment;
     80.0 * 75.0 * 48.0 - 75.0 * stadium_area() - 65.0 * (80.0 * 36.0 - above)
 }
@@ -3288,7 +3291,7 @@ fn an_intersection_answered_empty_while_a_vertex_lies_in_the_other_operand_is_re
 #[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
 fn cylinder_with_seam(base: [f64; 3], r: f64, h: f64, seam_deg: f64) -> Body {
     let c = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], r, h).unwrap();
-    let (s, co) = seam_deg.to_radians().sin_cos();
+    let (s, co) = det::sin_cos(seam_deg.to_radians());
     c.transform(&[
         [co, s, 0.0, 0.0],
         [-s, co, 0.0, 0.0],
@@ -3485,9 +3488,9 @@ fn a_traced_intersect_keeps_every_5_mm_round_beside_the_grooves_1_mm_rounds() {
     all_fixes();
     let body = traced_operands("issue_16935_hip_rounds_over_groove_rounds");
     // the decagon's apothem and area, the top's apothem 6 less (45°), the frustum on the prism
-    let apothem = 10.0 / (2.0 * 18_f64.to_radians().tan());
-    let base = 10.0 * apothem * apothem * 18_f64.to_radians().tan();
-    let top = base * ((apothem - 6.0) / apothem).powi(2);
+    let apothem = 10.0 / (2.0 * det::tan(18_f64.to_radians()));
+    let base = 10.0 * apothem * apothem * det::tan(18_f64.to_radians());
+    let top = base * det::powi((apothem - 6.0) / apothem, 2);
     let sharp_tool = 10.0 * base + 6.0 / 3.0 * (base + top + (base * top).sqrt());
     let wedges = sharp_tool - body("tool").volume(1e-11).unwrap();
     let want = body("target").volume(1e-11).unwrap() - wedges;
@@ -3652,7 +3655,7 @@ fn a_traced_join_of_each_wedge_alone_is_the_first_join_turned_into_place() {
     let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
     let angle = |b: &Body| {
         let [x, y, _] = b.mass_properties(1e-11).unwrap().centroid;
-        y.atan2(x)
+        det::atan2(y, x)
     };
     let joined = |i: usize| {
         let wedge = body(&format!("wedge{i}"));
@@ -3668,7 +3671,7 @@ fn a_traced_join_of_each_wedge_alone_is_the_first_join_turned_into_place() {
     // each vertex of the join, turned about z by `turn`
     let vertices = |r: &Body, turn: f64| -> Vec<[f64; 3]> {
         let (_, brep) = common::kernel_copy(r);
-        let (s, c) = turn.sin_cos();
+        let (s, c) = det::sin_cos(turn);
         brep.vertices()
             .ids()
             .map(|v| {
@@ -3679,7 +3682,10 @@ fn a_traced_join_of_each_wedge_alone_is_the_first_join_turned_into_place() {
     };
     let nearest = |p: &[f64; 3], set: &[[f64; 3]]| {
         set.iter()
-            .map(|q| ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt())
+            .map(|q| {
+                (det::powi(p[0] - q[0], 2) + det::powi(p[1] - q[1], 2) + det::powi(p[2] - q[2], 2))
+                    .sqrt()
+            })
             .fold(f64::INFINITY, f64::min)
     };
     let (first, first_turn) = joined(0);
@@ -3745,7 +3751,9 @@ fn a_traced_join_of_the_ten_wedges_in_turn_has_the_vertices_and_edges_of_each_jo
     };
     let near = |p: &[f64; 3], set: &[[f64; 3]]| {
         set.iter().any(|q| {
-            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt() <= 1e-6
+            (det::powi(p[0] - q[0], 2) + det::powi(p[1] - q[1], 2) + det::powi(p[2] - q[2], 2))
+                .sqrt()
+                <= 1e-6
         })
     };
     let target = points(&body("target"));
@@ -4118,14 +4126,14 @@ fn a_join_whose_hole_lines_up_with_a_bore_run_the_other_way_is_one_bore() {
 /// A counter-clockwise arc from `a` to `b` about `c`, of radius |a − c|.
 #[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
 fn arc_through(a: Vec2, b: Vec2, c: Vec2) -> Seg2 {
-    let start = (a.y - c.y).atan2(a.x - c.x);
-    let mut end = (b.y - c.y).atan2(b.x - c.x);
+    let start = det::atan2(a.y - c.y, a.x - c.x);
+    let mut end = det::atan2(b.y - c.y, b.x - c.x);
     while end <= start {
         end += TAU;
     }
     Seg2::Arc {
         center: c,
-        radius: ((a.x - c.x).powi(2) + (a.y - c.y).powi(2)).sqrt(),
+        radius: (det::powi(a.x - c.x, 2) + det::powi(a.y - c.y, 2)).sqrt(),
         start,
         sweep: end - start,
     }
@@ -4699,7 +4707,7 @@ fn torus_above(major: f64, tube: f64, bottom: f64) -> Body {
 /// gives a cylinder's (0.6131 rad from +x).
 #[allow(clippy::disallowed_methods)] // the test's operand, not ops computing geometry
 fn rod(base: [f64; 3], radius: f64, height: f64) -> Body {
-    let (s, c) = 0.6131_f64.sin_cos();
+    let (s, c) = det::sin_cos(0.6131_f64);
     let circle = [Curve::Arc {
         center: base,
         axis: [0.0, 0.0, 1.0],
@@ -4724,7 +4732,7 @@ fn rod(base: [f64; 3], radius: f64, height: f64) -> Body {
 #[allow(clippy::disallowed_methods)] // the test's own measure, not ops geometry
 fn seam_vertex_gap(r: &Body, corner: [f64; 3], off_seam: impl Fn([f64; 3]) -> f64) -> (f64, f64) {
     let (rec, _) = r.to_record().unwrap();
-    let dist = |p: [f64; 3]| (0..3).map(|i| (p[i] - corner[i]).powi(2)).sum::<f64>();
+    let dist = |p: [f64; 3]| (0..3).map(|i| det::powi(p[i] - corner[i], 2)).sum::<f64>();
     let v = rec
         .vertices
         .iter()
@@ -4767,7 +4775,7 @@ fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() 
         assert_eq!(r.counts().unwrap(), [4, 7, 4], "d {d}");
         // the seam meridian: radius 0.6 about (1.8, 0, 0) in the xz plane
         let (gap, tol) = seam_vertex_gap(&r, [2.4, 0.0, 0.0], |[x, y, z]| {
-            y.hypot((x - 1.8).hypot(z) - 0.6)
+            det::hypot(y, det::hypot(x - 1.8, z) - 0.6)
         });
         assert!(gap <= tol, "d {d}: the seam's vertex is {gap} off the seam");
         let v = volume(&r);
@@ -4823,13 +4831,11 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
     all_fixes();
     let (big, cap, edge, r, bottom) = (2.0_f64, 1.2_f64, 1.6_f64, 0.19_f64, -0.4_f64);
     let h = big - cap;
-    let capped = 4.0 / 3.0 * PI * big.powi(3) - PI * h * h * (3.0 * big - h) / 3.0;
+    let capped = 4.0 / 3.0 * PI * det::powi(big, 3) - PI * h * h * (3.0 * big - h) / 3.0;
     let height = |rho: f64| (big * big - rho * rho).max(0.0).sqrt().min(cap) - bottom;
     let arc = |rho: f64| {
         2.0 * rho
-            * ((rho * rho + edge * edge - r * r) / (2.0 * rho * edge))
-                .clamp(-1.0, 1.0)
-                .acos()
+            * det::acos(((rho * rho + edge * edge - r * r) / (2.0 * rho * edge)).clamp(-1.0, 1.0))
     };
     // (split at ρ = 1.6, where the height turns from the cap's to the ball's)
     let share = |step: f64| {
@@ -4841,9 +4847,9 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
     let want = capped - fine;
     for d in [5e-6, 1e-5, 2e-5] {
         // the centre on the cap's edge at the angle that puts the corner r + d from it
-        let angle = 2.0 * ((r + d) / (2.0 * edge)).asin();
+        let angle = 2.0 * det::asin((r + d) / (2.0 * edge));
         let notch = rod(
-            [edge * angle.cos(), edge * angle.sin(), bottom],
+            [edge * det::cos(angle), edge * det::sin(angle), bottom],
             r,
             cap - bottom,
         );
@@ -4864,7 +4870,7 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
         assert_eq!(res.counts().unwrap(), [4, 8, 6], "d {d}");
         // the seam meridian: radius 2 about the origin in the xz plane, on +x
         let (gap, tol) = seam_vertex_gap(&res, [edge, 0.0, cap], |[x, y, z]| {
-            y.hypot(x.hypot(z) - big)
+            det::hypot(y, det::hypot(x, z) - big)
         });
         assert!(gap <= tol, "d {d}: the seam's corner is {gap} off the seam");
         let v = volume(&res);
@@ -4887,8 +4893,8 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
 #[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
 fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
     all_fixes();
-    let end = (1.0_f64 / 3.0).asin();
-    let (rim, corner) = ([0.0, -6.0 * end.cos(), -2.0], [0.0, -6.0, -2.0]);
+    let end = det::asin(1.0_f64 / 3.0);
+    let (rim, corner) = ([0.0, -6.0 * det::cos(end), -2.0], [0.0, -6.0, -2.0]);
     let profile = [
         // from (0, -6, 0) down the ball to the rim at z -2
         Curve::Arc {
@@ -5152,10 +5158,10 @@ fn circles_common_area(a: f64, b: f64, d: f64) -> f64 {
         return 0.0;
     }
     if d <= (a - b).abs() {
-        return PI * a.min(b).powi(2);
+        return PI * det::powi(a.min(b), 2);
     }
-    let ta = ((d * d + a * a - b * b) / (2.0 * d * a)).acos();
-    let tb = ((d * d + b * b - a * a) / (2.0 * d * b)).acos();
+    let ta = det::acos((d * d + a * a - b * b) / (2.0 * d * a));
+    let tb = det::acos((d * d + b * b - a * a) / (2.0 * d * b));
     a * a * ta + b * b * tb - 0.5 * ((-d + a + b) * (d + a - b) * (d - a + b) * (d + a + b)).sqrt()
 }
 
@@ -5194,14 +5200,14 @@ fn a_drill_grazing_the_seam_vertex_of_a_cut_balls_rim_cuts_it() {
         }
         s * h / 3.0
     };
-    let cap = PI * (big - flat).powi(2) * (3.0 * big - (big - flat)) / 3.0;
+    let cap = PI * det::powi(big - flat, 2) * (3.0 * big - (big - flat)) / 3.0;
     for d in [-1e-5, 0.0, 5e-6, 1e-5, 1.5e-5, 4e-5, 1e-4] {
         let axis = [vertex[0] + (r - d) * ux, vertex[1] + (r - d) * uy];
-        let rho = axis[0].hypot(axis[1]);
+        let rho = det::hypot(axis[0], axis[1]);
         let section = |z: f64| circles_common_area(r, (big * big - z * z).sqrt(), rho);
-        let z0 = (big * big - (rho + r).powi(2)).sqrt();
+        let z0 = (big * big - det::powi(rho + r, 2)).sqrt();
         let drilled = PI * r * r * (z0 - bottom) + simpson(&section, z0, flat);
-        let want = 4.0 / 3.0 * PI * big.powi(3) - cap - drilled;
+        let want = 4.0 / 3.0 * PI * det::powi(big, 3) - cap - drilled;
         let ball = make_sphere([0.0; 3], big).unwrap();
         let block = make_box([-3.0, -3.0, flat], [6.0, 6.0, 2.0]).unwrap();
         let cut = boolean(ball, block, BooleanOp::Subtract).unwrap().unwrap();
@@ -5479,10 +5485,10 @@ fn a_ball_dipped_twice_the_tolerance_into_a_block_face_joins_it() {
     let (d, rb, rc): (f64, f64, f64) = (2e-5, 15.0, 10.0);
     let cap = PI * d * d * (3.0 * rb - d) / 3.0;
     let segment =
-        (rc * rc * ((rc - d) / rc).acos() - (rc - d) * (2.0 * rc * d - d * d).sqrt()) * 50.0;
+        (rc * rc * det::acos((rc - d) / rc) - (rc - d) * (2.0 * rc * d - d * d).sqrt()) * 50.0;
     for with_cylinder in [false, true] {
         let mut part = make_box([0.0; 3], [50.0; 3]).unwrap();
-        let mut want = 125_000.0 + 4.0 / 3.0 * PI * rb.powi(3) - cap;
+        let mut want = 125_000.0 + 4.0 / 3.0 * PI * det::powi(rb, 3) - cap;
         if with_cylinder {
             let v = solidcore_record::Vec3::new;
             let plane = Plane {
@@ -5561,7 +5567,7 @@ fn a_ball_dipped_twice_the_tolerance_into_a_swept_block_face_joins_it() {
     assert!(report.is_valid(), "{}", report.text);
     assert_eq!(u.solid_count().unwrap(), 1);
     assert!(u.is_manifold_solid().unwrap());
-    let want = 125_000.0 + 4.0 / 3.0 * PI * rb.powi(3) - PI * d * d * (3.0 * rb - d) / 3.0;
+    let want = 125_000.0 + 4.0 / 3.0 * PI * det::powi(rb, 3) - PI * d * d * (3.0 * rb - d) / 3.0;
     assert!(near(volume(&u), want), "{} vs {want}", volume(&u));
     // In the ball beyond the block face, at its middle and where the ball dips in.
     for p in [
@@ -5599,12 +5605,12 @@ fn a_cylinder_sunk_just_past_the_tolerance_into_a_box_face_joins_and_cuts_it() {
     let r: f64 = 5.0;
     for d in [2.05e-5, 2.1e-5, 2.2e-5] {
         let h = (2.0 * r * d - d * d).sqrt();
-        let groove = (r * r * 2.0 * (d / (2.0 * r)).sqrt().asin() - (r - d) * h) * 40.0;
+        let groove = (r * r * 2.0 * det::asin((d / (2.0 * r)).sqrt()) - (r - d) * h) * 40.0;
         let top = 40.0 * (30.0 - 2.0 * h);
-        let floor = 40.0 * 2.0 * r * (h / r).asin();
+        let floor = 40.0 * 2.0 * r * det::asin(h / r);
         let slack = 40.0 * 2.0 * 1e-5 / (h / r);
         for seam in [0.0, 0.01, 0.6131, PI / 2.0, PI] {
-            let (sin, cos) = seam.sin_cos();
+            let (sin, cos) = det::sin_cos(seam);
             for op in [BooleanOp::Union, BooleanOp::Subtract] {
                 let case = format!("d {d}, seam {seam}, {op:?}");
                 let block = make_box([0.0; 3], [40.0, 30.0, 10.0]).unwrap();
@@ -5772,7 +5778,7 @@ fn a_hole_crossing_equal_holes_a_hair_off_their_axes_cuts_a_drilled_cube() {
         let rho = 4.0 * (f64::from(i) + 0.5) / f64::from(rings);
         for j in 0..cells {
             let t = TAU * (f64::from(j) + 0.5) / f64::from(cells);
-            want += drilled_cube_chord(-10.0 + rho * t.cos(), 1e-5 + rho * t.sin()) * rho;
+            want += drilled_cube_chord(-10.0 + rho * det::cos(t), 1e-5 + rho * det::sin(t)) * rho;
         }
     }
     want *= (4.0 / f64::from(rings)) * (TAU / f64::from(cells));
@@ -5967,13 +5973,13 @@ fn faceted_uv_sphere(nlat: usize, radius: f64) -> Body {
     pts.push([0.0, 0.0, radius]);
     for i in 1..nlat {
         let theta = PI * i as f64 / nlat as f64;
-        let st = theta.sin();
-        let ct = theta.cos();
+        let st = det::sin(theta);
+        let ct = det::cos(theta);
         for j in 0..nlon {
             let phi = 2.0 * PI * j as f64 / nlon as f64 + off;
             pts.push([
-                radius * st * phi.cos(),
-                radius * st * phi.sin(),
+                radius * st * det::cos(phi),
+                radius * st * det::sin(phi),
                 radius * ct,
             ]);
         }

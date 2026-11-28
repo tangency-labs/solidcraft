@@ -21,6 +21,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::intersect::surface_intersector::sphere_span::{
     sphere_bezier_image, sphere_bezier_sweep, SpanImage, SpanSweep,
 };
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::sphere::Sphere;
@@ -62,7 +63,7 @@ fn bezier_spans(c: &BSplineCurve) -> (Vec<f64>, Vec<Vec3>) {
 fn every_traced_span_near_a_sphere_pole_maps_onto_its_3d_span() {
     let k = &Kernel::default();
     for turn in [0.01_f64, 0.03] {
-        let (sn, cs) = turn.sin_cos();
+        let (sn, cs) = det::sin_cos(turn);
         let ball = Surface::from(
             Sphere::create_canonical(
                 k,
@@ -160,7 +161,7 @@ fn every_traced_trim_near_a_sphere_pole_is_monotone_in_u_where_its_longitude_is(
     let k = &Kernel::default();
     let mut monotone = 0;
     for turn in [0.01_f64, 0.02, 0.03] {
-        let (sn, cs) = turn.sin_cos();
+        let (sn, cs) = det::sin_cos(turn);
         let ball = Surface::from(
             Sphere::create_canonical(
                 k,

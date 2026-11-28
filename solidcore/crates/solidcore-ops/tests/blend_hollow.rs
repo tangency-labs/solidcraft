@@ -3,6 +3,7 @@
 //! `NoRoomReason::BreaksThrough` refuses them as [`Error::TooLarge`] with
 //! [`RoomReason::BreaksThrough`].
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
+use solidcore::math::det;
 
 mod common;
 
@@ -299,8 +300,8 @@ fn a_curved_face_clear_of_the_band_leaves_its_stretches_judged() {
 fn tapered_hollow() -> Body {
     use solidcore_ops::boolean::boolean;
     let hollow = make_box([-50.0, -30.0, -1.0], [100.0, 60.0, 41.0]).unwrap();
-    let a = 0.02_f64.atan();
-    let (c, s) = (a.cos(), a.sin());
+    let a = det::atan(0.02_f64);
+    let (c, s) = (det::cos(a), det::sin(a));
     hollow
         .transform(&[
             [c, s, 0.0, 0.0],
@@ -345,8 +346,8 @@ fn oblique_end() -> Body {
     let hollow = make_box([-50.0, -30.0, -1.0], [110.0, 60.0, 41.0]).unwrap();
     let cut = make_box([0.0, -100.0, -10.0], [100.0, 200.0, 70.0]).unwrap();
     // turned about z so that its x = 0 face has normal (1, -0.1, 0), then moved to x = 46
-    let a = (-0.1_f64).atan();
-    let (c, s) = (a.cos(), a.sin());
+    let a = det::atan(-0.1_f64);
+    let (c, s) = (det::cos(a), det::sin(a));
     // (rows are the images of x, y, z and the move, as `Body::transform` reads them)
     cut.transform(&[
         [c, s, 0.0, 0.0],

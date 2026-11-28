@@ -11,6 +11,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -133,7 +134,7 @@ fn cylinder(k: &mut Kernel) -> Brep {
 }
 
 fn on_cylinder(p: Point3) -> f64 {
-    p.x.hypot(p.y) - 4.0
+    det::hypot(p.x, p.y) - 4.0
 }
 
 /// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. Upstream marched
@@ -178,7 +179,7 @@ fn frustum_inner_radius(z: f64) -> f64 {
 }
 
 fn on_frustum(p: Point3) -> f64 {
-    p.x.hypot(p.y) - frustum_inner_radius(p.z)
+    det::hypot(p.x, p.y) - frustum_inner_radius(p.z)
 }
 
 /// A frustum r5 to r3 over h10 shelled 1 inward, its top open. Upstream marched its floor
@@ -294,8 +295,8 @@ fn radial_hole(big: f64, r: f64, depth: f64) -> f64 {
     (0..n)
         .map(|i| {
             let t = -0.5 * PI + (f64::from(i) + 0.5) * h;
-            let y = r * t.sin();
-            2.0 * r * r * t.cos() * t.cos() * ((big * big - y * y).sqrt() - depth)
+            let y = r * det::sin(t);
+            2.0 * r * r * det::cos(t) * det::cos(t) * ((big * big - y * y).sqrt() - depth)
         })
         .sum::<f64>()
         * h
@@ -303,7 +304,7 @@ fn radial_hole(big: f64, r: f64, depth: f64) -> f64 {
 
 /// The angle of `p` about Z, in degrees in `[0, 360)`.
 fn angle_deg(p: Point3) -> f64 {
-    p.y.atan2(p.x).to_degrees().rem_euclid(360.0)
+    det::atan2(p.y, p.x).to_degrees().rem_euclid(360.0)
 }
 
 /// The seam angles (degrees) of the faces of `b` on the cylinder of radius `radius` about Z:

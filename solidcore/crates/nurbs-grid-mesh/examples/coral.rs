@@ -21,6 +21,7 @@ use std::time::Instant;
 use nurbs_grid_mesh::{
     deviation, grid_lines, mesh_trimmed, Dir, LoopPoint, MeshOptions, NurbsSurface, TrimmedMesh,
 };
+use solidcore::math::det;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -78,8 +79,8 @@ fn main() {
             .map(|k| {
                 let a = 2.0 * PI * f64::from(k) / 400.0;
                 let (u, v) = (
-                    u0 + (u1 - u0) * (cu + 0.1 * a.cos()),
-                    v0 + (v1 - v0) * (cv + 0.1 * a.sin()),
+                    u0 + (u1 - u0) * (cu + 0.1 * det::cos(a)),
+                    v0 + (v1 - v0) * (cv + 0.1 * det::sin(a)),
                 );
                 LoopPoint {
                     u,

@@ -7,6 +7,7 @@
 //! everything.
 
 use crate::body::{EdgeInfo, Mesh};
+use solidcore::math::det;
 
 /// The view direction: the azimuth turns about z, the elevation tilts towards z (degrees).
 #[derive(Clone, Copy)]
@@ -18,8 +19,8 @@ pub struct View {
 impl View {
     /// `p` as (right, down, depth), depth growing away from the viewer.
     pub fn project(self, p: [f64; 3]) -> [f64; 3] {
-        let (sa, ca) = self.azimuth.to_radians().sin_cos();
-        let (se, ce) = self.elevation.to_radians().sin_cos();
+        let (sa, ca) = det::sin_cos(self.azimuth.to_radians());
+        let (se, ce) = det::sin_cos(self.elevation.to_radians());
         let [x, y, z] = p;
         let across = ca * x - sa * y;
         let along = sa * x + ca * y;
@@ -266,7 +267,7 @@ impl Canvas {
         let r = width / 2.0;
         for seg in pts.windows(2) {
             let [a, b] = [seg.first(), seg.get(1)].map(|p| p.copied().unwrap_or([0.0; 3]));
-            let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+            let len = (det::powi(b[0] - a[0], 2) + det::powi(b[1] - a[1], 2)).sqrt();
             let steps = (len / (r * 0.5).max(0.5)).ceil().max(1.0) as usize;
             for s in 0..=steps {
                 let t = s as f64 / steps as f64;

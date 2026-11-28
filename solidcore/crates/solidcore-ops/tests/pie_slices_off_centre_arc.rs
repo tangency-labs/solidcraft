@@ -4,6 +4,7 @@
 
 use std::f64::consts::PI;
 
+use solidcore::math::det;
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
 use solidcore_ops::{session, Body, BooleanOp, CheckLevel};
@@ -18,7 +19,7 @@ const H: f64 = 119.0;
 /// The corners of a 120° pie slice symmetric about +y, `RHO` from the apex.
 #[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
 fn corners() -> ([f64; 2], [f64; 2]) {
-    let p0 = [RHO * (PI / 6.0).cos(), RHO * (PI / 6.0).sin()];
+    let p0 = [RHO * det::cos(PI / 6.0), RHO * det::sin(PI / 6.0)];
     (p0, [-p0[0], p0[1]])
 }
 
@@ -28,7 +29,7 @@ fn corners() -> ([f64; 2], [f64; 2]) {
 #[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
 fn sector(c: f64, turn: f64) -> Body {
     let (p0, p1) = corners();
-    let (ct, st) = (turn.cos(), turn.sin());
+    let (ct, st) = (det::cos(turn), det::sin(turn));
     let at = |p: [f64; 2]| [ct * p[0] - st * p[1], st * p[0] + ct * p[1], 0.0];
     let profile = [
         Curve::Line {
@@ -39,9 +40,9 @@ fn sector(c: f64, turn: f64) -> Body {
             center: at([0.0, c]),
             axis: [0.0, 0.0, 1.0],
             reference: at([1.0, 0.0]),
-            radius: (p0[0].powi(2) + (p0[1] - c).powi(2)).sqrt(),
-            start: (p0[1] - c).atan2(p0[0]),
-            end: (p1[1] - c).atan2(p1[0]),
+            radius: (det::powi(p0[0], 2) + det::powi(p0[1] - c, 2)).sqrt(),
+            start: det::atan2(p0[1] - c, p0[0]),
+            end: det::atan2(p1[1] - c, p1[0]),
         },
         Curve::Line {
             start: at(p1),
@@ -64,10 +65,10 @@ fn sector(c: f64, turn: f64) -> Body {
 #[allow(clippy::disallowed_methods)] // the closed form the test checks against
 fn slice_volume(c: f64) -> f64 {
     let (p0, p1) = corners();
-    let r = (p0[0].powi(2) + (p0[1] - c).powi(2)).sqrt();
-    let theta = 2.0 * (p0[0] / r).asin();
+    let r = (det::powi(p0[0], 2) + det::powi(p0[1] - c, 2)).sqrt();
+    let theta = 2.0 * det::asin(p0[0] / r);
     let triangle = 0.5 * (p0[0] * p1[1] - p0[1] * p1[0]);
-    (triangle + r * r / 2.0 * (theta - theta.sin())) * H
+    (triangle + r * r / 2.0 * (theta - det::sin(theta))) * H
 }
 
 /// The second slice is turned 120° + `apart` about the apex, so the facing walls part by

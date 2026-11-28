@@ -32,6 +32,7 @@
 //! runs from v = 3/4 across the interval's end to 1/4 (its rim in two edges meeting there),
 //! face 1 over [1/4, 3/4]. θ = [`closed_angle`].
 
+use solidcore::math::det;
 use solidcore_record::brep::{
     Brep, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Region, Shell,
     Surface, Vertex,
@@ -73,13 +74,13 @@ impl Kind {
         match self {
             Kind::Tangent => {
                 let th = angle(face, at[1]);
-                [-th.cos(), -th.sin(), 0.0]
+                [-det::cos(th), -det::sin(th), 0.0]
             }
             Kind::Collapsed | Kind::Quartic => [-1.0, 0.0, 0.0],
             Kind::Cone => {
                 let th = angle(face, at[1]);
                 let r = std::f64::consts::FRAC_1_SQRT_2;
-                [-th.cos() * r, -th.sin() * r, r]
+                [-det::cos(th) * r, -det::sin(th) * r, r]
             }
         }
     }
@@ -187,7 +188,7 @@ const MID: f64 = std::f64::consts::FRAC_1_SQRT_2;
 /// `1, cos 45°, 1`, turned a quarter for the neighbour.
 pub fn angle(face: usize, v: f64) -> f64 {
     let (b0, b1, b2) = ((1.0 - v) * (1.0 - v), 2.0 * v * (1.0 - v) * MID, v * v);
-    let th = (b1 + b2).atan2(b0 + b1);
+    let th = det::atan2(b1 + b2, b0 + b1);
     if face == 0 { th } else { th + HALF_PI }
 }
 

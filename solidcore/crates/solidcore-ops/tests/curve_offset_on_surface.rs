@@ -11,6 +11,7 @@
     clippy::disallowed_methods // the test's own sampling and radii, not ops computing geometry
 )]
 
+use solidcore::math::det;
 use solidcore_ops::curve::{circle, offset_on_surface, OffsetSide};
 use solidcore_ops::sweep::{loft, Curve as Sweep};
 use solidcore_ops::Error;
@@ -83,7 +84,7 @@ fn a_circle_round_a_cylinder_offsets_along_it() {
         assert!(o.deviation <= 1e-3, "{side:?}: {}", o.deviation);
         let pts = points_of(&o.curve, 80);
         for p in &pts {
-            assert!((p[0].hypot(p[1]) - 50.0).abs() <= 1e-3, "{p:?}");
+            assert!((det::hypot(p[0], p[1]) - 50.0).abs() <= 1e-3, "{p:?}");
             assert!(((p[2] - 50.0).abs() - 30.0).abs() <= 1e-3, "{p:?}");
         }
         zs.push(pts[0][2]);

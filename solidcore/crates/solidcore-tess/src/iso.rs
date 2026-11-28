@@ -318,6 +318,7 @@ impl Triangles<'_> {
 mod tests {
     use super::*;
     use crate::fixtures::{fixture, size_of};
+    use solidcore::math::det;
     use solidcore_record::brep::Surface;
 
     fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -405,7 +406,7 @@ mod tests {
         };
         let w = sub(p, frame.origin);
         let (x, y) = (dot(w, frame.x_axis), dot(w, frame.y_axis));
-        Some((x.hypot(y), *radius))
+        Some((det::hypot(x, y), *radius))
     }
 
     #[test]
@@ -524,7 +525,7 @@ mod tests {
         let on = sphere_lines(&b, &lines, tol);
         assert_eq!(on.len(), 8);
         // the meridians run from pole to pole, the parallels close
-        let pole = |p: [f64; 3]| p[0].hypot(p[1]) < 1e-6;
+        let pole = |p: [f64; 3]| det::hypot(p[0], p[1]) < 1e-6;
         let meridians = on
             .iter()
             .filter(|l| pole(l[0]) && pole(l[l.len() - 1]))
@@ -555,7 +556,7 @@ mod tests {
             "both sides of the rim"
         );
         // and a meridian reaches the pole
-        assert!(on.iter().flatten().any(|p| p[0].hypot(p[1]) < 1e-6));
+        assert!(on.iter().flatten().any(|p| det::hypot(p[0], p[1]) < 1e-6));
     }
 
     #[test]

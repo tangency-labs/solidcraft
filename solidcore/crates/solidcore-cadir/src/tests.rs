@@ -7,6 +7,7 @@
 use super::*;
 use cadmpeg_ir::geometry::{SolvedSurfaceGeometry, SurfaceGeometry};
 use cadmpeg_ir::math::{Point3, Vector3};
+use solidcore::math::det;
 
 fn cube() -> CadIr {
     cadmpeg_ir::examples::unit_cube().unwrap()
@@ -319,12 +320,18 @@ fn a_negative_radius_turns_the_surface_side_as_the_normals_say() {
     let (cx, cy, cz) = (c.x, c.y, c.z);
     let at = move |a: f64, b: f64, h: f64| [cx + a, cy + b, cz + h];
     let sphere = |r: f64| {
-        move |u: f64, v: f64| at(r * v.cos() * u.cos(), r * v.cos() * u.sin(), r * v.sin())
+        move |u: f64, v: f64| {
+            at(
+                r * det::cos(v) * det::cos(u),
+                r * det::cos(v) * det::sin(u),
+                r * det::sin(v),
+            )
+        }
     };
     let torus = |r: f64| {
         move |u: f64, v: f64| {
-            let ring = 20.0 + r * v.cos();
-            at(ring * u.cos(), ring * u.sin(), r * v.sin())
+            let ring = 20.0 + r * det::cos(v);
+            at(ring * det::cos(u), ring * det::sin(u), r * det::sin(v))
         }
     };
     // ∂u × ∂v by central differences.
@@ -994,7 +1001,7 @@ fn a_placed_lines_bound_counts_the_rounding_of_its_direction() {
     let placed = |y: f64| {
         let line =
             LineCurve::try_new(Point3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0)).unwrap();
-        let (c, s) = (1.0, 2f64.powi(-31));
+        let (c, s) = (1.0, det::powi(2f64, -31));
         let turn = cadmpeg_ir::transform::Transform::affine([
             [c, -s, 0.0, 0.0],
             [s, c, 0.0, y],
@@ -1020,7 +1027,7 @@ fn a_placed_lines_bound_counts_the_rounding_of_its_direction() {
         }
         other => panic!("{other:?}"),
     }
-    match placed(2f64.powi(23)) {
+    match placed(det::powi(2f64, 23)) {
         Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
         other => panic!("{other:?}"),
     }
@@ -1360,7 +1367,7 @@ fn segment_prism(
         Body, Coedge, EdgeCarrier, FaceLoops, LoopRing, Point, Region, Vertex,
     };
     let (b, h) = (6.0, 5.0);
-    let s = std::f64::consts::FRAC_PI_3.sin();
+    let s = det::sin(std::f64::consts::FRAC_PI_3);
     let corners = [
         [5.0, -b * s, 0.0],
         [5.0, b * s, 0.0],
@@ -1574,7 +1581,7 @@ fn an_extruded_ellipse_without_a_solved_form_is_read_by_its_definition() {
         )
     };
     let theta = 2.0 * std::f64::consts::FRAC_PI_3;
-    let expected = 0.6 * 50.0 * (theta - theta.sin()) * 5.0;
+    let expected = 0.6 * 50.0 * (theta - det::sin(theta)) * 5.0;
     for (name, ir) in [
         ("up", segment_prism(up, Sense::Forward)),
         ("down", segment_prism(down, Sense::Reversed)),
@@ -1875,11 +1882,11 @@ fn a_spindle_torus_is_its_meridian_circle_revolved() {
     );
     let theirs = |r: f64| {
         move |u: f64, v: f64| {
-            let ring = 1.0 + r * v.cos();
+            let ring = 1.0 + r * det::cos(v);
             [
-                1.0 + ring * u.cos(),
-                2.0 + ring * u.sin(),
-                3.0 + r * v.sin(),
+                1.0 + ring * det::cos(u),
+                2.0 + ring * det::sin(u),
+                3.0 + r * det::sin(v),
             ]
         }
     };
@@ -1919,15 +1926,15 @@ fn a_spindle_torus_is_its_meridian_circle_revolved() {
         let ours = move |u: f64, t: f64| {
             let p = [
                 frame.origin[0] - origin[0]
-                    + radius * (t.cos() * frame.x_axis[0] + t.sin() * frame.y_axis[0]),
+                    + radius * (det::cos(t) * frame.x_axis[0] + det::sin(t) * frame.y_axis[0]),
                 frame.origin[1] - origin[1]
-                    + radius * (t.cos() * frame.x_axis[1] + t.sin() * frame.y_axis[1]),
+                    + radius * (det::cos(t) * frame.x_axis[1] + det::sin(t) * frame.y_axis[1]),
                 frame.origin[2] - origin[2]
-                    + radius * (t.cos() * frame.x_axis[2] + t.sin() * frame.y_axis[2]),
+                    + radius * (det::cos(t) * frame.x_axis[2] + det::sin(t) * frame.y_axis[2]),
             ];
             [
-                origin[0] + p[0] * u.cos() - p[1] * u.sin(),
-                origin[1] + p[0] * u.sin() + p[1] * u.cos(),
+                origin[0] + p[0] * det::cos(u) - p[1] * det::sin(u),
+                origin[1] + p[0] * det::sin(u) + p[1] * det::cos(u),
                 origin[2] + p[2],
             ]
         };

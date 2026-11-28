@@ -14,6 +14,7 @@
     clippy::indexing_slicing,
     clippy::disallowed_methods
 )] // test
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -31,7 +32,7 @@ use solidcore_record::brep::Brep as Record;
 const TANGENT: f64 = 0.5 * std::f64::consts::PI / 180.0;
 
 fn lean() -> f64 {
-    10f64.to_radians().tan()
+    det::tan(10f64.to_radians())
 }
 
 /// The edge nearest `p`.

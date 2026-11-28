@@ -34,6 +34,7 @@ use crate::patch::Patch;
 use crate::piece::{add, cross, dot, norm, scale, sub, Piece, V3};
 use crate::surface3::Surf;
 use crate::Error;
+use solidcore::math::det;
 
 /// What the closed forms take from the run.
 pub(crate) struct Settings {
@@ -142,7 +143,7 @@ struct Ellipse {
 
 impl Ellipse {
     fn at(&self, t: f64) -> V3 {
-        let (s, c) = t.sin_cos();
+        let (s, c) = det::sin_cos(t);
         add(
             self.center,
             add(scale(self.e1, self.r1 * c), scale(self.e2, self.r2 * s)),
@@ -246,8 +247,8 @@ fn plane_quadric(plane: &Frame, form: &Algebraic, contact: f64) -> Option<Meet> 
     // The smaller as det / λ1, which mean − root would cancel.
     let l1 = mean + root;
     let l2 = det / l1;
-    let angle = 0.5 * (2.0 * k[0][1]).atan2(k[0][0] - k[1][1]);
-    let (sn, cs) = angle.sin_cos();
+    let angle = 0.5 * det::atan2(2.0 * k[0][1], k[0][0] - k[1][1]);
+    let (sn, cs) = det::sin_cos(angle);
     Some(Meet::Ellipse(Ellipse {
         center,
         e1: add(scale(e1, cs), scale(e2, sn)),

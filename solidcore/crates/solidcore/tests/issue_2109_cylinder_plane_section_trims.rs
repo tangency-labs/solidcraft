@@ -39,6 +39,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::vector2d::Point2;
 use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -73,7 +74,7 @@ fn plate_and_peg(tau_deg: f64) -> (Kernel, Brep) {
     let pl = Axis2Placement::new(
         Point3::new(0.0, 0.0, 0.0),
         Vec3::new(1.0, 0.0, 0.0),
-        Vec3::new(0.0, tau.cos(), tau.sin()),
+        Vec3::new(0.0, det::cos(tau), det::sin(tau)),
     );
     solidcore::topology::brep::p5::transform(&mut k, &mut peg, &pl, None, false).unwrap();
     let b = boolean_union(&mut k, plate, peg).unwrap();
@@ -112,7 +113,7 @@ fn plate_with_hole(tau_deg: f64) -> (Kernel, Brep) {
     let pl = Axis2Placement::new(
         Point3::new(0.0, 0.0, 0.0),
         Vec3::new(1.0, 0.0, 0.0),
-        Vec3::new(0.0, tau.cos(), tau.sin()),
+        Vec3::new(0.0, det::cos(tau), det::sin(tau)),
     );
     solidcore::topology::brep::p5::transform(&mut k, &mut drill, &pl, None, false).unwrap();
     let b = boolean_difference(&mut k, plate, drill).unwrap();
@@ -263,7 +264,7 @@ fn plane_section_trims_on_a_tilted_peg_are_exact() {
             "{tau} degrees: peg side {got} != {side} (off {:e})",
             got - side
         );
-        let top = 1600.0 - PI * R * R / tau.to_radians().cos();
+        let top = 1600.0 - PI * R * R / det::cos(tau.to_radians());
         let got = plate_top_area(&k, &mut b);
         assert!(
             (got - top).abs() < 1e-13 * top,
@@ -282,7 +283,7 @@ fn plane_section_trims_on_a_tilted_peg_are_exact() {
 #[test]
 fn rail_trims_on_a_rounded_tilted_peg_are_exact() {
     for tau in [15.0_f64, 30.0, 45.0] {
-        let side = 2.0 * PI * R * (15.0 - FILLET / tau.to_radians().cos());
+        let side = 2.0 * PI * R * (15.0 - FILLET / det::cos(tau.to_radians()));
         let (mut k, mut b) = rounded_plate_and_peg(tau);
         let fits = cylinder_trims(&k, &b);
         // the rails' quartic rational curves give rational trims of degree 8
@@ -308,7 +309,7 @@ fn rail_trims_on_a_rounded_tilted_peg_are_exact() {
 #[test]
 fn plane_section_trims_in_a_tilted_hole_are_exact() {
     for tau in [0.0_f64, 15.0, 30.0, 45.0] {
-        let length = 20.0 / tau.to_radians().cos();
+        let length = 20.0 / det::cos(tau.to_radians());
         let (wall, cut) = (2.0 * PI * R * length, 32000.0 - PI * R * R * length);
         let (mut k, mut b) = plate_with_hole(tau);
         let fits = cylinder_trims(&k, &b);

@@ -25,6 +25,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
 use solidcore::primitive::api_curves::create_line_segment;
@@ -38,7 +39,7 @@ use solidcore::{Brep, Kernel};
 
 /// The floor's side at z = 25.
 fn floor_side() -> f64 {
-    60.0 - 30.0 * 10f64.to_radians().tan()
+    60.0 - 30.0 * det::tan(10f64.to_radians())
 }
 
 /// The area one corner round takes from the floor's square (the issue's closed form).

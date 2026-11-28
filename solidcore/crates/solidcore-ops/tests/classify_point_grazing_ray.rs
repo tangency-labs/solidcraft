@@ -5,6 +5,7 @@
 //! as cutting the part, because the middle of the round's section, 0.08 mm inside the wall,
 //! classified as outside.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test
+use solidcore::math::det;
 
 mod common;
 
@@ -21,7 +22,11 @@ const AXIS: [f64; 2] = [-8.0, 0.0];
 #[allow(clippy::disallowed_methods)] // the test's sample points, not ops computing geometry
 fn at(angle: f64, radial: f64, z: f64) -> [f64; 3] {
     let a = angle.to_radians();
-    [AXIS[0] + radial * a.cos(), AXIS[1] + radial * a.sin(), z]
+    [
+        AXIS[0] + radial * det::cos(a),
+        AXIS[1] + radial * det::sin(a),
+        z,
+    ]
 }
 
 /// The points either side of the wall round the top of the circle that classify wrongly.

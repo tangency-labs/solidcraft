@@ -4,6 +4,7 @@
 // The cases are kept as they were written in SolidCraft.
 #![allow(clippy::cast_lossless, clippy::doc_markdown)]
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
 use super::plane::{from_angle, Box2, Planar, X, Y};
@@ -617,7 +618,7 @@ fn a_roll_flattens_through_its_neutral_surface() {
 fn a_cone_flattens_to_a_sector_at_its_neutral_radii() {
     let half_angle: f64 = 0.5;
     let turn = std::f64::consts::TAU;
-    let sweep = turn * half_angle.sin();
+    let sweep = turn * det::sin(half_angle);
     let sheet = Sheet {
         thickness: T,
         k_factor: K,
@@ -637,7 +638,7 @@ fn a_cone_flattens_to_a_sector_at_its_neutral_radii() {
     let Some(Some(flat)) = dev.panels.first() else {
         panic!("laid out: {dev:?}")
     };
-    let d = K * T / half_angle.tan();
+    let d = K * T / det::tan(half_angle);
     let arcs: Vec<(f64, f64)> = flat
         .region
         .outer
@@ -754,7 +755,7 @@ fn a_hole_in_a_roll_flattens_to_an_exact_ellipse() {
     for s in &ellipse.segs {
         for t in [0.0, 0.3, 0.7, 1.0] {
             let p = s.point_at(t);
-            let e = ((p.x - c.x) / hole).powi(2) + ((p.y - c.y * k) / (hole * k)).powi(2);
+            let e = det::powi((p.x - c.x) / hole, 2) + det::powi((p.y - c.y * k) / (hole * k), 2);
             assert!((e - 1.0).abs() < 1e-12, "{e}");
         }
     }
@@ -1273,7 +1274,7 @@ fn a_mitered_rip_keeps_both_panels_off_the_plane_between_them() {
 fn a_lapped_rip_covers_one_panel_with_the_other() {
     let (amount, gap) = (1.0, 0.5);
     let angle = 72.0_f64.to_radians();
-    let (sin, cos) = angle.sin_cos();
+    let (sin, cos) = det::sin_cos(angle);
     for (turn, covering, covered) in [
         (FRAC_PI_2, T - amount, T + gap),
         (-FRAC_PI_2, -amount, gap),
@@ -1314,7 +1315,7 @@ fn an_acute_overlap_keeps_the_requested_gap_between_the_cut_walls() {
     let gap = 0.5;
     for angle in [10.0_f64, 41.4, 60.0, 75.5, 89.99] {
         for turn in [angle.to_radians(), -angle.to_radians()] {
-            let (sin, cos) = turn.sin_cos();
+            let (sin, cos) = det::sin_cos(turn);
             let normal_a = Vec2::new(1.0, 0.0);
             let normal_b = Vec2::new(cos, -sin);
             for amount in [None, Some(0.5), Some(0.1)] {
@@ -1971,9 +1972,9 @@ fn a_free_end_follows_both_panels_outlines_through_the_bend() {
         let across = -p.y;
         // On the plate's half, `q` past its tangent line; on the flange's, past the flange's.
         let along = if across <= ba / 2.0 - 4.0 {
-            -3.0 + 0.75 * r * ((across + 4.0) / rn).tan()
+            -3.0 + 0.75 * r * det::tan((across + 4.0) / rn)
         } else {
-            3.0 - 0.75 * r * (((ba - 4.0) - across) / rn).tan()
+            3.0 - 0.75 * r * det::tan(((ba - 4.0) - across) / rn)
         };
         assert!(
             (p.x - along).abs() < 2e-3,
@@ -2000,7 +2001,7 @@ fn a_free_end_follows_both_panels_outlines_through_the_bend() {
         "{ends:?}"
     );
     // Leaving the plate's tangent line the end turns 9.30° off the side's slant.
-    let turn = (0.75 * r / rn).atan() - 0.75f64.atan();
+    let turn = det::atan(0.75 * r / rn) - det::atan(0.75f64);
     assert!(
         (turn.to_degrees() - 9.2992).abs() < 1e-3,
         "{}",

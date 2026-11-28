@@ -34,6 +34,7 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::approx_tol3d;
 use solidcore::intersect::api_intersectors::intersect_surfaces;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
@@ -203,7 +204,7 @@ fn assert_equator(k: &Kernel, s1: &Surface, s2: &Surface) {
             (rho - 2.0).abs() <= 1e-3,
             "point {i} {rho} from the sphere centre"
         );
-        let a = p.y.atan2(p.x);
+        let a = det::atan2(p.y, p.x);
         if let Some(b) = prev {
             let mut step = a - b;
             if step > std::f64::consts::PI {

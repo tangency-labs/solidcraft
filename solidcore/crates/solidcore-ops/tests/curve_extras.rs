@@ -10,6 +10,7 @@
     clippy::float_arithmetic
 )]
 
+use solidcore::math::det;
 use solidcore_ops::curve::{arc_about, curve_comb, extend_curve, CurveEndAt, CurveExtension};
 use solidcore_ops::Error;
 use solidcore_record::brep::Curve;
@@ -182,7 +183,7 @@ fn a_flat_arc_about_a_far_centre_is_built_on_its_circle() {
         (0.1_f64, -33.3_f64),
         (20.0, -(4e5_f64 * 4e5 - 400.0).sqrt()),
     ] {
-        let r = h.hypot(cy);
+        let r = det::hypot(h, cy);
         let sagitta = h * h / (r - cy);
         let arc = arc_about(
             [0.0, cy, 0.0],
@@ -200,7 +201,7 @@ fn a_flat_arc_about_a_far_centre_is_built_on_its_circle() {
         );
         for q in &p {
             assert!(
-                (q[0].hypot(q[1] - cy) - r).abs() <= 1e-12 * r
+                (det::hypot(q[0], q[1] - cy) - r).abs() <= 1e-12 * r
                     && q[1] >= -1e-12 * r
                     && q[1] <= sagitta + 1e-12 * r
                     && q[2].abs() <= 1e-12 * r,

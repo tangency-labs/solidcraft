@@ -12,6 +12,7 @@ use super::{offset_faces, offset_sheet, shell, thicken, transform_face};
 use crate::blend::{blend, Blend, Corners};
 use crate::session::{self, run};
 use crate::{make_box, make_cylinder, make_sphere, Body, Error, Order};
+use solidcore::math::det;
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -156,7 +157,7 @@ fn slanted_rim_cylinder(r: f64, bottom: f64, drop: f64, round: f64) -> Body {
         .unwrap();
     // the rim where it crosses y = 0 on the tilted plane, at x = -r: away from the
     // cylinder's seam at x = r
-    let rim = edge_at(&body, [-r, 0.0, 25.0 - drop / tilt.cos()]);
+    let rim = edge_at(&body, [-r, 0.0, 25.0 - drop / det::cos(tilt)]);
     blend(&body, Blend::Round, &[rim], &[round], &[], Corners::Filled).unwrap();
     body
 }
@@ -184,7 +185,7 @@ fn a_round_on_a_slanted_rim_shells_by_its_offset_surface() {
     let report = body.check(crate::CheckLevel::All).unwrap();
     assert_eq!(report.failures, 0, "{}", report.text);
     let measured = volume(&body);
-    let area = 2.0 * PI * 10.0 * 40.0 + 2.0 * PI * 100.0 / 20f64.to_radians().cos();
+    let area = 2.0 * PI * 10.0 * 40.0 + 2.0 * PI * 100.0 / det::cos(20f64.to_radians());
     let bound = 1e-8 * (outer + inner + measured) + body.tolerance().unwrap() * 2.0 * area;
     assert!(
         (measured - (outer - inner)).abs() <= bound,
@@ -278,7 +279,7 @@ fn disc_segment(r: f64, d: f64) -> f64 {
     if d >= r {
         return 0.0;
     }
-    r * r * (d / r).acos() - d * (r * r - d * d).sqrt()
+    r * r * det::acos(d / r) - d * (r * r - d * d).sqrt()
 }
 
 /// The area of the rectangle `|x| <= a`, `|y| <= b` inside the disc of radius `r` about its
@@ -287,7 +288,7 @@ fn disc_segment(r: f64, d: f64) -> f64 {
 /// area under the circle from 0 to x.
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn rectangle_in_disc(r: f64, a: f64, b: f64) -> f64 {
-    let under = |x: f64| 0.5 * (x * (r * r - x * x).sqrt() + r * r * (x / r).asin());
+    let under = |x: f64| 0.5 * (x * (r * r - x * x).sqrt() + r * r * det::asin(x / r));
     let corner = if r * r > a * a + b * b {
         let reach = (r * r - b * b).sqrt();
         under(reach) - under(a) - b * (reach - a)
@@ -372,10 +373,10 @@ fn discs_overlap(big: f64, r: f64, d: f64) -> f64 {
         return 0.0;
     }
     if d <= (big - r).abs() {
-        return PI * big.min(r).powi(2);
+        return PI * det::powi(big.min(r), 2);
     }
-    let a = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
-    let b = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
+    let a = r * r * det::acos((d * d + r * r - big * big) / (2.0 * d * r));
+    let b = big * big * det::acos((d * d + big * big - r * r) / (2.0 * d * big));
     let c = 0.5 * ((-d + r + big) * (d + r - big) * (d - r + big) * (d + r + big)).sqrt();
     a + b - c
 }
@@ -403,9 +404,12 @@ fn discs_overlap(big: f64, r: f64, d: f64) -> f64 {
 #[allow(clippy::disallowed_methods)] // closed-form oracle and face picks, not ops geometry
 fn a_cones_side_broken_through_by_a_hole_past_its_seam_shells_to_its_closed_form() {
     crate::test_corpus::rig_fixes();
-    let t18 = 18.0_f64.to_radians().tan();
+    let t18 = det::tan(18.0_f64.to_radians());
     let top = 100.0 - 200.0 * t18;
-    let (c, s) = (85.0_f64.to_radians().cos(), 85.0_f64.to_radians().sin());
+    let (c, s) = (
+        det::cos(85.0_f64.to_radians()),
+        det::sin(85.0_f64.to_radians()),
+    );
     let cone = crate::make_cone([0.0; 3], 100.0, top, 200.0).unwrap();
     let hole = make_cylinder([32.0 * c, 32.0 * s, 150.0], 5.0, 51.0).unwrap();
     let body = crate::boolean::boolean(cone, hole, crate::BooleanOp::Subtract)
@@ -419,10 +423,10 @@ fn a_cones_side_broken_through_by_a_hole_past_its_seam_shells_to_its_closed_form
     shell(&body, &o, &[bottom], -2.0).unwrap();
     let report = body.check(crate::CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{}", report.text);
-    let inside = |z: f64| 100.0 - z * t18 - 2.0 / 18.0_f64.to_radians().cos();
+    let inside = |z: f64| 100.0 - z * t18 - 2.0 / det::cos(18.0_f64.to_radians());
     // the r 7 disc leaves the side's offset where 32 + 7 = inside(z), z ~ 181.3: split there
-    let out = (100.0 - 2.0 / 18.0_f64.to_radians().cos() - 39.0) / t18;
-    let section = |z: f64| PI * inside(z).powi(2);
+    let out = (100.0 - 2.0 / det::cos(18.0_f64.to_radians()) - 39.0) / t18;
+    let section = |z: f64| PI * det::powi(inside(z), 2);
     let notch = |z: f64| discs_overlap(inside(z), 7.0, 32.0);
     let cavity =
         integral(0.0, 198.0, section) - integral(148.0, out, notch) - integral(out, 198.0, notch);
@@ -695,7 +699,7 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
         .unwrap()
         .unwrap();
     shell(&b, &order(&b), &[], -0.18).unwrap();
-    let want = PI * 2.25 * 4.0 + PI * 0.0225 * 1.2 - PI * 1.32_f64.powi(2) * 3.64;
+    let want = PI * 2.25 * 4.0 + PI * 0.0225 * 1.2 - PI * det::powi(1.32_f64, 2) * 3.64;
     assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
     assert!(b.is_manifold_solid().unwrap());
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
@@ -795,8 +799,8 @@ fn a_dome_inset_by_its_radius_or_more_stays_solid() {
     // under half the radius, as before: the inset ball less its cap below the void's ceiling
     let (w, r) = (1.9, 2.1);
     let h = r - w;
-    let want =
-        60000.0 + dome - void(w) - 4.0 / 3.0 * PI * r.powi(3) + PI * h * h * (3.0 * r - h) / 3.0;
+    let want = 60000.0 + dome - void(w) - 4.0 / 3.0 * PI * det::powi(r, 3)
+        + PI * h * h * (3.0 * r - h) / 3.0;
     let got = made(w);
     assert!(rel(got, want) < 1e-9, "{w}: {got} {want}");
     for w in [4.0, 5.0] {
@@ -834,7 +838,7 @@ fn a_dome_inset_by_its_radius_or_more_stays_solid() {
 fn a_thin_boss_touching_its_faces_rim_stays_solid_without_winding_its_footprint() {
     all_fixes();
     // each circle's seam turned 0.6131 rad about its axis, as SolidCraft's cylinders have it
-    let (s, c) = 0.6131_f64.sin_cos();
+    let (s, c) = det::sin_cos(0.6131_f64);
     let turned = |x: f64, z: f64| {
         [
             [c, s, 0.0, 0.0],
@@ -856,7 +860,8 @@ fn a_thin_boss_touching_its_faces_rim_stays_solid_without_winding_its_footprint(
         || shell(&b, &o, &[], -72.0),
     );
     r.unwrap();
-    let want = PI * 360_000.0 * 2400.0 + PI * 4900.0 * 140.0 - PI * 528.0_f64.powi(2) * 2256.0;
+    let want =
+        PI * 360_000.0 * 2400.0 + PI * 4900.0 * 140.0 - PI * det::powi(528.0_f64, 2) * 2256.0;
     assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
     assert!(b.is_manifold_solid().unwrap());
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
@@ -903,7 +908,9 @@ fn a_basin_shells_past_its_rim_to_its_closed_form() {
     // z = 10 - t ... 30 - t; its sides stay inside the shrunk slab in x and at the back for t <= 6.
     let (r5, r164) = (5f64.sqrt(), 1.64f64.sqrt());
     let integral = |c: [f64; 3], lo: f64, hi: f64| {
-        c[0] * (hi - lo) + c[1] * (hi * hi - lo * lo) / 2.0 + c[2] * (hi.powi(3) - lo.powi(3)) / 3.0
+        c[0] * (hi - lo)
+            + c[1] * (hi * hi - lo * lo) / 2.0
+            + c[2] * (det::powi(hi, 3) - det::powi(lo, 3)) / 3.0
     };
     // (w0 + z)(h0 + h1 z) as coefficients in z.
     let product = |w0: f64, h0: f64, h1: f64| [w0 * h0, w0 * h1 + h0, h1];
@@ -3213,7 +3220,7 @@ fn erosion_wedge(t: f64) -> f64 {
     const SLICES: usize = 64;
     // the point of section `s` (x0, x1, z0, z1) whose outward normal is at angle phi
     let support = |s: [f64; 4], phi: f64| -> [f64; 2] {
-        let (sin, cos) = phi.sin_cos();
+        let (sin, cos) = det::sin_cos(phi);
         let pick = |c: f64, lo: f64, hi: f64| {
             if c > 1e-12 {
                 hi - 8.0
@@ -3237,9 +3244,9 @@ fn erosion_wedge(t: f64) -> f64 {
         .map(|&phi| {
             let p = support(TUBE, phi);
             [
-                phi.cos(),
-                phi.sin(),
-                phi.cos() * p[0] + phi.sin() * p[1] - t,
+                det::cos(phi),
+                det::sin(phi),
+                det::cos(phi) * p[0] + det::sin(phi) * p[1] - t,
             ]
         })
         .collect();
@@ -3248,7 +3255,7 @@ fn erosion_wedge(t: f64) -> f64 {
             .iter()
             .map(|&phi| {
                 let (p, q) = (support(TUBE, phi), support(FLARE, phi));
-                let (cos, sin) = (phi.cos(), phi.sin());
+                let (cos, sin) = (det::cos(phi), det::sin(phi));
                 let a = (cos * (q[0] - p[0]) + sin * (q[1] - p[1])) / 70.0;
                 let n = (1.0 + a * a).sqrt();
                 let at = (cos * p[0] + a * -80.0 + sin * p[1]) / n - t - a / n * y;
@@ -3323,7 +3330,7 @@ fn erosion_wedge(t: f64) -> f64 {
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_tube_joined_to_a_flared_loft_shells_open_at_both_ends() {
     all_fixes();
-    let inset = |t: f64| (100.0 - 2.0 * t).powi(2) - (4.0 - PI) * (8.0 - t).powi(2);
+    let inset = |t: f64| det::powi(100.0 - 2.0 * t, 2) - (4.0 - PI) * det::powi(8.0 - t, 2);
     for t in [2.0, 6.0] {
         let b = tube_joined_to_a_flare();
         let o = order(&b);
@@ -4743,7 +4750,8 @@ fn a_ringed_countersinks_cone_moves_within_the_ring() {
     let removed = 2.0
         * PI
         * (delta / sin * (r * r - 4.0) / 2.0
-            + (rho * (rho * rho - r * r) / 2.0 - (rho.powi(3) - r.powi(3)) / 3.0) / tan);
+            + (rho * (rho * rho - r * r) / 2.0 - (det::powi(rho, 3) - det::powi(r, 3)) / 3.0)
+                / tan);
     let expected = countersunk_volume(3.99) - removed;
     assert!(
         rel(volume(&b), expected) < 1e-9,

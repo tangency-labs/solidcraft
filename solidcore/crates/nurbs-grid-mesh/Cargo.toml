@@ -7,5 +7,9 @@ version.workspace = true
 rust-version.workspace = true
 publish = false
 
+[dev-dependencies]
+# The transcendental functions, `solidcore::math::det`, for the tests and examples.
+solidcore = { path = "../solidcore" }
+
 [lints]
 workspace = true

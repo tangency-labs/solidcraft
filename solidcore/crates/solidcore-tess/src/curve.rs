@@ -56,6 +56,7 @@ pub fn curve_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::math::det;
 
     /// The quarter circle of radius 10 about the origin in z = 0 as a rational quadratic.
     fn quarter_circle() -> Curve {
@@ -85,10 +86,13 @@ mod tests {
             for w in pts.windows(2) {
                 // On the circle, and every chord's middle sags at most the tolerance.
                 for p in w {
-                    assert!((p[0].hypot(p[1]) - 10.0).abs() < 1e-9);
+                    assert!((det::hypot(p[0], p[1]) - 10.0).abs() < 1e-9);
                 }
                 let m = [(w[0][0] + w[1][0]) / 2.0, (w[0][1] + w[1][1]) / 2.0];
-                assert!(10.0 - m[0].hypot(m[1]) <= chord * 1.0001, "sag at {chord}");
+                assert!(
+                    10.0 - det::hypot(m[0], m[1]) <= chord * 1.0001,
+                    "sag at {chord}"
+                );
             }
         }
     }

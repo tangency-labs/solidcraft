@@ -2,6 +2,7 @@
 //! the flat, its outline and note, its refusals, its clearance test and where a sketch line on the
 //! panel's faces lies in the chart, each against the section's closed form.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use super::super::plane::Planar;
@@ -72,9 +73,9 @@ fn along_y(far: bool) -> Bead {
 #[test]
 fn the_footprint_is_the_width_and_the_centreline_and_the_base_bends_setbacks() {
     let fp = bead_footprint(&along_y(false), T).unwrap();
-    let xf = 5.0 + (FRAC_PI_4 / 2.0).tan();
-    let sq = (2.0f64 / 6.0).atan() / 2.0;
-    let sq = sq.tan();
+    let xf = 5.0 + det::tan(FRAC_PI_4 / 2.0);
+    let sq = det::atan(2.0f64 / 6.0) / 2.0;
+    let sq = det::tan(sq);
     let xs: Vec<f64> = fp.iter().map(|p| p.x).collect();
     let ys: Vec<f64> = fp.iter().map(|p| p.y).collect();
     let (x0, x1) = (
@@ -188,9 +189,9 @@ fn the_outline_gives_the_crown_and_a_note_that_reads_upright() {
     let fold = plate();
     let o = bead_outline(&fold, &along_y(false), T, false).unwrap();
     let ro = 1.0 + T;
-    let half = |a: f64| (a / 2.0).tan();
-    let crown_width = 10.0 - 2.0 * (2.0 / FRAC_PI_4.tan() + ro * half(FRAC_PI_4));
-    let beta = (2.0f64 / 6.0).atan();
+    let half = |a: f64| det::tan(a / 2.0);
+    let crown_width = 10.0 - 2.0 * (2.0 / det::tan(FRAC_PI_4) + ro * half(FRAC_PI_4));
+    let beta = det::atan(2.0f64 / 6.0);
     let crown_length = 320.0 - 2.0 * (6.0 + ro * half(beta));
     assert!(
         (o.crown_width - crown_width).abs() < 1e-9 && (o.crown_length - crown_length).abs() < 1e-9,
@@ -317,7 +318,7 @@ fn circle(c: Vec2, r: f64) -> Loop2 {
 #[test]
 fn an_outline_is_placed_against_the_footprint_exactly() {
     let b = along_y(false);
-    let xf = 5.0 + (FRAC_PI_4 / 2.0).tan();
+    let xf = 5.0 + det::tan(FRAC_PI_4 / 2.0);
     let at = |l: &Loop2, near: f64| bead_against(&b, T, l, near).unwrap();
     assert_eq!(at(&square(70.0, 100.0, 10.0), 0.0), BeadAgainst::Clear);
     assert_eq!(at(&square(52.0, 100.0, 10.0), 0.0), BeadAgainst::Meets);

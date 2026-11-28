@@ -17,6 +17,7 @@ use solidcore::error::primitive::PrimitiveFailure;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::primitive_creation::{model::PrimitiveModel, p1::PrimitiveCreation};
@@ -114,7 +115,7 @@ fn turn(k: &mut Kernel, a_deg: f64, centre_y: f64) -> solidcore::Result<solidcor
     );
     let a = a_deg.to_radians();
     let corner = Vec3::new(10., 0., 0.);
-    let end = Vec3::new(10. - 10. * a.cos(), 10. * a.sin(), 0.);
+    let end = Vec3::new(10. - 10. * det::cos(a), 10. * det::sin(a), 0.);
     let path = |p, q| Curve::from(BSplineCurve::create_line_segment(3, p, q).unwrap());
     let paths = [path(Vec3::ZERO, corner), path(corner, end)];
     PrimitiveModel::build_new(k, |_, model| {

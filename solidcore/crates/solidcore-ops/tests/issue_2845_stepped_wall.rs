@@ -10,6 +10,7 @@
     clippy::indexing_slicing,
     clippy::disallowed_methods
 )] // test: the closed form uses pi
+use solidcore::math::det;
 
 #[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
 mod solidcraft_fixes;
@@ -106,7 +107,7 @@ fn recorded_stepped_wall() -> Body {
 /// the square [16, 20] x [20 - r, 20] less the disc's part in it,
 /// A(r) = 4 r - int_{r - 4}^{r} sqrt(r^2 - t^2) dt, over the wall's 42.
 fn trimmed_at_its_crease(r: f64) -> f64 {
-    let under = |u: f64| u / 2.0 * (r * r - u * u).max(0.0).sqrt() + r * r / 2.0 * (u / r).asin();
+    let under = |u: f64| u / 2.0 * (r * r - u * u).max(0.0).sqrt() + r * r / 2.0 * det::asin(u / r);
     9520.0 - 42.0 * (4.0 * r - (under(r) - under(r - 4.0)))
 }
 

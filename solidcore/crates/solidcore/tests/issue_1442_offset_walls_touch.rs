@@ -15,6 +15,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -140,7 +141,7 @@ fn issue_1442_plate_hole_crossing_side_still_resolved() {
     let pi = core::f64::consts::PI;
     let r: f64 = 3.5;
     let d: f64 = 3.0;
-    let segment = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let segment = r * r * det::acos(d / r) - d * (r * r - d * d).sqrt();
     let cavity = (37.0 * 37.0 - (pi * r * r - segment)) * 8.5;
     let want = 40.0 * 40.0 * 10.0 - pi * 2.0 * 2.0 * 10.0 - cavity;
     let v = volume(&k, &mut b).unwrap();

@@ -3,13 +3,14 @@
 #![allow(dead_code)]
 
 use crate::error::teeth::{TeethFailure, Why};
+use crate::math::det;
 use crate::teeth::outline::rotated;
 use crate::teeth::{Gaps, Outline, Pair, Piece, Point};
 use crate::SolidError;
 
 /// The distance between two points.
 pub fn dist(a: Point, b: Point) -> f64 {
-    (a[0] - b[0]).hypot(a[1] - b[1])
+    det::hypot(a[0] - b[0], a[1] - b[1])
 }
 
 /// An outline's own promise, checked from outside: the pieces of the tooth join, the tooth closes
@@ -90,9 +91,7 @@ pub fn assert_gap(
 
 /// The angle between two directions, 0 to pi.
 pub fn angle_between(a: Point, b: Point) -> f64 {
-    (a[0] * b[1] - a[1] * b[0])
-        .atan2(a[0] * b[0] + a[1] * b[1])
-        .abs()
+    det::atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]).abs()
 }
 
 /// A small generator of the same numbers every run, for sweeps.

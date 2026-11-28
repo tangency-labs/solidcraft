@@ -3,6 +3,7 @@
 //! against what it must be, and hostile numbers refused as data or answered plainly, never a
 //! panic.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use super::common::{failure, HOSTILE, HOSTILE_COUNTS};
@@ -81,7 +82,7 @@ fn ends(s: &Seg2) -> (Vec2, Vec2) {
             sweep,
         } => {
             let at = |angle: f64| {
-                let (s, c) = angle.sin_cos();
+                let (s, c) = det::sin_cos(angle);
                 Vec2::new(center.x + radius * c, center.y + radius * s)
             };
             (at(start), at(start + sweep))
@@ -346,7 +347,7 @@ fn a_cutter_section_follows_the_space_and_keeps_its_arcs() {
         cut.from,
         cut.to
     );
-    let (s, c) = cut.middle.sin_cos();
+    let (s, c) = det::sin_cos(cut.middle);
     assert!(near(
         cut.axis_at,
         Vec2::new((root + 5.0) * c, (root + 5.0) * s)
@@ -360,10 +361,13 @@ fn a_cutter_section_follows_the_space_and_keeps_its_arcs() {
 fn a_space_too_wide_for_one_cutter_ends_square() {
     // The corners 2 x (pi/2 + 0.6) apart, wider than one cutter's section reaches round.
     const { assert!(PI + 1.2 > MOST_SPACE) };
-    let after = [(PI / 2.0 + 0.6).cos() * 10.0, (PI / 2.0 + 0.6).sin() * 10.0];
+    let after = [
+        det::cos(PI / 2.0 + 0.6) * 10.0,
+        det::sin(PI / 2.0 + 0.6) * 10.0,
+    ];
     let before = [
-        (-PI / 2.0 - 0.6).cos() * 10.0,
-        (-PI / 2.0 - 0.6).sin() * 10.0,
+        det::cos(-PI / 2.0 - 0.6) * 10.0,
+        det::sin(-PI / 2.0 - 0.6) * 10.0,
     ];
     let none = cutter_section(&[], after, before, 8.0, 5.0, 11.0, 1e-3).expect("no refusal");
     assert_eq!(none, None);
@@ -398,8 +402,8 @@ fn a_space_too_wide_for_one_cutter_ends_square() {
         "{out:?}"
     );
     // Nearly a full turn: still a region.
-    let wide_after = [10.0 * 0.05_f64.cos(), 10.0 * 0.05_f64.sin()];
-    let wide_before = [10.0 * 0.1_f64.cos(), 10.0 * 0.1_f64.sin()];
+    let wide_after = [10.0 * det::cos(0.05_f64), 10.0 * det::sin(0.05_f64)];
+    let wide_before = [10.0 * det::cos(0.1_f64), 10.0 * det::sin(0.1_f64)];
     let nearly = space_region(&[], wide_after, wide_before, 12.0, 1e-3).expect("a wide region");
     let Seg2::Arc { sweep, .. } = nearly.segs[1] else {
         panic!("the arc of the circle: {:?}", nearly.segs[1]);

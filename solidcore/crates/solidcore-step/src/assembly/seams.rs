@@ -32,6 +32,7 @@ use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
 
 use super::{Assembly, Bound, EdgeB, R, index, unsupported};
+use solidcore::math::det;
 
 /// Samples per edge when following a loop around the axis.
 const SAMPLES: usize = 16;
@@ -230,7 +231,7 @@ fn axis(s: &BSurface) -> Option<Axis> {
         }
         BSurface::Cone { frame: f, radius_at_origin, half_angle } => {
             let (origin, z) = frame(f);
-            let apex = origin + z * (-radius_at_origin / half_angle.tan());
+            let apex = origin + z * (-radius_at_origin / det::tan(*half_angle));
             let poles = if *half_angle > 0.0 { [Some(apex), None] } else { [None, Some(apex)] };
             Some(Axis { origin, z, kind: Kind::Ruled, poles, period: TAU })
         }
@@ -307,7 +308,7 @@ const IDENTITY: [[f64; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.
 
 /// `p` turned by `angle` about the axis through `o` along unit `k` (right-handed).
 fn turned(p: Vec3, o: Vec3, k: Vec3, angle: f64) -> Vec3 {
-    let (s, c) = angle.sin_cos();
+    let (s, c) = det::sin_cos(angle);
     let x = p - o;
     o + x * c + k.cross(x) * s + k * (k.dot(x) * (1.0 - c))
 }
@@ -722,7 +723,7 @@ impl Assembly<'_> {
                 let (da, db) = (pa - ax.origin, pb - ax.origin);
                 let (ra, rb) = (da - ax.z * da.dot(ax.z), db - ax.z * db.dot(ax.z));
                 let (z, x) = crate::kernel::square_frame(ax.z, if ra.len() >= rb.len() { da } else { db }).ok_or("a seam along the sphere's axis")?;
-                let latitude = |d: Vec3| d.dot(z).atan2(d.dot(x));
+                let latitude = |d: Vec3| det::atan2(d.dot(z), d.dot(x));
                 let (ta, tb) = (latitude(da), latitude(db));
                 if !(ta.abs() <= 0.5 * PI + 1e-9 && tb.abs() <= 0.5 * PI + 1e-9) {
                     return Err(unsupported("a seam between loops at opposite angles"));
@@ -745,7 +746,7 @@ impl Assembly<'_> {
                 let centre = ax.origin + x * *major;
                 let tube = |p: Vec3| {
                     let d = p - centre;
-                    d.dot(z).atan2(d.dot(x))
+                    det::atan2(d.dot(z), d.dot(x))
                 };
                 let (ta, tb) = (tube(pa), tube(pb));
                 let up = (tb - ta).rem_euclid(TAU);
@@ -765,7 +766,7 @@ impl Assembly<'_> {
                 let r = (da - z * h).len();
                 let y = z.cross(x);
                 let db = pb - ax.origin;
-                let back = (-(db.dot(y).atan2(db.dot(x)))).rem_euclid(TAU);
+                let back = (-(det::atan2(db.dot(y), db.dot(x)))).rem_euclid(TAU);
                 if !(back > 1e-9) {
                     return Err("a seam of no length".into());
                 }
@@ -997,7 +998,7 @@ impl Assembly<'_> {
                 let d = p - o;
                 let h = d.dot(z);
                 let rho = (d - z * h).len();
-                [d.dot(y).atan2(d.dot(x)), h.atan2(rho - major_radius)]
+                [det::atan2(d.dot(y), d.dot(x)), det::atan2(h, rho - major_radius)]
             };
             let mut samples: Vec<[f64; 2]> = Vec::new();
             let mut outside = true;
@@ -1074,19 +1075,19 @@ impl Assembly<'_> {
         let o = Vec3::from(frame.origin);
         let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
         let z = x.cross(y);
-        let radial = x * u.cos() + y * u.sin();
-        let ring_radius = major_radius + minor_radius * w.cos();
-        let p = o + radial * ring_radius + z * (minor_radius * w.sin());
+        let radial = x * det::cos(u) + y * det::sin(u);
+        let ring_radius = major_radius + minor_radius * det::cos(w);
+        let p = o + radial * ring_radius + z * (minor_radius * det::sin(w));
         let v = index(self.vertices.len())?;
         self.vertices.push(Vertex { point: arr(p), tolerance: self.tol });
         // Round the axis the way u runs, round the tube the way v runs: the torus's whole
         // (u, v) box, counter-clockwise.
         let ring = BCurve::Circle {
-            frame: Frame { origin: arr(o + z * (minor_radius * w.sin())), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
+            frame: Frame { origin: arr(o + z * (minor_radius * det::sin(w))), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
             radius: ring_radius,
         };
-        let tube_x = radial * w.cos() + z * w.sin();
-        let tube_y = z * w.cos() - radial * w.sin();
+        let tube_x = radial * det::cos(w) + z * det::sin(w);
+        let tube_y = z * det::cos(w) - radial * det::sin(w);
         let tube = BCurve::Circle {
             frame: Frame { origin: arr(o + radial * major_radius), x_axis: arr(tube_x), y_axis: arr(tube_y) },
             radius: minor_radius,
@@ -1139,11 +1140,11 @@ impl Assembly<'_> {
                 if n.cross(z).len() <= 1e-9 {
                     // Round the axis: its tube angle.
                     let h = d.dot(z);
-                    w_at = Some(h.atan2((d - z * h).len() - major_radius));
+                    w_at = Some(det::atan2(h, (d - z * h).len() - major_radius));
                 } else if n.dot(z).abs() <= 1e-9 {
                     // Round the tube: its longitude.
                     let dc = c - o;
-                    u_at = Some(dc.dot(y).atan2(dc.dot(x)));
+                    u_at = Some(det::atan2(dc.dot(y), dc.dot(x)));
                 }
             }
             let mut surface = face.surface.clone();
@@ -1217,7 +1218,7 @@ impl Assembly<'_> {
                 points.push(p);
                 let d = p - o;
                 let h = d.dot(z);
-                let q = [d.dot(y).atan2(d.dot(x)), h.atan2((d - z * h).len())];
+                let q = [det::atan2(d.dot(y), d.dot(x)), det::atan2(h, (d - z * h).len())];
                 let q = match path.last() {
                     Some(l) => [l[0] + wrap(q[0] - l[0]), q[1]],
                     None => q,
@@ -1256,7 +1257,7 @@ impl Assembly<'_> {
         let mut prev: Option<f64> = None;
         for p in points.iter().chain(points.first()) {
             let d = *p - o;
-            let a = d.dot(ey).atan2(d.dot(ex));
+            let a = det::atan2(d.dot(ey), d.dot(ex));
             if let Some(b) = prev {
                 turned += wrap(a - b);
             }
@@ -1721,7 +1722,7 @@ impl Assembly<'_> {
             let y = n.cross(x);
             let y = if (pb - before).dot(y) >= 0.0 { y } else { -y };
             let d = pa - c;
-            let theta = d.dot(y).atan2(d.dot(x)).rem_euclid(TAU);
+            let theta = det::atan2(d.dot(y), d.dot(x)).rem_euclid(TAU);
             let radius = (pb - c).len();
             if !(theta * radius > self.tol) {
                 return Ok(None);
@@ -2584,7 +2585,7 @@ impl Perpendicular {
     /// `p`'s angle about the axis, right-handed.
     fn angle(&self, p: Vec3) -> f64 {
         let d = p - self.origin;
-        d.dot(self.y).atan2(d.dot(self.x))
+        det::atan2(d.dot(self.y), d.dot(self.x))
     }
 
     /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
@@ -2663,7 +2664,7 @@ impl Perpendicular {
                 return None;
             }
             let d = *p - self.origin;
-            let r = d.dot(self.x).hypot(d.dot(self.y));
+            let r = det::hypot(d.dot(self.x), d.dot(self.y));
             if !(r > 0.0) {
                 return None;
             }
@@ -2676,7 +2677,7 @@ impl Perpendicular {
         if !(hi - lo < PI) {
             return None;
         }
-        let r = least * (0.5 * (hi - lo)).cos();
+        let r = least * det::cos(0.5 * (hi - lo));
         let pad = gamma(16) * (PI + far) + if tol > 0.0 { tol / r } else { 0.0 };
         (pad.is_finite() && r > 0.0).then_some(([a0 + lo, a0 + hi], pad))
     }

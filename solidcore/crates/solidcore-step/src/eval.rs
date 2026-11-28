@@ -3,6 +3,7 @@
 //! the geometry is not defined at, or for geometry too inconsistent to evaluate.
 
 use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Surface, add, cross, dot, norm, scale, sub};
+use solidcore::math::det;
 
 /// Every knot repeated by its multiplicity, for `points` control points of degree `degree`:
 /// `None` unless there are more points than the degree and the multiplicities add up to
@@ -122,9 +123,9 @@ impl Curve {
         }
         let p = match self {
             Curve::Line { origin, direction, magnitude } => add(*origin, scale(*direction, t * magnitude)),
-            Curve::Circle { position, radius } => position.at(radius * t.cos(), radius * t.sin(), 0.0),
-            Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => position.at(semi_axis_1 * t.cos(), semi_axis_2 * t.sin(), 0.0),
-            Curve::Hyperbola { position, semi_axis, semi_imag_axis } => position.at(semi_axis * t.cosh(), semi_imag_axis * t.sinh(), 0.0),
+            Curve::Circle { position, radius } => position.at(radius * det::cos(t), radius * det::sin(t), 0.0),
+            Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => position.at(semi_axis_1 * det::cos(t), semi_axis_2 * det::sin(t), 0.0),
+            Curve::Hyperbola { position, semi_axis, semi_imag_axis } => position.at(semi_axis * det::cosh(t), semi_imag_axis * det::sinh(t), 0.0),
             Curve::Parabola { position, focal_dist } => position.at(focal_dist * t * t, 2.0 * focal_dist * t, 0.0),
             Curve::BSpline(b) => b.point(t)?,
             Curve::Polyline(pts) => {
@@ -171,22 +172,24 @@ impl Surface {
         }
         let p = match self {
             Surface::Plane { position } => position.at(u, v, 0.0),
-            Surface::Cylinder { position, radius } => position.at(radius * u.cos(), radius * u.sin(), v),
+            Surface::Cylinder { position, radius } => position.at(radius * det::cos(u), radius * det::sin(u), v),
             Surface::Cone { position, radius, semi_angle } => {
-                let r = radius + v * semi_angle.tan();
-                position.at(r * u.cos(), r * u.sin(), v)
+                let r = radius + v * det::tan(*semi_angle);
+                position.at(r * det::cos(u), r * det::sin(u), v)
             }
-            Surface::Sphere { position, radius } => position.at(radius * v.cos() * u.cos(), radius * v.cos() * u.sin(), radius * v.sin()),
+            Surface::Sphere { position, radius } => {
+                position.at(radius * det::cos(v) * det::cos(u), radius * det::cos(v) * det::sin(u), radius * det::sin(v))
+            }
             Surface::Torus { position, major_radius, minor_radius } | Surface::DegenerateTorus { position, major_radius, minor_radius, .. } => {
-                let r = major_radius + minor_radius * v.cos();
-                position.at(r * u.cos(), r * u.sin(), minor_radius * v.sin())
+                let r = major_radius + minor_radius * det::cos(v);
+                position.at(r * det::cos(u), r * det::sin(u), minor_radius * det::sin(v))
             }
             Surface::BSpline(b) => b.point(u, v)?,
             Surface::Revolution { profile, axis } => {
                 // Rodrigues: the profile point turned by u about the axis.
                 let q = sub(profile.point_at(v, depth + 1)?, axis.origin);
                 let k = axis.direction;
-                let (s, c) = u.sin_cos();
+                let (s, c) = det::sin_cos(u);
                 add(axis.origin, add(add(scale(q, c), scale(cross(k, q), s)), scale(k, dot(k, q) * (1.0 - c))))
             }
             Surface::Extrusion { profile, direction, magnitude } => add(profile.point_at(u, depth + 1)?, scale(*direction, v * magnitude)),

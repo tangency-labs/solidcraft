@@ -12,6 +12,7 @@
 //! Deviations: none (no upstream counterpart). No recursion: the panels are reached by a
 //! breadth-first walk over the joints, each joint followed once.
 
+use crate::math::det;
 use std::collections::VecDeque;
 
 use super::chart::Flatten;
@@ -93,8 +94,8 @@ impl Wrap {
         let rho = self.sheet - self.sign * depth;
         Vec3::new(
             along,
-            self.sign * (self.sheet - rho * phi.cos()),
-            rho * phi.sin() - self.setback,
+            self.sign * (self.sheet - rho * det::cos(phi)),
+            rho * det::sin(phi) - self.setback,
         )
     }
 }
@@ -144,16 +145,16 @@ impl Bent {
         // In the frame, a point turned `phi` at radius `rho` lies at (along, sign (sheet -
         // rho cos phi), rho sin phi - setback); deeper, `rho` falls (sign 1) or grows.
         let (c, s) = (w.sheet - w.sign * q.y, q.z + w.setback);
-        let rho = c.hypot(s);
+        let rho = det::hypot(c, s);
         if !(rho > 0.0) {
             return None;
         }
-        let phi = s.atan2(c);
+        let phi = det::atan2(s, c);
         let (o, d) = self.flat;
         let flat = o + d * q.x + Vec2::new(d.y, -d.x) * (phi * w.neutral - w.setback);
         let deeper = self
             .frame
-            .vector(Vec3::new(0.0, phi.cos(), -w.sign * phi.sin()));
+            .vector(Vec3::new(0.0, det::cos(phi), -w.sign * det::sin(phi)));
         Some((flat, (w.sheet - rho) * w.sign, deeper))
     }
 
@@ -411,7 +412,7 @@ pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, 
 /// line, less its setback back along the `b` panel.
 fn bent_across(bend: &Bend, thickness: f64, k_factor: f64) -> Rigid3 {
     let w = Wrap::of(bend, thickness, k_factor);
-    let (sin, cos) = bend.angle.sin_cos();
+    let (sin, cos) = det::sin_cos(bend.angle);
     let on = Vec3::new(0.0, w.sign * sin, cos);
     let up = Vec3::new(0.0, cos, -w.sign * sin);
     Rigid3 {
@@ -451,7 +452,7 @@ fn embed(surface: &Surface, q: Vec2, depth: f64) -> Option<(Vec3, Vec3)> {
             material_inward,
         } => {
             let s = turn_sign(material_inward);
-            let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
+            let out = Vec3::new(det::cos(q.y), s * det::sin(q.y), 0.0);
             let normal = out * -s;
             Some((out * radius + Vec3::Z * q.x + normal * depth, normal))
         }
@@ -460,8 +461,8 @@ fn embed(surface: &Surface, q: Vec2, depth: f64) -> Option<(Vec3, Vec3)> {
             material_inward,
         } => {
             let s = turn_sign(material_inward);
-            let (sa, ca) = half_angle.sin_cos();
-            let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
+            let (sa, ca) = det::sin_cos(half_angle);
+            let out = Vec3::new(det::cos(q.y), s * det::sin(q.y), 0.0);
             let normal = (out * ca - Vec3::Z * sa) * -s;
             Some(((out * sa + Vec3::Z * ca) * q.x + normal * depth, normal))
         }
@@ -479,7 +480,7 @@ pub(crate) fn metric(surface: &Surface, q: Vec2) -> [f64; 3] {
         Surface::Plane => [1.0, 0.0, 1.0],
         Surface::Cylinder { radius, .. } => [1.0, 0.0, radius * radius],
         Surface::Cone { half_angle, .. } => {
-            let round = q.x * half_angle.sin();
+            let round = q.x * det::sin(half_angle);
             [1.0, 0.0, round * round]
         }
     }
@@ -494,17 +495,17 @@ fn tangent(surface: &Surface, q: Vec2, dir: Vec2) -> Option<Vec3> {
             material_inward,
         } => {
             let s = turn_sign(material_inward);
-            Vec3::Z * dir.x + Vec3::new(-q.y.sin(), s * q.y.cos(), 0.0) * (radius * dir.y)
+            Vec3::Z * dir.x + Vec3::new(-det::sin(q.y), s * det::cos(q.y), 0.0) * (radius * dir.y)
         }
         Surface::Cone {
             half_angle,
             material_inward,
         } => {
             let s = turn_sign(material_inward);
-            let (sa, ca) = half_angle.sin_cos();
-            let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
+            let (sa, ca) = det::sin_cos(half_angle);
+            let out = Vec3::new(det::cos(q.y), s * det::sin(q.y), 0.0);
             (out * sa + Vec3::Z * ca) * dir.x
-                + Vec3::new(-q.y.sin(), s * q.y.cos(), 0.0) * (q.x * sa * dir.y)
+                + Vec3::new(-det::sin(q.y), s * det::cos(q.y), 0.0) * (q.x * sa * dir.y)
         }
     };
     along.normalized()

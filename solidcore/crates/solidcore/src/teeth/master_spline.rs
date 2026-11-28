@@ -37,6 +37,7 @@
 //! tooth that goes all the way round, with a pair cycle of a whole turn. Angles are radians, except
 //! the angle a person gives [`placement`] and [`master_spline`], which is degrees.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::error::teeth::{TeethFailure, Why};
@@ -180,7 +181,7 @@ pub(super) fn turned_piece(piece: &Piece, angle: f64) -> Piece {
 
 /// The angle of a point about the axis.
 fn angle_of(p: Point) -> f64 {
-    p[1].atan2(p[0])
+    det::atan2(p[1], p[0])
 }
 
 /// The outline turned about its axis by `angle` (radians, counter-clockwise): the same pieces at
@@ -230,7 +231,7 @@ impl Period {
         let joint = tooth
             .iter()
             .enumerate()
-            .filter_map(|(i, p)| p.start().map(|q| (i, q, q[0].hypot(q[1]))))
+            .filter_map(|(i, p)| p.start().map(|q| (i, q, det::hypot(q[0], q[1]))))
             .filter(|(_, _, r)| (r - on).abs() <= near)
             .min_by(|a, b| (a.2 - on).abs().total_cmp(&(b.2 - on).abs()));
         let Some((at, first, radius)) = joint else {
@@ -330,7 +331,7 @@ pub(crate) fn replaced_period_typed(
                 radius,
                 role,
                 ..
-            } if centre[0].hypot(centre[1]) < 1e-9
+            } if det::hypot(centre[0], centre[1]) < 1e-9
                 && (radius - period.radius).abs() <= 1e-6 * (1.0 + radius) =>
             {
                 Some(*role)

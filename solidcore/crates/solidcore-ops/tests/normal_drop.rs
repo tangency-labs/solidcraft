@@ -11,6 +11,7 @@
     clippy::float_arithmetic
 )]
 
+use solidcore::math::det;
 use solidcore_ops::sweep::{drop_curves, Curve};
 use solidcore_ops::{make_box, make_cylinder, Body, Error, Order};
 use solidcore_record::brep::Curve as RecordCurve;
@@ -188,7 +189,7 @@ fn curves_crossing_a_closed_cylinders_seam_drop_as_two_pieces_and_cut() {
     for (c, _) in &dropped_chord {
         let p = points(c);
         for q in [p[0], p[p.len() - 1]] {
-            let rad = q[0].hypot(q[1]);
+            let rad = det::hypot(q[0], q[1]);
             assert!((rad - r).abs() < 1e-5, "endpoint on cylinder: {q:?}");
         }
         for q in &p {
@@ -207,7 +208,7 @@ fn curves_crossing_a_closed_cylinders_seam_drop_as_two_pieces_and_cut() {
     );
     // The two non-seam endpoints must match the radial projections of [d, -a, 20] and [d, a, 20]
     // (one each, order-independently), ruling out duplicated single-side pieces.
-    let hyp = d.hypot(a);
+    let hyp = det::hypot(d, a);
     let want_neg = [r * d / hyp, -r * a / hyp, 20.0];
     let want_pos = [r * d / hyp, r * a / hyp, 20.0];
     let near = |p: [f64; 3], q: [f64; 3]| {
@@ -268,7 +269,7 @@ fn curves_crossing_a_closed_cylinders_seam_drop_as_two_pieces_and_cut() {
     }
 
     // Closed-form area of the slot dropped square onto the cylinder.
-    let want_inside = 32.0 * r * (a / d).atan() + 2.0 * PI * r * ((a * a + d * d).sqrt() - d);
+    let want_inside = 32.0 * r * det::atan(a / d) + 2.0 * PI * r * ((a * a + d * d).sqrt() - d);
     let area_bound = tol * 2.0 * PI * a;
     for n in [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]] {
         let curves: Vec<Curve> = drop_curves(&can, &order, wall, &slot_facing(n), tol)

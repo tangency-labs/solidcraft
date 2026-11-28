@@ -7,6 +7,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use super::plane::{from_angle, Planar};
@@ -88,8 +89,8 @@ impl Flatten {
                     k * t
                 };
                 Ok(Flatten::Cone {
-                    shift: h / half_angle.tan(),
-                    scale: half_angle.sin(),
+                    shift: h / det::tan(half_angle),
+                    scale: det::sin(half_angle),
                 })
             }
         }
@@ -110,7 +111,7 @@ impl Flatten {
             Flatten::Same => p,
             Flatten::Roll { radius } => Vec2::new(p.x, p.y / radius),
             Flatten::Cone { shift, scale } => {
-                let turn = p.y.atan2(p.x);
+                let turn = det::atan2(p.y, p.x);
                 let turn = turn + ((near * scale - turn) / TAU).round() * TAU;
                 Vec2::new(p.len() - shift, turn / scale)
             }
@@ -313,8 +314,10 @@ fn is_spiral(a: Vec2, b: Vec2) -> bool {
 fn spiral_pieces(a: Vec2, b: Vec2, shift: f64, scale: f64) -> f64 {
     let (dr, dt) = (b.x - a.x, (b.y - a.y) * scale);
     let far = (a.x + shift).abs().max((b.x + shift).abs());
-    let fourth = dt.abs().powi(3) * (dt * dt * far * far + 16.0 * dr * dr).sqrt();
-    (fourth / (384.0 * CHORD_TOL)).powf(0.25).ceil().max(1.0)
+    let fourth = det::powi(dt.abs(), 3) * (dt * dt * far * far + 16.0 * dr * dr).sqrt();
+    det::powf(fourth / (384.0 * CHORD_TOL), 0.25)
+        .ceil()
+        .max(1.0)
 }
 
 /// A circular arc as rational quadratic pieces of at most a quarter turn each: exact, and kept
@@ -328,9 +331,9 @@ pub(crate) fn arc_as_conics(center: Vec2, radius: f64, start: f64, sweep: f64) -
             let half = step / 2.0;
             Seg2::Conic {
                 a: center + from_angle(a0) * radius,
-                apex: center + from_angle(a0 + half) * (radius / half.cos()),
+                apex: center + from_angle(a0 + half) * (radius / det::cos(half)),
                 b: center + from_angle(a0 + step) * radius,
-                w: half.cos(),
+                w: det::cos(half),
             }
         })
         .collect()

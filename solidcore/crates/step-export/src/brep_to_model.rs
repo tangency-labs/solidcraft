@@ -631,6 +631,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
 mod tests {
     use super::*;
     use solidcore::kernel::Kernel;
+    use solidcore::math::det;
     use solidcore::math::Point3;
     use solidcore::primitive::api_primitives as api;
 
@@ -769,8 +770,8 @@ mod tests {
                 magnitude,
             } => plus(*origin, t * magnitude, *dir),
             ModelCurve::Circle { frame, radius } => plus(
-                plus(frame.origin, radius * t.cos(), frame.x),
-                radius * t.sin(),
+                plus(frame.origin, radius * det::cos(t), frame.x),
+                radius * det::sin(t),
                 frame.y,
             ),
             other => panic!("generator {other:?}"),
@@ -780,8 +781,8 @@ mod tests {
     /// The ISO 10303-42 point of an exported surface at file parameters (angles in
     /// radians).
     fn iso_point(surface: &ModelSurface, u: f64, v: f64) -> [f64; 3] {
-        let (su, cu) = u.sin_cos();
-        let (sv, cv) = v.sin_cos();
+        let (su, cu) = det::sin_cos(u);
+        let (sv, cv) = det::sin_cos(v);
         let around = |frame: &Frame, r: f64, height: f64| {
             plus(
                 plus(plus(frame.origin, r * cu, frame.x), r * su, frame.y),
@@ -795,7 +796,7 @@ mod tests {
                 frame,
                 radius,
                 semi_angle_deg,
-            } => around(frame, radius + v * semi_angle_deg.to_radians().tan(), v),
+            } => around(frame, radius + v * det::tan(semi_angle_deg.to_radians()), v),
             ModelSurface::Sphere { frame, radius } => around(frame, radius * cv, radius * sv),
             ModelSurface::Torus {
                 frame,

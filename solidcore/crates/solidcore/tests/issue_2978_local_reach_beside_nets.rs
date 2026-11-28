@@ -23,6 +23,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -251,7 +252,7 @@ fn a_pyramid_base_moved_up_leaves_the_similar_pyramid_above_it() {
     assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
     let d = planes[0].0.z;
     assert!(d > 1.3 && d < 1.31, "{d}");
-    let want = before * ((h - d) / h).powi(3);
+    let want = before * det::powi((h - d) / h, 3);
     let v = volume(&mut k, &mut b).unwrap();
     assert!((v - want).abs() <= AGREE * want, "{v} vs {want}");
 }
@@ -431,12 +432,12 @@ fn pappus(d: f64) -> f64 {
     // the moved side `(R, Z)(t)` and `Z'(t)` (z'' = 0: z is linear in t)
     let side = |t: f64| {
         let (rp, zp) = (dbez(R, t), dbez(Z, t));
-        let l = rp.hypot(zp);
+        let l = det::hypot(rp, zp);
         (bez(R, t) + d * zp / l, bez(Z, t) - d * rp / l)
     };
     let side_dz = |t: f64| {
         let (rp, zp) = (dbez(R, t), dbez(Z, t));
-        let l = rp.hypot(zp);
+        let l = det::hypot(rp, zp);
         let dl = rp * ddr(t) / l;
         zp - d * (ddr(t) * l - rp * dl) / (l * l)
     };
@@ -456,7 +457,7 @@ fn pappus(d: f64) -> f64 {
     let n = 40;
     let mut nodes = Vec::new();
     for i in 1..=n {
-        let mut x = (std::f64::consts::PI * (f64::from(i) - 0.25) / (f64::from(n) + 0.5)).cos();
+        let mut x = det::cos(std::f64::consts::PI * (f64::from(i) - 0.25) / (f64::from(n) + 0.5));
         let mut dp = 1.0;
         for _ in 0..100 {
             let (mut p0, mut p1) = (1.0, x);
@@ -490,13 +491,13 @@ fn pappus(d: f64) -> f64 {
     };
     let (t0, t1) = (cut(0.0), cut(90.0));
     let (a, b) = (t0.max(0.0), t1.min(1.0));
-    let mut v = theta * quad(&|t| side(t).0.powi(2) / 2.0 * side_dz(t), a, b);
+    let mut v = theta * quad(&|t| det::powi(side(t).0, 2) / 2.0 * side_dz(t), a, b);
     // a tangent line on from an end of the side to the cap it ends inside: R linear in Z
     for (end, cap, inside) in [(0.0, 0.0, t0 < 0.0), (1.0, 90.0, t1 > 1.0)] {
         if inside {
             let (r0, z0) = side(end);
             let slope = dbez(R, end) / dbez(Z, end);
-            let f = |z: f64| (r0 + (z - z0) * slope).powi(3) / (6.0 * slope);
+            let f = |z: f64| det::powi(r0 + (z - z0) * slope, 3) / (6.0 * slope);
             v += theta
                 * if end == 0.0 {
                     f(z0) - f(cap)
@@ -808,7 +809,7 @@ fn closed_fit_spline(points: &[(f64, f64)]) -> solidcore::curve::curve::Curve {
     let h: Vec<f64> = (0..n)
         .map(|i| {
             let (a, b) = (at(i), at(i + 1));
-            (b.0 - a.0).hypot(b.1 - a.1)
+            det::hypot(b.0 - a.0, b.1 - a.1)
         })
         .collect();
     // the cyclic system, x and y as two right-hand sides, by Gaussian elimination

@@ -22,6 +22,7 @@ use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Curve2, Surface as BSurface};
 
 use super::{R, unsupported};
+use solidcore::math::det;
 
 /// A turn round the axis in the parameter of a form on the quarter grid.
 const FORM_TURN: f64 = 4.0;
@@ -74,7 +75,7 @@ fn axis(label: &BSurface) -> R<Axis> {
             Box::new(move |_| r)
         }
         BSurface::Cone { radius_at_origin, half_angle, .. } => {
-            let (r, slope) = (*radius_at_origin, half_angle.tan());
+            let (r, slope) = (*radius_at_origin, det::tan(*half_angle));
             Box::new(move |h| r + h * slope)
         }
         _ => {
@@ -94,7 +95,7 @@ impl Axis {
         if !(round > 1e-18) {
             return Err(unsupported("an edge of a face that winds round its axis on the axis"));
         }
-        Ok(Spot { theta: y.atan2(x), height: r.dot(self.z), d_theta: (x * d.dot(self.y) - y * d.dot(self.x)) / round, d_height: d.dot(self.z) })
+        Ok(Spot { theta: det::atan2(y, x), height: r.dot(self.z), d_theta: (x * d.dot(self.y) - y * d.dot(self.x)) / round, d_height: d.dot(self.z) })
     }
 }
 
@@ -103,8 +104,8 @@ fn along(theta: f64) -> (f64, f64) {
     let q = (theta / FRAC_PI_2).floor();
     let psi = (theta - q * FRAC_PI_2).clamp(0.0, FRAC_PI_2);
     let eighth = FRAC_PI_8;
-    let t = (0.5 * psi - eighth).tan();
-    (form::param(theta), 0.25 * (1.0 + t * t) / eighth.tan())
+    let t = det::tan(0.5 * psi - eighth);
+    (form::param(theta), 0.25 * (1.0 + t * t) / det::tan(eighth))
 }
 
 /// A piece of the pcurve: its parameters, and at each end the angle followed from the start (not
@@ -479,7 +480,7 @@ fn lift_bound(ax: &Axis, source: &Source, [p, q]: [End; 2]) -> R<Verdict> {
     }
     // t = tan(psi/2 - pi/8) runs in [-tan(pi/8), tan(pi/8)] inside a quarter, with
     // dt/dtheta = (1 + t^2)/2, and du/dtheta = c (1 + t^2) for c = 1/(4 tan(pi/8)).
-    let reach = FRAC_PI_8.tan();
+    let reach = det::tan(FRAC_PI_8);
     let mut tangent: Series = [Ivl::from(0.0); 4];
     tangent[0] = Ivl::new(-reach, reach);
     for k in 0..3 {
@@ -498,12 +499,12 @@ fn lift_bound(ax: &Axis, source: &Source, [p, q]: [End; 2]) -> R<Verdict> {
     // u' = g(theta) * theta'; its third coefficient is u/4! * 4 = u / 6.
     let slope = series_mul(&g, &rate);
     let u4 = 6.0 * slope[3].mag();
-    let factor = h.abs().powi(4) / 384.0;
+    let factor = det::powi(h.abs(), 4) / 384.0;
     let (eu, ev) = (factor * u4, factor * v4);
     // The radius over the heights the spline can be at.
     let heights = Ivl::from(p.v) + span * v1;
     let radius = (ax.radius)(heights.lo - ev).abs().max((ax.radius)(heights.hi + ev).abs());
-    let climb = ((ax.radius)(1.0) - (ax.radius)(0.0)).hypot(1.0);
+    let climb = det::hypot((ax.radius)(1.0) - (ax.radius)(0.0), 1.0);
     let bound = radius * 4.0 * reach * eu + climb * ev;
     Ok(if bound.is_finite() { Verdict::Within(bound) } else { Verdict::Unbounded })
 }
@@ -719,9 +720,9 @@ mod tests {
     /// `spans` of them over the parameter 0 to 1, about the z axis of `frame`.
     fn helix([o, x, y, z]: [Vec3; 4], radius: f64, pitch: f64, spans: usize) -> BCurve {
         let step = TAU / 6.0;
-        let weight = (0.5 * step).cos();
+        let weight = det::cos(0.5 * step);
         let at = |turn: f64, r: f64, w: f64| {
-            let p = o + x * (r * turn.cos()) + y * (r * turn.sin()) + z * (pitch * turn / TAU);
+            let p = o + x * (r * det::cos(turn)) + y * (r * det::sin(turn)) + z * (pitch * turn / TAU);
             [w * p.x, w * p.y, w * p.z, w]
         };
         let mut knots = vec![0.0; 3];
@@ -755,9 +756,9 @@ mod tests {
         // The angle the helix is at, counting its turns, and its height.
         let place = |t: f64| {
             let d = on.point(t).unwrap() - o;
-            assert!((d.dot(x).hypot(d.dot(y)) - radius).abs() < 1e-9, "off the cylinder at {t}");
+            assert!((det::hypot(d.dot(x), d.dot(y)) - radius).abs() < 1e-9, "off the cylinder at {t}");
             let about = spans as f64 / 6.0 * TAU * t;
-            let angle = d.dot(y).atan2(d.dot(x));
+            let angle = det::atan2(d.dot(y), d.dot(x));
             (angle + TAU * ((about - angle) / TAU).round(), d.dot(z))
         };
         for interval in [[0.0176, 0.7958], [0.0855, 0.877], [0.0, 1.0]] {

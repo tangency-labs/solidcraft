@@ -31,6 +31,7 @@ use crate::invert::Side;
 use crate::patch::Patch;
 use crate::piece::{box_of, boxes_apart, cross, dot, norm, sub, Piece, V3};
 use crate::Error;
+use solidcore::math::det;
 
 /// What the field path takes from the run.
 pub(crate) struct Settings {
@@ -618,7 +619,7 @@ fn turn(u: &[f64], v: &[f64], clear: f64, depth: u32) -> Option<f64> {
             return None;
         };
         let (a, b) = ((u0, v0), (u1, v1));
-        return Some((a.0 * b.1 - a.1 * b.0).atan2(a.0 * b.0 + a.1 * b.1));
+        return Some(det::atan2(a.0 * b.1 - a.1 * b.0, a.0 * b.0 + a.1 * b.1));
     }
     if depth >= 40 {
         return None;
@@ -750,7 +751,7 @@ fn crossing(
             let (ls, lt) = (bs0 + bs * (bs1 - bs0), bt0 + bt * (bt1 - bt0));
             // A box edge through x* itself (x* on the cell's edge) has a double
             // root there: not a branch's way out.
-            if ((ls - c.s) / hs).powi(2) + ((lt - c.t) / ht).powi(2) < 0.25 {
+            if det::powi((ls - c.s) / hs, 2) + det::powi((lt - c.t) / ht, 2) < 0.25 {
                 continue;
             }
             let q = cell.at(ls, lt);
@@ -842,7 +843,7 @@ fn valley(
         } else {
             norm(e.dt) * (cell.t1 - cell.t0)
         };
-        let limit = 0.5 * dd_min * (settings.resolution / along).powi(2);
+        let limit = 0.5 * dd_min * det::powi(settings.resolution / along, 2);
         // g_s zero along the high edge, s = 1 (t = 1 for lines along t): the valley
         // is that edge, G there is g's edge polynomial, bounded by its coefficients.
         let high = if lines == 0 { 1 } else { 3 };
@@ -1137,13 +1138,13 @@ fn contact_curve(
         // each derivative's coefficients (CLEAR of the scale, times 2n for each
         // differencing): a contact to the input's own precision, where the
         // flatness puts no zero nearer than (rounding / κ)^(1/k) of it.
-        let rounding = |j: usize| CLEAR * scale * (2.0 * degree as f64).powi(j as i32);
+        let rounding = |j: usize| CLEAR * scale * det::powi(2.0 * degree as f64, j as i32);
         // b holds k - 1 bounds, j = 0 to k - 2.
         let enough = |b: &[f64]| {
             b.iter().enumerate().all(|(j, &bj)| bj <= rounding(j))
                 || b.iter()
                     .enumerate()
-                    .map(|(j, &bj)| bj / (factorial(j) * r.powi((k - j) as i32)))
+                    .map(|(j, &bj)| bj / (factorial(j) * det::powi(r, (k - j) as i32)))
                     .sum::<f64>()
                     < kappa / factorial(k)
         };
@@ -1203,9 +1204,9 @@ fn contact_curve(
                     a.iter()
                         .enumerate()
                         .skip(j)
-                        .map(|(i, ai)| ai * delta.powi((i - j) as i32) / factorial(i - j))
+                        .map(|(i, ai)| ai * det::powi(delta, (i - j) as i32) / factorial(i - j))
                         .sum::<f64>()
-                        + kappa_max * delta.powi((k - j) as i32) / factorial(k - j)
+                        + kappa_max * det::powi(delta, (k - j) as i32) / factorial(k - j)
                 })
                 .collect();
             enough(&b)

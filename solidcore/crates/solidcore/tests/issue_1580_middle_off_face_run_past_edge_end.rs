@@ -20,6 +20,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_taper_extrude;
@@ -178,8 +179,8 @@ fn middle_off_face_run_past_the_edge_end_is_not_refused() {
 #[test]
 fn middle_off_face_run_inside_the_edge_span_is_a_cliff_overflow() {
     let a: f64 = 0.5;
-    let g = (a * (4.0 - a * a).sqrt() + 4.0 * (a / 2.0).asin()) / 2.0;
-    let h = (8.0 - (4.0 - a * a).powf(1.5)) / 3.0;
+    let g = (a * (4.0 - a * a).sqrt() + 4.0 * det::asin(a / 2.0)) / 2.0;
+    let h = (8.0 - det::powf(4.0 - a * a, 1.5)) / 3.0;
     let in_notch = 6.0 / 18.5 * (a * a - a * g + h);
     let analytic = (4.0 - std::f64::consts::PI) * 40.0 - in_notch;
     let outcome = round_front_edge(|k| notched_block(k, 1.5));

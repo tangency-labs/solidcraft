@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use super::*;
+use solidcore::math::det;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Curve2, Frame, Surface as BSurface};
 
@@ -114,7 +115,7 @@ fn every_edge_of_the_box_is_named_by_its_origin() {
 /// `given`, each top use's pcurve is given as the straight (u, v) line between its ends (`off`
 /// from them in u), which lies off its edge by at most a quarter of the 1 mm bulge.
 fn box_with_spline_top(given: bool, off: f64) -> R<Solid> {
-    let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let (sin, cos) = det::sin_cos(std::f64::consts::FRAC_PI_6);
     let (a, b) = ([cos, sin], [-sin, cos]);
     let c = [5.0, 10.0];
     // u where s(u) = t: the root in [0, 1] of -2u² + 42u - (20 + t).
@@ -467,7 +468,7 @@ fn box_with(f: usize, definition: &SweptSurface, own: bool) -> R<(Solid, BSurfac
 #[test]
 fn an_ellipse_swept_across_its_parameter_origin_bounds_only_its_face() {
     let (a, b, h) = (10.0, 6.0, 5.0);
-    let s = (std::f64::consts::PI / 3.0).sin();
+    let s = det::sin(std::f64::consts::PI / 3.0);
     for up in [true, false] {
         let mut asm = Assembly::new(1e-6, None);
         let v: Vec<u32> =
@@ -516,7 +517,7 @@ fn an_ellipse_swept_across_its_parameter_origin_bounds_only_its_face() {
         let solid = asm.finish(0, "segment".into(), vec![vec![(bottom, true), (top, true), (flat, true), side]], Kind::Solid).unwrap();
         assert_eq!((solid.brep.faces.len(), solid.brep.edges.len(), solid.brep.vertices.len()), (4, 6, 4), "up: {up}");
         let theta = 2.0 * std::f64::consts::FRAC_PI_3;
-        let expected = b / a * 0.5 * a * a * (theta - theta.sin()) * h;
+        let expected = b / a * 0.5 * a * a * (theta - det::sin(theta)) * h;
         let got = volume(&solid);
         assert!((got - expected).abs() < 1e-6 * expected, "up: {up}: {got} vs {expected}");
     }
@@ -636,7 +637,7 @@ fn parabola_and_hyperbola_edges_lie_on_their_conics() {
     let c = hyperbola_curve(o, z, x, r, [t0, t1]);
     let eval = crate::kernel::CurveEval::new(&c).unwrap();
     for t in [t0, t1] {
-        let want = Vec3::new(1.0 + r[0] * f64::cosh(t), 2.0 + r[1] * f64::sinh(t), 3.0);
+        let want = Vec3::new(1.0 + r[0] * det::cosh(t), 2.0 + r[1] * det::sinh(t), 3.0);
         assert!(eval.point(t).unwrap().dist(want) < 1e-9, "hyperbola at {t}");
     }
 }
@@ -685,7 +686,7 @@ fn half_cylinder() -> BSurface {
 /// A bicubic patch with a single interior knot along each direction, its points off any plane.
 fn bicubic() -> BSurface {
     let points =
-        (0..5).map(|i| (0..5).map(|j| [f64::from(i), f64::from(j), (f64::from(i) * 0.7).sin() + (f64::from(j) * 1.3).cos()]).collect()).collect();
+        (0..5).map(|i| (0..5).map(|j| [f64::from(i), f64::from(j), det::sin(f64::from(i) * 0.7) + det::cos(f64::from(j) * 1.3)]).collect()).collect();
     let knots = vec![0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0, 1.0];
     BSurface::Spline { u_knots: knots.clone(), v_knots: knots, points }
 }
@@ -821,7 +822,7 @@ fn an_arc_wholly_past_the_quarter_line_its_faces_form_ends_on_takes_its_closed_f
     let (r, h, tol) = (10.0, 5.0, 1e-3);
     let delta = 0.8 * tol / r;
     let mut asm = Assembly::new(tol, None);
-    let rim = |a: f64, z: f64| [r * a.cos(), r * a.sin(), z];
+    let rim = |a: f64, z: f64| [r * det::cos(a), r * det::sin(a), z];
     let half = std::f64::consts::FRAC_PI_2;
     let (cb, ct) = (asm.add_vertex([0.0; 3]).unwrap(), asm.add_vertex([0.0, 0.0, h]).unwrap());
     let mut at = |a: f64, z: f64| asm.add_vertex(rim(a, z)).unwrap();
@@ -846,7 +847,7 @@ fn an_arc_wholly_past_the_quarter_line_its_faces_form_ends_on_takes_its_closed_f
     let (ta, tb) = (arc(10, h, [-delta, 0.0], [tm, t0]), arc(11, h, [0.0, half], [t0, tq]));
     let cylinder = BSurface::Cylinder { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
     let plane = |origin: [f64; 3], u_axis: [f64; 3], v_axis: [f64; 3]| BSurface::Plane { origin, u_axis, v_axis };
-    let d = [(-delta).cos(), (-delta).sin(), 0.0];
+    let d = [det::cos(-delta), det::sin(-delta), 0.0];
     let faces = [
         (cylinder, vec![(ba, true), (bb, true), (up_q, true), (tb, false), (ta, false), (up_m, false)]),
         (plane([0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]), vec![(b_q, true), (bb, false), (ba, false), (b_m, false)]),

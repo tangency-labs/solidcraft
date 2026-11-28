@@ -60,6 +60,7 @@
 
 use crate::error::teeth::{TeethFailure, Why, FIT_DISTANCE};
 use crate::geom::certified::{gamma, next_up};
+use crate::math::det;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::crv_deviation::certified_distance;
 use crate::nurbs::knots::{KnotVector, Side as KnotSide, MAX_DEGREE as KERNEL_MAX_DEGREE};
@@ -308,7 +309,7 @@ pub(super) fn same_direction(a: Option<Point>, b: Option<Point>) -> bool {
 
 /// A direction of length one, if it has a finite length above nothing.
 pub(super) fn unit([x, y]: Point) -> Option<Point> {
-    let length = x.hypot(y);
+    let length = det::hypot(x, y);
     if length > 0.0 && length.is_finite() {
         Some([x / length, y / length])
     } else {
@@ -323,9 +324,7 @@ pub(super) fn difference(a: Point, b: Point) -> Point {
 
 /// The angle between two directions, 0 to pi.
 pub(super) fn angle_between(a: Point, b: Point) -> f64 {
-    (a[0] * b[1] - a[1] * b[0])
-        .atan2(a[0] * b[0] + a[1] * b[1])
-        .abs()
+    det::atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]).abs()
 }
 
 /// One side of a join: the direction of travel there, whether it is exact, the join's point, and
@@ -397,7 +396,7 @@ pub(super) fn side(piece: &Piece, at_end: bool) -> Option<Side> {
             let s = sweep.signum();
             let at = if at_end { piece.end()? } else { piece.start()? };
             if *radius > 0.0 && *sweep != 0.0 {
-                exact([-angle.sin() * s, angle.cos() * s], at)
+                exact([-det::sin(angle) * s, det::cos(angle) * s], at)
             } else {
                 None
             }

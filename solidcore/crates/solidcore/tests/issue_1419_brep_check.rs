@@ -11,6 +11,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use solidcore::primitive::api_primitives as ap;
 use solidcore::topology::brep::validation::{check_brep, BrepCheck, CheckLevel};
 use solidcore::topology::Brep;
@@ -135,7 +136,7 @@ fn local_vertex_tolerances_do_not_refuse_a_valid_body_or_its_cut() {
     let mut cut = boolean_difference(&mut k, bounded, tool).unwrap();
     let report = check(&mut k, &mut cut);
     assert!(report.is_valid(), "{:?}", report.lines());
-    let expected = 1000.0 - std::f64::consts::PI * 1.5_f64.powi(2) * 10.0;
+    let expected = 1000.0 - std::f64::consts::PI * det::powi(1.5_f64, 2) * 10.0;
     let measured = brep_volume_default(&k, &mut cut, 1e-8).unwrap();
     assert!(
         (measured - expected).abs() < 1e-6,
@@ -241,7 +242,7 @@ fn arc_prism(k: &mut Kernel, gap: f64) -> (Brep, solidcore::topology::VertexId) 
 
     let at = |radius: f64, degrees: f64| {
         let a = degrees.to_radians();
-        Vec3::new(radius * a.cos(), radius * a.sin(), 0.0)
+        Vec3::new(radius * det::cos(a), radius * det::sin(a), 0.0)
     };
     let frame = Axis2Placement::new(origin(), at(1.0, 100.0), at(1.0, 190.0));
     let sweep = Extent1d::from_min_max(0.0, 70.0);

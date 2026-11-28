@@ -29,6 +29,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_cylinder;
@@ -51,7 +52,7 @@ fn profile() -> [(f64, f64); 4] {
     let root = RADIUS - depth();
     let outer = RADIUS + 0.05;
     let half_root = PITCH / 8.0;
-    let half_outer = half_root + (outer - root) * 30.0_f64.to_radians().tan();
+    let half_outer = half_root + (outer - root) * det::tan(30.0_f64.to_radians());
     [
         (root, -half_root),
         (outer, -half_outer),
@@ -68,7 +69,7 @@ fn screw_groove(k: &mut Kernel, z0: f64, turns: f64, per_turn: usize) -> Brep {
     let mut curves = Vec::new();
     for i in 0..=n {
         let turn = i as f64 / per_turn as f64;
-        let (s, c) = (2.0 * PI * turn).sin_cos();
+        let (s, c) = det::sin_cos(2.0 * PI * turn);
         let pts: Vec<Point3> = prof
             .iter()
             .map(|&(r, z)| Point3::new(r * c, r * s, z0 + z + PITCH * turn))
@@ -114,7 +115,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 fn analytic_volume() -> f64 {
     let d = depth();
     let a = PITCH / 4.0;
-    let b = a + 2.0 * d * 30.0_f64.to_radians().tan();
+    let b = a + 2.0 * d * det::tan(30.0_f64.to_radians());
     let area = d * (a + b) / 2.0;
     let centroid = RADIUS - d + d * (a + 2.0 * b) / (3.0 * (a + b));
     PI * RADIUS * RADIUS * LENGTH - LENGTH / PITCH * 2.0 * PI * centroid * area

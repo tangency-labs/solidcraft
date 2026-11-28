@@ -8,6 +8,7 @@
 
 use std::f64::consts::PI;
 
+use solidcore::math::det;
 use solidcore_ops::sweep::{extrude, planar_faces, project_curves, Curve, DraftCorner};
 use solidcore_ops::trim::split_sheet;
 use solidcore_ops::trim::{
@@ -468,7 +469,7 @@ fn slot(a: f64, d: f64) -> [Curve; 4] {
 ///   ends cover 2 pi r (sqrt(a^2 + d^2) - d) together.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn slot_area_on_cylinder(r: f64, a: f64, d: f64) -> f64 {
-    32.0 * r * (a / d).atan() + 2.0 * PI * r * ((a * a + d * d).sqrt() - d)
+    32.0 * r * det::atan(a / d) + 2.0 * PI * r * ((a * a + d * d).sqrt() - d)
 }
 
 /// A slot of half width a = 3 drawn in the plane y = d = 20 and dropped square onto the half

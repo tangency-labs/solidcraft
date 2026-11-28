@@ -9,6 +9,7 @@ use crate::vec::VecExt as _;
 
 use super::size::{Rules, SizeAt};
 use crate::{Result, TessError};
+use solidcore::math::det;
 
 /// How near, as a fraction of its segment's parameter length, a node put in on an edge may lie to
 /// another shaping request before it is that node ([`insert_at`]). Crossing events are
@@ -354,7 +355,7 @@ pub(crate) fn turn(a: Vec3, b: Vec3) -> f64 {
     if !(la > 0.0 && lb > 0.0) {
         return 0.0;
     }
-    (a.dot(b) / (la * lb)).clamp(-1.0, 1.0).acos()
+    det::acos((a.dot(b) / (la * lb)).clamp(-1.0, 1.0))
 }
 
 #[cfg(test)]

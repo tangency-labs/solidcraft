@@ -6,6 +6,7 @@
 //! sampling of curves, arcs and splines, and the old sampling kept as the oracle that the proved
 //! one is never coarser.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 use super::common::{check_outline, lift, not_proved, out_of_range, typed_why, why, Dice};
@@ -92,7 +93,7 @@ fn old_arc_steps(radius: f64, sweep: f64, tolerance: f64) -> usize {
     }
     let ratio = (tolerance / radius).clamp(1e-15, 1.0);
     // The angle of a chord that is this far from its arc in the middle
-    let step = 2.0 * (1.0 - ratio).acos();
+    let step = 2.0 * det::acos(1.0 - ratio);
     let steps = if step > 0.0 {
         (sweep.abs() / step).ceil()
     } else {
@@ -110,7 +111,7 @@ fn old_arc_steps(radius: f64, sweep: f64, tolerance: f64) -> usize {
 
 /// The circle of `radius` about the origin, `P(t) = radius (cos t, sin t)`.
 fn circle_at(radius: f64) -> impl Fn(f64) -> Point {
-    move |t: f64| [radius * t.cos(), radius * t.sin()]
+    move |t: f64| [radius * det::cos(t), radius * det::sin(t)]
 }
 
 /// What [`circle_at`] does over a stretch: its derivatives enclosed through `bound::sin_cos`.
@@ -232,7 +233,7 @@ fn circle(centre: f64, radius: f64, sides: usize) -> Vec<Point> {
     (0..sides)
         .map(|i| {
             let a = TAU * i as f64 / sides as f64;
-            [centre + radius * a.cos(), radius * a.sin()]
+            [centre + radius * det::cos(a), radius * det::sin(a)]
         })
         .collect()
 }
@@ -363,7 +364,7 @@ fn outlines_of_lines_arcs_and_splines() -> crate::Result<()> {
 fn arc_like() -> (usize, Vec<f64>, Vec<Point>) {
     let k = 0.2652; // places the inner control points so that the curve stays near the unit circle
     let quarter = FRAC_PI_2 / 2.0;
-    let (c, s) = (quarter.cos(), quarter.sin());
+    let (c, s) = (det::cos(quarter), det::sin(quarter));
     let control = vec![
         [1.0, 0.0],
         [1.0, k],
@@ -392,7 +393,11 @@ fn a_spline_is_evaluated_and_cut_into_chords_within_the_tolerance() -> crate::Re
     assert_eq!(bspline::point(degree, &knots, &control, 7.0)?, [0.0, 1.0]); // taken into the range
     for i in 0..=100 {
         let [x, y] = bspline::point(degree, &knots, &control, f64::from(i) / 100.0)?;
-        assert!((x.hypot(y) - 1.0).abs() < 2e-4, "at {i}: {}", x.hypot(y));
+        assert!(
+            (det::hypot(x, y) - 1.0).abs() < 2e-4,
+            "at {i}: {}",
+            det::hypot(x, y)
+        );
     }
     // A straight spline of degree 1 is its control polygon.
     let line = bspline::point(1, &[0.0, 0.0, 1.0, 1.0], &[[0.0, 0.0], [2.0, 4.0]], 0.25)?;
@@ -414,7 +419,7 @@ fn a_spline_is_evaluated_and_cut_into_chords_within_the_tolerance() -> crate::Re
             // The chord's middle is inside the curve by at most the tolerance (the curve itself is
             // within 2e-4 of the circle).
             assert!(
-                1.0 - middle[0].hypot(middle[1]) < tolerance + 2e-4,
+                1.0 - det::hypot(middle[0], middle[1]) < tolerance + 2e-4,
                 "{tolerance}"
             );
         }
@@ -529,7 +534,7 @@ fn a_long_spline_is_cut_into_chords_without_checking_it_at_every_point() -> crat
     let control: Vec<Point> = (0..=spans)
         .map(|i| {
             let a = -FRAC_PI_4 + FRAC_PI_2 * i as f64 / spans as f64;
-            [a.cos(), a.sin()]
+            [det::cos(a), det::sin(a)]
         })
         .collect();
     let knots: Vec<f64> = (0..spans + 3)
@@ -751,8 +756,8 @@ fn a_pentagram_a_bow_tie_and_a_clockwise_square_are_refused() {
     let star: Vec<Point> = (0..5)
         .map(|k| {
             [
-                10.0 * (TAU * f64::from(2 * k) / 5.0).cos(),
-                10.0 * (TAU * f64::from(2 * k) / 5.0).sin(),
+                10.0 * det::cos(TAU * f64::from(2 * k) / 5.0),
+                10.0 * det::sin(TAU * f64::from(2 * k) / 5.0),
             ]
         })
         .collect();
@@ -910,14 +915,14 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
     let mut looked = 0_usize;
     for _ in 0..2000 {
         let centre = -1e4 + 2e4 * unit();
-        let width = 10f64.powf(-12.0 + 12.3 * unit());
+        let width = det::powf(10f64, -12.0 + 12.3 * unit());
         let (lo, hi) = (centre - 0.5 * width, centre + 0.5 * width);
         let (s, c) = bound::sin_cos(Ivl::new(lo, hi));
         for k in 0..100 {
             let t = (lo + (hi - lo) * f64::from(k) / 99.0).max(lo).min(hi);
             // The enclosure is proved; the platform's value is only good in practice, so it is
             // looked for within a few units in the last place of the enclosure.
-            let (sine, cosine) = t.sin_cos();
+            let (sine, cosine) = det::sin_cos(t);
             assert!(
                 beside(s, sine) && beside(c, cosine),
                 "at {t} in [{lo}, {hi}]: sin {sine} in {s:?}, cos {cosine} in {c:?}"
@@ -941,7 +946,7 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
     ] {
         let (s, c) = bound::sin_cos_at(x);
         if x.abs() <= 1e6 {
-            let (sine, cosine) = x.sin_cos();
+            let (sine, cosine) = det::sin_cos(x);
             assert!(
                 beside(s, sine) && beside(c, cosine),
                 "{x:e}: sin {sine:e} in {s:?}, cos {cosine:e} in {c:?}"
@@ -954,7 +959,11 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
             assert_eq!((s.lo, s.hi, c.lo, c.hi), (-1.0, 1.0, -1.0, 1.0), "{x:e}");
         }
         let a = bound::atan_at(x);
-        assert!(beside(a, x.atan()), "atan {x:e}: {} in {a:?}", x.atan());
+        assert!(
+            beside(a, det::atan(x)),
+            "atan {x:e}: {} in {a:?}",
+            det::atan(x)
+        );
         assert!(a.hi - a.lo < 1e-14, "atan {x:e}: {a:?}");
     }
     // Exact cases: the sine and cosine of 0, the arc tangent of 1 (a quarter of pi) and of what
@@ -1008,7 +1017,7 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
         let a = bound::atan_over(Ivl::new(lo, hi));
         for k in 0..=50 {
             let x = lo + (hi - lo) * f64::from(k) / 50.0;
-            assert!(holds(a, x.atan()), "{x}: {a:?}");
+            assert!(holds(a, det::atan(x)), "{x}: {a:?}");
         }
     }
     let ray = bound::atan_over(Ivl::new(f64::NEG_INFINITY, 0.0));
@@ -1057,7 +1066,7 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
             let width = next_up((t1 - t0).abs());
             let (p0, p1, bend) = (at(t0), at(t1), bend_of(t0, t1));
             let e = off_of(t0, p0).max(off_of(t1, p1));
-            let sagitta = 2.0 * radius * (0.25 * (t1 - t0)).sin().powi(2);
+            let sagitta = 2.0 * radius * det::powi(det::sin(0.25 * (t1 - t0)), 2);
             let by_size = width * width / 8.0 * bend.second_size + e;
             let proved = bound::chord_bound(width, p0, p1, e, &bend);
             let swapped = bound::chord_bound(width, p1, p0, e, &bend);
@@ -1124,11 +1133,11 @@ fn span_bends_hold_the_spline() -> crate::Result<()> {
         let (knots, control) = random_spline(&mut dice, degree, spans, round % 2 == 0, 1.0);
         let point = |t: f64| bspline::point(degree, &knots, &control, t);
         let (h1, h2) = (
-            2f64.powi(-12),
+            det::powi(2f64, -12),
             if degree <= 5 {
-                2f64.powi(-7)
+                det::powi(2f64, -7)
             } else {
-                2f64.powi(-9)
+                det::powi(2f64, -9)
             },
         );
         for span in degree..control.len() {
@@ -1236,7 +1245,7 @@ fn span_bends_hold_the_spline() -> crate::Result<()> {
                             looked += 1;
                         }
                     }
-                    let size = second[0].hypot(second[1]);
+                    let size = det::hypot(second[0], second[1]);
                     assert!(
                         size <= part.second_size * (1.0 + 1e-7) + 1e-9,
                         "degree {degree}, span {span}, [{lo}, {hi}] at {t}: {size} above {}",
@@ -1283,8 +1292,8 @@ fn a_bump_between_probes_is_caught() -> crate::Result<()> {
     // g in powers of t, from t^0 to t^5, then in Bernstein form on [0, 1]; x(t) = t.
     let power = [
         0.0,
-        24.0 * a.powi(4),
-        -50.0 * a.powi(3),
+        24.0 * det::powi(a, 4),
+        -50.0 * det::powi(a, 3),
         35.0 * a * a,
         -10.0 * a,
         1.0,
@@ -1514,7 +1523,7 @@ fn arc_counts_against_the_old_rule() {
                 proved += 1;
                 assert!(n + 1 >= old, "{label}: {n} against {old}");
                 let ratio = tolerance / radius;
-                let step = 2.0 * (1.0 - ratio.clamp(1e-15, 1.0)).acos();
+                let step = 2.0 * det::acos(1.0 - ratio.clamp(1e-15, 1.0));
                 let quotient = sweep / step;
                 if ratio >= 1e-6 && (quotient - quotient.round()).abs() >= 1e-9 && n < old {
                     fewer.push(format!("{label}: {n} against {old}"));
@@ -1571,7 +1580,7 @@ fn hostile_bends_refuse() {
     }
     // Nor does a platform whose sine is wrong by more than the tolerance pass for right: its
     // points are measured, and the curve is refused.
-    let wrong = |t: f64| [t.cos(), t.sin() + 2e-3];
+    let wrong = |t: f64| [det::cos(t), det::sin(t) + 2e-3];
     let refused = sampled(&wrong, &off, &bend, 0.0, 1.0, 1e-3);
     assert!(chord_unproved(&refused), "{refused:?}");
     let lost = |t: f64| if t > 0.5 { [f64::NAN, 0.0] } else { unit(t) };
@@ -1749,7 +1758,7 @@ fn a_curve_keeps_room_for_the_gap_its_closing_chord_bridges() -> crate::Result<(
     for k in 0..=200 {
         let s = f64::from(k) / 200.0;
         let c = [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])];
-        let angle = c[1].atan2(c[0]).min(to);
+        let angle = det::atan2(c[1], c[0]).min(to);
         let far = distance(c, at(angle));
         assert!(far <= tolerance, "{far:e} at {s} of the closing chord");
     }

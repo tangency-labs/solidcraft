@@ -1,6 +1,7 @@
 //! Pairs of involute parts, checked by placing them and measuring the gap: a splined shaft in its
 //! hub.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::teeth::involute::{hub_for, External, Fit};
@@ -53,7 +54,7 @@ fn a_shaft_sits_in_its_hub_with_the_clearance_asked_for() -> crate::Result<()> {
     // Between flanks the play asked for on the pitch circle appears turned by the pressure angle,
     // half on each side.
     for side in [0.06, 0.02, 0.2] {
-        let each_side = side * 30f64.to_radians().cos() / 2.0;
+        let each_side = side * det::cos(30f64.to_radians()) / 2.0;
         let found = shaft_in_hub(side, 0.0)?.expect("within reach");
         assert!(
             (found.distance - each_side).abs() < 2e-6,
@@ -79,7 +80,7 @@ fn a_shaft_turns_in_its_hub_by_half_the_play_and_no_further() -> crate::Result<(
     assert!(jammed.distance < -0.005, "{}", jammed.distance);
     // Turned by a whole pitch it is the same fit again.
     let next = shaft_in_hub(side, TAU / 20.0)?.expect("within reach");
-    assert!((next.distance - side * 30f64.to_radians().cos() / 2.0).abs() < 2e-6);
+    assert!((next.distance - side * det::cos(30f64.to_radians()) / 2.0).abs() < 2e-6);
     Ok(())
 }
 

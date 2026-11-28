@@ -17,6 +17,7 @@
 //! no length, a face of no size, numbers that are not finite give a refusal or a plain answer,
 //! never a panic.
 
+use crate::math::det;
 use std::f64::consts::FRAC_PI_2;
 
 use crate::eval::Frame;
@@ -284,9 +285,7 @@ pub fn chord_gap(axis: Vec3, a: Vec3, b: Vec3) -> ChordGap {
 #[must_use]
 pub fn centre_angle(plane: &Frame, min: Vec3, max: Vec3) -> f64 {
     let centre = (min + max) * 0.5 - v(plane.origin);
-    centre
-        .dot(v(plane.y_axis))
-        .atan2(centre.dot(v(plane.x_axis)))
+    det::atan2(centre.dot(v(plane.y_axis)), centre.dot(v(plane.x_axis)))
 }
 
 /// The angle a tool made about the middle line at the angle `from` is turned by about the axis to
@@ -307,7 +306,7 @@ pub fn copy_turn(from: f64, to: f64, back: bool) -> f64 {
 /// sense puts the copy in nearly the same place (or the angles are not numbers).
 #[must_use]
 pub fn turn_tells_sense(from: f64, to: f64) -> bool {
-    (to - from).sin().abs() > TELLING_TURN
+    det::sin(to - from).abs() > TELLING_TURN
 }
 
 /// Whether a copy turned by [`copy_turn`] from `from` to `to` (not back) lies about the mirror of
@@ -319,7 +318,7 @@ pub fn lies_turned_back(plane: &Frame, min: Vec3, max: Vec3, from: f64, to: f64)
     let lies = centre_angle(plane, min, max);
     let mirror = from - (to - from);
     // Nearer the short way round is a larger cosine of the angle between.
-    (lies - mirror).cos() > (lies - to).cos()
+    det::cos(lies - mirror) > det::cos(lies - to)
 }
 
 /// The quarter turn that takes a section on the plane into the shaft (radians): a quarter turn

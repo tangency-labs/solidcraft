@@ -35,6 +35,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -362,7 +363,7 @@ fn tight_box_cells_are_solved_on_their_own_subpatch() {
     // 0.05 (2 - 6)^3 = -3.2 at its bottom point to 0 at its top. The trim is the circle
     // projected within the trim tolerance (0.01), so x and y are held to that; z is flat at
     // the top, where a trim 0.01 past the circle rises 0.05 x 0.01^3 = 5e-8.
-    let z = |y: f64| SHEET_RISE * (y - SHEET_FLAT).powi(3);
+    let z = |y: f64| SHEET_RISE * det::powi(y - SHEET_FLAT, 3);
     for (what, got, want, tol) in [
         ("x min", bx.min().x, cx - r, 1e-3),
         ("x max", bx.max().x, cx + r, 1e-3),
@@ -609,7 +610,7 @@ fn quarter_cylinder() -> Surface {
     let (r, s) = (10.0, FRAC_1_SQRT_2);
     let at = |deg: f64, scale: f64| {
         let a = deg.to_radians();
-        (scale * a.cos(), scale * a.sin())
+        (scale * det::cos(a), scale * det::sin(a))
     };
     let ((x0, y0), (x1, y1), (x2, y2)) = (at(-30.0, r), at(15.0, r / s), at(60.0, r));
     let arc = [(x0, y0, 1.0), (x1, y1, s), (x2, y2, 1.0)];
@@ -659,7 +660,7 @@ fn a_ridge_along_a_face_is_divided_only_across_it() {
     assert!((bx.min().x - 5.0).abs() <= 1e-6, "x min {}", bx.min().x);
     assert!((bx.min().y + 5.0).abs() <= 1e-6, "y min {}", bx.min().y);
     assert!(
-        (bx.max().y - 10.0 * 60f64.to_radians().sin()).abs() <= 1e-6,
+        (bx.max().y - 10.0 * det::sin(60f64.to_radians())).abs() <= 1e-6,
         "y max {}",
         bx.max().y
     );
@@ -681,7 +682,7 @@ fn closed_fit_spline(points: &[(f64, f64)]) -> Curve {
     let h: Vec<f64> = (0..n)
         .map(|i| {
             let (a, b) = (at(i), at(i + 1));
-            (b.0 - a.0).hypot(b.1 - a.1)
+            det::hypot(b.0 - a.0, b.1 - a.1)
         })
         .collect();
     // the cyclic system, x and y as two right-hand sides, by Gaussian elimination

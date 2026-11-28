@@ -3,6 +3,7 @@
 //! the refusals.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 
+use solidcore::math::det;
 use solidcore_ops::bead::{beads, Joint};
 use solidcore_ops::boolean::union_all;
 use solidcore_ops::{edge_faces_along, make_box, Body, Error, FitKind};
@@ -45,7 +46,7 @@ fn close(got: f64, want: f64) -> bool {
 fn segment_area(c: f64, h: f64) -> f64 {
     let h = h.abs();
     let r = (c * c / 4.0 + h * h) / (2.0 * h);
-    r * r * (c / (2.0 * r)).asin() - (c / 2.0) * (r - h)
+    r * r * det::asin(c / (2.0 * r)) - (c / 2.0) * (r - h)
 }
 
 #[test]

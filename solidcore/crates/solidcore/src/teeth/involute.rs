@@ -21,6 +21,7 @@
 //! Lengths are millimetres. Heights of the tooth are given in modules, as usual for involute
 //! splines.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::blend::fillet_section::interval::Ivl;
@@ -40,7 +41,7 @@ use crate::SolidError;
 
 /// The involute function `tan a - a` of an angle in radians.
 pub fn inv(angle: f64) -> f64 {
-    angle.tan() - angle
+    det::tan(angle) - angle
 }
 
 /// What module, count of teeth and pressure angle fix.
@@ -71,7 +72,7 @@ fn base(module: f64, teeth: u32, pressure_angle: f64) -> Result<Base, TeethFailu
         });
     }
     let alpha = in_range("pressure angle", pressure_angle, 1.0, 50.0)?.to_radians();
-    let (sin, cos) = alpha.sin_cos();
+    let (sin, cos) = det::sin_cos(alpha);
     let z = f64::from(teeth);
     let r = m * z / 2.0;
     Ok(Base {
@@ -91,7 +92,7 @@ impl Base {
     fn turned(&self, radius: f64) -> Option<f64> {
         if radius.is_finite() && radius >= self.rb {
             let roll = (radius * radius - self.rb * self.rb).sqrt() / self.rb;
-            Some(roll - roll.atan())
+            Some(roll - det::atan(roll))
         } else {
             None
         }
@@ -183,7 +184,7 @@ impl Flank {
     /// contact, which is at the angle `phi` below.
     pub(super) fn point(&self, v: f64) -> Point {
         let phi = (self.s / 2.0 - v / (self.sin * self.cos)) / self.r;
-        let (sn, cs) = phi.sin_cos();
+        let (sn, cs) = det::sin_cos(phi);
         let along = v * self.cos / self.sin;
         [
             (self.r + v) * cs - along * sn,
@@ -273,9 +274,9 @@ impl Fillet {
     /// round's centre, on the far side.
     pub(super) fn point(&self, phi: f64) -> Point {
         let (du, dv) = (self.r * phi - self.uc, -self.vc);
-        let len = du.hypot(dv);
+        let len = det::hypot(du, dv);
         let (qu, qv) = (self.uc - self.rho * du / len, self.vc - self.rho * dv / len);
-        let (sn, cs) = phi.sin_cos();
+        let (sn, cs) = det::sin_cos(phi);
         let along = qu - self.r * phi;
         [
             (self.r + qv) * cs - along * sn,
@@ -559,8 +560,8 @@ impl Cut {
         const STEPS: u32 = 4096;
         let outside = |phi: f64| {
             let [x, y] = self.fillet(phi);
-            self.half_angle(x.hypot(y))
-                .is_some_and(|half| y.atan2(x) >= half)
+            self.half_angle(det::hypot(x, y))
+                .is_some_and(|half| det::atan2(y, x) >= half)
         };
         let at = |i: u32| {
             self.phi_root + (phi_tangent - self.phi_root) * f64::from(i) / f64::from(STEPS)
@@ -579,9 +580,9 @@ impl Cut {
             }
         }
         let [x, y] = self.fillet(outside_at);
-        let v = self.flank_height(x.hypot(y));
+        let v = self.flank_height(det::hypot(x, y));
         let [fx, fy] = self.flank(v);
-        if (fx - x).hypot(fy - y) > 1e-9 * (1.0 + self.base.r) {
+        if det::hypot(fx - x, fy - y) > 1e-9 * (1.0 + self.base.r) {
             return Err(NO_JOIN);
         }
         Ok((outside_at, v))
@@ -656,12 +657,12 @@ impl External {
 
         let (ra, rb) = (cut.ra, cut.base.rb);
         let [jx, jy] = cut.flank(cut.v_join);
-        if !(ra > jx.hypot(jy) * (1.0 + 1e-12) && ra > rb) {
+        if !(ra > det::hypot(jx, jy) * (1.0 + 1e-12) && ra > rb) {
             return Err(TeethFailure::Invalid(Why::NoFlankLeft));
         }
         cut.v_tip = cut.flank_height(ra);
         let [tx, ty] = cut.flank(cut.v_tip);
-        cut.tip_half_angle = ty.atan2(tx);
+        cut.tip_half_angle = det::atan2(ty, tx);
         if !(cut.tip_half_angle > 0.0) {
             return Err(TeethFailure::Invalid(Why::PointedBelowTip));
         }
@@ -754,7 +755,7 @@ impl External {
     pub(crate) fn form_radius_typed(&self) -> Result<f64, TeethFailure> {
         let cut = self.cut()?;
         let [x, y] = cut.flank(cut.v_join);
-        Ok(x.hypot(y))
+        Ok(det::hypot(x, y))
     }
 
     /// Whether the rack cuts into the flank near the base circle, as it does when the teeth are
@@ -784,7 +785,7 @@ impl External {
         let r = in_range(
             "radius",
             radius,
-            x.hypot(y) * (1.0 - 1e-12),
+            det::hypot(x, y) * (1.0 - 1e-12),
             cut.ra * (1.0 + 1e-12),
         )?;
         cut.half_angle(r.max(cut.base.rb)).ok_or(NO_JOIN)
@@ -931,8 +932,8 @@ impl HubFlank {
     /// The point of the upper flank at which a length `roll` is unwound from the base circle.
     pub(super) fn point(&self, roll: f64) -> Point {
         let rb = self.rb;
-        let angle = self.half_at_base - (roll / rb - (roll / rb).atan());
-        on_circle([0.0, 0.0], rb.hypot(roll), angle)
+        let angle = self.half_at_base - (roll / rb - det::atan(roll / rb));
+        on_circle([0.0, 0.0], det::hypot(rb, roll), angle)
     }
 
     /// What the flank does over the unwound lengths `[lo, hi]`, for `outline::sampled`.
@@ -1017,7 +1018,7 @@ impl Internal {
         let half_at_base = space / (2.0 * b.r) + b.inv;
         let roll_of = |radius: f64| (radius * radius - b.rb * b.rb).max(0.0).sqrt();
         let (roll_minor, roll_centre) = (roll_of(minor), roll_of(centre_radius));
-        let turned = |roll: f64| roll / b.rb - (roll / b.rb).atan();
+        let turned = |roll: f64| roll / b.rb - det::atan(roll / b.rb);
         let half_at_minor = half_at_base - turned(roll_minor);
         if !(half_at_minor < PI / b.z) {
             return Err(TeethFailure::Invalid(Why::SpacesMeetAtTips));
@@ -1083,7 +1084,7 @@ impl Internal {
     /// callers.
     pub(crate) fn form_radius_typed(&self) -> Result<f64, TeethFailure> {
         let f = self.formed()?;
-        Ok(f.base.rb.hypot(f.roll_round))
+        Ok(det::hypot(f.base.rb, f.roll_round))
     }
 
     /// The outline of the opening, a space centred on the x axis. The flanks are given as points
@@ -1116,7 +1117,7 @@ impl Internal {
         let centre = on_circle([0.0, 0.0], f.centre_radius, f.centre_angle);
         // From the root circle's direction to the flank's normal: a quarter turn less what the
         // centre's own involute has unwound.
-        let round_sweep = FRAC_PI_2 - (((f.roll_round - f.rho) / f.base.rb).atan());
+        let round_sweep = FRAC_PI_2 - (det::atan((f.roll_round - f.rho) / f.base.rb));
 
         let mut tooth = vec![Piece::Curve {
             points: lower,
@@ -1214,11 +1215,10 @@ pub(crate) fn hub_for_typed(shaft: &External, fit: &Fit) -> Result<Internal, Tee
     let f = hub.formed()?;
     // Beyond its form radius the hub's space narrows into its root rounds; the shaft's tip corners,
     // the shaft's points nearest to them there, must stay inside the rounds.
-    if cut.ra > f.base.rb.hypot(f.roll_round) && f.rho > 0.0 {
+    if cut.ra > det::hypot(f.base.rb, f.roll_round) && f.rho > 0.0 {
         let (ra, c) = (cut.ra, f.centre_radius);
-        let reach_of_round = ((ra * ra + c * c - f.rho * f.rho) / (2.0 * ra * c))
-            .clamp(-1.0, 1.0)
-            .acos();
+        let reach_of_round =
+            det::acos(((ra * ra + c * c - f.rho * f.rho) / (2.0 * ra * c)).clamp(-1.0, 1.0));
         // The hub is free to turn on the shaft by half the side clearance either way; turned as far
         // as it goes, the flanks touching, a tip corner stands that much nearer a round.
         let turned = side / (2.0 * cut.base.r);
