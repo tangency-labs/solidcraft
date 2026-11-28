@@ -720,8 +720,12 @@ impl<'t> TextEdit<'t> {
 
             // TODO(servo/rust-smallvec#146): Use extend_right instead of the loop once we have
             // smallvec 2.0. Using `extend_right` here won't compile, due to lifetime issues.
+            // SolidCraft: give the prefix the field's alignment, as the text and hint atoms
+            // below get it, so the vertical-centring lift treats the affixes exactly as it
+            // treats the text: lifted in a centred field, kept where it stands in a
+            // top-aligned one (SolidCraft #23381).
             for atom in prefix {
-                atoms.push_right(atom);
+                atoms.push_right(atom.atom_align(align));
             }
 
             if text.as_str().is_empty() && !hint_text.is_empty() {
@@ -803,7 +807,7 @@ impl<'t> TextEdit<'t> {
             // TODO(servo/rust-smallvec#146): Use extend_right instead of the loop once we have
             // smallvec 2.0. Using `extend_right` here won't compile, due to lifetime issues.
             for atom in suffix {
-                atoms.push_right(atom);
+                atoms.push_right(atom.atom_align(align)); // SolidCraft: see the prefix loop, #23381.
             }
 
             let min_height = (min_inner_height + frame.total_margin().sum().y).at_least(min_size.y);
@@ -847,7 +851,7 @@ impl<'t> TextEdit<'t> {
         let painter = ui.painter_at(text_clip_rect.expand(1.0)); // expand to avoid clipping cursor
 
         // SolidCraft: compute the optical lift once, so the preview cursor, the row and
-        // the caret all stand on the same lifted baseline (#22642).
+        // the caret all stand on the same lifted baseline (#23381).
         let cap_ink_rise = if align.y() == Align::Center {
             galley_cap_ink_rise(ui.painter(), &galley)
         } else {
@@ -950,7 +954,7 @@ impl<'t> TextEdit<'t> {
         // baseline), so a vertically centred field's text reads low in its frame. Lift the row
         // by the distance from the middle of its row box to the middle of a capital's ink,
         // measured from a fixed probe glyph rather than the text itself, so the baseline never
-        // moves while one types (SolidCraft #22642).
+        // moves while one types (SolidCraft #23381).
         if align.y() == Align::Center {
             galley_pos.y -= cap_ink_rise;
         }
@@ -1653,7 +1657,7 @@ fn check_for_mutating_key_press(
 
 /// How far the middle of a capital's ink sits below the middle of its row box, in points, for
 /// `font`. Used to lift vertically centred single-row text so its capitals read centred; see
-/// its use in [`crate::TextEdit`]'s paint (SolidCraft #22642). Lays out one fixed probe glyph
+/// its use in [`crate::TextEdit`]'s paint (SolidCraft #23381). Lays out one fixed probe glyph
 /// rather than reading the laid-out text, so the result follows the font, its size and the
 /// pixels-per-point, and never moves with what is typed.
 pub fn cap_ink_rise(painter: &Painter, font: &FontId) -> f32 {
@@ -1667,7 +1671,7 @@ pub fn cap_ink_rise(painter: &Painter, font: &FontId) -> f32 {
 /// How far to lift `galley` so a vertically centred line of text reads centred in its row
 /// box: [`cap_ink_rise`] for the font `galley` was laid out with, or `0.0` for a multi-row
 /// galley, which is centred as a block rather than on one baseline. Use with
-/// [`Align::Center`] on the cross axis of whatever contains the text (SolidCraft #22642).
+/// [`Align::Center`] on the cross axis of whatever contains the text (SolidCraft #23381).
 pub fn galley_cap_ink_rise(painter: &Painter, galley: &Galley) -> f32 {
     if galley.rows.len() != 1 {
         return 0.0;

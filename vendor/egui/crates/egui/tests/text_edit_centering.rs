@@ -1,5 +1,5 @@
 // SolidCraft: a TextEdit centred vertically must put its capitals in the middle of the field,
-// not the middle of the font's row box (SolidCraft #22642).
+// not the middle of the font's row box (SolidCraft #23381).
 use egui::{Align2, Context, FontId, Frame, Margin, RawInput, Rect, TextEdit, epaint::Shape, pos2, vec2};
 
 fn ink_and_field(text: &str, align: Align2) -> (f32, f32) {
@@ -27,7 +27,7 @@ fn ink_and_field(text: &str, align: Align2) -> (f32, f32) {
 fn centred_text_edit_puts_capital_ink_in_the_middle_of_the_field() {
     let (ink, field_centre) = ink_and_field("Hamburgevons", Align2::LEFT_CENTER);
     // The row box would land the capitals low; the ink's middle must not.
-    assert!((ink - field_centre).abs() <= 0.6, "ink centre {ink} is {} pt off the field centre {field_centre}", ink - field_centre,);
+    assert!((ink - field_centre).abs() <= 0.5, "ink centre {ink} is {} pt off the field centre {field_centre}", ink - field_centre,);
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn a_hinted_empty_text_edit_puts_the_hint_ink_in_the_middle_of_the_field() {
         })
         .expect("a painted hint shape");
     assert!(
-        (ink - field.center().y).abs() <= 0.6,
+        (ink - field.center().y).abs() <= 0.5,
         "hint ink centre {ink} is {} pt off the field centre {}",
         ink - field.center().y,
         field.center().y,
@@ -86,7 +86,7 @@ fn a_hinted_empty_text_edit_puts_the_hint_ink_in_the_middle_of_the_field() {
 /// The preview insertion cursor painted while the pointer moves over the field with a
 /// button down must stand at exactly the height of the caret painted in the same frame:
 /// both sit on the lifted baseline, not one on the lifted row and the other on the row
-/// box (#22642).
+/// box (#23381).
 #[test]
 fn the_preview_cursor_stands_where_the_caret_lands() {
     let ctx = Context::default();
@@ -157,5 +157,63 @@ fn the_preview_cursor_stands_where_the_caret_lands() {
         (preview - caret).abs() <= 0.5,
         "the preview cursor centre {preview} is {} pt off the caret centre {caret}",
         preview - caret,
+    );
+}
+
+/// A prefix shares the field's vertical placement: a centred field lifts it together with
+/// its text, and a top-aligned field lifts neither, so an affix never sits on a different
+/// baseline than the text beside it (SolidCraft #23381).
+#[test]
+fn a_prefix_shares_the_field_vertical_placement() {
+    let tops = |align: Align2| -> (f32, f32, f32) {
+        let ctx = Context::default();
+        let mut value = "Hamburgevons".to_owned();
+        let font = FontId::monospace(15.0);
+        let mut rise = 0.0;
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))),
+                ..Default::default()
+            },
+            |ui| {
+                rise = egui::cap_ink_rise(ui.painter(), &font);
+                ui.add_sized(
+                    vec2(200.0, 40.0),
+                    TextEdit::singleline(&mut value)
+                        .align(align)
+                        .margin(Margin::ZERO)
+                        .font(font.clone())
+                        .prefix(egui::RichText::new("Q").font(font.clone())),
+                );
+            },
+        );
+        output.textures_delta.clear();
+        let mut prefix = None;
+        let mut text = None;
+        for clipped in &output.shapes {
+            if let Shape::Text(t) = &clipped.shape {
+                if t.galley.job.text == "Q" {
+                    prefix = Some(t.pos.y);
+                } else {
+                    text = Some(t.pos.y);
+                }
+            }
+        }
+        (
+            prefix.expect("the prefix is painted"),
+            text.expect("the value is painted"),
+            rise,
+        )
+    };
+    let (prefix, text, rise) = tops(Align2::LEFT_CENTER);
+    assert!(rise.abs() >= 0.5, "guard: this font must have a non-zero lift, got {rise}");
+    assert!(
+        (prefix - text).abs() <= 0.001,
+        "in a centred field the prefix row top {prefix} must match the text's {text}"
+    );
+    let (prefix, text, _) = tops(Align2::LEFT_TOP);
+    assert!(
+        (prefix - text).abs() <= 0.001,
+        "in a top-aligned field the prefix row top {prefix} must match the text's {text}"
     );
 }
