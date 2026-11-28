@@ -4786,7 +4786,7 @@ fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
     assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/711.diff
+// ---- no-cache model helpers
 fn fresh_no_cache_model(doc: &solidcraft_doc::Document) -> solidcraft_doc::Model {
     let mut m = solidcraft_doc::Model::new();
     m.no_cache = true;
@@ -4951,7 +4951,7 @@ fn moving_component_with_planar_sweep_rail_recomputes_railed_sweep() {
     assert!((cached.area - expected.area).abs() < 1e-3, "cached area {} vs fresh {}", cached.area, expected.area);
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/726.diff
+// ---- moved-component path/rail tests
 
 /// Scene: `Tube` pipe in C1 along a planar XZ path owned by C2 (nested under `Asm` when
 /// `nested`). Returns the session and the occurrence id to move (C2, or `Asm` when nested).
