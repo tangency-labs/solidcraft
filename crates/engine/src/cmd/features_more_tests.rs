@@ -5522,3 +5522,31 @@ fn a_draft_past_where_a_short_walls_sides_meet_ends_the_wall_in_a_point() {
     assert_eq!([b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()], [1, 6, 12, 8]);
     assert!(b.validity().is_empty(), "{:?}", b.validity());
 }
+
+fn dome_with_a_mark_sketch(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Profile"}));
+    run(s, "sketch.spline.control_point", json!({"points": [[24, 0], [24, 18], [12, 28], [0, 28]]}));
+    run(s, "sketch.line", json!({"points": [[0, 28], [0, 0], [24, 0]]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.revolve", json!({"sketch": "Profile", "axis": "y", "operation": "new", "body_name": "Dome"}));
+    run(s, "sketch.create", json!({"plane": {"origin": [0, -60, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Mark"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [-3, 6], "p1": [3, 10]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+#[test]
+fn emboss_takes_a_point_exactly_on_a_revolved_dome_high_up() {
+    let mut s = Session::default();
+    dome_with_a_mark_sketch(&mut s);
+    let bezier = |t: f64| {
+        let (u, w) = (1.0 - t, t);
+        let at = |c: [f64; 4]| u * u * u * c[0] + 3.0 * u * u * w * c[1] + 3.0 * u * w * w * c[2] + w * w * w * c[3];
+        (at([24.0, 24.0, 12.0, 0.0]), at([0.0, 18.0, 28.0, 28.0]))
+    };
+    for t in [0.2, 0.5, 0.65, 0.85] {
+        let (r, z) = bezier(t);
+        let e = s.execute("solid.emboss", &json!({"sketch": "Mark", "depth": 1, "face": [-r, 0, z], "targets": ["Dome"]}));
+        let e = e.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(!e.contains("lies on no face"), "t={t} point [{}, 0, {z}]: {e}", -r);
+    }
+}
