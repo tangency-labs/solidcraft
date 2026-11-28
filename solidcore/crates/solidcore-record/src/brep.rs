@@ -22,14 +22,72 @@ pub use curve2::Curve2;
 pub const VERSION: u32 = 4;
 /// The most items (records, points, knots, uses) [`Brep::validate`] takes in a record that comes
 /// from outside the kernel: a file, the control channel, pasted data. A record the kernel built
-/// ([`Brep::validate_built`]) has no such cap.
+/// ([`Brep::validate_built`]) has no such cap. A STEP file may take more, up to [`item_limit`].
 pub const MAX_ITEMS: usize = 4_000_000;
+/// Bytes of STEP text one item is charged when a file raises this floor (#812).
+///
+/// About 0.9e6 STEP points per 100 MB, plus knots and pcurves, so 16 bytes per item puts a
+/// 64 MB file on the `4_000_000` floor and a 256 MB file at `16_000_000`.
+pub const ITEM_BYTES: u64 = 16;
+/// The most items [`item_limit`] allows when free memory is unknown.
+pub const ITEM_LIMIT_CEILING: usize = 16_000_000;
+/// Bytes of memory one item is charged when the cap is a quarter of free memory.
+pub const ITEM_MEMORY_BYTES: u64 = 512;
 pub const MAX_SHELLS: usize = 1024;
 /// Maximum number of nested geometry edges, with the root at depth zero.
 pub const MAX_DEPTH: usize = 16;
 /// The highest spline degree a record may carry.
 pub const MAX_SPLINE_DEGREE: usize = 16;
 const TAU: f64 = std::f64::consts::TAU;
+
+/// The item cap for a file of `file_bytes`, with `available_bytes` of free memory.
+///
+/// [`None`] means free memory is unknown. The cap is the minimum of the ceiling and the
+/// maximum of [`MAX_ITEMS`] and `file_bytes / `[`ITEM_BYTES`]. The ceiling is
+/// `available_bytes / 4 / `[`ITEM_MEMORY_BYTES`], or [`ITEM_LIMIT_CEILING`] when free memory
+/// is unknown. A cap that does not fit in [`usize`] is [`usize::MAX`].
+pub fn item_limit(file_bytes: u64, available_bytes: Option<u64>) -> usize {
+    let ceiling = match available_bytes {
+        Some(available) => available / 4 / ITEM_MEMORY_BYTES,
+        None => ITEM_LIMIT_CEILING as u64,
+    };
+    let cap = ceiling.min((MAX_ITEMS as u64).max(file_bytes / ITEM_BYTES));
+    usize::try_from(cap).unwrap_or(usize::MAX)
+}
+
+/// Bytes the operating system reports free, for [`item_limit`].
+///
+/// Linux reads `MemAvailable` from `/proc/meminfo` and converts that kB figure to bytes. The
+/// file missing, the line missing, or any other operating system, is [`None`]: the cap then
+/// stops at [`ITEM_LIMIT_CEILING`].
+pub fn available_memory_bytes() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        linux_available_memory_bytes()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// `MemAvailable` from `/proc/meminfo`, in bytes. Missing file or line: [`None`].
+#[cfg(target_os = "linux")]
+fn linux_available_memory_bytes() -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    for line in text.lines() {
+        // `?` on `strip_prefix` would return on the first other line.
+        let Some(rest) = line.strip_prefix("MemAvailable:") else {
+            continue;
+        };
+        let kb = rest
+            .split_whitespace()
+            .next()
+            .and_then(|token| token.parse::<u64>().ok())?;
+        return Some(kb.saturating_mul(1024));
+    }
+    None
+}
 
 /// A body (SMLib `SmBrep`, STEP `MANIFOLD_SOLID_BREP`/`BREP_WITH_VOIDS`/`SHELL_BASED_SURFACE_MODEL`).
 /// Every list is in canonical order (docs/native-brep.md, "Canonical order"): a face's index
@@ -330,22 +388,41 @@ pub fn require(condition: bool, message: &'static str) -> Result<()> {
 }
 
 /// The items counted so far and the most allowed, shared by the checks of one input.
+/// `overflowed` is the total that first passed the cap.
 #[derive(Debug)]
 pub struct Budget {
     used: usize,
     limit: usize,
+    /// The running total that first passed `limit`, or [`usize::MAX`] when that addition
+    /// overflowed. Unset until an add fails. [`Brep::validate`] ignores it.
+    overflowed: Option<usize>,
 }
 impl Budget {
     /// The budget of a record from outside the kernel: [`MAX_ITEMS`].
     pub fn input() -> Budget {
+        Budget::capped(MAX_ITEMS)
+    }
+
+    fn capped(limit: usize) -> Budget {
         Budget {
             used: 0,
-            limit: MAX_ITEMS,
+            limit,
+            overflowed: None,
         }
     }
+
     fn add(&mut self, n: usize) -> Result<()> {
-        self.used = self.used.checked_add(n).ok_or(Invalid("item budget"))?;
-        require(self.used <= self.limit, "item budget")
+        let Some(sum) = self.used.checked_add(n) else {
+            self.overflowed = Some(usize::MAX);
+            return Err(Invalid("item budget"));
+        };
+        self.used = sum;
+        if sum > self.limit {
+            self.overflowed = Some(sum);
+            Err(Invalid("item budget"))
+        } else {
+            Ok(())
+        }
     }
 }
 fn numbers(values: impl IntoIterator<Item = f64>) -> Result<()> {
@@ -766,8 +843,34 @@ impl Brep {
     ///
     /// For a record from outside the kernel (a file, the control channel, pasted data): it is
     /// refused past [`MAX_ITEMS`] items, so hostile input is bounded before anything walks it.
+    /// [`Self::validate_file`] raises that cap when the file's text pays for the record.
     pub fn validate(&self) -> Result<()> {
-        self.validate_within(Budget::input())
+        self.validate_within(&mut Budget::input())
+    }
+
+    /// [`Self::validate`] for a record read from a file of `file_bytes`, with `available_bytes`
+    /// of free memory ([`available_memory_bytes`]).
+    ///
+    /// The same walk, with the item cap from [`item_limit`] instead of [`MAX_ITEMS`]. Past that
+    /// cap the record is valid but too large: the error names the count that first passed the
+    /// cap and the cap. Any other refusal is that [`Invalid`]'s message, not prefixed again.
+    pub fn validate_file(
+        &self,
+        file_bytes: u64,
+        available_bytes: Option<u64>,
+    ) -> std::result::Result<(), String> {
+        let mut budget = Budget::capped(item_limit(file_bytes, available_bytes));
+        match self.validate_within(&mut budget) {
+            Ok(()) => Ok(()),
+            Err(Invalid("item budget")) => {
+                let counted = budget.overflowed.unwrap_or(usize::MAX);
+                let cap = budget.limit;
+                Err(format!(
+                    "portable B-rep: the file is valid but too large: {counted} items, cap {cap}"
+                ))
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     /// [`Brep::validate`] for a record the kernel built in memory (an operation's result, a
@@ -775,13 +878,10 @@ impl Brep {
     /// record already sits in memory, its size set by inputs that were bounded where they came
     /// in, and the checks are linear in it; a cap here would only refuse a real result.
     pub fn validate_built(&self) -> Result<()> {
-        self.validate_within(Budget {
-            used: 0,
-            limit: usize::MAX,
-        })
+        self.validate_within(&mut Budget::capped(usize::MAX))
     }
 
-    fn validate_within(&self, mut budget: Budget) -> Result<()> {
+    fn validate_within(&self, budget: &mut Budget) -> Result<()> {
         require(self.version == VERSION, "unsupported version")?;
         tolerance(self.tolerance)?;
         require(
@@ -794,13 +894,13 @@ impl Brep {
         )?;
         budget.add(self.regions.len() + self.faces.len() + self.edges.len())?;
         for v in &self.vertices {
-            points(&[v.point], &mut budget)?;
+            points(&[v.point], budget)?;
             tolerance(v.tolerance)?;
         }
         for e in &self.edges {
-            curve(&e.curve, 0, &mut budget)?;
+            curve(&e.curve, 0, budget)?;
             if let Some(n) = &e.nurbs {
-                curve(n, 0, &mut budget)?;
+                curve(n, 0, budget)?;
                 require(
                     matches!(n, Curve::Spline { .. } | Curve::RationalSpline { .. }),
                     "NURBS form is not a NURBS",
@@ -831,12 +931,12 @@ impl Brep {
         }
         for f in &self.faces {
             if f.nurbs.is_some() {
-                face_label(&f.surface, &mut budget)?;
+                face_label(&f.surface, budget)?;
             } else {
-                surface(&f.surface, 0, &mut budget)?;
+                surface(&f.surface, 0, budget)?;
             }
             if let Some(n) = &f.nurbs {
-                surface(n, 0, &mut budget)?;
+                surface(n, 0, budget)?;
                 require(
                     matches!(n, Surface::Spline { .. } | Surface::RationalSpline { .. }),
                     "NURBS form is not a NURBS",
@@ -879,7 +979,7 @@ impl Brep {
                 if let Loop::Edges { edges } = l {
                     budget.add(edges.len())?;
                     for e in edges {
-                        curve2::curve2(&e.pcurve, &mut budget)?;
+                        curve2::curve2(&e.pcurve, budget)?;
                     }
                 }
             }

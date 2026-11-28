@@ -571,6 +571,92 @@ fn the_item_budget_bounds_input_records_and_not_the_kernels_own() {
     );
 }
 
+/// `value` as a [`usize`], saturating at [`usize::MAX`].
+fn saturated_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
+/// File-sized cap (#812): `max` of [`MAX_ITEMS`] and `file_bytes / ITEM_BYTES`, cut by free
+/// memory (`available / 4 / ITEM_MEMORY_BYTES`) or, with no memory figure, by
+/// [`ITEM_LIMIT_CEILING`].
+#[test]
+fn item_limit_is_the_floor_raised_by_the_file_and_cut_by_memory() {
+    assert_eq!(ITEM_BYTES, 16);
+    assert_eq!(ITEM_MEMORY_BYTES, 512);
+    assert_eq!(ITEM_LIMIT_CEILING, 16_000_000);
+    assert_eq!(item_limit(0, None), MAX_ITEMS);
+    assert_eq!(item_limit(0, Some(u64::MAX)), MAX_ITEMS);
+    assert_eq!(item_limit(u64::MAX, None), ITEM_LIMIT_CEILING);
+    // The memory ceiling is under the floor, so it is the cap.
+    let tight: u64 = 1024 * 1024;
+    let ceiling = saturated_usize(tight / 4 / ITEM_MEMORY_BYTES);
+    assert!(ceiling < MAX_ITEMS);
+    assert_eq!(item_limit(tight, Some(tight)), ceiling);
+    let bytes = (MAX_ITEMS as u64) * ITEM_BYTES * 2;
+    assert_eq!(item_limit(bytes, Some(u64::MAX)), MAX_ITEMS * 2);
+    // Known memory replaces the absolute ceiling.
+    let memory = saturated_usize(u64::MAX / 4 / ITEM_MEMORY_BYTES);
+    let from_file = saturated_usize(u64::MAX / ITEM_BYTES);
+    let abundant = memory.min(MAX_ITEMS.max(from_file));
+    assert!(abundant > ITEM_LIMIT_CEILING);
+    assert_eq!(item_limit(u64::MAX, Some(u64::MAX)), abundant);
+}
+
+#[test]
+fn validate_file_names_the_count_when_the_record_passes_the_cap() {
+    let Err(message) = over_the_item_budget().validate_file(1, Some(u64::MAX)) else {
+        panic!("a record past the floor was accepted")
+    };
+    assert!(
+        message.starts_with("portable B-rep: the file is valid but too large: "),
+        "{message}"
+    );
+    assert!(message.contains("cap 4000000"), "{message}");
+    let cap = item_limit(1, Some(u64::MAX));
+    assert_eq!(cap, MAX_ITEMS);
+    let counted_text = message
+        .split(" items")
+        .next()
+        .and_then(|head| head.rsplit(' ').next())
+        .unwrap_or("");
+    let counted: usize = counted_text.parse().unwrap_or(0);
+    assert!(counted > MAX_ITEMS, "{message}");
+    assert_eq!(
+        message,
+        format!("portable B-rep: the file is valid but too large: {counted} items, cap {cap}"),
+        "{message}"
+    );
+}
+
+#[test]
+fn validate_file_accepts_the_record_when_the_file_pays_for_it() {
+    // Valid apart from the fixed budget: `validate_built` already accepts this record.
+    let bytes = (MAX_ITEMS as u64) * ITEM_BYTES * 2;
+    let accepted = over_the_item_budget().validate_file(bytes, Some(u64::MAX));
+    assert!(
+        accepted.is_ok(),
+        "a record inside the file-sized cap was refused: {accepted:?}"
+    );
+}
+
+#[test]
+fn validate_file_reports_a_collapsed_segment_ahead_of_the_size() {
+    let mut collapsed = over_the_item_budget();
+    if let Curve::Polyline { points } = &mut collapsed.edges[0].curve {
+        points[1] = points[0];
+    }
+    let bytes = (MAX_ITEMS as u64) * ITEM_BYTES * 2;
+    let Err(message) = collapsed.validate_file(bytes, Some(u64::MAX)) else {
+        panic!("a collapsed polyline was accepted")
+    };
+    assert!(message.contains("collapsed polyline segment"), "{message}");
+    assert!(!message.contains("too large"), "{message}");
+    assert_eq!(
+        message, "portable B-rep: collapsed polyline segment",
+        "{message}"
+    );
+}
+
 #[test]
 fn spline_domains_weights_and_nesting_are_bounded() {
     let mut budget = Budget::input();
@@ -601,7 +687,8 @@ fn spline_domains_weights_and_nesting_are_bounded() {
     assert!(
         Budget {
             used: MAX_ITEMS,
-            limit: MAX_ITEMS
+            limit: MAX_ITEMS,
+            overflowed: None,
         }
         .add(1)
         .is_err()
