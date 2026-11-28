@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "ui.hide_sketch": "إخفاء الرسم التخطيطي",
+    "ui.hide_sketch_help": "يخفي الرسم التخطيطي عند إنشاء هذه الميزة. عند الإيقاف: يبقى الرسم مرئيًا لإعادة استخدامه في عدة ميزات دون إظهاره مجددًا. يُحفظ للميزة التالية."
+  },
+  "de": {
+    "ui.hide_sketch": "Skizze ausblenden",
+    "ui.hide_sketch_help": "Blendet die Skizze beim Erstellen dieses Features aus. Aus: Die Skizze bleibt sichtbar, damit sie ohne erneutes Einblenden für weitere Features verwendet werden kann. Bleibt für das nächste Feature erhalten."
+  },
+  "en": {
+    "ui.hide_sketch": "Hide sketch",
+    "ui.hide_sketch_help": "Hide the sketch when this feature is created. Off: the sketch stays visible so you can reuse it across multiple features without turning its eye back on. Remembered for the next feature."
+  },
+  "es": {
+    "ui.hide_sketch": "Ocultar boceto",
+    "ui.hide_sketch_help": "Oculta el boceto al crear esta operación. Desactivado: el boceto permanece visible para reutilizarlo en varias operaciones sin volver a mostrarlo. Se recuerda para la siguiente operación."
+  },
+  "fr": {
+    "ui.hide_sketch": "Masquer l'esquisse",
+    "ui.hide_sketch_help": "Masque l'esquisse lors de la création de cette fonction. Désactivé : l'esquisse reste visible afin de la réutiliser pour plusieurs fonctions sans la réafficher. Mémorisé pour la fonction suivante."
+  },
+  "he": {
+    "ui.hide_sketch": "הסתר סקיצה",
+    "ui.hide_sketch_help": "מסתיר את הסקיצה בעת יצירת פיצ'ר זה. כבוי: הסקיצה נשארת גלויה לשימוש חוזר בפיצ'רים נוספים בלי להדליק אותה מחדש. נשמר לפיצ'ר הבא."
+  },
+  "ja": {
+    "ui.hide_sketch": "スケッチを非表示",
+    "ui.hide_sketch_help": "このフィーチャーの作成時にスケッチを非表示にします。オフ：スケッチが表示されたままになるため、再表示せずに複数のフィーチャーで再利用できます。次のフィーチャーでも保持されます。"
+  },
+  "ko": {
+    "ui.hide_sketch": "스케치 숨기기",
+    "ui.hide_sketch_help": "이 피처를 생성할 때 스케치를 숨깁니다. 끄기: 스케치가 표시된 상태로 유지되어 다시 표시하지 않고 여러 피처에서 재사용할 수 있습니다. 다음 피처에도 유지됩니다."
+  },
+  "vi": {
+    "ui.hide_sketch": "Ẩn phác thảo",
+    "ui.hide_sketch_help": "Ẩn phác thảo khi tạo đối tượng này. Tắt: phác thảo vẫn hiển thị để tái sử dụng cho nhiều đối tượng mà không cần bật lại. Được ghi nhớ cho đối tượng tiếp theo."
+  },
+  "zh": {
+    "ui.hide_sketch": "隐藏草图",
+    "ui.hide_sketch_help": "创建此特征时隐藏草图。关闭：草图保持可见，无需重新打开显示即可在多个特征中重复使用。下次创建特征时保留此设置。"
+  }
+}

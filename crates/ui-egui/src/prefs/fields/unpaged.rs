@@ -25,6 +25,11 @@ macro_rules! unpaged_preferences {
             /// The local appearance library the Appearance panel loads whenever it opens (#20361); empty:
             /// none, the panel opens with no library, as it always has. Set by the panel's own checkbox.
             appearance_library: String = String::new();
+            /// Automatically hide a sketch when a feature consumes it (Extrude, Revolve, Hole at
+            /// sketch points, sheet metal flanges, etc.; on by default, matching existing
+            /// behaviour). Set by the Hide sketch option in feature tool dialogs and remembered
+            /// across sessions; no Preferences page shows or resets it (#23256).
+            auto_hide_sketches: bool = true;
             /// The programs the user added to the slicer list, newest first.
             custom_slicers: Vec<String> = Vec::new();
             /// Imported theme files (`theme_files`), kept here so they also work in the browser.
@@ -72,7 +77,7 @@ macro_rules! unpaged_preferences {
             /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
             /// and they are ignored.
             save_mesh_format: String = "stl".into();
-            /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
+            /// Save as mesh and Send to Slicer: the last quality (`standard`, `fine` or `finest`, #4747, #23257).
             save_mesh_quality: String = "standard".into();
             /// Send to Slicer: the format last sent to each slicer, by its key in the slicer list (`3mf`,
             /// `stl` or `step`). A slicer that is not in it starts from its own default, 3MF for most.

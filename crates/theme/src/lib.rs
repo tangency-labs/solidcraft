@@ -1491,6 +1491,32 @@ impl Tokens {
         [self.axis_x, self.axis_y, self.axis_z]
     }
 
+    /// Brighter tint of axis `axis` (0 = X, 1 = Y, 2 = Z) for a hovered or active Move triad
+    /// handle (#23225): preserves the axis's own hue while increasing brightness, staying crisp on
+    /// both dark and light viewports.
+    pub fn axis_highlight(&self, axis: usize) -> Color32 {
+        let base = self.axes()[axis.min(2)];
+        let mut hsv = egui::ecolor::HsvaGamma::from(base);
+        if panel_luminance(self.viewport_top) < 0.18 {
+            // Dark viewport: lift brightness and tint slightly toward white so even full-value
+            // primaries stand out clearly.
+            hsv.v = (hsv.v + 0.25).min(1.0);
+            hsv.s *= 0.86;
+        } else {
+            // Light viewport: raise brightness while preserving chroma for crisp contrast; soften
+            // saturation only by the leftover boost when V reaches 1.0 so bright primaries still
+            // visibly brighten without washing out.
+            let boost = 0.16_f32;
+            let gained = (1.0 - hsv.v).min(boost);
+            hsv.v = (hsv.v + boost).min(1.0);
+            let leftover = boost - gained;
+            if leftover > 0.0 {
+                hsv.s *= 1.0 - leftover * 0.85;
+            }
+        }
+        Color32::from(hsv)
+    }
+
     /// The tokens of the current theme and colour vision mode, the colours drawn in the 3D view
     /// from the view's own dark or light ([`viewport_dark`]).
     pub fn get() -> Tokens {
@@ -2339,6 +2365,57 @@ mod tests {
         }
         assert_eq!(Tokens::get(), Tokens::dark());
         assert_eq!(TabAccent::current(&egui::Context::default()), TabAccent::for_ramp(&Tokens::dark(), super::AccentRamp::Main));
+    }
+
+    /// Move triad axis highlights (#23225) keep each axis's own hue and colour family while
+    /// visibly brightening it in both dark and light themes and every colour vision mode.
+    #[test]
+    fn axis_highlight_preserves_axis_hue_and_brightens_in_both_themes() {
+        let hue_diff = |a: f32, b: f32| {
+            let d = (a - b).abs();
+            d.min(1.0 - d)
+        };
+        for dark in [false, true] {
+            for mode in ColorVision::ALL {
+                let t = Tokens::themed(dark, mode);
+                let highlighted = [0, 1, 2].map(|i| t.axis_highlight(i));
+                assert_ne!(highlighted[0], highlighted[1]);
+                assert_ne!(highlighted[1], highlighted[2]);
+                assert_ne!(highlighted[0], highlighted[2]);
+                for (i, (base, hi)) in t.axes().into_iter().zip(highlighted).enumerate() {
+                    assert_ne!(hi, t.accent, "dark={dark} {mode:?} axis {i}: must not fall back to accent");
+                    assert!(
+                        panel_luminance(hi) > panel_luminance(base),
+                        "dark={dark} {mode:?} axis {i}: highlight {hi:?} must be brighter than {base:?}"
+                    );
+                    let base_hsv = egui::ecolor::HsvaGamma::from(base);
+                    let hi_hsv = egui::ecolor::HsvaGamma::from(hi);
+                    assert!(hue_diff(base_hsv.h, hi_hsv.h) < 0.02, "dark={dark} {mode:?} axis {i}: hue drifted from {} to {}", base_hsv.h, hi_hsv.h);
+                    // X stays red-dominant, Y green-dominant, Z blue-dominant.
+                    match i {
+                        0 => assert!(hi.r() > hi.g() && hi.r() > hi.b(), "X stays red: {hi:?}"),
+                        1 => assert!(hi.g() > hi.r() && hi.g() > hi.b(), "Y stays green: {hi:?}"),
+                        _ => assert!(hi.b() > hi.r() && hi.b() > hi.g(), "Z stays blue: {hi:?}"),
+                    }
+                }
+            }
+        }
+        // Full-value saturated primaries and pure black still brighten without losing identity.
+        for base_tokens in [Tokens::light(), Tokens::dark()] {
+            let primaries = Tokens {
+                axis_x: Color32::from_rgb(255, 0, 0),
+                axis_y: Color32::from_rgb(0, 255, 0),
+                axis_z: Color32::from_rgb(0, 0, 255),
+                ..base_tokens
+            };
+            for i in 0..3 {
+                let base = primaries.axes()[i];
+                let hi = primaries.axis_highlight(i);
+                assert!(panel_luminance(hi) > panel_luminance(base), "primary axis {i}: {base:?} -> {hi:?}");
+            }
+            let mono = Tokens { axis_x: Color32::BLACK, ..base_tokens };
+            assert!(panel_luminance(mono.axis_highlight(0)) > panel_luminance(Color32::BLACK));
+        }
     }
 
     /// Tooltips show while the pointer is still moving and after a short wait (#7679): the egui

@@ -844,6 +844,7 @@ impl DialogComputation {
         }
         let cmds = apply_commands(app, d)?;
         let mut session = app.session.scratch();
+        session.auto_hide_sketches = app.preferences.auto_hide_sketches;
         // The window's operation check already evaluated this Join (#6901).
         if let Some(joined) = app.op_check.joined_for(&cmds, app.session.revision) {
             session.prime(&joined);
@@ -3622,6 +3623,26 @@ pub(crate) use crate::ui_kit::{field, row as form_row};
 pub(crate) fn check(ui: &mut egui::Ui, on: &mut bool) {
     let r = crate::ui_kit::checkbox(ui, "", on);
     publish_check(ui, &r, *on);
+}
+
+/// Remembered feature-tool option: hide the sketch when a feature consumes it (#23256).
+/// Bound to `app.preferences.auto_hide_sketches` (default on) and synced immediately to sessions.
+pub(crate) fn hide_sketch_option(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let before = app.preferences.auto_hide_sketches;
+    ui.scope(|ui| {
+        crate::ui_kit::checkbox_grid(ui, &mut [("ui.hide_sketch", &mut app.preferences.auto_hide_sketches)], 1);
+    })
+    .response
+    .backing_on_hover_text(solidcraft_ui_text::tr("ui.hide_sketch_help"));
+    if app.preferences.auto_hide_sketches != before {
+        crate::prefs::sync_auto_hide_sketches(app);
+    }
+}
+
+/// Expanded `Options` section holding [`hide_sketch_option`] for sketch-consuming feature dialogs
+/// that have no other `Options` section of their own.
+pub(crate) fn hide_sketch_options_section(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
+    crate::ui_kit::section(ui, id, "Options", true, |ui| hide_sketch_option(app, ui));
 }
 
 pub(crate) fn combo(ui: &mut egui::Ui, id: &str, labels: &[&str], sel: &mut usize) {

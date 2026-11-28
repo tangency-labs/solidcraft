@@ -4,15 +4,19 @@
 //! takes two points along an edge of the image the same way and turns the image so that edge is
 //! horizontal, vertical or at a typed angle (#11989).
 
-use egui::{Pos2, Stroke, vec2};
+use egui::{CursorIcon, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
 use serde_json::{Value, json};
-use solidcore_record::Vec2;
+use solidcore_record::{Plane, Vec2};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
+use crate::browser::CanvasPointDrag;
 use crate::ui_kit;
 use crate::viewport::Proj;
 use solidcraft_theme::Tokens;
+
+/// How near the pointer must be to Point A or Point B to hover or grab it (screen points, #23210).
+const GRAB_PX: f32 = 10.0;
 
 pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut m) = app.tree.canvas_panel.clone() else { return };
@@ -274,33 +278,136 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2, add: bool) ->
     true
 }
 
-/// Markers for the two calibration or straightening points on the image. Straighten also draws
-/// the line A–B; while it waits for Point B, the line follows the pointer from Point A (#11989).
-pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+fn canvas_plane(app: &SolveApp, panel: &crate::browser::CanvasPanel) -> Option<Plane> {
+    let doc = &app.session.doc;
+    let c = doc.canvases.iter().find(|c| c.id == panel.canvas)?;
+    let (vals, _) = doc.param_values();
+    doc.canvas_plane(&vals, c, &app.session.model.state()).ok()
+}
+
+fn on_plane(plane: &Plane, proj: &Proj, screen: Pos2) -> Option<Vec2> {
+    let (origin, direction) = proj.ray(screen);
+    let world = plane.intersect_ray(origin, direction)?;
+    let local = plane.to_local(world);
+    local.is_finite().then_some(local)
+}
+
+fn hit_point_in(panel: &crate::browser::CanvasPanel, plane: &Plane, proj: &Proj, screen: Pos2) -> Option<u8> {
+    let mut best: Option<(u8, f32)> = None;
+    for (i, point) in [panel.a, panel.b].into_iter().enumerate() {
+        let Some(at) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
+            continue;
+        };
+        let d = (at - screen).length();
+        if d > GRAB_PX {
+            continue;
+        }
+        let idx = i as u8;
+        let better = match best {
+            None => true,
+            Some((prev, prev_d)) => d + 1e-3 < prev_d || ((d - prev_d).abs() <= 1e-3 && idx == panel.next && prev != panel.next),
+        };
+        if better {
+            best = Some((idx, d));
+        }
+    }
+    best.map(|(idx, _)| idx)
+}
+
+/// Which calibration/straightening point (`0` = A, `1` = B) is under `screen`, if any (#23210).
+pub(crate) fn hit_point(app: &SolveApp, proj: &Proj, screen: Pos2) -> Option<u8> {
+    let panel = app.tree.canvas_panel.as_ref().filter(|p| p.picks_points())?;
+    let plane = canvas_plane(app, panel)?;
+    hit_point_in(panel, &plane, proj, screen)
+}
+
+/// Whether Point A or Point B is currently being dragged in the viewport (#23210).
+pub(crate) fn dragging(app: &SolveApp) -> bool {
+    app.tree.canvas_panel.as_ref().is_some_and(|p| p.picks_points() && p.drag.is_some())
+}
+
+/// Whether the pointer is over a draggable calibration/straightening point or actively dragging one.
+pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, screen: Pos2) -> bool {
+    dragging(app) || hit_point(app, proj, screen).is_some()
+}
+
+/// Begin dragging Point A or Point B when a primary drag starts on its marker (#23210).
+pub(crate) fn drag_start(app: &mut SolveApp, proj: &Proj, press: Pos2) -> bool {
+    let Some(mut panel) = app.tree.canvas_panel.clone() else {
+        return false;
+    };
+    if !panel.picks_points() {
+        return false;
+    }
+    let Some(plane) = canvas_plane(app, &panel) else {
+        return false;
+    };
+    let Some(point) = hit_point_in(&panel, &plane, proj, press) else {
+        return false;
+    };
+    let Some(at) = on_plane(&plane, proj, press) else {
+        return false;
+    };
+    let origin = if point == 0 { panel.a } else { panel.b };
+    panel.drag = Some(CanvasPointDrag { point, offset: [at.x - origin[0], at.y - origin[1]] });
+    app.tree.canvas_panel = Some(panel);
+    true
+}
+
+/// Move the actively dragged Point A or Point B smoothly on the canvas plane (#23210).
+pub(crate) fn drag_to(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
+    let Some(mut panel) = app.tree.canvas_panel.clone() else {
+        return false;
+    };
+    if !panel.picks_points() {
+        return false;
+    }
+    let Some(drag) = panel.drag else {
+        return false;
+    };
+    let Some(plane) = canvas_plane(app, &panel) else {
+        return false;
+    };
+    let Some(at) = on_plane(&plane, proj, screen) else {
+        return false;
+    };
+    let next = [at.x - drag.offset[0], at.y - drag.offset[1]];
+    if !next[0].is_finite() || !next[1].is_finite() {
+        return false;
+    }
+    if drag.point == 0 {
+        panel.a = next;
+    } else {
+        panel.b = next;
+    }
+    app.tree.canvas_panel = Some(panel);
+    true
+}
+
+/// Finish dragging Point A or Point B, committing its current coordinates (#23210).
+pub(crate) fn drag_end(app: &mut SolveApp) -> bool {
+    let Some(panel) = app.tree.canvas_panel.as_mut() else {
+        return false;
+    };
+    panel.drag.take().is_some()
+}
+
+/// Formatted live distance between Point A and Point B in document units.
+pub(crate) fn distance_preview_label(app: &SolveApp, panel: &crate::browser::CanvasPanel) -> String {
+    solidcraft_engine::doc::display_units::format_length(panel.measured_distance(), &app.session.doc.units, app.preferences.length_decimals)
+}
+
+/// Markers for the two calibration or straightening points on the image. Calibrate shows the
+/// A–B line and live measured distance preview; Straighten draws the line A–B (following the
+/// pointer while waiting for Point B, #11989). Hovering or dragging A or B shows a grab cue (#23210).
+pub(crate) fn paint_marks(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
     let Some(panel) = app.tree.canvas_panel.as_ref().filter(|p| p.picks_points() || p.trace) else {
         return;
     };
-    let doc = &app.session.doc;
-    let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else {
-        return;
-    };
-    let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, c, &app.session.model.state()) else {
+    let Some(plane) = canvas_plane(app, panel) else {
         return;
     };
     let t = Tokens::get();
-    if panel.straighten {
-        let a = proj.to_screen(plane.to_world(Vec2::new(panel.a[0], panel.a[1])));
-        let b = if panel.next == 1 {
-            // The pointer, when it is over the view.
-            painter.ctx().pointer_hover_pos().filter(|p| painter.clip_rect().contains(*p))
-        } else {
-            proj.to_screen(plane.to_world(Vec2::new(panel.b[0], panel.b[1])))
-        };
-        if let (Some(a), Some(b)) = (a, b) {
-            painter.line_segment([a, b], Stroke::new(1.5, t.accent));
-        }
-    }
     if panel.trace {
         // A ring on every region picked, the last one the accent.
         for (i, point) in panel.points.iter().enumerate() {
@@ -314,22 +421,75 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
         }
         return;
     }
-    for (i, point) in [panel.a, panel.b].into_iter().enumerate() {
-        let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
+    let dragged = panel.drag.map(|d| d.point);
+    let hovered = if dragged.is_none() { hover.and_then(|p| hit_point_in(panel, &plane, proj, p)) } else { None };
+    if dragged.is_some() {
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+    } else if hovered.is_some() {
+        ui.ctx().set_cursor_icon(CursorIcon::Grab);
+    }
+    let sa = proj.to_screen(plane.to_world(Vec2::new(panel.a[0], panel.a[1])));
+    let sb = proj.to_screen(plane.to_world(Vec2::new(panel.b[0], panel.b[1])));
+    if panel.straighten {
+        let b = if panel.next == 1 && dragged.is_none() {
+            // The pointer, when it is over the view.
+            painter.ctx().pointer_hover_pos().filter(|p| painter.clip_rect().contains(*p))
+        } else {
+            sb
+        };
+        if let (Some(a), Some(b)) = (sa, b) {
+            painter.line_segment([a, b], Stroke::new(1.5, t.accent));
+        }
+    } else if panel.calibrate
+        && let (Some(a), Some(b)) = (sa, sb)
+    {
+        painter.line_segment([a, b], Stroke::new(1.5, t.accent));
+        let label = distance_preview_label(app, panel);
+        let mid = pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+        let dir = b - a;
+        let dir_len = dir.length();
+        let perp = if dir_len > 1e-3 {
+            let n = vec2(-dir.y / dir_len, dir.x / dir_len);
+            if n.y > 0.0 { -n } else { n }
+        } else {
+            vec2(0.0, -1.0)
+        };
+        let pill_center = mid + perp * 16.0;
+        let text_color = if dragged.is_some() { t.accent } else { t.text };
+        let galley = painter.layout_no_wrap(label, egui::FontId::proportional(t.font_body), text_color);
+        let pill = Rect::from_center_size(pill_center, galley.size() + vec2(10.0, 4.0));
+        painter.rect_filled(pill, 3.0, t.panel.gamma_multiply(0.92));
+        painter.rect_stroke(pill, 3.0, Stroke::new(1.0, if dragged.is_some() { t.accent } else { t.sel_edge }), StrokeKind::Middle);
+        painter.galley(pill.center() - galley.size() * 0.5, galley, text_color);
+    }
+    for (i, screen) in [sa, sb].into_iter().enumerate() {
+        let Some(screen) = screen else {
             continue;
         };
-        let active = panel.next as usize == i;
-        let stroke = Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge });
-        painter.circle_stroke(screen, 7.0, stroke);
-        painter.circle_filled(screen, 2.5, if active { t.accent } else { t.sel_vertex });
+        let idx = i as u8;
+        let is_dragged = dragged == Some(idx);
+        let is_hovered = hovered == Some(idx);
+        let interactive = is_dragged || is_hovered;
+        let active = panel.next == idx;
+        if interactive {
+            let r = if is_dragged { 9.5 } else { 9.0 };
+            painter.circle_filled(screen, r, t.accent.gamma_multiply(if is_dragged { 0.28 } else { 0.18 }));
+            painter.circle_stroke(screen, r, Stroke::new(2.5, t.accent));
+            painter.circle_filled(screen, 3.5, t.accent);
+        } else {
+            let stroke = Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge });
+            painter.circle_stroke(screen, 7.0, stroke);
+            painter.circle_filled(screen, 2.5, if active { t.accent } else { t.sel_vertex });
+        }
         let label = if i == 0 { "A" } else { "B" };
         painter.text(
             screen + vec2(10.0, -10.0),
             egui::Align2::LEFT_BOTTOM,
             label,
             egui::FontId::proportional(t.font_body),
-            if active { t.accent } else { t.text },
+            if interactive || active { t.accent } else { t.text },
         );
+        crate::scenario::publish_handle(if i == 0 { "canvas_point_a" } else { "canvas_point_b" }, screen);
     }
 }
 
@@ -543,5 +703,216 @@ mod tests {
             assert!(!super::click(&mut h.app, &proj, sm, false));
             assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);
         }
+    }
+
+    fn pointer_button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() }
+    }
+
+    /// Hovering and dragging Point A updates its coordinates and live calibration distance preview
+    /// without disturbing Point B, orbiting/panning the camera, or starting a box selection (#23210).
+    #[test]
+    fn calibrate_drag_point_a_updates_coordinates_and_live_distance_without_moving_b() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, true));
+        h.frames(6);
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
+        let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
+
+        // Place initial A and B cleanly inside the canvas.
+        let panel = h.app.tree.canvas_panel.as_mut().unwrap();
+        panel.a = [c.center.x - 20.0, c.center.y];
+        panel.b = [c.center.x + 20.0, c.center.y];
+        panel.distance = 40.0;
+        let b_before = panel.b;
+        let dist_before = panel.measured_distance();
+        assert!((dist_before - 40.0).abs() < 1e-6);
+        h.frames(2);
+
+        let start_a = screen(c.center.x - 20.0, c.center.y);
+        let mid_a = screen(c.center.x - 10.0, c.center.y + 5.0);
+        let end_a = screen(c.center.x, c.center.y);
+        let cam_before = h.app.cam;
+
+        // Hover over Point A shows the Grab cue and owns the pointer.
+        h.frame_with(vec![egui::Event::PointerMoved(start_a)]);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Grab);
+        assert_eq!(super::hit_point(&h.app, &proj, start_a), Some(0));
+        assert!(crate::canvas::owns_pointer(&h.app, &proj, start_a));
+
+        // Press and drag Point A to mid_a: live update while still holding.
+        h.frame_with(vec![pointer_button(start_a, true)]);
+        h.frame_with(vec![egui::Event::PointerMoved(mid_a)]);
+        assert!(super::dragging(&h.app), "Point A drag must be active while holding primary");
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Grabbing);
+        assert!(h.app.viewport.boxsel.is_none(), "dragging Point A must not start box selection");
+        {
+            let p = h.app.tree.canvas_panel.as_ref().unwrap();
+            assert!((p.a[0] - (c.center.x - 10.0)).abs() < 0.75, "mid-drag A.x: {:?}", p.a);
+            assert!((p.a[1] - (c.center.y + 5.0)).abs() < 0.75, "mid-drag A.y: {:?}", p.a);
+            assert_eq!(p.b, b_before, "Point B must remain undisturbed while dragging A");
+            assert!((p.measured_distance() - dist_before).abs() > 5.0, "live measured distance must update in real time: {}", p.measured_distance());
+            assert_eq!(
+                super::distance_preview_label(&h.app, p),
+                solidcraft_engine::doc::display_units::format_length(
+                    p.measured_distance(),
+                    &h.app.session.doc.units,
+                    h.app.preferences.length_decimals,
+                )
+            );
+        }
+
+        // Continue dragging to end_a and release.
+        h.frame_with(vec![egui::Event::PointerMoved(end_a)]);
+        h.frame_with(vec![pointer_button(end_a, false)]);
+        h.frames(2);
+        assert!(!super::dragging(&h.app), "release must end Point A drag");
+        assert!(h.app.viewport.boxsel.is_none());
+        let p = h.app.tree.canvas_panel.as_ref().unwrap();
+        assert!((p.a[0] - c.center.x).abs() < 0.75, "committed A.x: {:?}", p.a);
+        assert!((p.a[1] - c.center.y).abs() < 0.75, "committed A.y: {:?}", p.a);
+        assert_eq!(p.b, b_before, "Point B must remain undisturbed after releasing A");
+        assert!((p.measured_distance() - 20.0).abs() < 0.75, "new A-B distance: {}", p.measured_distance());
+        assert_eq!(h.app.cam, cam_before, "camera must not orbit or pan");
+
+        // Calibrating now uses the dragged Point A (20 mm -> 40 mm doubles canvas width from 80 to 160).
+        h.step(&json!({"widget": "Calibrate"})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.canvas_panel.is_none());
+        let width = h.app.session.doc.canvases[0].width;
+        assert!((width - 160.0).abs() < 4.0, "expected ~160 after calibrating dragged A: {width}");
+    }
+
+    /// Dragging Point B works smoothly (including same-frame move+release and OpenSCAD left-drag orbit preset)
+    /// without disturbing Point A or orbiting the camera (#23210).
+    #[test]
+    fn calibrate_drag_point_b_preserves_point_a_and_blocks_orbit() {
+        for one_frame_release in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.language = "en".into();
+            h.app.preferences.nav = crate::prefs::OPENSCAD_NAV.into();
+            h.app.home.open = false;
+            let id = canvas(&mut h);
+            h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, true));
+            h.frames(6);
+            let rect = h.app.viewport.rect.expect("viewport");
+            let proj = crate::viewport::projection(&h.app, rect);
+            let c = h.app.session.doc.canvases[0].clone();
+            let (vals, _) = h.app.session.doc.param_values();
+            let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
+            let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
+
+            let panel = h.app.tree.canvas_panel.as_mut().unwrap();
+            panel.a = [c.center.x - 15.0, c.center.y];
+            panel.b = [c.center.x + 15.0, c.center.y];
+            let a_before = panel.a;
+            h.frames(2);
+
+            let start_b = screen(c.center.x + 15.0, c.center.y);
+            let mid_b = screen(c.center.x + 5.0, c.center.y - 6.0);
+            let end_b = screen(c.center.x + 25.0, c.center.y - 8.0);
+            let cam_before = h.app.cam;
+
+            h.frame_with(vec![egui::Event::PointerMoved(start_b)]);
+            assert_eq!(h.output.cursor_icon, egui::CursorIcon::Grab);
+            assert_eq!(super::hit_point(&h.app, &proj, start_b), Some(1));
+
+            h.frame_with(vec![pointer_button(start_b, true)]);
+            h.frame_with(vec![egui::Event::PointerMoved(mid_b)]);
+            assert!(super::dragging(&h.app));
+            if one_frame_release {
+                h.frame_with(vec![egui::Event::PointerMoved(end_b), pointer_button(end_b, false)]);
+            } else {
+                h.frame_with(vec![egui::Event::PointerMoved(end_b)]);
+                h.frame_with(vec![pointer_button(end_b, false)]);
+            }
+            h.frames(2);
+
+            assert!(!super::dragging(&h.app));
+            let p = h.app.tree.canvas_panel.as_ref().unwrap();
+            assert_eq!(p.a, a_before, "Point A must stay undisturbed (one_frame_release={one_frame_release})");
+            assert!((p.b[0] - (c.center.x + 25.0)).abs() < 0.75, "Point B.x: {:?}", p.b);
+            assert!((p.b[1] - (c.center.y - 8.0)).abs() < 0.75, "Point B.y: {:?}", p.b);
+            assert_eq!(h.app.cam, cam_before, "OpenSCAD left-drag orbit must not trigger when dragging Point B");
+        }
+    }
+
+    /// Clicking away from A/B or clicking without dragging keeps existing click-to-place intact,
+    /// and Escape / Cancel leaves the canvas untouched with no dangling drag state (#23210).
+    #[test]
+    fn calibrate_click_without_drag_preserves_click_to_place_and_escape_cancel() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, true));
+        h.frames(6);
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
+        let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
+
+        // 1. Plain click away from A and B places Point A (next: 0 -> 1).
+        let click_a = screen(c.center.x - 12.0, c.center.y + 6.0);
+        h.frame_with(vec![egui::Event::PointerMoved(click_a)]);
+        h.frame_with(vec![pointer_button(click_a, true)]);
+        h.frame_with(vec![pointer_button(click_a, false)]);
+        h.frames(2);
+        {
+            let p = h.app.tree.canvas_panel.as_ref().unwrap();
+            assert_eq!(p.next, 1, "first click places Point A and advances next to B");
+            assert!((p.a[0] - (c.center.x - 12.0)).abs() < 0.75, "{:?}", p.a);
+            assert!((p.a[1] - (c.center.y + 6.0)).abs() < 0.75, "{:?}", p.a);
+        }
+
+        // 2. Plain click away from A and B places Point B (next: 1 -> 0).
+        let click_b = screen(c.center.x + 18.0, c.center.y - 4.0);
+        h.frame_with(vec![egui::Event::PointerMoved(click_b)]);
+        h.frame_with(vec![pointer_button(click_b, true)]);
+        h.frame_with(vec![pointer_button(click_b, false)]);
+        h.frames(2);
+        {
+            let p = h.app.tree.canvas_panel.as_ref().unwrap();
+            assert_eq!(p.next, 0, "second click places Point B and cycles next back to A");
+            assert!((p.b[0] - (c.center.x + 18.0)).abs() < 0.75, "{:?}", p.b);
+            assert!((p.b[1] - (c.center.y - 4.0)).abs() < 0.75, "{:?}", p.b);
+        }
+
+        // 3. Clicking directly on existing Point B WITHOUT dragging still triggers click-to-place (sets A to B's spot).
+        let on_b = screen(c.center.x + 18.0, c.center.y - 4.0);
+        assert_eq!(super::hit_point(&h.app, &proj, on_b), Some(1));
+        h.frame_with(vec![egui::Event::PointerMoved(on_b)]);
+        h.frame_with(vec![pointer_button(on_b, true)]);
+        h.frame_with(vec![pointer_button(on_b, false)]);
+        h.frames(2);
+        {
+            let p = h.app.tree.canvas_panel.as_ref().unwrap();
+            assert_eq!(p.next, 1, "click without drag on existing marker must keep click-to-place");
+            assert!((p.a[0] - (c.center.x + 18.0)).abs() < 0.75, "{:?}", p.a);
+            assert!((p.a[1] - (c.center.y - 4.0)).abs() < 0.75, "{:?}", p.a);
+        }
+
+        // 4. Escape closes Calibrate cleanly without modifying the canvas.
+        let width_before = h.app.session.doc.canvases[0].width;
+        h.frame_with(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }]);
+        h.frames(2);
+        assert!(h.app.tree.canvas_panel.is_none(), "Escape must close Calibrate panel");
+        assert!(!super::dragging(&h.app));
+        assert!((h.app.session.doc.canvases[0].width - width_before).abs() < 1e-9);
     }
 }

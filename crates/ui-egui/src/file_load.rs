@@ -1028,6 +1028,7 @@ fn start(app: &mut SolveApp) {
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
     scratch.set_validation(app.preferences.validation);
+    scratch.auto_hide_sketches = app.preferences.auto_hide_sketches;
     // A file an importer plugin reads opens with the plugins the user installed and left on.
     scratch.plugin_state = app.session.plugin_state.clone();
     scratch.plugin_state.user.dialog_folders = request.plugin_folders.as_deref().cloned();
@@ -1189,6 +1190,7 @@ fn start_staged(app: &mut SolveApp) {
     let mut session = if insert { app.session.scratch() } else { Session::default() };
     session.set_command_check(app.session.command_check());
     session.set_validation(app.preferences.validation);
+    session.auto_hide_sketches = app.preferences.auto_hide_sketches;
     crate::print_face_ui::sync(&mut session, &app.preferences);
     if insert {
         session.selection = app.session.selection.clone();

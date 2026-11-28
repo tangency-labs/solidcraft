@@ -64,7 +64,7 @@ pub(super) struct Send<'a> {
     /// 3MF objects with parts (`objects: "component"`, #8139). Only for [`Dest::Path`].
     pub parts: Vec<(String, Vec<String>)>,
     pub format: Format,
-    /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
+    /// Mesh tessellation quality for STL and 3MF (ignored for STEP).
     pub quality: solidcraft_io::MeshQuality,
     pub dest: Dest<'a>,
     /// Only for [`Dest::Folder`]: the file's name without extension, already checked with
@@ -106,7 +106,7 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
 /// Write the bodies into the slicer folder.
 fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     use crate::slicer_files;
-    let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format)?;
+    let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format, r.quality)?;
     if let Some(copy) = &r.copy {
         // The file the user keeps: named after the design, in their folder, and the slicer opens it.
         let stem = slicer_files::copy_stem(&s.doc.name);

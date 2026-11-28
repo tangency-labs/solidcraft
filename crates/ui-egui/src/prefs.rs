@@ -1794,6 +1794,7 @@ impl Snapshot {
         crate::plugins::sync_policy(app);
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
+        sync_auto_hide_sketches(app);
         crate::render_workspace::apply_memory_policy(app);
         apply_tolerance_heal(&app.preferences);
         app.preferences.stand_up_answers = stand_up_answers;
@@ -2098,6 +2099,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
     crate::plugins::sync_policy(app);
     sync_surface_analysis(app);
+    sync_auto_hide_sketches(app);
     crate::render_workspace::apply_memory_policy(app);
     apply_tolerance_heal(&app.preferences);
     if app.preferences.default_units != units {
@@ -2207,6 +2209,7 @@ pub(crate) fn drawn_quality(app: &SolveApp) -> solidcraft_engine::doc::display_q
 
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
+    sync_auto_hide_sketches(app);
     crate::plugins::sync_policy(app);
     apply_network(&app.preferences);
     // The features computed from now on are checked as the preference says.
@@ -2293,6 +2296,15 @@ pub(crate) fn sync_surface_analysis(app: &mut SolveApp) {
     app.session.set_single_surface_analysis(single);
     for slot in app.docs.background_mut() {
         slot.session.set_single_surface_analysis(single);
+    }
+}
+
+/// Whether creating a feature auto-hides its sketch applies to every open design without document edits.
+pub(crate) fn sync_auto_hide_sketches(app: &mut SolveApp) {
+    let auto_hide = app.preferences.auto_hide_sketches;
+    app.session.auto_hide_sketches = auto_hide;
+    for slot in app.docs.background_mut() {
+        slot.session.auto_hide_sketches = auto_hide;
     }
 }
 
@@ -4737,6 +4749,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     app.preferences = new;
     crate::plugins::sync_policy(app);
     sync_surface_analysis(app);
+    sync_auto_hide_sketches(app);
     crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
@@ -10566,6 +10579,44 @@ mod tests {
         assert_eq!((app.preferences.validation, app.session.validation()), (Validation::Off, Validation::Off));
         super::defaults(&mut app, super::PAGE_DESIGN);
         assert_eq!(app.preferences.validation, Validation::EachFeature);
+    }
+
+    /// #23256: `auto_hide_sketches` defaults to on (including when omitted from saved preferences),
+    /// is unpaged (no longer shown on Preferences -> Design or reset by Design Defaults), and
+    /// persists across restarts.
+    #[test]
+    fn auto_hide_sketches_defaults_on_is_unpaged_and_persists_across_restarts() {
+        use serde_json::json;
+        // Backwards compatibility: old saved preferences without `auto_hide_sketches` default to true.
+        assert!(serde_json::from_value::<super::Prefs>(json!({})).unwrap().auto_hide_sketches);
+        assert!(super::lenient(&json!({})).auto_hide_sketches);
+        assert_eq!(super::FIELD_PAGES.iter().find(|(field, _)| *field == "auto_hide_sketches").copied(), Some(("auto_hide_sketches", None)));
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        assert!(h.app.preferences.auto_hide_sketches);
+        assert!(h.app.session.auto_hide_sketches);
+
+        // No longer shown on Preferences -> Design.
+        h.call("ui.prefs", json!({"language": "en", "open": "Design"}));
+        h.frames(3);
+        assert!(crate::scenario::rect_of("prefs:auto_hide_sketches").is_none());
+        h.call("ui.prefs", json!({"button": "cancel"}));
+
+        // Toggling off syncs the session, survives Design Defaults, and persists across restarts.
+        h.call("ui.prefs", json!({"auto_hide_sketches": false}));
+        assert!(!h.app.preferences.auto_hide_sketches);
+        assert!(!h.app.session.auto_hide_sketches);
+        h.call("ui.prefs", json!({"open": "Design", "button": "defaults"}));
+        h.call("ui.prefs", json!({"button": "ok"}));
+        assert!(!h.app.preferences.auto_hide_sketches, "unpaged choice survives Design Defaults");
+        assert!(!h.app.session.auto_hide_sketches);
+
+        let saved = h.app.prefs();
+        let mut reloaded = SolveApp::new(Default::default(), Default::default());
+        reloaded.load_prefs(&saved);
+        assert!(!reloaded.preferences.auto_hide_sketches, "remembered choice survives restart");
+        assert!(!reloaded.session.auto_hide_sketches, "reloaded session syncs remembered choice");
     }
 
     #[test]

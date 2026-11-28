@@ -342,6 +342,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); ",
             "single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); ",
             "format?: 3mf|stl|3mf-tagged|step (default 3mf, in millimetres; a 3MF that can't be written goes as STL; step: the bodies as exact B-rep with their colours, which the slicer meshes itself, for slicers that read STEP); ",
+            "quality?: standard|fine|finest (STL and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); ",
             "name?: the file's name without extension, as the slicer shows it (default: the design's name and a code that tells designs and body selections apart; a given name is used as it is, so two sends under one name share one file; not used with copy_to, whose file is named after the design; refused when it is blank, over 240 bytes, starts or ends with a space or a dot, holds / \\ : * ? \" < > | or a control character, or is a name Windows keeps for a device, such as CON or NUL); ",
             "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; ",
             "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead",
@@ -352,7 +353,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!(
             "consent: bool (required: true only once the user has agreed to upload the model to Printables' servers; it stays there for 30 minutes and opening it needs a Printables sign-in); ",
             "bodies?: [names] (default: the selected bodies); ",
-            "format?: 3mf|stl (default 3mf, in millimetres) → uploads the bodies to EasyPrint, Printables' slicer in the browser, and opens it in the browser. 100 MB at most. Works in the desktop app and the browser build; ",
+            "format?: 3mf|stl (default 3mf, in millimetres); ",
+            "quality?: standard|fine|finest (how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard) → uploads the bodies to EasyPrint, Printables' slicer in the browser, and opens it in the browser. 100 MB at most. Works in the desktop app and the browser build; ",
             "the CLI has no way to upload yet",
         )),
     CommandSpec::new("file.slicers", "Installed Slicers", crate::checked!("file.slicers", slicers))
@@ -4429,6 +4431,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
             Some(other) => return Err(bad(cmd, format!("unknown format `{other}` (stl, 3mf, 3mf-tagged, step)"))),
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
+        let quality = mesh_quality(p, cmd)?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
         // Anything but text is refused, not read as "no name": the caller asked for a name.
         let name = match p.get("name") {
@@ -4459,7 +4462,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 bodies: string_list(cmd, p, "bodies")?,
                 parts: Vec::new(),
                 format,
-                quality: Default::default(),
+                quality,
                 dest: send::Dest::Folder,
                 name,
                 copy,
