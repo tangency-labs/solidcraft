@@ -61,6 +61,9 @@ macro_rules! general_preferences {
             /// organisations that keep their designs on file servers. Off (the default): only on the
             /// servers in `network_hosts`, or one the user allows when asked (`network_prompt`).
             network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
+            /// The tab groups of the designs in `open_designs` as the last quit left them, so they
+            /// come back with their designs (see `RememberedGroup`).
+            open_design_groups: Vec<crate::tab_groups::RememberedGroup> = Vec::new(), PAGE_GENERAL;
             /// Those designs' files, in tab order, as the last quit left them.
             open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
             /// How strongly a print face stands out in the viewport (#8429): the share of the section

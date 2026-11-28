@@ -546,6 +546,12 @@ storage.patch                     plugins: a plugin's own data in the design, no
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 surface.midsurface                tested in the engine: crates/engine/src/schema/surface_midsurface_tests.rs and crates/engine/src/midsurface_samples_tests.rs (the pairing and sheets in crates/doc/src/midsurface.rs tests)
 surface.midsurface_analyze        read-only analysis, no geometry made: crates/engine/src/schema/surface_midsurface_tests.rs (the analysis in crates/doc/src/midsurface.rs tests)
+tab.group.add                      puts a design in a tab group of the window: no geometry, tested in the engine's tab_groups tests and the UI's tab_group_ui tests
+tab.group.create                   makes a tab group of the window: no geometry, tested in the engine's tab_groups tests and the UI's tab_group_ui tests
+tab.group.list                     a listing of the window's tab groups: no geometry, tested in the engine's tab_groups tests and the UI's tab_group_ui tests
+tab.group.remove                   takes a design out of its tab group: no geometry, tested in the engine's tab_groups tests and the UI's tab_group_ui tests
+tab.group.ungroup                  takes a tab group away, its designs stay open: no geometry, tested in the engine's tab_groups tests and the UI's tab_group_ui tests
+tab.group.update                   renames or recolours a tab group: no geometry, tested in the engine's tab_groups tests and the UI's tab_group_ui tests
 tab.layout.apply                   manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.list                    manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.remove                  manages an application view layout; no geometry, tested in the engine and UI

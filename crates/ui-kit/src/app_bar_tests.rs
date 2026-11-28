@@ -1075,9 +1075,17 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_new: "t:vnew",
     view_more: "t:vmore",
     switcher: "t:switcher",
+    group: "t:group:",
     view_collapse: "t:vcollapse",
     file_drop: "t:file_drop",
 };
+
+const GROUP_MENU: [TabMenuRow<'static>; 3] = [
+    TabMenuRow::new("grename", "Rename tab group", ""),
+    TabMenuRow::new("gblue", "Blue", "").with_swatch(egui::Color32::BLUE, true),
+    TabMenuRow::new("gungroup", "Ungroup", "").separated(),
+];
+const EXTRA_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("gremove", "Remove from tab group", "")];
 
 const VIEW_MENU: [TabMenuRow<'static>; 4] = [
     TabMenuRow::new("move_to_window", "Move to window", "").for_local_view().with_children(&[TabMenuRow::new("move_new", "New window", "")]),
@@ -1176,6 +1184,11 @@ struct TabsRig {
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
     focused: std::cell::Cell<bool>,
+    /// The first two designs are in a tab group named "Parts" (or with no name, `unnamed`).
+    grouped: std::cell::Cell<bool>,
+    unnamed: std::cell::Cell<bool>,
+    /// The group is folded: its designs are hidden and its chevron points right.
+    group_folded: std::cell::Cell<bool>,
     /// The first design's sub-tabs are folded into its tab.
     collapsed: std::cell::Cell<bool>,
 }
@@ -1209,6 +1222,9 @@ impl TabsRig {
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
+            grouped: std::cell::Cell::new(false),
+            unnamed: std::cell::Cell::new(false),
+            group_folded: std::cell::Cell::new(false),
             collapsed: std::cell::Cell::new(false),
         };
         rig.frame(Vec::new());
@@ -1229,8 +1245,23 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab =
-            |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[], collapsed: false };
+        let tab = |name: &'static str| DocTab {
+            name,
+            list_name: name,
+            dirty: false,
+            place: "Not saved yet",
+            security: None,
+            views: &[],
+            group: None,
+            extra_menu: &[],
+            hidden: false,
+            collapsed: false,
+        };
+        let grouped = self.grouped.get();
+        let hidden = self.group_folded.get();
+        fn in_group(grouped: bool, hidden: bool, doc: DocTab<'_>) -> DocTab<'_> {
+            if grouped { DocTab { group: Some(0), extra_menu: &EXTRA_MENU, hidden, ..doc } } else { doc }
+        }
         let mut views = VIEWS;
         if self.detached {
             views[1].to_window = Some(1);
@@ -1244,11 +1275,18 @@ impl TabsRig {
         } else {
             &[]
         };
-        let first = DocTab { views, collapsed: self.collapsed.get(), ..tab(self.name) };
+        let first = in_group(grouped, hidden, DocTab { views, collapsed: self.collapsed.get(), ..tab(self.name) });
+        let groups = [GroupLabel {
+            name: if self.unnamed.get() { "" } else { "Parts" },
+            fill: egui::Color32::RED,
+            tip: "Tab group: Parts",
+            menu: &GROUP_MENU,
+            collapsed: self.group_folded.get(),
+        }];
         let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
-            tabs: if self.pop_out { vec![first] } else { vec![first, tab("Two"), tab("Three")] },
+            tabs: if self.pop_out { vec![first] } else { vec![first, in_group(grouped, hidden, tab("Two")), tab("Three")] },
             selected: 0,
             shown_selected: Some(0),
             pop_out: self.pop_out,
@@ -1287,6 +1325,8 @@ impl TabsRig {
             layout_fill_heading: "",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
+            groups: if grouped { &groups } else { &[] },
+            group_rename: None,
         };
         let (x0, x1) = if self.views.is_some() { (20.0, 780.0) } else { (100.0, 700.0) };
         let x1 = self.room.map_or(x1, |room| x0 + room);
@@ -1653,6 +1693,122 @@ fn a_view_drop_slot_shifts_only_neighbours_at_or_after_the_local_index() {
     assert_eq!(rig.at("t:view:1"), second);
     assert_eq!(rig.at("t:vnew"), plus);
     assert!(view_drag_gap(&rig.ctx, strip, 1).is_none());
+}
+
+/// A tab group's label sits before its first tab with a line in its colour under its tabs; a
+/// right click opens its menu (rows returned with the group's place), a double click asks to
+/// rename it, and a grouped tab's menu has its group rows after the strip's own. An unnamed group's
+/// label is a narrow dot, and the label takes room the tabs give up.
+#[test]
+fn a_tab_groups_label_comes_before_its_tabs_with_its_menu() {
+    let rect = |name: &str| solidcraft_ui_registry::rect_of(name).unwrap_or_else(|| panic!("{name} is drawn"));
+    let plain = TabsRig::new();
+    let (tab0, tab1) = (rect("t:tab:0"), rect("t:tab:1"));
+    assert!(solidcraft_ui_registry::rect_of("t:group:0").is_none(), "no group, no label");
+    let rig = TabsRig::new();
+    rig.grouped.set(true);
+    rig.frame(Vec::new());
+    let (label, grouped0, grouped1) = (rect("t:group:0"), rect("t:tab:0"), rect("t:tab:1"));
+    assert!(label.right() <= grouped0.left() && grouped0.right() <= grouped1.left(), "label {label:?}, then its tabs {grouped0:?} {grouped1:?}");
+    assert!(label.left() >= tab0.left() - 1.0, "the label starts where the first tab did");
+    assert!(grouped1.left() > tab1.left(), "the tabs make room for it");
+    // The group holds its designs: its label is as tall as a tab, and its band, taller still, runs
+    // behind the label and both tabs.
+    assert!((label.height() - grouped0.height()).abs() < 0.5, "label {label:?} as tall as a tab {grouped0:?}");
+    let band = rect("t:group:0:band");
+    assert!(
+        band.contains_rect(label) && band.contains_rect(grouped0) && band.contains_rect(grouped1) && band.height() > grouped0.height(),
+        "band {band:?} around the label {label:?} and tabs {grouped0:?} {grouped1:?}"
+    );
+    assert!(band.right() < rect("t:tab:2").left(), "the design outside the group is outside the band");
+    drop(plain);
+    rig.press(rig.at("t:group:0"), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert_eq!(rig.press(rig.at("t:menu:gblue"), egui::PointerButton::Primary), vec![TabAction::GroupMenu { group: 0, id: "gblue".into() }]);
+    // A double click on the label.
+    let at = rig.at("t:group:0");
+    rig.time.set(rig.time.get() + 1.0);
+    let mut actions = Vec::new();
+    for pressed in [true, false, true, false] {
+        actions.extend(rig.frame(vec![egui::Event::PointerMoved(at), press(at, pressed)]));
+    }
+    assert_eq!(actions, vec![TabAction::StartGroupRename(0)]);
+    // A grouped tab's menu: the strip's rows, then its own.
+    rig.press(rig.at("t:tab:1"), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    assert_eq!(rig.press(rig.at("t:menu:gremove"), egui::PointerButton::Primary), vec![TabAction::Menu { tab: 1, id: "gremove".into() }]);
+    // With no name the label is a dot.
+    rig.unnamed.set(true);
+    rig.frame(Vec::new());
+    assert!(rect("t:group:0").width() < label.width(), "a dot is narrower than a name");
+}
+
+/// A folded group keeps its label, with its chevron as a target of its own: its designs are not
+/// drawn, and a click on the chevron asks to show them.
+#[test]
+fn a_folded_group_draws_only_its_label_and_its_chevron_toggles_it() {
+    let rect = |name: &str| solidcraft_ui_registry::rect_of(name).unwrap_or_else(|| panic!("{name} is drawn"));
+    let rig = TabsRig::new();
+    rig.grouped.set(true);
+    rig.group_folded.set(true);
+    rig.frame(Vec::new());
+    let label = rect("t:group:0");
+    assert!(solidcraft_ui_registry::rect_of("t:tab:0").is_none(), "a folded design is not drawn");
+    assert!(solidcraft_ui_registry::rect_of("t:tab:1").is_none(), "a folded design is not drawn");
+    assert!(label.width() > 0.0, "the label stays");
+    let chevron = rect("t:group:0:toggle");
+    assert!(label.contains_rect(chevron) && chevron.right() <= label.right() + 0.5, "the chevron sits at the label's end");
+    assert_eq!(rig.press(rig.at("t:group:0:toggle"), egui::PointerButton::Primary), vec![TabAction::ToggleGroup(0)]);
+}
+
+/// Files dragged onto the bar never open inside a folded group, where they would join it unseen:
+/// at the label's right end they open after the group.
+#[test]
+fn files_dropped_on_a_folded_group_open_beside_it_not_inside_it() {
+    let rect = |name: &str| solidcraft_ui_registry::rect_of(name).unwrap_or_else(|| panic!("{name} is drawn"));
+    let rig = TabsRig::new();
+    rig.grouped.set(true);
+    rig.group_folded.set(true);
+    rig.frame(Vec::new());
+    let label = rect("t:group:0");
+    let at = |x: f32| super::file_drop_place(&rig.ctx, egui::Id::unique("test_tabs"), Some(pos2(x, label.center().y)));
+    // The label starts the strip: its left end is the place before the group.
+    assert_eq!(at(label.left() + 1.0), Some(0), "before the group");
+    assert_eq!(at(label.right() + 1.0), Some(2), "after the group, not between its two folded designs");
+}
+
+/// The selected design's views show as sub-tabs inside its tab when it is in a group, after the
+/// group's label, in both sub-tab styles.
+#[test]
+fn a_grouped_design_shows_its_sub_tabs_after_the_label() {
+    let rect = |name: &str| solidcraft_ui_registry::rect_of(name).unwrap_or_else(|| panic!("{name} is drawn"));
+    for clear in [false, true] {
+        let mut rig = TabsRig::with(Some(true));
+        rig.clear = clear;
+        rig.grouped.set(true);
+        rig.frame(Vec::new());
+        let (label, design, views, next) = (rect("t:group:0"), rect("t:tab:0"), [rect("t:view:0"), rect("t:view:1")], rect("t:tab:1"));
+        assert!(label.right() <= design.left(), "clear={clear}: label {label:?} before the design {design:?}");
+        assert!(
+            views.iter().all(|v| v.left() >= design.left() && v.right() <= next.left()),
+            "clear={clear}: sub-tabs {views:?} inside the design's tab"
+        );
+        assert_eq!(rig.press(rig.at("t:view:1"), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
+    }
+    // With too little room for the design's pill, nothing of it covers the label: a right click
+    // there still opens the group's menu.
+    for clear in [false, true] {
+        let mut rig = TabsRig::with(Some(true));
+        rig.clear = clear;
+        rig.room = Some(150.0);
+        rig.grouped.set(true);
+        rig.frame(Vec::new());
+        rig.press(rig.at("t:group:0"), egui::PointerButton::Secondary);
+        rig.frame(Vec::new());
+        rig.frame(Vec::new());
+        assert!(solidcraft_ui_registry::rect_of("t:menu:gblue").is_some(), "clear={clear}: the label's menu opens");
+    }
 }
 
 /// The chevron right after the selected design's + folds its sub-tabs into its tab, in both

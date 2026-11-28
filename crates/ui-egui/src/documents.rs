@@ -239,6 +239,9 @@ impl LayoutFill {
 pub struct Documents {
     /// What the places of a layout without a view show ([`LayoutFill`]).
     pub(crate) layout_fill: LayoutFill,
+    /// The tab groups saved at the last quit that this launch is bringing back, from the first
+    /// design opened (`None` until then).
+    pub(crate) pending_groups: Option<Vec<crate::tab_group_ui::PendingGroup>>,
     slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
@@ -278,6 +281,10 @@ pub struct Documents {
     pub(crate) view_rename: Option<ViewRename>,
     /// Click placement in progress (design tab id, view id).
     pub(crate) view_placement: Option<(u64, u64)>,
+    /// The window's tab groups, by tab number ([`crate::tab_groups`]).
+    pub(crate) groups: crate::tab_groups::TabGroups,
+    /// A group's name being typed in its label.
+    pub(crate) group_rename: Option<crate::tab_group_ui::GroupRename>,
     /// The active tab's own parked conversation while `agent_shared_session` is enabled, so
     /// switching tabs never hands one tab's parked chat to another tab's slot. Boxed so
     /// `Documents` / `SolveApp` does not double its inline stack footprint with a second `AgentChat`.
@@ -433,6 +440,16 @@ impl Documents {
             self.active_tab = next_tab();
         }
         self.active_tab
+    }
+
+    /// Every tab's number ([`DocSlot::tab`]), in strip order; the shown one is numbered now if it
+    /// was not yet.
+    pub(crate) fn tab_numbers(&mut self) -> Vec<u64> {
+        let shown = self.active_tab();
+        if self.slots.is_empty() {
+            return vec![shown];
+        }
+        self.slots.iter().map(|slot| slot.as_ref().map_or(shown, |slot| slot.tab)).collect()
     }
 
     /// [`Self::active_tab`], without numbering a tab not asked for yet (0).
@@ -1328,6 +1345,7 @@ pub(crate) fn design_opened(app: &mut SolveApp, path: &str) {
     if let Some(dir) = solidcraft_engine::recovery::data_dir() {
         restore_views_in(app, path, &dir);
     }
+    crate::tab_group_ui::design_opened(app, path);
     if app.session.path.as_deref().is_some_and(|p| same_path(p, path))
         && let Some(kind) = crate::new_window::take_start_view().and_then(|key| ViewKind::from_key(&key))
     {
@@ -1919,6 +1937,17 @@ pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String>
     }
     switch(app, index);
     Ok(true)
+}
+
+/// The session of the design at tab index `k`: the shown one is in the app itself.
+pub(crate) fn design_session(app: &SolveApp, k: usize) -> Option<&solidcraft_engine::Session> {
+    if k == app.docs.active { Some(&app.session) } else { app.docs.slots.get(k).and_then(Option::as_ref).map(|slot| &slot.session) }
+}
+
+/// The tab index of the open design saved at `path`: the shown one first.
+pub(crate) fn index_of_path(app: &SolveApp, path: &str) -> Option<usize> {
+    let matches = |k: usize| design_session(app, k).and_then(|s| s.path.as_deref()).is_some_and(|p| same_path(p, path));
+    (0..app.docs.count()).find(|&k| k == app.docs.active && matches(k)).or_else(|| (0..app.docs.count()).find(|&k| matches(k)))
 }
 
 pub(crate) fn same_path(a: &str, b: &str) -> bool {
@@ -2543,6 +2572,7 @@ fn quit_step(app: &mut SolveApp) {
                 false => app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect(),
             };
             app.preferences.open_designs = sessions.into_iter().filter_map(|s| s.path.clone()).collect();
+            app.preferences.open_design_groups = crate::tab_group_ui::remembered(app);
         }
     }
 }
@@ -2896,6 +2926,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
             let at = |k: &str| p.get(k).and_then(Value::as_u64).map(|x| x as usize);
             if let (Some(from), Some(to)) = (at("from"), at("to")) {
                 move_tab(app, from, to);
+                crate::tab_group_ui::dropped(app, to);
             }
         }
         Some("quit") => request_quit(app),
@@ -2990,6 +3021,7 @@ const TAB_HANDLES: crate::app_bar::TabHandles<'static> = crate::app_bar::TabHand
     view_new: "tab:view_new",
     view_more: "tab:view_more",
     switcher: "tab:switcher",
+    group: "tab:group:",
     view_collapse: "tab:view_collapse",
     file_drop: "tab:file_drop",
 };
@@ -3165,6 +3197,12 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         })
         .collect();
+    // The tab groups: their labels and menus, each tab's group rows, and a name being typed.
+    let group_parts = crate::tab_group_ui::StripGroups::build(app);
+    let group_menus = group_parts.group_menus();
+    let group_labels = group_parts.labels(&group_menus);
+    let tab_menus = group_parts.tab_menus();
+    let mut group_edit = crate::tab_group_ui::take_rename(app);
     // Local views expose their editor in both the switcher and sub-tab presentations.
     let mut view_edit = app.docs.view_rename.take().filter(|r| !app.home.open && app.docs.views.get(r.view).is_some());
     let view_place = view_edit.as_ref().and_then(|r| design_views.get(selected)?.iter().position(|(view, _, _, _)| view.id == r.view));
@@ -3243,13 +3281,19 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .zip(&places)
                 .zip(&badges)
                 .zip(&view_tabs)
-                .map(|(((((list_name, dirty), name), place), security), views)| crate::app_bar::DocTab {
+                .zip(group_parts.of_tab.iter().chain(std::iter::repeat(&None)))
+                .zip(tab_menus.iter().map(Vec::as_slice).chain(std::iter::repeat(&[][..])))
+                .zip(group_parts.hidden.iter().copied().chain(std::iter::repeat(false)))
+                .map(|((((((((list_name, dirty), name), place), security), views), group), extra_menu), hidden)| crate::app_bar::DocTab {
                     name,
                     list_name,
                     dirty: *dirty,
                     place,
                     security: *security,
                     views,
+                    group: *group,
+                    extra_menu,
+                    hidden,
                     collapsed: false,
                 })
                 .enumerate()
@@ -3300,6 +3344,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             layout_fill_heading: solidcraft_ui_text::tr_label("Empty cells show"),
             switcher_menu: &switcher_menu,
             tear_off_below: TEAR_OFF_BELOW,
+            groups: &group_labels,
+            group_rename: crate::tab_group_ui::rename_field(&group_parts, group_edit.as_mut()),
         };
         if child {
             let width = crate::app_bar::preferred_pill_width(ui, &strip);
@@ -3394,8 +3440,12 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
     let (mut shut, mut pick, mut many, mut dropped, mut renamed, mut copied, mut saved) = (None, None, None, None, None, None, None);
+    crate::tab_group_ui::finish_rename(app, group_edit, &actions);
     let mut window_drop = false;
     for action in actions {
+        if idle && crate::tab_group_ui::handle(app, &group_parts, &action) {
+            continue;
+        }
         match action {
             crate::app_bar::TabAction::Select(i) => pick = Some(i),
             crate::app_bar::TabAction::Close(i) => shut = Some(i),
@@ -3454,6 +3504,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         (None, None) => {
             if let Some((from, to)) = dropped {
                 move_tab(app, from, to);
+                crate::tab_group_ui::dropped(app, to);
             }
         }
     }
