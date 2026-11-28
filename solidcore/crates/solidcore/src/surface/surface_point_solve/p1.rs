@@ -2195,7 +2195,13 @@ mod tests {
             .find_polygon_triangle_guess((0, 0))
             .unwrap()
         };
+        let before_search = format!("{:?}", original.nurb);
         assert_eq!(guess(&original).ave_cpt_dist, 1.0);
+        assert_eq!(
+            format!("{:?}", original.nurb),
+            before_search,
+            "building the index must not change the surface description"
+        );
         let mut edited = original.clone_exact_shared();
         for z in [1.0, 2.0] {
             // Move the last row into the query's block, once while shared and once after detaching.

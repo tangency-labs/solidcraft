@@ -461,10 +461,17 @@ pub struct BSplineSurface {
 #[derive(Debug, Default)]
 pub(crate) struct NurbSlot(Arc<NurbData>);
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct NurbData {
     value: OnceLock<Surface>,
     cells: OnceLock<Option<Box<CellIndex>>>,
+}
+
+// Surface diagnostics describe the NURB itself, regardless of whether a query has built the index.
+impl std::fmt::Debug for NurbData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.value, f)
+    }
 }
 
 // A detached editing copy starts with an empty index.
