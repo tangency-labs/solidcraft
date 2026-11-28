@@ -37,6 +37,11 @@
 //!   extension of a strip that is not Bezier in the swapped direction) is left
 //!   swapped, as upstream's in-place `N_AdjustDerivSrf`; `SmBSplineSurface::
 //!   CreateSkinnedSurface` retries on it.
+//! - Not upstream (#15859): without derivative surfaces, once the cross sections are
+//!   compatible, those that are G1 but not C1 at a shared knot with different derivative
+//!   ratios are reparametrised exactly to one ratio there (degree `2p`), so the skin is
+//!   G1 across the knot between the sections too (`joint_ratios`). Sections
+//!   with nothing to match are skinned as upstream skins them, bit for bit.
 //! - Every array access is bounds checked; where upstream would index outside its
 //!   arrays (cross sections or derivative strips that are not compatible although
 //!   `cmp` says so, rails that are not compatible with each other, too few `ts`
@@ -929,6 +934,14 @@ pub(crate) fn create_skin_srf_boundary_continuity_mapped(
         }
     }
 
+    // Not upstream (#15859): sections that are G1 but not C1 at a shared knot are
+    // reparametrised to one derivative ratio there, so the skin is G1 across it
+    // (`joint_ratios`). Derivative data would have to follow the end sections' new
+    // parametrisation, so the sections are taken as they are with it.
+    if !has_der {
+        super::joint_ratios::match_joint_ratios(cur)?;
+    }
+
     let c0 = crv(cur, 0)?;
     let mut nc = c0.n();
     let mut pc = c0.degree();
@@ -1385,6 +1398,132 @@ mod tests {
             };
             let s = create_skin_srf_boundary_continuity(&mut cs, &mut opt).unwrap();
             assert_eq!(s.n(), 5);
+        }
+    }
+
+    /// A closed section through six points of an ellipse (half-axes `a`, `b`, at height
+    /// `z`): six cubic pieces on unit intervals, G1 but not C1. At joint `j` the derivative
+    /// after the joint is `ratio(j)` times the one before (the seam is joint 0), as a
+    /// fit-point spline's pieces are once each is put on a unit interval.
+    fn creased_section(a: f64, b: f64, z: f64, ratio: impl Fn(usize) -> f64) -> Curve {
+        let n = 6;
+        let angle = |j: usize| std::f64::consts::TAU * (j % n) as f64 / n as f64;
+        let pt = |j: usize| Vec3::new(a * angle(j).cos(), b * angle(j).sin(), z);
+        let tangent = |j: usize| {
+            let t = Vec3::new(-a * angle(j).sin(), b * angle(j).cos(), 0.0);
+            t * (1.0 / t.length())
+        };
+        // the derivative before joint j is the chord before it, after it `ratio(j)` times that
+        let before = |j: usize| (pt(j) - pt(j + n - 1)).length();
+        let after = |j: usize| ratio(j % n) * before(j);
+        let mut pts = vec![CPoint::from_point(pt(0))];
+        for j in 0..n {
+            pts.push(CPoint::from_point(pt(j) + tangent(j) * (after(j) / 3.0)));
+            pts.push(CPoint::from_point(
+                pt(j + 1) - tangent(j + 1) * (before(j + 1) / 3.0),
+            ));
+            pts.push(CPoint::from_point(pt(j + 1)));
+        }
+        let mut knots = vec![0.0; 4];
+        for j in 1..n {
+            knots.extend([j as f64; 3]);
+        }
+        knots.extend([n as f64; 4]);
+        Curve::new(pts, 3, knots).unwrap()
+    }
+
+    /// #15859: a skin through sections that are G1 but not C1 at their joints, each with its
+    /// own derivative ratios there, had creases between the sections: its one-sided normals
+    /// differed across the joints. The sections are reparametrised to one ratio per joint,
+    /// so the normals agree across every joint, the seam too, to rounding, and every section
+    /// is still the same curve.
+    #[test]
+    fn skin_through_sections_with_different_joint_ratios_has_no_crease() {
+        let ratio =
+            |k: usize| move |j: usize| 1.0 + 0.15 * k as f64 * if j % 2 == 0 { 1.0 } else { -0.5 };
+        let originals = vec![
+            creased_section(15.0, 10.0, 0.0, ratio(0)),
+            creased_section(20.0, 12.0, 10.0, ratio(1)),
+            creased_section(15.0, 10.0, 20.0, ratio(2)),
+        ];
+        let mut cs = originals.clone();
+        let ts = [0.0, 0.5, 1.0];
+        let mut opt = SkinBoundaryOptions {
+            deg: 2,
+            ts: Some(ts.to_vec()),
+            ..SkinBoundaryOptions::default()
+        };
+        let s = create_skin_srf_boundary_continuity(&mut cs, &mut opt).unwrap();
+        let (pu, q) = s.degrees();
+        // Rounding bound: a control point of the reparametrised sections and of the skin is
+        // a short sum of products (fewer than 16 q roundings: the composition with the
+        // quadratic reparametrisation, then the interpolation across three sections), so
+        // each carries at most gamma |P|; a first derivative is a difference of two of them
+        // over a knot span (times the degree), and a normal's direction moves by at most the
+        // relative errors of its two derivatives, on each side of the joint.
+        let gamma = 16.0 * q as f64 * f64::EPSILON;
+        let big = s
+            .cpts()
+            .iter()
+            .flatten()
+            .map(|c| c.to_euclid().length())
+            .fold(0.0, f64::max);
+        let span = |k: &[f64]| {
+            k.windows(2)
+                .map(|w| w[1] - w[0])
+                .filter(|d| *d > 0.0)
+                .fold(f64::INFINITY, f64::min)
+        };
+        let (hu, hv) = (span(s.u_knots()), span(s.v_knots()));
+        let normal = |u: f64, v: f64, side: Side| {
+            let d = s.derivs(u, v, Side::Left, side, false, 1, 1).unwrap();
+            let (su, sv) = (d[1][0], d[0][1]);
+            let err = 2.0
+                * gamma
+                * big
+                * (pu as f64 / (hu * su.length()) + q as f64 / (hv * sv.length()));
+            let n = su.cross(sv);
+            (n * (1.0 / n.length()), err)
+        };
+        let mut worst: f64 = 0.0;
+        for j in 0..6 {
+            // the seam: the end of the last piece against the start of the first
+            let (vl, vr) = if j == 0 {
+                (6.0, 0.0)
+            } else {
+                (j as f64, j as f64)
+            };
+            for i in 0..=10 {
+                let u = f64::from(i) / 10.0;
+                let (nl, el) = normal(u, vl, Side::Left);
+                let (nr, er) = normal(u, vr, Side::Right);
+                let jump = nl.cross(nr).length();
+                assert!(nl.dot(nr) > 0.0);
+                assert!(
+                    jump <= el + er,
+                    "joint {j}, u {u}: normals jump by {jump} > {}",
+                    el + er
+                );
+                worst = worst.max(jump);
+            }
+        }
+        assert!(worst < 1e-11, "{worst}");
+        // Every section is the same curve: the skin passes through each, and each of its
+        // points lies on the section given (found by Newton from the same parameter).
+        for (k, c) in originals.iter().enumerate() {
+            for i in 0..=60 {
+                let v = f64::from(i) / 10.0;
+                let x = s.eval(ts[k], v, Side::Left, Side::Left).unwrap();
+                let mut t = v;
+                for _ in 0..30 {
+                    let d = c.derivs(t, Side::Left, 2).unwrap();
+                    let e = d[0] - x;
+                    let step = e.dot(d[1]) / (d[1].dot(d[1]) + e.dot(d[2]));
+                    t = (t - step).clamp(0.0, 6.0);
+                }
+                let off = (c.eval(t, Side::Left).unwrap() - x).length();
+                assert!(off <= 4.0 * gamma * big, "section {k}, v {v}: {off} off");
+            }
         }
     }
 
