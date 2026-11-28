@@ -680,7 +680,7 @@ impl<'a> Table<'a> {
         painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, t.form_dim);
         let pill = egui::Rect::from_min_size(egui::pos2(left + label_width + t.space_8, rect.center().y - t.space_8), vec2(count_width, t.space_16));
         painter.rect_filled(pill, (t.space_16 * 0.5).round() as u8, t.text.gamma_multiply(0.13));
-        painter.galley(egui::pos2(pill.left() + t.space_6, pill.center().y - count_galley.size().y * 0.5), count_galley, t.form_dim);
+        painter.galley(crate::text::centred_in(&painter, &count_galley, pill.center()), count_galley, t.form_dim);
         if response.has_focus() {
             painter.rect_stroke(
                 rect.shrink2(vec2(t.space_4, t.space_2 * 0.5)),
