@@ -178,9 +178,11 @@ pub enum DraftRefusal {
     /// its net is not clamped in both directions (the sense is read at the net's corners;
     /// a periodic or unclamped net is refused, not guessed).
     SenseNotProved,
-    /// The drafted cone would close within the face's span (its radius on the neutral plane
-    /// or at a control point not positive, its slope infinite), or its net could not be
-    /// edited.
+    /// The face is a cone whose radius where its axis crosses the neutral plane is not
+    /// positive: the neutral plane is at or past its apex, so there is no hinge circle.
+    NeutralPlanePastApex,
+    /// The drafted cone would close within the face's span (its radius at a control point
+    /// not positive, its slope infinite), or its net could not be edited.
     ConeCloses,
 }
 
@@ -529,8 +531,11 @@ fn cone_draft(
     } else {
         (cone.radius(v0), cone.tan_semi_angle() * sense)
     };
+    if !above(r0, 0.0) {
+        return Ok(Err(DraftRefusal::NeutralPlanePastApex));
+    }
     let turned = (slope.atan() - s * angle).tan();
-    if !above(r0, 0.0) || !turned.is_finite() {
+    if !turned.is_finite() {
         return Ok(Err(DraftRefusal::ConeCloses));
     }
     Ok(Ok(ConeDraft {
@@ -1562,6 +1567,46 @@ mod tests {
             straight.procedural_blend().unwrap().recertify(&k).unwrap(),
             0.0
         );
+    }
+
+    /// A cone of radius 10 at z = 0 and 5 at z = 10 has its apex at z = 20: about the planes
+    /// z = 25 and z = 21 its radius is -2.5 and -0.5, so neither has a hinge circle. The
+    /// refusal says so, apart from a cone that closes within the face's span. The plane
+    /// through the apex itself is left out: there the radius is 0 only up to rounding, and
+    /// its sign differs between platforms.
+    #[test]
+    fn a_cone_about_a_plane_at_or_past_its_apex_is_refused_as_such() {
+        let mut k = Kernel::default();
+        let b =
+            crate::primitive::api_primitives::create_cone(&mut k, Point3::ZERO, 10.0, 5.0, 10.0)
+                .unwrap();
+        let f = curved_face(&k, &b);
+        for height in [25.0, 21.0] {
+            let past = Draft::new(Point3::new(0.0, 0.0, height), Vec3::Z, Vec3::Z, THETA).unwrap();
+            assert_eq!(
+                draft_surface(&k, &b, f, &past).unwrap().unwrap_err(),
+                DraftRefusal::NeutralPlanePastApex
+            );
+        }
+        let below = Draft::new(Point3::new(0.0, 0.0, 15.0), Vec3::Z, Vec3::Z, THETA).unwrap();
+        assert!(draft_surface(&k, &b, f, &below).unwrap().is_ok());
+    }
+
+    /// #22807: an R 10, height 100 cylinder drafted 6 degrees about its base closes to a point at
+    /// z = 10 / tan(6 deg) ~ 95.14 < 100, so it is refused as `DraftRefusal::ConeCloses`; 5 degrees
+    /// stays open past the top (apex at ~114.3) and succeeds.
+    #[test]
+    fn a_cylinder_that_closes_before_its_top_is_refused_as_cone_closes() {
+        let mut k = Kernel::default();
+        let b = create_cylinder(&mut k, Point3::ZERO, 10.0, 100.0).unwrap();
+        let f = curved_face(&k, &b);
+        let steep = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, 6.0_f64.to_radians()).unwrap();
+        assert_eq!(
+            draft_surface(&k, &b, f, &steep).unwrap().unwrap_err(),
+            DraftRefusal::ConeCloses
+        );
+        let open = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, 5.0_f64.to_radians()).unwrap();
+        assert!(draft_surface(&k, &b, f, &open).unwrap().is_ok());
     }
 
     #[test]

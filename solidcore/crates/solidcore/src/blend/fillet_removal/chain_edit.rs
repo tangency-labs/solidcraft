@@ -3,12 +3,12 @@
 
 use super::ring::{extend_line_seam, RingFilletRemoval};
 use super::{
-    bspline_part_with_nurb, glue_edges, ner, own_edge_curve, refused, set_vertex_point,
-    stage_failed,
+    bspline_part_with_nurb, curve_without_net, defect, edge_curve, edge_vertex, face_surface,
+    glue_edges, have, no_surface, own_edge_curve, refused, set_vertex_point, stopped,
 };
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::blend::{BlendFailure, RemovalRefusal as R};
+use crate::error::blend::{BlendFailure, RemovalInput, RemovalRefusal as R, RemovalStop};
 use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -117,7 +117,7 @@ fn retained_sides(
                 } else if end == Some(v) {
                     high
                 } else {
-                    return Err(stage_failed());
+                    return Err(defect("an edge found at a vertex has it at an end"));
                 };
                 *target = Some(j.point);
                 *keeps = true;
@@ -160,17 +160,20 @@ fn side_parameter(
     };
     let on_curve = project(curve, curve.natural_interval())?;
     if !on_curve.success {
-        return Err(stage_failed());
+        return Err(stopped(RemovalStop::SideEdgeDropStopped));
     }
     if on_curve.distance <= tol {
         return Ok((on_curve.parameter, None));
     }
     let (continued, domain) = if curve.is_linear(k, tol, false)?.linear {
-        let v = ner(if high {
-            edge::end_vertex(b, e)?
-        } else {
-            edge::start_vertex(b, e)?
-        })?;
+        let v = edge_vertex(
+            if high {
+                edge::end_vertex(b, e)?
+            } else {
+                edge::start_vertex(b, e)?
+            },
+            e,
+        )?;
         let reach = vertex::point(b, v)?.distance(point);
         let line = extend_line_seam(k, curve, high, reach, tol)?;
         let span = line.natural_interval();
@@ -179,7 +182,7 @@ fn side_parameter(
         let mut support = None;
         for f in edge::faces(b, e, None)? {
             if matches!(
-                ner(face::surface(b, f)?)?.kind(),
+                face_surface(b, f)?.kind(),
                 SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)
             ) {
                 support = Some(f);
@@ -199,7 +202,7 @@ fn side_parameter(
     };
     let at = project(&continued, domain)?;
     if !at.success {
-        return Err(stage_failed());
+        return Err(stopped(RemovalStop::SideEdgeDropStopped));
     }
     if at.distance > tol {
         return Err(refused(R::SeamTrimMissesNewVertex));
@@ -221,7 +224,7 @@ fn side_edit(
     }
     let old_span = edge::interval(b, e)?;
     let mut limits = [old_span.min(), old_span.max()];
-    let old_curve = ner(edge::curve(b, e)?)?;
+    let old_curve = edge_curve(b, e)?;
     let mut replacement = None;
     for ((high, point), limit) in [false, true].into_iter().zip(ends).zip(&mut limits) {
         if let Some(p) = point {
@@ -253,8 +256,13 @@ fn side_edit(
         let mut uv = old.clone_for_evaluation()?;
         for t in limits {
             if !uv.natural_interval().contains_value(t, 0.0) {
-                let spline = ner(bspline_part_with_nurb(&uv)?)?;
-                uv = Curve::from(ner(spline.create_continued_curve(t)?)?);
+                let Some(spline) = bspline_part_with_nurb(&uv)? else {
+                    return Err(curve_without_net(Some(e), &uv));
+                };
+                let Some(continued) = spline.create_continued_curve(t)? else {
+                    return Err(stopped(RemovalStop::CurveNotExtended));
+                };
+                uv = Curve::from(continued);
             }
         }
         trims.push((use_id, uv));
@@ -275,7 +283,11 @@ fn side_edit(
 fn include_trim(k: &Kernel, b: &mut Brep, f: FaceId, domain: Extent2d) -> Result<()> {
     let domain = face::uv_domain(b, f)?.union(&domain);
     face::set_uv_domain(b, f, &domain)?;
-    let surface = ner(b.face_mut(f)?.surface.as_mut())?;
+    let surface = b
+        .face_mut(f)?
+        .surface
+        .as_mut()
+        .ok_or_else(|| no_surface(f))?;
     match surface.kind_mut() {
         SurfaceKind::Plane(plane) => {
             let basis = plane.natural_uv_domain();
@@ -295,8 +307,8 @@ fn include_trim(k: &Kernel, b: &mut Brep, f: FaceId, domain: Extent2d) -> Result
             };
             if !target.is_contained_by(&old, 0.0) {
                 let support = AnalyticSupport::check(k, surface)?;
-                super::expand_boundary_span(k, surface, target.min(), dir)?;
-                super::expand_boundary_span(k, surface, target.max(), dir)?;
+                super::expand_boundary_span(k, f, surface, target.min(), dir)?;
+                super::expand_boundary_span(k, f, surface, target.max(), dir)?;
                 let grown = surface.natural_uv_domain_with_nurb(k)?;
                 super::update_analytical_domain(k, surface, &grown)?;
                 if AnalyticSupport::check(k, surface)? != support {
@@ -320,7 +332,7 @@ fn cone_seam_trim(
     uv: &Curve,
     span: Extent1d,
 ) -> Result<Option<Curve>> {
-    let surface = ner(face::surface(b, f)?)?;
+    let surface = face_surface(b, f)?;
     let SurfaceKind::Cone(cone) = surface.kind() else {
         return Ok(None);
     };
@@ -374,18 +386,23 @@ impl Side {
         let tol = tol.min(edge::tolerance(b, self.edge)?);
         let old = edge::interval(b, self.edge)?;
         for (use_id, uv) in &mut self.trims {
-            let f = ner(eu::face(b, *use_id)?)?;
+            let f = have(eu::face(b, *use_id)?, RemovalInput::EdgeUseFace)?;
             let ruling = cone_seam_trim(k, b, self.edge, f, uv, self.span)?;
             let replaced = ruling.is_some();
             if let Some(ruling) = ruling {
                 *uv = ruling;
             }
-            let bounds = ner(uv.certified_bounding_box(k, &self.span)?)?;
+            let bounds = uv
+                .certified_bounding_box(k, &self.span)?
+                .ok_or_else(|| stopped(RemovalStop::NoCertifiedBox))?;
             let domain = domains.entry(f).or_insert(face::uv_domain(b, f)?);
             *domain = domain.union(&Extent2d::from_extent3d(&bounds));
             include_trim(k, b, f, *domain)?;
-            let surface = ner(face::surface(b, f)?)?;
-            let curve = ner(self.curve.as_ref().or(edge::curve(b, self.edge)?))?;
+            let surface = face_surface(b, f)?;
+            let curve = match self.curve.as_ref() {
+                Some(c) => c,
+                None => edge_curve(b, self.edge)?,
+            };
             if replaced {
                 certified_lift(k, surface, uv, curve, self.span, tol)?;
                 continue;
@@ -415,12 +432,13 @@ fn open_supports(
                 continue;
             }
             domains.entry(f).or_insert(face::uv_domain(b, f)?);
-            let surface = ner(face::surface(b, f)?)?;
+            let surface = face_surface(b, f)?;
             let domain = match surface.kind() {
                 SurfaceKind::Plane(p) => {
-                    let bounds = ner(s
+                    let bounds = s
                         .sharp
-                        .certified_bounding_box(k, &s.sharp.natural_interval())?)?;
+                        .certified_bounding_box(k, &s.sharp.natural_interval())?
+                        .ok_or_else(|| stopped(RemovalStop::NoCertifiedBox))?;
                     let mut domain = Extent2d::new();
                     for corner in bounds.corners() {
                         domain.add_point(p.project_point_to_uv_domain(corner));
@@ -528,8 +546,15 @@ pub(super) fn remove_chain(
                 continue;
             }
             get_or_create_uv_trim_curve(k, b, use_id, false, false, true)?.status?;
-            let f = ner(eu::face(b, use_id)?)?;
-            let uv = ner(eu::uv_trim_curve(b, use_id)?.0)?;
+            let f = have(eu::face(b, use_id)?, RemovalInput::EdgeUseFace)?;
+            let Some(uv) = eu::uv_trim_curve(b, use_id)?.0 else {
+                return Err(Failure::new(
+                    super::OP,
+                    BlendFailure::RemovalStopped(RemovalStop::UvTrimNotMade),
+                )
+                .at(EntityRef::Edgeuse(use_id))
+                .into_error());
+            };
             let refusal = || {
                 Failure::new(
                     super::OP,
@@ -540,20 +565,18 @@ pub(super) fn remove_chain(
             if edge::tolerance(b, keep)? > budget || edge::interval(b, keep)? != span {
                 return Err(refusal().into_error());
             }
-            certified_lift(
-                k,
-                ner(face::surface(b, f)?)?,
-                uv,
-                &section.sharp,
-                span,
-                budget,
-            )
-            .map_err(|e| match e {
-                e @ SolidError::Unsupported { .. } => refusal().caused_by(e).into_error(),
-                e => e,
+            certified_lift(k, face_surface(b, f)?, uv, &section.sharp, span, budget).map_err(
+                |e| match e {
+                    e @ SolidError::Unsupported { .. } => refusal().caused_by(e).into_error(),
+                    e => e,
+                },
+            )?;
+            let bounds = uv
+                .certified_bounding_box(k, &span)?
+                .ok_or_else(|| stopped(RemovalStop::NoCertifiedBox))?;
+            let domain = domains.get_mut(&f).ok_or_else(|| {
+                defect("the supports of a kept rail have their windows opened first")
             })?;
-            let bounds = ner(uv.certified_bounding_box(k, &span)?)?;
-            let domain = domains.get_mut(&f).ok_or_else(stage_failed)?;
             *domain = domain.union(&Extent2d::from_extent3d(&bounds));
         }
     }

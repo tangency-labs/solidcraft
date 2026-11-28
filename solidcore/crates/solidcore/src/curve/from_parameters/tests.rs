@@ -292,6 +292,19 @@ fn a_circle_on_its_form_keeps_it_and_a_moved_form_is_refused() {
     near(at(&k, &c, ivl.max()), [1.0, 4.0, 0.0], 1e-15 * 8.0);
     assert!(conic_on_form(&k, &circle, &quarter_form([1.0, 2.0, 1e-9], 2.0)).is_err());
     assert!(conic_on_form(&k, &circle, &quarter_form([1.0, 2.0, 0.0], 2.0 + 1e-9)).is_err());
+    // #23062: a reader that drops a label its form is not proved on is told so, not refused
+    let moved = quarter_form([1.0, 2.0, 0.0], 2.0 + 1e-9);
+    assert!(conic_on_form_if_proved(&k, &circle, &moved)
+        .unwrap()
+        .is_none());
+    let on = quarter_form([1.0, 2.0, 0.0], 2.0);
+    assert!(conic_on_form_if_proved(&k, &circle, &on).unwrap().is_some());
+    // what is not about the form being off the conic is still refused
+    let line = Record::Line {
+        start: [0.0; 3],
+        end: [1.0, 0.0, 0.0],
+    };
+    assert!(conic_on_form_if_proved(&k, &line, &on).is_err());
 }
 
 /// A pcurve's knots go affinely onto its edge's kernel interval; its points are the record's.
@@ -727,4 +740,35 @@ fn a_polynomial_spline_and_polyline_are_non_rational() {
         .cpts()
         .iter()
         .all(|p| p.w != NOW && p.z == NOZ));
+}
+
+/// #3384: a flat arc about a far centre (chord 40 on radius 4e5, the world origin at the
+/// chord's middle, one rational quadratic piece) is proved on its circle by [`on_conic`]: the
+/// sphere's constant `|o|^2 - r^2` cancels there and counts at the size of `|o|^2` and `r^2`.
+/// The same arc with its middle pole moved out by 1e-11 of the radius (its middle about
+/// 5e-12 of the radius off the circle) is still refused: the bound is rounding, not a tolerance.
+#[test]
+fn a_flat_arc_about_a_far_centre_is_proved_on_its_circle_and_no_further() {
+    let (h, r) = (20.0_f64, 4e5_f64);
+    let cy = -(r * r - h * h).sqrt();
+    let w = (h / r).asin().cos();
+    let arc = |lift: f64| {
+        // the middle pole, where the end tangents meet, r / w above the centre (homogeneous)
+        let top = cy + r / w + lift;
+        spline(
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            &[
+                [h, 0.0, 0.0, 1.0],
+                [0.0, w * top, 0.0, w],
+                [-h, 0.0, 0.0, 1.0],
+            ],
+            3,
+            true,
+            OP,
+        )
+        .unwrap()
+    };
+    let (o, x, y) = axes(&frame([0.0, cy, 0.0])).unwrap();
+    assert!(on_conic(&arc(0.0), o, x, y, r, r, true).unwrap());
+    assert!(!on_conic(&arc(1e-11 * r), o, x, y, r, r, true).unwrap());
 }

@@ -27,6 +27,20 @@
     "paper_dark": "#000000",
     "paper_ink": "#000000",
     "paper_dark_ink": "#ffffff",
+    "paper_lines": [
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000"
+    ],
+    "paper_dark_lines": [
+      "#ffffff",
+      "#ffffff",
+      "#ffffff",
+      "#ffffff",
+      "#ffffff"
+    ],
     "bend_up": "#000000",
     "body": "#ffffff",
     "body_edge": "#000000",
@@ -97,6 +111,7 @@
     "hover": "#ffffff",
     "hover_edge": "#000000",
     "hover_edge_halo": "#ffffff",
+    "hover_edge_lit": "#000000",
     "hover_profile": "#000000",
     "hover_profile_edge": "#ffffff",
     "icon": "#000000",

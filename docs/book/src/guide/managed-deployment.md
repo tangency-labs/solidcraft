@@ -13,7 +13,9 @@ writes nothing, and it sends nothing about the policy anywhere.
 
 The Windows installer (`solidcraft-windows-x64.msi`, also arm64 and x86) installs for all users.
 `msiexec /i solidcraft-windows-x64.msi /qn` installs it without questions, so a deployment tool
-can run it.
+can run it. People without administrator rights can install it just for themselves instead
+([Getting started](getting-started.md#installing-on-windows)); policies under
+`HKLM\Software\Policies\SolidCraft` apply to that copy too.
 
 ## The policies
 
@@ -23,6 +25,7 @@ can run it.
 | Anonymous usage statistics | `UsageStatistics` | `REG_DWORD` | `0`: SolidCraft sends no usage statistics, keeps none to send later and shows no notice about them, and people cannot turn them on. `1`: each person chooses. SolidCraft 0.46 or later; what is sent is in [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md). |
 | Organization name | `OrganizationName` | `REG_SZ` | The name shown as **Managed by** and the name, up to 64 characters on one line. It changes no setting. |
 | Units of new designs | `DefaultUnits` | `REG_SZ` | `mm`, `cm`, `m`, `in` or `ft` (Preferences, Design). Designs that already exist keep their units. SolidCraft 0.46 or later. |
+| Interface font | `InterfaceFont` | `REG_SZ` | the name of a font family installed on the computer, such as `Segoe UI`: the interface font, which people cannot change or replace with a font file; a family the computer does not have leaves the built-in font showing, and a file path counts as not configured. SolidCraft 0.51 or later. |
 | Interface language | `Language` | `REG_SZ` | `system` to follow the operating system, or the code of a language SolidCraft has, such as `en`, `de`, `fr`, `pt-BR` or `zh-TW` (Preferences, General, Language lists them). SolidCraft 0.46 or later. |
 | Reopen designs at start | `ReopenDesigns` | `REG_DWORD` | `1`: reopens the designs that were open when SolidCraft closed. `0`: does not, for example on shared computers. SolidCraft 0.46 or later. |
 | Show the Discord button | `ShowDiscordButton` | `REG_DWORD` | `1`: the application bar shows it and people cannot hide it. `0`: hidden. The Help menu keeps the link. SolidCraft 0.46 or later. |
@@ -32,7 +35,20 @@ can run it.
 | AI agent permissions | `AiPermissions` | `REG_SZ` | `ask` (every change asks first), `edits` (modelling runs, files and destructive actions ask) or `all` (nothing asks). An agent's own permissions and the **Always allowed** answers don't apply while it is set. SolidCraft 0.46 or later. |
 | Changes per message | `AgentTurnLimit` | `REG_DWORD` | `1` to `200`: the most changes an agent in the chat makes for one message. `0`: no limit. SolidCraft 0.46 or later. |
 | Let AI agents connect | `AgentControl` | `REG_DWORD` | `1`: the control channel (MCP, this computer only) is on. `0`: SolidCraft opens no port for agents, not even one named with `--control` or `SOLIDCRAFT_CONTROL_PORT`. SolidCraft 0.46 or later. |
+| Allow Open with EasyPrint | `AllowEasyPrint` | `REG_DWORD` | `0`: SolidCraft offers no EasyPrint and sends no model to Printables, whoever asks. `1` or not set: people can use it after agreeing once. SolidCraft 0.46 or later. |
+| Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. SolidCraft 0.46 or later. |
 | Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
+| Show labels on the toolbar | `RibbonLabels` | `REG_DWORD` | `1`: the toolbar shows a label under each button. `0`: icons only (Preferences, Layout, Window, Toolbar). SolidCraft 0.51 or later. |
+| Show the status bar | `StatusBar` | `REG_DWORD` | `1`: the status bar shows and people cannot hide it. `0`: hidden (Preferences, Layout, Window, Status bar). SolidCraft 0.51 or later. |
+| Workspace layout | `Layout` | `REG_SZ` | `floating` (panels float over the model) or `compact` (panels docked around it): the workspace layout, which people cannot change (Preferences, Layout, Window, Panel style). SolidCraft 0.51 or later. |
+| Export hidden edges as dashed lines | `DxfDashedHiddenLines` | `REG_DWORD` | `1`: File, Export Current View as DXF writes hidden edges as dashed lines. `0`: it leaves them out. The export dialog shows the choice as set by the organization. SolidCraft 0.51 or later. |
+| Zero point of DXF view exports | `DxfOrigin` | `REG_SZ` | `target` (the point the camera looks at) or `origin` (the model's origin): where File, Export Current View as DXF puts the drawing's 0,0. SolidCraft 0.51 or later. |
+| Curve tolerance of DXF view exports | `DxfTolerance` | `REG_SZ` | a number of millimetres from `0.001` to `1`, such as `0.01`: how far the segments File, Export Current View as DXF writes for a curve may stray from it, which people cannot change. A macOS profile or the JSON file may give it as a number. SolidCraft 0.51 or later. |
+| Mesh export format | `MeshExportFormat` | `REG_SZ` | `stl`, `3mf` or `3mf-tagged` (3MF with face tags): the format File, Save As Mesh and Send to Slicer write; Export STL and Export 3MF open the dialog with it too. SolidCraft 0.51 or later. |
+| Mesh export quality | `MeshExportQuality` | `REG_SZ` | `standard`, `fine` or `finest`: how closely a saved mesh follows curved faces. SolidCraft 0.51 or later. |
+| Slicer | `Slicer` | `REG_SZ` | `prusa`, `bambu`, `orca`, `cura`, `superslicer`, `creality`, `elegoo`, `anycubic`, `ideamaker`, `lychee`, `qidi`, `chitubox`, `creatware`, `slic3r` or `easyprint` (EasyPrint, in the browser): the slicer File, Send to Slicer uses, which people cannot change; when it is not installed, Send to Slicer says no slicer was found. Open in EasyPrint uses it too. SolidCraft 0.51 or later. |
+| Theme | `Theme` | `REG_SZ` | `dark`, `light` or the id of a built-in theme, such as `nord`, `high-contrast` or `solarized-light` (the file names in [`crates/look/themes`](https://github.com/tangency-labs/solidcraft/tree/main/crates/look/themes)): the interface theme, which people cannot change, import over or follow from a file; it does not switch between day and night. SolidCraft 0.51 or later. |
+| Theme file | `ThemeFile` | `REG_SZ` | The full path of a SolidCraft theme file (`.json`) everyone follows, up to 4096 characters on one line. See [A theme for everyone](#a-theme-for-everyone). SolidCraft 0.51 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 
@@ -105,6 +121,22 @@ Make it owned by root and not writable by others (`chmod 644`): a file anyone ma
 ignored. A Flatpak or Snap sees its own `/etc`, not the computer's, so use the distribution's
 package (deb, rpm, AppImage or the FreeBSD package) where you need the policy to apply.
 
+## Keeping data inside the organization
+
+These are the features that send something from SolidCraft to a server outside your
+organization, and the policy that turns each off:
+
+| What leaves the computer | Where it goes | Policy |
+|---|---|---|
+| Update checks | SolidCraft's update feed | `CheckForUpdates` = `0` |
+| Anonymous usage statistics | SolidCraft's metrics server (`metrics.solidcraft.io`, [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md)) | `UsageStatistics` = `0` |
+| What a person asks an AI agent, and what the agent sees | The AI provider the agent uses | `AiFeatures` = `0`, `AgentControl` = `0`, `ConnectAiApps` = `0` |
+| Problem reports, with what the person ticks | SolidCraft's ticket server, or GitHub | `AllowProblemReports` = `0` |
+| A model sent to Open with EasyPrint | Printables | `AllowEasyPrint` = `0` |
+
+Linked designs and fonts on network locations are read from your own file servers
+(Preferences, General, Network locations).
+
 ## Check that a policy applies
 
 While any policy is set, the application bar shows a briefcase and **Managed by** with the
@@ -121,9 +153,28 @@ unavailable too. A Donate or Discord button the policy shows has no way to hide 
 **Set by your organization** instead.
 
 An agent or a script sees the same through the control channel: the reply of `ui.prefs` has a
-`policy` object that lists the locked settings, their values in force (`settings`) and the
-organization's name. The settings themselves report each person's own stored choice, and a
+`policy` object that lists the locked settings, their values in force (`settings`), the
+features turned off (`off`: `easyprint`, `problem_reports`) and the organization's name. The settings themselves report each person's own stored choice, and a
 request that changes a locked setting is refused ([control protocol](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)).
+
+## A theme for everyone
+
+`ThemeFile` gives everyone your organization's colours. Make the theme in SolidCraft
+(Preferences, Interface, Theme: change a theme's colours and export it), then put the file where
+every computer can read it and people cannot change it, for example
+`C:\ProgramData\ACME\solidcraft-theme.json`, `/etc/solidcraft/acme-theme.json` or a read-only
+network share, and set `ThemeFile` to its full path.
+
+SolidCraft then follows that file, as **Follow a theme file** in Preferences does: its colours
+replace the chosen theme, and when you replace the file, every running SolidCraft shows the new
+colours within a second. People cannot stop following it or follow another file, and the
+`--theme-file` option doesn't apply. The theme picker still records a person's choice, which
+comes back when the policy is removed.
+
+If the file is missing, cannot be read or is not a theme file, SolidCraft keeps the last theme
+that loaded (the person's own at start) and Preferences, Interface says why the file was not
+applied. A path that is empty, longer than 4096 characters or has a line break counts as not set.
+The browser version of SolidCraft reads no policy.
 
 ## A policy is not a launcher
 

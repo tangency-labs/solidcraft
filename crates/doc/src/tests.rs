@@ -4,6 +4,180 @@ use solidcraft_kernel::measure;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
 use crate::*;
+#[cfg(test)]
+mod weld_tests {
+    use super::*;
+    fn record() -> crate::weld::WeldRecord {
+        crate::weld::WeldRecord {
+            id: 42,
+            number: 1,
+            settings: crate::weld::WeldSettings::default(),
+            symbol: Some(solidcraft_geom::weld::Weld {
+                arrow_side: Some(solidcraft_geom::weld::WeldSide {
+                    kind: solidcraft_geom::weld::Kind::Fillet,
+                    size: Some(solidcraft_geom::weld::Size::Throat(3.)),
+                    length_mm: None,
+                    intermittent: None,
+                    contour: None,
+                }),
+                other_side: None,
+                all_round: false,
+                field: true,
+                tail: None,
+            }),
+        }
+    }
+    #[test]
+    fn weld_graphics_round_trip_and_old_design_default() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        let text = serde_json::to_string(&doc).unwrap();
+        let back = crate::format::read(&text).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.next_item_id().unwrap() > 42);
+        let old = crate::format::read(&serde_json::to_string(&Document::new("Old")).unwrap()).unwrap();
+        assert!(old.welds.is_empty());
+    }
+    #[test]
+    fn weld_butt_full_penetration_round_trip() {
+        let mut weld = record();
+        weld.settings.weld_type = "butt".into();
+        weld.settings.size = [("h".into(), 1.)].into_iter().collect();
+        weld.settings.face = "flat".into();
+        weld.settings.process = Some("135".into());
+        let symbol = weld.symbol.as_mut().unwrap();
+        symbol.tail = Some("135".into());
+        let side = symbol.arrow_side.as_mut().unwrap();
+        side.kind = solidcraft_geom::weld::Kind::SingleVButt;
+        side.size = None;
+        side.contour = Some(solidcraft_geom::weld::Contour::Flush);
+        let mut doc = Document::new("Butt");
+        doc.welds.push(weld);
+        let back = crate::format::read(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.welds[0].settings.density.is_none());
+    }
+    #[test]
+    fn weld_settings_validate_names_sizes_and_spans() {
+        use crate::weld::{WeldSettings, WeldSpans};
+        let settings = WeldSettings::default();
+        assert!(settings.validate().is_ok());
+        assert_eq!(settings.size.keys().map(String::as_str).collect::<Vec<_>>(), ["a"]);
+        for (field, value) in [
+            ("weld_type", "groove"),
+            ("process", "MAG"),
+            ("process", ""),
+            ("process", "1234"),
+            ("process", "１２"),
+            ("side", "left"),
+            ("ends", "round"),
+            ("spot_look", "unknown"),
+            ("reference_plane", "0"),
+            ("face", "unknown"),
+            ("symbol_standard", "jis"),
+            ("groove", "double_v"),
+            ("penetration", "unknown"),
+            ("root", "unknown"),
+            ("tack_mode", "unknown"),
+        ] {
+            let mut raw = serde_json::to_value(&settings).unwrap();
+            raw[field] = serde_json::json!(value);
+            let bad: WeldSettings = serde_json::from_value(raw).unwrap();
+            assert!(bad.validate().is_err(), "{field}={value}");
+        }
+        for typ in crate::weld::TYPES {
+            let mut settings = settings.clone();
+            settings.weld_type = (*typ).into();
+            for key in crate::weld::SIZE_KEYS {
+                settings.size = [((*key).into(), 1.)].into_iter().collect();
+                if *typ == "butt" {
+                    settings.penetration = if *key == "s" { "partial" } else { "full" }.into();
+                }
+                if *typ == "tack" {
+                    settings.size.insert("l".into(), 5.);
+                    settings.tack_mode = if *key == "n" { "count" } else { "pitch" }.into();
+                    if *key != "n" {
+                        settings.size.insert("e".into(), 40.);
+                    }
+                }
+                assert_eq!(settings.validate().is_ok(), crate::weld::size_keys(typ).contains(key), "{typ}/{key}");
+            }
+        }
+        for (count, length_mm, pitch_mm, valid) in [
+            (1, 1., 1., true),
+            (10000, 1., 2., true),
+            (0, 1., 2., false),
+            (10001, 1., 2., false),
+            (2, 0., 2., false),
+            (2, 1., -1., false),
+            (2, f64::NAN, 2., false),
+            (2, 1., f64::INFINITY, false),
+        ] {
+            let settings = WeldSettings { spans: Some(WeldSpans { count, length_mm, pitch_mm }), ..Default::default() };
+            assert_eq!(settings.validate().is_ok(), valid);
+        }
+    }
+    #[test]
+    fn weld_graphics_refuse_hostile_saved_records() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        for (path, bad) in [
+            (vec!["id"], serde_json::json!(0)),
+            (vec!["number"], serde_json::json!(0)),
+            (vec!["settings", "weld_type"], serde_json::json!("unknown")),
+            (vec!["settings", "size", "a"], serde_json::json!(-1)),
+            (vec!["settings", "process"], serde_json::json!(7)),
+            (vec!["symbol", "arrow_side", "size", "mm"], serde_json::json!(0)),
+        ] {
+            let mut value = serde_json::to_value(&doc).unwrap();
+            let mut target = &mut value["welds"][0];
+            for key in path {
+                target = &mut target[key];
+            }
+            *target = bad;
+            assert!(crate::format::read(&value.to_string()).is_err());
+        }
+        let mut value = serde_json::to_value(&doc).unwrap();
+        value["welds"] = serde_json::json!([record(), record()]);
+        assert!(crate::format::read(&value.to_string()).is_err());
+    }
+
+    #[test]
+    fn weld_choices_and_new_sizes_round_trip_without_changing_legacy_defaults() {
+        use crate::weld::WeldSettings;
+        let legacy: WeldSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(legacy.symbol_standard, "iso2553_2019_a");
+        assert_eq!((&*legacy.groove, &*legacy.penetration, &*legacy.root, &*legacy.tack_mode), ("v", "full", "as_welded", "pitch"));
+        for standard in crate::weld::SYMBOL_STANDARDS {
+            let mut r = record();
+            r.settings.symbol_standard = (*standard).into();
+            r.settings.root_gap = Some(0.);
+            r.settings.size.extend([("z1".into(), 4.), ("z2".into(), 6.), ("s".into(), 5.)]);
+            let back: crate::weld::WeldRecord = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+            assert_eq!(back, r);
+        }
+        for (mode, sizes) in [("pitch", vec![("l", 5.), ("e", 40.)]), ("count", vec![("l", 5.), ("n", 4.)]), ("points", vec![("l", 5.)])] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: mode.into(),
+                size: sizes.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+                ..Default::default()
+            };
+            settings.validate().unwrap();
+            let back: WeldSettings = serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+            assert_eq!(back, settings);
+        }
+        for n in [0., -1., 1.5, f64::NAN, f64::INFINITY] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: "count".into(),
+                size: [("l".into(), 5.), ("n".into(), n)].into_iter().collect(),
+                ..Default::default()
+            };
+            assert!(settings.validate().is_err());
+        }
+    }
+}
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
@@ -26,6 +200,7 @@ fn boundary_fill_classifies_cells_on_exact_surfaces() {
         .add_feature(
             FeatureKind::BoundaryFill {
                 tools: vec![BodyName(tool)],
+                planes: Vec::new(),
                 cells: vec![Position(Vec3::new(0.0, 0.0, 5.0))],
                 operation: Operation::NewBody,
                 remove_tools: true,
@@ -48,6 +223,20 @@ fn boundary_fill_classifies_cells_on_exact_surfaces() {
     let error = model.result(fill).unwrap().error.as_ref().unwrap();
     assert!(error.contains("Boundary Fill cell points must be away from tool boundaries"), "{error}");
     assert_eq!(model.state().bodies.len(), 1, "the original tool is kept on failure");
+}
+
+/// A design saved before Boundary Fill took planes has none, and one without planes saves as it did.
+#[test]
+fn boundary_fill_without_planes_reads_and_saves_as_before() {
+    let old = serde_json::json!({"type": "boundary_fill", "tools": ["B"], "cells": [[0.0, 0.0, 5.0]]});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::BoundaryFill { planes, .. } = &kind else { panic!("Boundary Fill") };
+    assert!(planes.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("planes").is_none());
+    let with = serde_json::json!({"type": "boundary_fill", "tools": ["B"], "planes": [{"type": "origin", "name": "XY"}], "cells": [[0.0, 0.0, 5.0]]});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    let FeatureKind::BoundaryFill { planes, .. } = &kind else { panic!("Boundary Fill") };
+    assert_eq!(planes.len(), 1);
 }
 
 #[test]
@@ -77,6 +266,25 @@ fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     assert_eq!(named.resolve_component("Design").unwrap(), Some(0));
 }
 
+#[test]
+fn model_parameters_respect_the_document_limit() {
+    for named in [false, true] {
+        let mut doc = Document::new("At the limit");
+        doc.params = (0..MAX_PARAMS - 1)
+            .map(|i| Param { name: format!("p{i}"), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: false })
+            .collect();
+        let create = |doc: &mut Document, name: &str| {
+            if named { doc.new_named_model_param(name, "2 mm", "mm") } else { doc.new_model_param("2 mm", "mm") }
+        };
+        create(&mut doc, "dim").unwrap();
+        let before = doc.clone();
+        assert_eq!(doc.params.len(), MAX_PARAMS);
+        assert!(create(&mut doc, "other").unwrap_err().to_string().contains("too many parameters"));
+        assert_eq!(doc, before);
+        assert_eq!(Document::from_json(&doc.to_json()).unwrap().params.len(), MAX_PARAMS);
+    }
+}
+
 /// 40 x 30 rectangle with its width and height driven by `width` / d2.
 fn plate_doc() -> (Document, u64) {
     let mut doc = Document::new("plate");
@@ -91,9 +299,9 @@ fn plate_doc() -> (Document, u64) {
     sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
-    let d1 = doc.new_model_param("width", "mm");
+    let d1 = doc.new_model_param("width", "mm").unwrap();
     sk.add_constraint(Length { l: l[0], value: 40.0 }, Some(d1)).unwrap();
-    let d2 = doc.new_model_param("30 mm", "mm");
+    let d2 = doc.new_model_param("30 mm", "mm").unwrap();
     sk.add_constraint(Length { l: l[1], value: 30.0 }, Some(d2)).unwrap();
     let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
     doc.add_feature(
@@ -116,9 +324,15 @@ fn plate_doc() -> (Document, u64) {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -226,9 +440,15 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -405,6 +625,100 @@ fn a_saved_model_with_a_long_warning_is_adopted() {
     features.last_mut().unwrap()["warning"] = warning.clone().into();
     let reopened = Model::adopt(&doc, &saved).unwrap();
     assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
+}
+
+/// A sketch a design file puts on a face by its point alone (no face name, no attachment)
+/// follows the nearest flat face that faces its way. When no face is at its point any more, it
+/// still opens on that face's plane, but with a warning (#20518): the `sketch.create` command
+/// refuses the same point, and the file said nothing. A face that only moved along its normal
+/// (the point still on it, seen square to it) gives no warning.
+#[test]
+fn a_sketch_whose_face_point_is_on_no_face_warns() {
+    use solidcraft_geom::prelude::*;
+
+    // The plate is 40 x 30 mm, 20 mm tall: its top face is at z = 20.
+    let sketch_on = |picked_z: f64, at: Vec3| {
+        let (mut doc, _) = plate_doc();
+        let top = Plane::new(Vec3::new(0.0, 0.0, picked_z), Vec3::X, Vec3::Y).unwrap();
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 3.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let plane = PlaneRef::Face { plane: top, at, name: None, anchor: None };
+        let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(id).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let z = m.state().sketches.iter().find(|s| s.feature == id).unwrap().plane.origin.z;
+        (result.warning.clone(), z)
+    };
+    let (warning, z) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a point on the top face: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(15.0, Vec3::new(10.0, 10.0, 15.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a top face that moved up 5 mm still holds the point: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(20.0, Vec3::new(60.0, 60.0, 20.0));
+    let warning = warning.unwrap_or_default();
+    assert!(warning.contains("no face is at the point the sketch was placed on, [60, 60, 20]"), "{warning}");
+    assert!((z - 20.0).abs() < 1e-9, "the sketch stays on the plane of the nearest face, not at z {z}");
+}
+
+/// A sketch saved on a face by a name worked out from geometry (an Align that kept no history
+/// guessed it, #20308) finds no face once that face has its exact name (#22919). Where the saved
+/// point still lies on a flat face on the sketch's own plane and the feature and side that made the
+/// named face still make one, the plane is the same, and the sketch opens on it with a note; a face
+/// that moved off that plane, a point on no face, a name whose root is gone and a name saved
+/// before format 14 still ask for the face to be picked again.
+#[test]
+fn a_sketch_on_a_face_saved_by_a_guessed_name_stays_on_the_same_plane() {
+    use solidcraft_geom::prelude::*;
+
+    // The plate is 40 x 30 mm, 20 mm tall: its top face is at z = 20.
+    let sketch_on = |picked_z: f64, at: Vec3, name: &str| {
+        let (mut doc, _) = plate_doc();
+        let top = Plane::new(Vec3::new(0.0, 0.0, picked_z), Vec3::X, Vec3::Y).unwrap();
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 3.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let plane = PlaneRef::Face { plane: top, at, name: Some(name.into()), anchor: None };
+        let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, Some("On top")).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(id).unwrap().clone();
+        let z = m.state().sketches.iter().find(|s| s.feature == id).map(|s| s.plane.origin.z);
+        (result, z)
+    };
+    // The top face's own name told apart by a move no face has: what its root names (the
+    // feature and the side that made it) is still there.
+    let top = {
+        let (doc, _) = plate_doc();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        naming::face_names_at(&m.state(), &[Vec3::new(10.0, 10.0, 20.0)]).pop().unwrap()
+    };
+    let guessed = format!("{top}@F99.1");
+    let guessed = guessed.as_str();
+    let (result, z) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), guessed);
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let warning = result.warning.unwrap_or_default();
+    assert!(warning.contains("has a new name; the sketch stays on the same plane"), "{warning}");
+    assert!(z.is_some_and(|z| (z - 20.0).abs() < 1e-9), "{z:?}");
+    let lost = |result: &FeatureResult, name: &str| result.error.as_deref().and_then(reselect_parts) == Some(("On top", name));
+    // Picked on a plane 5 mm under the top face: the sketch would move, so the face under the
+    // point is not taken for it.
+    let (result, _) = sketch_on(15.0, Vec3::new(10.0, 10.0, 20.0), guessed);
+    assert!(lost(&result, guessed), "{result:?}");
+    // The point is on no face.
+    let (result, _) = sketch_on(20.0, Vec3::new(60.0, 60.0, 20.0), guessed);
+    assert!(lost(&result, guessed), "{result:?}");
+    // A name whose root no face has any more (its sketch curve deleted and drawn again) is lost.
+    let (result, _) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), "F7:side:l47@F9.1");
+    assert!(lost(&result, "F7:side:l47@F9.1"), "{result:?}");
+    // A name saved before format 14 is never found by its point.
+    let legacy = format!("{}{guessed}", naming::LEGACY_MARK);
+    let (result, _) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), &legacy);
+    assert!(lost(&result, &legacy), "{result:?}");
 }
 
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
@@ -658,6 +972,133 @@ fn a_pattern_reads_the_bodies_its_source_cuts() {
     assert_eq!(summary(&m.state()), from_scratch(&doc));
 }
 
+/// The cap the pattern tests share: a disc with a conical hollow in its top, a bore through it
+/// clear of the hollow, a post in the hollow up to the hollow's wall joined to the disc, and a
+/// circular pattern that holds the bore and the post. The post's own join takes the face its To
+/// Object points at, so a copy of it has to be built where the post was built (#14305).
+fn cap_with_a_pattern(doc: &mut Document, component: u64) {
+    // A disc with a conical hollow in its top.
+    add_in(
+        doc,
+        component,
+        "Body1",
+        serde_json::json!({"type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "20", "height": "20", "operation": "new_body"}),
+    );
+    add_in(
+        doc,
+        component,
+        "Hollow",
+        serde_json::json!({"type": "cone", "base": ["0", "0", "20"], "axis": [0.0, 0.0, -1.0], "radius": "5", "top_radius": "0", "height": "10", "operation": "cut"}),
+    );
+    // A bore through the disc, clear of the hollow.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(15.0, 0.0), 1.0, None, None).unwrap();
+    let bore_sketch =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("Bore sketch")).unwrap();
+    add_in(
+        doc,
+        component,
+        "Bore",
+        serde_json::json!({"type": "extrude", "sketch": bore_sketch, "profiles": {"type": "all"}, "extent": {"distance": "30", "through_all": true}, "operation": "cut"}),
+    );
+    // A post in the hollow, up to the hollow's conical wall, joined to the disc.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(3.0, 0.0), 0.6, None, None).unwrap();
+    let post_sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "18".into() },
+                sketch: sk,
+            },
+            Some("Post sketch"),
+        )
+        .unwrap();
+    add_in(
+        doc,
+        component,
+        "Post",
+        serde_json::json!({"type": "extrude", "sketch": post_sketch, "profiles": {"type": "all"}, "extent": {"convention": "total_distance", "direction": "negative", "distance": "4", "to": [3.0, 0.0, 14.0]}, "operation": "join", "targets": ["Body1"]}),
+    );
+    for f in doc.features.iter_mut().filter(|f| f.name == "Body1") {
+        f.body_names = vec!["Body1".into()];
+    }
+    let bore = doc.find_feature("Bore").map_or(0, |f| f.id);
+    let post = doc.find_feature("Post").map_or(0, |f| f.id);
+    add_in(
+        doc,
+        component,
+        "Pattern",
+        serde_json::json!({"type": "pattern", "features": [bore, post], "pattern": {"type": "circular", "origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0], "count": "4", "angle": "360 deg"}}),
+    );
+}
+
+/// The cap's pattern: the post stands at radius 3 and the bore is cut at radius 15, each at the
+/// four places a circular pattern round the Z axis puts them. The post is read in the hollow it
+/// stands in (17 mm above the base) and the bore in the disc it goes through (10 mm above it).
+fn assert_pattern_posts_and_bores(body: &crate::kernel::Body) {
+    for (x, y) in [(3.0, 0.0), (0.0, 3.0), (-3.0, 0.0), (0.0, -3.0)] {
+        assert!(body.contains(Vec3::new(x, y, 17.0)), "the post stands at ({x}, {y}, 17)");
+    }
+    for (x, y) in [(15.0, 0.0), (0.0, 15.0), (-15.0, 0.0), (0.0, -15.0)] {
+        assert!(!body.contains(Vec3::new(x, y, 10.0)), "the bore is cut at ({x}, {y}, 10)");
+    }
+}
+
+/// A pattern that holds several features builds with all of them (#14305): the bore it holds is
+/// cut at each of its copies, and the post it holds stands at each of its copies. The copy of a
+/// feature that points at a face with its To Object is built where the feature was built, so the
+/// face that the feature's own join took is still there and the copy is that feature's own tool,
+/// moved.
+#[test]
+fn a_pattern_that_holds_several_features_builds_with_all_of_them() {
+    let mut doc = Document::new("cap with a pattern of several features");
+    cap_with_a_pattern(&mut doc, 0);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    // One body: the disc with the hollow in it, the four bores the pattern cut and the four
+    // posts it added.
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 1);
+    // The post stands at each of the four places the pattern puts it and the bore is cut at each
+    // of its four places: a pattern that copies the bores alone leaves the posts out.
+    assert_pattern_posts_and_bores(&st.bodies[0].body);
+}
+
+/// The same pattern in a document with two components: a cold rebuild prefetches each component's
+/// chain in parallel, and a pattern's copies are built against the model as it was before the
+/// feature they copy ran, there as in the sequential loop (#14305).
+///
+/// The prefetch runs here (the document has two components and the evaluation is cold), and it
+/// stops before the pattern: a pattern whose source points at a face with its To Object reads
+/// bodies it cannot name, so it is no relative change and the parallel chain does not take it
+/// (`Feature::reads` in `crates/doc/src/eval.rs`). The sequential loop evaluates the pattern,
+/// against the states its copies are built on, and gives the model the user sees.
+#[test]
+fn a_pattern_in_a_component_of_many_builds_with_all_of_its_features() {
+    let mut doc = Document::new("two components with a pattern of several features");
+    let cap = doc.add_component(Some("Cap"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    cap_with_a_pattern(&mut doc, cap);
+    // A second component, so the document has more than one and the prefetch runs.
+    add_in(
+        &mut doc,
+        other,
+        "Block",
+        serde_json::json!({"type": "box", "corner": ["100", "0", "0"], "length": "10", "width": "10", "height": "10", "operation": "new_body"}),
+    );
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // The same model as an evaluation without the prefetch gives.
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 2);
+    // The same posts and bores as in a document with one component: the pattern copies them all.
+    assert_pattern_posts_and_bores(&st.body("Body1").unwrap().body);
+}
+
 /// A cut of several bodies cuts again only those that changed: the rod, which `w` does not
 /// move, keeps the very body its earlier cut gave, while the cap `w` sizes is cut again.
 #[test]
@@ -818,6 +1259,716 @@ fn an_edit_in_one_component_recomputes_only_what_reads_it() {
     }
 }
 
+/// A component deleted, or another added before the rest, changes the bodies before the other
+/// components' features and the design's components, none of which they read: each keeps its
+/// result, made again on the model as it is now, and the bodies match an evaluation from scratch.
+#[test]
+fn a_component_deleted_or_added_keeps_the_others_results() {
+    let doc = three_parts(true);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let mut without = doc.clone();
+    without.remove_component_tree(without.find_component("A").unwrap()).unwrap();
+    m.evaluate(&without);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 0, "B's and C's features after A's are kept");
+    assert_eq!(summary(&m.state()), from_scratch(&without));
+    // A new component first in the timeline: only its own features are computed.
+    let mut with = without.clone();
+    let d = with.add_component(Some("D"), 0).unwrap();
+    circle_extrude(&mut with, d, "D post", PlaneRef::Origin { name: "XY".into() }, Vec2::new(-40.0, 0.0), 4.0, "9", "new_body");
+    with.features.rotate_right(2);
+    m.evaluate(&with);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 2, "D's sketch and extrude");
+    assert_eq!(summary(&m.state()), from_scratch(&with));
+    // And back (an undo): every result is kept.
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 0);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+}
+
+/// A body made under the name its feature stores is not reused under another body of that name:
+/// a component added before it that takes the name makes the feature name its body otherwise.
+#[test]
+fn a_stored_name_taken_by_a_body_before_it_is_not_reused() {
+    let doc = three_parts(false);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let mut taken = doc.clone();
+    let d = taken.add_component(Some("D"), 0).unwrap();
+    // A feature of its own name (feature names are unique) whose body takes C's post's name.
+    circle_extrude(&mut taken, d, "D post", PlaneRef::Origin { name: "XY".into() }, Vec2::new(-40.0, 0.0), 4.0, "9", "new_body");
+    let post = taken.find_feature("D post").unwrap().id;
+    taken.feature_mut(post).unwrap().body_names = vec!["C post".into()];
+    taken.features.rotate_right(2);
+    m.evaluate(&taken);
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&taken);
+    let errors = |m: &Model| m.results.iter().map(|r| r.error.clone()).collect::<Vec<_>>();
+    assert_eq!(errors(&m), errors(&fresh));
+    assert_eq!(summary(&m.state()), summary(&fresh.state()));
+    assert!(fresh.state().bodies.iter().any(|b| b.name == "C post" && b.component == d), "D's body has the name C's post stores");
+}
+
+/// What an evaluation shows: each feature's outcome with the bodies after it, the last bodies in
+/// full and the body counter.
+type Shown = (Vec<(u64, Option<String>, Option<String>, Vec<(String, u64)>)>, Vec<(String, u64, i64, Vec<String>)>, usize);
+
+fn shown(m: &Model) -> Shown {
+    let bodies = |st: &ModelState| st.bodies.iter().map(|b| (b.name.clone(), b.component)).collect();
+    // A failed cut's hint at a body of another component follows where that is placed, which the
+    // key of a failure does not hold. Of a body SMLib's check refuses, which one is compared: its
+    // words can differ between two evaluations.
+    let told = |e: &str| {
+        let cut = if e.contains("SMLib's check refuses") { ": the operation failed: SMLib" } else { " in component '" };
+        e.split(cut).next().unwrap_or(e).to_string()
+    };
+    let error = |r: &FeatureResult| r.error.as_deref().map(told);
+    // An import's warning has what its own check of the parts found once that ended, whenever it does.
+    let warning = |r: &FeatureResult| r.warning.clone().filter(|_| r.import_report.is_none());
+    let results = m.results.iter().map(|r| (r.id, error(r), warning(r), bodies(&r.state))).collect();
+    (results, summary(&m.state()), m.state().body_counter)
+}
+
+/// The session's model is what opening the design's file and evaluating it afresh gives.
+fn same_as_opened(m: &Model, doc: &Document, what: &str) {
+    let mut opened = Model::new();
+    opened.no_cache = true;
+    let read = crate::format::read(&doc.to_json()).unwrap();
+    opened.evaluate(&read);
+    settled(&mut opened, &read);
+    let (kept, fresh) = (shown(m), shown(&opened));
+    for (f, (kept, fresh)) in doc.features.iter().zip(kept.0.iter().zip(&fresh.0)) {
+        assert_eq!(kept, fresh, "{what}: feature {} `{}`", f.id, f.name);
+    }
+    assert_eq!(kept, fresh, "{what}");
+}
+
+fn boxed(doc: &mut Document, component: u64, name: &str, x: f64, body_names: &[&str]) -> u64 {
+    let kind = serde_json::json!({"type": "box", "corner": [x, 0.0, 0.0], "length": "10", "width": "10", "height": "10", "operation": "new_body"});
+    add_in(doc, component, name, kind);
+    let id = doc.find_feature(name).unwrap().id;
+    doc.feature_mut(id).unwrap().body_names = body_names.iter().map(|n| n.to_string()).collect();
+    id
+}
+
+/// A cut that names another component's body is refused once a body of its own component was asked
+/// to be called that (#12141): the cut that ran before that body was there is not kept.
+#[test]
+fn a_cut_is_not_kept_once_its_target_s_name_is_ambiguous() {
+    let mut doc = Document::new("ambiguous target");
+    let [a, c] = ["A", "C"].map(|n| doc.add_component(Some(n), 0).unwrap());
+    boxed(&mut doc, a, "A box", 0.0, &["X"]);
+    add_in(
+        &mut doc,
+        c,
+        "C cut",
+        serde_json::json!({"type": "cylinder", "base": [5.0, 5.0, -1.0], "axis": [0.0, 0.0, 1.0], "radius": "2", "height": "20", "operation": "cut"}),
+    );
+    let cut = doc.find_feature("C cut").unwrap().id;
+    doc.feature_mut(cut).unwrap().participants = vec!["X".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // An added body that makes nothing ambiguous keeps the cut.
+    let mut other = doc.clone();
+    boxed(&mut other, c, "C other", 100.0, &["Y"]);
+    other.features[1..].rotate_right(1);
+    m.evaluate(&other);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 1, "the added box alone");
+    same_as_opened(&m, &other, "an unrelated body added");
+    let mut taken = doc.clone();
+    boxed(&mut taken, c, "C box", 100.0, &["X"]);
+    taken.features[1..].rotate_right(1);
+    m.evaluate(&taken);
+    assert!(m.result(cut).unwrap().error.as_ref().is_some_and(|e| e.contains("ambiguous")), "{:?}", m.result(cut).unwrap().error);
+    same_as_opened(&m, &taken, "the target's name asked for in the cut's component");
+}
+
+/// A New Body that names a body fails once that body is gone, as it does evaluated afresh.
+#[test]
+fn a_new_body_is_not_kept_once_a_body_it_names_is_gone() {
+    let mut doc = Document::new("named by a new body");
+    let x = boxed(&mut doc, 0, "X box", 0.0, &["X"]);
+    let new = boxed(&mut doc, 0, "New", 20.0, &["New"]);
+    doc.feature_mut(new).unwrap().participants = vec!["X".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    doc.delete_feature(x).unwrap();
+    m.evaluate(&doc);
+    assert!(m.result(new).unwrap().error.is_some());
+    same_as_opened(&m, &doc, "the named body deleted");
+}
+
+/// A body numbered from the counter is not a stored one for a name stored in another slot: what
+/// it is numbered follows the bodies before it (found by the edits below).
+#[test]
+fn a_numbered_body_is_not_kept_for_a_name_stored_in_another_slot() {
+    let mut doc = Document::new("slots");
+    boxed(&mut doc, 0, "Seventh", 0.0, &["Body7"]);
+    boxed(&mut doc, 0, "Numbered", 20.0, &["", "Body8"]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert!(m.state().body("Body8").is_some());
+    let seventh = doc.find_feature("Seventh").unwrap().id;
+    doc.delete_feature(seventh).unwrap();
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "the body that counted to seven deleted");
+    assert!(m.state().body("Body1").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// A body made under a stored `BodyN` counts up to N wherever it is made: kept on a model that has
+/// counted less than it had, it still does, so the next body is numbered as in a fresh evaluation.
+#[test]
+fn a_kept_body_of_a_stored_number_still_counts() {
+    let mut doc = Document::new("counted");
+    boxed(&mut doc, 0, "Tenth", 0.0, &["Body10"]);
+    boxed(&mut doc, 0, "Fifth", 20.0, &["Body5"]);
+    boxed(&mut doc, 0, "Next", 40.0, &[]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert!(m.state().body("Body11").is_some());
+    let tenth = doc.find_feature("Tenth").unwrap().id;
+    doc.delete_feature(tenth).unwrap();
+    m.evaluate(&doc);
+    no_errors(&m);
+    same_as_opened(&m, &doc, "the body that counted to ten deleted");
+    assert!(m.state().body("Body6").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// `n` separate boxes, each with one edge rounded, the edge named and recorded as the Fillet
+/// command stores it when it is picked.
+fn rounded_boxes(n: usize) -> Document {
+    let mut doc = Document::new("rounded boxes");
+    for i in 0..n {
+        let (x, name) = (20.0 * i as f64, format!("Block {}", i + 1));
+        boxed(&mut doc, 0, &name, x, &[&name]);
+        add_in(
+            &mut doc,
+            0,
+            &format!("Round {}", i + 1),
+            serde_json::json!({"type": "fillet", "edges": [[x + 10.0, 5.0, 10.0]], "radius": "1", "body": name}),
+        );
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    for f in &mut doc.features {
+        if let FeatureKind::Fillet { edges, body, .. } = &f.kind {
+            let st = m.state_before(f.id);
+            f.edge_refs = crate::edge_refs(&st, body, &plain(edges));
+            f.edge_names = crate::edge_names_for(&st, body, &plain(edges));
+        }
+    }
+    doc
+}
+
+/// The number of a suppressed feature's stored name is not handed out: a body numbered before the
+/// feature was suppressed is not kept under it.
+#[test]
+fn a_numbered_body_is_not_kept_once_its_number_is_reserved() {
+    let mut doc = Document::new("reserved number");
+    // Makes nothing, so suppressing it changes no body: only its stored name counts.
+    let cut = serde_json::json!({"type": "box", "corner": [100.0, 0.0, 0.0], "length": "5", "width": "5", "height": "5", "operation": "cut"});
+    add_in(&mut doc, 0, "Cut", cut);
+    boxed(&mut doc, 0, "Numbered", 0.0, &[]);
+    let cut = doc.find_feature("Cut").unwrap().id;
+    doc.feature_mut(cut).unwrap().body_names = vec!["Body1".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.state().body("Body1").is_some());
+    doc.feature_mut(cut).unwrap().suppressed = true;
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "suppressed");
+    assert!(m.state().body("Body2").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// A body taken back from a saved model counts as deep in the chain of names as it is now, so one
+/// feature fewer before it brings the bodies after it back under the limit.
+#[test]
+fn a_reopened_body_counts_in_the_naming_depth_as_it_stands() {
+    let mut doc = Document::new("reopened at the limit");
+    boxed(&mut doc, 0, "Far", -500.0, &["Far"]);
+    for i in 1..397 {
+        add_in(&mut doc, 0, &format!("Far {i}"), serde_json::json!({"type": "move", "bodies": ["Far"], "translate": ["0", "0", "0.01"]}));
+    }
+    boxed(&mut doc, 0, "Near", 0.0, &["Near"]);
+    boxed(&mut doc, 0, "Other", 40.0, &["Other"]);
+    boxed(&mut doc, 0, "Last", 80.0, &["Last"]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let names = |m: &Model| crate::naming::face_names(m.state().body("Last").unwrap()).to_vec();
+    assert!(names(&m).iter().all(|n| n.starts_with("Last:face:")), "{:?}", names(&m));
+    let mut m = Model::adopt(&doc, &m.saved(&doc).unwrap()).unwrap();
+    let id = doc.find_feature("Far 200").unwrap().id;
+    doc.feature_mut(id).unwrap().suppressed = true;
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "one suppressed");
+    assert!(names(&m).iter().all(|n| !n.starts_with("Last:face:")), "{:?}", names(&m));
+}
+
+/// A face of a tool without roles (a coil's end) is named after whatever body it lies on, read or
+/// not: a bevel of its edge, stored by that name, is not kept once another body names the face.
+#[test]
+fn a_bevel_is_not_kept_once_another_body_names_its_face() {
+    let mut doc = Document::new("named from geometry");
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    boxed(&mut doc, 0, "Block", 0.0, &["Block"]);
+    let coil = serde_json::json!({"type": "coil", "base": [5.0, 5.0, 10.5], "axis": [0.0, 0.0, 1.0], "diameter": "6", "pitch": "4", "turns": "1", "section_size": "2", "section": "square", "operation": "join"});
+    add_in(&mut doc, 0, "Coil", coil);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // A pick a little off its edge, as one kept from before an edit is: the point alone finds nothing.
+    let edge = Vec3::new(8.0, 4.6, 11.8);
+    let body = Some(BodyName("Block".into()));
+    let (refs, names) = (crate::edge_refs(&m.state(), &body, &[edge]), crate::edge_names_for(&m.state(), &body, &[edge]));
+    add_in(&mut doc, 0, "Bevel", serde_json::json!({"type": "chamfer", "edges": [[8.0, 4.6, 11.8]], "distance": "0.2", "body": "Block"}));
+    let bevel = doc.find_feature("Bevel").unwrap().id;
+    let f = doc.feature_mut(bevel).unwrap();
+    (f.edge_refs, f.edge_names) = (refs, names);
+    m.evaluate(&doc);
+    no_errors(&m);
+    // A block whose side lies on the coil's end.
+    let other = serde_json::json!({"type": "box", "corner": [6.0, 0.0, 8.0], "length": "10", "width": "5", "height": "10", "operation": "new_body"});
+    add_in(&mut doc, b, "Other", other);
+    let id = doc.find_feature("Other").unwrap().id;
+    doc.feature_mut(id).unwrap().body_names = vec!["Other".into()];
+    doc.features.rotate_right(1);
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "a block on the coil's end");
+}
+
+/// A pick off its edge lies on every body with an edge up to twice as far, and the round says so:
+/// a body added there, beyond the reach the bodies near the pick are looked for in, is named too.
+#[test]
+fn a_round_is_not_kept_without_the_note_of_a_body_added_by_its_pick() {
+    let long = |doc: &mut Document, component: u64, name: &str, x: f64| {
+        let kind =
+            serde_json::json!({"type": "box", "corner": [x, 0.0, 0.0], "length": "10", "width": "1000", "height": "10", "operation": "new_body"});
+        add_in(doc, component, name, kind);
+        let id = doc.find_feature(name).unwrap().id;
+        doc.feature_mut(id).unwrap().body_names = vec![name.into()];
+    };
+    let mut doc = Document::new("a pick off its edge");
+    long(&mut doc, 0, "Rail", 0.0);
+    add_in(&mut doc, 0, "Round", serde_json::json!({"type": "fillet", "edges": [[10.8, 500.0, 10.0]], "radius": "1"}));
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    long(&mut doc, b, "Other", 12.3);
+    doc.features.rotate_right(1);
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "a rail added by the pick");
+}
+
+/// The design whose join SMLib's check refuses: an imported block with an edge off its face, and a
+/// box joined to it.
+fn block_with_a_refused_join() -> Document {
+    let mut doc = Document::new("refused join");
+    boxed(&mut doc, 0, "Before", -60.0, &["Before"]);
+    let step: std::sync::Arc<str> = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step").into();
+    let kind = FeatureKind::Import { file: "block.step".into(), step, components: Vec::new(), skip: Vec::new(), records: None };
+    let block = doc.add_feature(kind, Some("Block")).unwrap();
+    doc.feature_mut(block).unwrap().body_names = vec!["Block".into()];
+    let join = serde_json::json!({"type": "box", "corner": [15.0, 25.0, 5.0], "length": "10", "width": "10", "height": "10", "operation": "join"});
+    add_in(&mut doc, 0, "Join", join);
+    let join = doc.find_feature("Join").unwrap().id;
+    doc.feature_mut(join).unwrap().participants = vec!["Block".into()];
+    boxed(&mut doc, 0, "After", 200.0, &["After"]);
+    doc
+}
+
+/// Bring in every check still running, of features and of imported parts, and what it refuses.
+fn settled(m: &mut Model, doc: &Document) {
+    for _ in 0..=doc.features.len() {
+        let refused = m.settle_feature_checks(true);
+        while m.checking_imports() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if !m.settle_import_checks() && !refused {
+            return;
+        }
+        m.evaluate(doc);
+    }
+    panic!("a check refuses again and again");
+}
+
+/// What a window shows before a check ends ([`Model::set_background_checks`]) is kept neither
+/// for what it read nor whole: an edit made while the check runs, of a body the checked feature
+/// does not read, ends with the failure the design opened afresh has, and so does its undo.
+#[test]
+fn a_result_shown_before_its_check_refuses_it_is_not_kept() {
+    let doc = block_with_a_refused_join();
+    let join = doc.find_feature("Join").unwrap().id;
+    let mut without = doc.clone();
+    without.delete_feature(doc.find_feature("Before").unwrap().id).unwrap();
+    let mut added = doc.clone();
+    boxed(&mut added, 0, "Added", -120.0, &["Added"]);
+    added.features.rotate_right(1);
+    let mut m = Model::new();
+    m.set_background_checks(true);
+    for (what, d) in
+        [("shown", &doc), ("one deleted", &without), ("undone", &doc), ("one added", &added), ("undone again", &doc), ("as it was", &doc)]
+    {
+        m.evaluate(d);
+        // Left running as far as the window leaves it, for the next edit to meet.
+        if what != "shown" && what != "undone" {
+            settled(&mut m, d);
+            assert!(m.result(join).unwrap().error.is_some(), "{what}: the join is refused");
+            same_as_opened(&m, d, what);
+        }
+    }
+}
+
+/// Boxes with one rounded edge each, past the 400 features a body's names are worked out from
+/// history for: the bodies after that name their faces by place. Deleting a box, or adding one,
+/// moves bodies across that limit, and a round whose edge was named on the other side of it does
+/// what it does in the design opened afresh: it fails there, so what it did before is not kept
+/// (#20956). What stays on its side is kept: an undo evaluates nothing again.
+#[test]
+fn rounds_past_the_naming_limit_are_as_in_the_design_opened_afresh() {
+    let boxes = 205;
+    let doc = rounded_boxes(boxes);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let without = |boxes: &[usize]| {
+        let mut d = doc.clone();
+        for name in boxes.iter().flat_map(|i| [format!("Block {i}"), format!("Round {i}")]) {
+            let id = d.find_feature(&name).unwrap().id;
+            d.delete_feature(id).unwrap();
+        }
+        d
+    };
+    let mut added = doc.clone();
+    boxed(&mut added, 0, "Added", -20.0, &["Added"]);
+    added.features.rotate_right(1);
+    for (what, d, failed) in [("first deleted", without(&[1]), 0), ("middle deleted", without(&[boxes / 2]), 0), ("one added first", added, 1)] {
+        m.evaluate(&d);
+        assert_eq!(m.results.iter().filter(|r| r.error.is_some()).count(), failed, "{what}");
+        same_as_opened(&m, &d, what);
+        m.evaluate(&doc);
+        assert_eq!(m.last_recomputed, 0, "{what}, undone");
+    }
+    same_as_opened(&m, &doc, "all undone");
+}
+
+/// splitmix64, so each run makes the same edits.
+fn next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// Random edits of a small timeline.
+struct Edits {
+    state: u64,
+    made: u64,
+}
+
+impl Edits {
+    fn below(&mut self, n: usize) -> usize {
+        (next(&mut self.state) % n.max(1) as u64) as usize
+    }
+
+    fn one<'a, T>(&mut self, of: &'a [T]) -> Option<&'a T> {
+        let i = self.below(of.len());
+        of.get(i)
+    }
+
+    fn component(&mut self, doc: &Document) -> u64 {
+        let ids: Vec<u64> = std::iter::once(0).chain(doc.components.iter().map(|c| c.id)).collect();
+        self.one(&ids).copied().unwrap_or(0)
+    }
+
+    /// The name of a body of `m`, or now and then of none.
+    fn body(&mut self, m: &Model) -> String {
+        let names: Vec<String> = m.state().bodies.iter().map(|b| b.name.clone()).collect();
+        match self.below(12) {
+            0 => "Gone".into(),
+            _ => self.one(&names).cloned().unwrap_or_else(|| "Gone".into()),
+        }
+    }
+
+    /// Names as a feature stores them: of its own, a number, one another may have, none.
+    fn names(&mut self) -> Vec<String> {
+        match self.below(6) {
+            0 => Vec::new(),
+            1 => vec![format!("Body{}", 1 + self.below(9))],
+            2 => vec![["X", "Y"][self.below(2)].into()],
+            3 => vec![String::new(), format!("Body{}", 1 + self.below(9))],
+            _ => vec![format!("P{}", self.made)],
+        }
+    }
+
+    /// A feature at the end of `doc`, on bodies of `m`.
+    fn add(&mut self, doc: &mut Document, m: &Model) {
+        use serde_json::json;
+        self.made += 1;
+        let c = self.component(doc);
+        let x = 14.0 * self.below(5) as f64;
+        let op = ["new_body", "new_body", "join", "cut", "cut", "intersect"][self.below(6)];
+        let size = ["w", "10", "12", "9 + bad"][if self.below(20) == 0 { 3 } else { self.below(3) }];
+        let name = format!("F{}", self.made);
+        let (kind, target) = match self.below(13) {
+            0..=2 => (json!({"type": "box", "corner": [x, 0.0, 0.0], "length": size, "width": "10", "height": "10", "operation": "new_body"}), false),
+            3 => (json!({"type": "box", "corner": [x + 2.0, 2.0, 4.0], "length": size, "width": "3", "height": "10", "operation": op}), true),
+            // Across a block: in two pieces.
+            4 => (json!({"type": "box", "corner": [x + 4.0, -5.0, -5.0], "length": "2", "width": "30", "height": "30", "operation": "cut"}), true),
+            5 => (
+                json!({"type": "cylinder", "base": [x + 5.0, 5.0, -1.0], "axis": [0.0, 0.0, 1.0], "radius": "2", "height": "w + 2", "operation": op}),
+                true,
+            ),
+            6 => (json!({"type": "sphere", "center": [x + 5.0, 5.0, 10.0], "radius": "3", "operation": op}), true),
+            7 => (json!({"type": "move", "bodies": [self.body(m)], "translate": ["0", "0", "w / 10"], "copy": self.below(3) == 0}), false),
+            8 => {
+                let pattern = json!({"type": "rectangular", "dir1": [0, 1, 0], "count1": "n", "spacing1": "15"});
+                (json!({"type": "pattern", "features": [], "bodies": [self.body(m)], "pattern": pattern}), false)
+            }
+            9 => {
+                let op = ["join", "cut", "new_body"][self.below(3)];
+                (
+                    json!({"type": "combine", "target": self.body(m), "tools": [self.body(m)], "operation": op, "keep_tools": self.below(2) == 0}),
+                    false,
+                )
+            }
+            10 => {
+                let xy = PlaneRef::Origin { name: "XY".into() };
+                circle_extrude(doc, c, &name, xy, Vec2::new(x + 5.0, 5.0), 2.0 + self.below(3) as f64, "w", op);
+                (serde_json::Value::Null, true)
+            }
+            _ => {
+                let body = (self.below(2) == 0).then(|| self.body(m));
+                let edge = [[x + 10.0, 5.0, 10.0], [x, 5.0, 10.0], [x + 5.0, 0.0, 0.0]][self.below(3)];
+                let (ty, size) = [("fillet", "radius"), ("chamfer", "distance")][self.below(2)];
+                let mut kind = json!({"type": ty, "edges": [edge], size: "r", "tangent_chain": false});
+                if let Some(body) = body {
+                    kind["body"] = json!(body);
+                }
+                (kind, false)
+            }
+        };
+        if !kind.is_null() {
+            add_in(doc, c, &name, kind);
+        }
+        let names = self.names();
+        let to = match self.below(4) {
+            0 => vec![self.body(m)],
+            1 => vec!["*".into()],
+            _ => Vec::new(),
+        };
+        let picked = self.below(2) == 0;
+        let Some(f) = doc.features.iter_mut().find(|f| f.name == name) else { return };
+        f.body_names = names;
+        if target {
+            f.participants = to;
+        }
+        if let FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } = &f.kind
+            && picked
+        {
+            f.edge_refs = crate::edge_refs(&m.state(), body, &plain(edges));
+            f.edge_names = crate::edge_names_for(&m.state(), body, &plain(edges));
+        }
+    }
+
+    /// One edit of `doc`, whose model is `m`: what it was.
+    fn edit(&mut self, doc: &mut Document, m: &Model) -> String {
+        let ids: Vec<u64> = doc.features.iter().map(|f| f.id).collect();
+        let at = self.below(ids.len());
+        let id = ids.get(at).copied().unwrap_or(0);
+        let kind = self.below(17);
+        match kind {
+            0..=2 => {
+                self.add(doc, m);
+                format!("add {:?}", doc.features.last().map(|f| (&f.name, &f.kind, &f.body_names, &f.participants, f.component)))
+            }
+            // Added in the middle, where a rolled-back timeline adds.
+            3 | 4 => {
+                let before = doc.features.len();
+                self.add(doc, m);
+                let added = doc.features.len() - before;
+                if let Some(tail) = doc.features.get_mut(at..) {
+                    tail.rotate_right(added);
+                }
+                format!("add at {at} {:?}", doc.features.get(at + added - 1).map(|f| (&f.name, &f.kind, &f.body_names, &f.participants, f.component)))
+            }
+            5 | 6 => format!("delete {id}: {:?}", doc.delete_feature(id)),
+            7 => {
+                let to = self.below(ids.len());
+                if at < doc.features.len() {
+                    let f = doc.features.remove(at);
+                    doc.features.insert(to.min(doc.features.len()), f);
+                }
+                format!("move {id} to {to}")
+            }
+            8 => {
+                if let Some(f) = doc.feature_mut(id) {
+                    f.suppressed = !f.suppressed;
+                }
+                format!("suppress {id}")
+            }
+            9 => {
+                let names = self.names();
+                if let Some(f) = doc.feature_mut(id) {
+                    f.body_names.clone_from(&names);
+                }
+                format!("names of {id}: {names:?}")
+            }
+            // The names the bodies have, stored as a session stores them.
+            10 => {
+                let made: Vec<(u64, Vec<String>)> = m
+                    .results
+                    .iter()
+                    .filter(|r| r.error.is_none() && !r.skipped)
+                    .map(|r| (r.id, r.state.bodies.iter().filter(|b| b.feature == r.id).map(|b| b.name.clone()).collect()))
+                    .collect();
+                for (id, names) in made {
+                    if let Some(f) = doc.feature_mut(id).filter(|f| f.body_names.is_empty()) {
+                        f.body_names = names;
+                    }
+                }
+                "store names".into()
+            }
+            11 => {
+                let (name, value) =
+                    [("w", "10 mm"), ("w", "13 mm"), ("r", "1 mm"), ("r", "2 mm"), ("r", "40 mm"), ("n", "2"), ("n", "3")][self.below(7)];
+                format!("{name} = {value}: {:?}", doc.set_param(name, value, None, None))
+            }
+            12 => {
+                let c = self.component(doc);
+                if let Some(f) = doc.feature_mut(id) {
+                    f.component = c;
+                }
+                format!("{id} in component {c}")
+            }
+            13 => {
+                let name = format!("C{}", self.made);
+                self.made += 1;
+                let parent = self.component(doc);
+                format!("add component: {:?}", doc.add_component(Some(&name), parent))
+            }
+            14 => {
+                let c = self.component(doc);
+                format!("remove component {c}: {:?}", doc.remove_component_tree(c).map(|_| ()))
+            }
+            15 => {
+                doc.marker = (self.below(2) == 0).then_some(at);
+                format!("marker {:?}", doc.marker)
+            }
+            _ => {
+                let i = self.below(doc.occurrences.len());
+                if let Some(o) = doc.occurrences.get_mut(i) {
+                    o.transform[3][0] += 3.0;
+                }
+                format!("place {i}")
+            }
+        }
+    }
+}
+
+/// Edit a timeline at random for `steps` steps from `seed`, undoing and reopening now and then:
+/// after each the session's model is the design's opened afresh. `before`: features already there.
+fn edited_as_opened(seed: u64, steps: usize, before: usize, running: bool) -> usize {
+    let mut e = Edits { state: seed, made: 0 };
+    let mut doc = if running { block_with_a_refused_join() } else { Document::new("edited") };
+    for (name, value) in [("w", "10 mm"), ("r", "1 mm"), ("n", "2")] {
+        doc.set_param(name, value, None, None).unwrap();
+    }
+    for c in ["A", "B"] {
+        doc.add_component(Some(c), 0).unwrap();
+    }
+    // A body moved over and over, far from the others: each step is one more in the names' depth.
+    if before > 0 {
+        boxed(&mut doc, 0, "Far", -500.0, &["Far"]);
+        for i in 1..before {
+            add_in(&mut doc, 0, &format!("Far {i}"), serde_json::json!({"type": "move", "bodies": ["Far"], "translate": ["0", "0", "0.01"]}));
+        }
+    }
+    let mut m = Model::new();
+    m.set_background_checks(running);
+    m.evaluate(&doc);
+    for _ in 0..5 {
+        e.add(&mut doc, &m);
+        m.evaluate(&doc);
+    }
+    let mut undo: Vec<Document> = Vec::new();
+    let mut done: Vec<String> = Vec::new();
+    for step in 0..steps {
+        let what = match e.below(8) {
+            0 if !undo.is_empty() => {
+                doc = undo.pop().unwrap();
+                "undo".to_string()
+            }
+            1 => match m.saved(&doc).and_then(|s| Model::adopt(&doc, &s).ok()) {
+                Some(opened) => {
+                    m = opened;
+                    m.set_background_checks(running);
+                    "reopen".into()
+                }
+                None => continue,
+            },
+            _ => {
+                undo.push(doc.clone());
+                e.edit(&mut doc, &m)
+            }
+        };
+        done.push(what);
+        m.evaluate(&doc);
+        // The checks of some edits are still running when the next one comes.
+        if running {
+            if step + 1 < steps && e.below(2) == 0 {
+                continue;
+            }
+            settled(&mut m, &doc);
+        }
+        let what = format!("seed {seed}, step {step}:\n{}\n", done.join("\n"));
+        same_as_opened(&m, &doc, &what);
+    }
+    done.len()
+}
+
+/// Whatever is edited, in whatever order, the model a session holds is the one opening its design
+/// gives: the same bodies, names, errors and warnings, however much of it was kept.
+#[test]
+fn any_edits_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 8), env("SOLIDCRAFT_EDIT_STEPS", 25));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0, false)).sum();
+    eprintln!("{done} edits compared");
+}
+
+/// The same with the checks a window leaves running, among them ones that refuse a join.
+#[test]
+fn any_edits_with_checks_left_running_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 4), env("SOLIDCRAFT_EDIT_STEPS", 20));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0, true)).sum();
+    eprintln!("{done} edits compared");
+}
+
+/// The same across the limit of naming from history, which bodies far from it decide.
+#[test]
+fn any_edits_about_the_naming_limit_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 3), env("SOLIDCRAFT_EDIT_STEPS", 15));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 397, false)).sum();
+    eprintln!("{done} edits compared");
+}
+
 /// A construction plane's edit recomputes only the features that use it: a sketch on it and what
 /// is made from that sketch, wherever they are in the timeline, and nothing else.
 #[test]
@@ -914,7 +2065,9 @@ fn a_coil_follows_its_sketch() {
     doc.add_feature(
         FeatureKind::Coil {
             base: point_expr(Vec3::new(0.0, 0.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
+            axis_ref: None,
+            reversed: false,
             sketch: Some(crate::SketchId(sketch)),
             profiles: ProfileSel::All,
             diameter: None,
@@ -988,9 +2141,15 @@ fn box_fillet_cut_timeline() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -1026,6 +2185,7 @@ fn errors_are_reported_not_fatal() {
             angle2: None,
             symmetric: false,
             convention: Default::default(),
+            join_profile_arcs: false,
             to: None,
         },
         None,
@@ -1127,6 +2287,252 @@ fn a_body_reads_the_material_its_mass_is_computed_with() {
     }
 }
 
+/// An older design's parameters and feature inputs named after what are now units (#4811) are
+/// renamed to the first free `<name>_param…`; what uses them follows as the older build read
+/// it, and the comment says why without losing what it said.
+#[test]
+fn parameters_named_after_units_are_renamed_as_an_older_build_read_them() {
+    let mut doc = Document::new("old");
+    let id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "4".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    // Names no build lets you choose now, as an older design could have them.
+    doc.feature_mut(id).unwrap().param_names[0] = "deg".into();
+    doc.param_comments.insert("deg".into(), "tilt".into());
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: "x".repeat(4096), model: false });
+    doc.set_param("mm_param", "1", Some(""), None).unwrap();
+    doc.params.push(Param { name: "turn".into(), expr: "deg / 2 + mm".into(), unit: "mm".into(), comment: String::new(), model: false });
+    doc.favorites.insert("mm".into());
+    // An equation curve's formula too: `2 mm * t` was 2 × the parameter `mm` times t.
+    let mut sketch = Sketch::new();
+    let (x, y) = (Some("t".to_string()), "2 mm * t".to_string());
+    let (start, end) = ("0".to_string(), "1".to_string());
+    sketch.equations.push(solidcraft_sketch::EquationCurve {
+        curve: "c1".into(),
+        x,
+        y,
+        start,
+        end,
+        tolerance: 0.01,
+        variable_unit: Default::default(),
+        radians_trig: false,
+    });
+    let curve = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let names = ["mm".to_string(), "deg".into(), "mm".into(), "width".into()];
+    doc.rename_unit_word_params(&names).unwrap();
+    let FeatureKind::Sketch { sketch, .. } = &doc.feature(curve).unwrap().kind else { panic!("a sketch") };
+    assert_eq!(sketch.equations[0].y, "2 mm_param2 * t");
+    assert_eq!(doc.feature(id).unwrap().param_names[0], "deg_param");
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some(), "the next free name");
+    assert_eq!(doc.param("turn").map(|p| p.expr.as_str()), Some("deg_param / 2 + mm_param2"));
+    assert_eq!(doc.param_values().0["turn"].v, 8.0);
+    assert!(doc.favorites.contains("mm_param2"));
+    assert_eq!(doc.param_comments.get("deg_param").map(String::as_str), Some("tilt (renamed from `deg`, which is now a unit)"));
+    assert_eq!(doc.param("mm_param2").map(|p| p.comment.len()), Some(4096), "a comment at its longest keeps its text");
+    assert!(doc.param_values().1.is_empty(), "{:?}", doc.param_values().1);
+}
+
+/// Text parameters' names are taken too: a new `dN` name and a renamed parameter skip them.
+#[test]
+fn new_and_renamed_names_skip_text_parameters() {
+    let mut doc = Document::new("names");
+    doc.set_text_param("d1", "label", None).unwrap();
+    doc.set_text_param("mm_param", "label", None).unwrap();
+    assert_eq!(doc.next_d_name(), "d2");
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: String::new(), model: false });
+    doc.rename_unit_word_params(&["mm".to_string()]).unwrap();
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some());
+}
+
+#[test]
+fn copy_lineage_resolves_seed_material_and_respects_overrides() {
+    let mut doc = Document::new("copy lineage");
+    let seed_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(seed_id).unwrap().body_names = vec!["Seed".into()];
+    let pat_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "3".into(),
+                    spacing1: "20 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
+                },
+                bodies: vec!["Seed".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(pat_id).unwrap().body_names = vec!["Seed (2)".into(), "Seed (3)".into()];
+    let mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["Seed (2)".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(mir_id).unwrap().body_names = vec!["Seed (2) (2)".into()];
+
+    doc.materials.insert("Seed".into(), "Steel".into());
+    assert!(!doc.has_copy_material_lineage("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (3)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2) (2)"), Some("Seed (2)"));
+    assert!(doc.has_copy_material_lineage("Seed (2)"));
+    for body in ["Seed", "Seed (2)", "Seed (3)", "Seed (2) (2)"] {
+        assert_eq!(doc.body_material(body), "Steel", "{body}");
+        assert!((doc.density(body) - 7.85).abs() < 1e-9, "{body}");
+    }
+
+    // Explicit override on an intermediate copy wins for itself and its downstream copies,
+    // and survives even if the seed temporarily acquires the same material and changes again.
+    doc.materials.insert("Seed (2)".into(), "Copper".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Steel");
+    doc.materials.insert("Seed".into(), "Copper".into());
+    doc.materials.insert("Seed".into(), "Aluminum".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Aluminum");
+
+    // Explicit Default on a copy stops lineage inheritance instead of falling back to the seed.
+    doc.materials.insert("Seed (3)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.resolved_body_material("Seed (3)"), Some(DEFAULT_MATERIAL));
+    assert_eq!(doc.body_material("Seed (3)"), DEFAULT_MATERIAL);
+    assert!((doc.density("Seed (3)") - DEFAULT_DENSITY).abs() < 1e-9);
+
+    // Multi-seed joined pattern: unmerged copies inherit unanimous seed material, do not guess
+    // when seeds disagree, and respect an explicit Default override.
+    let join_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "30 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
+                },
+                bodies: vec!["A".into(), "B".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: true,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(join_id).unwrap().body_names = vec!["A (2)".into()];
+    assert_eq!(doc.copy_seed_body("A (2)"), None);
+    assert!(doc.has_copy_material_lineage("A (2)"));
+    doc.materials.insert("A".into(), "Steel".into());
+    doc.materials.insert("B".into(), "Steel".into());
+    assert_eq!(doc.body_material("A (2)"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+    doc.materials.insert("B".into(), "Steel".into());
+    doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+
+    // Combined Mirror: single-seed unmerged lump inherits its seed; multi-seed unmerged lumps
+    // inherit unanimously when every seed shares the same material.
+    let single_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["A".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(single_mir_id).unwrap().body_names = vec!["A_mir".into()];
+    assert_eq!(doc.copy_seed_body("A_mir"), Some("A"));
+    assert_eq!(doc.body_material("A_mir"), "Steel");
+
+    let multi_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "XZ".into() },
+                bodies: vec!["A".into(), "B".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(multi_mir_id).unwrap().body_names = vec!["AB_mir".into()];
+    assert_eq!(doc.copy_seed_body("AB_mir"), None);
+    assert!(doc.has_copy_material_lineage("AB_mir"));
+    assert_eq!(doc.body_material("AB_mir"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("AB_mir"), DEFAULT_MATERIAL);
+}
+
 #[test]
 fn primitives_and_combine() {
     let mut doc = Document::new("p");
@@ -1145,7 +2551,7 @@ fn primitives_and_combine() {
     doc.add_feature(
         FeatureKind::Cylinder {
             base: point_expr(Vec3::new(5.0, 5.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             radius: "2".into(),
             height: "20".into(),
             operation: Operation::NewBody,
@@ -1154,8 +2560,20 @@ fn primitives_and_combine() {
         None,
     )
     .unwrap();
-    doc.add_feature(FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Cut, keep_tools: false }, None)
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Cut,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
+        None,
+    )
+    .unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
@@ -1195,6 +2613,10 @@ fn hostile_expressions_never_panic() {
         "in",
         "nan",
         "9999999999999999999999",
+        "g",
+        "kg",
+        "m³",
+        "mm²",
     ];
     let mut state: u64 = 0x9e3779b97f4a7c15;
     let mut next = || {
@@ -1444,9 +2866,8 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 
-    // The design as an older build saved it: format 63, the one before the midplane change
-    // (`format/v64/midplane-old-frame.rs`), and no list of the changes it has, so the change is
-    // applied to it as it opens. Not `FORMAT - 1`: another pending change moves `FORMAT` on.
+    // The design as an older build saved it: before v64 (`midplane-old-frame.rs`), so the
+    // v64 migration step is applied to it as it opens.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
     saved["format"] = serde_json::json!(crate::format::format_string(63));
     saved.as_object_mut().unwrap().remove("format_pending");
@@ -1504,6 +2925,35 @@ fn datum_refs_parse_strictly() {
 /// `Document::placement_frame` walks one exact placement the way the engine's occurrence walk
 /// does: the #7313 scenario's parent translated +100, a child +20, a copy of the parent another
 /// +50 - the copied child's XY plane sits at (170, 0, 0) against the original at (120, 0, 0).
+/// A direction of expressions turned by a frame keeps a constant however small it is next to
+/// nothing else: `["sin(t)", "0", "1e-20"]` at t = 0 is still along Z after a turn about Y, not
+/// zero (#18822). A length keeps its cutoff of 1e-12 mm for rounding.
+#[test]
+fn a_turned_direction_keeps_its_small_constants() {
+    let mut doc = Document::new("T");
+    doc.set_param("t", "0 deg", None, None).unwrap();
+    let turn = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Y, std::f64::consts::FRAC_PI_4);
+    let mut d: crate::DirExpr = ["sin(t)".into(), "0".into(), "1e-20".into()];
+    crate::map_dir_expr(&turn, &mut d);
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    let unit = crate::unit_direction(Vec3::new(v[0], v[1], v[2])).expect("a direction, not zero");
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    assert!(unit.dist(Vec3::new(h, 0.0, h)) < 1e-9, "{d:?} -> {unit:?}");
+    // Rounding from the turn itself is dropped from a direction of ordinary size, with or
+    // without an expression beside it, and every number is written short.
+    let quarter = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_2);
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1".into(), "0".into()];
+    crate::map_dir_expr(&quarter, &mut d);
+    assert_eq!(d[1].to_string(), "0", "{d:?}");
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1e-300".into(), "0".into()];
+    crate::map_dir_expr(&quarter, &mut d);
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    doc.set_param("t", "30 deg", None, None).unwrap();
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    assert!((v[0] - 0.5).abs() < 1e-15 && v[1].abs() < 1e-290 && (v[2] - 1e-300).abs() < 1e-310, "{d:?} -> {v:?}");
+}
+
 #[test]
 fn placement_frame_matches_the_occurrence_walk() {
     let mut doc = Document::new("datum frames");
@@ -1736,6 +3186,10 @@ fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
                 tools: vec!["Body2".into(), "Body3".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -1809,9 +3263,15 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -1820,7 +3280,16 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
     )
     .unwrap();
     doc.add_feature(
-        FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Join, keep_tools: false },
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Join,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
         None,
     )
     .unwrap();
@@ -1834,6 +3303,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 tool_plane: false,
                 tool_sheet: Default::default(),
                 tool_faces: Vec::new(),
+                tool_bodies: Vec::new(),
                 sketch: None,
                 line: None,
             },
@@ -1871,6 +3341,10 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
                 tools: vec!["Body3".into(), "Body2".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -1884,6 +3358,43 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
     let other = bodies.iter().find(|(n, _, _)| n != "Body1").cloned().unwrap_or_else(|| panic!("{bodies:?}"));
     assert!(rel(other.1, arm) < 1e-6 && other.2 == 1, "the arm: {bodies:?}");
     assert_eq!(kept, Some(KeptSeparate::AlongEdge));
+}
+
+/// A chamfer or fillet a design file picks by a point alone (no `body`, no edge name), where
+/// the point lies on edges of two bodies, blends the first body as before but warns, naming both
+/// (#20517): the `solid.chamfer` and `solid.fillet` commands refuse the same pick. A pick on one
+/// body's edge alone gives no warning.
+#[test]
+fn a_blend_picked_on_edges_of_two_bodies_warns_and_names_both() {
+    let blended = |kind: serde_json::Value| {
+        let mut doc = Document::new("two cubes");
+        for corner in [["0", "0", "0"], ["10", "0", "0"]] {
+            let cube = serde_json::json!({"type": "box", "corner": corner, "length": "10", "width": "10", "height": "10", "operation": "new_body"});
+            doc.add_feature(serde_json::from_value(cube).unwrap(), None).unwrap();
+        }
+        let blend = doc.add_feature(serde_json::from_value(kind).unwrap(), None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(blend).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let st = m.state();
+        let names: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
+        let volumes: Vec<f64> = st.bodies.iter().map(|b| measure(&b.body).unwrap().volume).collect();
+        (result.warning.clone(), names, volumes)
+    };
+    for kind in ["chamfer", "fillet"] {
+        let size = if kind == "chamfer" { "distance" } else { "radius" };
+        let (warning, names, volumes) = blended(serde_json::json!({"type": kind, "edges": [[10.0, 0.0, 5.0]], size: "1"}));
+        assert_eq!(names.len(), 2, "{names:?}");
+        let warning = warning.unwrap_or_default();
+        let both = format!("[10, 0, 5] lies on edges of 2 bodies, {} and {}: `{}` is blended", names[0], names[1], names[0]);
+        assert!(warning.contains(&both) && warning.contains("with `body`"), "{kind}: {warning}");
+        // The result is the same as before: the first body is blended, the second left alone.
+        assert!(volumes[0] < 999.9 && rel(volumes[1], 1000.0) < 1e-9, "{kind}: {volumes:?}");
+
+        let (warning, _, _) = blended(serde_json::json!({"type": kind, "edges": [[0.0, 0.0, 5.0]], size: "1"}));
+        assert!(warning.is_none(), "{kind} on an edge of one body: {warning:?}");
+    }
 }
 
 /// A fillet saved before corner setbacks reads with none and writes no `setbacks`; one with a
@@ -2105,6 +3616,7 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
         parent: 0,
         name: "Part".into(),
         transform: IDENTITY,
+        base_transform: None,
         grounded: false,
         expressed_moves: Vec::new(),
         bom_type: None,
@@ -2180,6 +3692,7 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
             parent: 0,
             name: format!("P{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded: false,
             bom_type: None,
             expressed_moves: Vec::new(),
@@ -2265,9 +3778,15 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_offset: None,
             from: None,
             to_body_apart: false,
+            through_all2: false,
+            to2: None,
+            to_offset2: None,
             from_level: false,
             picked_placements: Vec::new(),
             one_sided_direction: None,
+            to_ref: None,
+            from_ref: None,
+            extend_to_face: false,
         },
         operation: Operation::NewBody,
         targets: vec![],
@@ -2362,6 +3881,201 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
 }
 
+/// An extrude To Object on the construction plane of another component ends where that
+/// component puts the plane, not where the plane's numbers fall in the extrude's own, placed
+/// component (#8527, as #11734 for sketches).
+#[test]
+fn an_extrude_to_the_construction_plane_of_another_component_ends_on_it() {
+    let (mut doc, sketch) = plate_doc();
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    doc.occurrences.iter_mut().find(|o| o.component == part).unwrap().transform = rigid(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let offset = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "25 mm".into() };
+    let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset }, Some("Target")).unwrap();
+    doc.feature_mut(plane).unwrap().component = owner;
+    // The plane comes first in the timeline, then the sketch and the extrude of the part.
+    let at = doc.features.iter().position(|f| f.id == plane).unwrap();
+    let moved = doc.features.remove(at);
+    doc.features.insert(0, moved);
+    let extrude = doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Extrude { .. })).unwrap().id;
+    doc.feature_mut(sketch).unwrap().component = part;
+    let f = doc.feature_mut(extrude).unwrap();
+    f.component = part;
+    let FeatureKind::Extrude { extent, .. } = &mut f.kind else { panic!("an extrude") };
+    extent.to = Some(crate::FacePick(Vec3::new(0.0, 0.0, 25.0)));
+    extent.to_ref =
+        Some(crate::ObjectRef(crate::construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: plane.into(), placement: None } }));
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // The part sits 10 mm up, so the plane at 25 mm is 15 mm above its sketch.
+    let body = &model.state().bodies[0];
+    assert!(rel(measure(&body.body).unwrap().volume, 1200.0 * 15.0) < 1e-9, "{}", measure(&body.body).unwrap().volume);
+}
+
+/// Freeze the persisted v6 face-role encoding independently of display-mesh fields and serde layout.
+#[test]
+fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
+    let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
+    use solidcraft_kernel::mesh::ReconstructionKind::{Analytic, Faceted};
+    for (kind, digest) in [
+        (Analytic, "2b85ddcdb826582a9d392dd981499209eb69c06ae3f6ebacaca0c02a4e29a278"),
+        (Faceted, "3cbe2d7ca4e75f8b65845f9d84844cfe94e5236c8235692f6badf053aa649856"),
+    ] {
+        let traced = crate::lineage::reconstructed_tool(body.clone(), &positions, &[[0, 1, 2]], 0.01, kind);
+        let lineage = traced.lineage.unwrap();
+        let crate::lineage::Operand::Made(roles) = lineage.operands[0].as_ref() else { panic!("made faces") };
+        assert_eq!(roles.len(), 6);
+        for (face, names) in roles.iter().enumerate() {
+            assert_eq!(names, &[format!("mesh:{digest}:face:{face}")]);
+        }
+    }
+}
+
+/// Old conversion metadata is readable, but every saved design replays the same converter.
+#[test]
+fn saved_mesh_conversion_modes_replay_the_current_converter() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("saved conversion");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let conversion = doc.add_feature(FeatureKind::MeshConvert { body: "Mesh".into(), tolerance: "0.01 mm".into() }, None).unwrap();
+    let mut expected = None;
+    for obsolete in [
+        serde_json::json!({}),
+        serde_json::json!({"reconstruction":"legacy_prism"}),
+        serde_json::json!({"reconstruction":"analytic_v1"}),
+        serde_json::json!({"reconstruction":"analytic_v1_geometry_names"}),
+        serde_json::json!({"source_bound_names":false}),
+        serde_json::json!({"source_bound_names":true}),
+    ] {
+        let mut saved = serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.01 mm"});
+        saved.as_object_mut().unwrap().extend(obsolete.as_object().unwrap().clone());
+        doc.feature_mut(conversion).unwrap().kind = serde_json::from_value(saved).unwrap();
+        let canonical = serde_json::to_value(&doc.feature(conversion).unwrap().kind).unwrap();
+        assert!(canonical.get("reconstruction").is_none() && canonical.get("source_bound_names").is_none());
+        for replay in [&doc, &Document::from_json(&doc.to_json()).unwrap()] {
+            let mut model = Model::new();
+            model.evaluate(replay);
+            assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+            let state = model.state();
+            let body = state.body("Mesh").unwrap();
+            assert!((measure(&body.body).unwrap().volume - 6000.).abs() < 1e-6);
+            assert_eq!(body.feature, conversion);
+            let faces = crate::naming::face_names(body).as_ref().clone();
+            assert!(faces.iter().all(|name| name.contains(":mesh:")));
+            let names = (faces, crate::naming::edge_names(body));
+            if let Some(expected) = &expected {
+                assert_eq!(&names, expected);
+            } else {
+                expected = Some(names);
+            }
+        }
+    }
+}
+
+/// A saved conversion uses the current analytic geometry; an obsolete wall attachment reports a normal broken reference.
+#[test]
+fn saved_partial_arc_conversion_rebuilds_and_reports_obsolete_wall_references() {
+    use solidcraft_geom::prelude::*;
+    let root3 = 3f64.sqrt();
+    let outline = [
+        Vec2::new(-4., -3.),
+        Vec2::new(4., -3.),
+        Vec2::new(4., 3.),
+        Vec2::new(2., 3.),
+        Vec2::new(root3, 2.),
+        Vec2::new(1., 3. - root3),
+        Vec2::new(0., 1.),
+        Vec2::new(-1., 3. - root3),
+        Vec2::new(-root3, 2.),
+        Vec2::new(-2., 3.),
+        Vec2::new(-4., 3.),
+    ];
+    let source = solidcraft_kernel::extrude_planar_regions(
+        &solidcore_record::Plane::XY,
+        &[solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&outline), holes: vec![] }],
+        0.,
+        5.,
+    )
+    .unwrap();
+    let mesh = source.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("legacy polygon notch");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "polygon-notch.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let conversion = doc
+        .add_feature(serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.1 mm"})).unwrap(), None)
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    {
+        let st = model.state();
+        let body = st.body("Mesh").unwrap();
+        assert_eq!(body.body.face_count(), 8);
+        assert_eq!(measure(&body.body).unwrap().merged.face_types.get("cylinder"), Some(&1));
+        assert!((measure(&body.body).unwrap().volume - (240. - 10. * std::f64::consts::PI)).abs() < 1e-6);
+        assert!(crate::naming::face_names(body).iter().all(|name| name.contains(":mesh:")));
+    }
+    // The former polygon converter used these planar walls. This stored planar face no longer
+    // exists on the reconstructed cylinder, so replay must report the ordinary reference error.
+    let old = ModelBody::new("Mesh".into(), source, conversion);
+    let faces = crate::naming::face_names(&old);
+    let (face, spot) = crate::naming::face_spots(&old)
+        .into_iter()
+        .enumerate()
+        .find_map(|(i, spot)| {
+            let spot = spot?;
+            let solidcraft_kernel::FaceSurface::Plane { normal, .. } = spot.surface? else { return None };
+            (normal.z.abs() < 1e-8 && spot.point.x.abs() < 1.99 && spot.point.y > 0.9 && spot.point.y < 2.99).then_some((i, spot))
+        })
+        .unwrap();
+    let solidcraft_kernel::FaceSurface::Plane { normal, .. } = spot.surface.unwrap() else { panic!("planar wall") };
+    let plane = solidcore_record::Plane::from_normal(spot.point, normal.vec()).unwrap();
+    let sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Face { plane, at: spot.point, name: Some(faces[face].clone()), anchor: None },
+                sketch: Sketch::new(),
+            },
+            None,
+        )
+        .unwrap();
+    for replay in [&doc, &Document::from_json(&doc.to_json()).unwrap()] {
+        let mut cold = Model::new();
+        cold.evaluate(replay);
+        assert!(cold.result(conversion).unwrap().error.is_none());
+        assert!(cold.result(sketch).unwrap().error.is_some(), "obsolete polygon wall must request reattachment");
+    }
+}
+
 #[test]
 fn thread_additional_faces_preserve_old_single_face_serialization() {
     let old = serde_json::json!({"type":"thread", "face":[3.0,0.0,5.0]});
@@ -2449,4 +4163,1844 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     let mut model = Model::new();
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+}
+
+#[test]
+fn an_old_cell_grid_has_no_sketched_cell_and_is_saved_as_it_was() {
+    // A design from before the sketched cell (#21722): a built-in shape and a size, none of the
+    // sketched cell's fields. It reads with them all absent and writes none of them back.
+    let old = serde_json::json!({
+        "type": "cell_grid", "sketch": 1, "profiles": {"type": "all"}, "shape": "square",
+        "size": "10", "web": "2", "clip": "whole", "depth": "1.5"
+    });
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::CellGrid { size, cell_sketch, pitch_x, pitch_y, stagger, cell_angle, flip, cell_origin_x, cell_origin_y, .. } = &kind else {
+        panic!("a cell grid");
+    };
+    assert!(size.is_some() && cell_sketch.is_none() && pitch_x.is_none() && pitch_y.is_none());
+    assert!(stagger.is_none() && cell_angle.is_none() && !flip && cell_origin_x.is_none() && cell_origin_y.is_none());
+    let saved = serde_json::to_value(&kind).unwrap();
+    for key in ["cell_sketch", "pitch_x", "pitch_y", "stagger", "cell_angle", "flip", "cell_origin_x", "cell_origin_y"] {
+        assert!(saved.get(key).is_none(), "{key} in {saved}");
+    }
+    assert_eq!(saved.get("size"), old.get("size"));
+    // A sketched cell has no size, and keeps its layout through a save.
+    let sketched = serde_json::json!({
+        "type": "cell_grid", "sketch": 1, "profiles": {"type": "all"}, "web": "2", "depth": "1.5",
+        "cell_sketch": 2, "pitch_x": "20", "pitch_y": "20", "stagger": "0.5", "flip": true
+    });
+    let kind: FeatureKind = serde_json::from_value(sketched.clone()).unwrap();
+    let saved = serde_json::to_value(&kind).unwrap();
+    for key in ["cell_sketch", "pitch_x", "pitch_y", "stagger", "flip"] {
+        assert_eq!(saved.get(key), sketched.get(key), "{key}");
+    }
+    assert!(saved.get("size").is_none());
+    assert_eq!(kind.input_sketches(), vec![1, 2], "deleting the cell's sketch deletes the grid");
+}
+
+/// #17752: a Hole may name the press-in hardware it is the mounting hole of. It is saved only when
+/// set (a hole without it saves as before), with the kind as its name, and an older design reads
+/// with none. The hardware's length is an expression a parameter rename follows.
+#[test]
+fn a_hole_saves_its_press_in_hardware_only_when_set() {
+    let plain = serde_json::json!({"type": "hole", "position": [0, 0, 0], "direction": [0, 0, 1], "diameter": "4.25 mm", "hole": {"type": "simple"}});
+    let kind: FeatureKind = serde_json::from_value(plain.clone()).unwrap();
+    let FeatureKind::Hole { hardware, .. } = &kind else { panic!("not a hole") };
+    assert_eq!(*hardware, None);
+    assert!(serde_json::to_value(&kind).unwrap().get("hardware").is_none(), "a hole without hardware saves no key");
+
+    let mut with = plain;
+    with["hardware"] = serde_json::json!({"kind": "flush_nut", "thread": "M4", "part": "flush-nut.m4"});
+    let kind: FeatureKind = serde_json::from_value(with.clone()).unwrap();
+    let FeatureKind::Hole { hardware: Some(h), .. } = &kind else { panic!("hardware lost") };
+    assert_eq!((h.kind, h.thread.as_str(), h.part.as_str()), (crate::hardware_catalog::HardwareKind::FlushNut, "M4", "flush-nut.m4"));
+    assert!(h.length.is_none());
+    // Saved as it was read: the hardware object is the same, and has no length key when it has none.
+    assert_eq!(serde_json::to_value(&kind).unwrap()["hardware"], with["hardware"]);
+
+    // A stud's length is an expression: the feature's inputs name it, so a parameter rename reaches it.
+    with["hardware"] = serde_json::json!({"kind": "stud", "thread": "M3", "length": "pin_len", "part": "stud.m3"});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    assert!(kind.inputs().iter().any(|(label, e, _)| *label == "Hardware length" && e == "pin_len"), "{:?}", kind.inputs());
+}
+
+fn mat_close(a: &Mat, b: &Mat, tol: f64) -> bool {
+    a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() < tol)
+}
+
+#[test]
+fn capture_position_serde_round_trip_and_legacy_compatibility() {
+    let mut doc = Document::new("capture serde");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ_id = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    let base = rigid(Vec3::new(1.0, 2.0, 3.0), Vec3::ZERO, Vec3::Z, 0.25);
+    let occ = doc.occurrences.iter_mut().find(|o| o.id == occ_id).unwrap();
+    occ.base_transform = Some(base);
+    occ.transform = rigid(Vec3::new(11.0, 2.0, 3.0), Vec3::ZERO, Vec3::Z, 0.25);
+
+    let rot90 = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    let kind = FeatureKind::CapturePosition {
+        moves: vec![
+            CapturedOccurrenceMove {
+                occurrence: occ_id,
+                space: MoveSpace::World,
+                translate: ["10 mm".into(), "0".into(), "0".into()],
+                origin: Some(["1".into(), "2".into(), "3".into()]),
+                rotate_axis: Some([0.0, 0.0, 1.0]),
+                angle: Some("45 deg".into()),
+                rotation: None,
+                path: Some(vec![occ_id]),
+            },
+            CapturedOccurrenceMove {
+                occurrence: occ_id,
+                space: MoveSpace::Local,
+                translate: ["5 mm".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: Some(rot90),
+                path: None,
+            },
+        ],
+        joints: vec![CapturedJoint { joint: 99, values: vec![0.5], exprs: vec![Some("theta".into())] }],
+    };
+    assert_eq!(kind.type_name(), "CapturePositionFeature");
+    assert_eq!(kind.kind_key(), "capture_position");
+    assert_eq!(FeatureKind::type_name_to_kind_key("CapturePositionFeature"), Some("capture_position"));
+    assert_eq!(kind.base_name(), "CapturePosition");
+
+    doc.add_feature(kind, None).unwrap();
+    let json = doc.to_json();
+    let reopened = Document::from_json(&json).expect("CapturePosition design should reopen");
+    assert_eq!(reopened.occurrences.iter().find(|o| o.id == occ_id).unwrap().base_transform, Some(base));
+    assert_eq!(reopened.features[0].kind, doc.features[0].kind);
+
+    // Legacy design without CapturePosition or base_transform.
+    let mut legacy_doc = Document::new("legacy");
+    legacy_doc.add_component(Some("LegacyPart"), 0).unwrap();
+    let legacy_json = legacy_doc.to_json();
+    let legacy_val: serde_json::Value = serde_json::from_str(&legacy_json).unwrap();
+    assert!(legacy_val["occurrences"][0].get("base_transform").is_none());
+    let legacy_loaded = Document::from_json(&legacy_json).unwrap();
+    assert!(!legacy_loaded.has_capture_position_timeline());
+    let mut model = Model::new();
+    model.evaluate(&legacy_loaded);
+    assert!(model.resolved_occurrences().is_empty());
+
+    // Hostile format decode rejections: non-rigid base_transform, translation in `rotation`, deep path.
+    let mut bad_base: serde_json::Value = serde_json::from_str(&json).unwrap();
+    bad_base["occurrences"][0]["base_transform"] = serde_json::json!([[2, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]);
+    assert!(Document::from_json(&bad_base.to_string()).is_err());
+
+    let mut bad_rot: serde_json::Value = serde_json::from_str(&json).unwrap();
+    bad_rot["features"][0]["moves"][1]["rotation"][3][0] = serde_json::json!(12.0);
+    assert!(Document::from_json(&bad_rot.to_string()).is_err());
+}
+
+#[test]
+fn capture_position_walk_and_parameter_references_cover_moves_and_joints() {
+    let mut doc = Document::new("capture params");
+    let a = doc.add_component(Some("A"), 0).unwrap();
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == b).unwrap().id;
+
+    for (name, expr, unit) in [
+        ("dx", "10 mm", "mm"),
+        ("dy", "0 mm", "mm"),
+        ("dz", "0 mm", "mm"),
+        ("ox", "5 mm", "mm"),
+        ("oy", "0 mm", "mm"),
+        ("oz", "0 mm", "mm"),
+        ("ang", "30 deg", "deg"),
+        ("j_ang", "15 deg", "deg"),
+    ] {
+        doc.add_user_param(name, expr, Some(unit), None).unwrap();
+    }
+    doc.params.push(Param { name: "model_keep".into(), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: true });
+
+    let origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 77,
+        name: "Rev1".into(),
+        kind: crate::joints::JointKind::Revolute,
+        a: crate::joints::JointOrigin { occurrence: occ_a, ..origin.clone() },
+        b: crate::joints::JointOrigin { occurrence: occ_b, ..origin },
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    let mut kind = FeatureKind::CapturePosition {
+        moves: vec![CapturedOccurrenceMove {
+            occurrence: occ_b,
+            space: MoveSpace::Local,
+            translate: ["dx + model_keep".into(), "dy".into(), "dz".into()],
+            origin: Some(["ox".into(), "oy".into(), "oz".into()]),
+            rotate_axis: Some([0.0, 0.0, 1.0]),
+            angle: Some("ang".into()),
+            rotation: None,
+            path: None,
+        }],
+        joints: vec![CapturedJoint { joint: 77, values: vec![0.0], exprs: vec![Some("j_ang".into())] }],
+    };
+
+    // transform_geometry must leave MoveSpace origin untouched.
+    let before_kind = kind.clone();
+    kind.transform_geometry(&rigid(Vec3::new(50.0, 60.0, 70.0), Vec3::ZERO, Vec3::Z, 0.5));
+    assert_eq!(kind, before_kind);
+
+    let cap_id = doc.add_feature(kind, None).unwrap();
+
+    for used in ["dx", "ox", "ang", "j_ang"] {
+        assert!(!doc.param_users(used).is_empty(), "{used} should report param_users");
+        assert!(doc.remove_param(used).is_err(), "{used} should block deletion");
+        assert_eq!(doc.features_using_param(used), vec![cap_id], "{used} should list CapturePosition");
+    }
+
+    // Rename both move and joint parameter references.
+    assert!(doc.rename_param("dx", "dx_renamed").unwrap() >= 1);
+    assert!(doc.rename_param("ox", "ox_renamed").unwrap() >= 1);
+    assert!(doc.rename_param("j_ang", "j_ang_renamed").unwrap() >= 1);
+
+    doc.prune_model_params();
+    assert!(doc.param("model_keep").is_some(), "model param referenced by CapturePosition stays preserved");
+
+    if let FeatureKind::CapturePosition { moves, joints } = &doc.feature(cap_id).unwrap().kind {
+        assert_eq!(moves[0].translate[0].as_ref(), "dx_renamed + model_keep");
+        assert_eq!(moves[0].origin.as_ref().unwrap()[0].as_ref(), "ox_renamed");
+        assert_eq!(joints[0].exprs[0].as_deref(), Some("j_ang_renamed"));
+    } else {
+        panic!("expected CapturePosition");
+    }
+}
+
+#[test]
+fn capture_position_timeline_isolates_earlier_features_and_re_evaluates_on_parameter_change() {
+    let mut doc = Document::new("timeline isolation #20644");
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let mover = doc.add_component(Some("Mover"), 0).unwrap();
+    let occ_mover = doc.occurrences.iter().find(|o| o.component == mover).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_mover).unwrap().base_transform = Some(IDENTITY);
+    doc.add_user_param("dx", "100 mm", Some("mm"), None).unwrap();
+
+    // Feature 0: construction plane in Owner (Offset XZ by 60 mm -> world origin (0, -60, 0) or (0, 60, 0)).
+    let plane_id = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "60 mm".into() },
+            },
+            Some("OwnerPlane"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_id).unwrap().component = owner;
+
+    let make_sketch = || {
+        let mut sk = Sketch::new();
+        let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+        let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+        sk.add_line_pts(p0, p1, None).unwrap();
+        FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane_id.into(), placement: None }, sketch: sk }
+    };
+
+    // Feature 1 (before CapturePosition): SketchBefore in Mover.
+    let sketch_before = doc.add_feature(make_sketch(), Some("SketchBefore")).unwrap();
+    doc.feature_mut(sketch_before).unwrap().component = mover;
+
+    // Feature 2: CapturePosition moves Mover by [dx, 0, 0].
+    let cap_id = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["dx".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+
+    // Feature 3 (after CapturePosition): SketchAfter in Mover on the same Owner plane.
+    let sketch_after = doc.add_feature(make_sketch(), Some("SketchAfter")).unwrap();
+    doc.feature_mut(sketch_after).unwrap().component = mover;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    let st = model.state();
+    let before_origin = st.sketch(sketch_before).unwrap().plane.origin;
+    let after_origin = st.sketch(sketch_after).unwrap().plane.origin;
+    assert!((before_origin.x - 0.0).abs() < 1e-6, "SketchBefore saw Mover at base IDENTITY: {before_origin:?}");
+    assert!((after_origin.x + 100.0).abs() < 1e-6, "SketchAfter saw Mover at x=100, so plane x=-100 in Mover frame: {after_origin:?}");
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 100.0).abs() < 1e-9);
+
+    // Changing dx must recompute CapturePosition + SketchAfter while keeping SketchBefore cached.
+    doc.set_param("dx", "45 mm", Some("mm"), None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert_eq!(model.last_recomputed, 2, "only CapturePosition and SketchAfter should recompute, got {}", model.last_recomputed);
+    let st2 = model.state();
+    assert!((st2.sketch(sketch_before).unwrap().plane.origin.x - 0.0).abs() < 1e-6);
+    assert!((st2.sketch(sketch_after).unwrap().plane.origin.x + 45.0).abs() < 1e-6);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 45.0).abs() < 1e-9);
+
+    // Verify no_cache=true and refingerprint_from parity.
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&doc);
+    assert_eq!(fresh.resolved_occurrences(), model.resolved_occurrences());
+    assert_eq!(fresh.state().sketch(sketch_after).unwrap().plane.origin, st2.sketch(sketch_after).unwrap().plane.origin);
+    let expected_fps: Vec<u64> = model.results.iter().map(|r| r.fingerprint).collect();
+    model.refingerprint_from(&doc, 0);
+    let refp_fps: Vec<u64> = model.results.iter().map(|r| r.fingerprint).collect();
+    assert_eq!(refp_fps, expected_fps, "refingerprint_from(0) must match evaluate fingerprints");
+    let mut model_mid = model.clone();
+    model_mid.refingerprint_from(&doc, 2);
+    let mid_fps: Vec<u64> = model_mid.results.iter().map(|r| r.fingerprint).collect();
+    assert_eq!(mid_fps, expected_fps, "refingerprint_from(2) must match evaluate fingerprints");
+    let _ = cap_id;
+}
+
+#[test]
+fn capture_position_suppression_rollback_reorder_deletion_and_errors() {
+    let mut doc = Document::new("timeline ops");
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let mover = doc.add_component(Some("Mover"), 0).unwrap();
+    let occ_mover = doc.occurrences.iter().find(|o| o.component == mover).unwrap().id;
+    let base = rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_mover).unwrap().base_transform = Some(base);
+
+    let plane_id = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "10 mm".into() },
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(plane_id).unwrap().component = owner;
+
+    let cap1 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["20 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                }],
+                joints: vec![CapturedJoint { joint: 1, values: vec![1.25], exprs: Vec::new() }],
+            },
+            None,
+        )
+        .unwrap();
+
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(5.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    let sk_after = doc
+        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane_id.into(), placement: None }, sketch: sk }, None)
+        .unwrap();
+    doc.feature_mut(sk_after).unwrap().component = mover;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 25.0).abs() < 1e-9);
+    assert_eq!(model.resolved_joints().get(&1).map(|j| j.values.clone()), Some(vec![1.25]));
+
+    // Suppress CapturePosition -> reverts to base_transform (5.0) and clears resolved_joints.
+    doc.feature_mut(cap1).unwrap().suppressed = true;
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 5.0).abs() < 1e-9);
+    assert!(model.resolved_joints().is_empty());
+    assert!((model.state().sketch(sk_after).unwrap().plane.origin.x + 5.0).abs() < 1e-6);
+
+    // Unsuppress -> re-applies CapturePosition (25.0).
+    doc.feature_mut(cap1).unwrap().suppressed = false;
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 25.0).abs() < 1e-9);
+    assert_eq!(model.resolved_joints().get(&1).map(|j| j.values.clone()), Some(vec![1.25]));
+
+    // Rollback marker before CapturePosition -> reverts to base_transform (5.0).
+    let cap_idx = doc.feature_index(cap1).unwrap();
+    doc.marker = Some(cap_idx);
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 5.0).abs() < 1e-9);
+    assert!(model.resolved_joints().is_empty());
+
+    // Roll forward past CapturePosition -> restores from rolled_results and re-applies (25.0).
+    doc.marker = None;
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 25.0).abs() < 1e-9);
+    assert_eq!(model.resolved_joints().get(&1).map(|j| j.values.clone()), Some(vec![1.25]));
+
+    // Add a second non-commutative CapturePosition (90 deg rotation about world/parent origin),
+    // then reorder the two CapturePosition features and verify non-commutative result changes.
+    let cap2 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["0".into(), "0".into(), "0".into()],
+                    origin: Some(["0".into(), "0".into(), "0".into()]),
+                    rotate_axis: Some([0.0, 0.0, 1.0]),
+                    angle: Some("90 deg".into()),
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    model.evaluate(&doc);
+    // Order (cap1: +20x, cap2: rot90): base=(5,0,0) -> (25,0,0) -> rot90 => (0, 25, 0).
+    let t_order1 = model.resolved_occurrences()[&occ_mover];
+    assert!((t_order1[3][0] - 0.0).abs() < 1e-6 && (t_order1[3][1] - 25.0).abs() < 1e-6, "order1: {:?}", t_order1[3]);
+
+    // Reorder: cap2 before cap1 -> base=(5,0,0) -> rot90 => (0,5,0) -> +20x => (20, 5, 0).
+    let i1 = doc.feature_index(cap1).unwrap();
+    let i2 = doc.feature_index(cap2).unwrap();
+    doc.features.swap(i1, i2);
+    model.evaluate(&doc);
+    let t_order2 = model.resolved_occurrences()[&occ_mover];
+    assert!((t_order2[3][0] - 20.0).abs() < 1e-6 && (t_order2[3][1] - 5.0).abs() < 1e-6, "order2: {:?}", t_order2[3]);
+
+    // Delete both CapturePosition features -> reverts to base_transform (5,0,0).
+    doc.features.retain(|f| f.id != cap1 && f.id != cap2);
+    model.evaluate(&doc);
+    assert!(mat_close(&model.resolved_occurrences()[&occ_mover], &base, 1e-9));
+
+    // Atomic error: move 1 is valid, move 2 references an unknown parameter -> neither applies!
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![
+                CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["100 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+                CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["missing_param".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+            ],
+            joints: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.last().unwrap().error.is_some());
+    assert!(mat_close(&model.resolved_occurrences()[&occ_mover], &base, 1e-9), "atomic failure must not apply partial moves");
+}
+
+#[test]
+fn capture_position_world_space_nested_path_rotation_and_adjust_base() {
+    let mut doc = Document::new("world space nested");
+    let parent_comp = doc.add_component(Some("Parent"), 0).unwrap();
+    let child_comp = doc.add_component(Some("Child"), parent_comp).unwrap();
+    let occ_parent = doc.occurrences.iter().find(|o| o.component == parent_comp).unwrap().id;
+    let occ_child = doc.occurrences.iter().find(|o| o.component == child_comp).unwrap().id;
+
+    // Parent rotated +90 deg around Z; child starts at local (0, 0, 0).
+    let parent_rot = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_parent).unwrap().base_transform = Some(parent_rot);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_child).unwrap().base_transform = Some(IDENTITY);
+
+    // Move child +10 mm in World X -> in Parent's +90 deg Z-rotated local frame, World +X is Local -Y.
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ_child,
+                space: MoveSpace::World,
+                translate: ["10 mm".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: Some(vec![occ_parent, occ_child]),
+            }],
+            joints: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let child_local = model.resolved_occurrences()[&occ_child];
+    let child_world = mat_mul(&parent_rot, &child_local);
+    assert!((child_world[3][0] - 10.0).abs() < 1e-9 && child_world[3][1].abs() < 1e-9, "world={:?}", child_world[3]);
+    assert!(child_local[3][0].abs() < 1e-9 && (child_local[3][1] + 10.0).abs() < 1e-9, "local={:?}", child_local[3]);
+
+    // Test Occurrence::adjust_base_for_direct_move with non-commutative rotation + translation.
+    let base_before = rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.3);
+    let cap_delta = rigid(Vec3::new(0.0, 5.0, 0.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    let old_resolved = mat_mul(&cap_delta, &base_before);
+    let direct_shift = rigid(Vec3::new(3.0, -4.0, 2.0), Vec3::ZERO, Vec3::Y, 0.4);
+    let new_resolved = mat_mul(&direct_shift, &old_resolved);
+
+    let mut test_occ = Occurrence {
+        id: 500,
+        component: 1,
+        parent: 0,
+        name: "Test:1".into(),
+        transform: old_resolved,
+        base_transform: Some(base_before),
+        grounded: false,
+        bom_type: None,
+        expressed_moves: Vec::new(),
+    };
+    test_occ.adjust_base_for_direct_move(&old_resolved, &new_resolved);
+    let replayed = mat_mul(&cap_delta, &test_occ.base_transform.unwrap());
+    assert!(mat_close(&replayed, &new_resolved, 1e-9), "replayed={replayed:?}, want={new_resolved:?}");
+
+    // Test `rotation` fallback matrix + `CapturedJoint::exprs` re-evaluation on parameter change.
+    let mut rot_doc = Document::new("rotation and joint exprs");
+    let ca = rot_doc.add_component(Some("CA"), 0).unwrap();
+    let cb = rot_doc.add_component(Some("CB"), 0).unwrap();
+    let oa = rot_doc.occurrences.iter().find(|o| o.component == ca).unwrap().id;
+    let ob = rot_doc.occurrences.iter().find(|o| o.component == cb).unwrap().id;
+    rot_doc.occurrences.iter_mut().find(|o| o.id == ob).unwrap().base_transform = Some(IDENTITY);
+    rot_doc.add_user_param("j_theta", "30 deg", Some("deg"), None).unwrap();
+    let origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    rot_doc.assembly.joints.push(crate::joints::Joint {
+        id: 11,
+        name: "Rev".into(),
+        kind: crate::joints::JointKind::Revolute,
+        a: crate::joints::JointOrigin { occurrence: oa, ..origin.clone() },
+        b: crate::joints::JointOrigin { occurrence: ob, ..origin },
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+    let rot90 = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    rot_doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: ob,
+                    space: MoveSpace::Local,
+                    translate: ["5 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: Some(rot90),
+                    path: None,
+                }],
+                joints: vec![CapturedJoint { joint: 11, values: vec![0.0], exprs: vec![Some("j_theta".into())] }],
+            },
+            None,
+        )
+        .unwrap();
+
+    let mut rot_model = Model::new();
+    rot_model.evaluate(&rot_doc);
+    assert!(rot_model.results.iter().all(|r| r.error.is_none()), "{:?}", rot_model.results);
+    let mut expected_rot = rot90;
+    expected_rot[3] = [5.0, 0.0, 0.0, 1.0];
+    assert!(mat_close(&rot_model.resolved_occurrences()[&ob], &expected_rot, 1e-9));
+    let jv1 = rot_model.resolved_joints()[&11].values[0];
+    assert!((jv1 - 30.0_f64.to_radians()).abs() < 1e-9, "got {jv1}");
+
+    rot_doc.set_param("j_theta", "60 deg", Some("deg"), None).unwrap();
+    rot_model.evaluate(&rot_doc);
+    let jv2 = rot_model.resolved_joints()[&11].values[0];
+    assert!((jv2 - 60.0_f64.to_radians()).abs() < 1e-9, "got {jv2}");
+}
+
+#[test]
+fn capture_position_invalidates_construction_axis_point_move_rotate_about_and_sketch_links() {
+    let mut doc = Document::new("cache invalidation coverage");
+    let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+    let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.add_user_param("dx", "10 mm", Some("mm"), None).unwrap();
+
+    // Cylinder in CompA at local origin (radius 5, height 10) -> axis at (0,0,z) in CompA.
+    let cyl_a = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::ZERO),
+                axis: point_expr(Vec3::Z),
+                radius: "5 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("CylA"),
+        )
+        .unwrap();
+    doc.feature_mut(cyl_a).unwrap().component = comp_a;
+
+    // Construction plane & axis & point owned by CompA.
+    let plane_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "3 mm".into() },
+            },
+            Some("PlaneA"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_a).unwrap().component = comp_a;
+
+    let axis_a = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::TwoPoints {
+                    a: crate::construct::GeoRef::Point { p: Vec3::new(0.0, 0.0, 0.0) },
+                    b: crate::construct::GeoRef::Point { p: Vec3::new(0.0, 10.0, 0.0) },
+                },
+            },
+            Some("AxisA"),
+        )
+        .unwrap();
+    doc.feature_mut(axis_a).unwrap().component = comp_a;
+
+    let pt_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPoint {
+                def: crate::construct::PointDef::At { point: crate::construct::GeoRef::Point { p: Vec3::new(2.0, 3.0, 4.0) } },
+            },
+            Some("PointA"),
+        )
+        .unwrap();
+    doc.feature_mut(pt_a).unwrap().component = comp_a;
+
+    // Box in CompB (will be rotated around CompA's cylinder axis via Move { rotate_about: Some(...) }).
+    let box_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(0.0, 0.0, 0.0)),
+                length: "2 mm".into(),
+                width: "2 mm".into(),
+                height: "2 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxB"),
+        )
+        .unwrap();
+    doc.feature_mut(box_b).unwrap().component = comp_b;
+    doc.feature_mut(box_b).unwrap().body_names = vec!["BodyB".into()];
+
+    // Evaluate once at dx=10 to capture persistent face name of CylA.
+    let cap_id = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_a,
+                    space: MoveSpace::Local,
+                    translate: ["dx".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            Some("CapA"),
+        )
+        .unwrap();
+
+    let mut prep = Model::new();
+    prep.evaluate(&doc);
+    assert!(prep.results.iter().all(|r| r.error.is_none()), "{:?}", prep.results);
+    let prep_st = prep.state();
+    let cyl_body = prep_st.bodies.iter().find(|b| b.feature == cyl_a).unwrap();
+    let cyl_face_name = crate::naming::face_names(cyl_body)
+        .iter()
+        .enumerate()
+        .find(|(fi, _)| matches!(solidcraft_kernel::face_surface(&cyl_body.body, *fi), Some(solidcraft_kernel::FaceSurface::Cylinder { .. })))
+        .map(|(_, n)| n.clone())
+        .expect("cylinder face name");
+
+    // 1) ConstructionAxis on named cylinder face of CompA (authored in CompB).
+    let ax_named = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::ThroughFace {
+                    face: crate::construct::GeoRef::Face { at: Vec3::new(15.0, 0.0, 5.0), name: Some(cyl_face_name.clone()) },
+                },
+            },
+            Some("AxNamed"),
+        )
+        .unwrap();
+    doc.feature_mut(ax_named).unwrap().component = comp_b;
+
+    // 2) ConstructionAxis referencing AxisA (foreign construction axis) & ConstructionPoint referencing PointA (foreign construction point).
+    let ax_foreign = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::TwoPoints {
+                    a: crate::construct::GeoRef::ConstructPoint { name: "PointA".into() },
+                    b: crate::construct::GeoRef::Point { p: Vec3::new(0.0, 0.0, 20.0) },
+                },
+            },
+            Some("AxForeign"),
+        )
+        .unwrap();
+    doc.feature_mut(ax_foreign).unwrap().component = comp_b;
+
+    let pt_named = doc
+        .add_feature(
+            FeatureKind::ConstructionPoint {
+                def: crate::construct::PointDef::At {
+                    point: crate::construct::GeoRef::Snap {
+                        of: Box::new(crate::construct::GeoRef::Face { at: Vec3::new(15.0, 0.0, 5.0), name: Some(cyl_face_name.clone()) }),
+                        kind: crate::construct::SnapAt::Centre,
+                        at: Vec3::new(10.0, 0.0, 10.0),
+                        end: Some(1),
+                    },
+                },
+            },
+            Some("PtNamed"),
+        )
+        .unwrap();
+    doc.feature_mut(pt_named).unwrap().component = comp_b;
+
+    let pt_foreign = doc
+        .add_feature(
+            FeatureKind::ConstructionPoint {
+                def: crate::construct::PointDef::At { point: crate::construct::GeoRef::ConstructPoint { name: "PointA".into() } },
+            },
+            Some("PtForeign"),
+        )
+        .unwrap();
+    // Root component triggers world_state in construction_state.
+    doc.feature_mut(pt_foreign).unwrap().component = 0;
+
+    // 3) Move { rotate_about: Some(GeoRef::Face { .. }) } turning BodyB around CompA's cylinder axis.
+    let move_about = doc
+        .add_feature(
+            FeatureKind::Move {
+                bodies: vec!["BodyB".into()],
+                translate: ["0".into(), "0".into(), "0".into()],
+                rotate_axis: Some(Dir(Vec3::Z)),
+                rotate_about: Some(crate::construct::GeoRef::Face { at: Vec3::new(15.0, 0.0, 5.0), name: Some(cyl_face_name) }),
+                origin: Some(crate::point_expr(Vec3::new(10.0, 0.0, 0.0))),
+                angle: Some("90 deg".into()),
+                copy: false,
+                carry: Vec::new(),
+                leave: Vec::new(),
+                copy_frames: Vec::new(),
+            },
+            Some("MoveAbout"),
+        )
+        .unwrap();
+    doc.feature_mut(move_about).unwrap().component = comp_b;
+
+    // 4) Sketch in CompB projecting LinkSource::Plane { name: "PlaneA" } and LinkSource::Axis { name: "AxisA" }.
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Plane { name: "PlaneA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(13.0, -5.0), Vec2::new(13.0, 5.0))],
+    )
+    .unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Axis { name: "AxisA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(10.0, -5.0), Vec2::new(10.0, 5.0))],
+    )
+    .unwrap();
+    let sk_links = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SkLinks")).unwrap();
+    doc.feature_mut(sk_links).unwrap().component = comp_b;
+
+    // Evaluate cached model at dx = 10 mm, then mutate dx -> 40 mm.
+    let mut cached = Model::new();
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()), "{:?}", cached.results);
+
+    doc.set_param("dx", "40 mm", Some("mm"), None).unwrap();
+    cached.evaluate(&doc);
+
+    let mut cold = Model::new();
+    cold.no_cache = true;
+    cold.evaluate(&doc);
+    assert!(cold.results.iter().all(|r| r.error.is_none()), "{:?}", cold.results);
+
+    for (rc, rf) in cached.results.iter().zip(&cold.results) {
+        assert_eq!(rc.error, rf.error, "error mismatch on {}", rc.name);
+    }
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == ax_named).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == ax_named).map(|c| &c.geom),
+        "ConstructionAxis on named face must invalidate"
+    );
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == ax_foreign).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == ax_foreign).map(|c| &c.geom),
+        "ConstructionAxis on foreign construction point must invalidate"
+    );
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == pt_named).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == pt_named).map(|c| &c.geom),
+        "ConstructionPoint on named face must invalidate"
+    );
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == pt_foreign).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == pt_foreign).map(|c| &c.geom),
+        "ConstructionPoint in root referencing foreign point must invalidate"
+    );
+    let cached_bounds = solidcraft_geom::MeshGeom::bounds(&*cached.state().body("BodyB").unwrap().mesh());
+    let cold_bounds = solidcraft_geom::MeshGeom::bounds(&*cold.state().body("BodyB").unwrap().mesh());
+    assert!(
+        cached_bounds.min.dist(cold_bounds.min) < 1e-6 && cached_bounds.max.dist(cold_bounds.max) < 1e-6,
+        "Move rotate_about must invalidate: cached={cached_bounds:?} cold={cold_bounds:?}"
+    );
+    let cached_st = cached.state();
+    let cold_st = cold.state();
+    let cached_sk = cached_st.sketch(sk_links).unwrap();
+    let cold_sk = cold_st.sketch(sk_links).unwrap();
+    assert_eq!(cached_sk.sketch.curves.len(), cold_sk.sketch.curves.len());
+    for (cp, qp) in cached_sk.sketch.points.iter().zip(&cold_sk.sketch.points) {
+        assert!(solidcraft_geom::Vec2Geom::dist(cp.pos, qp.pos) < 1e-9, "linked sketch point mismatch: {:?} vs {:?}", cp.pos, qp.pos);
+    }
+    let _ = cap_id;
+}
+
+#[test]
+fn capture_position_is_current_saved_adopt_and_adopt_solved_sketches() {
+    let mut doc = Document::new("model cache & adopt");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().transform = rigid(Vec3::new(99.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.add_user_param("dx", "25 mm", Some("mm"), None).unwrap();
+    doc.add_user_param("j_ang", "30 deg", Some("deg"), None).unwrap();
+
+    let origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 1,
+        name: "Rev".into(),
+        kind: crate::joints::JointKind::Revolute,
+        a: crate::joints::JointOrigin { occurrence: occ_a, ..origin.clone() },
+        b: crate::joints::JointOrigin { occurrence: occ_b, ..origin },
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    let plane_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
+            },
+            Some("PlaneA"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_a).unwrap().component = comp_a;
+
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ_a,
+                space: MoveSpace::Local,
+                translate: ["dx".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: None,
+            }],
+            joints: vec![CapturedJoint { joint: 1, values: vec![0.0], exprs: vec![Some("j_ang".into())] }],
+        },
+        None,
+    )
+    .unwrap();
+
+    // Downstream sketch in CompB projecting PlaneA (so changing dx moves the linked sketch geometry).
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Plane { name: "PlaneA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(30.0, -5.0), Vec2::new(30.0, 5.0))],
+    )
+    .unwrap();
+    let sk_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SkB")).unwrap();
+    doc.feature_mut(sk_id).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert!(model.is_current(&doc), "Model::is_current must return true right after Model::evaluate");
+
+    // Save & adopt round-trip without recomputing.
+    let saved = model.saved(&doc).expect("Model::saved must succeed when base_transform != transform");
+    let mut adopted = Model::adopt(&doc, &saved).expect("Model::adopt must succeed");
+    assert_eq!(adopted.resolved_occurrences(), model.resolved_occurrences());
+    assert_eq!(adopted.resolved_joints(), model.resolved_joints());
+    assert!(adopted.is_current(&doc));
+    adopted.evaluate(&doc);
+    assert_eq!(adopted.last_recomputed, 0, "adopted model must not recompute");
+
+    // Changing joint kind invalidates CapturePosition cleanly.
+    let mut doc_slider = doc.clone();
+    doc_slider.assembly.joints[0].kind = crate::joints::JointKind::Slider;
+    model.evaluate(&doc_slider);
+    assert!(model.last_recomputed >= 1, "joint kind change must recompute CapturePosition, got {}", model.last_recomputed);
+    // Restore original Revolute doc for adopt_solved_sketches test.
+    model.evaluate(&doc);
+
+    // Mutate dx so the linked sketch re-solves, then adopt_solved_sketches.
+    doc.set_param("dx", "55 mm", Some("mm"), None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.is_current(&doc));
+    assert_eq!(model.adopt_solved_sketches(&mut doc), 1);
+    assert!(model.is_current(&doc), "is_current must remain true after adopt_solved_sketches");
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "evaluate after adopt_solved_sketches must not recompute");
+}
+
+#[test]
+fn capture_position_evaluate_shared_updates_resolved_occurrences_when_base_transform_changes() {
+    let mut doc = Document::new("evaluate_shared base_transform");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(IDENTITY);
+    let box_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(box_id).unwrap().component = comp;
+
+    let doc1 = std::sync::Arc::new(doc);
+    let mut model = Model::new();
+    assert!(model.evaluate_shared(&doc1));
+    assert!((model.resolved_occurrences()[&occ][3][0] - 0.0).abs() < 1e-9);
+
+    let mut doc2 = (*doc1).clone();
+    doc2.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(rigid(Vec3::new(99.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let doc2 = std::sync::Arc::new(doc2);
+    assert!(model.evaluate_shared(&doc2), "evaluate_shared must not skip when has_capture_position_timeline is true");
+    assert!((model.resolved_occurrences()[&occ][3][0] - 99.0).abs() < 1e-9);
+}
+
+#[test]
+fn capture_position_hardening_joint_values_and_clipboard_remap() {
+    let mut doc = Document::new("hardening");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(IDENTITY);
+
+    let cap_id = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ,
+                    space: MoveSpace::World,
+                    translate: ["1 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: Some(vec![occ]),
+                }],
+                joints: vec![CapturedJoint { joint: 1, values: vec![0.5], exprs: Vec::new() }],
+            },
+            None,
+        )
+        .unwrap();
+
+    // format::decode rejects oversized values / exprs (> 64) and out-of-range values.
+    let json = doc.to_json();
+    let mut too_many_vals: serde_json::Value = serde_json::from_str(&json).unwrap();
+    too_many_vals["features"][0]["joints"][0]["values"] = serde_json::json!(vec![0.0; 65]);
+    assert!(Document::from_json(&too_many_vals.to_string()).is_err());
+
+    let mut too_many_exprs: serde_json::Value = serde_json::from_str(&json).unwrap();
+    too_many_exprs["features"][0]["joints"][0]["exprs"] = serde_json::json!(vec![Option::<String>::None; 65]);
+    assert!(Document::from_json(&too_many_exprs.to_string()).is_err());
+
+    let mut too_big_val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    too_big_val["features"][0]["joints"][0]["values"] = serde_json::json!([1e10]);
+    assert!(Document::from_json(&too_big_val.to_string()).is_err());
+
+    // In-memory eval_captured_joint rejects NaN/out-of-range values even when exprs is empty.
+    let mut bad_doc = doc.clone();
+    if let FeatureKind::CapturePosition { joints, .. } = &mut bad_doc.feature_mut(cap_id).unwrap().kind {
+        joints[0].values = vec![f64::NAN];
+    }
+    let mut bad_model = Model::new();
+    bad_model.evaluate(&bad_doc);
+    assert!(bad_model.result(cap_id).and_then(|r| r.error.as_ref()).is_some());
+
+    // Feature::remap_clone remaps m.occurrence and m.path when occurrences map is populated.
+    let mut cloned = doc.feature(cap_id).unwrap().clone();
+    let mut occ_map = std::collections::BTreeMap::new();
+    occ_map.insert(occ, 777);
+    let source_roots = std::collections::BTreeSet::new();
+    let placements = crate::ClonePlacements { occurrences: &occ_map, source_roots: &source_roots, root_path: &[], doc: &doc, same_document: true };
+    cloned.remap_clone(&Default::default(), &Default::default(), &Default::default(), &Default::default(), Some(&placements)).unwrap();
+    if let FeatureKind::CapturePosition { moves, .. } = &cloned.kind {
+        assert_eq!(moves[0].occurrence, 777);
+        assert_eq!(moves[0].path.as_deref(), Some([777].as_slice()));
+    } else {
+        panic!("expected CapturePosition");
+    }
+}
+
+#[test]
+fn capture_position_moved_component_sketch_same_and_foreign_axis_links_match_cold_eval() {
+    let mut doc = Document::new("same and foreign axis link parity");
+    let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+    let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+    doc.add_user_param("dx", "10 mm", Some("mm"), None).unwrap();
+    doc.add_user_param("bx", "5 mm", Some("mm"), None).unwrap();
+    doc.add_user_param("by", "5 mm", Some("mm"), None).unwrap();
+
+    // CompB owns a ConstructionAxis at local x = 5 along Y.
+    let ax_b = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::TwoPoints {
+                    a: crate::construct::GeoRef::Point { p: Vec3::new(5.0, 0.0, 0.0) },
+                    b: crate::construct::GeoRef::Point { p: Vec3::new(5.0, 10.0, 0.0) },
+                },
+            },
+            Some("AxB"),
+        )
+        .unwrap();
+    doc.feature_mut(ax_b).unwrap().component = comp_b;
+
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![
+                CapturedOccurrenceMove {
+                    occurrence: occ_a,
+                    space: MoveSpace::Local,
+                    translate: ["dx".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+                CapturedOccurrenceMove {
+                    occurrence: occ_b,
+                    space: MoveSpace::Local,
+                    translate: ["bx".into(), "by".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+            ],
+            joints: Vec::new(),
+        },
+        Some("MoveParts"),
+    )
+    .unwrap();
+
+    let make_sketch = |doc: &mut Document, link_source: solidcraft_sketch::LinkSource, name: &str| {
+        let mut sk = Sketch::new();
+        let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+        let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+        sk.add_line_pts(p0, p1, None).unwrap();
+        sk.add_link(
+            solidcraft_sketch::LinkKind::Project,
+            link_source,
+            &[solidcraft_sketch::LinkGeom::Line(Vec2::new(0.0, -5.0), Vec2::new(0.0, 5.0))],
+        )
+        .unwrap();
+        let id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some(name)).unwrap();
+        doc.feature_mut(id).unwrap().component = comp_b;
+        id
+    };
+
+    let sk_same_axis = make_sketch(&mut doc, solidcraft_sketch::LinkSource::Axis { name: "AxB".into() }, "SkSameAxis");
+    let sk_same_datum = make_sketch(&mut doc, solidcraft_sketch::LinkSource::Axis { name: format!("o:{occ_b}/origin/Y") }, "SkSameDatum");
+    let sk_foreign_datum = make_sketch(&mut doc, solidcraft_sketch::LinkSource::Axis { name: format!("o:{occ_a}/origin/Y") }, "SkForeignDatum");
+
+    let mut cached = Model::new();
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()), "{:?}", cached.results);
+
+    for (dx, bx, by, expected_foreign_x) in
+        [("10 mm", "5 mm", "5 mm", 5.0), ("40 mm", "35 mm", "35 mm", 5.0), ("55 mm", "10 mm", "20 mm", 45.0), ("10 mm", "5 mm", "5 mm", 5.0)]
+    {
+        doc.set_param("dx", dx, Some("mm"), None).unwrap();
+        doc.set_param("bx", bx, Some("mm"), None).unwrap();
+        doc.set_param("by", by, Some("mm"), None).unwrap();
+        cached.evaluate(&doc);
+        assert!(cached.is_current(&doc));
+
+        let mut cold = Model::new();
+        cold.no_cache = true;
+        cold.evaluate(&doc);
+        assert!(cold.results.iter().all(|r| r.error.is_none()), "{:?}", cold.results);
+
+        let cached_st = cached.state();
+        let cold_st = cold.state();
+        for (sk_id, expected_link_x) in [(sk_same_axis, 5.0), (sk_same_datum, 0.0), (sk_foreign_datum, expected_foreign_x)] {
+            let cs = cached_st.sketch(sk_id).unwrap();
+            let fs = cold_st.sketch(sk_id).unwrap();
+            assert_eq!(cs.sketch.points.len(), fs.sketch.points.len(), "point count mismatch on {sk_id}");
+            for (cp, fp) in cs.sketch.points.iter().zip(&fs.sketch.points) {
+                assert!(
+                    solidcraft_geom::Vec2Geom::dist(cp.pos, fp.pos) < 1e-9,
+                    "cache mismatch on sketch {sk_id} ({dx}, {bx}, {by}): cached={:?} cold={:?}",
+                    cp.pos,
+                    fp.pos
+                );
+            }
+            let link_id = &cs.sketch.links[0].id;
+            for &pi in &cs.sketch.link_points(link_id) {
+                let x = cs.sketch.points[pi].pos.x;
+                assert!((x - expected_link_x).abs() < 1e-9, "sketch {sk_id} expected x={expected_link_x}, got {x}");
+            }
+        }
+    }
+}
+
+#[test]
+fn capture_position_nested_same_occurrence_reorder_local_vs_world_multi_instance() {
+    let mut doc = Document::new("nested same occ reorder");
+    let parent_comp = doc.add_component(Some("Parent"), 0).unwrap();
+    let child_comp = doc.add_component(Some("Child"), parent_comp).unwrap();
+    let occ_p1 = doc.occurrences.iter().find(|o| o.component == parent_comp).unwrap().id;
+    let occ_c = doc.occurrences.iter().find(|o| o.component == child_comp).unwrap().id;
+    let occ_p2 = doc.add_occurrence(parent_comp, 0, rigid(Vec3::new(0.0, 50.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Rotate occ_p1 +90 deg around Z; occ_p2 stays unrotated at (0, 50, 0); child starts at local (5, 0, 0).
+    let p1_rot = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    let c_base = rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_p1).unwrap().base_transform = Some(p1_rot);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_c).unwrap().base_transform = Some(c_base);
+
+    // CP1: World translation (+10, 0, 0) along occ_p1 path -> in occ_p1's +90Z frame, World +X = Local -Y.
+    let cp1 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_c,
+                    space: MoveSpace::World,
+                    translate: ["10 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: Some(vec![occ_p1, occ_c]),
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    // CP2: Local 90 deg rotation about Z around origin (0, 0, 0).
+    let cp2 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_c,
+                    space: MoveSpace::Local,
+                    translate: ["0".into(), "0".into(), "0".into()],
+                    origin: Some(["0".into(), "0".into(), "0".into()]),
+                    rotate_axis: Some([0.0, 0.0, 1.0]),
+                    angle: Some("90 deg".into()),
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    // Order (CP1 -> CP2): local (5, 0, 0) + world (+10,0,0)->local (0,-10,0) = (5, -10, 0), then local rot90Z -> (10, 5, 0).
+    let t1 = model.resolved_occurrences()[&occ_c];
+    assert!((t1[3][0] - 10.0).abs() < 1e-6 && (t1[3][1] - 5.0).abs() < 1e-6, "order1 local={:?}", t1[3]);
+    let w1_p1 = mat_mul(&p1_rot, &t1);
+    assert!((w1_p1[3][0] + 5.0).abs() < 1e-6 && (w1_p1[3][1] - 10.0).abs() < 1e-6, "order1 world p1={:?}", w1_p1[3]);
+    let _ = occ_p2;
+
+    // Reorder (CP2 -> CP1): local (5, 0, 0) -> local rot90Z => (0, 5, 0), then world (+10,0,0)->local (0,-10,0) => (0, -5, 0).
+    let i1 = doc.feature_index(cp1).unwrap();
+    let i2 = doc.feature_index(cp2).unwrap();
+    doc.features.swap(i1, i2);
+    model.evaluate(&doc);
+    let t2 = model.resolved_occurrences()[&occ_c];
+    assert!(t2[3][0].abs() < 1e-6 && (t2[3][1] + 5.0).abs() < 1e-6, "order2 local={:?}", t2[3]);
+}
+
+#[test]
+fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joints() {
+    let mut doc = Document::new("#20644 multi-feature isolation");
+    let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+    let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().grounded = true;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+
+    // BoxA at [0..10, 0..10, 0..10], BoxB at [20..30, 0..10, 0..10].
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxA"),
+        )
+        .unwrap();
+    doc.feature_mut(box_a).unwrap().component = comp_a;
+    doc.feature_mut(box_a).unwrap().body_names = vec!["BodyA".into()];
+
+    let box_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(20.0, 0.0, 0.0)),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxB"),
+        )
+        .unwrap();
+    doc.feature_mut(box_b).unwrap().component = comp_b;
+    doc.feature_mut(box_b).unwrap().body_names = vec!["BodyB".into()];
+
+    // Pre-capture ToObject Extrude in CompA up to BodyB's x=20 face (y=2..8, z=2..8, extruded +X from x=10 to x=20 -> length 10).
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(2.0, 2.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(8.0, 2.0), None).unwrap();
+    let p2 = sk.add_point(Vec2::new(8.0, 8.0), None).unwrap();
+    let p3 = sk.add_point(Vec2::new(2.0, 8.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_line_pts(p1, p2, None).unwrap();
+    sk.add_line_pts(p2, p3, None).unwrap();
+    sk.add_line_pts(p3, p0, None).unwrap();
+    let sk_to = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Placed { origin: crate::point_expr(Vec3::new(10.0, 0.0, 0.0)), x_dir: Vec3::Y, y_dir: Vec3::Z },
+                sketch: sk,
+            },
+            Some("SkTo"),
+        )
+        .unwrap();
+    doc.feature_mut(sk_to).unwrap().component = comp_a;
+
+    let ext_to = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                sketch: sk_to.into(),
+                profiles: ProfileSel::All,
+                extent: Extent {
+                    convention: crate::ExtrudeConvention::LegacyPerSide,
+                    distance: "1 mm".into(),
+                    direction: Direction::Positive,
+                    distance2: None,
+                    start_offset: None,
+                    symmetric_offset: false,
+                    through_all: false,
+                    second_follows_first: false,
+                    taper: None,
+                    corner: None,
+                    to: Some(crate::FacePick(Vec3::new(20.0, 5.0, 5.0))),
+                    to_offset: None,
+                    from: None,
+                    from_level: false,
+                    to_body_apart: true,
+                    through_all2: false,
+                    to2: None,
+                    to_offset2: None,
+                    picked_placements: Vec::new(),
+                    one_sided_direction: None,
+                    to_ref: None,
+                    from_ref: None,
+                    extend_to_face: false,
+                },
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                thin: None,
+            },
+            Some("ToObj"),
+        )
+        .unwrap();
+    doc.feature_mut(ext_to).unwrap().component = comp_a;
+    doc.feature_mut(ext_to).unwrap().body_names = vec!["BodyTo".into()];
+
+    // Pre-capture Mirror & Pattern of BodyB at pre-capture pose (YZ plane / +Y 20 mm).
+    let mirror_pre = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["BodyB".into()],
+                combine: false,
+                placements: vec![vec![occ_b]],
+            },
+            Some("MirrorPre"),
+        )
+        .unwrap();
+    doc.feature_mut(mirror_pre).unwrap().body_names = vec!["MirroredPre".into()];
+
+    let pattern_pre = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::Y),
+                    count1: "2".into(),
+                    spacing1: "20 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
+                },
+                bodies: vec!["BodyB".into()],
+                placements: vec![vec![occ_b]],
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            Some("PatternPre"),
+        )
+        .unwrap();
+    doc.feature_mut(pattern_pre).unwrap().body_names = vec!["PatPre1".into()];
+
+    // Pre-capture face-anchored ConstructionPlane on BodyB top face (z=10).
+    let plane_pre = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Face {
+                    plane: <Plane as solidcraft_geom::PlaneGeom>::new(Vec3::new(25.0, 5.0, 10.0), Vec3::X, Vec3::Y).unwrap(),
+                    at: Vec3::new(25.0, 5.0, 10.0),
+                    name: None,
+                    anchor: None,
+                },
+            },
+            Some("PlanePre"),
+        )
+        .unwrap();
+
+    // CapturePosition moves occ_b by (+10, 0, +15).
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ_b,
+                space: MoveSpace::Local,
+                translate: ["10 mm".into(), "0".into(), "15 mm".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: None,
+            }],
+            joints: Vec::new(),
+        },
+        Some("CaptureB"),
+    )
+    .unwrap();
+
+    // Also verify joint-driven occurrence #20644 isolation: CompJ joined via Slider to CompA with base_values=[0] -> captured=[20].
+    let comp_j = doc.add_component(Some("CompJ"), 0).unwrap();
+    let occ_j = doc.occurrences.iter().find(|o| o.component == comp_j).unwrap().id;
+    let box_j = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(0.0, 40.0, 0.0)),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxJ"),
+        )
+        .unwrap();
+    doc.feature_mut(box_j).unwrap().component = comp_j;
+    doc.feature_mut(box_j).unwrap().body_names = vec!["BodyJ".into()];
+
+    let j_origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 88,
+        name: "SlideJ".into(),
+        kind: crate::joints::JointKind::Slider,
+        a: crate::joints::JointOrigin {
+            occurrence: occ_a,
+            snap: crate::joints::Snap::Point { point: Vec3::new(0.0, 40.0, 0.0), z: None, x: None },
+            ..j_origin.clone()
+        },
+        b: crate::joints::JointOrigin {
+            occurrence: occ_j,
+            snap: crate::joints::Snap::Point { point: Vec3::new(0.0, 40.0, 0.0), z: None, x: None },
+            ..j_origin
+        },
+        values: vec![20.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: Some(vec![20.0]),
+        base_values: Some(vec![0.0]),
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+    // Pre-capture feature in timeline (at index before CaptureJ) reading BodyJ's position via ConstructionPlane.
+    let plane_j_pre = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Face {
+                    plane: <Plane as solidcraft_geom::PlaneGeom>::new(Vec3::new(5.0, 45.0, 10.0), Vec3::X, Vec3::Y).unwrap(),
+                    at: Vec3::new(5.0, 45.0, 10.0),
+                    name: None,
+                    anchor: None,
+                },
+            },
+            Some("PlaneJPre"),
+        )
+        .unwrap();
+    let cap_j = doc
+        .add_feature(
+            FeatureKind::CapturePosition { moves: Vec::new(), joints: vec![CapturedJoint { joint: 88, values: vec![20.0], exprs: Vec::new() }] },
+            Some("CaptureJ"),
+        )
+        .unwrap();
+    let _ = (occ_a, cap_j);
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    // Pre-capture ToObject stayed at x=[10..20] (volume 360), Mirror stayed at [-30..-20], Pattern stayed at [20..30], PlanePre stayed at z=10, PlaneJPre stayed at z=10.
+    let to_vol = solidcraft_kernel::measure(&model.state().body("BodyTo").unwrap().body).unwrap().volume;
+    assert!((to_vol - 360.0).abs() < 1e-4, "ToObject leaked post-capture pose: {to_vol}");
+    let mir_bounds = solidcraft_kernel::measure(&model.state().body("MirroredPre").unwrap().body).unwrap().bbox;
+    assert!((mir_bounds.min.x + 30.0).abs() < 1e-4 && (mir_bounds.max.x + 20.0).abs() < 1e-4, "{mir_bounds:?}");
+    let pat_bounds = solidcraft_kernel::measure(&model.state().body("PatPre1").unwrap().body).unwrap().bbox;
+    assert!((pat_bounds.min.x - 20.0).abs() < 1e-4 && (pat_bounds.min.y - 20.0).abs() < 1e-4, "{pat_bounds:?}");
+    let plane_z = model
+        .state()
+        .construct
+        .iter()
+        .find_map(|c| {
+            (c.feature == plane_pre).then_some(&c.geom).and_then(|g| match g {
+                crate::construct::ConstructGeom::Plane(p) => Some(p.origin.z),
+                _ => None,
+            })
+        })
+        .unwrap();
+    assert!((plane_z - 10.0).abs() < 1e-6, "PlanePre z leaked: {plane_z}");
+    let plane_j_z = model
+        .state()
+        .construct
+        .iter()
+        .find_map(|c| {
+            (c.feature == plane_j_pre).then_some(&c.geom).and_then(|g| match g {
+                crate::construct::ConstructGeom::Plane(p) => Some(p.origin.z),
+                _ => None,
+            })
+        })
+        .unwrap();
+    assert!((plane_j_z - 10.0).abs() < 1e-6, "PlaneJPre z leaked: {plane_j_z}");
+    assert!((model.resolved_occurrences()[&occ_j][3][2] - 20.0).abs() < 1e-6);
+}
+
+#[test]
+fn capture_position_hostile_format_decode_bounds_rejected() {
+    let mut doc = Document::new("hostile bounds");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(IDENTITY);
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 1,
+        name: "J1".into(),
+        kind: crate::joints::JointKind::Slider,
+        a: crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None }),
+        b: crate::joints::JointOrigin::new(occ, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None }),
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: Some(vec![0.0]),
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ,
+                space: MoveSpace::World,
+                translate: ["1 mm".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: Some([0.0, 0.0, 1.0]),
+                angle: None,
+                rotation: None,
+                path: Some(vec![occ]),
+            }],
+            joints: vec![CapturedJoint { joint: 1, values: vec![0.5], exprs: Vec::new() }],
+        },
+        None,
+    )
+    .unwrap();
+    let base: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+
+    // 1. path.len() > MAX_PLACEMENT_DEPTH + 1
+    let mut bad_path = base.clone();
+    bad_path["features"][0]["moves"][0]["path"] = serde_json::json!(vec![occ; crate::MAX_PLACEMENT_DEPTH + 2]);
+    assert!(Document::from_json(&bad_path.to_string()).is_err());
+
+    // 2. moves.len() > MAX_PLACEMENTS and joints.len() > MAX_PLACEMENTS
+    let mut too_many_moves = base.clone();
+    let mv = too_many_moves["features"][0]["moves"][0].clone();
+    too_many_moves["features"][0]["moves"] = serde_json::Value::Array(vec![mv; crate::MAX_PLACEMENTS + 1]);
+    assert!(Document::from_json(&too_many_moves.to_string()).is_err());
+
+    let mut too_many_joints = base.clone();
+    let cj = too_many_joints["features"][0]["joints"][0].clone();
+    too_many_joints["features"][0]["joints"] = serde_json::Value::Array(vec![cj; crate::MAX_PLACEMENTS + 1]);
+    assert!(Document::from_json(&too_many_joints.to_string()).is_err());
+
+    // 3. j.base_values.len() > 64, j.base_exprs.len() > 64, out-of-range j.base_values
+    let mut bad_base_vals = base.clone();
+    bad_base_vals["assembly"]["joints"][0]["base_values"] = serde_json::json!(vec![0.0; 65]);
+    assert!(Document::from_json(&bad_base_vals.to_string()).is_err());
+
+    let mut bad_base_exprs = base.clone();
+    bad_base_exprs["assembly"]["joints"][0]["base_exprs"] = serde_json::json!(vec!["0 mm"; 65]);
+    assert!(Document::from_json(&bad_base_exprs.to_string()).is_err());
+
+    let mut huge_base_val = base.clone();
+    huge_base_val["assembly"]["joints"][0]["base_values"] = serde_json::json!([1e10]);
+    assert!(Document::from_json(&huge_base_val.to_string()).is_err());
+
+    // 4. Non-rigid rotation in CapturePosition move
+    let mut bad_rot = base.clone();
+    bad_rot["features"][0]["moves"][0]["rotation"] =
+        serde_json::json!([[2.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]);
+    assert!(Document::from_json(&bad_rot.to_string()).is_err());
+}
+
+/// An extrude with a start offset names its parallel caps top#1 (lower) and top#2 (upper),
+/// reliably ordered by height. Area-weighted face centroids guarantee delta-X and delta-Y
+/// are zero between identical planar caps regardless of triangulation winding or vertex rotation,
+/// preventing triangulation-dependent spread-axis sorting flips (#21686).
+#[test]
+fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
+    let pts: [[f64; 2]; 12] = [
+        [25.0, 0.0],
+        [0.0, 5.0],
+        [0.0, 20.0],
+        [15.0, 35.0],
+        [25.0, 5.0],
+        [30.0, 20.0],
+        [20.0, 30.0],
+        [25.0, 45.0],
+        [40.0, 40.0],
+        [30.0, 40.0],
+        [30.0, 30.0],
+        [40.0, 20.0],
+    ];
+    for rot in 0..12 {
+        let mut sk = Sketch::new();
+        let mut rotated = pts.to_vec();
+        rotated.rotate_left(rot);
+        let point_ids: Vec<usize> = rotated.iter().map(|&[x, y]| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        for i in 0..12 {
+            let next = (i + 1) % 12;
+            sk.add_curve(solidcraft_sketch::CurveKind::Line { a: point_ids[i], b: point_ids[next] }, None).unwrap();
+        }
+        let mut doc = Document::new("start offset test");
+        let sketch_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        let _ = doc
+            .add_feature(
+                FeatureKind::Extrude {
+                    thin: None,
+                    sketch: crate::SketchId(sketch_id),
+                    profiles: ProfileSel::All,
+                    extent: Extent {
+                        convention: crate::ExtrudeConvention::TotalDistance,
+                        distance: "1".into(),
+                        direction: Direction::Positive,
+                        distance2: None,
+                        start_offset: Some("4".into()),
+                        symmetric_offset: false,
+                        through_all: false,
+                        second_follows_first: false,
+                        taper: None,
+                        corner: Default::default(),
+                        to: None,
+                        to_offset: None,
+                        from: None,
+                        to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
+                        from_level: false,
+                        picked_placements: Vec::new(),
+                        one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
+                        extend_to_face: false,
+                    },
+                    operation: Operation::NewBody,
+                    targets: vec![],
+                },
+                Some("Plate"),
+            )
+            .unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "rot {rot}: {:?}", model.results);
+        let state = model.state();
+        let body = state.bodies.first().expect("body built");
+        let names = crate::naming::face_names(body);
+        let bot_name = &names[body.body.faces(0.01).unwrap().iter().find(|f| (f.centroid.z - 4.0).abs() < 1e-4).unwrap().index];
+        let top_name = &names[body.body.faces(0.01).unwrap().iter().find(|f| (f.centroid.z - 5.0).abs() < 1e-4).unwrap().index];
+        assert_eq!(bot_name, "F2:top#1", "rot {rot} bottom cap name");
+        assert_eq!(top_name, "F2:top#2", "rot {rot} top cap name");
+
+        // Verify that F2:top#2 resolves to the top cap (z = 5.0)
+        let hit_top = crate::name_lookup::locate_face(&state, "F2:top#2", Vec3::new(20.0, 20.0, 5.0)).expect("find F2:top#2");
+        assert!((hit_top.point.z - 5.0).abs() < 1e-4, "rot {rot} F2:top#2 hit at z = 5");
+
+        // Verify that F2:top#1 resolves to the bottom cap (z = 4.0)
+        let hit_bot = crate::name_lookup::locate_face(&state, "F2:top#1", Vec3::new(20.0, 20.0, 4.0)).expect("find F2:top#1");
+        assert!((hit_bot.point.z - 4.0).abs() < 1e-4, "rot {rot} F2:top#1 hit at z = 4");
+    }
+}
+
+/// An asymmetric profile extruded with or without a start offset preserves its face names
+/// between kernel centroids and mesh-sampled means, and old saved designs keep all names
+/// on the exact same faces (#21686, PR #21762).
+#[test]
+fn asymmetric_profile_and_old_designs_preserve_face_names() {
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!("old_cap_anchor_fixture.json")).unwrap();
+    let doc = Document {
+        features: serde_json::from_value(fixture["features"].take()).unwrap(),
+        params: serde_json::from_value(fixture["params"].take()).unwrap(),
+        ..Document::default()
+    };
+    let upgraded = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&upgraded);
+    for r in &model.results {
+        assert!(r.error.is_none(), "feature {}: {:?}", r.id, r.error);
+    }
+    let st = model.state();
+    let b = st.body("Body1").expect("Body1 built");
+    let names = crate::naming::face_names(b);
+    const EXPECTED: &[&str] =
+        &["F2:side:a1", "F2:side:l6", "F2:side:l4", "F2:start", "F2:top", "F2:side:l1", "F4:side:l3", "F2:side:l3", "F4:bottom", "F2:side:l2"];
+    assert_eq!(&names[..], EXPECTED);
+    let centres = crate::naming::face_centres(b).expect("face centres");
+    assert_eq!(names.len(), centres.len());
+    // For every face on Body1, verifying that names land consistently:
+    assert!(!names.is_empty(), "faces named");
+    for (i, name) in names.iter().enumerate() {
+        assert!(!name.is_empty(), "face {i} has valid name");
+    }
+}
+
+/// #18815: a design with a failing feature still keeps a partial model cache for all valid
+/// upstream and independent features; reopening adopts those cached states, re-evaluates only
+/// the failing feature (`last_recomputed == 1`), and reproduces the exact error and final state.
+#[test]
+fn partial_model_cache_keeps_valid_features_around_an_error_and_reproduces_it() {
+    // Case 1: valid upstream -> failing middle feature -> valid independent downstream feature.
+    let mut doc = Document::new("Partial cache");
+    let upstream = boxed(&mut doc, 0, "Upstream", 0.0, &["UpstreamBody"]);
+    add_in(
+        &mut doc,
+        0,
+        "Broken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [50.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let broken = doc.find_feature("Broken").unwrap().id;
+    let downstream = boxed(&mut doc, 0, "Downstream", 100.0, &["DownstreamBody"]);
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(upstream).unwrap().error.is_none());
+    assert!(model.result(broken).unwrap().error.is_some(), "Broken must fail evaluation");
+    assert!(model.result(downstream).unwrap().error.is_none());
+    assert_eq!(model.state().bodies.len(), 2);
+
+    let saved = model.saved(&doc).expect("valid features keep a partial model cache");
+    let features = saved.records["features"].as_array().unwrap();
+    assert!(features[0].get("state").is_some() && features[0].get("errored").is_none());
+    assert!(features[1].get("state").is_none() && features[1].get("errored") == Some(&serde_json::json!(true)));
+    assert!(features[2].get("state").is_some() && features[2].get("errored").is_none());
+    assert_eq!(saved.final_state().unwrap().bodies.len(), 2);
+
+    // Thinning also works on a partial cache that carries an errored feature.
+    let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1024)]).collect();
+    let (thinned, _, _) = saved.thinned(&pieces, 0).expect("thinning a partial cache succeeds");
+    assert_eq!(thinned.final_state().unwrap().bodies.len(), 2);
+
+    let adopted = Model::adopt(&doc, &saved).expect("partial cache adopts cleanly");
+    assert_eq!(adopted.last_recomputed, 1, "only the failing feature is re-evaluated on open");
+    assert_eq!(adopted.result(upstream).unwrap().ms, model.result(upstream).unwrap().ms);
+    assert_eq!(adopted.result(downstream).unwrap().ms, model.result(downstream).unwrap().ms);
+    assert_eq!(adopted.result(broken).unwrap().error, model.result(broken).unwrap().error);
+    same_as_opened(&adopted, &doc, "partial cache around a failing middle feature");
+
+    // Case 2: failing feature is the last feature in the timeline.
+    let mut tail_doc = Document::new("Tail error");
+    let base = boxed(&mut tail_doc, 0, "Base", 0.0, &["BaseBody"]);
+    add_in(
+        &mut tail_doc,
+        0,
+        "TailBroken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [50.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let tail_broken = tail_doc.find_feature("TailBroken").unwrap().id;
+    let mut tail_model = Model::new();
+    tail_model.evaluate(&tail_doc);
+    let tail_saved = tail_model.saved(&tail_doc).expect("valid upstream feature keeps a partial cache");
+    assert_eq!(tail_saved.final_state().unwrap().bodies.len(), 1);
+    let tail_pieces: Vec<Vec<(usize, usize)>> = (0..tail_saved.bodies.len()).map(|i| vec![(i, 1024)]).collect();
+    let (tail_thin, _, _) = tail_saved.thinned(&tail_pieces, 0).expect("thinning a tail-error partial cache succeeds");
+    assert_eq!(tail_thin.final_state().unwrap().bodies.len(), 1);
+    let tail_adopted = Model::adopt(&tail_doc, &tail_saved).expect("tail-error partial cache adopts cleanly");
+    assert_eq!(tail_adopted.last_recomputed, 1, "only the failing tail feature is re-evaluated");
+    assert_eq!(tail_adopted.result(base).unwrap().ms, tail_model.result(base).unwrap().ms);
+    assert_eq!(tail_adopted.result(tail_broken).unwrap().error, tail_model.result(tail_broken).unwrap().error);
+    same_as_opened(&tail_adopted, &tail_doc, "partial cache before a failing tail feature");
+
+    // Case 3: when every non-skipped feature fails, no cache is saved.
+    let mut all_bad = Document::new("All failed");
+    add_in(
+        &mut all_bad,
+        0,
+        "OnlyBroken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [0.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let mut all_bad_model = Model::new();
+    all_bad_model.evaluate(&all_bad);
+    assert!(all_bad_model.saved(&all_bad).is_none());
 }

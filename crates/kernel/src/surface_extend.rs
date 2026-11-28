@@ -1,5 +1,5 @@
 //! Extend (Surface › Extend): boundary edges of a surface body pushed outward across their
-//! face, by a distance, up to a plane or a face, or (natural only) back to the surface's own
+//! face, by a distance, up to a plane, a face or a whole body, or (natural only) back to the surface's own
 //! bounds. Three ways to continue past an edge, each SMLib's extension of the surface
 //! (`smlib_extend_sheet`, `SmBSplineSurface::CreateExtendedSurface`):
 //!
@@ -21,17 +21,25 @@
 //! the face beside it). The lengthened sides must meet again: faces whose extensions part are
 //! refused. Up to a target, the face is extended
 //! past it and trimmed back where the target meets it ([`crate::trim_keep`]: SMLib's exact
-//! intersection). Back to the bounds is the face untrimmed to its surface's box
+//! intersection). Up to a whole body, it is cut where it first runs into the body's faces as they
+//! are, bounded where they end ([`crate::surface_trim::stop_extension`]). Back to the bounds is the face untrimmed to its surface's box
 //! ([`crate::untrim`]). A plane's straight edges pushed out with their neighbours lengthened
 //! keep the exact planar extension ([`crate::surfaces::extend`]).
 //!
 //! Refused rather than built: edges between two faces, edges of holes, and (not supported yet)
 //! an edge that is not a whole side of its surface's box (a trimmed edge, whose extension is no
 //! curve SMLib holds exactly).
+//!
+//! A fourth mode, law, builds the extension from the picked edges themselves, not from the
+//! surface's box, so a trimmed edge extends too: a ruled strip leaving the edge at a constant
+//! angle to the surface (0: tangent), by a distance or up to a plane or face (the strip alone cut
+//! there, the surface never), sewn to the surface along the edge. See [`ExtendMode::Law`] and the
+//! notes at [`law_strip`].
 
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+use solidcore_ops::ruled_strip::{Reach, far_tolerance, ruling_angle};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self};
 use solidcraft_geom::brep::eval::CurveEval;
@@ -62,7 +70,16 @@ pub enum ExtendMode {
     Tangent,
     /// Continued keeping the surface's curvature across the edge (G2).
     Curvature,
+    /// A strip built from the picked edges themselves, ruled by straight lines leaving each edge
+    /// at [`ExtendOptions::angle`] to the surface (0: tangent to it, square to the edge), so a
+    /// trimmed edge extends too.
+    Law,
 }
+
+/// The largest law-extension angle (radians, either way) short of a right angle: at 90° the
+/// strip would stand along the surface's normal, no longer an extension of it
+/// ([`solidcore_ops::ruled_strip::ANGLE_LIMIT`]).
+pub const LAW_ANGLE_LIMIT: f64 = solidcore_ops::ruled_strip::ANGLE_LIMIT;
 
 /// How far an extension goes.
 #[derive(Clone, Copy, Debug)]
@@ -71,6 +88,9 @@ pub enum ExtendLimit<'a> {
     Distance(f64),
     /// To where it meets a plane, or the surface of a face (extended).
     UpTo(&'a SplitTool<'a>),
+    /// To where it first runs into a whole body, any face of it as it is, never extended (natural
+    /// only). An extension part of which never meets the body is refused.
+    UpToBody(&'a Body),
     /// Back to the surface's own bounds (natural only), undoing a trim: a free-form surface's
     /// parameter box, an analytic surface's the box of the face's own span.
     Bounds,
@@ -84,6 +104,10 @@ pub struct ExtendOptions<'a> {
     /// Lengthen the edges next to an extended edge to meet the extension. On a face that is its
     /// surface's whole box those edges are parameter lines, which the extension continues.
     pub neighbours: bool,
+    /// The law extension's angle to the surface at the edge (radians, between −90° and 90°
+    /// exclusive): 0 continues the surface tangent to it; positive turns the strip toward the
+    /// side the face's normal points to, negative away. The other modes ignore it.
+    pub angle: f64,
 }
 
 /// The boundary edges of `body` picked by points on them, extended as `opts` says. The result is
@@ -107,9 +131,35 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
         ExtendLimit::Bounds if opts.mode != ExtendMode::Natural => {
             return Err(KernelError::Invalid("only a natural extension goes back to the surface's bounds".into()));
         }
+        // A run-off face has sides of its own, which the far end can't be told from.
+        ExtendLimit::UpToBody(_) if opts.mode == ExtendMode::Law => {
+            return Err(KernelError::Invalid("not supported yet: a law extension up to a whole body (pick a face of it)".into()));
+        }
+        // A law strip is cut only by a plane or a face; sketch curves would trim it as a split.
+        ExtendLimit::UpTo(SplitTool::Curves { .. }) if opts.mode == ExtendMode::Law => {
+            return Err(KernelError::Invalid("not supported yet: a law extension up to sketch curves (pick a plane or a face)".into()));
+        }
+        ExtendLimit::UpToBody(_) if opts.mode != ExtendMode::Natural => {
+            return Err(KernelError::Invalid("not supported yet: a tangent or curvature extension up to a whole body (pick a face of it)".into()));
+        }
         _ => {}
     }
+    if opts.mode == ExtendMode::Law && ruling_angle(opts.angle).is_none() {
+        return Err(KernelError::Invalid("the law extension's angle must lie between -90° and 90°".into()));
+    }
     let record = crate::native::brep_record(body)?;
+    if opts.mode == ExtendMode::Law {
+        // The usual refusals: edges between two faces, edges of holes.
+        let picked = picked_edges(&record, body.size(), at)?;
+        let edges: BTreeSet<usize> = picked.iter().map(|(e, _)| *e).collect();
+        return match opts.limit {
+            ExtendLimit::Distance(d) => law(body, at, edges.len(), opts.angle, d),
+            ExtendLimit::UpTo(tool) => law_up_to(body, at, &record, &edges, opts.angle, tool),
+            ExtendLimit::UpToBody(_) | ExtendLimit::Bounds => {
+                Err(KernelError::Invalid("not supported yet: a law extension takes a distance or a face to extend up to".into()))
+            }
+        };
+    }
     // A plane's straight edges pushed out with their neighbours lengthened: the exact planar
     // extension (what designs saved before the other modes build).
     if let (ExtendMode::Natural, ExtendLimit::Distance(d), true) = (opts.mode, opts.limit, opts.neighbours)
@@ -125,6 +175,7 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
         }
         ExtendLimit::Distance(d) => continued(body, at, &picked, d, opts.mode).map(|(out, _)| out),
         ExtendLimit::UpTo(tool) => up_to(body, at, &picked, tool, opts.mode),
+        ExtendLimit::UpToBody(target) => up_to_body(body, at, &picked, target, opts.mode),
     }
 }
 
@@ -333,6 +384,7 @@ fn one_face(body: &Body, at: &[Vec3], distance: f64, mode: ExtendMode) -> Result
         ExtendMode::Natural => Continuation::Natural,
         ExtendMode::Tangent => Continuation::Tangent,
         ExtendMode::Curvature => Continuation::Curvature,
+        ExtendMode::Law => return Err(failed("extend", "a law extension is built from its edges, not by SMLib's continuation")),
     };
     let reach = body.size() * 0.05 + 1e-6;
     let (sb, ob) = smlib_body_ordered(body)?;
@@ -374,6 +426,29 @@ fn up_to(body: &Body, at: &[Vec3], picked: &[(usize, usize)], tool: &SplitTool, 
     Ok(crate::record::after(cut, &long, &crate::record::counts(&[body])))
 }
 
+/// How far past its edges (picked at `at`) `body` extends to reach past all of `target`: its own
+/// reach ([`REACH`]), or past the farthest corner of the target's box from a pick, with room for the
+/// body's other points, when that is farther.
+fn reach_of(body: &Body, at: &[Vec3], target: &Body) -> Result<f64> {
+    let size = body.size().max(1e-6);
+    let own = size * REACH;
+    // A target with no solidcore form (a mesh) is refused where it would cut.
+    let (Some(p), Some(form)) = (at.first(), target.ops_body()) else { return Ok(own) };
+    let (lo, hi) = form.0.bounds().map_err(|e| failed("target bounds", e.to_string()))?;
+    let farthest =
+        solidcore_ops::measure::box_max_distance_to_point(lo, hi, [p.x, p.y, p.z]).map_err(|e| failed("target distance", e.to_string()))?;
+    Ok(own.max(farthest + 2.0 * size))
+}
+
+/// The faces extended past the target body and cut where they first run into it, keeping the
+/// pieces the surface's own faces lie in.
+fn up_to_body(body: &Body, at: &[Vec3], picked: &[(usize, usize)], target: &Body, mode: ExtendMode) -> Result<Body> {
+    let (long, _) = continued(body, at, picked, reach_of(body, at, target)?, mode)?;
+    let inside = (0..body.face_count()).map(|f| crate::surface_untrim::face_point(body, f)).collect::<Result<Vec<_>>>()?;
+    let cut = crate::surface_trim::stop_extension(&long, body, &inside, target)?;
+    Ok(crate::record::after(cut, &long, &crate::record::counts(&[body])))
+}
+
 /// The faces of the picked edges back on their surfaces' bounds: each untrimmed in place, its
 /// holes kept. One already there is refused.
 fn back_to_bounds(body: &Body, faces: &[usize]) -> Result<Body> {
@@ -387,6 +462,125 @@ fn back_to_bounds(body: &Body, faces: &[usize]) -> Result<Body> {
         return Err(KernelError::Invalid("the edge already lies on its surface's bounds".into()));
     }
     Ok(back)
+}
+
+// ---- Law extension -------------------------------------------------------------------------
+//
+// The strip is built from the picked edges' own curves, never from the source surface's
+// parameter box: the ruled surface on the chain of picked edges ([`crate::surface_ruled`]), each
+// ruling leaving its edge square to it at `angle` to the surface (in the plane of the face's
+// normal and the face's outward direction across the edge), `distance` long. On a straight edge of
+// a plane the strip is a plane; on an arc whose rulings keep their angle to its axis, a cylinder
+// or cone; elsewhere the exact ruled surface to a fair far curve. The strip is then sewn to the
+// source along the picked edges: the source's faces are kept as they are, the strip's faces are
+// made from the edges they stand on.
+
+/// The ruled settings of a law extension at `angle` (0: tangent) reaching `distance`: the ruled
+/// surface measures its angle from the face's normal, turned away from the face
+/// ([`solidcore_ops::ruled_strip::ruling_angle`]).
+fn law_rulings(angle: f64, distance: f64) -> Result<crate::surface_ruled::Ruled> {
+    use crate::surface_ruled::{Ruled, RuledCorners, RuledMode};
+    let angle = ruling_angle(angle).ok_or_else(|| KernelError::Invalid("the law extension's angle must lie between -90° and 90°".into()))?;
+    let mode = RuledMode::Angle { angle, reference: None };
+    Ok(Ruled { distance, mode, flip: false, corners: RuledCorners::Mitre, face: None })
+}
+
+/// The law strip alone on the edges `at` pick (one chain), as its own surface body whose history
+/// is over `[body]`; a strip that would fold over itself is refused. Where the rulings turn
+/// freely along an edge, the far edge is a fair curve of the ruled surface, refined until it
+/// passes within [`far_tolerance`] of the rulings' ends.
+fn law_strip(body: &Body, at: &[Vec3], angle: f64, distance: f64) -> Result<Body> {
+    let r = law_rulings(angle, distance)?;
+    let chain = |e: KernelError| match e {
+        KernelError::Invalid(m) if m.contains("chain") || m.contains("branch") || m.contains("loop") => {
+            KernelError::Invalid(format!("a law extension takes one chain of edges: {m}"))
+        }
+        e => e,
+    };
+    let tol = far_tolerance(body.size(), distance);
+    crate::surface_ruled::ruled_surface_close(body, at, &r, tol).map_err(chain)
+}
+
+/// `strip` sewn to `body` along the `count` edges it stands on: one surface body whose history is
+/// over `[body]`, the body's faces kept, the strip's faces as its own history says. A strip that
+/// does not sew along every picked edge is refused.
+fn sewn_to(body: &Body, strip: &Body, count: usize) -> Result<Body> {
+    let r = body.record();
+    let all: Vec<(usize, bool)> = (0..r.faces.len()).map(|f| (f, false)).collect();
+    let c = Parts::of(r, &all)?.canonical()?;
+    let kept = c
+        .faces
+        .iter()
+        .map(|p| all.get(*p).map(|(f, _)| record::from_face(0, *f, Change::Kept)))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| failed("sew", "a face of the surface is missing"))?;
+    let made = strip.history().map(|h| h.faces.clone()).ok_or_else(|| failed("sew", "the strip has no history"))?;
+    let out = crate::surfaces::sheet_of(vec![(c.brep, kept), (strip.record().clone(), made)], true, &[body])?;
+    if out.face_count() != body.face_count() + strip.face_count() || out.edge_count() + count != body.edge_count() + strip.edge_count() {
+        return Err(KernelError::Invalid("the extension can't be sewn to the surface along the picked edges".into()));
+    }
+    Ok(out)
+}
+
+/// The law extension of the picked edges (`count` of them, picked by `at`) by `distance`.
+fn law(body: &Body, at: &[Vec3], count: usize, angle: f64, distance: f64) -> Result<Body> {
+    let strip = law_strip(body, at, angle, distance)?;
+    sewn_to(body, &strip, count)
+}
+
+/// The law extension of the picked `edges` (of `record`, picked by `at`) up to a plane or face:
+/// the strip built long ([`REACH`] body sizes), cut where the target meets it keeping the piece
+/// on the edges, and sewn to the surface. The surface itself is never cut. A strip the target
+/// misses, wholly or in part (the piece kept still holds part of the strip's far edge), is
+/// refused. Where the long strip folds over itself (or its corners cut one of its strips away),
+/// a shorter one is built
+/// ([`solidcore_ops::ruled_strip::up_to_target`] picks the lengths): only a target the strip
+/// reaches before it folds is accepted; one past the fold (or so near it the strip can't be
+/// built) is refused as a fold.
+fn law_up_to(body: &Body, at: &[Vec3], record: &brep::Brep, edges: &BTreeSet<usize>, angle: f64, tool: &SplitTool) -> Result<Body> {
+    let reach = body.size().max(1e-6) * REACH;
+    let on_edges = edges.iter().map(|e| edge_middle(record, *e)).collect::<Result<Vec<_>>>()?;
+    let missed = || KernelError::Invalid("the extension never reaches the face it extends up to (all along the edges)".into());
+    // A strip too long for its corners (the mitres meet and cut a strip away) is shortened as a
+    // folding one is: a shorter strip keeps that strip.
+    let folds = |e: &KernelError| matches!(e, KernelError::Invalid(m) if m.contains("fold over itself") || m.contains("cut a strip away entirely"));
+    // The strip `length` long cut at the target, or `None` where the target misses it (wholly
+    // or in part); `Err` with the fold's message where that strip folds.
+    let attempt = |length: f64| -> Result<Option<Body>> {
+        let long = law_strip(body, at, angle, length)?;
+        let cut = match crate::trim_keep(&long, tool, TrimKeep::Regions(&on_edges)) {
+            Ok(cut) => cut,
+            Err(KernelError::Invalid(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if keeps_far_edge(body, &long, &cut, far_tolerance(body.size(), length))? {
+            return Ok(None);
+        }
+        Ok(Some(crate::record::after(cut, &long, &crate::record::counts(&[body]))))
+    };
+    let folded = || KernelError::Invalid("the strip would fold over itself before it reaches the face it extends up to: use a smaller angle".into());
+    let cut = match solidcore_ops::ruled_strip::up_to_target(reach, attempt, folds)? {
+        Reach::Cut(cut) => cut,
+        Reach::Missed => return Err(missed()),
+        Reach::Folded => return Err(folded()),
+    };
+    sewn_to(body, &cut, edges.len())
+}
+
+/// Whether `cut`, the law strip `long` cut at a target, still holds part of the strip's far edge
+/// (the target missed the strip there): a point of a far edge (an edge of `long` with neither
+/// end on the surface `body`) within `tol` of `cut`.
+fn keeps_far_edge(body: &Body, long: &Body, cut: &Body, tol: f64) -> Result<bool> {
+    for e in long.edges(tol)? {
+        let (Some(a), Some(b)) = (e.points.first(), e.points.last()) else { continue };
+        if body.face_at(*a, tol).is_some() || body.face_at(*b, tol).is_some() {
+            continue;
+        }
+        if e.points.iter().chain([&e.mid]).any(|p| cut.face_at(*p, 2.0 * tol).is_some()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn failed(what: &str, e: impl crate::Cause) -> KernelError {
@@ -407,7 +601,7 @@ mod tests {
         measure(b).unwrap().area
     }
     fn with(mode: ExtendMode, limit: ExtendLimit, neighbours: bool) -> ExtendOptions {
-        ExtendOptions { mode, limit, neighbours }
+        ExtendOptions { mode, limit, neighbours, angle: 0.0 }
     }
     fn natural(d: f64) -> ExtendOptions<'static> {
         with(ExtendMode::Natural, ExtendLimit::Distance(d), true)
@@ -618,6 +812,343 @@ mod tests {
         let both = extend_surface(&s, &[Vec3::new(5.0, 0.0, 20.0), Vec3::new(10.0, 5.0, 20.0)], &natural(5.0)).unwrap();
         assert!(rel(area(&both), 500.0) < 1e-9, "{}", area(&both));
         assert_eq!((both.face_count(), edges(&both)), (2, edges(&s)));
+    }
+
+    /// Up to a whole body: a square sheet extended in x under a stair of two risers, x = 15 for
+    /// y < 5 and x = 18 for y > 5, stops on each: 5 * 15 + 5 * 18 = 165. Up to a wall over half of
+    /// the edge it is refused, and so are a tangent extension and a body through the sheet.
+    #[test]
+    fn extends_up_to_every_face_of_a_whole_body() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        let wall = |points: &[[f64; 2]]| {
+            let v = |p: &[f64; 2]| Vec2::new(p[0], p[1]);
+            let chain = points.windows(2).map(|w| Seg2::Line { a: v(&w[0]), b: v(&w[1]) }).collect::<Vec<_>>();
+            crate::extrude_sheet(&Plane::XY, &[chain], -5.0, 5.0).unwrap()
+        };
+        let to = |body: &Body, mode| extend_surface(&s, &at, &with(mode, ExtendLimit::UpToBody(body), true));
+        let stair = wall(&[[15.0, -1.0], [15.0, 5.0], [18.0, 5.0], [18.0, 11.0]]);
+        let out = to(&stair, ExtendMode::Natural).unwrap();
+        assert!(rel(area(&out), 165.0) < 1e-9, "{}", area(&out));
+        let bb = measure(&out).unwrap().bbox;
+        assert!(bb.min.x.abs() < 1e-9 && (bb.max.x - 18.0).abs() < 1e-9, "{bb:?}");
+        // A wall far past 50 times the sheet's size is reached: 10 * 1000.
+        let distant = wall(&[[1000.0, -1.0], [1000.0, 11.0]]);
+        let out = to(&distant, ExtendMode::Natural).unwrap();
+        assert!(rel(area(&out), 10_000.0) < 1e-9, "{}", area(&out));
+        let half = wall(&[[15.0, -1.0], [15.0, 5.0]]);
+        let e = to(&half, ExtendMode::Natural).unwrap_err();
+        assert!(e.to_string().contains("never meets"), "{e}");
+        let through = wall(&[[5.0, -1.0], [5.0, 11.0]]);
+        assert!(to(&through, ExtendMode::Natural).is_err());
+        assert!(to(&stair, ExtendMode::Tangent).is_err());
+    }
+
+    fn law(angle_deg: f64, limit: ExtendLimit) -> ExtendOptions {
+        ExtendOptions { mode: ExtendMode::Law, limit, neighbours: true, angle: angle_deg.to_radians() }
+    }
+
+    /// Law at 0° off the square's edge x = 10, 5 long: the natural extension's 15 × 10 (area
+    /// 150, box 0…15 × 0…10 in z = 0), as the square and a 10 × 5 strip sewn along the edge (two
+    /// faces, 4 + 4 − 1 edges). The square is kept as it was; the strip is made from the edge.
+    #[test]
+    fn a_law_extension_at_zero_is_the_natural_one() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        let nat = extend_surface(&s, &at, &natural(5.0)).unwrap();
+        let out = extend_surface(&s, &at, &law(0.0, ExtendLimit::Distance(5.0))).unwrap();
+        assert!(rel(area(&out), 150.0) < 1e-9, "{}", area(&out));
+        assert!(rel(area(&out), area(&nat)) < 1e-9);
+        let (bb, nb) = (measure(&out).unwrap().bbox, measure(&nat).unwrap().bbox);
+        assert!(bb.min.dist(nb.min) < 1e-9 && bb.max.dist(nb.max) < 1e-9, "{bb:?} vs {nb:?}");
+        assert!(bb.max.dist(Vec3::new(15.0, 10.0, 0.0)) < 1e-9, "{bb:?}");
+        assert_eq!((out.face_count(), edges(&out)), (2, 7));
+        let h = out.history().unwrap();
+        let kept = h.faces.iter().filter(|f| f.change == Change::Kept && f.origins == [FaceOrigin::Face { operand: 0, face: 0 }]).count();
+        let made =
+            h.faces.iter().filter(|f| f.change == Change::Generated && matches!(f.origins.as_slice(), [FaceOrigin::Edge { operand: 0, .. }])).count();
+        assert_eq!((kept, made), (1, 1), "{h:?}");
+    }
+
+    /// At 30° the strip leaves the edge tilted 30° toward the square's normal (+z): its far
+    /// edge at x = 10 + 5 cos 30°, z = 5 sin 30° = 2.5, its area still 10 × 5 (100 + 50). At
+    /// −30° it tilts the other way, down to z = −2.5.
+    #[test]
+    fn a_law_extension_on_a_plane_at_30_degrees() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        for (deg, z) in [(30.0, 2.5), (-30.0, -2.5)] {
+            let out = extend_surface(&s, &at, &law(deg, ExtendLimit::Distance(5.0))).unwrap();
+            assert!(rel(area(&out), 150.0) < 1e-9, "{deg}: {}", area(&out));
+            let bb = measure(&out).unwrap().bbox;
+            let x = 10.0 + 5.0 * 30f64.to_radians().cos();
+            assert!((bb.max.x - x).abs() < 1e-9 && (bb.max.y - 10.0).abs() < 1e-9, "{deg}: {bb:?}");
+            assert!((bb.max.z.max(0.0) + bb.min.z.min(0.0) - z).abs() < 1e-9 && (bb.max.z - bb.min.z - 2.5).abs() < 1e-9, "{deg}: {bb:?}");
+            assert_eq!(out.face_count(), 2);
+        }
+    }
+
+    /// The quarter cylinder strip (radius 10, heights 0…20, area 100π), its top arc extended 5:
+    /// at 0° the cylinder continued, 10 · π/2 · 25 = 125π, up to z = 25, the strip a cylinder;
+    /// at 30° (toward the outward normal) a quarter of the cone frustum from radius 10 to
+    /// 10 + 5 sin 30° = 12.5 with slant 5, π/4 · (10 + 12.5) · 5 more, up to z = 20 + 5 cos 30°.
+    /// A straight edge (the generator at angle 0) 5 out at 0°: a 20 × 5 plane, 100π + 100.
+    #[test]
+    fn a_law_extension_off_a_cylinder() {
+        let c = cylinder_strip(FRAC_PI_2);
+        let top = [Vec3::new(10.0 * FRAC_PI_4.cos(), 10.0 * FRAC_PI_4.sin(), 20.0)];
+        let up = extend_surface(&c, &top, &law(0.0, ExtendLimit::Distance(5.0))).unwrap();
+        assert!(rel(area(&up), 125.0 * PI) < 1e-3, "{} vs {}", area(&up), 125.0 * PI); // (measured on meshes)
+        assert!((measure(&up).unwrap().bbox.max.z - 25.0).abs() < 1e-6);
+        assert!(
+            matches!(crate::face_surface(&up, 1), Some(crate::FaceSurface::Cylinder { radius, .. }) if (radius - 10.0).abs() < 1e-6)
+                || matches!(crate::face_surface(&up, 0), Some(crate::FaceSurface::Cylinder { radius, .. }) if (radius - 10.0).abs() < 1e-6)
+        );
+        assert_eq!(up.face_count(), 2);
+
+        let cone = extend_surface(&c, &top, &law(30.0, ExtendLimit::Distance(5.0))).unwrap();
+        let want = 100.0 * PI + FRAC_PI_4 * 22.5 * 5.0;
+        assert!(rel(area(&cone), want) < 1e-3, "{} vs {want}", area(&cone)); // (measured on meshes)
+        let bb = measure(&cone).unwrap().bbox;
+        assert!((bb.max.z - (20.0 + 5.0 * 30f64.to_radians().cos())).abs() < 1e-6, "{bb:?}");
+        assert!((bb.max.x - 12.5).abs() < 1e-6 && (bb.max.y - 12.5).abs() < 1e-6, "{bb:?}");
+        let half = (0..2).find_map(|f| match crate::face_surface(&cone, f) {
+            Some(crate::FaceSurface::Cone { half_angle, .. }) => Some(half_angle),
+            _ => None,
+        });
+        assert!(half.is_some_and(|h| (h - 30f64.to_radians()).abs() < 1e-6), "{half:?}");
+
+        let side = extend_surface(&c, &[Vec3::new(10.0, 0.0, 10.0)], &law(0.0, ExtendLimit::Distance(5.0))).unwrap();
+        assert!(rel(area(&side), 100.0 * PI + 100.0) < 1e-3, "{}", area(&side)); // (measured on meshes)
+        assert!((measure(&side).unwrap().bbox.min.y + 5.0).abs() < 1e-6, "{:?}", measure(&side).unwrap().bbox);
+    }
+
+    /// A flat sheet trimmed by a sketch arc and offset (a Surface Offset sheet): the square 0…10
+    /// cut to the quarter disc of radius 8, offset 2 (z = ±2). The law extension builds from the
+    /// arc: at 0° the quarter ring from radius 8 to 10 (the quarter disc of radius 10, 25π); at
+    /// 30° a quarter of the cone frustum from radius 8 to 8 + 2 cos 30°, slant 2,
+    /// π/4 · (16 + 2 cos 30°) · 2 more, rising 2 sin 30° = 1.
+    #[test]
+    fn a_law_extension_of_an_offset_sheets_arc() {
+        let s = square();
+        let arc = vec![Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 8.0, start: 0.0, sweep: FRAC_PI_2 }];
+        let cut = SplitTool::Curves { plane: Plane::XY, curves: vec![arc], along: None };
+        let disc = crate::trim(&s, &cut, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        assert!(rel(area(&disc), 16.0 * PI) < 1e-6, "{}", area(&disc));
+        let off = crate::offset_surface(&disc, &[0], 2.0, 1e-3).unwrap();
+        let bb = measure(&off).unwrap().bbox;
+        assert!((bb.max.z.abs() - 2.0).abs() < 1e-9 && (bb.max.x - 8.0).abs() < 1e-6, "{bb:?}");
+        let z = bb.max.z;
+        let rim = [Vec3::new(8.0 * FRAC_PI_4.cos(), 8.0 * FRAC_PI_4.sin(), z)];
+        let flat = extend_surface(&off, &rim, &law(0.0, ExtendLimit::Distance(2.0))).unwrap();
+        assert!(rel(area(&flat), 25.0 * PI) < 1e-3, "{} vs {}", area(&flat), 25.0 * PI); // (measured on meshes)
+        let bb = measure(&flat).unwrap().bbox;
+        assert!((bb.max.x - 10.0).abs() < 1e-6 && (bb.max.y - 10.0).abs() < 1e-6 && (bb.max.z - bb.min.z).abs() < 1e-9, "{bb:?}");
+        assert_eq!(flat.face_count(), 2);
+        let tilted = extend_surface(&off, &rim, &law(30.0, ExtendLimit::Distance(2.0))).unwrap();
+        let c30 = 30f64.to_radians().cos();
+        let want = 16.0 * PI + FRAC_PI_4 * (16.0 + 2.0 * c30) * 2.0;
+        assert!(rel(area(&tilted), want) < 1e-3, "{} vs {want}", area(&tilted)); // (measured on meshes)
+        let bb = measure(&tilted).unwrap().bbox;
+        assert!((bb.max.x - (8.0 + 2.0 * c30)).abs() < 1e-6 && (bb.max.z - bb.min.z - 1.0).abs() < 1e-6, "{bb:?}");
+    }
+
+    /// A trimmed edge of a curved Surface Offset sheet, the #17384 case: the quarter cylinder
+    /// strip (radius 10) cut by the slanted plane z = 15 − y/2 and offset 2 outward. The offset is
+    /// the cylinder of radius 12 under the edge C(φ) = (12 cos φ, 12 sin φ, 15 − 5 sin φ),
+    /// 0 ≤ φ ≤ π/2, area ∫ 12 (15 − 5 sin φ) dφ = 90π − 60. The edge is no side of the surface's
+    /// box: the other modes refuse it. The law extension at 0°, 3 long, is the ruled surface
+    /// C(φ) + v D(φ), 0 ≤ v ≤ 3, D the unit direction tangent to the cylinder, square to the edge
+    /// and away from the face; its area ∫∫ |C' × D + v D' × D| dv dφ is integrated here from those
+    /// formulas (the far edge is the kernel's fair curve through the rulings' ends, so 1e-3).
+    #[test]
+    fn a_law_extension_of_a_trimmed_curved_edge() {
+        let c = cylinder_strip(FRAC_PI_2);
+        let cut = SplitTool::Plane(Plane::from_normal(Vec3::new(0.0, 0.0, 15.0), Vec3::new(0.0, 0.5, 1.0)).unwrap());
+        let trimmed = crate::trim(&c, &cut, Vec3::new(7.0, 7.0, 1.0)).unwrap();
+        let off = crate::offset_surface(&trimmed, &[0], 2.0, 1e-3).unwrap();
+        let base = 90.0 * PI - 60.0;
+        assert!(rel(area(&off), base) < 1e-3, "{} vs {base}", area(&off)); // (measured on meshes)
+        let on_edge = |phi: f64| Vec3::new(12.0 * phi.cos(), 12.0 * phi.sin(), 15.0 - 5.0 * phi.sin());
+        let at = [on_edge(FRAC_PI_4)];
+        for mode in [ExtendMode::Natural, ExtendMode::Tangent, ExtendMode::Curvature] {
+            let e = extend_surface(&off, &at, &with(mode, ExtendLimit::Distance(3.0), true)).unwrap_err();
+            assert!(e.to_string().contains("trimmed"), "{mode:?}: {e}");
+        }
+        let out = extend_surface(&off, &at, &law(0.0, ExtendLimit::Distance(3.0))).unwrap();
+        // The strip by its formulas.
+        let dc = |phi: f64| Vec3::new(-12.0 * phi.sin(), 12.0 * phi.cos(), -5.0 * phi.cos());
+        let dir = |phi: f64| {
+            let n = Vec3::new(phi.cos(), phi.sin(), 0.0);
+            let d = n.cross(dc(phi)).normalized().unwrap();
+            if d.z < 0.0 { d * -1.0 } else { d }
+        };
+        let (m, k) = (4000, 60);
+        let mut strip = 0.0;
+        for i in 0..m {
+            let phi = FRAC_PI_2 * (i as f64 + 0.5) / m as f64;
+            let h = 1e-6;
+            let (d, dd) = (dir(phi), (dir(phi + h) - dir(phi - h)) * (0.5 / h));
+            for j in 0..k {
+                let v = 3.0 * (j as f64 + 0.5) / k as f64;
+                strip += (dc(phi).cross(d) + dd.cross(d) * v).len() * (FRAC_PI_2 / m as f64) * (3.0 / k as f64);
+            }
+        }
+        let worst = (0..=64)
+            .map(|i| FRAC_PI_2 * i as f64 / 64.0)
+            .map(|phi| out.nearest_edge(on_edge(phi) + dir(phi) * 3.0, 1e-4).unwrap().unwrap().1)
+            .fold(0.0, f64::max);
+        // The far edge follows the rulings' ends (to the law tolerance, 1e-5 of size + length).
+        assert!(worst < 1e-5 * (off.size() + 3.0) + 1e-4, "{worst}");
+        assert!(rel(area(&out), base + strip) < 1e-3, "{} vs {} (strip {strip})", area(&out), base + strip); // (measured on meshes)
+        // The strip's corner over φ = 0: the edge's end (12, 0, 15) plus 3 D(0) = 3 (0, 5, 12) / 13.
+        let top = measure(&out).unwrap().bbox.max.z;
+        let want = (0..=1000).map(|i| FRAC_PI_2 * i as f64 / 1000.0).map(|phi| on_edge(phi).z + 3.0 * dir(phi).z).fold(f64::MIN, f64::max);
+        assert!((want - (15.0 + 36.0 / 13.0)).abs() < 1e-9, "{want}");
+        assert!((top - want).abs() < 1e-3, "{top} vs {want}");
+        assert_eq!(out.face_count(), 2);
+    }
+
+    /// Up to a target: at 0° up to the plane x = 17, the strip cut there: 170, to x = 17; at 30°
+    /// up to the plane z = 2, the strip 2 / sin 30° = 4 long: 100 + 40; up to the face x = 13
+    /// of a box standing across the edge: 130. The square itself is never cut, even where the
+    /// target crosses it.
+    #[test]
+    fn a_law_extension_up_to_a_face() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        let plane = |o: Vec3, n: Vec3| SplitTool::Plane(Plane::from_normal(o, n).unwrap());
+        let x17 = plane(Vec3::new(17.0, 0.0, 0.0), Vec3::X);
+        let out = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&x17))).unwrap();
+        assert!(rel(area(&out), 170.0) < 1e-9, "{}", area(&out));
+        assert!((measure(&out).unwrap().bbox.max.x - 17.0).abs() < 1e-9);
+        let z2 = plane(Vec3::new(0.0, 0.0, 2.0), Vec3::Z);
+        let out = extend_surface(&s, &at, &law(30.0, ExtendLimit::UpTo(&z2))).unwrap();
+        assert!(rel(area(&out), 140.0) < 1e-9, "{}", area(&out));
+        let bb = measure(&out).unwrap().bbox;
+        assert!((bb.max.z - 2.0).abs() < 1e-9 && (bb.max.x - (10.0 + 4.0 * 30f64.to_radians().cos())).abs() < 1e-9, "{bb:?}");
+        let wall = crate::box_solid(Vec3::new(13.0, -5.0, -5.0), Vec3::new(20.0, 15.0, 5.0)).unwrap();
+        let face = crate::surfaces::nearest_face(&wall, Vec3::new(13.0, 5.0, 0.0)).unwrap();
+        let tool = SplitTool::Face { body: &wall, face };
+        let out = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&tool))).unwrap();
+        assert!(rel(area(&out), 130.0) < 1e-9, "{}", area(&out));
+        // The plane x − 3z = 5 crosses the square (along x = 5) and the strip at 30° (where
+        // 10 + t cos 30° − 3 t sin 30° = 5, t = 5 / (1.5 − cos 30°)): only the strip is cut, the
+        // square stays whole: 100 + 10 t.
+        let slant = plane(Vec3::new(5.0, 0.0, 0.0), Vec3::new(1.0, 0.0, -3.0));
+        let out = extend_surface(&s, &at, &law(30.0, ExtendLimit::UpTo(&slant))).unwrap();
+        let t = 5.0 / (1.5 - 30f64.to_radians().cos());
+        assert!(rel(area(&out), 100.0 + 10.0 * t) < 1e-9, "{} vs {}", area(&out), 100.0 + 10.0 * t);
+        assert!(measure(&out).unwrap().bbox.min.x.abs() < 1e-9);
+    }
+
+    /// Up to sketch curves (a sketch line at x = 17 on the square's plane) a law extension is
+    /// refused before any strip is built; the plane x = 17 (170) and the box face x = 13 (130)
+    /// still extend.
+    #[test]
+    fn a_law_extension_up_to_sketch_curves_is_refused() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        let line = vec![Seg2::Line { a: Vec2::new(17.0, -5.0), b: Vec2::new(17.0, 15.0) }];
+        let curves = SplitTool::Curves { plane: Plane::XY, curves: vec![line], along: None };
+        let e = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&curves))).unwrap_err();
+        assert!(e.to_string().contains("not supported yet: a law extension up to sketch curves"), "{e}");
+        let x17 = SplitTool::Plane(Plane::from_normal(Vec3::new(17.0, 0.0, 0.0), Vec3::X).unwrap());
+        let out = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&x17))).unwrap();
+        assert!(rel(area(&out), 170.0) < 1e-9, "{}", area(&out));
+        let wall = crate::box_solid(Vec3::new(13.0, -5.0, -5.0), Vec3::new(20.0, 15.0, 5.0)).unwrap();
+        let face = crate::surfaces::nearest_face(&wall, Vec3::new(13.0, 5.0, 0.0)).unwrap();
+        let tool = SplitTool::Face { body: &wall, face };
+        let out = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&tool))).unwrap();
+        assert!(rel(area(&out), 130.0) < 1e-9, "{}", area(&out));
+    }
+
+    /// Up to a target the long strip would fold before or reach only far out: the cylinder strip's
+    /// top arc leaning 60° in folds 10 / sin 60° = 11.547 out (its rulings meet on the axis); up
+    /// to the plane z = 22 its rulings are 2 / cos 60° = 4 long, a quarter of the cone frustum from
+    /// radius 10 to 10 − 4 sin 60° = 10 − 2√3 with slant 4, π/4 · (20 − 2√3) · 4 more: π (120 − 2√3).
+    /// Up to z = 26 (rulings 12 long, past the fold) it is refused as a fold. The square at 0° up to
+    /// the plane x = 500 (far out, but short of the long strip's end): 10 × 500 = 5000.
+    #[test]
+    fn a_law_extension_up_to_a_target_short_of_a_fold_or_far_out() {
+        let c = cylinder_strip(FRAC_PI_2);
+        let top = [Vec3::new(10.0 * FRAC_PI_4.cos(), 10.0 * FRAC_PI_4.sin(), 20.0)];
+        let plane = |o: Vec3, n: Vec3| SplitTool::Plane(Plane::from_normal(o, n).unwrap());
+        let z22 = plane(Vec3::new(0.0, 0.0, 22.0), Vec3::Z);
+        let out = extend_surface(&c, &top, &law(-60.0, ExtendLimit::UpTo(&z22))).unwrap();
+        let want = PI * (120.0 - 2.0 * 3f64.sqrt());
+        assert!(rel(area(&out), want) < 1e-3, "{} vs {want}", area(&out)); // (measured on meshes)
+        assert!((measure(&out).unwrap().bbox.max.z - 22.0).abs() < 1e-6, "{:?}", measure(&out).unwrap().bbox);
+        let z26 = plane(Vec3::new(0.0, 0.0, 26.0), Vec3::Z);
+        let e = extend_surface(&c, &top, &law(-60.0, ExtendLimit::UpTo(&z26))).unwrap_err();
+        assert!(e.to_string().contains("fold"), "{e}");
+        let s = square();
+        let x500 = plane(Vec3::new(500.0, 0.0, 0.0), Vec3::X);
+        let out = extend_surface(&s, &[Vec3::new(10.0, 5.0, 0.0)], &law(0.0, ExtendLimit::UpTo(&x500))).unwrap();
+        assert!(rel(area(&out), 5000.0) < 1e-9, "{}", area(&out));
+        assert!((measure(&out).unwrap().bbox.max.x - 500.0).abs() < 1e-9);
+    }
+
+    /// The square with the notch [2, 10] × (4, 6) cut out, its three notch edges extended at 30°
+    /// into the notch: the strips' corners at (2, 4) and (2, 6) are mitred, and the strip on the
+    /// short edge x = 2 (2 long) is cut away where its rulings reach 1 across, 1 / cos 30° = 1.155
+    /// long (a strip 1.5 long is refused). Up to the plane z = 0.5 the rulings are 0.5 / sin 30°
+    /// = 1 long, short of that, so the long strip (whose corners cut the short strip away) is
+    /// shortened as a folding one is and the target is reached: each strip loses
+    /// c = 1² cos 30° / 2 per mitred corner, 84 + 1 · (8 + 2 + 8) − 4c = 102 − 2 cos 30°. Up to
+    /// z = 0.7 (rulings 1.4 long, past the corners meeting) it is refused as a fold.
+    #[test]
+    fn a_law_extension_up_to_a_target_short_of_its_corners_meeting() {
+        let pts = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (2.0, 4.0), (2.0, 6.0), (10.0, 6.0), (10.0, 10.0), (0.0, 10.0)];
+        let r = Region2 { outer: Loop2::polygon(&pts.map(|(x, y)| Vec2::new(x, y))), holes: vec![] };
+        let notched = patch_region(&Plane::XY, &r).unwrap();
+        let at = [Vec3::new(6.0, 4.0, 0.0), Vec3::new(2.0, 5.0, 0.0), Vec3::new(6.0, 6.0, 0.0)];
+        let e = extend_surface(&notched, &at, &law(30.0, ExtendLimit::Distance(1.5))).unwrap_err();
+        assert!(e.to_string().contains("cut a strip away"), "{e}");
+        let plane = |z: f64| SplitTool::Plane(Plane::from_normal(Vec3::new(0.0, 0.0, z), Vec3::Z).unwrap());
+        let out = extend_surface(&notched, &at, &law(30.0, ExtendLimit::UpTo(&plane(0.5)))).unwrap();
+        let want = 102.0 - 2.0 * 30f64.to_radians().cos();
+        assert!(rel(area(&out), want) < 1e-9, "{} vs {want}", area(&out));
+        assert!((measure(&out).unwrap().bbox.max.z - 0.5).abs() < 1e-9);
+        let e = extend_surface(&notched, &at, &law(30.0, ExtendLimit::UpTo(&plane(0.7)))).unwrap_err();
+        assert!(e.to_string().contains("fold"), "{e}");
+    }
+
+    /// Refused: an angle at or past ±90° or not finite; a strip folding over itself (the cylinder
+    /// strip's top arc leaning 60° in, 15 long: 13 mm in at a radius of 10); a target the strip
+    /// never reaches (behind the edge, or parallel to the strip); up to a whole body or back to the
+    /// bounds; edges between two faces and hole edges, as the other modes.
+    #[test]
+    fn law_extensions_refused() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        for deg in [90.0, -90.0, 120.0, f64::NAN, f64::INFINITY] {
+            assert!(extend_surface(&s, &at, &law(deg, ExtendLimit::Distance(5.0))).is_err(), "{deg}");
+        }
+        assert!(extend_surface(&s, &at, &law(89.0, ExtendLimit::Distance(5.0))).is_ok());
+        let c = cylinder_strip(FRAC_PI_2);
+        let top = [Vec3::new(10.0 * FRAC_PI_4.cos(), 10.0 * FRAC_PI_4.sin(), 20.0)];
+        let e = extend_surface(&c, &top, &law(-60.0, ExtendLimit::Distance(15.0))).unwrap_err();
+        assert!(e.to_string().contains("fold"), "{e}");
+        assert!(extend_surface(&c, &top, &law(-60.0, ExtendLimit::Distance(5.0))).is_ok());
+        let behind = SplitTool::Plane(Plane::from_normal(Vec3::new(-5.0, 0.0, 0.0), Vec3::X).unwrap());
+        let e = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&behind))).unwrap_err();
+        assert!(e.to_string().contains("never reaches"), "{e}");
+        let level = SplitTool::Plane(Plane::from_normal(Vec3::new(0.0, 0.0, 3.0), Vec3::Z).unwrap());
+        let e = extend_surface(&s, &at, &law(0.0, ExtendLimit::UpTo(&level))).unwrap_err();
+        assert!(e.to_string().contains("never reaches"), "{e}");
+        let b = crate::box_solid(Vec3::new(20.0, 0.0, -5.0), Vec3::new(30.0, 10.0, 5.0)).unwrap();
+        assert!(extend_surface(&s, &at, &law(0.0, ExtendLimit::UpToBody(&b))).is_err());
+        assert!(extend_surface(&s, &at, &law(0.0, ExtendLimit::Bounds)).is_err());
+        let solid = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        assert!(extend_surface(&solid, &[Vec3::new(10.0, 5.0, 10.0)], &law(0.0, ExtendLimit::Distance(1.0))).is_err());
+        let r = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)]),
+            holes: vec![Loop2::circle(Vec2::new(10.0, 10.0), 3.0).reversed()],
+        };
+        let holed = patch_region(&Plane::XY, &r).unwrap();
+        let e = extend_surface(&holed, &[Vec3::new(13.0, 10.0, 0.0)], &law(0.0, ExtendLimit::Distance(1.0))).unwrap_err();
+        assert!(e.to_string().contains("hole"), "{e}");
     }
 
     /// Hostile and unsupported requests are refused, never panic.

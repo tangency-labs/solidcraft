@@ -1023,6 +1023,19 @@ fn cylinder(r: f64, h: f64) -> Brep {
     turned(r, r, h)
 }
 
+/// A cylinder whose circle edges run from `phase` through one full turn, so angle 0 lies
+/// `phase` before the parameter end. The seam and the side face stay on `[0, TAU]`, as [`turned`].
+fn cylinder_phased(r: f64, h: f64, phase: f64) -> Brep {
+    let mut body = turned(r, r, h);
+    let tau = std::f64::consts::TAU;
+    for edge in &mut body.shells[0].edges {
+        if let Curve::CircleArc { angle, .. } = &mut edge.curve {
+            *angle = [phase, phase + tau];
+        }
+    }
+    body
+}
+
 /// A cylinder (`r0 == r1`) or a cone frustum from radius `r0` at z = 0 to `r1` at z = `h`,
 /// its seam at angle 0.
 fn turned(r0: f64, r1: f64, h: f64) -> Brep {
@@ -1308,6 +1321,142 @@ fn check_cylinder_sides(d: &Drawing, view: &View) {
     for side in [-1., 1.] {
         let len: f64 = sides.iter().filter(|s| s.0 == side).map(|s| s.1).sum();
         assert!((len - rise).abs() < 1e-9, "side {side}: {len} vs {rise}");
+    }
+    assert_eq!(d.stats.uncertain_uncovered, 0, "{:?}", d.stats);
+    assert!(d.unsupported.is_empty());
+}
+
+/// The largest distance among the ends and the middle of every segment: a folded conic whose
+/// chord is short, and a line whose ends have collapsed, both count as the stroke drawn.
+fn screen_extent(piece: &Piece) -> f64 {
+    let mut pts = Vec::new();
+    for g in &piece.geometry {
+        for t in [0., 0.5, 1.] {
+            pts.push(g.point_at(t));
+        }
+    }
+    let mut extent = 0_f64;
+    for i in 0..pts.len() {
+        for j in (i + 1)..pts.len() {
+            let d = pts[i].dist(pts[j]);
+            if d.is_finite() {
+                extent = extent.max(d);
+            }
+        }
+    }
+    extent
+}
+
+#[test]
+fn an_edge_on_circle_whose_seam_is_just_off_the_fold_has_no_sub_nanometre_piece() {
+    // Parameter is the circle angle. Seen along -Y with up +Z, screen x is -X, so the
+    // projection of a circle about Z turns back at angle 0 (screen x = -R) and at angle π
+    // (screen x = +R). The circles run [phase, phase + TAU], so angle 0 is parameter TAU,
+    // `phase` before the end.
+    // Off that fold the screen moves R * (1 - cos dt) = R * dt^2 / 2. For R = 10 and
+    // dt = phase = 4e-8 that is 8e-15 mm, under a nanometre (1e-6 mm). The 3D chord is
+    // R * phase = 4e-7 mm. A cut is merged only when its parameter gap is at most 1e-10 of
+    // a full turn (about 6.3e-10) and its 3D gap is at most 1e-9 of the scene diagonal.
+    // The cylinder's box is 20 by 20 by 30, so that diagonal is sqrt(1700) (about 41.2)
+    // and the 3D limit is about 4.1e-8 mm. The parameter gap alone is already larger, and
+    // the chord is still above the 3D limit. The tail past the fold is not the visibility
+    // of the piece before it, so it stays.
+    let (r, h, phase) = (10., 30., 4e-8);
+    let opts = Options {
+        threads: 1,
+        ..Options::default()
+    };
+    let view = View::new(Vec3::new(0., -1., 0.), Vec3::new(0., 0., 1.)).unwrap();
+    let def = prepare(&cylinder_phased(r, h, phase), &opts).unwrap();
+    let d = hidden_lines(
+        std::slice::from_ref(&def),
+        &[identity(0, [0.; 3])],
+        &view,
+        &opts,
+        &never,
+    )
+    .unwrap();
+    for (edge, z) in [(0, 0.), (1, h)] {
+        let line = edge_line(&d, 0, edge);
+        for (i, piece) in line.pieces.iter().enumerate() {
+            let extent = screen_extent(piece);
+            assert!(
+                extent >= 1e-6,
+                "edge {edge} piece {i} t=[{:.6e}, {:.6e}] vis={:?} covered={} extent={extent:.6e}",
+                piece.t[0],
+                piece.t[1],
+                piece.visibility,
+                piece.covered,
+            );
+        }
+        for side in [r, -r] {
+            let target = Vec2::new(side, z);
+            let mut best = f64::MAX;
+            for piece in &line.pieces {
+                for g in &piece.geometry {
+                    for t in [0., 0.5, 1.] {
+                        let dist = g.point_at(t).dist(target);
+                        if dist.is_finite() {
+                            best = best.min(dist);
+                        }
+                    }
+                }
+            }
+            assert!(
+                best < 1e-6,
+                "edge {edge} misses screen ({side}, {z}) by {best}"
+            );
+        }
+        let drawn: f64 = line
+            .pieces
+            .iter()
+            .map(screen_extent)
+            .filter(|extent| *extent >= 1e-6)
+            .sum();
+        assert!(
+            drawn >= 2. * r - 1e-4,
+            "edge {edge} draws {drawn} mm of a {r} mm radius"
+        );
+    }
+}
+
+#[test]
+fn a_cylinder_one_twentieth_of_a_millimetre_tall_keeps_its_silhouette_lines() {
+    // A real edge of this height must not be dropped with the sub-nanometre tail above.
+    let opts = Options {
+        threads: 1,
+        ..Options::default()
+    };
+    let view = View::new(Vec3::new(0., -1., 0.), Vec3::new(0., 0., 1.)).unwrap();
+    let def = prepare(&cylinder(10., 0.05), &opts).unwrap();
+    let d = hidden_lines(
+        std::slice::from_ref(&def),
+        &[identity(0, [0.; 3])],
+        &view,
+        &opts,
+        &never,
+    )
+    .unwrap();
+    let sil = silhouette_pieces(&d);
+    assert!(!sil.is_empty());
+    let mut sides = Vec::new();
+    for p in sil {
+        assert_eq!(p.accuracy, CurveAccuracy::Analytic);
+        assert_eq!(p.visibility, Visibility::Visible);
+        for g in &p.geometry {
+            let Seg2::Line { a, b } = *g else {
+                panic!("a silhouette ruling is a line: {g:?}")
+            };
+            assert!(
+                (a.x.abs() - 10.).abs() < 1e-12 && (a.x - b.x).abs() < 1e-12,
+                "{g:?}"
+            );
+            sides.push((a.x.signum(), (b.y - a.y).abs()));
+        }
+    }
+    for side in [-1., 1.] {
+        let len: f64 = sides.iter().filter(|s| s.0 == side).map(|s| s.1).sum();
+        assert!((len - 0.05).abs() < 1e-6, "side {side}: {len} vs 0.05");
     }
     assert_eq!(d.stats.uncertain_uncovered, 0, "{:?}", d.stats);
     assert!(d.unsupported.is_empty());
@@ -6198,4 +6347,99 @@ fn spline_points_and_hulls_come_from_their_own_knot_spans() {
             );
         }
     }
+}
+
+#[test]
+fn a_ball_corner_is_its_labels_sphere_and_needs_its_form() {
+    let face = |center: [f64; 3], radius: f64| k::Face {
+        surface: k::Surface::BallPatch { center, radius },
+        nurbs: None,
+        domain: [[0., 1.], [0., 1.]],
+        loops: Vec::new(),
+    };
+    // The sphere is the label's, as it is.
+    let sphere = surface::ball_sphere(&face([1., 2., 3.], 2.));
+    assert!(matches!(
+        sphere,
+        Ok(Some(Analytic::Sphere { c, r })) if [c.x, c.y, c.z, r] == [1., 2., 3., 2.]
+    ));
+    // Its parameters are its form's: without one there is no chart.
+    assert!(matches!(
+        S3::of_face(&face([1., 2., 3.], 2.)),
+        Err(HlrError::Invalid("ball patch without its form"))
+    ));
+    // A sphere that is no sphere is refused with its reason.
+    for (center, radius) in [
+        ([f64::NAN, 0., 0.], 1.),
+        ([0., f64::INFINITY, 0.], 1.),
+        ([0.; 3], 0.),
+        ([0.; 3], -1.),
+        ([0.; 3], f64::NAN),
+        ([0.; 3], f64::INFINITY),
+    ] {
+        assert!(matches!(
+            surface::ball_sphere(&face(center, radius)),
+            Err(HlrError::Invalid("ball patch sphere"))
+        ));
+    }
+    // Every other face has no ball sphere.
+    let plane = k::Face {
+        surface: k::Surface::Plane {
+            origin: [0.; 3],
+            u_axis: [1., 0., 0.],
+            v_axis: [0., 1., 0.],
+        },
+        nurbs: None,
+        domain: [[0., 1.], [0., 1.]],
+        loops: Vec::new(),
+    };
+    assert!(matches!(surface::ball_sphere(&plane), Ok(None)));
+}
+
+#[test]
+fn placement_grid_matches_linear_scan_on_many_body_scene() {
+    // 81 small boxes on a 9x9 grid at two depths plus 1 large plate behind them (spanning all
+    // 10x10 = 100 grid cells > 64, exercising both `buckets` and `large` in `PlacementIndex`).
+    // Both solids are symmetric about the origin so `def.offset == Vec3::ZERO`.
+    let unit = prepare(&cuboid([-3., -3., -2.], [3., 3., 2.]), &Options::default()).unwrap();
+    let plate = prepare(
+        &cuboid([-100., -100., -1.], [100., 100., 1.]),
+        &Options::default(),
+    )
+    .unwrap();
+    let defs = [unit, plate];
+    let mut scene = Vec::new();
+    for row in 0..9 {
+        for col in 0..9 {
+            let z = if (row + col) % 2 == 0 { 0. } else { -8. };
+            scene.push(identity(
+                0,
+                [col as f64 * 20. - 80., row as f64 * 20. - 80., z],
+            ));
+        }
+    }
+    scene.push(identity(1, [0., 0., -20.]));
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let opts = Options::default();
+    let ctx_indexed = super::context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
+    let index = ctx_indexed.placement_index.as_ref().unwrap();
+    assert_eq!(index.large, [81]);
+    let mut ctx_linear = super::context(&defs, &scene, &view, &opts, &never, &Serial).unwrap();
+    ctx_linear.placement_index = None;
+
+    for z in [-15., -25.] {
+        for i in 0..12 {
+            for j in 0..10 {
+                let p = Vec3::new(-95. + i as f64 * 17.5, -95. + j as f64 * 21.0, z);
+                let (mut t1, mut t2) = (0, 0);
+                let a =
+                    classify_point_counted(&ctx_indexed, 81, &[], ctx_indexed.eps_own, p, &mut t1);
+                let b =
+                    classify_point_counted(&ctx_linear, 81, &[], ctx_linear.eps_own, p, &mut t2);
+                assert_eq!(a, b, "mismatch at {p:?}");
+            }
+        }
+    }
+    let drawing = hidden_lines(&defs, &scene, &view, &opts, &never).unwrap();
+    assert!(!drawing.lines.is_empty());
 }

@@ -8,6 +8,7 @@
 pub mod adv_surface_intersector;
 pub mod api_intersectors;
 pub mod curve_class;
+pub mod patch;
 pub mod point_class;
 pub mod ray_tracer;
 pub mod surface_drop_curve;

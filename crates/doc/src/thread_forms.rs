@@ -16,6 +16,8 @@ pub enum ThreadForm {
     /// ISO metric, 60° (ISO 68-1 basic profile, ISO 261/262 sizes): `M10`, `M10x1`.
     #[default]
     Metric,
+    /// Unified inch, 60° (ASME B1.1): `1/4-20 UNC-2A`, `#10-32 UNF`.
+    Unified,
     /// ISO metric trapezoidal, 30° (ISO 2904 design profile, ISO 2902 sizes): `Tr20x4`.
     Trapezoidal,
     /// General purpose Acme, 29° (ASME B1.5): `1/2-10 ACME`.
@@ -37,6 +39,10 @@ pub enum ThreadForm {
     /// American National Standard taper pipe thread, 60°, taper 1 in 16 (ASME B1.20.1):
     /// `1/2-14 NPT`.
     Npt,
+    /// The user's own symmetric profile, not a standard: the ISO 68-1 basic profile with its
+    /// fundamental triangle at the included angle the designation gives, 20° to 90°:
+    /// `C10x1.5x90` (major diameter, pitch, included angle).
+    Custom,
 }
 
 /// Which way a thread turns.
@@ -248,6 +254,17 @@ impl GrooveProfile {
         let d = (r - self.root_r).abs();
         (root + d * self.flank_lo.tan(), root + d * self.flank_hi.tan())
     }
+    /// How far the groove's section reaches past its crest (or the face, where the face lies
+    /// past the crest), so the cut leaves no skin: 0.05 P outwards for an external groove, 0.1 P
+    /// inwards for an internal one, but never so far that the groove there is wider than 0.95 P.
+    /// Only a wide-angled custom profile reaches that width; every standard form takes the
+    /// whole 0.05 P or 0.1 P. For a square section only: a taper thread's section is its own.
+    pub fn reach(&self, pitch: f64) -> f64 {
+        let reach = if self.internal { 0.1 * pitch } else { 0.05 * pitch };
+        // The width at the crest plus `e` is P - flat + e (tan lo + tan hi): 0.95 P at this `e`.
+        let cap = (self.crest_flat - 0.05 * pitch) / (self.flank_lo.tan() + self.flank_hi.tan());
+        if cap < reach { cap } else { reach }
+    }
     /// One turn of the groove over radii `a..b` (between root and crest): 2π∫ r w(r) dr.
     pub fn turn_volume(&self, pitch: f64, a: f64, b: f64) -> f64 {
         // w(r) = c0 + c1 r, linear in r.
@@ -263,8 +280,9 @@ impl GrooveProfile {
 }
 
 impl ThreadForm {
-    pub const ALL: [ThreadForm; 10] = [
+    pub const ALL: &[ThreadForm] = &[
         ThreadForm::Metric,
+        ThreadForm::Unified,
         ThreadForm::Trapezoidal,
         ThreadForm::Acme,
         ThreadForm::Buttress,
@@ -274,11 +292,13 @@ impl ThreadForm {
         ThreadForm::Rp,
         ThreadForm::Bspt,
         ThreadForm::Npt,
+        ThreadForm::Custom,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
             ThreadForm::Metric => "metric",
+            ThreadForm::Unified => "unified",
             ThreadForm::Trapezoidal => "trapezoidal",
             ThreadForm::Acme => "acme",
             ThreadForm::Buttress => "buttress",
@@ -288,17 +308,19 @@ impl ThreadForm {
             ThreadForm::Rp => "rp",
             ThreadForm::Bspt => "bspt",
             ThreadForm::Npt => "npt",
+            ThreadForm::Custom => "custom",
         }
     }
 
     pub fn from_name(s: &str) -> Option<ThreadForm> {
-        ThreadForm::ALL.into_iter().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
+        ThreadForm::ALL.iter().copied().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
     }
 
     /// The standard a form's profile and sizes come from.
     pub fn standard(self) -> &'static str {
         match self {
             ThreadForm::Metric => "ISO 68-1, ISO 261",
+            ThreadForm::Unified => "ASME B1.1",
             ThreadForm::Trapezoidal => "ISO 2904, ISO 2902",
             ThreadForm::Acme => "ASME B1.5",
             ThreadForm::Buttress => "DIN 513-1, DIN 513-2",
@@ -307,6 +329,7 @@ impl ThreadForm {
             ThreadForm::Bspp => "ISO 228-1",
             ThreadForm::Rp | ThreadForm::Bspt => "ISO 7-1",
             ThreadForm::Npt => "ASME B1.20.1",
+            ThreadForm::Custom => "none (the user's own profile)",
         }
     }
 
@@ -337,11 +360,16 @@ impl ThreadForm {
     }
 
     /// The form a designation's prefix names: `M` metric, `Tr` trapezoidal, `S` buttress, an inch
-    /// size with `ACME` or `BUTT`.
+    /// size with `ACME` or `BUTT`, or a Unified `UNC`/`UNF`/`UNEF`/`UN` suffix.
     pub fn of_designation(s: &str) -> Option<ThreadForm> {
+        if s.len() > 128 {
+            return None;
+        }
         let t = s.trim().to_ascii_uppercase();
         let then_size = |rest: &str| rest.trim_start().starts_with(|c: char| c.is_ascii_digit());
-        if t.contains("NPT") {
+        if t.split_whitespace().last().is_some_and(|s| matches!(s.split('-').next(), Some("UNC" | "UNF" | "UNEF" | "UN"))) {
+            Some(ThreadForm::Unified)
+        } else if t.contains("NPT") {
             Some(ThreadForm::Npt)
         } else if t.contains("ACME") {
             Some(ThreadForm::Acme)
@@ -353,6 +381,8 @@ impl ThreadForm {
             Some(ThreadForm::Buttress)
         } else if t.starts_with('M') {
             Some(ThreadForm::Metric)
+        } else if t.strip_prefix('C').is_some_and(then_size) {
+            Some(ThreadForm::Custom)
         } else if t.strip_prefix("RP").is_some_and(then_size) {
             Some(ThreadForm::Rp)
         } else if t.strip_prefix("RC").or_else(|| t.strip_prefix('R')).is_some_and(then_size) {
@@ -373,10 +403,11 @@ impl ThreadForm {
                 all.sort_by(|a, b| a.0.total_cmp(&b.0));
                 all
             }
+            ThreadForm::Unified => unified_catalogue().into_iter().map(|s| (s.major_diameter, s.pitch)).collect(),
             ThreadForm::Trapezoidal => ISO_2902_MEDIUM.to_vec(),
             ThreadForm::Buttress => ISO_2902_MEDIUM.iter().copied().filter(|(d, _)| *d >= 10.0).collect(),
             ThreadForm::Acme => ACME_SIZES.iter().map(|(_, d, n)| (d * INCH, INCH / n)).collect(),
-            ThreadForm::ButtressAsme | ThreadForm::Square => Vec::new(),
+            ThreadForm::ButtressAsme | ThreadForm::Square | ThreadForm::Custom => Vec::new(),
             ThreadForm::Bspp | ThreadForm::Rp | ThreadForm::Bspt | ThreadForm::Npt => {
                 self.pipe_sizes().iter().map(|s| (s.major, s.pitch())).collect()
             }
@@ -394,6 +425,9 @@ impl ThreadForm {
             return Err(why.into());
         }
         let bad = || format!("unknown {} thread `{s}` ({})", self.name(), self.example());
+        if s.len() > 128 {
+            return Err(bad());
+        }
         if let Some(f) = ThreadForm::of_designation(s)
             && f != self
         {
@@ -406,7 +440,15 @@ impl ThreadForm {
             }
             return Ok(ThreadSize { form: self, major: size.major, pitch: size.pitch(), lead: size.pitch() });
         }
-        let t = s.trim().to_ascii_uppercase().replace('×', "X").replace(' ', "");
+        // An ISO metric size may end in its tolerance class (`M8-6g`), which names no size.
+        let size = match self {
+            ThreadForm::Metric => match metric_class(s) {
+                (_, Some(class)) if crate::thread_catalog::iso_965_class(class).is_none() => return Err(not_a_class(class)),
+                (size, _) => size,
+            },
+            _ => s,
+        };
+        let t = size.trim().to_ascii_uppercase().replace('×', "X").replace(' ', "");
         let n = f64::from(starts.max(1));
         let (major, pitch, lead) = match self {
             ThreadForm::Metric => {
@@ -429,6 +471,11 @@ impl ThreadForm {
                         (d, p, p * n)
                     }
                 }
+            }
+            ThreadForm::Unified => {
+                let text = s.trim().to_ascii_uppercase();
+                let (major, pitch, _) = unified_designation(&text).ok_or_else(bad)?;
+                (major, pitch, pitch * n)
             }
             ThreadForm::Trapezoidal | ThreadForm::Buttress => {
                 let body = t.strip_prefix(if self == ThreadForm::Trapezoidal { "TR" } else { "S" }).ok_or_else(bad)?;
@@ -466,6 +513,10 @@ impl ThreadForm {
                 let p = INCH / tpi;
                 (d * INCH, p, p * n)
             }
+            ThreadForm::Custom => {
+                let c = custom_size(s)?;
+                (c.major, c.pitch, c.pitch * n)
+            }
             ThreadForm::Square | ThreadForm::Bspp | ThreadForm::Rp | ThreadForm::Bspt | ThreadForm::Npt => return Err(bad()),
         };
         if !(major.is_finite() && pitch.is_finite() && lead.is_finite() && major > 0.0 && pitch > 0.0 && pitch < major) {
@@ -480,7 +531,8 @@ impl ThreadForm {
 
     fn example(self) -> &'static str {
         match self {
-            ThreadForm::Metric => "like M8 or M8x1",
+            ThreadForm::Metric => "like M8, M8x1 or M8-6g",
+            ThreadForm::Unified => "like 1/4-20 UNC-2A or #10-32 UNF (UNC, UNF, UNEF or UN; classes 1A/2A/3A external, 1B/2B/3B internal)",
             ThreadForm::Trapezoidal => "like Tr20x4 or Tr40x14(P7)",
             ThreadForm::Acme => "like 1/2-10 ACME",
             ThreadForm::Buttress => "like S20x4 or S40x14(P7)",
@@ -490,7 +542,43 @@ impl ThreadForm {
             ThreadForm::Rp => "like Rp 1/2, internal (ISO 7-1, 1/16 to 6)",
             ThreadForm::Bspt => "like R 1/2 external or Rc 1/2 internal (ISO 7-1, 1/16 to 6)",
             ThreadForm::Npt => "like 1/2-14 NPT (1/16 to 12)",
+            ThreadForm::Custom => CUSTOM_EXAMPLE,
         }
+    }
+
+    /// A Unified class names its side: A for a shaft, B for a hole; so does an ISO metric one
+    /// (ISO 965-1, [`crate::thread_catalog::iso_965_class`]): e, f, g or h for a shaft, G or H for
+    /// a hole. Classes are retained in the callout; pitch-diameter allowances are not modelled by
+    /// the basic profile.
+    pub fn check_class(self, designation: &str, internal: bool) -> Result<(), String> {
+        if self == ThreadForm::Metric {
+            self.parse(designation, 1)?;
+            return match metric_class(designation).1 {
+                Some(class) if crate::thread_catalog::iso_965_class(class) != Some(internal) => Err(format!(
+                    "ISO 965-1 class {class} is for an {} thread; this {} needs {} (uppercase for a hole, lowercase for a shaft)",
+                    if internal { "external" } else { "internal" },
+                    if internal { "hole" } else { "shaft" },
+                    if internal { "G or H, such as 6H or 5H6H" } else { "e, f, g or h, such as 6g or 5g6g" }
+                )),
+                _ => Ok(()),
+            };
+        }
+        if self != ThreadForm::Unified {
+            return Ok(());
+        }
+        self.parse(designation, 1)?;
+        let text = designation.trim().to_ascii_uppercase();
+        if let Some((_, _, Some(class))) = unified_designation(&text)
+            && class.ends_with('B') != internal
+        {
+            return Err(format!(
+                "Unified class {class} is for an {} thread; this {} needs {} (ASME B1.1)",
+                if class.ends_with('B') { "internal" } else { "external" },
+                if internal { "hole" } else { "shaft" },
+                if internal { "1B, 2B or 3B" } else { "1A, 2A or 3A" }
+            ));
+        }
+        Ok(())
     }
 
     /// The pipe size a pipe-thread designation names: `G 1/2` (a class A or B after it is a
@@ -518,6 +606,13 @@ impl ThreadForm {
         }
     }
 
+    /// The tolerance class a designation of this form ends in, as written: an ISO metric one's
+    /// (`M8-6g` gives `6g`, checked or not); none for the other forms, whose classes are part of
+    /// the size's text or none.
+    pub fn tolerance_class(self, designation: &str) -> Option<&str> {
+        if self == ThreadForm::Metric { metric_class(designation).1 } else { None }
+    }
+
     /// An ISO 7-1 designation on an internal thread: `Rc` (the taper internal thread), else `R`.
     pub fn pipe_internal(designation: &str) -> bool {
         designation.trim().to_ascii_uppercase().starts_with("RC")
@@ -541,6 +636,19 @@ impl ThreadForm {
                     format!("M{}x{}", show(d), show(p))
                 }
             }
+            ThreadForm::Unified => {
+                let catalogue = unified_catalogue();
+                if let Some(size) = catalogue.iter().find(|s| (s.major_diameter - d).abs() < 1e-9 && (s.pitch - p).abs() < 1e-9) {
+                    return size.designation.clone();
+                }
+                let name = catalogue
+                    .iter()
+                    .find(|s| (s.major_diameter - d).abs() < 1e-9)
+                    .and_then(|s| s.designation.split_once('-').map(|(n, _)| n.to_string()))
+                    .or_else(|| (0..=12).find(|n| ((0.060 + 0.013 * f64::from(*n)) * INCH - d).abs() < 1e-9).map(|n| format!("#{n}")))
+                    .unwrap_or_else(|| show(d / INCH));
+                format!("{name}-{} UN", show(INCH / p))
+            }
             ThreadForm::Trapezoidal | ThreadForm::Buttress => {
                 let pre = if self == ThreadForm::Trapezoidal { "Tr" } else { "S" };
                 if multi { format!("{pre}{}x{}(P{})", show(d), show(lead), show(p)) } else { format!("{pre}{}x{}", show(d), show(p)) }
@@ -554,6 +662,10 @@ impl ThreadForm {
                 format!("{name}-{tpi} {}", if self == ThreadForm::Acme { "ACME" } else { "BUTT" })
             }
             ThreadForm::Square => format!("{}x{}", show(d), show(p)),
+            // The angle is in a custom designation alone, not in (d, P): 60° here is only the ISO
+            // profile's. A custom thread keeps the designation it was given; no size table or fit
+            // formats one.
+            ThreadForm::Custom => format!("C{}x{}x60", show(d), show(p)),
             ThreadForm::Bspp | ThreadForm::Rp | ThreadForm::Bspt | ThreadForm::Npt => match self.pipe_size(d) {
                 Some(z) if self == ThreadForm::Npt => format!("{}-{} NPT", z.nominal, show(z.tpi)),
                 Some(z) => {
@@ -570,20 +682,26 @@ impl ThreadForm {
     }
 
     /// The minor diameter a hole for this size is drilled to: the tap maker's drill for metric
-    /// ([`crate::metric_tap_drill`]), the internal thread's minor diameter for the others.
-    pub fn drill(self, d: f64, p: f64) -> f64 {
+    /// ([`crate::metric_tap_drill`]) and catalogued Unified sizes, the internal thread's minor
+    /// diameter for the others.
+    fn drill(self, d: f64, p: f64) -> f64 {
         match self {
             ThreadForm::Metric => crate::metric_tap_drill(d, p),
+            ThreadForm::Unified => unified_catalogue()
+                .iter()
+                .find(|s| (s.major_diameter - d).abs() < 1e-9 && (s.pitch - p).abs() < 1e-9)
+                .map_or_else(|| 2.0 * self.groove(d, p, true).crest_r, |s| s.tap_drill),
             _ => 2.0 * self.groove(d, p, true).crest_r,
         }
     }
 
     /// The sizes [`fit`](Self::fit) chooses from: [`sizes`](Self::sizes), less the metric sizes
     /// that are only known by name ([`ISO_COARSE_MORE`]), so a face is sized as it was before
-    /// they were added.
+    /// they were added. Unified chooses UNC alone.
     fn fit_sizes(self) -> Vec<(f64, f64)> {
         match self {
             ThreadForm::Metric => ISO_COARSE.to_vec(),
+            ThreadForm::Unified => crate::tapped_thread_sizes(crate::TappedThreadFamily::Unc).iter().map(|s| (s.major_diameter, s.pitch)).collect(),
             _ => self.sizes(),
         }
     }
@@ -614,17 +732,35 @@ impl ThreadForm {
             .map(|(n, p, _)| (n, p))
     }
 
+    /// The drill of [`drill`](Self::drill) for the thread `designation` names: a custom thread's
+    /// angle is in its designation.
+    pub fn drill_of(self, designation: &str, d: f64, p: f64) -> Result<f64, String> {
+        match self {
+            ThreadForm::Custom => Ok(2.0 * self.groove_of(designation, d, p, true)?.crest_r),
+            _ => Ok(self.drill(d, p)),
+        }
+    }
+
+    /// The groove of size (d, P) of the thread `designation` names: a custom thread's included
+    /// angle is in its designation ([`custom_size`]), every other form's is its standard's.
+    pub fn groove_of(self, designation: &str, d: f64, p: f64, internal: bool) -> Result<GrooveProfile, String> {
+        match self {
+            ThreadForm::Custom => Ok(custom_groove(d, p, internal, custom_size(designation)?.angle)),
+            _ => Ok(self.groove(d, p, internal)),
+        }
+    }
+
     /// The groove of size (d, P): external (between a screw's teeth) or internal (a nut's).
     /// `flank_lo`/`flank_hi` are for a buttress with its steep flank towards the end (+z); the
-    /// caller swaps them for [`SteepFlank::Start`].
-    pub fn groove(self, d: f64, p: f64, internal: bool) -> GrooveProfile {
+    /// caller swaps them for [`SteepFlank::Start`]. Outside this module, [`groove_of`](Self::groove_of).
+    fn groove(self, d: f64, p: f64, internal: bool) -> GrooveProfile {
         let deg = |a: f64| a.to_radians();
         let half = |a: f64| (deg(a), deg(a));
         // (flanks, tooth crest flat, basic depth, external minor radius, internal minor radius,
         // internal major radius)
         let (fl, flat, depth, r3, r1, r4) = match self {
-            ThreadForm::Metric | ThreadForm::Square => {
-                // ISO 68-1: H = P sqrt3/2, basic depth 5H/8, flats P/8 at the major and P/4 at
+            ThreadForm::Metric | ThreadForm::Unified | ThreadForm::Square => {
+                // ISO 68-1 / ASME B1.1: H = P sqrt3/2, basic depth 5H/8, flats P/8 at the major and P/4 at
                 // the minor diameter.
                 let h = p * 3f64.sqrt() / 2.0;
                 let r_minor = d / 2.0 - 5.0 * h / 8.0;
@@ -682,6 +818,9 @@ impl ThreadForm {
                 let flat = (big_h - h) * deg(half_angle).tan();
                 (half(half_angle), flat, h, d / 2.0 - h, d / 2.0 - h, d / 2.0)
             }
+            // Only reached from inside this module, which never asks for a custom groove here:
+            // [`groove_of`](Self::groove_of) builds it at its designation's angle.
+            ThreadForm::Custom => return custom_groove(d, p, internal, 60.0),
         };
         // The steep flank faces +z on the screw's teeth: the external groove's −z wall, the
         // internal groove's +z wall (the nut's teeth face the other way).
@@ -691,6 +830,136 @@ impl ThreadForm {
         } else {
             GrooveProfile { flank_lo: lo, flank_hi: hi, crest_r: d / 2.0, crest_flat: flat, root_r: r3, basic_depth: depth, internal }
         }
+    }
+}
+
+/// Reuse the tapped-hole catalogue's exact inch majors, TPI and drills. The order keeps UNC
+/// before UNF at each diameter; automatic sizing uses UNC alone.
+fn unified_catalogue() -> Vec<crate::TappedThread> {
+    let mut sizes = crate::tapped_thread_sizes(crate::TappedThreadFamily::Unc);
+    sizes.extend(crate::tapped_thread_sizes(crate::TappedThreadFamily::Unf));
+    sizes.sort_by(|a, b| a.major_diameter.total_cmp(&b.major_diameter).then(b.pitch.total_cmp(&a.pitch)));
+    sizes
+}
+
+/// Read an uppercase Unified callout without discarding its class. A numbered screw's major
+/// is (0.060 + 0.013 n) inches (ASME B1.1), n = 0..12; other sizes are inches as written.
+fn unified_designation(s: &str) -> Option<(f64, f64, Option<&str>)> {
+    let (size_pitch, suffix) = s.rsplit_once(char::is_whitespace)?;
+    let (series, class) = suffix.split_once('-').map_or((suffix, None), |(s, c)| (s, Some(c)));
+    if !matches!(series, "UNC" | "UNF" | "UNEF" | "UN") || class.is_some_and(|c| !matches!(c, "1A" | "2A" | "3A" | "1B" | "2B" | "3B")) {
+        return None;
+    }
+    let (size, tpi) = size_pitch.trim().rsplit_once('-')?;
+    let size = size.trim();
+    let major = if let Some(number) = size.strip_prefix('#') {
+        let n = number.parse::<u8>().ok().filter(|n| *n <= 12)?;
+        (0.060 + 0.013 * f64::from(n)) * INCH
+    } else if let Some((whole, fraction)) = size.split_once(char::is_whitespace) {
+        let (whole, fraction) = (num(whole)?, num(fraction.trim())?);
+        if whole < 1.0 || whole.fract() != 0.0 || !(fraction > 0.0 && fraction < 1.0) {
+            return None;
+        }
+        (whole + fraction) * INCH
+    } else {
+        num(size)? * INCH
+    };
+    let tpi = num(tpi)?;
+    if !(major > 0.0 && tpi > 0.0) {
+        return None;
+    }
+    Some((major, INCH / tpi, class))
+}
+
+/// An ISO metric designation's size and its tolerance class, if it ends in one: `M8-6g` is
+/// (`M8`, `6g`). ISO 965-1 writes the class after a dash (`M20 × 2 – 5H`): a hyphen or an en dash,
+/// with or without spaces around it. Only a class-shaped end (a digit and a letter, once or twice)
+/// is split off, so every size the parser read before reads the same (`M8x1e-1`, a pitch 0.1).
+pub(crate) fn metric_class(s: &str) -> (&str, Option<&str>) {
+    let s = s.trim();
+    let Some(at) = s.rfind(['-', '–']) else { return (s, None) };
+    let after = at + s.get(at..).and_then(|r| r.chars().next()).map_or(1, char::len_utf8);
+    let (Some(size), Some(tail)) = (s.get(..at), s.get(after..)) else { return (s, None) };
+    let tail = tail.trim();
+    let class = |d: u8, a: u8| d.is_ascii_digit() && a.is_ascii_alphabetic();
+    let shaped = match *tail.as_bytes() {
+        [d, a] => class(d, a),
+        [d1, a1, d2, a2] => class(d1, a1) && class(d2, a2),
+        _ => false,
+    };
+    if shaped { (size.trim_end(), Some(tail)) } else { (s, None) }
+}
+
+/// Why a class-shaped end of a metric designation is no ISO 965-1 class.
+fn not_a_class(class: &str) -> String {
+    format!(
+        "`{class}` is not an ISO 965-1 tolerance class: a shaft takes e, f, g or h, such as 6g, 4h or 5g6g (pitch diameter grade 3 to 9, then major diameter grade 4, 6 or 8); a hole takes G or H, such as 6H or 5H6H (grades 4 to 8); a class the same for both diameters is written once (6g, not 6g6g)"
+    )
+}
+
+/// Why a custom thread takes no chamfered tip.
+pub const CUSTOM_TIP: &str =
+    "a chamfered tip is not offered for a custom thread: ISO 4753's chamfer is for ISO metric threads; chamfer the shaft's end with Chamfer";
+
+/// A custom designation, for the hint and the messages.
+const CUSTOM_EXAMPLE: &str = "like C10x1.5x90 (major diameter x pitch x included angle, in mm and degrees, 20° to 90°)";
+
+/// A custom thread's size: major diameter and pitch (mm) and included flank angle (degrees).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CustomSize {
+    pub major: f64,
+    pub pitch: f64,
+    pub angle: f64,
+}
+
+/// The size a custom designation names: `C<major diameter>x<pitch>x<included angle>`, plain
+/// decimals in mm and degrees (`C10x1.5x90`), the angle 20° to 90°, and a groove that leaves the
+/// thread a core.
+pub fn custom_size(s: &str) -> Result<CustomSize, String> {
+    let shape = || format!("`{s}` is not a custom thread: write C<major diameter>x<pitch>x<included angle>, {CUSTOM_EXAMPLE}");
+    if s.len() > 128 {
+        return Err(shape());
+    }
+    let t: String = s.trim().to_ascii_uppercase().replace('×', "X").split_whitespace().collect();
+    let body = t.strip_prefix('C').ok_or_else(shape)?;
+    let decimal = |part: &str| -> Option<f64> {
+        let plain = !part.is_empty() && part.chars().all(|c| c.is_ascii_digit() || c == '.') && part.matches('.').count() <= 1 && part != ".";
+        plain.then(|| part.parse::<f64>().ok()).flatten().filter(|v| v.is_finite())
+    };
+    let parts: Vec<&str> = body.split('X').collect();
+    let [d, p, a] = parts.as_slice() else { return Err(shape()) };
+    let (Some(major), Some(pitch), Some(angle)) = (decimal(d), decimal(p), decimal(a)) else { return Err(shape()) };
+    if !(major > 0.0 && pitch > 0.0 && pitch < major) {
+        return Err(format!("`{s}`: the pitch must be above zero and below the major diameter"));
+    }
+    if !(20.0..=90.0).contains(&angle) {
+        return Err(format!(
+            "the included flank angle of `{s}` must be 20° to 90°: narrower is not a thread the profile describes, wider makes the groove wider than a pitch"
+        ));
+    }
+    let depth = custom_groove(major, pitch, false, angle).basic_depth;
+    if !(major - 2.0 * depth > 0.0) {
+        return Err(format!(
+            "`{s}`'s {} mm deep thread leaves no core: its minor diameter, the major diameter less twice the depth, is not above zero",
+            show(depth)
+        ));
+    }
+    Ok(CustomSize { major, pitch, angle })
+}
+
+/// The ISO 68-1 basic profile with its fundamental triangle at included angle `angle` (degrees):
+/// H = P / (2 tan(α/2)), basic depth 5H/8, the tooth's flats P/8 at the major and P/4 at the
+/// minor diameter (so the root flats are P/4 and P/8 at every angle). At 60° it is the ISO
+/// metric profile.
+fn custom_groove(d: f64, p: f64, internal: bool, angle: f64) -> GrooveProfile {
+    let half = (angle / 2.0).to_radians();
+    let h = p / (2.0 * half.tan());
+    let depth = 5.0 * h / 8.0;
+    let r_minor = d / 2.0 - depth;
+    if internal {
+        GrooveProfile { flank_lo: half, flank_hi: half, crest_r: r_minor, crest_flat: p / 4.0, root_r: d / 2.0, basic_depth: depth, internal }
+    } else {
+        GrooveProfile { flank_lo: half, flank_hi: half, crest_r: d / 2.0, crest_flat: p / 8.0, root_r: r_minor, basic_depth: depth, internal }
     }
 }
 
@@ -733,6 +1002,125 @@ fn show(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unified_designations_use_inch_majors_and_exact_tpi_conversion() {
+        let form = ThreadForm::Unified;
+        for (text, major, tpi) in [
+            ("1/4-20 UNC-2A", 6.35, 20.0),
+            ("#10-32 UNF", 4.826, 32.0),
+            ("0.25-32 UNEF-3B", 6.35, 32.0),
+            ("3/8-20 UN-1A", 9.525, 20.0),
+            ("1 1/4-12 UNF-2B", 31.75, 12.0),
+            ("  1/4-20  unc-2a  ", 6.35, 20.0),
+        ] {
+            assert_eq!(ThreadForm::of_designation(text), Some(form));
+            let size = form.parse(text, 1).unwrap();
+            assert!((size.major - major).abs() < 1e-12, "{text}: {size:?}");
+            assert_eq!(size.pitch, INCH / tpi);
+            assert_eq!(size.lead, size.pitch);
+            for internal in [false, true] {
+                assert_eq!(form.groove(size.major, size.pitch, internal), ThreadForm::Metric.groove(size.major, size.pitch, internal));
+            }
+        }
+        for n in 0..=12 {
+            let size = form.parse(&format!("#{n}-80 UN"), 1).unwrap();
+            assert!((size.major - (0.060 + 0.013 * f64::from(n)) * INCH).abs() < 1e-12);
+        }
+        for size in unified_catalogue() {
+            let parsed = form.parse(&size.designation, 1).unwrap();
+            assert!((parsed.major - size.major_diameter).abs() < 1e-12);
+            assert_eq!(parsed.pitch, size.pitch);
+            assert_eq!(form.format(parsed.major, parsed.pitch, parsed.lead), size.designation);
+            assert_eq!(form.drill(parsed.major, parsed.pitch), size.tap_drill);
+        }
+        assert_eq!(form.parse("1/4-20 UNC", 2).unwrap().lead, 2.54);
+        assert_eq!(form.format(6.35, INCH / 32.0, INCH / 32.0), "1/4-32 UN");
+        assert_eq!(form.fit(6.35, false), Some((6.35, 1.27)));
+        assert_eq!(form.fit(5.1054, true), Some((6.35, 1.27)));
+        assert_eq!(ThreadForm::Metric.fit(6.35, false), Some((6.0, 1.0)));
+    }
+
+    #[test]
+    fn unified_classes_name_the_side_and_malformed_designations_are_refused() {
+        let form = ThreadForm::Unified;
+        for grade in 1..=3 {
+            for (side, internal) in [("A", false), ("B", true)] {
+                let text = format!("1/4-20 UNC-{grade}{side}");
+                assert!(form.check_class(&text, internal).is_ok());
+                let error = form.check_class(&text, !internal).unwrap_err();
+                assert!(error.contains(if internal { "shaft needs 1A, 2A or 3A" } else { "hole needs 1B, 2B or 3B" }), "{error}");
+            }
+        }
+        assert!(form.check_class("1/4-20 UNC", false).is_ok());
+        assert!(form.check_class("1/4-20 UNC", true).is_ok());
+        for text in [
+            "#13-32 UNC",
+            "#-1-32 UN",
+            "1/4-0 UNC",
+            "1/4-NaN UNC",
+            "1/0-20 UNC",
+            "0-20 UNC",
+            "1/4-20",
+            "1/4-20 UNS",
+            "1/4-20 UNC-4A",
+            "1/4-20 UNC-2A-extra",
+            "1/4-20 UNC-",
+            "1/4-20 UNC-2AA",
+            "1/4-1e309 UN",
+            "1e309-20 UN",
+            "1/4-20 UNF extra",
+        ] {
+            assert!(form.parse(text, 1).is_err(), "{text}");
+        }
+        assert!(form.parse(&"1".repeat(5000), 1).is_err());
+        assert!(ThreadForm::Metric.parse("1/4-20 UNC", 1).unwrap_err().contains("a unified designation, not metric"));
+    }
+
+    /// An ISO metric class (ISO 965-1) after the size names its side by its letter's case and
+    /// leaves the size as it was; a class-shaped end that is no class is refused as such, other
+    /// endings as an unknown size, as before; a size the parser read before still reads the same.
+    #[test]
+    fn metric_classes_name_the_side_and_keep_the_size() {
+        let form = ThreadForm::Metric;
+        for (text, size, internal) in [
+            ("M8-6g", "M8", false),
+            ("M8x1-6H", "M8x1", true),
+            ("M10x1.25-5g6g", "M10x1.25", false),
+            ("M16xPh3P1.5-6g", "M16xPh3P1.5", false),
+            ("M8 - 6g", "M8", false),
+            ("M8- 6g", "M8", false),
+            ("M20 × 2 – 5H", "M20x2", true),
+        ] {
+            assert_eq!(form.parse(text, 1), form.parse(size, 1), "{text}");
+            assert_eq!(ThreadForm::of_designation(text), Some(form), "{text}");
+            assert!(form.check_class(text, internal).is_ok(), "{text}");
+            let error = form.check_class(text, !internal).unwrap_err();
+            assert!(error.contains(if internal { "this shaft needs e, f, g or h" } else { "this hole needs G or H" }), "{text}: {error}");
+        }
+        assert_eq!(form.tolerance_class("M20 × 2 – 5H"), Some("5H"));
+        assert_eq!(form.tolerance_class("M8"), None);
+        assert_eq!(ThreadForm::Unified.tolerance_class("1/4-20 UNC-2A"), None);
+        for text in ["M8", "M8x1"] {
+            assert!(form.check_class(text, true).is_ok() && form.check_class(text, false).is_ok());
+        }
+        for text in ["M8-5g", "M8-6d", "M8-6g6g", "M8-2A", "M8-9H"] {
+            let error = form.parse(text, 1).unwrap_err();
+            assert!(error.contains("is not an ISO 965-1 tolerance class"), "{text}: {error}");
+        }
+        for text in ["M8-LH", "M8-6g-LH", "M8-6g-L", "M8-6H/6g", "M8-", "M-6g", "M8 6g"] {
+            let error = form.parse(text, 1).unwrap_err();
+            assert!(error.contains("unknown metric thread"), "{text}: {error}");
+        }
+        // An exponent's minus is no class: M8x1e-1 is M8 with a 0.1 mm pitch, as before.
+        let fine = form.parse("M8x1e-1", 1).unwrap();
+        assert!((fine.major, fine.pitch) == (8.0, 0.1), "{fine:?}");
+        assert!(form.parse(&format!("M8-{}", "6g".repeat(5000)), 1).is_err());
+        // A tapped hole's size names no class: its class is saved apart (`thread_class`).
+        assert_eq!(crate::parse_metric_thread("M8-6H"), None);
+        assert!(crate::parse_tapped_thread("M8-6H").is_none());
+        assert_eq!(crate::parse_metric_thread("M8"), Some((8.0, 1.25)));
+    }
 
     /// Pipe-thread designations read to their table's size and write back as the standards write
     /// them; a size or a threads-per-inch the table lacks is refused.
@@ -822,5 +1210,110 @@ mod tests {
                 };
             assert!((g.width(p, r) - p / 2.0).abs() < 1e-9, "{f:?}");
         }
+    }
+
+    /// At 60° the custom profile is ISO 68-1's: H = P / (2 tan 30°) = P √3/2, so every field
+    /// equals the metric groove's (to rounding: tan 30° is not exactly 1/√3 in floating point).
+    #[test]
+    fn a_custom_thread_at_60_degrees_is_the_iso_metric_profile() {
+        for (d, p) in [(10.0, 1.5), (20.0, 2.5), (3.0, 0.5)] {
+            for internal in [false, true] {
+                let c = ThreadForm::Custom.groove_of(&format!("C{d}x{p}x60"), d, p, internal).unwrap();
+                let m = ThreadForm::Metric.groove(d, p, internal);
+                assert_eq!((c.flank_lo, c.flank_hi, c.internal), (m.flank_lo, m.flank_hi, m.internal), "C{d}x{p}x60");
+                for (a, b) in [(c.crest_r, m.crest_r), (c.crest_flat, m.crest_flat), (c.root_r, m.root_r), (c.basic_depth, m.basic_depth)] {
+                    assert!((a - b).abs() < 1e-12 * p.max(d), "C{d}x{p}x60 internal {internal}: {c:?} vs {m:?}");
+                }
+            }
+        }
+    }
+
+    /// At 90°, H = P / (2 tan 45°) = P/2 and the depth 5H/8 = 5P/16 = 0.3125 P: C10x1.5x90 is
+    /// 0.46875 deep, its minor radius 5 - 0.46875 = 4.53125. The root flats are the ISO ones at
+    /// every angle: P - P/8 - (5H/8)(2 tan 45°) = P/4 outside, P - P/4 - 5P/8 = P/8 inside.
+    #[test]
+    fn a_custom_thread_at_90_degrees_is_five_sixteenths_of_a_pitch_deep() {
+        let (d, p) = (10.0, 1.5);
+        let f = ThreadForm::Custom;
+        let ext = f.groove_of("C10x1.5x90", d, p, false).unwrap();
+        let int = f.groove_of("C10x1.5x90", d, p, true).unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-12;
+        assert!(near(ext.basic_depth, 0.46875) && near(ext.root_r, 4.53125) && near(ext.crest_r, 5.0), "{ext:?}");
+        assert!(near(int.crest_r, 4.53125) && near(int.root_r, 5.0), "{int:?}");
+        assert!(near(ext.flank_lo, std::f64::consts::FRAC_PI_4) && near(ext.flank_hi, std::f64::consts::FRAC_PI_4));
+        assert!(near(ext.width(p, ext.root_r), 0.375) && near(int.width(p, int.root_r), 0.1875));
+        assert!(near(f.drill_of("C10x1.5x90", d, p).unwrap(), 9.0625));
+        let z = f.parse("C10x1.5x90", 2).unwrap();
+        assert_eq!((z.major, z.pitch, z.lead), (10.0, 1.5, 3.0));
+        assert_eq!(ThreadForm::of_designation("C10x1.5x90"), Some(f));
+        assert_eq!(ThreadForm::from_name("custom"), Some(f));
+        assert!(f.sizes().is_empty() && f.refused().is_none() && !f.is_taper());
+        assert_eq!(f.parse(" c10 × 1.5 x 45 ", 1).map(|z| (z.major, z.pitch)), Ok((10.0, 1.5)));
+    }
+
+    /// Each malformed custom designation is refused with its reason. `C3x1x20`: H = 1/(2 tan 10°)
+    /// = 2.8356, depth 5H/8 = 1.7723, so the minor diameter 3 - 3.5446 is below zero.
+    #[test]
+    fn custom_designations_are_refused_with_their_reason() {
+        let f = ThreadForm::Custom;
+        let shape = "C<major diameter>x<pitch>x<included angle>";
+        let long = format!("C10x1.5x{}", "9".repeat(200));
+        for (text, why) in [
+            ("C10x1.5x19.9", "must be 20° to 90°"),
+            ("C10x1.5x90.1", "must be 20° to 90°"),
+            ("C10x1.5x0", "must be 20° to 90°"),
+            ("C10x1.5xinf", shape),
+            ("C10x1.5xNaN", shape),
+            ("C10x1e0x60", shape),
+            ("C10x3/2x60", shape),
+            ("C10x-1.5x60", shape),
+            ("C10x1.5x6.0.0", shape),
+            ("C10x1.5", shape),
+            ("C10", shape),
+            ("Cx1.5x60", shape),
+            ("C10x1.5x60x2", shape),
+            ("10x1.5x60", shape),
+            (long.as_str(), "unknown custom thread"),
+            ("C10x0x60", "the pitch must be above zero and below the major diameter"),
+            ("C1x2x60", "the pitch must be above zero and below the major diameter"),
+            ("C3x1x20", "leaves no core"),
+        ] {
+            let e = f.parse(text, 1).err().unwrap_or_default();
+            assert!(e.contains(why), "`{text}`: {e}");
+            assert!(f.groove_of(text, 10.0, 1.5, false).is_err(), "`{text}`");
+        }
+        // The core is there just above the bound: d > 2 × 1.7723 = 3.5446 at 20°.
+        assert!(f.parse("C3.6x1x20", 1).is_ok());
+        let e = ThreadForm::Metric.parse("C10x1.5x90", 1).err().unwrap_or_default();
+        assert!(e.contains("is a custom designation, not metric"), "{e}");
+    }
+
+    /// The section reaches 0.05 P past an external groove's crest and 0.1 P past an internal
+    /// one's, as before the 0.95 P cap, for every standard size of every form with a square
+    /// section (the taper threads have their own). The cap binds for a custom profile only:
+    /// at 90° the external reach is (P/8 - 0.05 P)/(2 tan 45°) = 0.0375 P, the groove there
+    /// P - P/8 + 0.0375 P × 2 = 0.95 P wide.
+    #[test]
+    fn the_groove_reach_is_unchanged_for_every_standard_form() {
+        let inch = 25.4;
+        for f in ThreadForm::ALL.iter().copied().filter(|f| !f.is_taper() && f.refused().is_none() && *f != ThreadForm::Custom) {
+            let mut sizes = f.sizes();
+            if f == ThreadForm::ButtressAsme {
+                sizes = vec![(2.5 * inch, inch / 8.0), (1.5 * inch, inch / 8.0), (inch, inch / 16.0), (10.0 * inch, inch / 4.0)];
+            }
+            assert!(!sizes.is_empty(), "{f:?}");
+            for (d, p) in sizes {
+                assert_eq!(f.groove(d, p, false).reach(p), 0.05 * p, "{f:?} {d}x{p} external");
+                assert_eq!(f.groove(d, p, true).reach(p), 0.1 * p, "{f:?} {d}x{p} internal");
+            }
+        }
+        let p = 1.5;
+        let ext = ThreadForm::Custom.groove_of("C10x1.5x90", 10.0, p, false).unwrap();
+        assert!((ext.reach(p) - 0.0375 * p).abs() < 1e-12, "{}", ext.reach(p));
+        assert!((ext.width(p, ext.crest_r + ext.reach(p)) - 0.95 * p).abs() < 1e-12);
+        let int = ThreadForm::Custom.groove_of("C10x1.5x90", 10.0, p, true).unwrap();
+        assert!((int.width(p, int.crest_r - int.reach(p)) - 0.95 * p).abs() < 1e-12);
+        // At 20° the cap is far off: (P/8 - 0.05 P)/(2 tan 10°) = 0.2127 P.
+        assert_eq!(ThreadForm::Custom.groove_of("C10x1.5x20", 10.0, p, false).unwrap().reach(p), 0.05 * p);
     }
 }

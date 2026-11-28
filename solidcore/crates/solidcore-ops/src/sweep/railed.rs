@@ -4,7 +4,7 @@
 
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::sweep::loft_rails::{
-    loft_rails as kernel_loft_rails, RailLoftOptions, RailSection as KernelSection,
+    loft_rails as kernel_loft_rails, polyline, RailLoftOptions, RailSection as KernelSection,
     DEFAULT_MAX_WIRES,
 };
 use solidcore::sweep::section_blend::{section_blend_surface, EndOrder, SectionFrame};
@@ -13,9 +13,10 @@ use solidcore::topology::brep::p3::new_brep;
 use solidcore::Vec3;
 
 use super::{making, parse, Curve};
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish_closed, Body, Expect};
 use crate::error::status;
 use crate::{Error, Result};
+pub use solidcore::sweep::loft_rails::Tolerance;
 
 /// How guide rails size a station (the kernel's [`KernelRailFit`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,9 +45,9 @@ pub struct RailSection {
 pub struct RailLoft {
     /// How the rails size a station.
     pub fit: RailFit,
-    /// The most a guided edge may stray from its rail (finite and positive): the kernel
-    /// certifies every guided edge within it.
-    pub tolerance: f64,
+    /// The most a guided edge may stray from its rail (finite and positive), a length or a
+    /// fraction of the loft's size: the kernel certifies every guided edge within it.
+    pub tolerance: Tolerance,
     /// The most wires (sections and stations together) the loft is skinned through: a
     /// resource bound, the kernel's default [`DEFAULT_MAX_WIRES`].
     pub max_wires: usize,
@@ -61,14 +62,23 @@ impl RailLoft {
     pub const fn new(tolerance: f64) -> Self {
         Self {
             fit: RailFit::Scale,
-            tolerance,
+            tolerance: Tolerance::Absolute(tolerance),
             max_wires: DEFAULT_MAX_WIRES,
             cap: true,
         }
     }
+
+    /// A capped loft scaled by its rails, certified within `fraction` of the loft's size.
+    #[must_use]
+    pub const fn relative(fraction: f64) -> Self {
+        Self {
+            tolerance: Tolerance::Relative(fraction),
+            ..Self::new(0.0)
+        }
+    }
 }
 
-/// The loft through `sections` guided by one or two `rails`, skinned cubic, each guided edge
+/// The loft through `sections` guided by one to sixteen `rails`, skinned cubic, each guided edge
 /// certified within `how.tolerance` of its rail ([`solidcore::sweep::loft_rails`]).
 ///
 /// # Errors
@@ -79,7 +89,7 @@ impl RailLoft {
 /// [`Error::NotSolid`].
 pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> Result<Body> {
     if !(2..=solidcore::sweep::loft_rails::MAX_SECTIONS).contains(&sections.len())
-        || !(1..=2).contains(&rails.len())
+        || !(1..=solidcore::sweep::loft_rails::MAX_RAILS).contains(&rails.len())
     {
         return Err(Error::Argument);
     }
@@ -123,7 +133,7 @@ pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> 
             max_wires: how.max_wires,
         };
         match kernel_loft_rails(k, &kernel_sections, &rail_refs, &opts) {
-            Ok(made) => finish(
+            Ok(made) => finish_closed(
                 k,
                 made.skin.brep,
                 if how.cap {
@@ -134,6 +144,35 @@ pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> 
             ),
             Err(e) => Ok(Err(refused(e))),
         }
+    })
+}
+
+/// A guide rail through `points` in order: solidcore's [`polyline`] (a degree-1 curve through
+/// them, its knots spaced as the points are in order), as ops' [`Curve::Nurbs`] with unit weights.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two points or one not finite (solidcore's refusal).
+pub fn polyline_rail(points: &[[f64; 3]]) -> Result<Curve> {
+    let v: Vec<Vec3> = points.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
+    let rail = polyline(&v).map_err(refused)?;
+    let base = rail.b_spline_base().ok_or(Error::Argument)?;
+    let degree = base.degree().map_err(refused)?;
+    let (unique, mult) = base.knots(None).map_err(refused)?;
+    let knots: Vec<f64> = unique
+        .iter()
+        .zip(&mult)
+        .flat_map(|(u, m)| std::iter::repeat_n(*u, *m))
+        .collect();
+    let (cp, weights) = base.control_polygon().map_err(refused)?;
+    let points = cp
+        .iter()
+        .enumerate()
+        .map(|(i, q)| [q.x, q.y, q.z, weights.get(i).copied().unwrap_or(1.0)])
+        .collect();
+    Ok(Curve::Nurbs {
+        degree,
+        points,
+        knots,
     })
 }
 
@@ -212,7 +251,7 @@ pub fn loft_blend(
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::FACES)
+        finish_closed(k, b, Expect::FACES)
     })
 }
 

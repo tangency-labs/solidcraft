@@ -159,6 +159,22 @@ fn open_record<R: Read + Seek>(reader: &mut PackageReader<R>, bytes: &[u8]) -> R
         total += blob.len();
         parts.insert(name.to_string(), solidcraft_doc::blob::Blob::from(blob));
     }
+    // A newer record can name other blob types, even in a drawing this build can open.
+    // Resolve only parts present in this container and use its usual size and digest checks.
+    if newer_record(&value).is_some() {
+        for name in blob_names(&value) {
+            if !parts.contains_key(name)
+                && reader.has_part(name)
+                && let Some((_, extension)) = name.rsplit_once('.')
+            {
+                let reference = json!({"part": name});
+                let bytes = reader.limited_blob(&reference, "part", extension, super::part_limit(name))?;
+                parts.insert(name.into(), solidcraft_doc::blob::Blob::from(bytes));
+            }
+        }
+        let text = std::str::from_utf8(bytes).map_err(invalid)?;
+        return Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_json(text))?);
+    }
     Ok(solidcraft_doc::blob::with_parts(parts, || Drawing::from_value(value))?)
 }
 
@@ -194,7 +210,7 @@ pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<(Vec
         let bytes = reader.limited_part(&name, MAX_DRAWING_BYTES)?;
         let d = match open_record(reader, &bytes) {
             Ok(d) => d,
-            Err(why) => match newer_record(&bytes) {
+            Err(why) => match serde_json::from_slice(&bytes).ok().as_ref().and_then(newer_record) {
                 Some((label, format)) => {
                     kept.push(keep(reader, &name, &bytes, &label, format, &why)?);
                     continue;
@@ -212,8 +228,7 @@ pub(super) fn read<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<(Vec
 
 /// The name and format number of a drawing record a newer build saved: a format this build doesn't
 /// read, or changes it doesn't know. `None` for a record this build's own format covers.
-fn newer_record(bytes: &[u8]) -> Option<(String, u32)> {
-    let value: Value = serde_json::from_slice(bytes).ok()?;
+fn newer_record(value: &Value) -> Option<(String, u32)> {
     let version = value.get("format").and_then(Value::as_str).and_then(|f| DRAWING.version_of(f))?;
     let applied: Option<Vec<String>> =
         value.get("format_pending").and_then(Value::as_array).map(|list| list.iter().filter_map(|v| v.as_str().map(String::from)).collect());
@@ -222,29 +237,40 @@ fn newer_record(bytes: &[u8]) -> Option<(String, u32)> {
     Some((label, newer.format))
 }
 
-/// The entry `name` kept as it came, with every container part its record names.
-fn keep<R: Read + Seek>(reader: &mut PackageReader<R>, name: &str, bytes: &[u8], label: &str, format: u32, why: &IoError) -> Result<KeptDrawing> {
-    fn named(value: &Value, found: &mut Vec<String>) {
+fn blob_names(value: &Value) -> std::collections::BTreeSet<&str> {
+    fn named<'a>(value: &'a Value, found: &mut std::collections::BTreeSet<&'a str>) {
         match value {
-            Value::String(s) if s.starts_with("blobs/") => found.push(s.clone()),
+            Value::String(s) if s.starts_with("blobs/") => {
+                found.insert(s);
+            }
             Value::Array(items) => items.iter().for_each(|v| named(v, found)),
-            Value::Object(map) => map.values().for_each(|v| named(v, found)),
+            Value::Object(map) => {
+                for (key, value) in map {
+                    if key.starts_with("blobs/") {
+                        found.insert(key);
+                    }
+                    named(value, found);
+                }
+            }
             _ => {}
         }
     }
-    let mut names = Vec::new();
-    if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
-        named(&value, &mut names);
-    }
-    names.sort();
-    names.dedup();
+    let mut names = std::collections::BTreeSet::new();
+    named(value, &mut names);
+    names
+}
+
+/// The entry `name` kept as it came, with every container part its record names.
+fn keep<R: Read + Seek>(reader: &mut PackageReader<R>, name: &str, bytes: &[u8], label: &str, format: u32, why: &IoError) -> Result<KeptDrawing> {
+    let value: Value = serde_json::from_slice(bytes).map_err(invalid)?;
+    let names = blob_names(&value);
     let mut parts = vec![(name.to_string(), Arc::from(bytes))];
     for part in names {
-        if !reader.has_part(&part) {
+        if !reader.has_part(part) {
             continue;
         }
-        let bytes = reader.limited_part(&part, super::part_limit(&part))?;
-        parts.push((part, bytes.into()));
+        let bytes = reader.limited_part(part, super::part_limit(part))?;
+        parts.push((part.into(), bytes.into()));
     }
     let note = format!("drawing `{label}` (saved by a newer SolidCraft, drawing format {format}, which this version can't read: {why})");
     Ok(KeptDrawing { parts, note })

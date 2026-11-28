@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="780" height="490" viewBox="0 0 780 490">
+  <title>13647-growth-reach</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="780" height="490" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 36 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Setback growth bounded by a round&apos;s rail reach</tspan></text>
+    <text transform="matrix(1 0 0 1 36 72)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#555555"><tspan x="0" y="0">Top face in plan: far Mitre at W cuts the round&apos;s rail at X</tspan></text>
+    <rect x="90" y="132" width="470" height="112" fill="#f0f0f0"/>
+    <rect x="240" y="132" width="215" height="54" fill="#dce9f5"/>
+    <rect x="455" y="132" width="35" height="54" fill="#e8eef4"/>
+    <line x1="90" y1="132" x2="560" y2="132" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="560" y1="132" x2="560" y2="244" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="90" y1="132" x2="90" y2="244" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="490" y1="186" x2="490" y2="244" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="90" y1="186" x2="240" y2="186" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <line x1="240" y1="186" x2="490" y2="186" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line x1="490" y1="186" x2="490" y2="132" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 4"/>
+    <line x1="455" y1="124" x2="455" y2="194" fill="none" stroke="#1f6fb2" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="240" y1="124" x2="240" y2="194" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="325" y1="124" x2="325" y2="194" fill="none" stroke="#1f6fb2" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <line x1="560" y1="132" x2="685" y2="132" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 4"/>
+    <line x1="665" y1="122" x2="665" y2="196" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <circle cx="90" cy="132" r="4.5" fill="#000000"/>
+    <circle cx="560" cy="132" r="4.5" fill="#000000"/>
+    <circle cx="490" cy="186" r="4.5" fill="#555555"/>
+    <circle cx="490" cy="132" r="4" fill="#ffffff" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="455" cy="132" r="4.5" fill="#1f6fb2"/>
+    <circle cx="240" cy="132" r="4" fill="#555555"/>
+    <circle cx="325" cy="132" r="4" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 82 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">V</tspan></text>
+    <text transform="matrix(1 0 0 1 224 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">base</tspan></text>
+    <text transform="matrix(1 0 0 1 306 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">grown</tspan></text>
+    <text transform="matrix(1 0 0 1 416 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" font-weight="bold" fill="#1f6fb2"><tspan x="0" y="0">reach</tspan></text>
+    <text transform="matrix(1 0 0 1 478 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">L_cut</tspan></text>
+    <text transform="matrix(1 0 0 1 553 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">W</tspan></text>
+    <text transform="matrix(1 0 0 1 640 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">2 x base</tspan></text>
+    <text transform="matrix(1 0 0 1 104 232)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">top face</tspan></text>
+    <text transform="matrix(1 0 0 1 274 212)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">round&apos;s rail (cut at X)</tspan></text>
+    <text transform="matrix(1 0 0 1 500 190)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="13" font-weight="bold" fill="#555555"><tspan x="0" y="0">X</tspan></text>
+    <text transform="matrix(1 0 0 1 572 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">far Mitre</tspan></text>
+    <text transform="matrix(1 0 0 1 572 176)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">at W</tspan></text>
+    <text transform="matrix(1 0 0 1 628 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">past rail</tspan></text>
+    <text transform="matrix(1 0 0 1 622 230)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">(PastRails)</tspan></text>
+    <line x1="472" y1="188" x2="442" y2="260" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 182 272)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">fit margin: 1000 tol (reach = L_cut - 1000 tol)</tspan></text>
+    <line x1="490" y1="244" x2="514" y2="260" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 520 272)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">far edge&apos;s rail (ends at X)</tspan></text>
+    <line x1="36" y1="294" x2="744" y2="294" fill="none" stroke="#e0e0e0" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 36 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#555555"><tspan x="0" y="0">Search interval in grow_curved along the cut edge</tspan></text>
+    <rect x="240" y="370" width="215" height="24" fill="#dce9f5"/>
+    <line x1="90" y1="382" x2="695" y2="382" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="240" y1="382" x2="455" y2="382" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line x1="90" y1="368" x2="90" y2="396" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="240" y1="368" x2="240" y2="396" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="325" y1="368" x2="325" y2="396" fill="none" stroke="#1f6fb2" stroke-width="2" stroke-miterlimit="10"/>
+    <line x1="455" y1="368" x2="455" y2="396" fill="none" stroke="#1f6fb2" stroke-width="2.5" stroke-miterlimit="10"/>
+    <line x1="560" y1="368" x2="560" y2="396" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <line x1="665" y1="368" x2="665" y2="396" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <text transform="matrix(1 0 0 1 74 412)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">0 (V)</tspan></text>
+    <text transform="matrix(1 0 0 1 224 412)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">base</tspan></text>
+    <text transform="matrix(1 0 0 1 299 412)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">least fit</tspan></text>
+    <text transform="matrix(1 0 0 1 424 412)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" font-weight="bold" fill="#1f6fb2"><tspan x="0" y="0">rail reach</tspan></text>
+    <text transform="matrix(1 0 0 1 544 412)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">room</tspan></text>
+    <text transform="matrix(1 0 0 1 640 412)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">2 x base</tspan></text>
+    <g>
+      <g>
+        <path d="M240 347.25 L245 347.25 L245 348.75 L240 348.75 Z M249 347.25 L254 347.25 L254 348.75 L249 348.75 Z M258 347.25 L263 347.25 L263 348.75 L258 348.75 Z M267 347.25 L272 347.25 L272 348.75 L267 348.75 Z M276 347.25 L281 347.25 L281 348.75 L276 348.75 Z M285 347.25 L290 347.25 L290 348.75 L285 348.75 Z M294 347.25 L299 347.25 L299 348.75 L294 348.75 Z M303 347.25 L308 347.25 L308 348.75 L303 348.75 Z M312 347.25 L317 347.25 L317 348.75 L312 348.75 Z M321 347.25 L326 347.25 L326 348.75 L321 348.75 Z M330 347.25 L335 347.25 L335 348.75 L330 348.75 Z M339 347.25 L344 347.25 L344 348.75 L339 348.75 Z M348 347.25 L353 347.25 L353 348.75 L348 348.75 Z M357 347.25 L362 347.25 L362 348.75 L357 348.75 Z M366 347.25 L371 347.25 L371 348.75 L366 348.75 Z M375 347.25 L380 347.25 L380 348.75 L375 348.75 Z M384 347.25 L389 347.25 L389 348.75 L384 348.75 Z M393 347.25 L398 347.25 L398 348.75 L393 348.75 Z M402 347.25 L407 347.25 L407 348.75 L402 348.75 Z M411 347.25 L416 347.25 L416 348.75 L411 348.75 Z M420 347.25 L425 347.25 L425 348.75 L420 348.75 Z M429 347.25 L434 347.25 L434 348.75 L429 348.75 Z M438 347.25 L443 347.25 L443 348.75 L438 348.75 Z M447 347.25 L452 347.25 L452 348.75 L447 348.75 Z M456 347.25 L461 347.25 L461 348.75 L456 348.75 Z M465 347.25 L470 347.25 L470 348.75 L465 348.75 Z M474 347.25 L479 347.25 L479 348.75 L474 348.75 Z M483 347.25 L488 347.25 L488 348.75 L483 348.75 Z M492 347.25 L497 347.25 L497 348.75 L492 348.75 Z M501 347.25 L506 347.25 L506 348.75 L501 348.75 Z M510 347.25 L515 347.25 L515 348.75 L510 348.75 Z M519 347.25 L524 347.25 L524 348.75 L519 348.75 Z M528 347.25 L533 347.25 L533 348.75 L528 348.75 Z M537 347.25 L542 347.25 L542 348.75 L537 348.75 Z M546 347.25 L551 347.25 L551 348.75 L546 348.75 Z M555 347.25 L560 347.25 L560 348.75 L555 348.75 Z M564 347.25 L569 347.25 L569 348.75 L564 348.75 Z M573 347.25 L578 347.25 L578 348.75 L573 348.75 Z M582 347.25 L587 347.25 L587 348.75 L582 348.75 Z M591 347.25 L596 347.25 L596 348.75 L591 348.75 Z M600 347.25 L605 347.25 L605 348.75 L600 348.75 Z M609 347.25 L614 347.25 L614 348.75 L609 348.75 Z M618 347.25 L623 347.25 L623 348.75 L618 348.75 Z M627 347.25 L632 347.25 L632 348.75 L627 348.75 Z M636 347.25 L641 347.25 L641 348.75 L636 348.75 Z M645 347.25 L650 347.25 L650 348.75 L645 348.75 Z M654 347.25 L659 347.25 L659 348.75 L654 348.75 Z M663 347.25 L665 347.25 L665 348.75 L663 348.75 Z" fill="#999999"/>
+        <path d="M668 348 L662 351 L662 345 Z" fill="#999999"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 252 340)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">Before: first trial at 2 x base hits PastRails -&gt; untyped refusal, no size</tspan></text>
+    <g>
+      <g>
+        <path d="M240 433 L455 433 L455 435 L240 435 Z" fill="#1f6fb2"/>
+        <path d="M459 434 L451 438 L451 430 Z" fill="#1f6fb2"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 90 456)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">After (certifies &lt;= reach): builds (auto) or SetbackTooShort { least &lt;= reach } (asked)</tspan></text>
+    <text transform="matrix(1 0 0 1 90 476)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">After (none certifies &lt;= reach): SetbackUncertifiedWithinRails { reach } with fit = 0</tspan></text>
+  </g>
+</svg>

@@ -111,6 +111,34 @@ pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
     mesh_body_with_normals(positions, triangles, &[])
 }
 
+/// Create a reduced copy using SolidCore's checked connectivity, without import-time welding.
+/// Exact repeated facets are removed before simplification; closed results repaired by duplicate
+/// removal use the outward-winding convention. Returns the mesh and its achieved triangle count;
+/// it may exceed the target.
+pub fn reduce_mesh(body: &Body, target: usize) -> Result<(Body, usize)> {
+    let (positions, triangles) = body.triangle_mesh().ok_or_else(|| KernelError::Invalid("select a mesh body".into()))?;
+    let points: Vec<[f64; 3]> = positions.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let normals: Vec<[f64; 3]> = body.triangle_corner_normals().unwrap_or_default().iter().flatten().map(|n| [n.x, n.y, n.z]).collect();
+    let run = || solidcore_ops::reduce_mesh(&points, triangles.as_flattened(), (!normals.is_empty()).then_some(normals.as_slice()), target);
+    let reduction = match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, run),
+        None => run(),
+    }
+    .map_err(|e| match e {
+        e @ solidcore_ops::Error::Refused { .. } => KernelError::Invalid(format!("mesh reduction failed: {e}")),
+        solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("mesh reduction: {m}")),
+        e => KernelError::Failed(format!("mesh reduction failed: {e}")),
+    })?;
+    let mesh = TriMesh {
+        positions: reduction.positions.into_iter().map(Vec3::from).collect(),
+        triangles: reduction.indices.as_chunks::<3>().0.to_vec(),
+        corner_normals: reduction.corner_normals.as_deref().unwrap_or_default().as_chunks::<3>().0.iter().map(|n| n.map(Vec3::from)).collect(),
+        // Duplicate cleanup can repair closure; the Ops workflow restores its winding.
+        closed: if reduction.removed_duplicate_triangles > 0 { reduction.closed } else { body.is_closed_mesh() },
+    };
+    Ok((Body::of_mesh(mesh).with_color(body.color()), reduction.reduced_triangles))
+}
+
 /// A mesh with optional independent, finite nonzero shading normals per triangle corner.
 /// Welding and winding repair affect geometric indices; seams never affect connectivity.
 pub fn mesh_body_with_normals(positions: &[Vec3], triangles: &[[u32; 3]], normals: &[[Vec3; 3]]) -> Result<Body> {
@@ -367,5 +395,67 @@ impl Body {
         placed.splits = self.splits.clone();
         placed.regularization_protected = self.regularization_protected;
         Some(placed)
+    }
+}
+
+#[cfg(test)]
+mod reduction_tests {
+    use super::*;
+
+    #[test]
+    fn stopped_reduction_is_refused_and_scope_is_restored() {
+        let points =
+            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(2.0, 2.0, 0.0), Vec3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 1.0, 0.0)];
+        let body = mesh_body(&points, &[[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]]).unwrap();
+        let stop = crate::Stop::new();
+        stop.stop();
+        let typed = stop.within(|| {
+            let token = solidcraft_smlib::stop::token().unwrap();
+            solidcore_ops::cancel::within(&token, || {
+                solidcore_ops::reduce_mesh(
+                    &[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 2.0, 0.0], [0.0, 2.0, 0.0], [1.0, 1.0, 0.0]],
+                    &[0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4],
+                    None,
+                    2,
+                )
+            })
+        });
+        assert!(matches!(typed, Err(solidcore_ops::Error::Cancelled)));
+        let error = stop.within(|| reduce_mesh(&body, 2)).unwrap_err();
+        assert!(matches!(&error, KernelError::Failed(_)) && error.to_string().to_lowercase().contains("cancel"));
+        assert!(reduce_mesh(&body, 2).is_ok_and(|(reduced, count)| count < 4 && !reduced.is_closed_mesh()));
+    }
+
+    #[test]
+    fn duplicate_cleanup_repairs_mesh_closure_and_keeps_source_and_corner_attributes() {
+        let points = [Vec3::new(0., 0., 0.), Vec3::new(2., 0., 0.), Vec3::new(0., 2., 0.), Vec3::new(0., 0., 2.)];
+        let outward = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
+        let per_vertex = [Vec3::new(0., 0., 1.), Vec3::new(1., 0., 1.), Vec3::new(0., 1., 1.), Vec3::new(1., 1., 1.)];
+        for reverse in [false, true] {
+            let mut facets = outward.to_vec();
+            if reverse {
+                for facet in &mut facets {
+                    facet.swap(1, 2);
+                }
+            }
+            facets.push(facets[0]);
+            let normals: Vec<_> = facets.iter().map(|facet| facet.map(|i| per_vertex[i as usize])).collect();
+            let source = mesh_body_with_normals(&points, &facets, &normals).unwrap();
+            assert!(!source.is_closed_mesh(), "the repeated facet has three uses at its edges");
+            let original_positions = source.triangle_mesh().unwrap().0.to_vec();
+            let original_facets = source.triangle_mesh().unwrap().1.to_vec();
+            let original_normals = source.triangle_corner_normals().unwrap().to_vec();
+            let (reduced, count) = reduce_mesh(&source, 1).unwrap();
+            assert_eq!(count, 4);
+            assert!(reduced.is_closed_mesh());
+            assert_eq!(reduced.triangle_mesh().unwrap().0, points);
+            assert_eq!(reduced.triangle_mesh().unwrap().1, outward);
+            let expected_normals = outward.map(|facet| facet.map(|i| per_vertex[i as usize]));
+            assert_eq!(reduced.triangle_corner_normals().unwrap(), expected_normals);
+            assert_eq!(source.triangle_mesh().unwrap().0, original_positions);
+            assert_eq!(source.triangle_mesh().unwrap().1, original_facets);
+            assert_eq!(source.triangle_corner_normals().unwrap(), original_normals);
+            assert!(!source.is_closed_mesh());
+        }
     }
 }

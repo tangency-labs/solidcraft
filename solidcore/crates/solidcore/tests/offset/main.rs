@@ -37,6 +37,8 @@ mod issue_1061_moved_boss_top_extends_cylinder;
 mod issue_1130_shelled_dome_rim;
 #[path = "../issue_1253_shell_under_rounded_top.rs"]
 mod issue_1253_shell_under_rounded_top;
+#[path = "../issue_13685_tube_folds.rs"]
+mod issue_13685_tube_folds;
 #[path = "../issue_1441_offset_surface_export.rs"]
 mod issue_1441_offset_surface_export;
 #[path = "../issue_1442_local_operation_offset_status.rs"]
@@ -87,6 +89,8 @@ mod issue_2111_offset_patch_sheet_gaps;
 mod issue_2174_cap_outward_ub_241;
 #[path = "../issue_2174_cap_rim_two_edges.rs"]
 mod issue_2174_cap_rim_two_edges;
+#[path = "../issue_22811_moved_flat_of_rounded_ball.rs"]
+mod issue_22811_moved_flat_of_rounded_ball;
 #[path = "../issue_2350_shell_offset_construction.rs"]
 mod issue_2350_shell_offset_construction;
 #[path = "../issue_2372_offset_shell_sweep_cancel.rs"]

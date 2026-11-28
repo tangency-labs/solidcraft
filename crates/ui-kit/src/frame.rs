@@ -31,9 +31,42 @@ impl Side {
     }
 }
 
-/// How far a docked panel with this key was dragged.
+fn dock_offset_id(key: &str) -> egui::Id {
+    egui::Id::unique(("sc_dock_offset", key))
+}
+
+/// How far a docked panel with this key was dragged. Kept only while it stays open, so the next
+/// dialog opens docked, clear of the part.
 pub fn dock_offset(ctx: &egui::Context, key: &str) -> egui::Vec2 {
-    ctx.data(|d| d.get_temp::<egui::Vec2>(egui::Id::unique(("sc_dock_offset", key)))).unwrap_or(egui::Vec2::ZERO)
+    let frame = ctx.cumulative_frame_nr();
+    let open = ctx.data(|d| d.get_temp::<u64>(dock_offset_id(key).with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
+    if !open {
+        set_dock_offset(ctx, key, egui::Vec2::ZERO);
+        return egui::Vec2::ZERO;
+    }
+    ctx.data(|d| d.get_temp::<egui::Vec2>(dock_offset_id(key))).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
+}
+
+/// [`dock_offset`] for a dialog that knows which opening of it this is (`opened`, new each time
+/// one opens). The offset belongs to that opening: another one, even on the very next frame,
+/// opens docked (#22388), and the same one keeps its place over frames it is not drawn.
+pub fn dock_offset_of(ctx: &egui::Context, key: &str, opened: u64) -> egui::Vec2 {
+    let owner = dock_offset_id(key).with("opened");
+    if ctx.data(|d| d.get_temp::<u64>(owner)) != Some(opened) {
+        ctx.data_mut(|d| d.insert_temp(owner, opened));
+        set_dock_offset(ctx, key, egui::Vec2::ZERO);
+        return egui::Vec2::ZERO;
+    }
+    ctx.data(|d| d.get_temp::<egui::Vec2>(dock_offset_id(key))).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
+}
+
+pub fn set_dock_offset(ctx: &egui::Context, key: &str, offset: egui::Vec2) {
+    ctx.data_mut(|d| d.insert_temp(dock_offset_id(key), offset));
+}
+
+pub(crate) fn note_dock_shown(ctx: &egui::Context, key: &str) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(dock_offset_id(key).with("shown"), frame));
 }
 
 /// A title drag owns the pointer even when it outruns the dialog's previous position.
@@ -68,7 +101,9 @@ pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applie
 /// so its band is published under its own scenario `handle` instead of the dialog's.
 pub fn drag_dock_named(ui: &Ui, handle: &str, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
     solidcraft_ui_registry::publish_handle(handle, band.center());
-    let response = ui.interact(band, ui.scope_id().with("sc_dock_drag"), egui::Sense::drag());
+    note_dock_shown(ui.ctx(), key);
+    // Pointer-only dock drag; keep title bands out of keyboard Tab order.
+    let response = ui.interact(band, ui.scope_id().with("sc_dock_drag"), egui::Sense::DRAG);
     if response.dragged() {
         let frame = ui.ctx().cumulative_frame_nr();
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_dock_drag_frame"), frame));
@@ -88,11 +123,11 @@ pub fn drag_dock_named(ui: &Ui, handle: &str, band: egui::Rect, key: &str, moved
             (Some((start, from)), Some(now)) => start + (now - from),
             _ => applied + response.drag_delta(),
         };
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(("sc_dock_offset", key)), to));
+        set_dock_offset(ui.ctx(), key, to);
     } else if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     } else if moved != applied {
         // Kept on screen: remember where it is, not where it was dragged off to.
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(("sc_dock_offset", key)), applied));
+        set_dock_offset(ui.ctx(), key, applied);
     }
 }

@@ -91,11 +91,13 @@ pub struct Entry {
     pub path: Option<String>,
     /// When the design last changed (ms since 1970).
     pub changed_at: f64,
+    /// This copy includes edits a concurrent save of an earlier revision cannot replace.
+    pub preserve_from_save: bool,
 }
 
 impl Entry {
     pub fn to_json(&self) -> String {
-        json!({"name": self.name, "path": self.path, "changed_at": self.changed_at}).to_string()
+        json!({"name": self.name, "path": self.path, "changed_at": self.changed_at, "preserve_from_save": self.preserve_from_save}).to_string()
     }
 
     /// Read copy `id`'s metadata. Anything malformed, oversized or not finite is no copy.
@@ -110,7 +112,8 @@ impl Entry {
             Some(p) => Some(p.as_str().filter(|p| !p.is_empty() && p.len() <= MAX_PATH)?.to_string()),
         };
         let changed_at = v.get("changed_at")?.as_f64().filter(|t| t.is_finite() && *t >= 0.0)?;
-        Some(Entry { id: id.to_string(), name, path, changed_at })
+        let preserve_from_save = v.get("preserve_from_save").and_then(Value::as_bool).unwrap_or(false);
+        Some(Entry { id: id.to_string(), name, path, changed_at, preserve_from_save })
     }
 }
 
@@ -140,7 +143,7 @@ pub enum Fate {
 pub fn fate(entry: &Entry, live: &[String], saved_at: Option<f64>) -> Fate {
     if page_of(&entry.id).is_some_and(|p| live.iter().any(|l| l == p)) {
         Fate::Leave
-    } else if newer_than_save(entry.changed_at, saved_at) {
+    } else if entry.preserve_from_save || newer_than_save(entry.changed_at, saved_at) {
         Fate::Offer
     } else {
         Fate::Drop
@@ -268,7 +271,17 @@ mod tests {
     }
 
     fn entry(id: &str, changed_at: f64, path: Option<&str>) -> Entry {
-        Entry { id: id.into(), name: "Bracket".into(), path: path.map(str::to_string), changed_at }
+        Entry { id: id.into(), name: "Bracket".into(), path: path.map(str::to_string), changed_at, preserve_from_save: false }
+    }
+
+    #[test]
+    fn an_earlier_revision_saved_later_does_not_supersede_a_kept_copy() {
+        let mut copy = entry("p1-1", 2000.0, Some("/opfs/Bracket.sc"));
+        assert_eq!(fate(&copy, &[], Some(3000.0)), Fate::Drop);
+        copy.preserve_from_save = true;
+        let restored = Entry::parse(&copy.id, copy.to_json().as_bytes()).unwrap();
+        assert_eq!(fate(&restored, &[], Some(3000.0)), Fate::Offer);
+        assert_eq!(fate(&restored, &["p1".into()], Some(3000.0)), Fate::Leave);
     }
 
     #[test]

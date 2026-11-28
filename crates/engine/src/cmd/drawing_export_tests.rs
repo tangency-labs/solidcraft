@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_geom::Vec2Geom;
 use solidcraft_geom::paper::NoPictures;
 use solidcraft_io::paper::{PngColour, paper_png};
 
@@ -167,7 +168,9 @@ fn a_view_with_hidden_lines_exports_dashed() {
     let statuses: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| v["status"].clone()).collect();
     assert_eq!(statuses, [json!("drawn"), json!("drawn")], "{reply}");
     let svg = reply["svg"].as_str().unwrap();
-    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 7, "{svg}");
+    // A hidden line's 3 mm dash and 0.75 mm gap at 0.25 mm wide are stroked 2.75 and 1 under the
+    // round caps (`Dashes::under_round_caps`).
+    assert_eq!(svg.matches("stroke-dasharray=\"2.75 1\" stroke-dashoffset=\"3.625\"").count(), 7, "{svg}");
     assert_eq!(svg.as_bytes(), scene_svg(&s, sheet).as_slice());
 }
 
@@ -875,10 +878,19 @@ fn a_sheet_exports_as_a_vector_pdf_at_its_paper_size() {
     // Millimetres scaled to points once, so the page's numbers are the sheet's.
     assert!(content.starts_with(&format!("q {:.9} 0 0 {:.9} 0 0 cm", 72.0 / 25.4, 72.0 / 25.4)), "{content}");
     let ops: Vec<&str> = content.split_whitespace().filter(|t| t.chars().all(|c| c.is_ascii_alphabetic() || c == '*')).collect();
-    for op in ["m", "l", "S", "f"] {
+    for op in ["m", "l", "S", "Tj"] {
         assert!(ops.contains(&op), "{op} in {content}");
     }
-    assert!(ops.iter().filter(|op| **op == "f").count() > 12, "each title block label and value filled");
+    assert!(ops.iter().filter(|op| **op == "Tj").count() > 12, "each title block label and value set as text");
+    assert!(!ops.contains(&"f"), "no glyph outline is filled: the text is real text");
+    let file = String::from_utf8_lossy(&bytes);
+    assert!(file.contains("/Subtype /Type3") && file.contains("/ToUnicode"), "an embedded font that maps back to Unicode");
+    // The same sheet asked for outlines: the old file, whose text is filled outlines and no font.
+    let (_, old) = export_file(&mut s, json!({"sheet": ids::encode(sheet), "format": "pdf", "text": "outlines"}));
+    let old_content = &pdf_pages(&old)[0].1;
+    assert!(old_content.split_whitespace().filter(|t| *t == "f").count() > 12, "each title block label and value filled");
+    assert!(!old_content.contains("Tj") && !String::from_utf8_lossy(&old).contains("/Type3"), "outlines carry no text");
+    assert!(refused(&mut s, json!({"sheet": ids::encode(sheet), "format": "svg", "text": "outlines"})).contains("`text` is for pdf only"));
     assert!(!content.contains(" Do"), "lines only: no picture");
     let name = s.drawing("test").unwrap().sheets[0].name.clone();
     assert_eq!(exported(&mut s, json!({"sheet": name, "format": "pdf"})), bytes, "the same bytes by name");
@@ -1035,10 +1047,157 @@ fn print_is_the_whole_drawings_pdf() {
     assert!(!String::from_utf8_lossy(&export).contains("PrintScaling"), "an export leaves printing to the viewer");
     assert_eq!(printed["pages"], json!([ids::encode(first), second]), "{printed}");
     assert!(String::from_utf8_lossy(&bytes).contains("/PrintScaling /None"));
-    assert_eq!(super::print_pdf(&mut s).unwrap(), bytes, "the app's print: the same bytes");
+    assert_eq!(super::print_pdf(&mut s).unwrap().bytes, bytes, "the app's print: the same bytes");
     assert!(s.execute("drawing.print", &json!({})).unwrap_err().to_string().contains("give `path`"));
     for (p, why) in [(json!({"path": folder.path("Drawing.svg")}), "path must be a .pdf file"), (json!({"sheet": "Sheet 1"}), "sheet")] {
         let message = s.execute("drawing.print", &p).unwrap_err().to_string();
         assert!(message.contains(why), "{p}: {message}");
+    }
+}
+
+/// What `drawing.check` lists as outside the sheet: for one sheet, or for every sheet.
+fn check_outside(s: &mut Session, sheet: Option<u64>) -> Value {
+    let reply = run(s, "drawing.check", sheet.map_or_else(|| json!({}), |sheet| json!({"sheet": ids::encode(sheet)})));
+    reply["findings"].as_array().unwrap().iter().filter(|f| f["kind"] == "outside_sheet").cloned().collect()
+}
+
+/// The (kind, id) of each object a reply's `outside_sheet` names, in its order.
+fn outside(reply: &Value) -> Vec<(String, String)> {
+    let named = |f: &Value| (f["object"]["kind"].as_str().unwrap().to_string(), f["object"]["id"].as_str().unwrap().to_string());
+    reply.get("outside_sheet").and_then(Value::as_array).map(|found| found.iter().map(named).collect()).unwrap_or_default()
+}
+
+/// A sheet with everything on it exports with no `outside_sheet`. A view moved off the sheet and a
+/// dimension whose line is off the paper are both named, in every format, exactly as `drawing.check`
+/// lists them for that sheet, and the file is still written.
+#[test]
+fn a_view_and_a_dimension_off_the_sheet_are_named_and_the_file_is_written() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let dimension =
+        run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(top), "kind": {"length": {"edge": [50, 0, 20]}}}))["dimension"].clone();
+    let formats = ["svg", "png", "pdf", "dxf"];
+    for format in formats {
+        let (reply, _) = export_file(&mut s, json!({"sheet": ids::encode(sheet), "format": format}));
+        assert!(reply.get("outside_sheet").is_none(), "{format}: nothing is off a clean sheet: {reply}");
+    }
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": dimension, "set": {"offset_mm": 1000}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [-500, 150]}}}));
+    let checked = check_outside(&mut s, Some(sheet));
+    let schema = output_schema_for::<ExportResult>();
+    for format in formats {
+        let (reply, bytes) = export_file(&mut s, json!({"sheet": ids::encode(sheet), "format": format}));
+        assert!(!bytes.is_empty(), "{format}: the file is still written");
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{format}: {reply}");
+        let named = outside(&reply);
+        assert!(named.contains(&("view".into(), ids::encode(front))), "{format}: the view: {reply}");
+        assert!(named.contains(&("dimension".into(), dimension.as_str().unwrap().into())), "{format}: the dimension: {reply}");
+        assert_eq!(reply["outside_sheet"], checked, "{format}: as drawing.check lists them");
+    }
+    // An SVG in the reply names them too.
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(reply["outside_sheet"], checked, "{reply}");
+}
+
+/// A PDF of every sheet names each finding's sheet, as `drawing.check` of the whole drawing does;
+/// `sheets` narrows it to the pages written, in page order; `drawing.print` and the app's own print
+/// report the same.
+#[test]
+fn a_pdf_of_every_sheet_and_a_print_name_what_is_off_each_sheet() {
+    let (mut s, first, [front, _]) = front_and_top();
+    let second = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].clone();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [-500, 150]}}}));
+    let table =
+        run(&mut s, "drawing.table.add", json!({"sheet": second, "kind": "revision", "set": {"place": {"at": [-500, 100]}}}))["table"].clone();
+    let checked = check_outside(&mut s, None);
+    let sheets_named: Vec<&Value> = checked.as_array().unwrap().iter().map(|f| &f["sheet"]).collect();
+    assert!(sheets_named.contains(&&json!(ids::encode(first))) && sheets_named.contains(&&second), "{checked}");
+    let (all, _) = export_file(&mut s, json!({"format": "pdf"}));
+    assert_eq!(all["outside_sheet"], checked, "{all}");
+    assert!(outside(&all).contains(&("table".into(), table.as_str().unwrap().into())), "{all}");
+    // Chosen pages only, the first page's findings first.
+    let (one, _) = export_file(&mut s, json!({"format": "pdf", "sheets": [second]}));
+    assert_eq!(one["outside_sheet"], check_outside(&mut s, ids::decode(second.as_str().unwrap())), "{one}");
+    let (reversed, _) = export_file(&mut s, json!({"format": "pdf", "sheets": [second, ids::encode(first)]}));
+    let pages: Vec<&Value> = reversed["outside_sheet"].as_array().unwrap().iter().map(|f| &f["sheet"]).collect();
+    assert_eq!(pages.first(), Some(&&second), "{reversed}");
+    assert_eq!(pages.len(), checked.as_array().unwrap().len(), "{reversed}");
+    // Print: the command's reply and the app's own.
+    let folder = Folder::new("drawing-print-outside");
+    let printed = run(&mut s, "drawing.print", json!({"path": folder.path("Drawing.pdf")}));
+    assert_eq!(printed["outside_sheet"], checked, "{printed}");
+    let own = super::print_pdf(&mut s).unwrap();
+    assert_eq!(serde_json::to_value(&own.outside_sheet).unwrap(), checked, "the app's print: the same findings");
+}
+
+/// A plate 10 mm thick with an `nx` x `nz` grid of Ø4 through holes on 6 mm centres, 7 mm in from its
+/// edges (4 x 3 holes: 32 x 26 mm, #212), drawn from the front at 1:1 on A3 with no title block: the
+/// session and its sheet.
+fn plate_with_a_grid_of_holes(nx: usize, nz: usize) -> (Session, u64) {
+    let mut s = Session::default();
+    let (pitch, start) = (6.0, 7.0);
+    let length = start * 2.0 + pitch * (nx as f64 - 1.0);
+    let height = start * 2.0 + pitch * (nz as f64 - 1.0);
+    run(&mut s, "solid.box", json!({"length": length, "width": 10, "height": height, "body_name": "Block"}));
+    for i in 0..nx {
+        for j in 0..nz {
+            let (x, z) = (start + pitch * i as f64, start + pitch * j as f64);
+            let cut = json!({"radius": 2.0, "height": 12, "base": [x, -1, z], "axis": "Y", "operation": "cut", "targets": ["Block"]});
+            run(&mut s, "solid.cylinder", cut);
+        }
+    }
+    run(&mut s, "drawing.create", json!({"omit_first_sheet_title_block": true}));
+    run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    (s, sheet)
+}
+
+/// A grid of round holes exports to DXF (#212): each hole's outline is one turn, however the rounding
+/// of its pieces' sweeps adds up, so it is written as a CIRCLE, and the DXF reads back, by both
+/// readers, with every arc in it less than a turn.
+#[test]
+fn a_plate_with_a_grid_of_holes_exports_as_dxf() {
+    for (nx, nz) in [(4, 3), (1, 1), (2, 2), (3, 3)] {
+        let (mut s, sheet) = plate_with_a_grid_of_holes(nx, nz);
+        let reply = s.execute(CMD, &json!({"sheet": ids::encode(sheet), "format": "dxf"}));
+        let reply = reply.unwrap_or_else(|e| panic!("{nx} x {nz} holes: {e}"));
+        let text = reply["dxf"].as_str().unwrap();
+        let file = solidcraft_io::read_dxf_file(text).unwrap_or_else(|e| panic!("{nx} x {nz} holes: {e}"));
+        // Every arc as written: an ARC's ends apart, a bulge at most a half turn (|bulge| <= 1); each
+        // hole, a whole turn, a CIRCLE.
+        let (mut round, mut circles) = (0, 0);
+        for e in file.entities() {
+            match e.geometry() {
+                solidcraft_io::DxfShape::Circle { r, .. } => {
+                    assert!((r - 2.0).abs() < 1e-9, "{nx} x {nz} holes: circle of {r}");
+                    circles += 1;
+                }
+                solidcraft_io::DxfShape::Arc { a0, a1, .. } => {
+                    let sweep = (a1 - a0).rem_euclid(360.0);
+                    assert!(sweep.is_finite() && sweep > 0.0 && sweep < 360.0, "{nx} x {nz} holes: arc {a0}..{a1}");
+                    round += 1;
+                }
+                solidcraft_io::DxfShape::BulgedPolyline { vertices, .. } => {
+                    for v in vertices {
+                        assert!(v.bulge.is_finite() && v.bulge.abs() <= 1.0, "{nx} x {nz} holes: bulge {}", v.bulge);
+                        round += usize::from(v.bulge != 0.0);
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert_eq!((circles, round), (nx * nz, 0), "{nx} x {nz} holes: circles and other round pieces");
+        // The sketch reader's view of the same file: every arc's ends on its circle and apart.
+        let read = solidcraft_io::read_dxf(text).unwrap_or_else(|e| panic!("{nx} x {nz} holes: {e}"));
+        let mut holes = 0;
+        for g in &read {
+            match g {
+                solidcraft_io::Geom2::Circle(_, r) => holes += usize::from((r - 2.0).abs() < 1e-6),
+                solidcraft_io::Geom2::Arc { c, a, b } => {
+                    assert!(a.dist(*b) > 1e-9 && (a.dist(*c) - b.dist(*c)).abs() < 1e-6, "{nx} x {nz} holes: {g:?}");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(holes, nx * nz, "{nx} x {nz} holes: {read:?}");
     }
 }

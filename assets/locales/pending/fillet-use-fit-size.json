@@ -1,0 +1,47 @@
+{
+  "en": {
+    "ui.fillet_error_too_large_fit": "The radius is too large for the faces beside these edges. The largest that fits is {size}.",
+    "ui.fillet_use_fit_size": "Use {size}",
+    "ui.fillet_use_fit_size_tip": "Set the radius to the largest size that fits these edges."
+  },
+  "ar": {
+    "ui.fillet_error_too_large_fit": "نصف القطر كبير جدًا على الوجوه المجاورة لهذه الحواف. أكبر مقاس مناسب هو {size}.",
+    "ui.fillet_use_fit_size": "استخدام {size}",
+    "ui.fillet_use_fit_size_tip": "ضبط نصف القطر على أكبر مقاس يناسب هذه الحواف."
+  },
+  "de": {
+    "ui.fillet_error_too_large_fit": "Der Radius ist zu groß für die Flächen neben diesen Kanten. Der größte passende Wert ist {size}.",
+    "ui.fillet_use_fit_size": "{size} verwenden",
+    "ui.fillet_use_fit_size_tip": "Setzt den Radius auf den größten Wert, der an diese Kanten passt."
+  },
+  "es": {
+    "ui.fillet_error_too_large_fit": "El radio es demasiado grande para las caras junto a estas aristas. El mayor que cabe es {size}.",
+    "ui.fillet_use_fit_size": "Usar {size}",
+    "ui.fillet_use_fit_size_tip": "Establece el radio al mayor tamaño que cabe en estas aristas."
+  },
+  "fr": {
+    "ui.fillet_error_too_large_fit": "Le rayon est trop grand pour les faces adjacentes à ces arêtes. Le plus grand qui convient est {size}.",
+    "ui.fillet_use_fit_size": "Utiliser {size}",
+    "ui.fillet_use_fit_size_tip": "Définit le rayon sur la plus grande valeur qui convient à ces arêtes."
+  },
+  "he": {
+    "ui.fillet_error_too_large_fit": "הרדיוס גדול מדי עבור הפאות שליד הקצוות האלה. הגודל הגדול ביותר שמתאים הוא {size}.",
+    "ui.fillet_use_fit_size": "להשתמש ב-{size}",
+    "ui.fillet_use_fit_size_tip": "מגדיר את הרדיוס לגודל הגדול ביותר שמתאים לקצוות האלה."
+  },
+  "ja": {
+    "ui.fillet_error_too_large_fit": "これらのエッジの隣の面に対して半径が大きすぎます。収まる最大サイズは {size} です。",
+    "ui.fillet_use_fit_size": "{size} を使用",
+    "ui.fillet_use_fit_size_tip": "これらのエッジに収まる最大サイズに半径を設定します。"
+  },
+  "vi": {
+    "ui.fillet_error_too_large_fit": "Bán kính quá lớn so với các mặt bên cạnh những cạnh này. Kích thước lớn nhất vừa là {size}.",
+    "ui.fillet_use_fit_size": "Dùng {size}",
+    "ui.fillet_use_fit_size_tip": "Đặt bán kính thành kích thước lớn nhất vừa với các cạnh này."
+  },
+  "zh": {
+    "ui.fillet_error_too_large_fit": "半径对这些边旁边的面来说太大。可容纳的最大尺寸为 {size}。",
+    "ui.fillet_use_fit_size": "使用 {size}",
+    "ui.fillet_use_fit_size_tip": "将半径设为这些边可容纳的最大尺寸。"
+  }
+}

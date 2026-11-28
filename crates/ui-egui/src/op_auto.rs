@@ -13,13 +13,16 @@
 //! - With Preferences › Design › "Choose the operation automatically" off (`auto_operation`), no
 //!   window chooses: each keeps the operation it opens with, Extrude its own Join or Cut.
 //! - Only shown bodies take part: when some bodies are hidden, the window names the shown ones as
-//!   the feature's `targets` ([`scope_targets`]).
+//!   the feature's `targets` ([`scope_targets`]). Pipe, Thicken and an Emboss with no Target
+//!   Face don't choose, but this holds for them too, and for a saved New Body feature that an
+//!   edit changes to Join, Cut or Intersect.
 
 use serde_json::Value;
 use solidcraft_engine::Addition;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, OPS};
+use crate::dialogs_surface::Surf;
 
 /// Operation indices (see [`OPS`]).
 pub const NEW: usize = 0;
@@ -60,6 +63,12 @@ fn rule(kind: &Kind) -> Option<Rule> {
     }
 }
 
+/// Whether the window's Join, Cut or Intersect takes only the shown bodies: every window that
+/// chooses, and Pipe, Thicken and Emboss, which don't.
+fn scoped(kind: &Kind) -> bool {
+    rule(kind).is_some() || matches!(kind, Kind::Pipe { .. } | Kind::Surface(Surf::Thicken { .. }) | Kind::Emboss { .. })
+}
+
 fn operation(kind: &mut Kind) -> Option<&mut usize> {
     match kind {
         Kind::Extrude { operation, .. }
@@ -69,6 +78,21 @@ fn operation(kind: &mut Kind) -> Option<&mut usize> {
         | Kind::Primitive { operation, .. } => Some(operation),
         _ => None,
     }
+}
+
+/// Preferences › Tools › "Start in New Body" (`new_body_default`, #19870): a new window that
+/// chooses its operation opens in New Body instead, and keeps it as if it were picked by hand.
+pub fn start_new_body(app: &SolveApp, d: &mut Dialog) {
+    if !app.preferences.new_body_default || d.editing.is_some() || rule(&d.kind).is_none() {
+        return;
+    }
+    if let Some(op) = operation(&mut d.kind) {
+        *op = NEW;
+    }
+    if let Kind::Extrude { auto_op, .. } = &mut d.kind {
+        *auto_op = false;
+    }
+    d.op_auto.manual = true;
 }
 
 /// What a check found, with the Join it evaluated when the material joins.
@@ -305,21 +329,38 @@ pub fn hold_ok(d: &mut Dialog, ok: bool, again: &mut bool, cancel: bool) -> bool
 }
 
 /// The shown bodies as the `targets` of a new feature's Join, Cut or Intersect that names none,
-/// when some bodies are hidden: a hidden body is left alone. With none shown, such a feature has
-/// nothing to change.
+/// when some bodies are hidden: a hidden body is left alone. An Emboss or Deboss joins or cuts
+/// with no `operation`, so it is scoped the same way. With none shown, such a feature has
+/// nothing to change. An edit is scoped the same way only when the saved feature was a New Body,
+/// which has no bodies of its own to keep; any other edit keeps what it was saved with.
 pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Result<(), String> {
-    if rule(&d.kind).is_none() || d.editing.is_some() {
+    if !scoped(&d.kind) {
         return Ok(());
     }
-    let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
+    if let Some((id, _)) = d.editing {
+        let saved = app.session.doc.feature(id).and_then(solidcraft_engine::doc::feature_operation);
+        if saved != Some(solidcraft_engine::doc::Operation::NewBody) {
+            return Ok(());
+        }
+    }
+    let shown = match d.kind {
+        Kind::Extrude { operation: CUT, .. } => solidcraft_engine::shown_scope_for(&app.session, solidcraft_engine::doc::Operation::Cut),
+        _ => solidcraft_engine::shown_scope(&app.session),
+    };
+    let Some(shown) = shown else { return Ok(()) };
     for (_, p) in cmds {
-        let changes = p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
+        // An Emboss or Deboss joins or cuts with no `operation`. With a Target Face it names
+        // that face's body as its target, so `named` leaves it as it is.
+        let emboss = matches!(d.kind, Kind::Emboss { .. });
+        let changes = emboss || p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
         let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
         if !changes || named {
             continue;
         }
         if shown.is_empty() {
-            return Err(solidcraft_ui_text::tr("dialog.no_shown_body").to_string());
+            // Emboss has no New Body to choose instead.
+            let refusal = if emboss { "dialog.no_shown_body_show_one" } else { "dialog.no_shown_body" };
+            return Err(solidcraft_ui_text::tr(refusal).to_string());
         }
         if let Some(map) = p.as_object_mut() {
             map.insert("targets".into(), Value::from(shown.clone()));

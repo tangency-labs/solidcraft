@@ -39,9 +39,13 @@ mod construct;
 mod construct_auto;
 pub(crate) mod delete;
 pub(crate) mod diagnostics;
+mod dogbone;
 mod drawing;
+mod drawing_auto_mark;
 mod drawing_balloon;
 mod drawing_break;
+mod drawing_centre_line;
+mod drawing_centre_mark;
 mod drawing_check;
 mod drawing_dimension;
 pub(crate) mod drawing_export;
@@ -62,6 +66,7 @@ mod envelopes;
 mod face;
 mod features;
 mod features_more;
+mod hole_stacks;
 mod join_pieces;
 pub(crate) use bom::SAME_AS_COMPONENT;
 pub(crate) use bom::occurrence_bom_type;
@@ -86,6 +91,7 @@ pub use construct_auto::is_construct_tool;
 pub use design_link::LinkProblem;
 pub use design_link::LinkState;
 pub use drawing_dimension::preview_scene as drawing_dimension_preview;
+pub(crate) use drawing_sketch::refuse_outside_drawing;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use edit::pick_mode;
 pub(crate) use face::FaceRefForm;
@@ -94,25 +100,30 @@ pub(crate) use features::EdgeRefForm;
 pub(crate) use features::PLANE_FORMS;
 pub use features::auto_operation;
 pub(crate) use features::axis_dir_form;
+pub(crate) use features::axis_expr_form;
 pub(crate) use features::axis_line_object;
+pub(crate) use features::axis_param;
 pub use features::clearance_diameter;
 pub use features::clearance_sizes;
 pub(crate) use features::edge_ref_form;
 pub(crate) use features::explicit_plane;
 pub use features::extrude_reach;
 pub use features::head_counterbore;
+pub use features::head_countersink;
 pub use features::large_thread_size;
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::plane_name_problem;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::rail_fit_form;
 pub use features::shown_scope;
+pub use features::shown_scope_for;
 pub(crate) use features::sketch_key;
 pub(crate) use features::sweep_orientation;
 pub(crate) use features_more::MAX_SKETCH_ID;
 pub(crate) use features_more::SidePoint;
 pub(crate) use features_more::SketchFrameId;
 pub(crate) use features_more::axes_mask;
+pub(crate) use features_more::coil_placed_edge;
 pub(crate) use features_more::side_point;
 pub(crate) use features_more::sketch_frame_id;
 pub(crate) use file::GEOMETRY_MESSAGE;
@@ -128,14 +139,24 @@ pub use file::runs_plugin_importer;
 pub(crate) use file::up_form;
 pub(crate) use file::usable_path;
 pub use file::use_import_cache_dir;
+pub use frame::member_section_view;
 pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
 pub use joints::MAX_REACH_JOINTS;
+pub use joints::drive_preview;
 pub use joints::posed_joints;
 pub use joints::reach_from;
 pub use joints::reach_preview;
 pub use parts::part_length_label;
+pub use shaft_spline::SplineArc;
+pub use shaft_spline::SplineCircle;
+pub use shaft_spline::SplineMaster;
+pub use shaft_spline::SplineOutline;
+pub use shaft_spline::SplinePart;
+pub use shaft_spline::SplinePreview;
+pub use shaft_spline::SplineRefusal;
+pub use shaft_spline::shaft_spline_preview;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub(crate) use sketch::finish_model_edit;
@@ -153,6 +174,7 @@ pub use sketch_modify::break_shared_end;
 pub use sketch_modify::extend_arc_preview;
 pub use sketch_modify::extend_end_at;
 pub use sketch_modify::extend_preview;
+pub use sketch_modify::offset_leaves_out;
 pub use sketch_modify::trim_hover;
 pub use sketch_modify::trim_piece;
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
@@ -162,11 +184,13 @@ mod component_link;
 pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
+mod documents;
 mod file;
 mod file_library;
 pub(crate) use file_library::uses_file as file_library_uses_file;
-mod frame;
+pub mod frame;
 mod frame_end_cap;
+mod frame_gusset;
 mod frame_rotate_member;
 pub(crate) mod inspect;
 mod interference;
@@ -186,13 +210,20 @@ mod motion_simulate;
 mod notes;
 mod parts;
 mod plugin;
+#[cfg(test)]
+pub(crate) use plugin::shared_corners as plugin_shared_corners;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
+mod pulleys;
+#[cfg(test)]
+mod pulleys_tests;
+pub(crate) mod scan_align;
 mod script;
 mod section;
 mod selection;
 pub mod settings;
+mod shaft_spline;
 pub(crate) use clipboard::component_path_form;
 pub(crate) use clipboard::copy_keys;
 pub(crate) use component::base_transform;
@@ -212,6 +243,7 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod print_face;
+mod remove_history;
 mod render;
 pub(crate) use render::PreparedCapture;
 pub(crate) use render::prepare_capture_with_metadata;
@@ -227,6 +259,7 @@ mod script_tests;
 mod sheet;
 pub(crate) use sheet::DxfCurves;
 pub(crate) use sheet::DxfText;
+pub(crate) use sheet::DxfUnits;
 pub(crate) use sheet::FlangeType;
 pub(crate) use sheet::ThenStep;
 pub(crate) use sheet::bend_table_format;
@@ -234,6 +267,7 @@ pub(crate) use sheet::dxf_curves;
 pub(crate) use sheet::dxf_layers;
 pub(crate) use sheet::dxf_note_height;
 pub(crate) use sheet::dxf_text;
+pub(crate) use sheet::dxf_units;
 pub(crate) use sheet::flange_edge;
 pub(crate) use sheet::flange_edge_list;
 pub(crate) use sheet::flange_position;
@@ -275,6 +309,8 @@ mod sketch_equation;
 mod sketch_freeform;
 mod sketch_import;
 mod sketch_inspect;
+mod sketch_links;
+mod sketch_merge_lines;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::MAX_PROJECTED_ENTITIES;
@@ -284,6 +320,7 @@ pub(crate) use sketch_project::ref_form;
 mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
+mod socket_reach;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -293,6 +330,7 @@ mod tab_views;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
+mod weld;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -592,11 +630,24 @@ pub fn not_in_sketch(s: &Session) -> std::result::Result<(), String> {
 
 /// Every command, in toolbar order.
 pub fn command_specs() -> Vec<&'static CommandSpec> {
+    all_command_specs().to_vec()
+}
+
+/// Every command, in toolbar order, gathered once: the window looks commands up by id many
+/// times a frame (its buttons, menus and shortcuts), and gathering them from every module each
+/// time was most of what a lookup cost.
+fn all_command_specs() -> &'static [&'static CommandSpec] {
+    static ALL: std::sync::OnceLock<Vec<&'static CommandSpec>> = std::sync::OnceLock::new();
+    ALL.get_or_init(gather_command_specs)
+}
+
+fn gather_command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
     v.extend(sketch_construction::COMMANDS.iter());
     v.extend(sketch_divide::COMMANDS.iter());
+    v.extend(sketch_merge_lines::COMMANDS.iter());
     v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());
@@ -606,6 +657,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(point_cloud::COMMANDS.iter());
     v.extend(point_cloud_deviation::COMMANDS.iter());
+    v.extend(scan_align::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
@@ -613,7 +665,9 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(surface_match::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
+    v.extend(sketch_links::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
+    v.extend(dogbone::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
@@ -625,20 +679,27 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
+    v.extend(frame_gusset::COMMANDS.iter());
     v.extend(frame_rotate_member::COMMANDS.iter());
+    v.extend(weld::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
     v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
+    v.extend(hole_stacks::COMMANDS.iter());
+    v.extend(socket_reach::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
     v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(pulleys::COMMANDS.iter());
+    v.extend(shaft_spline::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
+    v.extend(remove_history::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
@@ -664,11 +725,15 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(tab_layouts::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
+    v.extend(documents::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(drawing::COMMANDS.iter());
     v.extend(drawing_balloon::COMMANDS.iter());
     v.extend(drawing_break::COMMANDS.iter());
+    v.extend(drawing_auto_mark::COMMANDS.iter());
+    v.extend(drawing_centre_line::COMMANDS.iter());
+    v.extend(drawing_centre_mark::COMMANDS.iter());
     v.extend(drawing_check::COMMANDS.iter());
     v.extend(drawing_image::COMMANDS.iter());
     v.extend(drawing_note::COMMANDS.iter());
@@ -699,9 +764,17 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
 /// classification, a host's check) decides on the id this returns, never the id as sent, so it
 /// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    static BY_ID: std::sync::OnceLock<std::collections::HashMap<&'static str, &'static CommandSpec>> = std::sync::OnceLock::new();
     let id = normalize_command_id(id)?;
-    let all = command_specs();
-    all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
+    let by_id = BY_ID.get_or_init(|| {
+        let mut by_id = std::collections::HashMap::new();
+        // The first command of an id wins, as a search in toolbar order finds it.
+        for c in all_command_specs() {
+            by_id.entry(c.id).or_insert(*c);
+        }
+        by_id
+    });
+    by_id.get(id).copied().or_else(|| all_command_specs().iter().find(|c| c.id.eq_ignore_ascii_case(id)).copied())
 }
 
 /// Whether two ids use common alternative verbs in the same namespace. This only ranks

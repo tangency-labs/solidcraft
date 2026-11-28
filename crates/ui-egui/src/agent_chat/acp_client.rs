@@ -82,6 +82,11 @@ pub struct AcpBackend {
     exited: bool,
     config_pending: Option<(u64, String)>,
     modern_config: bool,
+    /// The agent is Claude Code's adapter, as its command says ([`acp::is_claude_adapter`]),
+    /// decided once when it starts: only then are its read tools on.
+    claude: bool,
+    /// Its own tool calls in the running turn ([`acp::ClaudeCalls`]).
+    calls: acp::ClaudeCalls,
 }
 
 impl AcpBackend {
@@ -119,6 +124,8 @@ impl AcpBackend {
             exited: false,
             config_pending: None,
             modern_config: false,
+            claude: acp::is_claude_adapter(argv),
+            calls: acp::ClaudeCalls::default(),
         };
         b.request(Pending::Initialize, "initialize", acp::initialize_params(env!("CARGO_PKG_VERSION")));
         Ok(b)
@@ -142,7 +149,7 @@ impl AcpBackend {
     fn new_session(&mut self) {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
-        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
+        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note, self.claude);
         self.request(Pending::SessionNew, "session/new", params);
     }
 
@@ -243,12 +250,26 @@ impl AcpBackend {
                 }
             }
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
-            Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
-            Incoming::Plan(p) => out.push(Event::Plan(p)),
-            Incoming::Permission { rpc, title, kind, options } => {
+            Incoming::Tool { id, title, kind, status, input, output, claude_tool } => {
+                let unasked = self.calls.update(&id, claude_tool.as_deref(), status);
+                out.push(Event::Tool { id, title, kind, status, input, output });
+                if let Some(tool) = unasked {
+                    out.push(Event::Unasked { tool });
+                }
+            }
+            // Accept updates only during the matching session's prompt. A prompt reply earlier in
+            // this poll can start a queued turn when the chat reads the events.
+            Incoming::Plan { session, entries }
+                if self.session.as_deref() == Some(session.as_str()) && self.pending.values().any(|p| *p == Pending::Prompt) =>
+            {
+                out.push(Event::Plan(entries));
+            }
+            Incoming::Plan { .. } => {}
+            Incoming::Permission { rpc, title, kind, options, reads, writes, plan, call, claude_tool } => {
+                let claude_tool = self.calls.question(call.as_deref(), claude_tool.as_deref());
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
-                out.push(Event::Permission { key: self.next_key, title, kind, options });
+                out.push(Event::Permission { key: self.next_key, title, kind, options, reads, writes, plan, claude_tool });
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),
@@ -331,6 +352,7 @@ impl ChatBackend for AcpBackend {
     }
 
     fn prompt(&mut self, parts: &[PromptPart]) {
+        self.calls.clear();
         if let Some(s) = self.session.clone() {
             self.request(Pending::Prompt, "session/prompt", acp::prompt_params(&s, parts));
         }
@@ -394,6 +416,12 @@ impl ChatBackend for AcpBackend {
         self.note = acp::system_note(text);
     }
 
+    fn set_allow_paths(&mut self, paths: &[std::path::PathBuf]) {
+        if let Some(bridge) = self.bridge.as_mut() {
+            bridge.allow_paths = paths.to_vec();
+        }
+    }
+
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         if let Some(rpc) = self.permissions.remove(&key) {
             self.send(&acp::permission_reply(rpc, option));
@@ -428,6 +456,10 @@ impl ChatBackend for AcpBackend {
 
     fn pid(&self) -> Option<u32> {
         self.proc.as_ref().and_then(AgentProcess::pid)
+    }
+
+    fn claude_code(&self) -> bool {
+        self.claude
     }
 
     fn shutdown(&mut self, wait: bool) {
@@ -479,7 +511,7 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
     let init = wait_for(&p, 1);
     let session_cwd = if acp::runs_in_wsl(argv) { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     let result = init.and_then(|v| {
-        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE)));
+        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE, acp::is_claude_adapter(argv))));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
             solidcraft_ui_text::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])
@@ -558,6 +590,45 @@ done
         backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
         backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
         Ok(backend)
+    }
+
+    #[test]
+    fn plan_updates_belong_to_the_active_session_and_pending_prompt() {
+        let mut backend = ready_backend().unwrap();
+        let mut events = Vec::new();
+        let plan = |session: &str, content: &str, status: &str| {
+            let message = json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session, "update": {"sessionUpdate": "plan", "entries": [{"content": content, "status": status}]}
+                }
+            });
+            acp::parse(&message.to_string()).unwrap()
+        };
+
+        backend.handle(plan("s1", "Before prompt", "in_progress"), &mut events);
+        backend.prompt(&[PromptPart::Text("make a plate".into())]);
+        let prompt = backend.next_id;
+        backend.handle(plan("old-session", "Wrong session", "in_progress"), &mut events);
+        assert!(events.is_empty());
+
+        backend.handle(plan("s1", "Make plate", "in_progress"), &mut events);
+        backend.handle(plan("s1", "Make plate", "completed"), &mut events);
+        backend.handle(Incoming::Reply { id: prompt, result: Ok(json!({"stopReason":"end_turn"})) }, &mut events);
+        backend.handle(plan("s1", "Late update from the previous prompt", "in_progress"), &mut events);
+        assert!(
+            matches!(events.as_slice(), [Event::Plan(active), Event::Plan(completed), Event::TurnEnded { .. }]
+                if active.as_slice() == [("Make plate".to_owned(), "in_progress".to_owned())]
+                    && completed.as_slice() == [("Make plate".to_owned(), "completed".to_owned())]),
+            "{events:?}"
+        );
+
+        events.clear();
+        backend.prompt(&[PromptPart::Text("add a hole".into())]);
+        backend.handle(plan("s1", "Drill hole", "in_progress"), &mut events);
+        assert!(matches!(events.as_slice(), [Event::Plan(active)] if active.as_slice() == [("Drill hole".to_owned(), "in_progress".to_owned())]));
+        backend.shutdown(true);
     }
 
     /// Wait for native cleanup, then supply the replacement's initialize reply.

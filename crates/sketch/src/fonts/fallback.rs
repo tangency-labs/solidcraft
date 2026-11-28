@@ -185,6 +185,31 @@ pub const HEBREW: Candidates = &[
     ),
 ];
 
+/// Georgian: Mkhedruli, Asomtavruli and Mtavruli are not in egui's built-in faces. The interface
+/// uses a candidate only if it draws Georgian; drawings do not search this list yet.
+pub const GEORGIAN: Candidates = &[
+    // Windows
+    ("Sylfaen", &["C:\\Windows\\Fonts\\sylfaen.ttf"]),
+    ("Segoe UI", &["C:\\Windows\\Fonts\\segoeui.ttf"]),
+    // macOS
+    ("SF Georgian", &["/System/Library/Fonts/SFGeorgian.ttf"]),
+    // Linux
+    (
+        "Noto Sans Georgian",
+        &[
+            "/usr/share/fonts/noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/google-noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/google-noto-vf/NotoSansGeorgian[wght].ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansGeorgian-Regular.ttf",
+        ],
+    ),
+    (
+        "DejaVu Sans",
+        &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"],
+    ),
+];
+
 /// Arabic, with the joining forms a shaper uses. egui's built-in faces have none.
 pub const ARABIC: Candidates = &[
     // Windows
@@ -213,6 +238,40 @@ pub const ARABIC: Candidates = &[
         "DejaVu Sans",
         &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"],
     ),
+];
+
+/// Lao: Noto Sans Lao when installed, then system Lao faces (Leelawadee UI on Windows
+/// also covers Lao). The interface uses a candidate only if it draws Lao.
+pub const LAO: Candidates = &[
+    // Windows
+    (
+        "Noto Sans Lao",
+        &[
+            "C:\\Windows\\Fonts\\NotoSansLao-Regular.ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao[wdth,wght].ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao-VariableFont_wdth,wght.ttf",
+        ],
+    ),
+    ("Noto Sans Lao UI", &["C:\\Windows\\Fonts\\NotoSansLaoUI-Regular.ttf"]),
+    ("Lao UI", &["C:\\Windows\\Fonts\\LaoUI.ttf"]),
+    ("Leelawadee UI", &["C:\\Windows\\Fonts\\LeelawUI.ttf"]),
+    ("Leelawadee", &["C:\\Windows\\Fonts\\leelawad.ttf"]),
+    // macOS
+    ("Noto Sans Lao", &["/Library/Fonts/NotoSansLao-Regular.ttf"]),
+    ("Lao Sangam MN", &["/System/Library/Fonts/Supplemental/Lao Sangam MN.ttf", "/System/Library/Fonts/Lao Sangam MN.ttf"]),
+    ("Lao MN", &["/System/Library/Fonts/Supplemental/Lao MN.ttc", "/System/Library/Fonts/Lao MN.ttc"]),
+    // Linux
+    (
+        "Noto Sans Lao",
+        &[
+            "/usr/share/fonts/noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/google-noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/google-noto-vf/NotoSansLao[wdth,wght].ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansLao-Regular.ttf",
+        ],
+    ),
+    ("Phetsarath OT", &["/usr/share/fonts/truetype/phetsarath/Phetsarath_OT.ttf", "/usr/share/fonts/opentype/phetsarath/Phetsarath_OT.otf"]),
 ];
 
 /// Largest character map read: a full CJK font's is about a megabyte.

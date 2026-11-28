@@ -247,6 +247,8 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         (doc.point_clouds.is_empty(), "point clouds"),
         (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
         (doc.named_views.is_empty(), "named views"),
+        (doc.home_view.is_none(), "the Home view"),
+        (doc.saved_sections.is_empty(), "saved section analyses"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
         (doc.visibility.is_empty(), "hidden items"),
@@ -626,6 +628,24 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         // The offset and the rest angle travel as they are stored, zero
         // included: a value left out would be re-inferred at creation from
         // wherever the parts sit (`least_turn_angle`), not restored.
+        match (&j.exprs.offset_x, j.offset_xy[0]) {
+            (Some(e), _) => {
+                o.insert("offset_x".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_x".into(), json!(v));
+            }
+            _ => {}
+        }
+        match (&j.exprs.offset_y, j.offset_xy[1]) {
+            (Some(e), _) => {
+                o.insert("offset_y".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_y".into(), json!(v));
+            }
+            _ => {}
+        }
         match (&j.exprs.offset, j.offset) {
             (Some(e), _) => {
                 o.insert("offset".into(), json!(e));
@@ -960,6 +980,8 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
             XRef::Dir(d) => json!(dir(*d)),
             XRef::Face { face, pick: None } => json!(face),
             XRef::Face { pick: Some(p), .. } => json!({"face": world(*p)}),
+            XRef::Reference { reference, reverse } => json!({"reference":reference,"reverse":reverse}),
+            XRef::Planar { planar_face, reverse } => json!({"planar_face":planar_face,"reverse":reverse}),
         }
     };
     match &origin.snap {
@@ -992,6 +1014,13 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
         }
         Snap::FaceCenter { pick, x, .. } => {
             arg.insert("face".into(), json!(world(*pick)));
+            if let Some(x) = x {
+                arg.insert("x".into(), xref(x));
+            }
+        }
+        Snap::SketchPoint { sketch, point, x } => {
+            arg.insert("sketch".into(), json!(sketch));
+            arg.insert("point".into(), json!(point));
             if let Some(x) = x {
                 arg.insert("x".into(), xref(x));
             }
@@ -1078,7 +1107,7 @@ fn rebuilt_part(doc: &Document, comp: u64, part: &solidcraft_doc::StandardPart, 
     Ok(fresh)
 }
 
-/// A component's part properties and free-text properties as one
+/// A component's part properties, free-text properties and name split rule as one
 /// `component.metadata.set` step (the constructors seed defaults the design
 /// may have edited), with the keys the command would refuse listed out. The
 /// well-known keys the constructors seed and the design dropped are cleared.
@@ -1099,7 +1128,7 @@ fn component_metadata_step(c: &solidcraft_doc::Component) -> Result<(Option<Valu
             values.insert((*key).to_string(), Value::Null);
         }
     }
-    if values.is_empty() && c.properties.is_empty() {
+    if values.is_empty() && c.properties.is_empty() && c.name_split.is_none() {
         return Ok((None, odd));
     }
     let mut params = Map::new();
@@ -1107,6 +1136,9 @@ fn component_metadata_step(c: &solidcraft_doc::Component) -> Result<(Option<Valu
     params.insert("values".into(), Value::Object(values));
     if !c.properties.is_empty() {
         params.insert("properties".into(), json!(c.properties));
+    }
+    if let Some(rule) = &c.name_split {
+        params.insert("name_split".into(), json!(rule));
     }
     Ok((Some(step("component.metadata.set", Value::Object(params))), odd))
 }

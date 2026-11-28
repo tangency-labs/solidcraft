@@ -158,20 +158,16 @@ fn edges(d: &Dialog) -> [Option<Vec3>; 2] {
     })
 }
 
-/// A point `[x, y, z]` of a dialog's stored parameters.
-fn vec3(v: &Value) -> Option<Vec3> {
-    let a = v.as_array()?;
-    let c = |i: usize| a.get(i).and_then(Value::as_f64).filter(|x| x.is_finite());
-    (a.len() == 3).then(|| Some(Vec3::new(c(0)?, c(1)?, c(2)?))).flatten()
-}
-
 /// The way the hole drills at `at`: as it was made (editing), else into the face there. A
 /// cylinder's: into the face it stands on, against its axis.
 fn direction(s: &Session, d: &Dialog, at: Vec3) -> Option<Vec3> {
     if let Kind::Primitive { at: Some((_, normal)), .. } = &d.kind {
         return normal.map(|n| -n);
     }
-    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
+    d.extra
+        .get("direction")
+        .and_then(|v| crate::dialogs::axis_now(s, v))
+        .or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
 }
 
 /// The face's frame at the place for the picked edges (and which reference inputs they are), found
@@ -482,7 +478,14 @@ fn nearest_edge(s: &Session, at: Vec3, p: Vec3) -> Option<Sel> {
 /// The reference distances on the canvas: a dimension from each edge to the hole's centre, and a
 /// box beside it to type the distance in. Whether a box took the keyboard (a newly picked edge's),
 /// which the dialog's main value then leaves to it.
-pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> bool {
+pub(crate) fn canvas(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    d: &mut Dialog,
+    box_place: crate::canvas::BoxPlace<'_>,
+) -> bool {
     if !takes(d) {
         return false;
     }
@@ -509,17 +512,13 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
             took = true;
         }
         let Some(value) = refs.distance.get_mut(*k) else { continue };
-        let at = box_beyond(a, b);
-        let r = crate::canvas::value_box_in(
-            ui,
-            (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k))),
-            label,
-            value,
-            at,
-            focus,
-            false,
-            crate::canvas::box_place(app, proj),
-        );
+        let ids = (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k)));
+        let (at, pivot) = box_beyond(a, b);
+        let size = crate::canvas::box_size(ui, ids.0, label, None);
+        let offset = pivot.pos_in_rect(&egui::Rect::from_min_size(Pos2::ZERO, size)).to_vec2();
+        let rect = egui::Rect::from_min_size(at - offset, size);
+        let rect = crate::place_gizmo::yield_box_in(ui, ids.0, b, rect);
+        let r = crate::canvas::value_box_in(ui, ids, label, value, (rect.min + offset, pivot), focus, false, box_place);
         if let Some(r) = r {
             crate::scenario::publish_handle(&format!("canvas:{label}"), r.center());
         }

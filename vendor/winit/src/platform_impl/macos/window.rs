@@ -49,6 +49,12 @@ impl Window {
         self.delegate.get_on_main(|delegate| f(delegate))
     }
 
+    /// SolidCraft: the delegate, for a window this one owns to register with it.
+    #[inline]
+    pub(crate) fn delegate(&self, mtm: MainThreadMarker) -> &WindowDelegate {
+        self.delegate.get(mtm)
+    }
+
     #[cfg(feature = "rwh_06")]
     #[inline]
     pub(crate) fn raw_window_handle_rwh_06(

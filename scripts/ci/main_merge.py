@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Is this pull request push only a merge of main into a change that already passed CI?
+"""Did this pull request's change already pass CI, so this run need not test it again?
 
     python3 -I scripts/ci/main_merge.py --base BASE_SHA --head HEAD_SHA --repo OWNER/NAME \
-        --pr NUMBER --head-repo OWNER/NAME --head-ref BRANCH
+        --pr NUMBER --head-repo OWNER/NAME --head-ref BRANCH [--run-id ID --attempt N]
 
-Prints `carried=<url of the passing run>` when all of these hold, else `carried=`:
+Prints `carried=<url of the passing run>` when the change passed already, else `carried=`. It
+passed already when any of these holds:
+  - this very commit passed in another run of this pull request with the test shards (a label
+    added again, approved-for-ci after a pass, a reopen, ready for review again);
+  - this run's previous attempt passed with the shards ("Re-run all jobs" after a pass);
+  - a commit of this pull request with the same tree (`git rev-parse HEAD^{tree}`, the same files
+    exactly) passed with the shards: a rebase or a squash that changed nothing, a commit message
+    reworded;
+  - it is only a merge of main into a change that passed, when all of these hold:
   - HEAD is a merge commit whose second parent is on main (an ancestor of BASE): "Merge branch
     'main'", or GitHub's Update branch button;
   - the pull request's own change is the same before and after the merge (equal `git patch-id
@@ -25,6 +33,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 
 API = "https://api.github.com"
@@ -100,6 +109,52 @@ def passing_run(repo, sha, token, pr, head_repo, head_ref):
     return ""
 
 
+def previous_attempt(repo, run_id, attempt, token):
+    """URL of this run's previous attempt when it passed with the test shards, else ""."""
+    if attempt < 2:
+        return ""
+    prev = get(f"{API}/repos/{repo}/actions/runs/{run_id}/attempts/{attempt - 1}", token)
+    if prev.get("conclusion") != "success":
+        return ""
+    jobs = get(f"{API}/repos/{repo}/actions/runs/{run_id}/attempts/{attempt - 1}/jobs?per_page=100", token).get("jobs", [])
+    shards = [j for j in jobs if j.get("name", "").startswith(SHARD_PREFIX)]
+    if shards and all(j.get("conclusion") == "success" for j in shards):
+        return prev.get("html_url", "")
+    return ""
+
+
+def tree_of(repo, sha, token):
+    """The tree of `sha`: from the local clone, or the API for a commit the clone lacks
+    (a force-pushed one)."""
+    try:
+        return git("rev-parse", f"{sha}^{{tree}}").strip()
+    except subprocess.CalledProcessError:
+        return get(f"{API}/repos/{repo}/commits/{sha}", token).get("commit", {}).get("tree", {}).get("sha", "")
+
+
+# Earlier heads of the pull request looked at for the same tree (each may cost an API call or two).
+MAX_TREES = 5
+
+
+def same_tree_run(repo, head, token, pr, head_repo, head_ref):
+    """URL of a passing run of an earlier head of this pull request with HEAD's exact tree."""
+    tree = git("rev-parse", f"{head}^{{tree}}").strip()
+    runs = get(f"{API}/repos/{repo}/actions/workflows/ci.yml/runs?branch={urllib.parse.quote(head_ref, safe='')}&event=pull_request&status=success&per_page=30", token)
+    seen = set()
+    for run in runs.get("workflow_runs", []):
+        sha = run.get("head_sha", "")
+        if sha == head or sha in seen or not same_pull_request(run, pr, head_repo, head_ref):
+            continue
+        seen.add(sha)
+        if len(seen) > MAX_TREES:
+            break
+        if tree_of(repo, sha, token) == tree:
+            url = passing_run(repo, sha, token, pr, head_repo, head_ref)
+            if url:
+                return sha, url
+    return "", ""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
@@ -108,11 +163,25 @@ def main():
     ap.add_argument("--pr", required=True, type=int)
     ap.add_argument("--head-repo", required=True)
     ap.add_argument("--head-ref", required=True)
+    ap.add_argument("--run-id", default="")
+    ap.add_argument("--attempt", type=int, default=1)
     a = ap.parse_args()
     carried = ""
     try:
         token = os.environ.get("GH_TOKEN", "")
-        for change in merge_chain(a.base, a.head) if token else []:
+        if token and a.run_id:
+            carried = previous_attempt(a.repo, a.run_id, a.attempt, token)
+            if carried:
+                print(f"attempt {a.attempt - 1} of this run passed: {carried}", file=sys.stderr)
+        if token and not carried:
+            carried = passing_run(a.repo, a.head, token, a.pr, a.head_repo, a.head_ref)
+            if carried:
+                print(f"{a.head} already passed: {carried}", file=sys.stderr)
+        if token and not carried:
+            sha, carried = same_tree_run(a.repo, a.head, token, a.pr, a.head_repo, a.head_ref)
+            if carried:
+                print(f"{a.head} has the tree of {sha}, which passed: {carried}", file=sys.stderr)
+        for change in merge_chain(a.base, a.head) if token and not carried else []:
             carried = passing_run(a.repo, change, token, a.pr, a.head_repo, a.head_ref)
             if carried:
                 print(f"{a.head} merges main into {change}, which passed: {carried}", file=sys.stderr)
