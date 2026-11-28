@@ -167,9 +167,10 @@ pub(crate) struct Field {
     /// Whether an option names a larger `x-solidcraft-image`: the list then shows a big picture of
     /// the highlighted option.
     pub(crate) pictured: bool,
-    /// `x-solidcraft-choice` asks for the options as a row of icon buttons, drawn when every
-    /// option's picture loaded and the row fits.
-    pub(crate) buttons: bool,
+    /// The ui-kit control `x-solidcraft-control` names for a choice (`dropdown`, `dropdown_icons`,
+    /// `segmented`, `segmented_icons`) or a list (`segmented_icons`, `checkbox`); `None` draws the
+    /// default: a dropdown, or one checkbox per option.
+    pub(crate) control: Option<String>,
     conditions: FieldConditions,
     order: usize,
     pub(crate) visible: bool,
@@ -361,14 +362,14 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         return selection_field(key, p, required);
     }
     let choice = !list && (p.contains_key("enum") || p.contains_key("oneOf"));
-    use craft_plugin::layout::CHOICE;
+    use craft_plugin::layout::CONTROL;
     let allowed: &[&str] = match (kind, choice) {
         ("number", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"],
         ("integer", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
         ("boolean", false) => &[],
-        ("array", false) => &["items", "uniqueItems", "minItems", "maxItems", CHOICE],
+        ("array", false) => &["items", "uniqueItems", "minItems", "maxItems", CONTROL],
         // A list of values, or of `{"const": value, "title": shown}` options; not both.
-        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf", "minLength", "maxLength", "format", CHOICE],
+        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf", "minLength", "maxLength", "format", CONTROL],
         ("string", false) => &["minLength", "maxLength", "format", craft_plugin::FONT_KEY],
         _ => return None,
     };
@@ -530,7 +531,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             swatches,
             pictures,
             pictured,
-            buttons: p.contains_key(CHOICE),
+            control: p.get(CONTROL).and_then(Value::as_str).map(str::to_owned),
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -615,7 +616,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             swatches: Vec::new(),
             pictures: Vec::new(),
             pictured: false,
-            buttons: false,
+            control: None,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -3468,27 +3469,43 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                 response
             } else {
                 let before_index = index;
-                let response = match pictures {
-                    // A row of icon buttons; the dropdown below when it does not fit.
-                    Some(pictures) if field.buttons => ui_kit::row(ui, &label, |ui| {
-                        if let Some((response, clicked)) = choice_buttons(ui, field, titles, &pictures, |i| *chosen == Some(i)) {
-                            if clicked.is_some() {
-                                *chosen = clicked;
-                            }
+                let mut picked = None;
+                let response = match (field.control.as_deref(), pictures) {
+                    // The built-in dialogs' icon segments; the dropdown when they get too narrow.
+                    (Some("segmented_icons"), Some(pictures)) => ui_kit::row(ui, &label, |ui| {
+                        if segments_fit(ui, pictures.len()) {
+                            let (response, clicked) = icon_segments(ui, field, titles, &pictures, |i| *chosen == Some(i));
+                            picked = clicked;
                             return response;
                         }
                         let lead_icon = lead.then_some(crate::plugin_images::GENERIC);
                         let options: Vec<(&str, &str)> = shown.iter().copied().zip(lead_icon.into_iter().chain(pictures)).collect();
                         ui_kit::dropdown_icons(ui, &id, &mut index, &options)
                     }),
-                    Some(pictures) => {
+                    (Some("segmented"), _) => ui_kit::row(ui, &label, |ui| {
+                        let keys: Vec<String> = field.available.iter().map(|i| format!("plugin_dialog:choice:{}:{i}", field.key)).collect();
+                        let targets: Vec<&str> = keys.iter().map(String::as_str).collect();
+                        let options: Vec<&str> = field.available.iter().filter_map(|i| titles.get(*i).map(String::as_str)).collect();
+                        let states: Vec<bool> = field.available.iter().map(|i| *chosen == Some(*i)).collect();
+                        let mut at = 0;
+                        let config = ui_kit::Segments { states: &states, targets: &targets, ..Default::default() };
+                        let response = clicked_response(ui, &field.key, |ui| ui_kit::segmented(ui, &mut at, &options, config));
+                        if response.changed() {
+                            picked = field.available.get(at).copied();
+                        }
+                        response
+                    }),
+                    (control, Some(pictures)) if control != Some("dropdown") => {
                         // "Choose…" has the generic plugin icon.
                         let lead_icon = lead.then_some(crate::plugin_images::GENERIC);
                         let options: Vec<(&str, &str)> = shown.iter().copied().zip(lead_icon.into_iter().chain(pictures)).collect();
                         ui_kit::row(ui, &label, |ui| ui_kit::dropdown_icons(ui, &id, &mut index, &options))
                     }
-                    None => ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &id, &mut index, &shown)),
+                    _ => ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &id, &mut index, &shown)),
                 };
+                if picked.is_some() {
+                    *chosen = picked;
+                }
                 if index != before_index {
                     *chosen = (if lead { index.checked_sub(1) } else { Some(index) }).and_then(|i| field.available.get(i).copied());
                 }
@@ -3507,9 +3524,10 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
             };
             let mut checkboxes = false;
             let first = ui_kit::row(ui, &label, |ui| {
-                if let Some(pictures) = pictures.as_ref().filter(|_| field.buttons)
-                    && let Some((response, clicked)) = choice_buttons(ui, field, titles, pictures, |i| chosen.contains(&i))
+                if let Some(pictures) = pictures.as_ref().filter(|_| field.control.as_deref() == Some("segmented_icons"))
+                    && segments_fit(ui, pictures.len())
                 {
+                    let (response, clicked) = icon_segments(ui, field, titles, pictures, |i| chosen.contains(&i));
                     if let Some(index) = clicked {
                         toggle_option(chosen, index);
                     }
@@ -3574,26 +3592,44 @@ fn field_pictures<'a>(plugin: &'a Listed, field: &Field) -> Option<Vec<&'a str>>
     field.available.iter().map(|i| field.images.get(*i).and_then(|rel| plugin.images.get(rel)).map(String::as_str)).collect()
 }
 
-/// The available options as icon buttons, with their titles as tooltips; `on` takes an option's
-/// schema index. `None` when the row does not fit; else the response and the clicked option.
-fn choice_buttons(
+/// Whether `count` icon segments are each at least a row high wide in the space left.
+fn segments_fit(ui: &egui::Ui, count: usize) -> bool {
+    count > 0 && ui.available_width() >= count as f32 * ui_kit::row_height()
+}
+
+/// The available options as ui-kit's `segmented_icons`, with their titles as tooltips; `on` takes
+/// an option's schema index. The response is changed on a click, with the clicked option.
+fn icon_segments(
     ui: &mut egui::Ui,
     field: &Field,
     titles: &[String],
     pictures: &[&str],
     on: impl Fn(usize) -> bool,
-) -> Option<(egui::Response, Option<usize>)> {
+) -> (egui::Response, Option<usize>) {
     let keys: Vec<String> = field.available.iter().map(|i| format!("plugin_dialog:choice:{}:{i}", field.key)).collect();
-    let options: Vec<ui_kit::IconChoice<'_>> = field
+    let options: Vec<ui_kit::IconSegment<'_>> = field
         .available
         .iter()
         .zip(&keys)
         .zip(pictures)
-        .map(|((i, key), icon)| ui_kit::IconChoice { key, icon, tip: titles.get(*i).map_or("", String::as_str) })
+        .map(|((i, key), icon)| ui_kit::IconSegment { key, icon, tip: titles.get(*i).cloned().unwrap_or_default() })
         .collect();
     let states: Vec<bool> = field.available.iter().map(|i| on(*i)).collect();
-    let (response, clicked) = ui_kit::icon_choices(ui, &options, &states)?;
-    Some((response, clicked.and_then(|at| field.available.get(at).copied())))
+    let mut at = usize::MAX;
+    let response = clicked_response(ui, &field.key, |ui| ui_kit::segmented_icons(ui, &mut at, &options, &states));
+    let clicked = response.changed().then(|| field.available.get(at).copied()).flatten();
+    (response, clicked)
+}
+
+/// A ui-kit control that reports a click as a bool, drawn under its own id as a response that is
+/// changed on the click.
+fn clicked_response(ui: &mut egui::Ui, key: &str, add: impl FnOnce(&mut egui::Ui) -> bool) -> egui::Response {
+    let inner = ui.push_id(key, add);
+    let mut response = inner.response;
+    if inner.inner {
+        response.mark_changed();
+    }
+    response
 }
 
 /// Same background discovery and process cache as sketch text. The built-in name is a real

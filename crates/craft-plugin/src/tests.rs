@@ -856,29 +856,36 @@ fn dialog_layout_annotations_are_checked_at_load() {
 }
 
 #[test]
-fn icon_button_choices_are_checked_at_load_and_lists_of_them_take_distinct_options() {
-    let buttons = json!({"version":1,"style":"buttons"});
+fn a_choice_names_the_ui_kit_control_it_is_drawn_with_and_lists_of_them_take_distinct_options() {
     let options = json!([{"const":"a","x-solidcraft-icon":"a.svg"},{"const":"b","x-solidcraft-icon":"b.svg"}]);
-    let one = json!({"type":"string","oneOf":options,"x-solidcraft-choice":buttons});
-    let many = json!({"type":"array","uniqueItems":true,"items":{"type":"string","oneOf":options},"x-solidcraft-choice":buttons});
+    let one = json!({"type":"string","oneOf":options});
+    let many = json!({"type":"array","uniqueItems":true,"items":{"type":"string","oneOf":options}});
+    let with = |property: &Value, control: Value| {
+        let mut property = property.clone();
+        property["x-solidcraft-control"] = control;
+        property
+    };
     let load = |property: &Value| {
         let mut value = manifest();
         value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"p":property}}}]);
         parse(&value)
     };
-    load(&one).unwrap();
-    load(&many).unwrap();
-    let refused = |property: Value| matches!(load(&property), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("properties.p.x-solidcraft-choice"));
-    for annotation in [json!({"version":2,"style":"buttons"}), json!({"version":1,"style":"tiles"}), json!({"version":1}), json!("buttons")] {
-        let mut property = one.clone();
-        property["x-solidcraft-choice"] = annotation.clone();
-        assert!(refused(property), "{annotation}");
+    let refused = |property: Value| matches!(load(&property), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("properties.p.x-solidcraft-control"));
+    for control in ["dropdown", "dropdown_icons", "segmented", "segmented_icons"] {
+        load(&with(&one, json!(control))).unwrap();
     }
-    let mut repeating = many.clone();
+    for control in ["segmented_icons", "checkbox"] {
+        load(&with(&many, json!(control))).unwrap();
+    }
+    for control in [json!("checkbox"), json!("icon_choices"), json!("Dropdown"), json!({"control":"dropdown"}), json!(1)] {
+        assert!(refused(with(&one, control.clone())), "{control}");
+    }
+    assert!(refused(with(&many, json!("dropdown"))), "a list takes no dropdown");
+    let mut repeating = with(&many, json!("checkbox"));
     repeating["uniqueItems"] = json!(false);
     assert!(refused(repeating), "a list of choices needs uniqueItems");
-    assert!(refused(json!({"type":"number","x-solidcraft-choice":buttons})));
-    assert!(refused(json!({"type":"array","uniqueItems":true,"items":{"type":"object"},"x-solidcraft-choice":buttons})));
+    assert!(refused(json!({"type":"number","x-solidcraft-control":"segmented"})));
+    assert!(refused(json!({"type":"array","uniqueItems":true,"items":{"type":"object"},"x-solidcraft-control":"checkbox"})));
 
     // The pictures of a list's options are package images like a choice's.
     let schema = json!({"type":"object","properties":{"p":many}});

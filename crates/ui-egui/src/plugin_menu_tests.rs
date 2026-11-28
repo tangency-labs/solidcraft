@@ -933,7 +933,7 @@ fn a_list_of_options_sends_the_ticked_consts_in_option_order_within_its_counts()
         json!({"type":"object","required":["sides"],"properties":{"sides":p}})
     };
     let mut fields = form(&sides(json!({}))).expect("drawn");
-    assert!(!fields[0].0.buttons, "checkboxes without the annotation");
+    assert_eq!(fields[0].0.control, None, "checkboxes without a control named");
     assert_eq!(fields[0].1, Input::Choices(vec![0, 1]), "the default, in option order");
     assert_eq!(params(&fields), Ok(json!({"sides":["front","back"]})));
     let mut chosen = vec![0, 2];
@@ -954,8 +954,8 @@ fn a_list_of_options_sends_the_ticked_consts_in_option_order_within_its_counts()
     assert_eq!(fields[0].1, Input::Choices(vec![0]));
     assert_eq!(params(&fields), Ok(json!({"sides":["front"]})));
 
-    let buttons = form(&sides(json!({"x-solidcraft-choice":{"version":1,"style":"buttons"}}))).expect("drawn");
-    assert!(buttons[0].0.buttons);
+    let buttons = form(&sides(json!({"x-solidcraft-control":"segmented_icons"}))).expect("drawn");
+    assert_eq!(buttons[0].0.control.as_deref(), Some("segmented_icons"));
     for extra in [json!({"uniqueItems":false}), json!({"default":["nope"]}), json!({"minItems":3,"maxItems":2})] {
         assert_eq!(form(&sides(extra.clone())), None, "{extra}");
     }
