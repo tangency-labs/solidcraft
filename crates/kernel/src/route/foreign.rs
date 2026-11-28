@@ -7,10 +7,10 @@
 //!
 //! With it, an operation goes to the other kernel when that kernel takes it
 //! ([`solidcraft_kernel_api::Backend::supports`]). One it doesn't take runs on solidcore as it
-//! would without the feature, and so does one it answers with [`BackendError::Unsupported`], or
+//! would without the feature, and so does one it answers with [`BackendError::Unsupported`],
 //! with [`BackendError::Exchange`] (a body it can't take, or a result it can't give back as a
-//! record). Any other failure is the other kernel's answer and reaches the caller, so a
-//! measurement sees it.
+//! record), or with any other failure but a stop: each is logged with its reason and counted
+//! ([`fell_back`]), so a measurement sees it, and the user gets solidcore's result or words.
 //!
 //! `SOLIDCRAFT_KERNEL=solidcore` keeps every operation on solidcore in such a build, and
 //! [`set_kernel`] changes the choice while the program runs, so one build can compare both.
@@ -88,6 +88,14 @@ pub fn set_kernel(k: Kernel) {
     CHOICE.store(code(k), Ordering::Relaxed);
 }
 
+/// Held by every test that chooses a kernel or counts [`fell_back`]: both are the process's, so
+/// two such tests running at once would change each other's choice and count.
+#[cfg(test)]
+pub(crate) fn choosing() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 const fn code(k: Kernel) -> u8 {
     match k {
         Kernel::Solidcore => SOLIDCORE,
@@ -145,8 +153,102 @@ pub(crate) fn run<B: Backend>(
             FELL_BACK.fetch_add(1, Ordering::Relaxed);
             None
         }
-        Ok(Err(e)) => Some(Err(KernelError::from(e))),
-        Err(e) => Some(Err(e)),
+        Ok(Err(BackendError::Cancelled(why))) => Some(Err(KernelError::from(BackendError::Cancelled(why)))),
+        Ok(Err(e)) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+        Err(e) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+    }
+}
+
+/// `run` on `backend` for an operation that takes no body and makes one body per profile region
+/// (an extrusion, a revolution), each brought back as a body and handed with the rest to
+/// `finish`, which names them as solidcore names its own: `None` when the operation stays on
+/// solidcore (another kernel chosen, an operation the backend doesn't take, or `finish` can't
+/// name what came back, which is logged with the reason), else the backend's answer.
+pub(crate) fn run_each<B: Backend>(
+    backend: &B,
+    op: OpKind,
+    run: impl FnOnce(&B) -> std::result::Result<Vec<B::Form>, B::Error>,
+    finish: impl FnOnce(Vec<Body>) -> Result<Vec<Body>>,
+) -> Option<Result<Vec<Body>>> {
+    run_parts(
+        backend,
+        op,
+        &[],
+        |k, _| run(k),
+        |bodies| finish(bodies).map_err(|e| BackendError::Exchange(format!("its faces don't name as solidcore's do ({e})"))),
+    )
+}
+
+/// `run` on `backend` with `operands` taken there as their records, for an operation that makes
+/// several bodies (a split's pieces), each brought back as a body and handed with the rest to
+/// `finish`, which puts them in solidcore's order or says why it can't: `None` when the
+/// operation stays on solidcore (another kernel chosen, an operation or an operand the backend
+/// doesn't take, or `finish`'s refusal, each logged with the reason), else the backend's answer.
+pub(crate) fn run_parts<B: Backend>(
+    backend: &B,
+    op: OpKind,
+    operands: &[&Body],
+    run: impl FnOnce(&B, &[B::Form]) -> std::result::Result<Vec<B::Form>, B::Error>,
+    finish: impl FnOnce(Vec<Body>) -> std::result::Result<Vec<Body>, BackendError>,
+) -> Option<Result<Vec<Body>>> {
+    if kernel() != Kernel::Occt {
+        return None;
+    }
+    if backend.supports(op) == Support::No || operands.iter().any(|b| b.is_mesh()) {
+        FELL_BACK.fetch_add(1, Ordering::Relaxed);
+        return None;
+    }
+    let what = op.name();
+    let answer = crate::guard(what, || {
+        let forms = match operands.iter().map(|b| backend.import(b.record())).collect::<std::result::Result<Vec<_>, _>>() {
+            Ok(forms) => forms,
+            Err(e) => return Ok(Err(e.into())),
+        };
+        let made = match run(backend, &forms) {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e.into())),
+        };
+        let mut bodies = Vec::with_capacity(made.len());
+        for form in &made {
+            let out = match backend.export(form) {
+                Ok(out) => out,
+                Err(e) => return Ok(Err(e.into())),
+            };
+            bodies.push(Body::from_record(out.record)?);
+        }
+        Ok(finish(bodies))
+    });
+    match answer {
+        Ok(Ok(bodies)) => Some(Ok(bodies)),
+        Ok(Err(BackendError::Unsupported(why))) => {
+            log::info!("{what}: {} doesn't take it ({why}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+        Ok(Err(BackendError::Exchange(why))) => {
+            log::warn!("{what}: {} couldn't give its result back ({why}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+        Ok(Err(BackendError::Cancelled(why))) => Some(Err(KernelError::from(BackendError::Cancelled(why)))),
+        Ok(Err(e)) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+        Err(e) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
     }
 }
 
@@ -156,6 +258,7 @@ mod tests {
 
     #[test]
     fn the_choice_can_change_while_the_program_runs() {
+        let _chosen = choosing();
         set_kernel(Kernel::Solidcore);
         assert_eq!(kernel(), Kernel::Solidcore);
         set_kernel(Kernel::Occt);
