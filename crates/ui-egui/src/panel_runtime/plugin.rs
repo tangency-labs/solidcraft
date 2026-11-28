@@ -19,6 +19,7 @@ struct Snapshot {
     actions: VecDeque<QueuedAction>,
     visibility: BTreeMap<(u64, String, String), u64>,
     document: String,
+    listener_failures: BTreeMap<String, String>,
 }
 struct QueuedAction {
     document: String,
@@ -169,6 +170,7 @@ pub(super) fn sync(app: &mut crate::SolveApp) -> PanelResult<()> {
     let actions = {
         let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "plugin panel data borrowed"))?;
         snapshot.document = app.session.document_id.clone();
+        snapshot.listener_failures.clone_from(&app.session.plugin_state.listener_failures);
         snapshot.panels = panels.into_iter().map(|panel| Ok((instance(&panel)?.0, panel))).collect::<PanelResult<_>>()?;
         std::mem::take(&mut snapshot.actions)
     };
@@ -353,6 +355,9 @@ impl PanelController for PluginController {
             return Ok(());
         }
         self.availability(&context.owner, services.models).require()?;
+        if let Some(failure) = self.state.0.try_borrow().ok().and_then(|snapshot| snapshot.listener_failures.get(&panel.plugin).cloned()) {
+            ui.label(solidcraft_ui_text::format("prefs.plugin_listener_failed", &[("error", &failure)]));
+        }
         let units = panel.units.as_str();
         let mut events = Vec::new();
         ui.push_id((&context.workspace.0, &self.id), |ui| {

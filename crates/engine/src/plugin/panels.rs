@@ -112,7 +112,9 @@ fn caller<'a>(session: Option<&'a mut Session>, panel: &str) -> craft_plugin::Re
     Ok(package)
 }
 pub(super) fn set_data(session: Option<&mut Session>, panel: &str, updates: &[ui::Datum]) -> craft_plugin::Result<()> {
-    let package = caller(session, panel)?;
+    let session = session.ok_or_else(|| HostError::InvalidInput { field: "ui".into(), reason: "no active transaction".into() })?;
+    let mut candidate = session.scratch();
+    let package = caller(Some(&mut candidate), panel)?;
     let layout = &package
         .declarations
         .panel(panel)
@@ -122,7 +124,39 @@ pub(super) fn set_data(session: Option<&mut Session>, panel: &str, updates: &[ui
         .data
         .get_mut(panel)
         .ok_or_else(|| HostError::InvalidInput { field: "ui.panel".into(), reason: "unknown panel".into() })?
-        .set_data_for(layout, updates)
+        .set_data_for(layout, updates)?;
+    check_retained_data(&candidate)?;
+    session.plugin_state.panels = candidate.plugin_state.panels;
+    Ok(())
+}
+
+/// Count the logical snapshots, including pending frame updates, before retaining them.
+pub(super) fn check_retained_data(session: &Session) -> craft_plugin::Result<()> {
+    let data: BTreeMap<_, BTreeMap<_, _>> = session
+        .plugin_state
+        .panels
+        .iter()
+        .map(|(id, package)| {
+            (
+                id,
+                package
+                    .data
+                    .iter()
+                    .map(|(panel, data)| {
+                        let mut data = data.clone();
+                        data.merge_frame();
+                        (panel, data)
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    let bytes =
+        serde_json::to_vec(&(data, &session.plugin_state.listener_data)).map_err(|error| HostError::Trap { reason: error.to_string() })?.len();
+    if bytes > 16 * 1024 * 1024 {
+        return Err(HostError::LimitExceeded { limit: "listener panel data exceeds 16 MiB retained JSON bytes".into() });
+    }
+    Ok(())
 }
 pub(super) fn clear_data(session: Option<&mut Session>, panel: &str) -> craft_plugin::Result<()> {
     if let Some(data) = caller(session, panel)?.data.get_mut(panel) {

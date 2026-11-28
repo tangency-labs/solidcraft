@@ -104,6 +104,8 @@ pub struct AppState {
     pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
+    /// Window-owned set of plugins with an open panel or workspace.
+    pub listener_open_plugins: Option<BTreeSet<String>>,
     /// Set by the host for a workspace enter or exit hook: grouped commands that reach files are
     /// refused and no folder is writable, whatever the grant store says. Never guest-visible.
     pub(crate) workspace_hook: bool,
@@ -1192,9 +1194,15 @@ impl PluginHost for SolidCraftHost {
         panels::set_data(self.transaction.as_mut(), panel, updates)
     }
     fn ui_clear_data(&mut self, panel: &str) -> craft_plugin::Result<()> {
+        if self.session.plugin_state.listener_design.is_some() {
+            return Err(HostError::PermissionDenied { permission: "ui.clear-data from listener".into() });
+        }
         panels::clear_data(self.transaction.as_mut(), panel)
     }
     fn ui_show_panel(&mut self, panel: &str, visible: bool) -> craft_plugin::Result<()> {
+        if self.session.plugin_state.listener_design.is_some() {
+            return Err(HostError::PermissionDenied { permission: "ui.show-panel from listener".into() });
+        }
         panels::show_panel(self.transaction.as_mut(), panel, visible)
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {

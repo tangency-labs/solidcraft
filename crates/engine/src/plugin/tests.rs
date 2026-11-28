@@ -1266,6 +1266,30 @@ mod native {
         fixture
     }
     #[test]
+    fn design_listener_updates_only_its_open_panel() {
+        let fixture = panel_fixture();
+        let path = fixture.0.join("sample/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["capabilities"] = json!(["commands@0.2", "design@0.1", "ui@0.1"]);
+        manifest["runtime"]["listeners"] = json!([{"entry":"make","on":["design.changed"]}]);
+        std::fs::write(path, manifest.to_string()).unwrap();
+        let mut session = Session::default();
+        fixture.install(&mut session, json!({}));
+        sync_panels(&mut session);
+        let token = session.design_token();
+        design_changed(&mut session, Some(token));
+        assert!(session.plugin_state.listener_data.is_empty(), "closed panels never run listeners");
+        session.plugin_state.listener_open_plugins = Some(BTreeSet::from(["sample".into()]));
+        session.execute("solid.box", &json!({"length":1,"width":2,"height":3})).unwrap();
+        let token = session.design_token();
+        design_changed(&mut session, Some(token.clone()));
+        assert!(session.plugin_state.listener_failures.is_empty(), "{:?}", session.plugin_state.listener_failures);
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&ui::UiValue::Text("ready".into())));
+        assert_eq!(session.design_token(), token);
+    }
+
+    #[test]
     fn panel_event_shaped_entry_params_remain_ordinary_inputs() {
         let fixture = panel_fixture();
         let mut session = Session::default();
@@ -6682,4 +6706,41 @@ fn a_body_a_plugin_run_hides_stays_hidden_beside_one_hidden_meanwhile() {
     assert_eq!(shown(&live), [true, false, false], "undo takes back the run and keeps the hide made meanwhile");
     live.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(shown(&live), [false, false, true]);
+}
+
+#[test]
+fn listener_panel_authority_refuses_other_panels_and_design_edits() {
+    let mut host = panel_host();
+    host.session.plugin_state.listener_design = Some(Some(host.session.design_token()));
+    let before = host.session.doc.to_json();
+    host.begin_transaction().unwrap();
+    assert!(host.ui_set_data("another-plugins-panel", &[ui::Datum { path: "/value".into(), value: ui::UiValue::Flag(true) }]).is_err());
+    host.ui_set_data("jobs", &[ui::Datum { path: "/value".into(), value: ui::UiValue::Flag(true) }]).unwrap();
+    assert!(host.run_command("solid.box", &json!({"length":1,"width":1,"height":1})).is_err());
+    assert!(host.ui_clear_data("jobs").is_err());
+    assert!(host.ui_show_panel("jobs", false).is_err());
+    host.rollback_transaction().unwrap();
+    assert_eq!(host.session.doc.to_json(), before);
+    host.session.merge_plugin_panel_data();
+    assert!(host.session.plugin_panels()[0].data.get("/value").is_none());
+}
+
+#[test]
+fn panel_retained_data_limit_includes_pending_updates_across_plugins() {
+    let mut session = panel_host().session;
+    let package = session.plugin_state.panels["sample"].clone();
+    for index in 0..18 {
+        let id = format!("panel{index}");
+        session.plugin_state.panels.insert(id.clone(), package.clone());
+        session.plugin_state.ui_caller = Some(id.clone());
+        let before = session.plugin_state.panels.clone();
+        let result =
+            panels::set_data(Some(&mut session), "jobs", &[ui::Datum { path: "/payload".into(), value: ui::UiValue::Text("x".repeat(950_000)) }]);
+        if index == 17 {
+            assert!(matches!(result, Err(HostError::LimitExceeded { .. })));
+            assert_eq!(session.plugin_state.panels, before, "oversized pending data is never retained");
+        } else {
+            result.unwrap();
+        }
+    }
 }

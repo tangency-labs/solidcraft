@@ -85,6 +85,9 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
                 continue;
             }
         };
+        if runtime_has_panels(&package) && !session.plugin_state.listener_open_plugins.as_ref().is_some_and(|open| open.contains(&id)) {
+            continue;
+        }
         // Background execution requires approval of this exact declaration and component.
         if session.plugin_state.grants.get(&id).and_then(|grants| grants.package_hash.as_deref()) != Some(package.approval.as_str()) {
             continue;
@@ -138,7 +141,7 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
             }
             let invocation = Package { manifest, approval: package.approval.clone(), component: package.component.clone() };
             let result = run(&mut scratch, invocation, &listener.entry, &event)
-                .and_then(|reply| listener_panel_data(session, &id, &listener.entry, reply.result).map_err(EngineError::from));
+                .and_then(|reply| publish_listener(session, &scratch, &id, &listener.entry, reply.result).map_err(EngineError::from));
             match result {
                 Ok(()) => {
                     if let Some(failures) = session.plugin_state.listener_entry_failures.get_mut(&id) {
@@ -194,5 +197,29 @@ pub(super) fn listener_panel_data(session: &mut Session, plugin: &str, entry: &s
         return Err(HostError::LimitExceeded { limit: format!("listener panel data exceeds {MAX_RETAINED_BYTES} retained JSON bytes") });
     }
     std::sync::Arc::make_mut(&mut session.plugin_state.listener_data).insert(key, data);
+    Ok(())
+}
+
+fn runtime_has_panels(package: &Package) -> bool {
+    package.manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_some()
+}
+
+/// Publish only successful, bounded output from the component's own namespace.
+fn publish_listener(session: &mut Session, scratch: &Session, plugin: &str, entry: &str, data: Value) -> craft_plugin::Result<()> {
+    let mut candidate = session.scratch();
+    if let Some(after) = scratch.plugin_state.panels.get(plugin)
+        && let Some(current) = candidate.plugin_state.panels.get_mut(plugin)
+        && current.approval == after.approval
+    {
+        current.data.clone_from(&after.data);
+    }
+    listener_panel_data(&mut candidate, plugin, entry, data)?;
+    panels::check_retained_data(&candidate)?;
+    session.plugin_state.listener_data = candidate.plugin_state.listener_data;
+    if let Some(after) = candidate.plugin_state.panels.get(plugin)
+        && let Some(current) = session.plugin_state.panels.get_mut(plugin)
+    {
+        current.data.clone_from(&after.data);
+    }
     Ok(())
 }

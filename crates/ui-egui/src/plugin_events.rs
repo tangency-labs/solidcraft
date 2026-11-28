@@ -13,6 +13,7 @@ struct Job {
     uid: u64,
     notification: Notification,
     link_snapshot: Arc<BTreeMap<u64, LinkChange>>,
+    panels: BTreeMap<String, solidcraft_engine::plugin::PanelPackage>,
     done: mpsc::Receiver<AppState>,
 }
 
@@ -120,6 +121,26 @@ fn panel_data(app: &mut SolveApp, data: Arc<BTreeMap<String, serde_json::Value>>
     app.session.plugin_state.listener_data = data;
 }
 
+/// A closed dock must not keep a plugin listener running in the background.
+fn open_plugins(app: &SolveApp) -> std::collections::BTreeSet<String> {
+    let mut open = std::collections::BTreeSet::new();
+    if let Some(plugin) = crate::plugin_workspaces::active_plugin(app) {
+        open.insert(plugin.to_owned());
+    }
+    if let Some(integration) = &app.panel_runtime {
+        for panel in app.session.plugin_panels() {
+            if crate::plugin_workspaces::panel_allowed(app, &panel.plugin, &panel.panel.id)
+                && crate::panel_runtime::plugin_instance(&panel.plugin, &panel.panel)
+                    .ok()
+                    .is_some_and(|id| integration.runtime.layout().layout().instance(&id).is_ok_and(|instance| instance.requested_open))
+            {
+                open.insert(panel.plugin);
+            }
+        }
+    }
+    open
+}
+
 fn completed(app: &mut SolveApp, job: Job, mut state: AppState) {
     if job.uid != app.session.uid {
         return;
@@ -139,6 +160,25 @@ fn completed(app: &mut SolveApp, job: Job, mut state: AppState) {
     if job.link_snapshot != app.session.plugin_state.link_changes {
         app.plugins.events.retry(job.notification, app.now);
         return;
+    }
+    // A panel action can change transient data without changing the design token.
+    // Re-run against that state rather than overwrite it or exceed the worker's
+    // retained-data budget by combining independently checked snapshots.
+    if job.panels != app.session.plugin_state.panels {
+        app.plugins.events.retry(job.notification, app.now);
+        return;
+    }
+    let open = open_plugins(app);
+    for (id, package) in &state.panels {
+        if open.contains(id)
+            && !app.preferences.disabled_plugins.contains(id)
+            && app.preferences.plugin_grants.get(id) == state.grants.get(id)
+            && app.preferences.plugin_grants.get(id).and_then(|grant| grant.package_hash.as_deref()) == Some(package.approval.as_str())
+            && let Some(live) = app.session.plugin_state.panels.get_mut(id).filter(|live| live.approval == package.approval)
+        {
+            // Adopt data only: a listener cannot change placement or declarations.
+            live.data.clone_from(&package.data);
+        }
     }
     let ids: std::collections::BTreeSet<_> =
         app.session.plugin_state.listener_failures.keys().chain(state.listener_failures.keys()).cloned().collect();
@@ -233,11 +273,17 @@ fn tick_with_spawner(
         {
             // The worker replaces outputs only for invoked listeners and prunes caches of
             // packages without current approval. Other event subscriptions keep their data.
-            let scratch = app.session.scratch();
+            let mut scratch = app.session.scratch();
+            scratch.plugin_state.listener_open_plugins = Some(open_plugins(app));
             let retry = notification.clone();
             if let Some(done) = spawn(scratch, notification) {
-                app.plugins.events.job =
-                    Some(Job { uid: app.session.uid, notification: retry, link_snapshot: app.session.plugin_state.link_changes.clone(), done });
+                app.plugins.events.job = Some(Job {
+                    uid: app.session.uid,
+                    notification: retry,
+                    link_snapshot: app.session.plugin_state.link_changes.clone(),
+                    panels: app.session.plugin_state.panels.clone(),
+                    done,
+                });
             } else {
                 app.plugins.events.retry(retry, app.now);
             }
