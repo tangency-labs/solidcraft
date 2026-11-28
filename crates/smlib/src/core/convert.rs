@@ -1038,6 +1038,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
                 o.r3(FACE_PLANE_ORIGIN, pos.origin());
                 o.r3(FACE_PLANE_AXIS, pos.z_axis());
                 o.r3(FACE_PLANE_REF_DIRECTION, pos.x_axis());
+                o.r3(FACE_PLANE_Y_AXIS, pos.y_axis());
             }
             SurfaceKind::Cone(c) if c.is_cylinder_class() => {
                 let pos = c.canonical().origin;
@@ -1777,6 +1778,7 @@ fn validate(f: &In<'_>) -> Option<Shape> {
     if !(lens(FACE_PLANE_ORIGIN, 3 * n_p)
         && lens(FACE_PLANE_AXIS, 3 * n_p)
         && lens(FACE_PLANE_REF_DIRECTION, 3 * n_p)
+        && lens(FACE_PLANE_Y_AXIS, 3 * n_p)
         && lens(FACE_CYLINDER_ORIGIN, 3 * n_cy)
         && lens(FACE_CYLINDER_AXIS, 3 * n_cy)
         && lens(FACE_CYLINDER_REF_DIRECTION, 3 * n_cy)
@@ -1800,7 +1802,9 @@ fn validate(f: &In<'_>) -> Option<Shape> {
     }
     let positive = |id: i32, i: usize| f.r(id).get(i).is_some_and(|&r| r > 0.0);
     for i in 0..n_p {
-        if !good_frame(f.r(FACE_PLANE_AXIS), f.r(FACE_PLANE_REF_DIRECTION), i) {
+        if !good_frame(f.r(FACE_PLANE_AXIS), f.r(FACE_PLANE_REF_DIRECTION), i)
+            || !good_frame(f.r(FACE_PLANE_REF_DIRECTION), f.r(FACE_PLANE_Y_AXIS), i)
+        {
             return None;
         }
     }
@@ -2104,6 +2108,13 @@ fn torus_of_arrays(k: &Kernel, f: &In<'_>, j: usize, nurbs: &BSplineSurface, fou
 fn placement(origin: Point3, z: Vec3, x: Vec3) -> Result<Axis2Placement> {
     let mut p = Axis2Placement::default();
     p.set_canonical(origin, x, z.cross(x)).map_err(|_| bad("a frame that spans no plane"))?;
+    Ok(p)
+}
+
+/// The plane's actual two axes, through the kernel's single canonical-placement policy.
+pub(crate) fn plane_placement(origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Result<Axis2Placement> {
+    let mut p = Axis2Placement::default();
+    p.set_canonical(Vec3::from_array(origin), Vec3::from_array(x), Vec3::from_array(y)).map_err(|_| bad("a frame that spans no plane"))?;
     Ok(p)
 }
 
@@ -2412,7 +2423,11 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
         } else if ty == SURFACE_PLANE_I {
             let j = i_plane;
             i_plane += 1;
-            let p = placement(get3(f.r(FACE_PLANE_ORIGIN), j)?, get3(f.r(FACE_PLANE_AXIS), j)?, get3(f.r(FACE_PLANE_REF_DIRECTION), j)?)?;
+            let p = plane_placement(
+                get3(f.r(FACE_PLANE_ORIGIN), j)?.to_array(),
+                get3(f.r(FACE_PLANE_REF_DIRECTION), j)?.to_array(),
+                get3(f.r(FACE_PLANE_Y_AXIS), j)?.to_array(),
+            )?;
             // its domain is restricted below without changing its parameterisation
             Surface::from(Plane::create_canonical(&p).map_err(sc("SmPlane::CreateCanonical"))?)
         } else if ty == SURFACE_CYLINDER_I {

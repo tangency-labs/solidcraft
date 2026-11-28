@@ -350,14 +350,11 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
             *c += 1;
         }
         let surface = match kind {
-            SURFACE_PLANE => {
-                let f = frame(
-                    v3(flat.f(FACE_PLANE_ORIGIN), i, "plane")?,
-                    v3(flat.f(FACE_PLANE_AXIS), i, "plane")?,
-                    v3(flat.f(FACE_PLANE_REF_DIRECTION), i, "plane")?,
-                );
-                b::Surface::Plane { origin: f.origin, u_axis: f.x_axis, v_axis: f.y_axis }
-            }
+            SURFACE_PLANE => b::Surface::Plane {
+                origin: v3(flat.f(FACE_PLANE_ORIGIN), i, "plane")?,
+                u_axis: v3(flat.f(FACE_PLANE_REF_DIRECTION), i, "plane")?,
+                v_axis: v3(flat.f(FACE_PLANE_Y_AXIS), i, "plane")?,
+            },
             SURFACE_CYLINDER => b::Surface::Cylinder {
                 frame: frame(
                     v3(flat.f(FACE_CYLINDER_ORIGIN), i, "cylinder")?,

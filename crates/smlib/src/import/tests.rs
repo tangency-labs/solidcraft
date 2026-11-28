@@ -351,3 +351,13 @@ fn a_plane_import_still_maps_scaled_and_skew_axes() {
         assert_eq!(a.reals[&flat::FACE_RANGE], range);
     }
 }
+
+#[test]
+fn a_nearly_parallel_plane_keeps_its_original_normal() {
+    let mut a = Arrays::default();
+    plane(&mut a, [7.0, -11.0, 23.0], [1.0, 0.0, 0.0], [1.0, 0.0, 1e-13], [[0.0, 10.0], [0.0, 30.0]], true).unwrap();
+    assert_eq!(a.reals[&flat::FACE_PLANE_AXIS], [0.0, -1.0, 0.0]);
+    assert_eq!(a.reals[&flat::FACE_PLANE_REF_DIRECTION], [1.0, 0.0, 0.0]);
+    assert_eq!(a.reals[&flat::FACE_PLANE_Y_AXIS], [0.0, 0.0, 1.0]);
+    assert_eq!(a.reals[&flat::FACE_RANGE], [0.0, 0.0, 40.0, 30.0 * 1e-13]);
+}

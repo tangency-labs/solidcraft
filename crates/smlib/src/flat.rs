@@ -111,6 +111,8 @@ pub const VERTEX_TOLERANCE: i32 = 165;
 /// The definitions counted in `FACE_DEFINITION_REAL_COUNT`, packed in face order: a ball patch's
 /// sphere's centre x, y, z and radius.
 pub const FACE_DEFINITION_REALS: i32 = 166;
+/// This crate's plane Y axis (not in smlib.h), carried between import, core/convert and export.
+pub const FACE_PLANE_Y_AXIS: i32 = 167;
 /// The largest EDGE_TOLERANCE or VERTEX_TOLERANCE import takes (smlib.h: "at most 1").
 pub const MAX_TOLERANCE: f64 = 1.0;
 /// `SMLIB_FLAT_MAX_LEN`: no array is longer.

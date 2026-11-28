@@ -715,3 +715,165 @@ fn a_planar_body_record_stabilizes_after_one_import() {
         rec = next;
     }
 }
+
+/// The plane map and the modeled rectangle, independently of line-end reconstruction.
+fn plane_record_parameters(record: &b::Brep) -> Vec<Vec<u64>> {
+    record
+        .faces
+        .iter()
+        .map(|face| {
+            let b::Surface::Plane { origin, u_axis, v_axis } = &face.surface else { panic!("expected a plane") };
+            origin.iter().chain(u_axis).chain(v_axis).chain(face.domain.iter().flatten()).map(|x| x.to_bits()).collect()
+        })
+        .collect()
+}
+
+fn plane_record_geometry(body: &crate::Brep, expected: &serde_json::Value, counts: [usize; 3]) {
+    let mass = body.mass_properties(1e-8).unwrap();
+    let bounds = body.bounds().unwrap();
+    assert_eq!(body.counts().unwrap(), counts);
+    let volume = expected["volume"].as_f64().unwrap_or(0.0);
+    if volume == 0.0 {
+        assert_eq!(mass.volume, 0.0);
+    } else {
+        assert!(rel(mass.volume, volume) < 1e-9);
+    }
+    assert!(rel(mass.area, expected["area"].as_f64().unwrap()) < 1e-9);
+    let scale = expected["length_scale"].as_f64().unwrap();
+    for i in 0..3 {
+        assert!((mass.centroid[i] - expected["centroid"][i].as_f64().unwrap()).abs() <= 1e-9 * scale);
+        assert!((bounds.0[i] - expected["bounds"][0][i].as_f64().unwrap()).abs() <= 1e-9 * scale);
+        assert!((bounds.1[i] - expected["bounds"][1][i].as_f64().unwrap()).abs() <= 1e-9 * scale);
+    }
+}
+
+/// Each stored coefficient is kept, including a rectangle wider than the boundary.
+#[test]
+fn plane_records_keep_both_axes_and_modeled_domains() {
+    let expected: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/plane-record/expected.json")).unwrap();
+    let cases = [
+        ("axis_control", include_str!("../../tests/fixtures/plane-record/axis_control.json")),
+        ("oblique", include_str!("../../tests/fixtures/plane-record/oblique.json")),
+        ("origin_only", include_str!("../../tests/fixtures/plane-record/origin_only.json")),
+    ];
+    for (label, input) in cases {
+        for loose in [false, true] {
+            let mut record: b::Brep = serde_json::from_str(input).unwrap();
+            if loose {
+                record.faces[0].domain = [[-2.0, 18.0], [-3.0, 33.0]];
+            }
+            let parameters = plane_record_parameters(&record);
+            for round in 1..=9 {
+                solidcore_ops::record_check::validate(&record).unwrap();
+                solidcore_ops::record_check::agreement(&record).unwrap();
+                let body = crate::Brep::from_record(&record, true).unwrap();
+                let next = body.to_native().unwrap();
+                plane_record_geometry(&body, &expected[label], [1, 4, 4]);
+                eprintln!("{label} loose={loose} round={round}: {:?}", next.faces[0].domain);
+                assert_eq!(plane_record_parameters(&next), parameters, "{label}, loose={loose}, round={round}");
+                solidcore_ops::record_check::agreement(&next).unwrap();
+                record = next;
+            }
+        }
+    }
+}
+
+/// Rodrigues' rotation about (1,2,3), with analytic cuboid mass and interval bounds.
+#[test]
+fn spatially_rotated_box_keeps_plane_parameters() {
+    let (s, c) = 0.7_f64.sin_cos();
+    let k = 1.0 - c;
+    let n = 14.0_f64.sqrt();
+    let a = [1.0 / n, 2.0 / n, 3.0 / n];
+    let mut r = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            r[i][j] = k * a[i] * a[j] + if i == j { c } else { 0.0 };
+        }
+    }
+    r[0][1] -= s * a[2];
+    r[0][2] += s * a[1];
+    r[1][0] += s * a[2];
+    r[1][2] -= s * a[0];
+    r[2][0] -= s * a[1];
+    r[2][1] += s * a[0];
+    let matrix = [[r[0][0], r[1][0], r[2][0], 0.0], [r[0][1], r[1][1], r[2][1], 0.0], [r[0][2], r[1][2], r[2][2], 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let center: [f64; 3] = std::array::from_fn(|i| r[i][0] * 6.0 + r[i][1] * 8.0 + r[i][2] * 18.0);
+    let half: [f64; 3] = std::array::from_fn(|i| r[i][0].abs() * 5.0 + r[i][1].abs() * 10.0 + r[i][2].abs() * 15.0);
+    let lo: [f64; 3] = std::array::from_fn(|i| center[i] - half[i]);
+    let hi: [f64; 3] = std::array::from_fn(|i| center[i] + half[i]);
+    let expected = serde_json::json!({"volume":6000.0,"area":2200.0,"centroid":center,"bounds":[lo,hi],"length_scale":30.0});
+    let body = crate::Brep::make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap().transformed(&matrix).unwrap();
+    let mut record = body.to_native().unwrap();
+    let parameters = plane_record_parameters(&record);
+    for round in 1..=9 {
+        let body = crate::Brep::from_record(&record, true).unwrap();
+        let next = body.to_native().unwrap();
+        plane_record_geometry(&body, &expected, [6, 12, 8]);
+        assert_eq!(plane_record_parameters(&next), parameters, "round {round}");
+        solidcore_ops::record_check::agreement(&next).unwrap();
+        record = next;
+    }
+}
+
+/// The first import changes a true scale or skew; its output frame is then idempotent.
+#[test]
+fn changed_plane_axes_settle_after_the_first_import() {
+    let base: b::Brep = serde_json::from_str(include_str!("../../tests/fixtures/plane-record/axis_control.json")).unwrap();
+    let oblique: b::Brep = serde_json::from_str(include_str!("../../tests/fixtures/plane-record/oblique.json")).unwrap();
+    let b::Surface::Plane { origin, u_axis, v_axis } = &oblique.faces[0].surface else { panic!("expected plane") };
+    let (origin, u_axis, v_axis) = (*origin, *u_axis, *v_axis);
+    for skew in [false, true] {
+        let mut u = u_axis;
+        let mut v = v_axis;
+        if skew {
+            for i in 0..3 {
+                v[i] += 1e-6 * u[i];
+            }
+        } else {
+            for x in &mut u {
+                *x *= 1.0 + 1e-9;
+            }
+        }
+        let mut record = base.clone();
+        record.faces[0].surface = b::Surface::Plane { origin, u_axis: u, v_axis: v };
+        let uv = [[0.0, 0.0], [10.0, 0.0], [10.0, 30.0], [0.0, 30.0]];
+        for (vertex, [s, t]) in record.vertices.iter_mut().zip(uv) {
+            vertex.point = std::array::from_fn(|i| origin[i] + s * u[i] + t * v[i]);
+        }
+        for edge in &mut record.edges {
+            edge.curve =
+                b::Curve::Line { start: record.vertices[edge.vertices[0] as usize].point, end: record.vertices[edge.vertices[1] as usize].point };
+        }
+        let cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let area = 300.0 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+        let centroid: [f64; 3] = std::array::from_fn(|i| origin[i] + 5.0 * u[i] + 15.0 * v[i]);
+        let lo: [f64; 3] = std::array::from_fn(|i| record.vertices.iter().map(|v| v.point[i]).fold(f64::INFINITY, f64::min));
+        let hi: [f64; 3] = std::array::from_fn(|i| record.vertices.iter().map(|v| v.point[i]).fold(f64::NEG_INFINITY, f64::max));
+        let expected = serde_json::json!({"area":area,"centroid":centroid,"bounds":[lo,hi],"length_scale":30.0});
+        let original = plane_record_parameters(&record);
+        let first = crate::Brep::from_record(&record, true).unwrap().to_native().unwrap();
+        let fixed = plane_record_parameters(&first);
+        assert_ne!(fixed, original);
+        record = first;
+        for round in 2..=9 {
+            let body = crate::Brep::from_record(&record, true).unwrap();
+            let next = body.to_native().unwrap();
+            plane_record_geometry(&body, &expected, [1, 4, 4]);
+            assert_eq!(plane_record_parameters(&next), fixed, "skew={skew}, round={round}");
+            solidcore_ops::record_check::agreement(&next).unwrap();
+            record = next;
+        }
+    }
+}
+
+#[test]
+fn plane_y_axis_arrays_are_validated() {
+    let a = to_arrays(&case("box").body).unwrap();
+    let x = a.reals[&crate::flat::FACE_PLANE_REF_DIRECTION].clone();
+    for bad in [Vec::new(), vec![0.0; x.len() - 1], vec![0.0; x.len()], vec![f64::NAN; x.len()], x] {
+        let mut invalid = a.clone();
+        invalid.reals.insert(crate::flat::FACE_PLANE_Y_AXIS, bad);
+        assert!(from_arrays(&invalid).is_err());
+    }
+}
