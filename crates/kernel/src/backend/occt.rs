@@ -27,11 +27,12 @@ use std::sync::OnceLock;
 use occt_capi::{Boolean, Shape};
 use solidcore_ops::sweep::Curve;
 use solidcore_record::brep::Brep;
-use solidcore_record::{Plane, Region2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec3};
 use solidcraft_kernel_api::{
     Axis2, Backend, BackendError, BackendId, BoolOp, ChamferSide, Exported, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides,
     SplitTool, Support, Taper, TrimKeep,
 };
+use solidcraft_kernel_api::{Helix, PathSpan, PointPath, RailFit, SweepOptions};
 
 use crate::body::Body;
 
@@ -332,6 +333,30 @@ impl Modelling for Occt {
 
     fn trim_keep(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>, _keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
         unsupported("a trim")
+    }
+
+    fn sweep(&self, _plane: &Plane, _region: &Region2, _path: &[PathSpan], _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_points(&self, _plane: &Plane, _region: &Region2, _path: &PointPath, _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_helix(&self, _plane: &Plane, _region: &Region2, _helix: &Helix<'_>) -> Result<Shape, BackendError> {
+        unsupported("a helical sweep")
+    }
+
+    fn loft(&self, _sections: &[(Plane, Loop2)], _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_regions(&self, _sections: &[(Plane, Region2)]) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_to_point(&self, _plane: &Plane, _section: &Loop2, _apex: Vec3, _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft to a point")
     }
 }
 
