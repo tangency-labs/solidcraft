@@ -3732,6 +3732,74 @@ mod tests {
         }
     }
 
+    /// A prism 8 long, equal-chamfered on the edge through (10, 10, 4). The section is
+    /// (0, 0), (10, 0), (10, 10), (10 - w, 10), (0, y_left): the face beside that edge is w wide,
+    /// then the neighbour slopes down to y_left. The chamfer of distance d meets the section in
+    /// the line x + y = 20 - d. Closed form: the uncut section minus the polygon that line cuts,
+    /// times 8. On the narrow face the polygon is the right triangle of leg d. Once d passes the
+    /// face the line meets the slope y - 10 = m (x - (10 - w)), m = (10 - y_left) / (10 - w), at
+    /// x = (10 - d + m (10 - w)) / (1 + m), and the polygon is (10, 10 - d), (10, 10), (10 - w, 10)
+    /// and that point. For w = 1, y_left = 6 and d = 1.0001 the volume is 651.999199972. A
+    /// distance just past the face (1.0001, and 2.0001 on a face of width 2) is refused; the
+    /// distances beside it build.
+    #[test]
+    fn chamfer_just_past_a_narrow_face_beside_a_slope_builds() {
+        fn polygon_area(pts: &[(f64, f64)]) -> f64 {
+            let mut twice = 0.0;
+            for i in 0..pts.len() {
+                let (x0, y0) = pts[i];
+                let (x1, y1) = pts[(i + 1) % pts.len()];
+                twice += x0 * y1 - x1 * y0;
+            }
+            twice.abs() * 0.5
+        }
+
+        /// Uncut block minus the polygon the chamfer line cuts from the section, times 8.
+        fn closed_form(section: &[(f64, f64); 5], distance: f64) -> f64 {
+            let width = 10.0 - section[3].0;
+            let y_left = section[4].1;
+            let removed = if distance <= width {
+                polygon_area(&[(10.0, 10.0 - distance), (10.0, 10.0), (10.0 - distance, 10.0)])
+            } else {
+                let m = (10.0 - y_left) / (10.0 - width);
+                let x = (10.0 - distance + m * (10.0 - width)) / (1.0 + m);
+                let y = 20.0 - distance - x;
+                polygon_area(&[(10.0, 10.0 - distance), (10.0, 10.0), (10.0 - width, 10.0), (x, y)])
+            };
+            (polygon_area(section) - removed) * 8.0
+        }
+
+        fn prism(section: &[(f64, f64); 5]) -> Body {
+            let outline: Vec<Vec2> = section.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
+            let region = Region2 { outer: Loop2::polygon(&outline), holes: vec![] };
+            crate::extrude(&Plane::XY, &[region], 0.0, 8.0).unwrap().pop().unwrap()
+        }
+
+        fn check(section: &[(f64, f64); 5], distance: f64) {
+            let want = closed_form(section, distance);
+            let body = prism(section);
+            let out = chamfer(&body, &[Vec3::new(10.0, 10.0, 4.0)], distance).unwrap_or_else(|e| panic!("{e}"));
+            assert!(out.validity().is_empty(), "{:?}", out.validity());
+            let got = crate::measure(&out).unwrap().volume;
+            assert!((got - want).abs() < 1e-6, "d={distance}: {got} vs {want}");
+        }
+
+        let narrow = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (9.0, 10.0), (0.0, 6.0)];
+        let at_just_past = closed_form(&narrow, 1.0001);
+        assert!((at_just_past - 651.999199972).abs() < 1e-9, "{at_just_past}");
+        // Face 1 wide, neighbour drops 4 over 9. 1.0, 1.00001 and 1.0005 build; 1.0001 is refused.
+        for distance in [1.0, 1.00001, 1.0001, 1.0005] {
+            check(&narrow, distance);
+        }
+        // Face 2 wide, neighbour slope 0.5. 2.0 and 2.0005 build; 2.0001 is refused.
+        let wider = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (8.0, 10.0), (0.0, 6.0)];
+        for distance in [2.0, 2.0001, 2.0005] {
+            check(&wider, distance);
+        }
+        // Slope 0.25, face 1 wide: distance 1.0001 already builds.
+        check(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (9.0, 10.0), (0.0, 7.75)], 1.0001);
+    }
+
     /// A block 40 wide and 20 deep (z 0…20) whose top rises from y = 20 at its sides to a
     /// crease along z at x = 20, each half sloping `slope` degrees, so the faces turn by twice
     /// that across the crease; and a point on the crease.

@@ -3841,30 +3841,18 @@ fn a_seam_turned_off_the_chain_and_back_leaves_the_body_as_it_was() {
     assert_seam(&back, FIN_TOP, "turned and back");
 }
 
-/// #19505: the same part at 0.93 stays refused as on main. The seam's vertex on the chain has
-/// no whole section at this size either, but the round's rail leaves the fin's top at the
-/// seam's section (the decision's trigger, see `docs/generic-blend.md`), so the body is
-/// untouched and the refusal stands.
+/// #19505: the same part at 0.93, just past the 0.926 at which the round's rail reaches the fin's
+/// sides' top edges, builds. It was refused while a chamfer's or round's rail past a narrow face
+/// was sewn to its projection (`trim_at_creases`): the seam's vertex on the chain has no
+/// whole section at this size, and the refusal named the rail leaving the fin's top at the seam's
+/// section. The rail now takes the planes' intersection, so the trim has no gap there. The body is
+/// the closed form's: valid, closed, its volume the added `fin_top_round_volume(-0.62, 0.93)`
+/// to 2e-9 (docs/generic-blend.md 3.4; r is under 2 ROOT, where the form holds), the same
+/// checks as the build at 1.
 #[test]
-fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_stays_refused_at_0_93() {
+fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_builds_at_0_93() {
     fixes();
-    let b = tube_with_fin(-0.62);
-    let before = b.volume(1e-9).unwrap();
-    match blend(
-        &b,
-        Blend::Round,
-        &[fin_top_edge(&b, -0.62)],
-        &[0.93],
-        &[],
-        Corners::Filled,
-    ) {
-        Err(Error::TooLarge {
-            why: Some(RoomReason::RailLeavesFace),
-            ..
-        }) => {}
-        other => panic!("{other:?}"),
-    }
-    assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits());
+    assert_fin_top_round_rolls_over(-0.62, 0.93);
 }
 
 /// SolidCraft #15767 (j4py's repro): a bar 32 long along y whose section in the xz plane is the

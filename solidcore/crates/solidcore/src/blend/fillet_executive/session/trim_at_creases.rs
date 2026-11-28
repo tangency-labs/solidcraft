@@ -41,6 +41,12 @@
 //!   kept sheet, just off it, leaves a strip whose sides the trim's tolerances cannot tell
 //!   apart: refused (`NoRoomReason::StripBelowResolution`), not left to fail at the sewing or
 //!   to fall in two.
+//! - **A rail beside the intersection.** A sheet edge that runs beside
+//!   a straight crease's segment, farther than the trim tolerance and no farther than the loose
+//!   window, takes that crease between the meets of its neighbouring edges' lines. A neighbour
+//!   moves only along its own line. The imprint then asks a boundary curve to lie on the face,
+//!   not merely within the loose window: a rail that has left a narrow face is the planes'
+//!   intersection, not its projection onto the next face.
 //! - **Open setbacks and each round's side (the fork's ef57570, ce748fa; smlib#125).** An
 //!   open G1 setback corner's spring curves are imprinted with the sheet's boundary and its
 //!   hole's `3 n` edges stay free; a concave round's sheet lies in the void it fills.
@@ -490,6 +496,265 @@ fn straight_ends(k: &Kernel, curve: &Curve) -> Result<Option<(Point3, Point3, f6
         _ => None,
     };
     Ok(deviation.map(|d| (a, b, d)))
+}
+
+/// Whether `p` lies within `accept` of the infinite line through `a` and `b`.
+fn point_on_line(a: Point3, b: Point3, p: Point3, accept: f64) -> bool {
+    let u = b - a;
+    let uu = u.dot(u);
+    if uu.is_nan() || uu <= 0.0 {
+        return p.distance(a) <= accept;
+    }
+    let t = u.dot(p - a) / uu;
+    let closest = Point3::new(a.x + u.x * t, a.y + u.y * t, a.z + u.z * t);
+    closest.distance(p) <= accept
+}
+
+/// Whether `p` lies within `accept` of the segment from `a` to `b`.
+fn point_near_segment(a: Point3, b: Point3, p: Point3, accept: f64) -> bool {
+    let u = b - a;
+    let uu = u.dot(u);
+    if uu.is_nan() || uu <= 0.0 {
+        return p.distance(a) <= accept;
+    }
+    let t = (u.dot(p - a) / uu).clamp(0.0, 1.0);
+    let closest = Point3::new(a.x + u.x * t, a.y + u.y * t, a.z + u.z * t);
+    closest.distance(p) <= accept
+}
+
+/// The point on the line through `c` and `d` where it meets the line through `a` and `b`,
+/// when the two lines meet within `accept`. Parallel lines, and lines that pass apart,
+/// give `None`.
+fn lines_meet(a: Point3, b: Point3, c: Point3, d: Point3, accept: f64) -> Option<Point3> {
+    let u = b - a;
+    let v = d - c;
+    let w = a - c;
+    let uu = u.dot(u);
+    let vv = v.dot(v);
+    let uv = u.dot(v);
+    let uw = u.dot(w);
+    let vw = v.dot(w);
+    let det = uv * uv - uu * vv;
+    let well_conditioned = det.abs() > 64.0 * f64::EPSILON * uu * vv;
+    if !well_conditioned {
+        return None;
+    }
+    // (a + s u) - (c + t v) = 0, with w = a - c: uu s - uv t = -uw, uv s - vv t = -vw
+    let s = (uw * vv - uv * vw) / det;
+    let t = (uv * uw - uu * vw) / det;
+    let on_second = Point3::new(c.x + v.x * t, c.y + v.y * t, c.z + v.z * t);
+    let on_first = Point3::new(a.x + u.x * s, a.y + u.y * s, a.z + u.z * s);
+    if on_first.distance(on_second) > accept {
+        return None;
+    }
+    Some(on_second)
+}
+
+/// The straight segment from `a` to `z` as a curve (a line, its own NURB).
+fn segment(a: Point3, z: Point3, dim: u64) -> Result<Curve> {
+    let mut line = Line::from_points(a, z, dim);
+    line.make_nurb()?;
+    Ok(Curve::from(line))
+}
+
+/// Where `meets` puts `x`, or the vertex's own point when `x` is not moved.
+fn met_point(
+    b: &Brep,
+    meets: &[(crate::topology::VertexId, Point3)],
+    x: crate::topology::VertexId,
+) -> Result<Point3> {
+    match meets.iter().find(|&&(w, _)| w == x) {
+        Some(&(_, q)) => Ok(q),
+        None => vertex::point(b, x),
+    }
+}
+
+/// Whether `point` lies on `curve` over its trimmed interval, within `accept`.
+fn lies_on(k: &Kernel, curve: &Curve, point: Point3, accept: f64) -> Result<bool> {
+    Ok(matches!(
+        drop_on(k, curve, &curve.natural_interval(), point)?,
+        Some((_, dist)) if dist <= accept
+    ))
+}
+
+/// The meets of `edge`'s neighbouring lines on `face` with the line through `line_a` and
+/// `line_b`: one per end, each within `on_tol` of its vertex. `None` when an end has no
+/// such meet.
+#[allow(clippy::too_many_arguments)]
+fn meets_of_neighbours(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    edge: EdgeId,
+    ends: [crate::topology::VertexId; 2],
+    line_a: Point3,
+    line_b: Point3,
+    accept: f64,
+    on_tol: f64,
+) -> Result<Option<Vec<(crate::topology::VertexId, Point3)>>> {
+    let mut meets = Vec::new();
+    for v in ends {
+        let p = vertex::point(b, v)?;
+        let mut q = None;
+        for e2 in vertex::edges(b, v, Some(face))? {
+            if e2 == edge {
+                continue;
+            }
+            let Some((na, nz, _)) = straight_ends(k, &edge_curve(k, b, e2)?)? else {
+                continue;
+            };
+            q = lines_meet(na, nz, line_a, line_b, accept);
+            if q.is_some() {
+                break;
+            }
+        }
+        let Some(q) = q else {
+            return Ok(None);
+        };
+        if q.distance(p) > on_tol {
+            return Ok(None);
+        }
+        meets.push((v, q));
+    }
+    Ok(Some(meets))
+}
+
+/// `edge`'s neighbouring edges rebuilt between the points `meets` names (trimmed when the
+/// curve already holds both ends, otherwise the straight line between them). `None` when a
+/// neighbour is not straight and does not already hold its new ends.
+fn neighbour_pieces(
+    k: &Kernel,
+    b: &Brep,
+    edge: EdgeId,
+    meets: &[(crate::topology::VertexId, Point3)],
+    accept: f64,
+) -> Result<Option<Vec<(EdgeId, Curve)>>> {
+    let mut specs: Vec<(EdgeId, Point3, Point3)> = Vec::new();
+    for &(v, _) in meets {
+        for e2 in vertex::edges(b, v, None)? {
+            if e2 == edge {
+                continue;
+            }
+            let (Some(a), Some(z)) = edge::start_end_vertices(b, e2)? else {
+                return Ok(None);
+            };
+            if a == z || specs.iter().any(|(t, _, _)| *t == e2) {
+                continue;
+            }
+            let (pa, pz) = (met_point(b, meets, a)?, met_point(b, meets, z)?);
+            let ncurve = edge_curve(k, b, e2)?;
+            let held = lies_on(k, &ncurve, pa, accept)? && lies_on(k, &ncurve, pz, accept)?;
+            if !held {
+                // A straight neighbour is extended only along its own line. Any other
+                // edge at the vertex stays, and the rail is left unmoved: a chord to a
+                // point off that line would swing the edge off its face.
+                let Some((na, nz, _)) = straight_ends(k, &ncurve)? else {
+                    return Ok(None);
+                };
+                if !point_on_line(na, nz, pa, accept) || !point_on_line(na, nz, pz, accept) {
+                    return Ok(None);
+                }
+            }
+            specs.push((e2, pa, pz));
+        }
+    }
+    let mut pieces = Vec::new();
+    for (e2, pa, pz) in specs {
+        let ncurve = edge_curve(k, b, e2)?;
+        let next = if lies_on(k, &ncurve, pa, accept)? && lies_on(k, &ncurve, pz, accept)? {
+            piece_between(k, &ncurve, pa, pz)?
+        } else {
+            Some(segment(pa, pz, ncurve.dim())?)
+        };
+        let Some(next) = next else {
+            return Ok(None);
+        };
+        pieces.push((e2, next));
+    }
+    Ok(Some(pieces))
+}
+
+/// A sheet edge that runs beside `crease`, farther than `tol` and no farther than
+/// `on_tol`. The classifier would keep the old curve and the sewing would span that
+/// gap (a chamfer rail that has left a narrow face, still inside the loose window of
+/// the next plane, parallel to the planes' intersection). The edge takes the
+/// intersection between the meets of its neighbouring edges' lines. A straight neighbour
+/// is trimmed, or extended, to that meet; a neighbour that does not meet it is left
+/// unchanged, and so is the edge.
+fn pull_boundary_onto_intersection(
+    k: &Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    face: FaceId,
+    crease: &Curve,
+    tol: f64,
+    on_tol: f64,
+) -> Result<()> {
+    let Some((line_a, line_b, _)) = straight_ends(k, crease)? else {
+        return Ok(());
+    };
+    let accept = tol * 1e-6;
+    let edges = face::p4::edges(b, face, None, false, None)?;
+    for e in edges {
+        if !edge::is_lamina(b, e)? {
+            continue;
+        }
+        let (Some(sv), Some(ev)) = edge::start_end_vertices(b, e)? else {
+            continue;
+        };
+        if sv == ev {
+            continue;
+        }
+        let curve = edge_curve(k, b, e)?;
+        let Some(bound) = distance_to_line_bound(&curve, line_a, line_b) else {
+            continue;
+        };
+        if bound <= tol || bound > on_tol {
+            continue;
+        }
+        // Beside the crease's own segment. The bound above is to the infinite line
+        // through its ends; a rail that only nears that line past the segment stays.
+        let (sp, ep) = (vertex::point(b, sv)?, vertex::point(b, ev)?);
+        if !point_near_segment(line_a, line_b, sp, on_tol)
+            || !point_near_segment(line_a, line_b, ep, on_tol)
+        {
+            continue;
+        }
+        let Some(meets) =
+            meets_of_neighbours(k, b, face, e, [sv, ev], line_a, line_b, accept, on_tol)?
+        else {
+            continue;
+        };
+        let (Some(&(_, q0)), Some(&(_, q1))) = (meets.first(), meets.get(1)) else {
+            continue;
+        };
+        if q0.distance(q1) <= tol {
+            continue;
+        }
+        let Some(pieces) = neighbour_pieces(k, b, e, &meets, accept)? else {
+            continue;
+        };
+        replace_edge_curve(b, env, e, segment(q0, q1, crease.dim())?)?;
+        for &(v, q) in &meets {
+            let this = (env.key_of)(EntityRef::Vertex(v));
+            let key_of = env.key_of;
+            let vu_ref = |vu: crate::topology::VertexuseId| key_of(EntityRef::Vertexuse(vu));
+            vertex::set_point(
+                b,
+                v,
+                q,
+                &mut *env.records,
+                &mut *env.attributes,
+                env.context.as_deref_mut(),
+                this,
+                &vu_ref,
+            )?;
+        }
+        for (e2, p) in pieces {
+            replace_edge_curve(b, env, e2, p)?;
+        }
+    }
+    Ok(())
 }
 
 /// What a move of an edge onto its crease leaves to the trim: geometry that no longer
@@ -2342,6 +2607,15 @@ impl FilletSession<'_> {
                         body_tol * SECTION_FIT,
                     )?,
                 };
+                // A rail that has run past a narrow face sits beside this intersection,
+                // inside `on_tol` of it and parallel to it, so the classifier keeps the
+                // rail and the sewing spans the gap. The rail takes the intersection
+                // before that classification.
+                for c in &found {
+                    with_kernel_callbacks(k, &mut sheet, |k, b, env| {
+                        pull_boundary_onto_intersection(k, b, env, s, c, tol, on_tol)
+                    })?;
+                }
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
                 let mut along = Vec::new();
@@ -2660,14 +2934,20 @@ impl FilletSession<'_> {
             }
         }
 
-        // 4: the kept sheet's boundary imprinted on the target faces it lies on
+        // 4: the kept sheet's boundary imprinted on the target faces it lies on.
+        // `on_tol` is only the window in which a face is searched for creases. A rail
+        // that has run past a narrow face can sit inside that window of the next
+        // face's plane and still be a real gap off it (the extended rail, not the
+        // plane intersection). Imprinting that curve cuts the face at the rail's
+        // projection and leaves the vertex between the two. The crease above is the
+        // intersection, so the imprint takes a curve that lies on the face.
         let mut imprinted: BTreeSet<EdgeId> = BTreeSet::new();
         // each face's imprint curves, with the faces they split it into
         let mut imprints: Vec<(Vec<FaceId>, Vec<Curve>)> = Vec::new();
         for &f in &target_faces {
             let mut on = Vec::new();
             for &e in &lamina_edges {
-                if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
+                if edge_on_surface(k, &sheet, e, self.objects.target, f, tol)? {
                     on.push(edge_curve(k, &sheet, e)?);
                 }
             }
