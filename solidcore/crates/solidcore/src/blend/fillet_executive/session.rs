@@ -10435,3 +10435,392 @@ mod attribute_seed_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod rails_fit_seam_tests {
+    //! tangency-labs/solidcraft#17646: the rails check on the #2175 chamfer, through the
+    //! session's own steps.
+    use super::*;
+    use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+    use crate::blend::fillet_solver::p5::{PassedCrossing, RailsFit};
+    use crate::boolean::api_brep::boolean_difference;
+    use crate::curve::curve::Curve;
+    use crate::kernel::{KernelOptions, UpstreamFixes};
+    use crate::math::{Point3, Vec3};
+    use crate::primitive::api_curves::{create_arc, create_line_segment};
+    use crate::primitive::api_primitives::create_sphere;
+    use crate::query::api_queries::edge_closest_point;
+    use crate::sweep::api_brep::create_linear_sweep;
+    use std::f64::consts::PI;
+
+    /// SolidCraft's fixes: every `UpstreamFixes` field on.
+    fn solidcraft_kernel() -> Kernel {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let mut f = UpstreamFixes::default();
+        for &name in UpstreamFixes::NAMES {
+            *f.flag_mut(name).unwrap() = true;
+        }
+        k.fixes = f;
+        k
+    }
+
+    fn line(a: (f64, f64), b: (f64, f64)) -> Curve {
+        Curve::from(
+            create_line_segment(Vec3::new(a.0, a.1, 0.0), Vec3::new(b.0, b.1, 0.0)).unwrap(),
+        )
+    }
+
+    /// #2175's body: a block with an arc side (17.5 high) less a ball r 5 at (2.5, 22.5, 5)
+    /// (`tests/issue_2175_chamfer_rail_past_tangent_rim_end.rs` builds the same).
+    fn body(k: &mut Kernel) -> Brep {
+        let (c, r) = ((24.0625, 11.25), 26.5625);
+        let a = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+        let (s, mut e) = (a((0.0, 22.5)), a((0.0, 0.0)));
+        while e < s {
+            e += 2.0 * PI;
+        }
+        let curves = [
+            line((0.0, 0.0), (47.5, 0.0)),
+            line((47.5, 0.0), (47.5, 22.5)),
+            line((47.5, 22.5), (27.5, 22.5)),
+            line((27.5, 22.5), (27.5, 12.5)),
+            line((27.5, 12.5), (15.0, 12.5)),
+            line((15.0, 12.5), (15.0, 22.5)),
+            line((15.0, 22.5), (0.0, 22.5)),
+            Curve::from(
+                create_arc(Vec3::new(c.0, c.1, 0.0), r, s.to_degrees(), e.to_degrees()).unwrap(),
+            ),
+        ];
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        let block = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 17.5, true).unwrap();
+        let ball = create_sphere(k, Point3::new(2.5, 22.5, 5.0), 5.0).unwrap();
+        boolean_difference(k, block, ball).unwrap()
+    }
+
+    /// The rim edge from (2.5, 22.5, 10) round to (2.5, 22.5, 0).
+    fn rim(k: &Kernel, b: &Brep) -> EdgeId {
+        let q = Point3::new(3.152_630_987_392_417, 22.5, 0.042_775_695_948_521_88);
+        let mut best = (f64::INFINITY, None);
+        for &e in b.edge_list() {
+            if let Ok(c) = edge_closest_point(k, b, e, q) {
+                if c.closest.distance < best.0 {
+                    best = (c.closest.distance, Some(e));
+                }
+            }
+        }
+        best.1.unwrap()
+    }
+
+    /// A session for `edges` blended `radius` with `generator`, its corners bevelled when
+    /// `bevel`, driven in the executive's order (`FilletExecutive::create_fillet_brep`) to
+    /// the rails check. The refusal checks before the corners are left out: they judge and
+    /// build nothing the check reads. `rotate` may move a rail's start first. The first
+    /// solver's judgement, the crossings it passed and its 3D tolerance.
+    #[allow(clippy::too_many_arguments)] // the blend asked, as the session takes it
+    fn judged(
+        k: &mut Kernel,
+        b: &mut Brep,
+        edges: &[EdgeId],
+        radius: f64,
+        generator: FilletSurfaceGeneratorType,
+        bevel: bool,
+        rotate: &mut dyn FnMut(&Kernel, &mut FilletBrep, &[EdgeId]),
+    ) -> (RailsFit, Vec<PassedCrossing>, f64) {
+        let mut s = FilletSession::new(k, b).unwrap();
+        let radii = vec![radius; edges.len()];
+        let generators = vec![generator; edges.len()];
+        s.prepare_per_edge_constant_radius_with_second(
+            k,
+            edges,
+            &radii,
+            &radii,
+            &generators,
+            1,
+            1.0,
+        )
+        .unwrap();
+        s.create_corners(k, None).unwrap();
+        if bevel {
+            for id in s.fillet_corners().unwrap() {
+                s.set_corner_bevel(id, true).unwrap();
+            }
+        }
+        s.with_filleting_context(k, |s, k| {
+            s.objects.creation_smooth(k, &mut s.executive)?;
+            if k.fixes.fillet_trace_reaches_rails {
+                for solver in s.executive.solvers.clone() {
+                    s.objects.creation_extend_trace_to_its_rails(k, solver)?;
+                }
+            }
+            s.executive.create_corner_vertices(k, &mut s.objects)?;
+            s.executive.adjust_corner_topology(k, &mut s.objects)?;
+            s.executive.calculate_solver_geometry(k, &mut s.objects)?;
+            let Some(&FilletObject::Solver(id)) = s.executive.solvers.first() else {
+                panic!("no solver");
+            };
+            let objects = &mut s.objects;
+            let live = objects
+                .solvers
+                .get_mut(id.0 as usize)
+                .and_then(Option::as_mut)
+                .unwrap();
+            let mut rails = Vec::new();
+            for g in live_solver_ops(live).solver().fillet_geoms() {
+                for side in 0..2 {
+                    rails.push(objects.pseudo.geom(g)?.rail(side).unwrap());
+                }
+            }
+            rotate(k, &mut objects.pseudo, &rails);
+            let tolerance = live_solver_ops(live).solver().approx_tol_3d;
+            let mut context = SessionRollOver {
+                corners: &mut objects.corners,
+                executive: &s.executive,
+            };
+            let (fit, crossings) = FilletSolver::rails_fit_their_faces_with_crossings_with_ops(
+                live_solver_ops(live),
+                k,
+                objects.target,
+                &mut objects.pseudo,
+                &mut context,
+                true,
+            )?;
+            Ok((fit, crossings, tolerance))
+        })
+        .unwrap()
+    }
+
+    /// The #2175 chamfer (0.5, bevelled corners) judged, its back-face rail (the one on the
+    /// plane y = 22.5) started `turn` of the way along its own parameter from where it
+    /// starts.
+    fn chamfer_judged(k: &mut Kernel, turn: f64) -> (RailsFit, Vec<PassedCrossing>, f64) {
+        let mut b = body(k);
+        let e = rim(k, &b);
+        let mut rotate = |k: &Kernel, pseudo: &mut FilletBrep, rails: &[EdgeId]| {
+            if turn == 0.0 {
+                return;
+            }
+            let back = *rails
+                .iter()
+                .find(|&&r| {
+                    let c = crate::topology::edge::curve(pseudo.brep(), r)
+                        .unwrap()
+                        .unwrap();
+                    (c.evaluate_point(k, 0.25).unwrap().y - 22.5).abs() < 1e-9
+                })
+                .unwrap();
+            start_rail_at(k, pseudo, back, turn);
+        };
+        judged(
+            k,
+            &mut b,
+            &[e],
+            0.5,
+            FilletSurfaceGeneratorType::Linear,
+            true,
+            &mut rotate,
+        )
+    }
+
+    /// Move the start of the closed circular rail `rail` to its point `turn` of the way
+    /// along its parameter: the circle turned about its own axis (the same point set), and
+    /// the rail edge's vertices moved with it. The rail carries no UV trim curve on its mate
+    /// here, so there is none to move with it.
+    fn start_rail_at(k: &Kernel, pseudo: &mut FilletBrep, rail: EdgeId, turn: f64) {
+        let brep = pseudo.brep_mut();
+        let primary = crate::topology::edgeuse::p1::primary_edgeuse(brep, rail)
+            .unwrap()
+            .unwrap();
+        let mate = crate::topology::edgeuse::p1::mate(brep, primary)
+            .unwrap()
+            .unwrap();
+        assert!(crate::topology::edgeuse::p1::uv_trim_curve(brep, mate)
+            .unwrap()
+            .0
+            .is_none());
+        let mut curve = crate::topology::edge::curve(brep, rail)
+            .unwrap()
+            .unwrap()
+            .clone();
+        let at = |c: &Curve, t: f64| c.evaluate_point(k, t).unwrap();
+        let (p0, p1, p2) = (
+            at(&curve, 0.0),
+            at(&curve, 1.0 / 3.0),
+            at(&curve, 2.0 / 3.0),
+        );
+        // the circle's centre and axis: the circumcentre of three of its points,
+        // p0 + (|a|^2 (b x n) + |b|^2 (n x a)) / (2 |n|^2)
+        let (a, b) = (p1 - p0, p2 - p0);
+        let n = a.cross(b);
+        let centre = p0 + (b.cross(n) * a.dot(a) + n.cross(a) * b.dot(b)) * (0.5 / n.dot(n));
+        let axis = n.unitize().unwrap();
+        let q = at(&curve, turn);
+        let (u, v) = (p0 - centre, q - centre);
+        let angle = axis.dot(u.cross(v)).atan2(u.dot(v));
+        let mut turned = crate::geom::axis2_placement::Axis2Placement::default();
+        turned.init();
+        turned.rotate_about_axis_at_point(angle, centre, axis);
+        curve.transform(k, &turned, None).unwrap();
+        let start = at(&curve, 0.0);
+        assert!(start.distance(q) < 1e-9, "{start:?} for {q:?}");
+        let radius = u.length();
+        for i in 0..8 {
+            let p = at(&curve, f64::from(i) / 8.0);
+            assert!(((p - centre).length() - radius).abs() < 1e-9);
+            assert!(axis.dot(p - centre).abs() < 1e-9);
+        }
+        brep.edge_mut(rail).unwrap().curve = Some(curve);
+        let (first, last) = crate::topology::edge::start_end_vertices(brep, rail).unwrap();
+        for vertex in [first, last].into_iter().flatten() {
+            brep.vertex_mut(vertex).unwrap().point = q;
+        }
+    }
+
+    /// tangency-labs/solidcraft#17646: the #2175 chamfer's back-face rail started inside its
+    /// run off the face round the far side (where it starts on SolidCraft's kernel) and on
+    /// the face: the rails check finds the same of the rails either way. Before, that run
+    /// was two pieces at the first start, each passed over as past an end, and one run at
+    /// the second, judged off its face (`left_across` and `return_across` one entry longer).
+    #[test]
+    fn the_back_face_rail_is_judged_the_same_wherever_it_starts() {
+        let mut k = solidcraft_kernel();
+        let (inside_run, _, _) = chamfer_judged(&mut k, 0.0);
+        let mut k = solidcraft_kernel();
+        let (on_face, _, _) = chamfer_judged(&mut k, 0.68);
+        assert_eq!(inside_run, on_face);
+    }
+
+    /// tangency-labs/solidcraft#17646: the one crossing the #2175 chamfer's rails check
+    /// passes is the back-face rail's crossing of the bottom face's edge, at
+    /// (4.736, 22.5, 0), passed to the bottom end of the rim, (2.5, 22.5, 0). The End there
+    /// is at a smooth vertex: it judges the rail on to its end on the cap plane, and refuses
+    /// the chamfer (`tests/issue_2175_chamfer_rail_past_tangent_rim_end.rs`), on both kernels.
+    #[test]
+    fn the_chamfer_s_crossing_is_passed_to_the_bottom_end() {
+        for kernel in [solidcraft_kernel, Kernel::default] {
+            let mut k = kernel();
+            let (fit, crossings, _) = chamfer_judged(&mut k, 0.0);
+            assert!(fit.fit && !fit.wraps_past_both_ends, "{fit:?}");
+            let [crossing] = crossings.as_slice() else {
+                panic!("{crossings:?}");
+            };
+            assert!(crossing.point.distance(Point3::new(4.736, 22.5, 0.0)) < 1e-3);
+            let b = body(&mut k);
+            let e = rim(&k, &b);
+            let ivl = b.edge(e).unwrap().interval;
+            let t = if crossing.end == 0 {
+                ivl.min()
+            } else {
+                ivl.max()
+            };
+            let end = crate::topology::edge::curve(&b, e)
+                .unwrap()
+                .unwrap()
+                .evaluate_point(&k, t)
+                .unwrap();
+            assert!(end.distance(Point3::new(2.5, 22.5, 0.0)) < 1e-9, "{end:?}");
+        }
+    }
+
+    /// The fork's tangent-end peg (`tests/fork_856b54e_tangent_end.rs` builds the same): a bar
+    /// 40 x 16 x 10 whose far end is a half disc R 8 about (40, 8), with a disc R 8 standing
+    /// 10 on its top about the same axis.
+    fn peg(k: &mut Kernel) -> Brep {
+        let p = Point3::new;
+        let seg = |a: Point3, b: Point3| Curve::from(create_line_segment(a, b).unwrap());
+        let bar = [
+            seg(p(0.0, 0.0, 0.0), p(40.0, 0.0, 0.0)),
+            Curve::from(create_arc(p(40.0, 8.0, 0.0), 8.0, -90.0, 90.0).unwrap()),
+            seg(p(40.0, 16.0, 0.0), p(0.0, 16.0, 0.0)),
+            seg(p(0.0, 16.0, 0.0), p(0.0, 0.0, 0.0)),
+        ];
+        let refs: Vec<Option<&Curve>> = bar.iter().map(Some).collect();
+        let bar = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, true).unwrap();
+        let disc = [Curve::from(
+            crate::primitive::api_curves::create_circle(p(40.0, 8.0, 10.0), 8.0).unwrap(),
+        )];
+        let refs: Vec<Option<&Curve>> = disc.iter().map(Some).collect();
+        let disc = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, true).unwrap();
+        crate::boolean::api_brep::boolean_union(k, bar, disc).unwrap()
+    }
+
+    /// The peg's front top edge, (0, 0, 10) to (40, 0, 10).
+    fn front_top(b: &Brep) -> EdgeId {
+        let found: Vec<EdgeId> = b
+            .edge_list()
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let (s, t) = crate::topology::edge::start_end_vertices(b, e).unwrap();
+                let s = b.vertex(s.unwrap()).unwrap().point;
+                let t = b.vertex(t.unwrap()).unwrap().point;
+                (s.z - 10.0).abs() < 1e-9
+                    && (t.z - 10.0).abs() < 1e-9
+                    && s.y.abs() < 1e-9
+                    && t.y.abs() < 1e-9
+                    && (s.x - t.x).abs() > 30.0
+            })
+            .collect();
+        let [e] = found.as_slice() else {
+            panic!("{found:?}");
+        };
+        *e
+    }
+
+    /// The peg's kernel (`tests/fork_856b54e_tangent_end.rs`).
+    fn peg_kernel() -> Kernel {
+        let mut k = Kernel::default();
+        k.fixes.fillet_trace_reaches_rails = true;
+        k.fixes.fillet_chamfer_cone_on_arc = true;
+        k
+    }
+
+    /// tangency-labs/solidcraft#17646: the peg's front round (2) ends at a tangent end
+    /// (`generic-blend.md` §3.1): the front face runs tangent into the end cylinder across the
+    /// seam T at x = 40. The rails check passes the front-face rail's crossing of T at
+    /// (40, 0, 8), in span, heading out past the edge's end (40, 0, 10). The End builds its
+    /// end curve outward from that event: in the round built, its rail end on T is that
+    /// crossing, within the solver's 3D tolerance.
+    #[test]
+    fn the_front_round_s_crossing_is_its_tangent_end_s_rail_end() {
+        let mut k = peg_kernel();
+        let mut b = peg(&mut k);
+        let e = front_top(&b);
+        let (fit, crossings, tolerance) = judged(
+            &mut k,
+            &mut b,
+            &[e],
+            2.0,
+            FilletSurfaceGeneratorType::Circular,
+            false,
+            &mut |_, _, _| {},
+        );
+        assert!(fit.fit, "{fit:?}");
+        let at_t: Vec<&PassedCrossing> = crossings
+            .iter()
+            .filter(|c| c.point.distance(Point3::new(40.0, 0.0, 8.0)) < 1e-3)
+            .collect();
+        assert_eq!(at_t.len(), 1, "{crossings:?}");
+        // the round built: the result's vertices on T (x = 40 on the front face y = 0)
+        let mut k = peg_kernel();
+        let mut b = peg(&mut k);
+        let e = front_top(&b);
+        {
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_constant_radius_edges(&mut k, &[e], 2.0, 1, 1, 1.0)
+                .unwrap();
+            s.do_fillet(&mut k).unwrap();
+        }
+        let on_t: Vec<Point3> = crate::topology::brep::p1::vertices(&b, None)
+            .unwrap()
+            .into_iter()
+            .map(|v| b.vertex(v).unwrap().point)
+            .filter(|p| (p.x - 40.0).abs() < 1e-6 && p.y.abs() < 1e-6)
+            .collect();
+        for crossing in at_t {
+            assert!(
+                on_t.iter().any(|p| p.distance(crossing.point) <= tolerance),
+                "{crossing:?} against {on_t:?} (tolerance {tolerance:e})"
+            );
+        }
+    }
+}
