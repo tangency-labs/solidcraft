@@ -1,0 +1,23 @@
+//! Built-in model appearances: names, sRGB colours and metalness.
+pub const LIBRARY: &[(&str, [u8; 3], f64)] = &[
+    ("Aluminum - Satin", [204, 208, 214], 1.0),
+    ("Aluminum - Anodized Black", [44, 46, 50], 1.0),
+    ("Aluminum - Anodized Blue", [52, 92, 160], 1.0),
+    ("Steel - Satin", [158, 164, 172], 1.0),
+    ("Stainless Steel - Brushed", [186, 191, 198], 1.0),
+    ("Cast Iron", [104, 104, 110], 1.0),
+    ("Brass - Polished", [208, 172, 88], 1.0),
+    ("Copper", [204, 122, 80], 1.0),
+    ("Titanium", [150, 148, 158], 1.0),
+    ("ABS - White", [236, 236, 230], 1.0),
+    ("ABS - Black", [36, 36, 38], 1.0),
+    ("ABS - Red", [196, 40, 40], 1.0),
+    ("ABS - Blue", [40, 90, 186], 1.0),
+    ("ABS - Yellow", [236, 196, 40], 1.0),
+    ("ABS - Green", [52, 150, 80], 1.0),
+    ("Rubber - Black", [28, 28, 28], 1.0),
+    ("Glass - Clear", [190, 220, 228], 0.25),
+    ("Glass - Smoked", [90, 96, 104], 0.45),
+    ("Wood - Oak", [190, 146, 92], 1.0),
+    ("Paint - Gloss White", [246, 246, 244], 1.0),
+];

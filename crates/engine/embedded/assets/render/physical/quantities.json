@@ -1,0 +1,209 @@
+{
+  "schema": "solidcraft-physical-quantities/1",
+  "units": {
+    "density": "kg/m^3",
+    "young_modulus": "Pa",
+    "poisson_ratio": "1",
+    "shear_modulus": "Pa",
+    "tensile_strength": "Pa",
+    "yield_strength": "Pa",
+    "compressive_strength": "Pa",
+    "flexural_strength": "Pa",
+    "flexural_modulus": "Pa",
+    "elongation_break": "1",
+    "thermal_conductivity": "W/(m K)",
+    "thermal_expansion": "1/K",
+    "specific_heat": "J/(kg K)",
+    "glass_transition": "K",
+    "melting_temperature": "K",
+    "heat_deflection": "K",
+    "volume_resistivity": "ohm m",
+    "relative_permittivity": "1",
+    "loss_tangent": "1",
+    "dielectric_strength": "V/m",
+    "water_absorption": "1",
+    "hardness_shore_a": "1",
+    "hardness_shore_d": "1",
+    "hardness_knoop": "1",
+    "hardness_janka": "N",
+    "service_temperature": "K",
+    "specific_gravity": "1",
+    "stress_at_strain": "Pa",
+    "tear_strength": "N/m",
+    "refractive_index": "1",
+    "decomposition_temperature": "K",
+    "compressive_modulus": "Pa",
+    "electrical_conductivity_iacs": "1",
+    "fracture_toughness": "Pa sqrt(m)",
+    "shear_strength": "Pa",
+    "hardness_brinell": "1",
+    "grain_density": "kg/m^3",
+    "porosity": "1",
+    "void_ratio": "1",
+    "mean_particle_size": "m",
+    "angle_of_repose": "rad",
+    "thermal_emittance": "1",
+    "solar_absorptance": "1",
+    "dry_film_thickness": "m",
+    "internal_bond_strength": "Pa",
+    "thickness_swelling": "1"
+  },
+  "conversions": {
+    "kg/m^3": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "g/cm^3": {
+      "scale": 1000.0,
+      "offset": 0.0
+    },
+    "Pa": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "kPa": {
+      "scale": 1000.0,
+      "offset": 0.0
+    },
+    "MPa": {
+      "scale": 1000000.0,
+      "offset": 0.0
+    },
+    "GPa": {
+      "scale": 1000000000.0,
+      "offset": 0.0
+    },
+    "psi": {
+      "scale": 6894.757293168,
+      "offset": 0.0
+    },
+    "ksi": {
+      "scale": 6894757.293168,
+      "offset": 0.0
+    },
+    "1": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "%": {
+      "scale": 0.01,
+      "offset": 0.0
+    },
+    "W/(m K)": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "1/K": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "ppm/K": {
+      "scale": 1e-06,
+      "offset": 0.0
+    },
+    "1/degF": {
+      "scale": 1.8,
+      "offset": 0.0
+    },
+    "J/(kg K)": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "J/(g K)": {
+      "scale": 1000.0,
+      "offset": 0.0
+    },
+    "K": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "degC": {
+      "scale": 1.0,
+      "offset": 273.15
+    },
+    "ohm m": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "ohm cm": {
+      "scale": 0.01,
+      "offset": 0.0
+    },
+    "microohm cm": {
+      "scale": 1e-08,
+      "offset": 0.0
+    },
+    "ohm mm^2/m": {
+      "scale": 1e-06,
+      "offset": 0.0
+    },
+    "V/m": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "kV/mm": {
+      "scale": 1000000.0,
+      "offset": 0.0
+    },
+    "V/mil": {
+      "scale": 39370.07874015748,
+      "offset": 0.0
+    },
+    "N": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "N/m": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "pli": {
+      "scale": 175.1268352465,
+      "offset": 0.0
+    },
+    "lb/in^3": {
+      "scale": 27679.904710203,
+      "offset": 0.0
+    },
+    "Btu/(h ft degF)": {
+      "scale": 1.730734666371,
+      "offset": 0.0
+    },
+    "Btu/(lb degF)": {
+      "scale": 4186.8,
+      "offset": 0.0
+    },
+    "MPa sqrt(m)": {
+      "scale": 1000000.0,
+      "offset": 0.0
+    },
+    "Pa sqrt(m)": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "degF": {
+      "scale": 0.5555555555555556,
+      "offset": 255.3722222222222
+    },
+    "micrometre": {
+      "scale": 1e-06,
+      "offset": 0.0
+    },
+    "mil": {
+      "scale": 2.54e-05,
+      "offset": 0.0
+    },
+    "degree": {
+      "scale": 0.017453292519943295,
+      "offset": 0.0
+    },
+    "rad": {
+      "scale": 1.0,
+      "offset": 0.0
+    },
+    "m": {
+      "scale": 1.0,
+      "offset": 0.0
+    }
+  }
+}

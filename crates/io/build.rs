@@ -184,7 +184,7 @@ fn hex_digest(digest: Sha256) -> String {
 /// The digest of the committed source of the saved model (see the module notes), or `None` when
 /// `.git` is absent, `git` is unavailable, or a part of the source is not in the commit.
 pub(crate) fn evaluation_source(root: &Path) -> Option<String> {
-    if !root.join(".git").exists() {
+    if !evaluation_inputs_present(root) || !root.join(".git").exists() {
         return None;
     }
     let paths = evaluation_paths();
@@ -288,6 +288,9 @@ fn hash_disk_path(root: &Path, path: &Path, digest: &mut Sha256, watch: bool) ->
 
 /// Fallback when `.git` or `git` is unavailable: hash the same evaluation inputs from `root`.
 pub(crate) fn evaluation_source_from_disk(root: &Path, watch: bool) -> Option<String> {
+    if !evaluation_inputs_present(root) {
+        return None;
+    }
     let mut digest = Sha256::new();
     digest.update("disk-v1\n");
     for rel in evaluation_paths() {
@@ -311,6 +314,13 @@ pub(crate) fn evaluation_source_from_disk(root: &Path, watch: bool) -> Option<St
         digest.update(format!("meta {file} {}\n{text}", text.len()));
     }
     Some(hex_digest(digest))
+}
+
+// A packaged IO crate has no evaluation workspace beside it. Never key its cache
+// with a partial source tree (or with an unrelated enclosing repository's HEAD).
+fn evaluation_inputs_present(root: &Path) -> bool {
+    evaluation_paths().iter().all(|path| root.join(path).exists())
+        && ["Cargo.toml", "Cargo.lock", "vendor"].iter().all(|path| root.join(path).exists())
 }
 
 fn main() {

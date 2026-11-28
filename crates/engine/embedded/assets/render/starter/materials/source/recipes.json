@@ -1,0 +1,1830 @@
+{
+  "schema": "solidcraft-authored-surfaces/1",
+  "generator_version": "1.0.0",
+  "created": "2026-10-21",
+  "resolution": 512,
+  "license": "MIT OR Apache-2.0",
+  "authoring": "Original deterministic periodic mathematical fields",
+  "external_inputs": [],
+  "semantic_policy": {
+    "base_color": "sRGB-encoded linear authored reflectance/F0 approximation; no baked illumination",
+    "data_maps": "Linear numerical channels; never apply sRGB transfer",
+    "normal": "OpenGL +Y; U right, V image-up; use wrapped sampling and renormalize",
+    "height": "16-bit unsigned normalized; (sample - 0.5) * height_span_mm",
+    "physical_mapping": "Each whole UV repeat spans tile_mm; preserve scale across CAD resizing",
+    "ambient_occlusion": "Constant 1; no invented AO map",
+    "availability": "Authored unbound resources. No runtime catalog import or reference render claimed"
+  },
+  "items": [
+    {
+      "id": "SURF-001",
+      "name": "Brushed stainless steel",
+      "catalog_ids": [
+        "MAT-002"
+      ],
+      "domains": [
+        "industrial",
+        "automotive"
+      ],
+      "pattern": "brushed",
+      "seed": 20262018,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.48,
+        0.52,
+        0.56
+      ],
+      "base_linear_high": [
+        0.62,
+        0.66,
+        0.69
+      ],
+      "roughness": 0.29,
+      "roughness_variation": 0.08,
+      "metallic": 1,
+      "height_span_mm": 0.018,
+      "cycles_u": 12,
+      "cycles_v": 64,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-002",
+      "name": "Cross-satin stainless steel",
+      "catalog_ids": [
+        "MAT-003"
+      ],
+      "domains": [
+        "industrial",
+        "automotive"
+      ],
+      "pattern": "cross_brushed",
+      "seed": 20263015,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.46,
+        0.5,
+        0.54
+      ],
+      "base_linear_high": [
+        0.6,
+        0.64,
+        0.67
+      ],
+      "roughness": 0.39,
+      "roughness_variation": 0.08,
+      "metallic": 1,
+      "height_span_mm": 0.025,
+      "cycles_u": 48,
+      "cycles_v": 48,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-003",
+      "name": "Shot-blasted steel",
+      "catalog_ids": [
+        "MAT-004"
+      ],
+      "domains": [
+        "industrial",
+        "automotive"
+      ],
+      "pattern": "grain",
+      "seed": 20264012,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.43,
+        0.46,
+        0.49
+      ],
+      "base_linear_high": [
+        0.56,
+        0.59,
+        0.62
+      ],
+      "roughness": 0.59,
+      "roughness_variation": 0.14,
+      "metallic": 1,
+      "height_span_mm": 0.1,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-004",
+      "name": "Galvanized steel spangle",
+      "catalog_ids": [
+        "MAT-006"
+      ],
+      "domains": [
+        "industrial",
+        "DIY"
+      ],
+      "pattern": "galvanized",
+      "seed": 20265009,
+      "tile_mm": [
+        180,
+        180
+      ],
+      "base_linear_low": [
+        0.44,
+        0.47,
+        0.51
+      ],
+      "base_linear_high": [
+        0.7,
+        0.73,
+        0.76
+      ],
+      "roughness": 0.35,
+      "roughness_variation": 0.12,
+      "metallic": 1,
+      "height_span_mm": 0.06,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-005",
+      "name": "Face-milled aluminium",
+      "catalog_ids": [
+        "MAT-011"
+      ],
+      "domains": [
+        "industrial",
+        "automotive",
+        "aerospace"
+      ],
+      "pattern": "milled",
+      "seed": 20266006,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.65,
+        0.68,
+        0.72
+      ],
+      "base_linear_high": [
+        0.8,
+        0.82,
+        0.85
+      ],
+      "roughness": 0.27,
+      "roughness_variation": 0.1,
+      "metallic": 1,
+      "height_span_mm": 0.05,
+      "cycles_u": 32,
+      "cycles_v": 4,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-006",
+      "name": "Turned aluminium tool marks",
+      "catalog_ids": [
+        "MAT-012"
+      ],
+      "domains": [
+        "industrial",
+        "electronics",
+        "aerospace"
+      ],
+      "pattern": "turned",
+      "seed": 20267003,
+      "tile_mm": [
+        40,
+        40
+      ],
+      "base_linear_low": [
+        0.64,
+        0.68,
+        0.72
+      ],
+      "base_linear_high": [
+        0.79,
+        0.82,
+        0.85
+      ],
+      "roughness": 0.28,
+      "roughness_variation": 0.07,
+      "metallic": 1,
+      "height_span_mm": 0.016,
+      "cycles_u": 8,
+      "cycles_v": 64,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-007",
+      "name": "Bead-blasted aluminium",
+      "catalog_ids": [
+        "MAT-014"
+      ],
+      "domains": [
+        "industrial",
+        "electronics",
+        "aerospace"
+      ],
+      "pattern": "grain",
+      "seed": 20268000,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.58,
+        0.62,
+        0.67
+      ],
+      "base_linear_high": [
+        0.73,
+        0.76,
+        0.8
+      ],
+      "roughness": 0.57,
+      "roughness_variation": 0.12,
+      "metallic": 1,
+      "height_span_mm": 0.09,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-008",
+      "name": "Brushed titanium appearance",
+      "catalog_ids": [
+        "MAT-019"
+      ],
+      "domains": [
+        "aerospace",
+        "industrial"
+      ],
+      "pattern": "brushed",
+      "seed": 20268997,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.43,
+        0.43,
+        0.44
+      ],
+      "base_linear_high": [
+        0.58,
+        0.58,
+        0.6
+      ],
+      "roughness": 0.4,
+      "roughness_variation": 0.1,
+      "metallic": 1,
+      "height_span_mm": 0.025,
+      "cycles_u": 12,
+      "cycles_v": 48,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-009",
+      "name": "Brushed copper appearance",
+      "catalog_ids": [
+        "MAT-022"
+      ],
+      "domains": [
+        "electronics",
+        "industrial"
+      ],
+      "pattern": "brushed",
+      "seed": 20269994,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.72,
+        0.35,
+        0.2
+      ],
+      "base_linear_high": [
+        0.89,
+        0.52,
+        0.33
+      ],
+      "roughness": 0.3,
+      "roughness_variation": 0.08,
+      "metallic": 1,
+      "height_span_mm": 0.02,
+      "cycles_u": 12,
+      "cycles_v": 64,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-010",
+      "name": "Machined brass appearance",
+      "catalog_ids": [
+        "MAT-024"
+      ],
+      "domains": [
+        "3D_printing",
+        "industrial"
+      ],
+      "pattern": "milled",
+      "seed": 20270991,
+      "tile_mm": [
+        60,
+        60
+      ],
+      "base_linear_low": [
+        0.62,
+        0.43,
+        0.14
+      ],
+      "base_linear_high": [
+        0.82,
+        0.64,
+        0.29
+      ],
+      "roughness": 0.29,
+      "roughness_variation": 0.1,
+      "metallic": 1,
+      "height_span_mm": 0.025,
+      "cycles_u": 24,
+      "cycles_v": 3,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-011",
+      "name": "Satin nickel appearance",
+      "catalog_ids": [
+        "MAT-027"
+      ],
+      "domains": [
+        "industrial",
+        "electronics"
+      ],
+      "pattern": "brushed",
+      "seed": 20271988,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.5,
+        0.49,
+        0.45
+      ],
+      "base_linear_high": [
+        0.67,
+        0.66,
+        0.61
+      ],
+      "roughness": 0.35,
+      "roughness_variation": 0.07,
+      "metallic": 1,
+      "height_span_mm": 0.02,
+      "cycles_u": 12,
+      "cycles_v": 48,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-012",
+      "name": "Solidified solder finish",
+      "catalog_ids": [
+        "MAT-165"
+      ],
+      "domains": [
+        "electronics"
+      ],
+      "pattern": "grain",
+      "seed": 20272985,
+      "tile_mm": [
+        20,
+        20
+      ],
+      "base_linear_low": [
+        0.49,
+        0.51,
+        0.54
+      ],
+      "base_linear_high": [
+        0.7,
+        0.72,
+        0.74
+      ],
+      "roughness": 0.38,
+      "roughness_variation": 0.1,
+      "metallic": 1,
+      "height_span_mm": 0.018,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-013",
+      "name": "Matte white industrial paint",
+      "catalog_ids": [
+        "MAT-031"
+      ],
+      "domains": [
+        "industrial",
+        "automotive",
+        "DIY"
+      ],
+      "pattern": "polymer",
+      "seed": 20273982,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.67,
+        0.67,
+        0.65
+      ],
+      "base_linear_high": [
+        0.78,
+        0.78,
+        0.76
+      ],
+      "roughness": 0.67,
+      "roughness_variation": 0.12,
+      "metallic": 0,
+      "height_span_mm": 0.035,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-014",
+      "name": "Black textured powder coat",
+      "catalog_ids": [
+        "MAT-032"
+      ],
+      "domains": [
+        "industrial",
+        "electronics",
+        "DIY"
+      ],
+      "pattern": "powder",
+      "seed": 20274979,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.012,
+        0.015,
+        0.019
+      ],
+      "base_linear_high": [
+        0.026,
+        0.03,
+        0.036
+      ],
+      "roughness": 0.62,
+      "roughness_variation": 0.16,
+      "metallic": 0,
+      "height_span_mm": 0.2,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-015",
+      "name": "Satin red industrial paint",
+      "catalog_ids": [
+        "MAT-033"
+      ],
+      "domains": [
+        "automotive",
+        "industrial"
+      ],
+      "pattern": "polymer",
+      "seed": 20275976,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.32,
+        0.012,
+        0.009
+      ],
+      "base_linear_high": [
+        0.43,
+        0.02,
+        0.016
+      ],
+      "roughness": 0.32,
+      "roughness_variation": 0.09,
+      "metallic": 0,
+      "height_span_mm": 0.03,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-016",
+      "name": "Grey hammer-finish enamel",
+      "catalog_ids": [
+        "MAT-037"
+      ],
+      "domains": [
+        "industrial",
+        "DIY"
+      ],
+      "pattern": "hammered",
+      "seed": 20276973,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.07,
+        0.09,
+        0.1
+      ],
+      "base_linear_high": [
+        0.18,
+        0.21,
+        0.22
+      ],
+      "roughness": 0.39,
+      "roughness_variation": 0.15,
+      "metallic": 0,
+      "height_span_mm": 0.32,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-017",
+      "name": "Red orange-peel lacquer surrogate",
+      "catalog_ids": [
+        "MAT-204"
+      ],
+      "domains": [
+        "automotive"
+      ],
+      "pattern": "powder",
+      "seed": 20277970,
+      "tile_mm": [
+        60,
+        60
+      ],
+      "base_linear_low": [
+        0.3,
+        0.008,
+        0.012
+      ],
+      "base_linear_high": [
+        0.39,
+        0.016,
+        0.021
+      ],
+      "roughness": 0.16,
+      "roughness_variation": 0.08,
+      "metallic": 0,
+      "height_span_mm": 0.045,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Opaque single-surface approximation: no independent coating, thin-film interference, transmission, or layered Fresnel response."
+      ]
+    },
+    {
+      "id": "SURF-018",
+      "name": "Black anodized opaque surrogate",
+      "catalog_ids": [
+        "MAT-016"
+      ],
+      "domains": [
+        "electronics",
+        "aerospace",
+        "automotive"
+      ],
+      "pattern": "brushed",
+      "seed": 20278967,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.008,
+        0.011,
+        0.015
+      ],
+      "base_linear_high": [
+        0.02,
+        0.025,
+        0.033
+      ],
+      "roughness": 0.37,
+      "roughness_variation": 0.09,
+      "metallic": 0,
+      "height_span_mm": 0.02,
+      "cycles_u": 12,
+      "cycles_v": 64,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task.",
+        "Opaque single-surface approximation: no independent coating, thin-film interference, transmission, or layered Fresnel response."
+      ]
+    },
+    {
+      "id": "SURF-019",
+      "name": "Fine black ABS housing",
+      "catalog_ids": [
+        "MAT-042"
+      ],
+      "domains": [
+        "electronics",
+        "industrial"
+      ],
+      "pattern": "polymer",
+      "seed": 20279964,
+      "tile_mm": [
+        60,
+        60
+      ],
+      "base_linear_low": [
+        0.014,
+        0.017,
+        0.022
+      ],
+      "base_linear_high": [
+        0.027,
+        0.032,
+        0.04
+      ],
+      "roughness": 0.48,
+      "roughness_variation": 0.12,
+      "metallic": 0,
+      "height_span_mm": 0.07,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-020",
+      "name": "Ivory textured ABS housing",
+      "catalog_ids": [
+        "MAT-042"
+      ],
+      "domains": [
+        "electronics",
+        "DIY"
+      ],
+      "pattern": "polymer",
+      "seed": 20280961,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.61,
+        0.57,
+        0.46
+      ],
+      "base_linear_high": [
+        0.75,
+        0.7,
+        0.59
+      ],
+      "roughness": 0.54,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.12,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-021",
+      "name": "Machined white POM appearance",
+      "catalog_ids": [
+        "MAT-046"
+      ],
+      "domains": [
+        "industrial",
+        "DIY"
+      ],
+      "pattern": "milled",
+      "seed": 20281958,
+      "tile_mm": [
+        60,
+        60
+      ],
+      "base_linear_low": [
+        0.7,
+        0.71,
+        0.7
+      ],
+      "base_linear_high": [
+        0.82,
+        0.83,
+        0.81
+      ],
+      "roughness": 0.4,
+      "roughness_variation": 0.08,
+      "metallic": 0,
+      "height_span_mm": 0.025,
+      "cycles_u": 24,
+      "cycles_v": 3,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-022",
+      "name": "Machined tan PEEK appearance",
+      "catalog_ids": [
+        "MAT-047"
+      ],
+      "domains": [
+        "industrial",
+        "aerospace"
+      ],
+      "pattern": "milled",
+      "seed": 20282955,
+      "tile_mm": [
+        60,
+        60
+      ],
+      "base_linear_low": [
+        0.28,
+        0.2,
+        0.11
+      ],
+      "base_linear_high": [
+        0.43,
+        0.34,
+        0.22
+      ],
+      "roughness": 0.43,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.025,
+      "cycles_u": 24,
+      "cycles_v": 3,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Surface direction is encoded in height/normal data; true anisotropic BRDF parameters remain an explicit renderer integration task."
+      ]
+    },
+    {
+      "id": "SURF-023",
+      "name": "Blue silicone jacket surface",
+      "catalog_ids": [
+        "MAT-333"
+      ],
+      "domains": [
+        "electronics",
+        "LED"
+      ],
+      "pattern": "rubber",
+      "seed": 20283952,
+      "tile_mm": [
+        50,
+        50
+      ],
+      "base_linear_low": [
+        0.018,
+        0.07,
+        0.23
+      ],
+      "base_linear_high": [
+        0.028,
+        0.12,
+        0.38
+      ],
+      "roughness": 0.64,
+      "roughness_variation": 0.09,
+      "metallic": 0,
+      "height_span_mm": 0.04,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Passive unpowered surface; no emission, volume scattering or calibrated light output."
+      ]
+    },
+    {
+      "id": "SURF-024",
+      "name": "Charcoal technical rubber",
+      "catalog_ids": [
+        "MAT-061"
+      ],
+      "domains": [
+        "automotive",
+        "industrial"
+      ],
+      "pattern": "rubber",
+      "seed": 20284949,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.009,
+        0.01,
+        0.012
+      ],
+      "base_linear_high": [
+        0.02,
+        0.022,
+        0.026
+      ],
+      "roughness": 0.76,
+      "roughness_variation": 0.12,
+      "metallic": 0,
+      "height_span_mm": 0.1,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-025",
+      "name": "Diamond-pattern TPU grip",
+      "catalog_ids": [
+        "MAT-065"
+      ],
+      "domains": [
+        "automotive",
+        "DIY"
+      ],
+      "pattern": "grip",
+      "seed": 20285946,
+      "tile_mm": [
+        60,
+        60
+      ],
+      "base_linear_low": [
+        0.022,
+        0.027,
+        0.032
+      ],
+      "base_linear_high": [
+        0.04,
+        0.046,
+        0.053
+      ],
+      "roughness": 0.63,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.6,
+      "cycles_u": 8,
+      "cycles_v": 8,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-026",
+      "name": "Agglomerated cork surface",
+      "catalog_ids": [
+        "MAT-146"
+      ],
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "pattern": "cork",
+      "seed": 20286943,
+      "tile_mm": [
+        160,
+        160
+      ],
+      "base_linear_low": [
+        0.18,
+        0.08,
+        0.025
+      ],
+      "base_linear_high": [
+        0.42,
+        0.25,
+        0.1
+      ],
+      "roughness": 0.84,
+      "roughness_variation": 0.11,
+      "metallic": 0,
+      "height_span_mm": 0.7,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-027",
+      "name": "Oiled oak grain approximation",
+      "catalog_ids": [
+        "MAT-111"
+      ],
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "pattern": "wood",
+      "seed": 20287940,
+      "tile_mm": [
+        240,
+        480
+      ],
+      "base_linear_low": [
+        0.16,
+        0.065,
+        0.018
+      ],
+      "base_linear_high": [
+        0.48,
+        0.28,
+        0.1
+      ],
+      "roughness": 0.42,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.35,
+      "cycles_u": 24,
+      "cycles_v": 8,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Original periodic grain illustration; no scanned species identification, knots, subsurface transport, or separate finish layer."
+      ]
+    },
+    {
+      "id": "SURF-028",
+      "name": "Walnut grain coat surrogate",
+      "catalog_ids": [
+        "MAT-113"
+      ],
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "pattern": "wood",
+      "seed": 20288937,
+      "tile_mm": [
+        240,
+        480
+      ],
+      "base_linear_low": [
+        0.055,
+        0.022,
+        0.012
+      ],
+      "base_linear_high": [
+        0.25,
+        0.12,
+        0.047
+      ],
+      "roughness": 0.3,
+      "roughness_variation": 0.09,
+      "metallic": 0,
+      "height_span_mm": 0.25,
+      "cycles_u": 22,
+      "cycles_v": 8,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Opaque single-surface approximation: no independent coating, thin-film interference, transmission, or layered Fresnel response.",
+        "Original periodic grain illustration; no scanned species identification, knots, subsurface transport, or separate finish layer."
+      ]
+    },
+    {
+      "id": "SURF-029",
+      "name": "Sanded beech grain",
+      "catalog_ids": [
+        "MAT-114"
+      ],
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "pattern": "wood",
+      "seed": 20289934,
+      "tile_mm": [
+        240,
+        480
+      ],
+      "base_linear_low": [
+        0.36,
+        0.19,
+        0.085
+      ],
+      "base_linear_high": [
+        0.64,
+        0.42,
+        0.23
+      ],
+      "roughness": 0.67,
+      "roughness_variation": 0.11,
+      "metallic": 0,
+      "height_span_mm": 0.25,
+      "cycles_u": 28,
+      "cycles_v": 8,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Original periodic grain illustration; no scanned species identification, knots, subsurface transport, or separate finish layer."
+      ]
+    },
+    {
+      "id": "SURF-030",
+      "name": "Natural birch grain",
+      "catalog_ids": [
+        "MAT-117"
+      ],
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "pattern": "wood",
+      "seed": 20290931,
+      "tile_mm": [
+        240,
+        480
+      ],
+      "base_linear_low": [
+        0.4,
+        0.28,
+        0.15
+      ],
+      "base_linear_high": [
+        0.71,
+        0.57,
+        0.35
+      ],
+      "roughness": 0.66,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.2,
+      "cycles_u": 30,
+      "cycles_v": 8,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Original periodic grain illustration; no scanned species identification, knots, subsurface transport, or separate finish layer."
+      ]
+    },
+    {
+      "id": "SURF-031",
+      "name": "Birch plywood exposed edge",
+      "catalog_ids": [
+        "MAT-121"
+      ],
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "pattern": "plywood",
+      "seed": 20291928,
+      "tile_mm": [
+        120,
+        60
+      ],
+      "base_linear_low": [
+        0.22,
+        0.12,
+        0.045
+      ],
+      "base_linear_high": [
+        0.68,
+        0.51,
+        0.28
+      ],
+      "roughness": 0.7,
+      "roughness_variation": 0.12,
+      "metallic": 0,
+      "height_span_mm": 0.15,
+      "cycles_u": 24,
+      "cycles_v": 20,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-032",
+      "name": "Uncoated MDF cut surface",
+      "catalog_ids": [
+        "MAT-123"
+      ],
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "pattern": "fibre",
+      "seed": 20292925,
+      "tile_mm": [
+        160,
+        160
+      ],
+      "base_linear_low": [
+        0.22,
+        0.13,
+        0.055
+      ],
+      "base_linear_high": [
+        0.45,
+        0.3,
+        0.14
+      ],
+      "roughness": 0.88,
+      "roughness_variation": 0.08,
+      "metallic": 0,
+      "height_span_mm": 0.25,
+      "cycles_u": 32,
+      "cycles_v": 20,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-033",
+      "name": "Carbon 2/2 twill opaque surrogate",
+      "catalog_ids": [
+        "MAT-151"
+      ],
+      "domains": [
+        "automotive",
+        "aerospace"
+      ],
+      "pattern": "weave_twill",
+      "seed": 20293922,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.01,
+        0.012,
+        0.015
+      ],
+      "base_linear_high": [
+        0.048,
+        0.055,
+        0.067
+      ],
+      "roughness": 0.3,
+      "roughness_variation": 0.12,
+      "metallic": 0,
+      "height_span_mm": 0.2,
+      "cycles_u": 16,
+      "cycles_v": 16,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Opaque single-surface approximation: no independent coating, thin-film interference, transmission, or layered Fresnel response.",
+        "Closed relief surface; no fibre-level optics, open weave, fibre scattering, or structural qualification."
+      ]
+    },
+    {
+      "id": "SURF-034",
+      "name": "Matte carbon plain weave",
+      "catalog_ids": [
+        "MAT-152"
+      ],
+      "domains": [
+        "automotive",
+        "aerospace",
+        "space"
+      ],
+      "pattern": "weave",
+      "seed": 20294919,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.012,
+        0.014,
+        0.018
+      ],
+      "base_linear_high": [
+        0.06,
+        0.069,
+        0.08
+      ],
+      "roughness": 0.58,
+      "roughness_variation": 0.11,
+      "metallic": 0,
+      "height_span_mm": 0.25,
+      "cycles_u": 24,
+      "cycles_v": 24,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Closed relief surface; no fibre-level optics, open weave, fibre scattering, or structural qualification."
+      ]
+    },
+    {
+      "id": "SURF-035",
+      "name": "Woven aramid resin surrogate",
+      "catalog_ids": [
+        "MAT-157"
+      ],
+      "domains": [
+        "automotive",
+        "aerospace"
+      ],
+      "pattern": "weave",
+      "seed": 20295916,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.2,
+        0.13,
+        0.018
+      ],
+      "base_linear_high": [
+        0.57,
+        0.42,
+        0.09
+      ],
+      "roughness": 0.46,
+      "roughness_variation": 0.12,
+      "metallic": 0,
+      "height_span_mm": 0.28,
+      "cycles_u": 20,
+      "cycles_v": 20,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Opaque single-surface approximation: no independent coating, thin-film interference, transmission, or layered Fresnel response.",
+        "Closed relief surface; no fibre-level optics, open weave, fibre scattering, or structural qualification."
+      ]
+    },
+    {
+      "id": "SURF-036",
+      "name": "Green PCB solder-mask finish",
+      "catalog_ids": [
+        "MAT-161"
+      ],
+      "domains": [
+        "electronics"
+      ],
+      "pattern": "pcb",
+      "seed": 20296913,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.007,
+        0.09,
+        0.024
+      ],
+      "base_linear_high": [
+        0.016,
+        0.17,
+        0.045
+      ],
+      "roughness": 0.3,
+      "roughness_variation": 0.08,
+      "metallic": 0,
+      "height_span_mm": 0.015,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Continuous solder-mask finish only; copper traces, plated pads, dielectric stack and silkscreen need separate geometry/material regions."
+      ]
+    },
+    {
+      "id": "SURF-037",
+      "name": "Blue PCB solder-mask finish",
+      "catalog_ids": [
+        "MAT-161"
+      ],
+      "domains": [
+        "electronics"
+      ],
+      "pattern": "pcb",
+      "seed": 20297910,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.006,
+        0.02,
+        0.1
+      ],
+      "base_linear_high": [
+        0.014,
+        0.05,
+        0.22
+      ],
+      "roughness": 0.29,
+      "roughness_variation": 0.08,
+      "metallic": 0,
+      "height_span_mm": 0.015,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Continuous solder-mask finish only; copper traces, plated pads, dielectric stack and silkscreen need separate geometry/material regions."
+      ]
+    },
+    {
+      "id": "SURF-038",
+      "name": "Epoxy IC package surface",
+      "catalog_ids": [
+        "MAT-166"
+      ],
+      "domains": [
+        "electronics"
+      ],
+      "pattern": "grain",
+      "seed": 20298907,
+      "tile_mm": [
+        40,
+        40
+      ],
+      "base_linear_low": [
+        0.01,
+        0.012,
+        0.015
+      ],
+      "base_linear_high": [
+        0.021,
+        0.024,
+        0.029
+      ],
+      "roughness": 0.78,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.045,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-039",
+      "name": "Opaque black electronics potting",
+      "catalog_ids": [
+        "MAT-169"
+      ],
+      "domains": [
+        "electronics",
+        "LED"
+      ],
+      "pattern": "polymer",
+      "seed": 20299904,
+      "tile_mm": [
+        80,
+        80
+      ],
+      "base_linear_low": [
+        0.008,
+        0.009,
+        0.011
+      ],
+      "base_linear_high": [
+        0.016,
+        0.018,
+        0.022
+      ],
+      "roughness": 0.47,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.03,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Passive unpowered surface; no emission, volume scattering or calibrated light output."
+      ]
+    },
+    {
+      "id": "SURF-040",
+      "name": "Orange PLA FDM sidewall",
+      "catalog_ids": [
+        "MAT-171"
+      ],
+      "domains": [
+        "3D_printing",
+        "DIY"
+      ],
+      "pattern": "fdm",
+      "seed": 20300901,
+      "tile_mm": [
+        10,
+        12.8
+      ],
+      "base_linear_low": [
+        0.66,
+        0.11,
+        0.008
+      ],
+      "base_linear_high": [
+        0.76,
+        0.17,
+        0.015
+      ],
+      "roughness": 0.45,
+      "roughness_variation": 0.07,
+      "metallic": 0,
+      "height_span_mm": 0.1,
+      "cycles_u": 8,
+      "cycles_v": 64,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Local bead relief only; actual toolpath, seam, support scars, wall outline and layer defects are not reconstructed."
+      ]
+    },
+    {
+      "id": "SURF-041",
+      "name": "Grey monotonic FDM top skin",
+      "catalog_ids": [
+        "MAT-361"
+      ],
+      "domains": [
+        "3D_printing",
+        "DIY"
+      ],
+      "pattern": "fdm_top",
+      "seed": 20301898,
+      "tile_mm": [
+        12.8,
+        12.8
+      ],
+      "base_linear_low": [
+        0.18,
+        0.2,
+        0.23
+      ],
+      "base_linear_high": [
+        0.24,
+        0.27,
+        0.3
+      ],
+      "roughness": 0.51,
+      "roughness_variation": 0.07,
+      "metallic": 0,
+      "height_span_mm": 0.09,
+      "cycles_u": 32,
+      "cycles_v": 32,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Local bead relief only; actual toolpath, seam, support scars, wall outline and layer defects are not reconstructed."
+      ]
+    },
+    {
+      "id": "SURF-042",
+      "name": "Black ABS FDM sidewall",
+      "catalog_ids": [
+        "MAT-173"
+      ],
+      "domains": [
+        "3D_printing",
+        "industrial"
+      ],
+      "pattern": "fdm",
+      "seed": 20302895,
+      "tile_mm": [
+        10,
+        16
+      ],
+      "base_linear_low": [
+        0.01,
+        0.013,
+        0.017
+      ],
+      "base_linear_high": [
+        0.021,
+        0.026,
+        0.033
+      ],
+      "roughness": 0.53,
+      "roughness_variation": 0.08,
+      "metallic": 0,
+      "height_span_mm": 0.13,
+      "cycles_u": 8,
+      "cycles_v": 64,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Local bead relief only; actual toolpath, seam, support scars, wall outline and layer defects are not reconstructed."
+      ]
+    },
+    {
+      "id": "SURF-043",
+      "name": "Blue TPU FDM sidewall",
+      "catalog_ids": [
+        "MAT-174"
+      ],
+      "domains": [
+        "3D_printing",
+        "DIY"
+      ],
+      "pattern": "fdm",
+      "seed": 20303892,
+      "tile_mm": [
+        10,
+        16
+      ],
+      "base_linear_low": [
+        0.012,
+        0.054,
+        0.17
+      ],
+      "base_linear_high": [
+        0.025,
+        0.085,
+        0.24
+      ],
+      "roughness": 0.68,
+      "roughness_variation": 0.09,
+      "metallic": 0,
+      "height_span_mm": 0.14,
+      "cycles_u": 8,
+      "cycles_v": 64,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Local bead relief only; actual toolpath, seam, support scars, wall outline and layer defects are not reconstructed."
+      ]
+    },
+    {
+      "id": "SURF-044",
+      "name": "White powder polyamide surface",
+      "catalog_ids": [
+        "MAT-175"
+      ],
+      "domains": [
+        "3D_printing",
+        "industrial"
+      ],
+      "pattern": "powder",
+      "seed": 20304889,
+      "tile_mm": [
+        40,
+        40
+      ],
+      "base_linear_low": [
+        0.64,
+        0.63,
+        0.59
+      ],
+      "base_linear_high": [
+        0.78,
+        0.77,
+        0.71
+      ],
+      "roughness": 0.84,
+      "roughness_variation": 0.1,
+      "metallic": 0,
+      "height_span_mm": 0.12,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-045",
+      "name": "White thermal coating surrogate",
+      "catalog_ids": [
+        "MAT-491"
+      ],
+      "domains": [
+        "aerospace",
+        "space"
+      ],
+      "pattern": "grain",
+      "seed": 20305886,
+      "tile_mm": [
+        100,
+        100
+      ],
+      "base_linear_low": [
+        0.76,
+        0.77,
+        0.76
+      ],
+      "base_linear_high": [
+        0.88,
+        0.89,
+        0.87
+      ],
+      "roughness": 0.86,
+      "roughness_variation": 0.07,
+      "metallic": 0,
+      "height_span_mm": 0.055,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry."
+      ]
+    },
+    {
+      "id": "SURF-046",
+      "name": "Wrinkled aluminium blanket face",
+      "catalog_ids": [
+        "MAT-501"
+      ],
+      "domains": [
+        "aerospace",
+        "space"
+      ],
+      "pattern": "foil",
+      "seed": 20306883,
+      "tile_mm": [
+        160,
+        160
+      ],
+      "base_linear_low": [
+        0.66,
+        0.68,
+        0.72
+      ],
+      "base_linear_high": [
+        0.8,
+        0.82,
+        0.86
+      ],
+      "roughness": 0.31,
+      "roughness_variation": 0.11,
+      "metallic": 1,
+      "height_span_mm": 1.0,
+      "cycles_u": 6,
+      "cycles_v": 8,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Metal-facing foil patch only; no thermal blanket stack, transmission, thermal emissivity claim or edge thickness."
+      ]
+    },
+    {
+      "id": "SURF-047",
+      "name": "Mare-style regolith surface",
+      "catalog_ids": [
+        "MAT-531"
+      ],
+      "domains": [
+        "space"
+      ],
+      "pattern": "regolith",
+      "seed": 20307880,
+      "tile_mm": [
+        240,
+        240
+      ],
+      "base_linear_low": [
+        0.026,
+        0.023,
+        0.02
+      ],
+      "base_linear_high": [
+        0.11,
+        0.095,
+        0.08
+      ],
+      "roughness": 0.94,
+      "roughness_variation": 0.05,
+      "metallic": 0,
+      "height_span_mm": 1.6,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Original generic surface in vacuum; no location dataset, measured lunar scattering, boulders, displaced terrain or airborne dust."
+      ]
+    },
+    {
+      "id": "SURF-048",
+      "name": "Highland-style regolith surface",
+      "catalog_ids": [
+        "MAT-546"
+      ],
+      "domains": [
+        "space"
+      ],
+      "pattern": "regolith",
+      "seed": 20308877,
+      "tile_mm": [
+        240,
+        240
+      ],
+      "base_linear_low": [
+        0.08,
+        0.075,
+        0.065
+      ],
+      "base_linear_high": [
+        0.24,
+        0.22,
+        0.18
+      ],
+      "roughness": 0.93,
+      "roughness_variation": 0.06,
+      "metallic": 0,
+      "height_span_mm": 1.8,
+      "cycles_u": 12,
+      "cycles_v": 12,
+      "limitations": [
+        "Illustrative authored RGB appearance, not a measured optical or engineering material.",
+        "A periodic local surface patch does not model object silhouette, voids, edges, damage depth, or full manufacturing geometry.",
+        "Original generic surface in vacuum; no location dataset, measured lunar scattering, boulders, displaced terrain or airborne dust."
+      ]
+    }
+  ]
+}

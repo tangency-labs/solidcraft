@@ -987,7 +987,7 @@ mod tests {
         // Both installations happen before the first frame, like a fast cached web fetch.
         assert!(install_cjk_font_for(
             &ctx,
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf")).to_vec(),
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf")).to_vec(),
             "ja",
         ));
         let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
@@ -1010,7 +1010,7 @@ mod tests {
 
     #[test]
     fn japanese_and_chinese_fallbacks_cover_semibold_text() {
-        let japanese = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf"));
+        let japanese = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf"));
         let chinese = find_system_chinese_font();
         for language in ["ja", "zh"] {
             let mut fonts = look::definitions();
@@ -1391,7 +1391,7 @@ mod tests {
     }
 
     fn japanese_font_bytes() -> Vec<u8> {
-        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf")).unwrap()
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf")).unwrap()
     }
 
     #[test]
@@ -1430,7 +1430,7 @@ mod tests {
 
     #[test]
     fn web_chinese_subset_draws_simplified_settings() {
-        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
+        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
         let ctx = test_context();
         assert!(install_web_script_fonts(&ctx, None, Some(bytes), None, "zh"));
         let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
@@ -1457,7 +1457,7 @@ mod tests {
     /// The Korean web face leads the sans families for a Korean UI and draws Hangul (#15208).
     #[test]
     fn web_korean_subset_draws_hangul_settings() {
-        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-kr/CraftUI-KR.otf")).to_vec();
+        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/craft-ui-kr/CraftUI-KR.otf")).to_vec();
         let ctx = test_context();
         assert!(install_web_script_fonts(&ctx, None, None, Some(bytes), "ko"));
         let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
@@ -1486,7 +1486,7 @@ mod tests {
     /// catalog has a glyph in it (#15208).
     #[test]
     fn the_korean_subset_covers_every_hangul_character() {
-        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-kr/CraftUI-KR.otf"));
+        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/craft-ui-kr/CraftUI-KR.otf"));
         let face = ttf_parser::Face::parse(bytes, 0).unwrap();
         for code in 0xAC00..=0xD7A3 {
             let c = char::from_u32(code).unwrap();

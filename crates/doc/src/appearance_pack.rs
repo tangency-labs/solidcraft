@@ -172,7 +172,7 @@ impl VisualPreset {
     }
 }
 
-#[path = "../../../assets/appearances/starter_pack.rs"]
+#[path = "../embedded/assets/appearances/starter_pack.rs"]
 mod data;
 pub use data::STARTER_PACK;
 

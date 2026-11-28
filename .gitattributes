@@ -19,3 +19,5 @@ solidcore/crates/solidcore/src/kernel/fixes/*.md text eol=lf
 # The kernel is vendored with git subtree, keeping its own history and licence: it must not look
 # like SolidCraft source in GitHub's language statistics.
 solidcore/** linguist-vendored
+# A byte-identical, generated copy of the root licence file (kept in sync by xtask): its upstream texts keep their own trailing spaces.
+crates/engine/embedded/THIRD-PARTY-LICENSES.txt -whitespace

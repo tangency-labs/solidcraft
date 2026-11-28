@@ -10,11 +10,11 @@ use solidcraft_doc::{
     render_resources::HdrId,
 };
 use std::{collections::BTreeSet, sync::OnceLock};
-const PROFILES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/render/physical/profiles.json"));
-const BINDINGS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/render/physical/bindings.json"));
-const CARDS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/render/physical/exports/native-cards.json"));
-const QUANTITIES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/render/physical/quantities.json"));
-const SOURCES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/render/physical/sources.json"));
+const PROFILES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/render/physical/profiles.json"));
+const BINDINGS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/render/physical/bindings.json"));
+const CARDS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/render/physical/exports/native-cards.json"));
+const QUANTITIES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/render/physical/quantities.json"));
+const SOURCES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/render/physical/sources.json"));
 struct Data {
     profiles: Value,
     bindings: Value,

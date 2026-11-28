@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn enclosure_snap_fit_follows_resized_front_wall() {
         let mut s = Session::default();
-        let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/sensor_enclosure.json")).unwrap();
+        let script: Value = serde_json::from_str(include_str!("../../embedded/examples/acceptance/sensor_enclosure.json")).unwrap();
         s.run_script(&script).unwrap();
         let feature = s.doc.find_feature("SnapFit1").unwrap().clone();
         run(&mut s, "parameters.change", json!({"name":"board_d","expression":"50 mm"}));

@@ -33,6 +33,14 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
         eprint!("{report}");
     }
     let path = root.join(FILE);
+    let packaged = root.join("crates/engine/embedded/THIRD-PARTY-LICENSES.txt");
+    if check {
+        let original = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let copy = std::fs::read(&packaged).map_err(|e| e.to_string())?;
+        if original != copy {
+            return Err("packaged third-party licences differ from the generated distribution".into());
+        }
+    }
     if check {
         let old = std::fs::read_to_string(&path).unwrap_or_default();
         if old.replace("\r\n", "\n") != text {
@@ -45,6 +53,7 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
         return Ok(());
     }
     std::fs::write(&path, &text).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::write(&packaged, &text).map_err(|e| e.to_string())?;
     println!("licences: wrote {FILE} ({} KB)", text.len() / 1024);
     Ok(())
 }

@@ -660,7 +660,7 @@ pub fn write_csv(pack: &RulePack) -> String {
 pub fn standard() -> &'static RulePack {
     static LIBRARY: OnceLock<RulePack> = OnceLock::new();
     LIBRARY.get_or_init(|| {
-        read(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sheet-metal/standard-library.json")).as_bytes())
+        read(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/sheet-metal/standard-library.json")).as_bytes())
             .map(|r| r.pack)
             .unwrap_or_default()
     })

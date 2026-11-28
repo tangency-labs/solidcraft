@@ -1,0 +1,794 @@
+{
+ "description": "Acceptance project (#27): a sensor enclosure for a 60 x 40 mm board. A case (rounded, shelled, a USB cut-out on the front wall, 4 PCB standoffs and 4 lid bosses patterned from one each, a snap fit) and a lid (a lip made from offsets of the case's inner rim, 4 screw holes patterned from one). Everything is sized from the user parameters: board_w, board_d, gap (board to inner wall), wall, height, standoff_h, hole_inset, usb_offset, lid_h.",
+ "commands": [
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "board_w",
+    "expression": "60 mm",
+    "comment": "PCB length"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "board_d",
+    "expression": "40 mm",
+    "comment": "PCB width"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "gap",
+    "expression": "8 mm",
+    "comment": "PCB to inner wall"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "wall",
+    "expression": "2 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "height",
+    "expression": "25 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "standoff_h",
+    "expression": "5 mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "hole_inset",
+    "expression": "3.5 mm",
+    "comment": "PCB mounting hole from its edge"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "usb_offset",
+    "expression": "10 mm",
+    "comment": "USB connector centre, left of the middle"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "lid_h",
+    "expression": "4 mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Outline"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     40,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.constraint.coincident",
+   "params": {
+    "a": "p5",
+    "b": "origin"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "value": "board_w + 2 * (gap + wall)"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2"
+    ],
+    "value": "board_d + 2 * (gap + wall)"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": "height",
+    "body_name": "Case"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      40,
+      30,
+      12.5
+     ],
+     [
+      -40,
+      30,
+      12.5
+     ],
+     [
+      -40,
+      -30,
+      12.5
+     ],
+     [
+      40,
+      -30,
+      12.5
+     ]
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      25
+     ]
+    ],
+    "thickness": "wall"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "PCB standoff",
+    "offset": "wall"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     -26.5,
+     -16.5
+    ],
+    "diameter": 6,
+    "id": "so"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": "so.center",
+    "diameter": 2.5,
+    "id": "so_hole"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "so.center"
+    ],
+    "type": "horizontal",
+    "value": "board_w / 2 - hole_inset"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "so.center"
+    ],
+    "type": "vertical",
+    "value": "board_d / 2 - hole_inset"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "so"
+    ],
+    "type": "diameter",
+    "value": "6 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "so_hole"
+    ],
+    "type": "diameter",
+    "value": "2.5 mm"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "profiles": [
+     [
+      "so"
+     ]
+    ],
+    "distance": "standoff_h",
+    "operation": "join",
+    "name": "Standoff"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "Standoff"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 2,
+    "spacing1": "board_w - 2 * hole_inset",
+    "dir2": [
+     0,
+     1,
+     0
+    ],
+    "count2": 2,
+    "spacing2": "board_d - 2 * hole_inset"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "USB",
+    "offset": "board_d / 2 + gap + wall"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     -10,
+     12
+    ],
+    "corner": [
+     -5.5,
+     13.75
+    ]
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "value": "9 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2"
+    ],
+    "value": "3.5 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "p5"
+    ],
+    "type": "horizontal",
+    "value": "usb_offset"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "p5"
+    ],
+    "type": "vertical",
+    "value": "wall + standoff_h + 1.6 mm + 1.75 mm"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "profiles": [
+     [
+      "l1",
+      "l2",
+      "l3",
+      "l4"
+     ]
+    ],
+    "distance": "-(wall + 1 mm)",
+    "operation": "cut",
+    "name": "USB cut"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Lid boss",
+    "offset": "wall"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     -34.5,
+     -24.5
+    ],
+    "diameter": 7,
+    "id": "bs"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": "bs.center",
+    "diameter": 2.5,
+    "id": "bs_hole"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "bs.center"
+    ],
+    "type": "horizontal",
+    "value": "board_w / 2 + gap - 4.5 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "bs.center"
+    ],
+    "type": "vertical",
+    "value": "board_d / 2 + gap - 4.5 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "bs"
+    ],
+    "type": "diameter",
+    "value": "7 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "bs_hole"
+    ],
+    "type": "diameter",
+    "value": "2.5 mm"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "profiles": [
+     [
+      "bs"
+     ]
+    ],
+    "distance": "height - wall",
+    "operation": "join",
+    "name": "Lid boss"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "Lid boss"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 2,
+    "spacing1": "board_w + 2 * gap - 9 mm",
+    "dir2": [
+     0,
+     1,
+     0
+    ],
+    "count2": 2,
+    "spacing2": "board_d + 2 * gap - 9 mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": "height",
+    "name": "Lid outline"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     40,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.constraint.coincident",
+   "params": {
+    "a": "p5",
+    "b": "origin"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "value": "board_w + 2 * (gap + wall)"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2"
+    ],
+    "value": "board_d + 2 * (gap + wall)"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": "lid_h",
+    "operation": "new",
+    "body_name": "Lid",
+    "name": "Lid"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      40,
+      30,
+      27
+     ],
+     [
+      -40,
+      30,
+      27
+     ],
+     [
+      -40,
+      -30,
+      27
+     ],
+     [
+      40,
+      -30,
+      27
+     ]
+    ],
+    "radius": 4,
+    "body": "Lid"
+   }
+  },
+  {
+   "command": "plastic.snap_fit",
+   "params": {
+    "position": [
+     0,
+     -28,
+     20
+    ],
+    "hook": [
+     0,
+     0,
+     1
+    ],
+    "length": 8,
+    "thickness": 1.2,
+    "width": 6,
+    "catch_depth": 0.8,
+    "catch_length": 1.5,
+    "body": "Case"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      -1,
+      0
+     ]
+    },
+    "name": "Lid lip",
+    "offset": "-height"
+   }
+  },
+  {
+   "command": "sketch.project",
+   "params": {
+    "refs": [
+     {
+      "face": [
+       0,
+       0,
+       25
+      ],
+      "body": "Lid"
+     }
+    ]
+   }
+  },
+  {
+   "command": "sketch.project",
+   "params": {
+    "refs": [
+     {
+      "face": [
+       0,
+       29,
+       25
+      ],
+      "body": "Case"
+     }
+    ]
+   }
+  },
+  {
+   "command": "sketch.offset",
+   "params": {
+    "curves": [
+     "l9"
+    ],
+    "distance": 0.2,
+    "side": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.offset",
+   "params": {
+    "curves": [
+     "l9"
+    ],
+    "distance": 1.4,
+    "side": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Lid lip",
+    "profiles": [
+     [
+      "l13",
+      "a13",
+      "l14",
+      "a14",
+      "l15",
+      "a15",
+      "l16",
+      "a16"
+     ]
+    ],
+    "distance": "2 mm",
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ],
+    "name": "Lid lip"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Lid screw",
+    "offset": "height + lid_h"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     -33.5,
+     -23.5
+    ],
+    "diameter": 3.2,
+    "id": "ls"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "ls.center"
+    ],
+    "type": "horizontal",
+    "value": "board_w / 2 + gap - 4.5 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "origin",
+     "ls.center"
+    ],
+    "type": "vertical",
+    "value": "board_d / 2 + gap - 4.5 mm"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "ls"
+    ],
+    "type": "diameter",
+    "value": "3.2 mm"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "profiles": [
+     [
+      "ls"
+     ]
+    ],
+    "through_all": true,
+    "direction": "negative",
+    "operation": "cut",
+    "targets": [
+     "Lid"
+    ],
+    "name": "Lid screw"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "Lid screw"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 2,
+    "spacing1": "board_w + 2 * gap - 9 mm",
+    "dir2": [
+     0,
+     1,
+     0
+    ],
+    "count2": 2,
+    "spacing2": "board_d + 2 * gap - 9 mm"
+   }
+  }
+ ]
+}

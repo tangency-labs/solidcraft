@@ -212,7 +212,7 @@ fn a_pack_round_trips_through_json_and_csv() {
     assert!(back.skipped.is_empty(), "{:?}", back.skipped);
     assert_eq!(write_json(&back.pack), json);
     // The shipped file is this format as written.
-    let shipped = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sheet-metal/standard-library.json"));
+    let shipped = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/sheet-metal/standard-library.json"));
     assert_eq!(read(shipped.as_bytes()).map(|r| r.pack).as_ref(), Ok(&lib));
     // CSV keeps the rules (not the sources), and a formula-like text survives it.
     let mut odd = lib.rules[0].clone();

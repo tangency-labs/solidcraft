@@ -1030,7 +1030,7 @@ mod tests {
     fn the_font_row_sets_keeps_and_clears_the_font_of_a_text() {
         // The repository's second font, BIZ UDPGothic: its "I" is 17.6385 mm² at a capital height of 10 mm, the built-in
         // font's 13.5557 mm².
-        let font = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf");
+        let font = concat!(env!("CARGO_MANIFEST_DIR"), "/embedded/assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf");
         let (mut h, link, _) = setup();
         // The dialog closes with the selection; the text's first outline is selected again to open it.
         let reopen = |h: &mut Harness| {
