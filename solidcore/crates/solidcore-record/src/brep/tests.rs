@@ -1112,6 +1112,7 @@ fn validate_file_reports_a_collapsed_segment_past_the_cap() {
         panic!("a collapsed polyline was accepted")
     };
     assert_eq!(message, "portable B-rep: collapsed polyline segment");
+}
 
 /// A screw-swept wall's definition: a straight profile across the axis, one turn in eight spans,
 /// with a run-out law.
