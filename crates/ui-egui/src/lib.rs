@@ -51,6 +51,7 @@ mod cut_bodies;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_report;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
@@ -513,6 +514,9 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Show only constraints of selected geometry in the Sketch Palette (view-only).
+    #[serde(skip)]
+    pub constraint_glyphs_selected_only: bool,
     /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
     /// The saved design and Preferences remain unchanged.
     #[serde(skip)]
@@ -566,6 +570,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            constraint_glyphs_selected_only: false,
             sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
@@ -864,6 +869,8 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
+    /// The Inspect Design window, when it is open (#20662).
+    pub design_report: Option<design_report::DesignReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -1288,6 +1295,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
+            design_report: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -3236,6 +3244,10 @@ impl SolveApp {
             sketch_report::open(self);
             return;
         }
+        if id == "document.inspect" {
+            design_report::open(self);
+            return;
+        }
         if id == "assembly.bom" {
             if bom_panel::available(self) {
                 bom_panel::set_focus_pending(self, true);
@@ -3935,6 +3947,19 @@ impl SolveApp {
     /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
+        if joint_handles::began_on(self).is_some() {
+            // While dragging a Move handle on the GPU motion table, sub-body highlights
+            // (face/edge/vertex) would stay at the pre-drag pose and force a CPU world rebuild;
+            // highlight their whole body instead so it moves with the GPU motion table.
+            for item in &mut v {
+                if let solidcraft_engine::Sel::Face { body, .. }
+                | solidcraft_engine::Sel::Edge { body, .. }
+                | solidcraft_engine::Sel::Vertex { body, .. } = item
+                {
+                    *item = solidcraft_engine::Sel::Body { name: std::mem::take(body) };
+                }
+            }
+        }
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
@@ -5221,6 +5246,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
+        design_report::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
@@ -5295,18 +5321,7 @@ impl SolveApp {
         } else {
             viewport::show(self, ui);
         }
-        if let Some(view) = view_window_drag::hovered_view(self) {
-            let rect = if view == self.docs.views.active().id {
-                self.viewport.rect
-            } else {
-                self.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
-            };
-            if let Some(rect) = rect.filter(|rect| rect.is_positive()) {
-                let t = solidcraft_theme::Tokens::get();
-                ui.painter().rect_filled(rect.shrink(2.0), 6, t.accent.gamma_multiply(0.035));
-                ui.painter().rect_stroke(rect.shrink(2.0), 6, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
-            }
-        }
+        view_window_drag::paint_hover_outline(self, ui);
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {

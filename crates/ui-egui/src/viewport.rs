@@ -6896,7 +6896,11 @@ fn hovered_body(app: &SolveApp) -> Option<String> {
 }
 
 fn highlighted_cow(app: &SolveApp) -> std::borrow::Cow<'_, [Sel]> {
-    if app.dialog.is_none() && app.viewport.text_drag.is_none() && crate::agent_chat::hovered_chip(app).is_empty() {
+    if app.dialog.is_none()
+        && app.viewport.text_drag.is_none()
+        && crate::joint_handles::began_on(app).is_none()
+        && crate::agent_chat::hovered_chip(app).is_empty()
+    {
         std::borrow::Cow::Borrowed(&app.session.selection)
     } else {
         std::borrow::Cow::Owned(app.highlighted())
@@ -9694,6 +9698,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::joint_handles::active(app) && !crate::ui_kit::input_blocked() {
         if let Some(p) = ui.input(|i| i.pointer.interact_pos()).filter(|p| p.is_finite()) {
             crate::joint_handles::to(app, &proj, p);
+            joint_motions::follow(app);
         }
         if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
             crate::joint_handles::end_drag(app);
