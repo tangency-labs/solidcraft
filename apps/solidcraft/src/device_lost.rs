@@ -39,9 +39,27 @@ pub fn recent(stamp: Option<&str>, now: u64) -> bool {
     stamp.and_then(|s| s.trim().parse::<u64>().ok()).is_some_and(|at| at <= now && now - at <= RECENT_SECS)
 }
 
+/// Whether `reason` reports that graphics or system memory ran out rather than a driver crash or
+/// reset: switching to the software renderer (which puts GPU buffers in system RAM) would only
+/// make memory exhaustion worse (#23651).
+pub fn is_out_of_memory(reason: Option<&str>) -> bool {
+    let Some(reason) = reason else { return false };
+    let normalized = reason.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+    normalized.contains("out of memory")
+        || normalized.contains("outofmemory")
+        || normalized.contains("out_of_memory")
+        || normalized.contains("out_of_device_memory")
+        || normalized.contains("out_of_host_memory")
+}
+
 /// Whether the start after a lost device uses the software renderer: when this launch already
-/// followed a recent loss (the driver keeps losing it), or ran on it anyway.
-pub fn restart_on_software(after_recent_loss: bool, cpu_renderer: bool) -> bool {
+/// followed a recent loss (the driver keeps losing it), or ran on it anyway — unless the device
+/// was lost because memory ran out, where software rendering would worsen memory exhaustion
+/// (#23651).
+pub fn restart_on_software(after_recent_loss: bool, cpu_renderer: bool, reason: Option<&str>) -> bool {
+    if is_out_of_memory(reason) {
+        return false;
+    }
     after_recent_loss || cpu_renderer
 }
 
@@ -58,8 +76,12 @@ pub fn note(software: bool, reason: Option<&str>, unkept: Option<&str>) -> Strin
     let unsaved = startup::unsaved_clause(unkept, "unsaved changes were kept for recovery");
     let mut first = unsaved.chars();
     let unsaved = first.next().map(|c| c.to_uppercase().chain(first).collect::<String>()).unwrap_or_default();
-    let mut note =
-        format!("The graphics device was reset (the graphics driver stopped responding), so SolidCraft closed and started again. {unsaved}.");
+    let cause = if is_out_of_memory(reason) {
+        "Graphics or system memory ran out"
+    } else {
+        "The graphics device was reset (the graphics driver stopped responding)"
+    };
+    let mut note = format!("{cause}, so SolidCraft closed and started again. {unsaved}.");
     if software {
         note.push_str(" This start uses software rendering, which doesn't depend on the graphics driver.");
     }
@@ -168,9 +190,10 @@ mod tests {
     /// The first loss starts again on the GPU; a second one soon after, on the software renderer.
     #[test]
     fn a_second_loss_in_a_row_starts_on_the_software_renderer() {
-        assert!(!super::restart_on_software(false, false));
-        assert!(super::restart_on_software(true, false));
-        assert!(super::restart_on_software(false, true));
+        assert!(!super::restart_on_software(false, false, None));
+        assert!(super::restart_on_software(true, false, None));
+        assert!(super::restart_on_software(false, true, None));
+        assert!(super::restart_on_software(true, false, Some("Lost: Device lost (vkQueueSubmit)")));
         assert!(super::note(true, None, None).contains("software rendering"));
         assert!(!super::note(false, None, None).contains("software rendering"));
         assert!(super::note(false, None, None).contains("Unsaved changes were kept for recovery."));
@@ -178,6 +201,42 @@ mod tests {
         let note = super::note(false, None, Some("Bracket: autosave is off"));
         assert!(note.contains("Some unsaved changes couldn't be kept for recovery (Bracket: autosave is off)."), "{note}");
         assert!(!note.contains("were kept"), "{note}");
+    }
+
+    /// Out-of-memory device losses are recognized across driver/wgpu phrasings, never force
+    /// software rendering (which would allocate GPU buffers in system RAM), and tell the user
+    /// memory ran out instead of blaming a hung graphics driver (#23651).
+    #[test]
+    fn out_of_memory_does_not_force_software_rendering_or_blame_driver() {
+        for oom in [
+            "Out of memory",
+            "DeviceLost: Out of memory",
+            "GPU out of memory",
+            "OutOfMemory",
+            "DXGI_ERROR_DEVICE_REMOVED (E_OUTOFMEMORY)",
+            "VK_ERROR_OUT_OF_DEVICE_MEMORY",
+            "VK_ERROR_OUT_OF_HOST_MEMORY",
+            "Out\n  of  Memory",
+        ] {
+            assert!(super::is_out_of_memory(Some(oom)), "expected OOM for {oom:?}");
+            assert!(!super::restart_on_software(true, false, Some(oom)), "must not switch to CPU for {oom:?}");
+            assert!(!super::restart_on_software(false, true, Some(oom)), "must not force CPU for {oom:?}");
+            assert!(!super::restart_on_software(true, true, Some(oom)), "must not force CPU for {oom:?}");
+        }
+        for other in [None, Some(""), Some("   "), Some("Lost: Device lost (vkQueueSubmit)"), Some("DXGI_ERROR_DEVICE_HUNG")] {
+            assert!(!super::is_out_of_memory(other), "unexpected OOM for {other:?}");
+        }
+
+        let note = super::note(false, Some("DeviceLost: Out of memory"), None);
+        assert!(note.contains("memory"), "{note}");
+        assert!(!note.contains("the graphics driver stopped responding"), "{note}");
+        assert!(!note.contains("software rendering"), "{note}");
+        assert!(note.contains("Unsaved changes were kept for recovery."), "{note}");
+        assert!(note.ends_with("The graphics driver reported: DeviceLost: Out of memory"), "{note}");
+
+        let unkept_note = super::note(false, Some("Out of memory"), Some("Bracket: autosave is off"));
+        assert!(unkept_note.contains("Some unsaved changes couldn't be kept for recovery (Bracket: autosave is off)."), "{unkept_note}");
+        assert!(!unkept_note.contains("the graphics driver stopped responding"), "{unkept_note}");
     }
 
     /// The start after a loss is told why (#9044): the old process's journal held the reason, and

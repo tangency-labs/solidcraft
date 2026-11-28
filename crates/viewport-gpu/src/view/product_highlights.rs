@@ -132,13 +132,14 @@ impl Renderer {
         let highlight_refused =
             self.pic.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
         // Only a failed product upload drops the product batches; a refused highlight keeps the
-        // product picture and is reported below. A refused scene stays in its slot, so the batches
-        // carry no key and the next frame retries it. A scope error means the scene was taken and
-        // what it uploaded can't be trusted, so its key stays and nothing half-uploaded is drawn.
+        // product picture and is reported below. A refused scene stays in its slot and keeps its
+        // failed key so the same over-budget key is not retried on every repaint frame, while a
+        // newer key is uploaded normally. A scope error means the scene was taken and what it
+        // uploaded can't be trusted, so its key stays and nothing half-uploaded is drawn.
         if caught.is_some() {
             self.product = Batches { key: Some(frame.key), ..Batches::default() };
-        } else if refused.is_some() {
-            self.product = Batches::default();
+        } else if let Some(reason) = &refused {
+            self.product = Batches { failed_upload: Some((frame.key, reason.clone())), ..Batches::default() };
         }
         let product_failed = caught.or(refused);
         let failed = product_failed.or(highlight_refused);

@@ -178,6 +178,9 @@ impl Arena {
         wanted: &[&Arc<SharedEdges>],
         need: u64,
     ) -> Option<(Arc<Arena>, u64)> {
+        if super::upload_refused() {
+            return None;
+        }
         let limit = Arena::limit(device);
         if need == 0 || need > limit {
             return None;
