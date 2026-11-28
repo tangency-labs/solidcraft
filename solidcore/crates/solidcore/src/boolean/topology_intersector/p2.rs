@@ -754,13 +754,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Ok(());
         }
 
+        let keep_wires: Option<std::collections::BTreeSet<O>> =
+            opt_keep_as_wires.map(|keep| keep.iter().copied().collect());
+
         // iter every edge of every deleted face looking for wire edges to delete
         for &e in &faces_edges {
             if !brep.edge_is_wire(e)? {
                 continue;
             }
             // save wires when asked
-            if opt_keep_as_wires.is_some_and(|keep| contains(keep, &e)) {
+            if keep_wires.as_ref().is_some_and(|keep| keep.contains(&e)) {
                 continue;
             }
 
