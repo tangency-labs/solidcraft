@@ -108,6 +108,31 @@ pub fn nearest_on_screen_segment(p: (f64, f64), a: (f64, f64), b: (f64, f64)) ->
     (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / length2).clamp(0.0, 1.0)
 }
 
+/// A position on the pointer's path inside the pick band of a projected stroke segment.
+/// The radius at the nearest point of the stroke interpolates between the endpoint radii.
+pub fn stroke_sweep_contact([from, to]: [(f64, f64); 2], [a, b]: [(f64, f64); 2], [r0, r1]: [f64; 2]) -> Option<(f64, f64)> {
+    let path = (to.0 - from.0, to.1 - from.1);
+    let ink = (b.0 - a.0, b.1 - a.1);
+    let cross = |u: (f64, f64), v: (f64, f64)| u.0 * v.1 - u.1 * v.0;
+    let path_at = |t: f64| (from.0 + t * path.0, from.1 + t * path.1);
+    let det = cross(path, ink);
+    if det != 0.0 {
+        let direction = (a.0 - from.0, a.1 - from.1);
+        let along_path = cross(direction, ink) / det;
+        let along_ink = cross(direction, path) / det;
+        if (0.0..=1.0).contains(&along_path) && (0.0..=1.0).contains(&along_ink) {
+            return Some(path_at(along_path));
+        }
+    }
+    // Otherwise the nearest pair has an endpoint of one of the two segments.
+    let at = |point| path_at(nearest_on_screen_segment(point, from, to));
+    [from, to, at(a), at(b)].into_iter().find(|&point| {
+        let t = nearest_on_screen_segment(point, a, b);
+        let center = (a.0 + t * ink.0, a.1 + t * ink.1);
+        distance(point, center) <= r0 + t * (r1 - r0)
+    })
+}
+
 fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
     (a.0 - b.0).hypot(a.1 - b.1)
 }

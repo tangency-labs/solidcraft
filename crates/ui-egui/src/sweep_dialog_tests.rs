@@ -231,7 +231,7 @@ fn a_sweep_path_curve_deleted_from_its_sketch_can_be_picked_again() {
     // The user opens the sweep and picks the guide curve again, in R.
     h.step(&json!({"call":"ui.editFeature","params":{"feature":"Swept"}})).unwrap();
     h.frames(8);
-    let hit = Hit::SketchCurve { sketch: other, id: "l1".into(), straight: true, point: Vec3::ZERO };
+    let hit = Hit::SketchCurve { sketch: other, id: "l1".into(), straight: true, point: Vec3::ZERO, ink_frame: None };
     let d = h.app.dialog.as_mut().unwrap();
     d.active = 1;
     let pick = d.candidate_on(&h.app.session, &hit, None).expect("the line of R is a valid path pick");

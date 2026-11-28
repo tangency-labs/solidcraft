@@ -552,6 +552,42 @@ pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
     q::point_distance(a, b).map(Distance::from).map_err(status)
 }
 
+/// The centre of the tight 3D box around the finite input points.
+pub fn point_bounds_center(points: impl IntoIterator<Item = [f64; 3]>) -> Option<[f64; 3]> {
+    Extent3d::point_bounds_center(points.into_iter().map(Vec3::from_array)).map(Vec3::to_array)
+}
+
+/// The finite point where the line meets a plane.
+pub fn line_plane_point(
+    plane: &solidcore_record::Plane,
+    origin: solidcore_record::Vec3,
+    direction: solidcore_record::Vec3,
+) -> Option<solidcore_record::Vec3> {
+    use solidcore_convert::{record_vec3, vec3};
+    solidcore::geom::geom_utility::line_plane_point(
+        vec3(origin),
+        vec3(direction),
+        vec3(plane.origin),
+        vec3(plane.x),
+        vec3(plane.y),
+    )
+    .map(record_vec3)
+}
+
+/// Approximate a polyline within the given tolerance and merge points closer than `min_step`.
+pub fn simplify_polyline(
+    points: &[solidcore_record::Vec3],
+    tolerance: f64,
+    min_step: f64,
+) -> Vec<solidcore_record::Vec3> {
+    use solidcore_convert::{record_vec3, vec3};
+    let points: Vec<_> = points.iter().copied().map(vec3).collect();
+    solidcore::geom::polyline::simplify(&points, tolerance, min_step)
+        .into_iter()
+        .map(record_vec3)
+        .collect()
+}
+
 /// A 2D point set's centroid and mean distance from that centroid.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointSetSummary {

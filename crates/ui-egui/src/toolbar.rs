@@ -3233,7 +3233,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                     && app.tool.is_none()
                     && app.dialog.is_none()
                     && let Some(sketch) = crate::workspace::focused_sketch(app)
-                    && (again || crate::grease_pencil::editing(app))
+                    && (again || (app.preferences.escape_twice_finishes_sketch && crate::grease_pencil::editing(app)))
                 {
                     app.last_escape = None;
                     // A sketch left blank is taken away instead, in one undo step, so no empty

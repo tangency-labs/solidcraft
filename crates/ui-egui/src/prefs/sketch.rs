@@ -307,6 +307,13 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "opening_closing", app.tr("prefs.sketch.opening_closing"), |ui| {
         check(
             ui,
+            "model_g_starts_grease_pencil",
+            "prefs.sketch.model_g_starts_grease_pencil",
+            Some("prefs.sketch.model_g_starts_grease_pencil_note"),
+            &mut app.preferences.model_g_starts_grease_pencil,
+        );
+        check(
+            ui,
             "sketch_face_activates_part",
             "prefs.sketch_face_activates_part",
             Some("prefs.sketch_face_activates_part_note"),

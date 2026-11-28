@@ -94,6 +94,9 @@ macro_rules! navigation_preferences {
             pan_reverse_x: bool = false, PAGE_NAVIGATION => check("ui.reverse_horizontal_pan_direction", "Horizontal two-finger scrolling and the thumb wheel pan the other way");
             /// Vertical trackpad scrolling pans the view the other way (#5240).
             pan_reverse_y: bool = false, PAGE_NAVIGATION => check("ui.reverse_vertical_pan_direction", "Vertical two-finger scrolling pans the other way");
+            /// Lets an Option/Alt-drag rotate a free component or ink stroke. The mouse binding
+            /// still applies when no rotation can start.
+            prefer_option_drag_rotation: bool = false, PAGE_NAVIGATION => check_tr("nav.prefer_option_drag_rotation.label");
             /// The quick menu (`quick_menu`) also opens by itself shortly after a click in the viewport
             /// selects something a command takes (#5501). Off by default: a click only selects.
             quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");

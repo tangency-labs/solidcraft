@@ -123,6 +123,17 @@ pub trait Points: Backend {
     fn hole_spacing(&self, items: &[([f64; 3], [f64; 3])]) -> Result<HoleSpacing, PointsRefused>;
     /// The distance from `a` to `b`, with its proved rounding bound.
     fn point_distance(&self, a: [f64; 3], b: [f64; 3]) -> Result<Distance, PointsRefused>;
+    /// The centre of the tight 3D box around the finite input points.
+    fn point_bounds_center(&self, points: impl IntoIterator<Item = [f64; 3]>) -> Option<[f64; 3]>;
+    /// The finite point where the line meets a plane.
+    fn line_plane_point(
+        &self,
+        plane: &solidcore_record::Plane,
+        origin: solidcore_record::Vec3,
+        direction: solidcore_record::Vec3,
+    ) -> Option<solidcore_record::Vec3>;
+    /// Approximate a polyline within the given tolerance and merge points closer than `min_step`.
+    fn simplify_polyline(&self, points: &[solidcore_record::Vec3], tolerance: f64, min_step: f64) -> Vec<solidcore_record::Vec3>;
     /// Whether `a` and `b` meet: their rounded distance is not more than `tol`.
     fn points_meet(&self, a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool, PointsRefused>;
     /// The vector from `from` to `to`.

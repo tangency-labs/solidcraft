@@ -184,6 +184,12 @@ fn in_sketch_3d(s: &Session) -> std::result::Result<(), String> {
 /// active component when a script supplies an explicit sketch.
 fn inverse_owner_frame(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::Mat> {
     let id = sketch_store::target(s, p, cmd)?;
+    let frame = owner_frame(s, id, cmd)?;
+    solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, "the sketch owner placement is not invertible"))
+}
+
+/// The world placement the command uses for a sketch's component coordinates.
+fn owner_frame(s: &Session, id: u64, cmd: &str) -> Result<solidcraft_doc::Mat> {
     let owner = s.doc.feature(id).map(|f| f.component).ok_or_else(|| bad(cmd, "target sketch is missing"))?;
     if owner != 0 && owner != s.active_component {
         if s.doc.occurrences.len() > 100_000 {
@@ -212,8 +218,7 @@ fn inverse_owner_frame(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_d
             }
         }
     }
-    let frame = if owner == s.active_component { s.active_component_frame() } else { s.placed_document().component_transform(owner) };
-    solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, "the sketch owner placement is not invertible"))
+    Ok(if owner == s.active_component { s.active_component_frame() } else { s.placed_document().component_transform(owner) })
 }
 
 /// `sketch.create3d`: a new sketch with 3D Sketch on, with no plane to choose. A sketch always

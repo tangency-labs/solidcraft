@@ -1497,21 +1497,34 @@ struct InkPixel {
     @builtin(frag_depth) depth: f32,
 };
 
-@fragment
-fn fs_ink(i: InkOut) -> InkPixel {
+fn ink_pixel(i: InkOut, opaque: bool) -> InkPixel {
     let x = clamp(i.xy.x, 0.0, i.line.x);
     let closest_b = select((i.depth.y < i.depth.x), (i.depth.y > i.depth.x), reversed());
     let t = select(select(0.0, 1.0, closest_b), x / max(i.line.x, 1e-6), i.line.x > 1e-6);
     let radius = mix(i.line.y, i.line.z, t);
     let draw_radius = max(radius, 0.5);
+    let alpha = i.color.a * (radius / draw_radius);
+    if (alpha <= 0.0 || (alpha >= 1.0) != opaque) { discard; }
     if (length(vec2<f32>(i.xy.x - x, i.xy.y)) > draw_radius) { discard; }
+    let depth = mix(i.depth.x, i.depth.y, t);
+    if (!(depth >= 0.0 && depth <= 1.0)) { discard; }
     let world_t = t * i.depth.w / mix(i.depth.z, i.depth.w, t);
     if (clipped(mix(i.a, i.b, world_t))) { discard; }
     let across = i.xy.y / draw_radius;
     var out: InkPixel;
-    out.color = out_color(vec4<f32>(i.color.rgb * (1.0 - 0.20 * across * across), i.color.a * radius / draw_radius));
-    out.depth = clamp(mix(i.depth.x, i.depth.y, t), 0.0, 1.0);
+    out.color = out_color(vec4<f32>(i.color.rgb * (1.0 - 0.20 * across * across), alpha));
+    out.depth = depth;
     return out;
+}
+
+@fragment
+fn fs_ink(i: InkOut) -> InkPixel {
+    return ink_pixel(i, true);
+}
+
+@fragment
+fn fs_ink_fractional(i: InkOut) -> InkPixel {
+    return ink_pixel(i, false);
 }
 
 // Point clouds and their cells (`view/clouds.rs`): dots, segments as beads (or lines when they

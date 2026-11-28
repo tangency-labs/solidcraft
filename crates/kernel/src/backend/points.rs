@@ -3,6 +3,7 @@
 
 use solidcore_ops::{hole_spacing, measure, pick};
 use solidcore_record::brep::Brep;
+use solidcore_record::{Plane, Vec3};
 use solidcraft_kernel_api::points::{Distance, HoleSpacing, PitchCircle, PointSetSummary, Points, PointsRefused, SpacingPattern};
 
 use super::Solidcore;
@@ -39,6 +40,18 @@ impl Points for Solidcore {
 
     fn point_distance(&self, a: [f64; 3], b: [f64; 3]) -> Result<Distance, PointsRefused> {
         measure::point_distance(a, b).map(|d| Distance { value: d.value, bound: d.bound }).map_err(refused)
+    }
+
+    fn point_bounds_center(&self, points: impl IntoIterator<Item = [f64; 3]>) -> Option<[f64; 3]> {
+        measure::point_bounds_center(points)
+    }
+
+    fn line_plane_point(&self, plane: &Plane, origin: Vec3, direction: Vec3) -> Option<Vec3> {
+        measure::line_plane_point(plane, origin, direction)
+    }
+
+    fn simplify_polyline(&self, points: &[Vec3], tolerance: f64, min_step: f64) -> Vec<Vec3> {
+        measure::simplify_polyline(points, tolerance, min_step)
     }
 
     fn points_meet(&self, a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool, PointsRefused> {

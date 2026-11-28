@@ -565,6 +565,26 @@ impl Extent3d {
         }
     }
 
+    /// The centre of the tight axis-aligned box of the finite input points.
+    #[must_use]
+    pub fn point_bounds_center(points: impl IntoIterator<Item = Point3>) -> Option<Point3> {
+        let mut points = points
+            .into_iter()
+            .filter(|p| p.to_array().into_iter().all(f64::is_finite));
+        let first = points.next()?;
+        let mut bounds = Self::from_points(first, first);
+        for point in points {
+            bounds.add_point(point);
+        }
+        let lo = bounds.min();
+        let hi = bounds.max();
+        Some(Vec3::new(
+            f64::midpoint(lo.x, hi.x),
+            f64::midpoint(lo.y, hi.y),
+            f64::midpoint(lo.z, hi.z),
+        ))
+    }
+
     /// Sets both corners; fails (leaving `self` unchanged) when `min > max` on any
     /// axis (`SetMinMax(const SmPoint3d&, const SmPoint3d&)`).
     pub fn set_min_max(&mut self, min: Point3, max: Point3) -> Result<()> {
@@ -1299,6 +1319,18 @@ mod tests {
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
         Vec3::new(x, y, z)
+    }
+
+    #[test]
+    fn finite_point_bounds_are_tight_and_the_center_does_not_overflow() {
+        let finite = [p(8.0, -2.0, 3.0), p(4.0, 6.0, 11.0), p(5.0, 0.0, 2.0)];
+        assert_eq!(
+            Extent3d::point_bounds_center(finite),
+            Some(p(6.0, 2.0, 6.5))
+        );
+        assert_eq!(Extent3d::point_bounds_center([p(f64::NAN, 0.0, 0.0)]), None);
+        let large = p(f64::MAX, -f64::MAX, 0.0);
+        assert_eq!(Extent3d::point_bounds_center([large, large]), Some(large));
     }
 
     /// An endless line meets a box it runs through, one that grazes a side within the given

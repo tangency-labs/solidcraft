@@ -971,7 +971,7 @@ fn secondary_alignment_feedback_accepts_named_edge_and_tracks_sketch_namespace()
     assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], "edge");
     app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
     d.active = 2;
-    let hit = crate::viewport::Hit::SketchCurve { sketch: 99, id: "l1".into(), straight: true, point: Vec3::ZERO };
+    let hit = crate::viewport::Hit::SketchCurve { sketch: 99, id: "l1".into(), straight: true, point: Vec3::ZERO, ink_frame: None };
     assert!(d.candidate(&app.session, &hit).is_none(), "a missing sketch has no matching occurrence");
 }
 
@@ -4527,7 +4527,11 @@ fn secondary_alignment_review_helper_markers_follow_their_occurrence_without_a_b
     for (hit, at, z) in [
         (crate::viewport::Hit::Axis { name: "MovingAxis".into() }, Vec3::new(40.0, 10.0, 0.0), Vec3::Y),
         (crate::viewport::Hit::Plane { name: "MovingPlane".into(), point: Vec3::ZERO }, Vec3::new(40.0, 10.0, 0.0), Vec3::X),
-        (crate::viewport::Hit::SketchCurve { sketch, id: "l1".into(), straight: true, point: Vec3::ZERO }, Vec3::new(40.0, 15.0, 0.0), Vec3::Y),
+        (
+            crate::viewport::Hit::SketchCurve { sketch, id: "l1".into(), straight: true, point: Vec3::ZERO, ink_frame: None },
+            Vec3::new(40.0, 15.0, 0.0),
+            Vec3::Y,
+        ),
     ] {
         let marker = review_alignment_marker(&mut app, hit).expect("a valid helper has an alignment marker");
         let expected = solidcraft_engine::doc::apply_point(&shown, at);

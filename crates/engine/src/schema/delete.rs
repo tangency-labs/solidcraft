@@ -214,6 +214,10 @@ pub struct SelectionDeleteResult {
     /// The names of the timeline features that went (or would go), the selected ones and those
     /// that depended on them.
     pub deleted: Vec<String>,
+    /// The ids of sketches removed as they became empty when their ink strokes were deleted.
+    /// These sketches are also included by name in `deleted`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub emptied_ink_sketches: Vec<u64>,
     /// The ids of the joints that went (or would go): the ones asked for, and those on an
     /// occurrence deleted.
     pub deleted_joints: Vec<u64>,

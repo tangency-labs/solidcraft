@@ -4948,7 +4948,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
                 drawn_ids.push(id);
             }
             // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
-            if let Some(target) = target.filter(|_| !drawn_ids.is_empty()) {
+            if let Some(target) = target.filter(|_| drawn.iter().any(|(wire, _)| wire.ink_diameter.is_none())) {
                 super::sketch_3d::join_in(sk, doc, target, &drawn_ids)?;
             }
             return Ok((ids, point_ids(sk, &copies), drawn_ids));

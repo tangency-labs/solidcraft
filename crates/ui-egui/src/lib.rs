@@ -2108,6 +2108,7 @@ impl SolveApp {
         };
         if let Ok(v) = &r {
             sheet_views::command_opened(self, id, v);
+            grease_pencil::forget_picks(self);
             // A sketch id can be reused after undo or deletion. Its predecessor's view
             // must never become the starting camera of the newly created sketch.
             if id == "sketch.create"

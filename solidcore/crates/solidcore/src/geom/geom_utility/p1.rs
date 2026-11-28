@@ -474,6 +474,25 @@ pub fn line_plane_intersect_uv(
     Ok((numer_t / denom, numer_u / denom, numer_v / denom))
 }
 
+/// The finite point where a line meets the plane given by its origin and axes.
+#[must_use]
+pub fn line_plane_point(
+    origin: Point3,
+    direction: Vec3,
+    plane_origin: Point3,
+    plane_x: Vec3,
+    plane_y: Vec3,
+) -> Option<Point3> {
+    let (t, _, _) =
+        line_plane_intersect_uv(origin, direction, plane_origin, plane_x, plane_y).ok()?;
+    let point = origin + direction * t;
+    point
+        .to_array()
+        .into_iter()
+        .all(f64::is_finite)
+        .then_some(point)
+}
+
 /// Parameter of the point of the line `line_pnt + t * line_vec` closest to
 /// `test_point` (`0` for a degenerate line) (`smgu_LineClosestPoint`).
 #[must_use]
@@ -1975,6 +1994,21 @@ pub fn double_less_than(dval1: f64, dval2: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_plane_point_is_the_point_on_both_inputs() {
+        let origin = Vec3::new(4.0, 5.0, 7.0);
+        let plane = Vec3::new(0.0, 0.0, 3.0);
+        let direction = Vec3::new(1.0, 0.0, -2.0);
+        assert_eq!(
+            line_plane_point(origin, direction, plane, Vec3::X, Vec3::Y),
+            Some(Vec3::new(6.0, 5.0, 3.0))
+        );
+        assert_eq!(
+            line_plane_point(origin, Vec3::X, plane, Vec3::X, Vec3::Y),
+            None
+        );
+    }
 
     fn v(x: f64, y: f64, z: f64) -> Vec3 {
         Vec3::new(x, y, z)

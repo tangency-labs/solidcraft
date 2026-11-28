@@ -879,7 +879,7 @@ fn offset_takes_no_curve_on_a_corner_of_a_closed_shape_until_a_pick_opens_it() {
     let right = line(&h, |p| (p.x - 10.0).abs() < 1e-6);
     h.step(&json!({"start": "sketch.offset"})).unwrap();
     let offered = |h: &Harness, id: &str| {
-        let hit = Hit::SketchCurve { sketch, id: id.to_owned(), straight: true, point: solidcore_record::Vec3::ZERO };
+        let hit = Hit::SketchCurve { sketch, id: id.to_owned(), straight: true, point: solidcore_record::Vec3::ZERO, ink_frame: None };
         candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some()
     };
     let click =
@@ -949,7 +949,7 @@ fn offset_takes_other_curves_after_a_circle_or_with_chain_off() {
     h.step(&json!({"start": "sketch.offset"})).unwrap();
     let refused = |h: &Harness| -> Vec<String> {
         let d = h.app.dialog.as_ref().unwrap();
-        let hit = |id: &String| Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
+        let hit = |id: &String| Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO, ink_frame: None };
         all.iter().filter(|id| candidate(d, &h.app.session, &hit(id)).is_none()).cloned().collect()
     };
     let pick = |h: &mut Harness, ids: &[String]| {

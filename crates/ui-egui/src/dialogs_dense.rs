@@ -1589,7 +1589,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
         }
-        Kind::ScaleInk { factor, .. } => enter |= expr_row_positive(ui, "Scale factor", factor),
+        Kind::ScaleInk { factor, .. } => {
+            enter |= expr_row_positive(ui, "Scale factor", factor);
+            if let Err(message) = ink_scale_factor(app, factor) {
+                let t = Tokens::get();
+                ui.add(egui::Label::new(RichText::new(message).color(t.warning).size(t.font_small)).wrap());
+            }
+        }
         Kind::EditInk(edit) => edit.show(app, ui),
         Kind::Scale { factor, per_axis, factor_y, factor_z } => {
             form_row(ui, "Type", |ui| {

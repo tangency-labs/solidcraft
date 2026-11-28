@@ -12,6 +12,7 @@ use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines,
 use solidcraft_engine::{SectionPlane, Sel};
 use solidcraft_viewport::{Camera, Mat4, Rgb};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot};
 use crate::navigation::{CameraInput, NavCaps, orbit_drag};
@@ -170,7 +171,7 @@ impl ViewScenes {
 pub struct ViewportState {
     pub(crate) ink_move: Option<crate::grease_pencil::Move>,
     pub(crate) ink_pick: std::sync::Mutex<crate::grease_pencil::InkPickCache>,
-    pub(crate) ink_hover_frame: Option<Mat>,
+    pub(crate) ink_selected_paths: crate::grease_pencil::InkPickPaths,
     /// Touchscreen gesture ownership and contacts for the shared camera handler.
     pub(crate) touch: crate::navigation::TouchNavigation,
     /// The faces the modelling kernel refuses that the window points at (a failed operation's
@@ -597,6 +598,9 @@ pub enum Hit {
         id: String,
         straight: bool,
         point: Vec3,
+        /// The displayed occurrence placement of an ink stroke.
+        #[serde(skip)]
+        ink_frame: Option<Arc<Mat>>,
     },
     Vertex {
         body: String,
@@ -738,24 +742,29 @@ pub(crate) struct ViewTurn {
 
 impl ViewTurn {
     pub(crate) fn new(proj: &Proj, center: Vec3, start: Pos2) -> Option<Self> {
-        Some(Self { center, axis: proj.cam.back(), screen: proj.to_screen(center)?, start })
+        let screen = proj.to_screen(center)?;
+        (screen.is_finite() && start.is_finite()).then_some(Self { center, axis: proj.cam.back(), screen, start })
     }
 
     pub(crate) fn rotation_at(self, pos: Pos2) -> Option<f64> {
-        let start = self.start - self.screen;
-        let end = pos - self.screen;
-        if start.length_sq() < 36.0 {
+        if !pos.is_finite() {
+            return None;
+        }
+        if self.start.distance_sq(self.screen) < 36.0 {
             // Near the pivot, horizontal motion gives a stable turn without a polar singularity.
             return Some(-f64::from(pos.x - self.start.x) / 64.0);
         }
-        (end.length_sq() >= 4.0).then(|| {
-            use std::f32::consts::{PI, TAU};
-            f64::from((start.angle() - end.angle() + PI).rem_euclid(TAU) - PI)
-        })
+        if pos.distance_sq(self.screen) < 4.0 {
+            return None;
+        }
+        let view_point = |p: Pos2| Vec2::new(f64::from(p.x), -f64::from(p.y));
+        let sweep = solidcraft_kernel::affine::counterclockwise_sweep(view_point(self.screen), view_point(self.start), view_point(pos))?;
+        use std::f64::consts::{PI, TAU};
+        Some(if sweep < PI { sweep } else { sweep - TAU })
     }
 
-    pub(crate) fn matrix(self, angle: f64) -> solidcraft_engine::doc::Mat {
-        solidcraft_engine::doc::rigid(Vec3::ZERO, self.center, self.axis, angle)
+    pub(crate) fn matrix(self, angle: f64) -> Option<Mat> {
+        solidcraft_kernel::affine::rotation(self.center.into(), self.axis.into(), angle).ok()
     }
 }
 
@@ -1290,8 +1299,8 @@ pub(crate) fn ink_frames(frames: &[Mat], selected: bool) -> &[Mat] {
 }
 
 fn hovered_ink(app: &SolveApp) -> Option<(u64, &str, &Mat)> {
-    let Hit::SketchCurve { sketch, id, .. } = app.viewport.hover.as_ref()? else { return None };
-    Some((*sketch, id, app.viewport.ink_hover_frame.as_ref()?))
+    let Hit::SketchCurve { sketch, id, ink_frame: Some(frame), .. } = app.viewport.hover.as_ref()? else { return None };
+    Some((*sketch, id, frame))
 }
 
 fn ink_highlight(t: &Tokens) -> Color32 {
@@ -5650,7 +5659,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
                     }
                     if dd < 6.0 && bestc.wants((tier, dd)) {
                         let point = ray_segment_closest(o, d, w[0].1, w[1].1);
-                        bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: c.id.clone(), straight, point });
+                        bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: c.id.clone(), straight, point, ink_frame: None });
                     }
                 }
             }
@@ -5667,7 +5676,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
                 }
                 if dd < 6.0 && bestc.wants((tier, dd)) {
                     let point = ray_segment_closest(o, d, seg[0].1, seg[1].1);
-                    bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight, point });
+                    bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight, point, ink_frame: None });
                 }
             }
         }
@@ -5773,7 +5782,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let visible = |p: Vec3, slack: f64| kept(p) && (through || wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack));
     if !crate::render_workspace::active(app)
         && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
-        && let Some((ink, _)) = crate::grease_pencil::nearby_ink(app, &st, proj, pos, 4.0, None, |p| {
+        && let Some(ink) = crate::grease_pencil::nearby_ink(app, &st, proj, pos, 4.0, None, |p| {
             kept(p) && (wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack))
         })
     {
@@ -6748,7 +6757,7 @@ pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
         let c = sk.curves.get(sk.curve_index(id)?)?;
         // Its start is where an orbit from the hover would turn about.
         let point = c.kind.ends().and_then(|(a, _)| sk.point(a)).map_or(Vec3::ZERO, |at| ss.plane.to_world(at));
-        Some(Hit::SketchCurve { sketch, id: id.to_string(), straight: matches!(c.kind, CurveKind::Line { .. }), point })
+        Some(Hit::SketchCurve { sketch, id: id.to_string(), straight: matches!(c.kind, CurveKind::Line { .. }), point, ink_frame: None })
     };
     Some(match sel {
         Sel::Edge { body, index, point } => Hit::Edge { body: body.clone(), index: *index, mid: *point, point: *point },
@@ -9361,7 +9370,6 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         })
         .map(|h| (h, None))
     } else {
-        app.viewport.ink_hover_frame = None;
         if app.tool.is_some() {
             tool_hover(app, &hits).map(|h| (h, None))
         } else if let Some((hit, sel)) = corner {
@@ -9393,7 +9401,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
-    let rotating = option_only(mods);
+    let rotating = app.preferences.prefer_option_drag_rotation && option_only(mods);
     // Sample the current pointer before publishing the frame's sketch and highlight layers.
     let ink_drag = crate::grease_pencil::move_input(
         app,
@@ -9853,20 +9861,24 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                             // A pen's tap picks where it lifted: Safari's touch end clears the
                             // hover in the same frame as the release, before this click is read.
-                            let sel = match cand.and_then(|c| c.1) {
+                            let picked = match cand.and_then(|(hit, sel)| sel.map(|sel| (hit, sel))) {
                                 None if pen_select => {
                                     let hits = pick_cached(app, &proj, p);
-                                    candidate(app, &hits).map(|(_, s)| s)
+                                    candidate(app, &hits)
                                 }
-                                sel => sel,
+                                picked => picked,
                             };
                             // A pen tap on geometry toggles it. A tap on empty space clears.
-                            let (add, allow_toggle) = if pen_select { (sel.is_some(), true) } else { (add, allow_toggle) };
+                            let (add, allow_toggle) = if pen_select { (picked.is_some(), true) } else { (add, allow_toggle) };
                             // Not the first click of a double-click on a shown dimension's value.
-                            if sel.is_none() && !add && !crate::dim_view::model_text_at(p) {
+                            if picked.is_none() && !add && !crate::dim_view::model_text_at(p) {
                                 app.viewport.edit_dimensions = None;
                             }
+                            let sel = picked.as_ref().map(|(_, sel)| sel.clone());
                             select(app, sel.clone(), add, allow_toggle);
+                            if let Some((hit, _)) = picked {
+                                crate::grease_pencil::remember_pick(app, &hit);
+                            }
                             crate::select_other::note_click(app, p, if add || pen_select { None } else { sel });
                         }
                     }
@@ -10015,6 +10027,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
     if app.tool.is_none()
         && app.dialog.is_none()
+        && !ink_drag
         && primary_nav.is_none()
         && mode.is_none()
         && crate::sketch_view::active_sketch(app).is_some()
@@ -10098,7 +10111,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let depth = if stored_handle { undo_before } else { app.session.undo.len() };
                     app.viewport.point_drag = Some((id, depth, grab, offset, mirrored))
                 }
-                Some(Hit::SketchCurve { sketch, id, .. } | Hit::SketchMidpoint { sketch, id, .. }) if Some(sketch) == active => {
+                Some(Hit::SketchCurve { sketch, id, ink_frame: None, .. } | Hit::SketchMidpoint { sketch, id, .. }) if Some(sketch) == active => {
                     app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.undo.len(), Some(q), Vec2::ZERO, false));
                 }
                 _ => {}
@@ -12616,6 +12629,38 @@ mod tests {
     use super::*;
     use crate::navigation::*;
 
+    #[test]
+    fn hovering_and_dragging_ink_use_the_stroke_in_the_active_sketch() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.grease_pencil", json!({"points":[[-20,0,0],[20,0,0]]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.camera", json!({"target":[0,0,0],"distance":120}));
+        let at = json!({"world":[7,0,0]});
+        h.step(&json!({"move":at})).unwrap();
+        let (sketch, id, frame) = hovered_ink(&h.app).expect("ordinary hover keeps the picked stroke placement");
+        assert_eq!(Some(sketch), h.app.session.active_sketch);
+        assert_eq!(id, "w1");
+        assert_eq!(*frame, solidcraft_engine::doc::IDENTITY);
+
+        h.step(&json!({"click":at})).unwrap();
+        let [x, y] = h.at(&at).unwrap();
+        let start = pos2(x as f32, y as f32);
+        let end = start + vec2(18.0, 28.0);
+        h.app.synthetic.push(egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        h.app.synthetic.push(egui::Event::PointerMoved(end));
+        while !h.app.synthetic.is_empty() {
+            h.frame();
+        }
+        assert!(h.app.viewport.ink_move.is_some());
+        assert!(h.app.viewport.point_drag.is_none());
+    }
+
     /// A pen tap reuses the viewport's ordinary picking and can clear without a keyboard.
     #[test]
     fn pen_taps_toggle_sketch_picks_when_enabled() {
@@ -14660,9 +14705,9 @@ mod tests {
             output.textures_delta.clear();
             !output.shapes.is_empty()
         };
-        h.app.viewport.hover = Some(Hit::SketchCurve { sketch: other, id: line, straight: true, point: Vec3::ZERO });
+        h.app.viewport.hover = Some(Hit::SketchCurve { sketch: other, id: line, straight: true, point: Vec3::ZERO, ink_frame: None });
         assert!(drawn(&h), "the other sketch's curve is lit under the pointer");
-        h.app.viewport.hover = Some(Hit::SketchCurve { sketch: open, id: own, straight: true, point: Vec3::ZERO });
+        h.app.viewport.hover = Some(Hit::SketchCurve { sketch: open, id: own, straight: true, point: Vec3::ZERO, ink_frame: None });
         assert!(!drawn(&h), "the open sketch's design curve is not");
         crate::dim_view::cancel();
     }
@@ -14699,7 +14744,8 @@ mod tests {
             let preview: f32 = output.shapes.iter().map(|s| length(&s.shape)).sum();
             let r = h.app.run("sketch.line", json!({"points":[[0,0],[20,8]]})).unwrap();
             let id = r["curves"][0].as_str().unwrap().to_string();
-            h.app.viewport.hover = Some(Hit::SketchCurve { sketch: h.app.session.active_sketch.unwrap(), id, straight: true, point: Vec3::ZERO });
+            h.app.viewport.hover =
+                Some(Hit::SketchCurve { sketch: h.app.session.active_sketch.unwrap(), id, straight: true, point: Vec3::ZERO, ink_frame: None });
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 hover_highlight(&h.app, &ui.ctx().layer_painter(egui::LayerId::background()), &proj);
             });
@@ -18194,7 +18240,7 @@ mod tests {
         assert_eq!(highlight_key(&app), edge, "the same edge, the pointer elsewhere on it: nothing to build again");
         app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::X, point: Vec3::X });
         assert_ne!(highlight_key(&app), edge, "an edge's middle picks which part of it is lit");
-        let curve = |x: f64| Hit::SketchCurve { sketch: 1, id: "L1".into(), straight: true, point: Vec3::new(x, 0.0, 0.0) };
+        let curve = |x: f64| Hit::SketchCurve { sketch: 1, id: "L1".into(), straight: true, point: Vec3::new(x, 0.0, 0.0), ink_frame: None };
         app.viewport.hover = Some(curve(0.0));
         let on_curve = highlight_key(&app);
         app.viewport.hover = Some(curve(3.0));

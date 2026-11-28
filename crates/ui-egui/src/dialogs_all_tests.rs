@@ -225,7 +225,10 @@ fn measure_input_fits_external_sketch_geometry() {
     assert!(fits(accept, &point));
     assert_eq!(d.items(), vec![curve.clone(), point.clone()]);
     assert_eq!(
-        d.candidate(&h.app.session, &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true, point: solidcore_record::Vec3::ZERO }),
+        d.candidate(
+            &h.app.session,
+            &Hit::SketchCurve { sketch: 17, id: "line1".into(), straight: true, point: solidcore_record::Vec3::ZERO, ink_frame: None }
+        ),
         Some(curve.clone())
     );
     assert_eq!(

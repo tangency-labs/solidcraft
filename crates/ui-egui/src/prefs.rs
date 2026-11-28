@@ -12501,6 +12501,22 @@ mod tests {
     }
 
     #[test]
+    fn option_drag_rotation_is_saved_as_an_opt_in_navigation_preference() {
+        let old: Prefs = serde_json::from_value(json!({"nav":"maya"})).unwrap();
+        assert!(!old.prefer_option_drag_rotation);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        scroll_to_and_click(&mut h, "prefs:prefer_option_drag_rotation");
+        assert!(h.app.preferences.prefer_option_drag_rotation);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.prefer_option_drag_rotation);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.prefer_option_drag_rotation);
+    }
+
+    #[test]
     fn orbit_cursor_wrap_defaults_on_and_can_be_turned_off() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
         assert!(old.orbit_cursor_wrap, "saved preferences from before the option wrap");

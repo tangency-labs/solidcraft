@@ -40,6 +40,7 @@ pub mod periodic_extent1d;
 pub mod plane_height;
 pub mod point_set;
 pub mod polar_box;
+pub mod polyline;
 pub mod polynomial;
 pub mod pseudo_box;
 pub mod scan_frame;

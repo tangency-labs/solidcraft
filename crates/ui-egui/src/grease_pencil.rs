@@ -1,19 +1,20 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::RangeInclusive,
+    sync::Arc,
 };
 
 use egui::{Color32, Event, PointerButton, Pos2, Response, Shape, Stroke, Ui};
 use serde_json::{Value, json};
 use solidcore_record::{Plane, Vec3};
-use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::schema::sketch_3d::CopiedInk;
 use solidcraft_engine::sketch::MAX_FIT_POINTS;
 use solidcraft_engine::{
     Sel,
-    doc::{Mat, ModelState},
+    doc::{IDENTITY, Mat, ModelState},
     sketch::Wire,
 };
+use solidcraft_kernel::{affine, points};
 
 use crate::ui_kit::BackingTooltipExt;
 
@@ -28,6 +29,9 @@ pub(crate) const ERASE: &str = "sketch.erase_ink";
 pub(crate) const EDIT: &str = "sketch.edit_ink";
 pub(crate) const SCALE: &str = "sketch.scale_ink";
 
+/// The occurrence paths of picked strokes, keyed by design session, sketch and wire.
+pub(crate) type InkPickPaths = BTreeMap<(u64, u64, String), Vec<u64>>;
+
 pub(crate) fn is_tool(kind: Kind) -> bool {
     matches!(kind, Kind::Freehand | Kind::InkErase)
 }
@@ -41,10 +45,16 @@ pub(crate) fn editing(app: &SolveApp) -> bool {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Brush {
-    erase: Option<BTreeSet<String>>,
+    erase: Option<Erase>,
     pub(crate) picking_color: bool,
     stroke: Option<Freehand>,
     depth: Option<Depth>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct Erase {
+    strokes: BTreeSet<String>,
+    last: Option<Pos2>,
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +79,7 @@ impl Depth {
             return Some(*point);
         }
         body.planar_face(*face)
-            .and_then(|plane| plane.intersect_ray(*origin, *direction))
+            .and_then(|plane| points::line_plane_point(&plane, *origin, *direction))
             .or_else(|| body.fire_ray(*origin, *direction).ok().flatten().map(|hit| hit.point))
             .filter(|&point| crate::view_pick::section_keeps(&viewport::section_planes(app), point))
     }
@@ -289,7 +299,9 @@ pub(crate) fn input(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, inside: bool
     let finished = ui.input(|i| {
         for event in &i.events {
             match *event {
-                Event::PointerButton { button: PointerButton::Primary, pressed: true, .. } => {
+                Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. }
+                    if start.as_ref().is_some_and(|stroke| stroke.tip == pos) =>
+                {
                     if let Some(stroke) = &start {
                         tool.brush.depth.get_or_insert(Depth::Point(stroke.plane.origin));
                     }
@@ -331,43 +343,97 @@ pub(crate) fn input(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, inside: bool
 
 pub(crate) fn pending_erase(app: &SolveApp) -> Option<(u64, &BTreeSet<String>)> {
     let tool = app.tool.as_ref().filter(|tool| tool.kind == Kind::InkErase)?;
-    Some((crate::sketch_view::active_sketch(app)?, tool.brush.erase.as_ref()?))
+    Some((crate::sketch_view::active_sketch(app)?, &tool.brush.erase.as_ref()?.strokes))
 }
 
 fn erase_input(app: &mut SolveApp, ui: &Ui, proj: &Proj, inside: bool, navigating: bool) {
     let Some(sketch) = crate::workspace::focused_sketch(app) else { return };
-    let focused = ui.input(|i| i.focused);
-    let press = brush_press(app, ui, proj, inside);
-    let hit = app.viewport.hover.as_ref().and_then(|hit| match hit {
-        Hit::SketchCurve { sketch: owner, id, .. } if inside && *owner == sketch => Some(id.clone()),
-        _ => None,
-    });
-    let Some(tool) = app.tool.as_mut() else { return };
+    let (focused, down) = ui.input(|i| (i.focused, i.pointer.primary_down()));
     if navigating || !focused {
-        tool.brush.erase = None;
+        if let Some(tool) = app.tool.as_mut() {
+            tool.brush.erase = None;
+        }
         return;
     }
     if inside {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
     }
-    let (pressed, released, down) =
-        ui.input(|i| (i.pointer.button_pressed(PointerButton::Primary), i.pointer.button_released(PointerButton::Primary), i.pointer.primary_down()));
-    if pressed {
-        tool.brush.erase = press.map(|_| BTreeSet::new());
-    }
-    let Some(strokes) = &mut tool.brush.erase else { return };
-    if let Some(id) = hit
-        && strokes.insert(id)
-    {
-        ui.ctx().request_repaint();
-    }
-    if released || !down {
-        let strokes = tool.brush.erase.take().unwrap_or_default();
-        if released && !strokes.is_empty() {
-            let items: Vec<_> = strokes.into_iter().map(|id| Sel::ExternalSketchCurve { sketch, id }).collect();
-            crate::delete::request(app, json!({"items": items}));
+    let events = ui.input(|i| i.events.clone());
+    for event in events {
+        match event {
+            Event::PointerButton { pos, button: PointerButton::Primary, pressed, .. } => {
+                if pressed {
+                    let start = inside && proj.rect.contains(pos) && !crate::shell::covered(app, pos);
+                    if let Some(tool) = app.tool.as_mut() {
+                        tool.brush.erase = start.then(Erase::default);
+                    }
+                }
+                erase_to(app, ui, proj, sketch, pos);
+                if !pressed {
+                    let erased = app.tool.as_mut().and_then(|tool| tool.brush.erase.take());
+                    if let Some(erase) = erased.filter(|erase| !erase.strokes.is_empty()) {
+                        let items: Vec<_> = erase.strokes.into_iter().map(|id| Sel::ExternalSketchCurve { sketch, id }).collect();
+                        crate::delete::request(app, json!({"items": items}));
+                        return;
+                    }
+                }
+            }
+            Event::PointerMoved(pos) => erase_to(app, ui, proj, sketch, pos),
+            // Cancel when the original pointer disappears.
+            Event::PointerGone => {
+                if let Some(tool) = app.tool.as_mut() {
+                    tool.brush.erase = None;
+                }
+            }
+            _ => {}
         }
     }
+    if !down && let Some(tool) = app.tool.as_mut() {
+        tool.brush.erase = None;
+    }
+}
+
+fn erase_to(app: &mut SolveApp, ui: &Ui, proj: &Proj, sketch: u64, pos: Pos2) {
+    let visible = proj.rect.contains(pos) && !crate::shell::covered(app, pos);
+    let Some(erase) = app.tool.as_mut().and_then(|tool| tool.brush.erase.as_mut()) else { return };
+    let last = std::mem::replace(&mut erase.last, visible.then_some(pos));
+    if !visible || last == Some(pos) {
+        return;
+    }
+    let from = last.unwrap_or(pos);
+    let Some(contacts) = erase_contacts(app, proj, sketch, from, pos) else { return };
+    let strokes = contacts
+        .into_iter()
+        .filter(|&point| !crate::shell::covered(app, point))
+        .filter_map(|point| match depth_at(app, proj, point, ui.ctx(), Some(sketch))? {
+            Hit::SketchCurve { id, .. } => Some(id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !strokes.is_empty()
+        && let Some(erase) = app.tool.as_mut().and_then(|tool| tool.brush.erase.as_mut())
+    {
+        erase.strokes.extend(strokes);
+        ui.ctx().request_repaint();
+    }
+}
+
+fn erase_contacts(app: &SolveApp, proj: &Proj, sketch: u64, from: Pos2, to: Pos2) -> Option<Vec<Pos2>> {
+    let world = crate::open_meshing::shown_world(app);
+    let mut cache = app.viewport.ink_pick.lock().ok()?;
+    cache.update(app, &world, proj);
+    let path_bounds = egui::Rect::from_two_pos(from, to).expand(BRUSH_PICK_REACH);
+    let pending = pending_erase(app).map(|(_, strokes)| strokes);
+    let mut contacts = Vec::new();
+    for stroke in &cache.strokes {
+        if stroke.sketch != sketch || !stroke.bounds.intersects(path_bounds) || pending.is_some_and(|ids| ids.contains(&stroke.wire)) {
+            continue;
+        }
+        contacts.extend(stroke.segments.iter().filter_map(|&[a, b]| sweep_contact(from, to, a, b)));
+    }
+    contacts.sort_unstable_by(|a, b| a.distance_sq(from).total_cmp(&b.distance_sq(from)));
+    contacts.dedup();
+    Some(contacts)
 }
 
 impl Freehand {
@@ -377,14 +443,13 @@ impl Freehand {
             .into_iter()
             .filter_map(|pos| {
                 let (origin, direction) = self.view.ray(pos);
-                self.plane.intersect_ray(origin, direction)
+                points::line_plane_point(&self.plane, origin, direction)
             })
             .collect();
         // Keep the visible shape while avoiding redundant spline spans.
         let points_per_mm = ink_width_at(&self.view, render_width(&self.view, 1.0, 0.0), self.plane.origin);
         let tolerance = 0.75 / f64::from(points_per_mm.max(1e-6));
-        let mut points = crate::edge_detail::simplify(&points, tolerance);
-        points.dedup_by(|a, b| a.dist(*b) < 1e-9);
+        let points = points::simplify_polyline(&points, tolerance, 1e-9);
         (points.len() >= 2).then(|| {
             json!({
                 "points": points.into_iter().map(|p| [p.x, p.y, p.z]).collect::<Vec<_>>(),
@@ -436,9 +501,8 @@ impl Brush {
 pub(crate) fn depth_hover(app: &mut SolveApp, proj: &Proj, pos: Option<Pos2>, ctx: &egui::Context) -> Option<Hit> {
     let sample = pos.filter(|_| app.tool.as_ref().is_none_or(|tool| tool.brush.stroke.is_none()));
     let erase = app.tool.as_ref().filter(|tool| tool.kind == Kind::InkErase).and_then(|_| crate::workspace::focused_sketch(app));
-    let target = sample.and_then(|pos| depth_at(app, proj, pos, ctx, erase));
-    app.viewport.ink_hover_frame = target.as_ref().and_then(|(_, frame)| *frame);
-    let ((hit, _), pos) = target.zip(sample)?;
+    let pos = sample?;
+    let hit = depth_at(app, proj, pos, ctx, erase)?;
     if let Some(tool) = app.tool.as_mut().filter(|tool| tool.kind == Kind::Freehand) {
         tool.brush.depth = match &hit {
             Hit::Face { body, index, point } => Some(Depth::Face { point: *point, body: body.clone(), face: *index, ray: proj.ray(pos) }),
@@ -449,7 +513,7 @@ pub(crate) fn depth_hover(app: &mut SolveApp, proj: &Proj, pos: Option<Pos2>, ct
     Some(hit)
 }
 
-fn depth_at(app: &SolveApp, proj: &Proj, pos: Pos2, ctx: &egui::Context, erase: Option<u64>) -> Option<(Hit, Option<Mat>)> {
+fn depth_at(app: &SolveApp, proj: &Proj, pos: Pos2, ctx: &egui::Context, erase: Option<u64>) -> Option<Hit> {
     let world = crate::open_meshing::shown_world(app);
     let section = viewport::section_planes(app);
     let face = crate::view_pick::brush_face(app, &world, proj, pos, &section, ctx)?;
@@ -458,13 +522,15 @@ fn depth_at(app: &SolveApp, proj: &Proj, pos: Pos2, ctx: &egui::Context, erase: 
         Some(Hit::Face { point, .. }) => Some(view.apply(*point)[2]),
         _ => None,
     };
-    if let Some((hit, frame)) = nearby_ink(app, &world, proj, pos, 2.0, erase, |point| {
+    if let Some(hit) = nearby_ink(app, &world, proj, pos, BRUSH_PICK_REACH, erase, |point| {
         crate::view_pick::section_keeps(&section, point) && face_depth.is_none_or(|depth| depth - view.apply(point)[2] <= 1e-6)
     }) {
-        return Some((hit, Some(frame)));
+        return Some(hit);
     }
-    face.filter(|_| erase.is_none()).map(|hit| (hit, None))
+    face.filter(|_| erase.is_none())
 }
+
+const BRUSH_PICK_REACH: f32 = 2.0;
 
 #[derive(Default)]
 pub(crate) struct InkPickCache {
@@ -477,7 +543,7 @@ struct ScreenStroke {
     sketch: u64,
     wire: String,
     straight: bool,
-    frame: Mat,
+    frame: Arc<Mat>,
     bounds: egui::Rect,
     segments: Vec<[ScreenPoint; 2]>,
 }
@@ -487,6 +553,23 @@ struct ScreenPoint {
     world: Vec3,
     screen: Pos2,
     radius: f32,
+}
+
+fn screen_segment_parameter(point: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let xy = |p: Pos2| (f64::from(p.x), f64::from(p.y));
+    solidcraft_viewport::nearest_on_screen_segment(xy(point), xy(a), xy(b)) as f32
+}
+
+/// A point of the pointer path whose pick band intersects the projected ink segment.
+fn sweep_contact(from: Pos2, to: Pos2, a: ScreenPoint, b: ScreenPoint) -> Option<Pos2> {
+    let bounds = egui::Rect::from_two_pos(a.screen, b.screen).expand(a.radius.max(b.radius) + BRUSH_PICK_REACH);
+    if !bounds.intersects(egui::Rect::from_two_pos(from, to)) {
+        return None;
+    }
+    let xy = |p: Pos2| (f64::from(p.x), f64::from(p.y));
+    let radii = [f64::from(a.radius + BRUSH_PICK_REACH), f64::from(b.radius + BRUSH_PICK_REACH)];
+    let (x, y) = solidcraft_viewport::stroke_sweep_contact([xy(from), xy(to)], [xy(a.screen), xy(b.screen)], radii)?;
+    Some(Pos2::new(x as f32, y as f32))
 }
 
 impl InkPickCache {
@@ -504,6 +587,11 @@ impl InkPickCache {
         session.visibility.hidden_occurrences.hash(&mut key);
         let selected: BTreeSet<_> = viewport::selected_ink_sketches(app, world).collect();
         selected.hash(&mut key);
+        let edit = stroke_edit(app);
+        if let Some(edit) = edit.filter(|edit| edit.diameter.is_some()) {
+            edit.strokes.hash(&mut key);
+            edit.diameter.map(f64::to_bits).hash(&mut key);
+        }
         let key = key.finish();
         if self.key == key && self.world.as_ptr() == std::sync::Arc::as_ptr(world) {
             return;
@@ -518,11 +606,13 @@ impl InkPickCache {
             let sketch = ss.feature;
             let frames = viewport::sketch_frames(app, world, sketch, solidcraft_engine::view::sketch_shown(session, sketch));
             for &frame in viewport::ink_frames(&frames, selected.contains(&sketch)) {
+                let frame = Arc::new(frame);
                 for wire in &ss.sketch.wires {
                     let Some(diameter) = wire.ink_diameter else { continue };
+                    let diameter = edit.and_then(|edit| edit.preview(sketch, wire)).map_or(diameter, |(width, _)| width);
                     let width = render_width(proj, diameter, 0.0);
-                    let at = |&world| {
-                        let world = solidcraft_engine::doc::apply_point(&frame, world);
+                    let at = |&world: &Vec3| {
+                        let world = Vec3::from(affine::apply_point(&frame, world.into()));
                         let screen = proj.to_screen(world)?;
                         Some(ScreenPoint { world, screen, radius: ink_width_at(proj, width, world).min(1024.0) * 0.5 })
                     };
@@ -536,7 +626,14 @@ impl InkPickCache {
                         }
                     }
                     if !segments.is_empty() {
-                        self.strokes.push(ScreenStroke { sketch, wire: wire.id.clone(), straight: wire.fit.len() == 2, frame, bounds, segments });
+                        self.strokes.push(ScreenStroke {
+                            sketch,
+                            wire: wire.id.clone(),
+                            straight: wire.fit.len() == 2,
+                            frame: frame.clone(),
+                            bounds,
+                            segments,
+                        });
                     }
                 }
             }
@@ -554,12 +651,10 @@ pub(crate) fn nearby_ink(
     tolerance: f32,
     only: Option<u64>,
     visible: impl Fn(Vec3) -> bool,
-) -> Option<(Hit, Mat)> {
+) -> Option<Hit> {
     let mut cache = app.viewport.ink_pick.lock().ok()?;
     cache.update(app, world, proj);
     let view = proj.cam.view();
-    let xy = |p: Pos2| (f64::from(p.x), f64::from(p.y));
-    let pointer = xy(pos);
     let mut best = None;
     let mut rank = (tolerance, f64::INFINITY);
     let erased = pending_erase(app);
@@ -572,7 +667,7 @@ pub(crate) fn nearby_ink(
         }
         for &[a, b] in &stroke.segments {
             let line = b.screen - a.screen;
-            let t = solidcraft_viewport::nearest_on_screen_segment(pointer, xy(a.screen), xy(b.screen)) as f32;
+            let t = screen_segment_parameter(pos, a.screen, b.screen);
             let screen = a.screen + line * t;
             let radius = egui::lerp(a.radius..=b.radius, t);
             let gap = ((pos - screen).length() - radius).max(0.0);
@@ -582,13 +677,20 @@ pub(crate) fn nearby_ink(
             let (o, d) = proj.ray(screen);
             let point = viewport::ray_segment_closest(o, d, a.world, b.world);
             let next = (gap, -view.apply(point)[2]);
-            if next < rank && visible(point) {
+            let [_, _, z, w] = proj.vp.apply(point);
+            if next < rank && (0.0..=w).contains(&z) && visible(point) {
                 best = Some((stroke, point));
                 rank = next;
             }
         }
     }
-    best.map(|(stroke, point)| (Hit::SketchCurve { sketch: stroke.sketch, id: stroke.wire.clone(), straight: stroke.straight, point }, stroke.frame))
+    best.map(|(stroke, point)| Hit::SketchCurve {
+        sketch: stroke.sketch,
+        id: stroke.wire.clone(),
+        straight: stroke.straight,
+        point,
+        ink_frame: Some(stroke.frame.clone()),
+    })
 }
 
 pub(crate) fn selected_strokes(app: &SolveApp) -> Option<Vec<Value>> {
@@ -643,6 +745,54 @@ pub(crate) fn selected_by_sketch(app: &SolveApp, sel: &Sel) -> bool {
             && ink_wire(&crate::open_meshing::shown_world(app), *sketch, id).is_some())
 }
 
+pub(crate) fn forget_picks(app: &mut SolveApp) {
+    if app.viewport.ink_selected_paths.is_empty() {
+        return;
+    }
+    let selected: BTreeSet<_> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|sel| match sel {
+            Sel::ExternalSketchCurve { sketch, id } => Some((*sketch, id.as_str())),
+            _ => None,
+        })
+        .collect();
+    let other_sessions: BTreeSet<_> = app.docs.background().map(|session| session.uid).collect();
+    app.viewport.ink_selected_paths.retain(|(uid, sketch, id), _| {
+        if *uid == app.session.uid { selected.contains(&(*sketch, id.as_str())) } else { other_sessions.contains(uid) }
+    });
+}
+
+/// Record the selected occurrence, so Copy still uses it after the pointer leaves.
+pub(crate) fn remember_pick(app: &mut SolveApp, hit: &Hit) {
+    let Hit::SketchCurve { sketch, id, ink_frame: Some(frame), .. } = hit else { return };
+    if !app.session.selection.contains(&Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() }) {
+        return;
+    }
+    let Some(feature) = app.session.doc.feature(*sketch) else { return };
+    let path = if **frame == IDENTITY {
+        app.session.feature_path(feature.component)
+    } else {
+        let world = crate::open_meshing::shown_world(app);
+        let Some(copy) = world.sketch_copies.get(sketch).and_then(|copies| copies.iter().find(|copy| copy.delta == **frame)) else { return };
+        copy.path.clone()
+    };
+    app.viewport.ink_selected_paths.insert((app.session.uid, *sketch, id.clone()), path);
+}
+
+fn copy_frame(app: &SolveApp, world: &ModelState, sketch: u64, id: &str) -> Mat {
+    if let Some(path) = app.viewport.ink_selected_paths.get(&(app.session.uid, sketch, id.to_owned())) {
+        if app.session.doc.feature(sketch).is_some_and(|feature| app.session.feature_path(feature.component) == *path) {
+            return IDENTITY;
+        }
+        if let Some(copy) = world.sketch_copies.get(&sketch).and_then(|copies| copies.iter().find(|copy| copy.path == *path)) {
+            return copy.delta;
+        }
+    }
+    viewport::sketch_frames(app, world, sketch, solidcraft_engine::view::sketch_shown(&app.session, sketch)).first().copied().unwrap_or(IDENTITY)
+}
+
 pub(crate) fn copy_strokes(app: &SolveApp) -> Option<Vec<CopiedInk>> {
     app.session.selection.first()?;
     if !app.session.selection.iter().all(|sel| matches!(sel, Sel::ExternalSketchCurve { .. })) {
@@ -653,51 +803,45 @@ pub(crate) fn copy_strokes(app: &SolveApp) -> Option<Vec<CopiedInk>> {
         .selection
         .iter()
         .map(|sel| {
-            let (_, wire) = selected_ink(&world, sel)?;
-            Some(CopiedInk { points: wire.fit.iter().map(|p| [p.x, p.y, p.z]).collect(), diameter: wire.ink_diameter?, color: wire.ink_color })
+            let (sketch, wire) = selected_ink(&world, sel)?;
+            let frame = copy_frame(app, &world, sketch, &wire.id);
+            Some(CopiedInk {
+                points: wire.fit.iter().map(|&point| affine::apply_point(&frame, point.into())).collect(),
+                diameter: wire.ink_diameter?,
+                color: wire.ink_color,
+            })
         })
         .collect()
 }
 
 pub(crate) fn paste_strokes(app: &mut SolveApp, at: Option<Pos2>, in_place: bool) -> bool {
-    let by = if in_place { Vec3::ZERO } else { paste_offset(app, at) };
-    let strokes: Vec<_> = app
-        .copied_ink
-        .iter()
-        .cloned()
-        .map(|mut stroke| {
-            for point in &mut stroke.points {
-                point[0] += by.x;
-                point[1] += by.y;
-                point[2] += by.z;
-            }
-            stroke
-        })
-        .collect();
+    let mut strokes = app.copied_ink.clone();
+    if !in_place {
+        let Some(transform) = paste_transform(app, at) else { return false };
+        for point in strokes.iter_mut().flat_map(|stroke| &mut stroke.points) {
+            *point = affine::apply_point(&transform, *point);
+        }
+    }
     app.run("sketch.paste_ink", json!({"strokes": strokes})).is_ok()
 }
 
-fn paste_offset(app: &SolveApp, at: Option<Pos2>) -> Vec3 {
-    let center = app
-        .copied_ink
-        .iter()
-        .flat_map(|stroke| stroke.points.iter().map(|&[x, y, z]| Vec3::new(x, y, z)))
-        .collect::<solidcraft_engine::geom::Aabb3>()
-        .center();
+fn paste_transform(app: &SolveApp, at: Option<Pos2>) -> Option<Mat> {
+    let center = points::point_bounds_center(app.copied_ink.iter().flat_map(|stroke| stroke.points.iter().copied()))?;
     let (x, y, _) = app.cam.basis();
     let half_point = *width_range(app).start();
-    at.zip(app.viewport.rect)
-        .and_then(|(point, rect)| {
-            if !rect.contains(point) || crate::shell::covered(app, point) {
-                return None;
-            }
-            let proj = viewport::projection(app, rect);
-            let (origin, direction) = proj.ray(point);
-            let plane = Plane { origin: center, x, y };
-            let delta = plane.intersect_ray(origin, direction)? - center;
-            (delta.len2() > half_point * half_point).then_some(delta)
+    let target = at
+        .zip(app.viewport.rect)
+        .filter(|(pointer, rect)| rect.contains(*pointer) && !crate::shell::covered(app, *pointer))
+        .and_then(|(pointer, rect)| {
+            let (origin, direction) = viewport::projection(app, rect).ray(pointer);
+            points::line_plane_point(&Plane { origin: center.into(), x, y }, origin, direction)
         })
-        .unwrap_or((x - y) * (32.0 * half_point))
+        .filter(|target| points::point_distance(center, (*target).into()).is_ok_and(|distance| distance.value > half_point));
+    if let Some(target) = target {
+        return affine::translation_between(center, target.into()).ok();
+    }
+    let offset = 32.0 * half_point;
+    affine::translation(affine::parallelogram_point([0.0; 3], x.into(), y.into(), offset, -offset)).ok()
 }
 
 pub(crate) fn stroke_edit(app: &SolveApp) -> Option<&EditStroke> {
@@ -792,20 +936,44 @@ pub(crate) struct Move {
     revision: u64,
 }
 
-pub(crate) fn stroke_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, Sel)> {
-    let (Hit::SketchCurve { point, .. }, sel @ Sel::ExternalSketchCurve { .. }) = viewport::candidate(app, &viewport::pick(app, proj, pos))? else {
+fn plan_move(app: &SolveApp, proj: &Proj, pos: Pos2, rotating: bool) -> Option<(Move, Option<(Sel, Hit)>)> {
+    let (hit @ Hit::SketchCurve { point, ink_frame: Some(_), .. }, sel @ Sel::ExternalSketchCurve { .. }) =
+        viewport::candidate(app, &viewport::pick(app, proj, pos))?
+    else {
         return None;
     };
-    selected_ink(&crate::open_meshing::shown_world(app), &sel)?;
-    Some((point, sel))
+    let Sel::ExternalSketchCurve { sketch, id } = &sel else { return None };
+    let replace = rotating && !app.session.selection.contains(&sel) && !selected_by_sketch(app, &sel);
+    let selection = if replace { std::slice::from_ref(&sel) } else { app.session.selection.as_slice() };
+    let world = crate::open_meshing::shown_world(app);
+    let wires = || selection.iter().flat_map(|sel| selection_wires(&world, sel));
+    let mut strokes = BTreeMap::<_, BTreeSet<_>>::new();
+    for (sketch, wire) in wires() {
+        strokes.entry(sketch).or_default().insert(wire.id.clone());
+    }
+    if !strokes.get(sketch).is_some_and(|ids| ids.contains(id)) {
+        return None;
+    }
+    let turn = if rotating {
+        let center = points::point_bounds_center(wires().flat_map(|(_, wire)| wire.pts.iter().copied().map(Into::into)))?;
+        Some(ViewTurn::new(proj, center.into(), pos)?)
+    } else {
+        None
+    };
+    let (x, y, _) = proj.cam.basis();
+    let mut plane = Plane { origin: point, x, y };
+    let (origin, direction) = proj.ray(pos);
+    plane.origin = points::line_plane_point(&plane, origin, direction)?;
+    let drag = Move { strokes, plane, turn, revision: app.session.revision, transform: IDENTITY };
+    Some((drag, replace.then_some((sel, hit))))
+}
+
+pub(crate) fn can_rotate_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
+    plan_move(app, proj, pos, true).is_some()
 }
 
 /// Preview the selected strokes together and commit one edit on release.
 pub(crate) fn move_input(app: &mut SolveApp, ui: &Ui, proj: &Proj, response: &Response, rotating: bool, available: bool) -> bool {
-    use solidcraft_engine::{
-        doc::{IDENTITY, rigid},
-        geom::Aabb3,
-    };
     let (focused, primary, cancelled) = ui.input(|i| (i.focused, i.pointer.primary_down(), i.key_pressed(egui::Key::Escape)));
     if !available || !focused || cancelled {
         return app.viewport.ink_move.take().is_some();
@@ -813,33 +981,17 @@ pub(crate) fn move_input(app: &mut SolveApp, ui: &Ui, proj: &Proj, response: &Re
     if response.drag_started_by(PointerButton::Primary)
         && (rotating || app.session.selection.iter().any(|s| matches!(s, Sel::ExternalSketchCurve { .. } | Sel::Feature { .. })))
         && let Some(pos) = ui.input(|i| i.pointer.press_origin()).filter(|p| proj.rect.contains(*p) && !crate::shell::covered(app, *p))
-        && let Some((point, sel)) = stroke_at(app, proj, pos)
-        && let Sel::ExternalSketchCurve { sketch, id } = &sel
+        && let Some((mut drag, selection)) = plan_move(app, proj, pos, rotating)
     {
-        if rotating && !app.session.selection.contains(&sel) && !selected_by_sketch(app, &sel) {
+        if let Some((sel, hit)) = selection {
             viewport::select(app, Some(sel.clone()), false, false);
-        }
-        let world = crate::open_meshing::shown_world(app);
-        let mut strokes = BTreeMap::<_, BTreeSet<_>>::new();
-        let mut bounds = Aabb3::EMPTY;
-        for (sketch, wire) in app.session.selection.iter().flat_map(|sel| selection_wires(&world, sel)) {
-            if strokes.entry(sketch).or_default().insert(wire.id.clone()) && rotating {
-                for &point in &wire.pts {
-                    bounds.add(point);
-                }
+            if !app.session.selection.contains(&sel) {
+                return false;
             }
+            remember_pick(app, &hit);
+            drag.revision = app.session.revision;
         }
-        let (x, y, _) = proj.cam.basis();
-        let mut plane = Plane { origin: point, x, y };
-        let (o, d) = proj.ray(pos);
-        let turn = (rotating && !bounds.is_empty()).then(|| ViewTurn::new(proj, bounds.center(), pos)).flatten();
-        if strokes.get(sketch).is_some_and(|ids| ids.contains(id))
-            && (!rotating || turn.is_some())
-            && let Some(anchor) = plane.intersect_ray(o, d)
-        {
-            plane.origin = anchor;
-            app.viewport.ink_move = Some(Move { strokes, plane, turn, revision: app.session.revision, transform: IDENTITY });
-        }
+        app.viewport.ink_move = Some(drag);
     }
     let Some(drag) = &mut app.viewport.ink_move else { return false };
     if drag.revision != app.session.revision {
@@ -848,13 +1000,15 @@ pub(crate) fn move_input(app: &mut SolveApp, ui: &Ui, proj: &Proj, response: &Re
     }
     if let Some(p) = ui.input(|i| i.pointer.interact_pos()).filter(|p| proj.rect.contains(*p)) {
         if let Some(turn) = drag.turn {
-            if let Some(angle) = turn.rotation_at(p) {
-                drag.transform = turn.matrix(angle);
+            if let Some(matrix) = turn.rotation_at(p).and_then(|angle| turn.matrix(angle)) {
+                drag.transform = matrix;
             }
         } else {
             let (o, d) = proj.ray(p);
-            if let Some(point) = drag.plane.intersect_ray(o, d) {
-                drag.transform = rigid(point - drag.plane.origin, Vec3::ZERO, Vec3::Z, 0.0);
+            if let Some(point) = points::line_plane_point(&drag.plane, o, d)
+                && let Ok(matrix) = affine::translation_between(drag.plane.origin.into(), point.into())
+            {
+                drag.transform = matrix;
             }
         }
     }
@@ -873,4 +1027,113 @@ pub(crate) fn move_input(app: &mut SolveApp, ui: &Ui, proj: &Proj, response: &Re
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scenario::Harness;
+
+    fn projection(h: &mut Harness, target: [f64; 3]) -> Proj {
+        h.step(&json!({"call":"ui.view","params":{"view":"top"}})).unwrap();
+        h.step(&json!({"call":"ui.camera","params":{"target":target,"distance":120}})).unwrap();
+        viewport::projection(&h.app, h.app.viewport.rect.unwrap())
+    }
+
+    fn ink(h: &mut Harness) -> (u64, String) {
+        let id = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        let stroke = h.app.run(COMMAND, json!({"points":[[0,0,0],[10,0,0]],"diameter":1,"color":[12,34,56]})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        (id, stroke)
+    }
+
+    fn button(pos: Pos2, pressed: bool) -> Event {
+        Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    #[test]
+    fn paste_in_place_uses_the_copied_occurrence_after_the_pointer_leaves() {
+        let mut h = Harness::new();
+        let occurrence = h.app.run("component.create", json!({"name":"Ink Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        let (sketch, id) = ink(&mut h);
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.run("occurrence.copy", json!({"occurrence":occurrence,"translate":[100,0,0]})).unwrap();
+        let proj = projection(&mut h, [105.0, 0.0, 0.0]);
+        let pos = proj.to_screen(Vec3::new(105.0, 0.0, 0.0)).unwrap();
+        h.frame_with(vec![Event::PointerMoved(pos), button(pos, true)]);
+        h.frame_with(vec![button(pos, false)]);
+        let source = Sel::ExternalSketchCurve { sketch, id };
+        assert_eq!(h.app.session.selection.as_slice(), std::slice::from_ref(&source));
+        h.frame_with(vec![Event::PointerGone]);
+        h.app.copied_ink = copy_strokes(&h.app).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.run("select.set", json!({"items":[source]})).unwrap();
+        assert_eq!(copy_strokes(&h.app).unwrap()[0].points, [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]);
+        assert!(paste_strokes(&mut h.app, None, true));
+        let [Sel::ExternalSketchCurve { sketch: pasted, id }] = h.app.session.selection.as_slice() else { panic!("pasted stroke must be selected") };
+        let world = crate::open_meshing::shown_world(&h.app);
+        let pasted = ink_wire(&world, *pasted, id).unwrap();
+        assert_eq!(pasted.fit, [Vec3::new(100.0, 0.0, 0.0), Vec3::new(110.0, 0.0, 0.0)]);
+        assert_eq!(pasted.ink_color, Some([12, 34, 56]));
+    }
+
+    #[test]
+    fn eyedropper_hits_the_previewed_width_outside_the_saved_stroke() {
+        let mut h = Harness::new();
+        let (sketch, id) = ink(&mut h);
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let proj = projection(&mut h, [5.0, 0.0, 0.0]);
+        let pos = proj.to_screen(Vec3::new(5.0, 4.0, 0.0)).unwrap();
+        assert!(depth_at(&h.app, &proj, pos, &h.ctx, None).is_none());
+        h.app.session.selection = vec![Sel::ExternalSketchCurve { sketch, id: id.clone() }];
+        h.app.start(EDIT);
+        let Some(crate::dialogs::Kind::EditInk(edit)) = h.app.dialog.as_mut().map(|dialog| &mut dialog.kind) else {
+            panic!("Edit Stroke should open");
+        };
+        edit.diameter = Some(20.0);
+        edit.picking_color = true;
+        assert!(matches!(depth_at(&h.app, &proj, pos, &h.ctx, None), Some(Hit::SketchCurve { id: hit, .. }) if hit == id));
+    }
+
+    #[test]
+    fn eraser_catches_a_thin_stroke_between_pointer_events() {
+        let mut h = Harness::new();
+        let (sketch, id) = ink(&mut h);
+        let proj = projection(&mut h, [5.0, 0.0, 0.0]);
+        h.app.start(ERASE);
+        let from = proj.to_screen(Vec3::new(5.0, -12.0, 0.0)).unwrap();
+        let to = proj.to_screen(Vec3::new(5.0, 12.0, 0.0)).unwrap();
+        assert!(depth_at(&h.app, &proj, from, &h.ctx, Some(sketch)).is_none());
+        assert!(depth_at(&h.app, &proj, to, &h.ctx, Some(sketch)).is_none());
+        h.frame_with(vec![Event::PointerMoved(from), button(from, true)]);
+        h.frame_with(vec![Event::PointerMoved(to)]);
+        assert!(pending_erase(&h.app).is_some_and(|(_, ids)| ids.contains(&id)));
+        assert!(h.app.session.doc.sketch(sketch).is_ok(), "the sweep is a preview until release");
+        h.frame_with(vec![button(to, false)]);
+        assert!(h.app.session.doc.sketch(sketch).is_err(), "the last stroke and empty sketch were removed");
+    }
+
+    #[test]
+    fn covered_click_does_not_consume_a_later_brush_press_in_the_same_frame() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        let proj = projection(&mut h, [0.0, 0.0, 0.0]);
+        h.app.start(COMMAND);
+        let covered = proj.to_screen(Vec3::new(0.0, 20.0, 0.0)).unwrap();
+        let from = proj.to_screen(Vec3::new(-10.0, 0.0, 0.0)).unwrap();
+        let to = proj.to_screen(Vec3::new(10.0, 0.0, 0.0)).unwrap();
+        h.app.shell.cards.push(egui::Rect::from_center_size(covered, egui::Vec2::splat(10.0)));
+        let events = vec![button(covered, true), button(covered, false), button(from, true), Event::PointerMoved(to), button(to, false)];
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(proj.rect), events, ..Default::default() }, |ui| {
+            input(&mut h.app, ui, &proj, true, false);
+        });
+        let wires = &h.app.session.doc.sketch(sketch).unwrap().wires;
+        assert_eq!(wires.len(), 1);
+        let end = wires[0].fit[1];
+        assert!((end.x - 10.0).abs() < 1e-4 && end.y.abs() < 1e-4, "{end:?}");
+    }
 }

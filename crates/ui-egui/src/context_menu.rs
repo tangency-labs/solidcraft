@@ -278,7 +278,7 @@ pub struct MenuState {
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
     /// The viewport menu's right-click selected what was under it: where the menu opened, the
     /// selection before and the one it made. Select Other puts the one before back.
-    picked: Option<(Pos2, Vec<Sel>, Vec<Sel>)>,
+    picked: Option<MenuSelection>,
     /// The button that opened the menu, when it toggles it: a press there is not a press outside,
     /// so its click closes the menu instead of closing and reopening it (#1522).
     opener: Option<Rect>,
@@ -3493,7 +3493,7 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
     app.menu.section_plane = crate::view_pick::section_plane_at(app, at).map(|c| c.id);
-    let under = app.viewport.hover.as_ref().and_then(|hit| crate::viewport::candidate(app, std::slice::from_ref(hit))).map(|(_, sel)| sel);
+    let (hit, under) = app.viewport.hover.as_ref().and_then(|hit| crate::viewport::candidate(app, std::slice::from_ref(hit))).unzip();
     app.menu.face = under.as_ref().filter(|s| matches!(s, Sel::Face { .. })).cloned();
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
     app.menu.plane = under.as_ref().and_then(|sel| match sel {
@@ -3518,6 +3518,9 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
         };
         if takes {
             select_under(app, at, before, sel);
+            if let Some(hit) = hit {
+                crate::grease_pencil::remember_pick(app, &hit);
+            }
         }
     }
     open_for(app, at, Target::Viewport);
@@ -3527,9 +3530,23 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
 /// the cursor; something already in the selection keeps the whole selection.
 fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
     if !in_selection(app, &sel) {
+        let ink_paths = app
+            .viewport
+            .ink_selected_paths
+            .iter()
+            .filter(|((uid, _, _), _)| *uid == app.session.uid)
+            .map(|(key, path)| (key.clone(), path.clone()))
+            .collect();
         let _ = app.run("select.set", json!({ "items": [sel] }));
-        app.menu.picked = Some((at, before, app.session.selection.clone()));
+        app.menu.picked = Some(MenuSelection { at, before, made: app.session.selection.clone(), ink_paths });
     }
+}
+
+struct MenuSelection {
+    at: Pos2,
+    before: Vec<Sel>,
+    made: Vec<Sel>,
+    ink_paths: crate::grease_pencil::InkPickPaths,
 }
 
 /// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer, or
@@ -3558,11 +3575,12 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
 
 /// Restore the selection made automatically when opening a right-click menu at `at`.
 fn restore_picked(app: &mut SolveApp, at: Pos2) {
-    if let Some((opened, before, made)) = app.menu.picked.take()
-        && opened == at
-        && app.session.selection == made
+    if let Some(picked) = app.menu.picked.take()
+        && picked.at == at
+        && app.session.selection == picked.made
+        && app.run("select.set", json!({ "items": picked.before })).is_ok()
     {
-        let _ = app.run("select.set", json!({ "items": before }));
+        app.viewport.ink_selected_paths.extend(picked.ink_paths);
     }
 }
 

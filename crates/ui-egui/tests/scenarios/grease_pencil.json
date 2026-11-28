@@ -1,4 +1,5 @@
 [
+  {"call": "ui.prefs", "params": {"model_g_starts_grease_pencil": true}},
   {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
   {"start": "sketch.grease_pencil"},
   {"expect": {"sketching": true, "tool": "sketch.grease_pencil"}},
@@ -108,6 +109,7 @@
   {"start": "sketch.finish"},
   {"call": "ui.view", "params": {"view": "top"}},
   {"call": "ui.camera", "params": {"target": [0, 0, 0], "distance": 120}},
+  {"call": "ui.prefs", "params": {"prefer_option_drag_rotation": true}},
   {"drag": [{"world": [12, 0, 30]}, {"world": [0, 12, 30]}], "alt": true},
   {"expect": {"query": {"command": "sketch.inspect", "params": {"sketch": "Turn ink"}, "path": ["wires", 0, "start", 1], "value": -20}}},
   {"expect": {"query": {"command": "sketch.inspect", "params": {"sketch": "Turn ink"}, "path": ["wires", 0, "end", 1], "value": 20}}},

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "nav.prefer_option_drag_rotation.help": "Option/Alt-drag turns a free component or Grease Pencil stroke if one is under the pointer. Otherwise, the mouse mapping controls the view.",
+    "nav.prefer_option_drag_rotation.label": "Rotate with Option/Alt-drag"
+  },
+  "ar": {
+    "nav.prefer_option_drag_rotation.help": "يؤدي السحب مع الضغط على Option أو Alt إلى تدوير مكوّن حر أو خط قلم الرسم الحر تحت المؤشر. في الحالات الأخرى، تتحكم تعيينات الفأرة في العرض.",
+    "nav.prefer_option_drag_rotation.label": "التدوير بالسحب مع Option أو Alt"
+  },
+  "de": {
+    "nav.prefer_option_drag_rotation.help": "Ziehen mit der Options- oder Alt-Taste dreht eine freie Komponente oder einen Freihandstrich unter dem Zeiger. Andernfalls steuert die Mausbelegung die Ansicht.",
+    "nav.prefer_option_drag_rotation.label": "Drehen durch Ziehen mit Option oder Alt"
+  },
+  "he": {
+    "nav.prefer_option_drag_rotation.help": "גרירה עם Option או Alt מסובבת רכיב חופשי או קו ציור חופשי מתחת לסמן. במקרים אחרים, מיפוי העכבר שולט בתצוגה.",
+    "nav.prefer_option_drag_rotation.label": "סיבוב בגרירה עם Option או Alt"
+  },
+  "ja": {
+    "nav.prefer_option_drag_rotation.help": "ポインターの下に固定されていないコンポーネントやグリースペンシルの線がある場合は、Option/Alt キーを押しながらドラッグすると回転します。それ以外の場合は、マウスの割り当てに従ってビューを操作します。",
+    "nav.prefer_option_drag_rotation.label": "Option/Alt ドラッグで回転"
+  },
+  "ko": {
+    "nav.prefer_option_drag_rotation.help": "포인터 아래에 고정되지 않은 구성 요소나 그리스 펜슬 획이 있으면 Option/Alt 키를 누른 채 드래그하여 회전합니다. 그 외에는 마우스 매핑에 따라 뷰를 조작합니다.",
+    "nav.prefer_option_drag_rotation.label": "Option/Alt 드래그로 회전"
+  },
+  "vi": {
+    "nav.prefer_option_drag_rotation.help": "Kéo khi giữ Option hoặc Alt để xoay thành phần tự do hoặc nét bút vẽ dưới con trỏ. Trong các trường hợp khác, chuột điều khiển góc nhìn theo thiết lập hiện tại.",
+    "nav.prefer_option_drag_rotation.label": "Xoay khi kéo với Option hoặc Alt"
+  },
+  "zh": {
+    "nav.prefer_option_drag_rotation.help": "按住 Option 或 Alt 拖动可旋转指针下未固定的零部件或蜡笔笔画。其他情况下，按鼠标映射操作视图。",
+    "nav.prefer_option_drag_rotation.label": "按住 Option/Alt 拖动旋转"
+  }
+}

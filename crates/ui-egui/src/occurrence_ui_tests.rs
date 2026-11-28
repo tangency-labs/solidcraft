@@ -19,12 +19,23 @@ fn option_drag_rotates_a_free_component_about_its_center() {
     let drag = json!([{"drag": [{"world":[47,0,8]},{"world":[40,7,8]}],"alt":true,"steps":12}]);
     let pose = |h: &Harness| h.app.session.occurrence_placement(&[part]).unwrap().world;
     let original = pose(&h);
+    h.app.preferences.prefer_option_drag_rotation = true;
     h.run(&drag).unwrap();
     assert_eq!(pose(&h), original);
 
     h.app.run("occurrence.ground", json!({"occurrence":part,"grounded":false})).unwrap();
+    crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("maya"));
+    let camera = h.app.cam;
+    h.app.preferences.prefer_option_drag_rotation = false;
+    h.run(&drag).unwrap();
+    assert_eq!(pose(&h), original, "the default leaves the Maya binding in charge");
+    assert_ne!(h.app.cam.back(), camera.back(), "the default drag orbits on the part");
+
+    h.app.cam = camera;
+    h.app.preferences.prefer_option_drag_rotation = true;
     let undo = h.app.session.undo.len();
     h.run(&drag).unwrap();
+    assert_eq!(h.app.cam.back(), camera.back(), "the enabled preference lets the part drag own the press");
     let matrix = pose(&h);
     let center = solidcraft_engine::doc::apply_point(&matrix, solidcore_record::Vec3::new(20.0, 0.0, 4.0));
     assert!((center - solidcore_record::Vec3::new(40.0, 0.0, 4.0)).len() < 2e-4);

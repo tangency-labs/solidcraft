@@ -2455,8 +2455,10 @@ fn align_takes_sketch_frames_and_joint_origins() {
     let bottom = face(&app, Vec3::new(20.0, 15.0, 0.0));
     d.inputs[1].items = vec![bottom.clone()];
     d.active = 2;
-    let ring = d
-        .candidate(&app.session, &crate::viewport::Hit::SketchCurve { sketch, id: "ring".into(), straight: false, point: Vec3::new(63.0, 5.0, 0.0) });
+    let ring = d.candidate(
+        &app.session,
+        &crate::viewport::Hit::SketchCurve { sketch, id: "ring".into(), straight: false, point: Vec3::new(63.0, 5.0, 0.0), ink_frame: None },
+    );
     assert!(ring.is_some(), "the To input takes a sketch circle");
     d.pick(&app.session, ring.unwrap());
     let p = apply_commands(&app, &d).unwrap().remove(0).1;

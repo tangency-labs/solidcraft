@@ -1216,6 +1216,45 @@ fn browser_feature_menu_confirms_dependent_changes_before_deleting() {
 }
 
 #[test]
+fn mixed_delete_confirms_before_removing_unselected_sketch_geometry() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let part = app.run("component.create", json!({"name": "Part"})).unwrap()["component"].as_u64().unwrap();
+    let sketch = app.run("sketch.create", json!({"plane": "XY", "name": "Marked sketch"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]})).unwrap();
+    let stroke = app.run("sketch.grease_pencil", json!({"points": [[0, 0, 3], [4, 5, 3]]})).unwrap()["curves"][0].clone();
+    assert!(stroke.is_string());
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.activate", json!({"component": "root"})).unwrap();
+
+    let saved = app.session.doc.to_json();
+    let params = json!({"components": [part], "items": [{"type": "external_sketch_curve", "sketch": sketch, "id": stroke}]});
+    crate::delete::request(&mut app, params.clone());
+    let pending = app.menu.confirm.as_ref().expect("asks before deleting the rest of the sketch");
+    assert_eq!(pending.report["deleted"], json!(["Marked sketch"]));
+    assert_eq!(app.session.doc.to_json(), saved);
+    assert!(crate::delete::confirm(&mut app, false));
+    assert_eq!(app.session.doc.to_json(), saved);
+    crate::delete::request(&mut app, params);
+    assert!(crate::delete::confirm(&mut app, true));
+    assert!(app.session.doc.feature(sketch).is_none());
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.to_json(), saved);
+}
+
+#[test]
+fn deleting_the_last_ink_stroke_removes_the_empty_sketch_without_confirmation() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let sketch = app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let stroke = app.run("sketch.grease_pencil", json!({"points": [[0, 0, 3], [4, 5, 3]]})).unwrap()["curves"][0].clone();
+    assert!(stroke.is_string());
+    app.run("sketch.finish", json!({})).unwrap();
+
+    crate::delete::request(&mut app, json!({"items": [{"type": "external_sketch_curve", "sketch": sketch, "id": stroke}]}));
+    assert!(app.menu.confirm.is_none());
+    assert!(app.session.doc.feature(sketch).is_none());
+}
+
+#[test]
 fn menu_delete_items_use_the_same_path() {
     let mut app = sample_app();
     let b = body(&app);

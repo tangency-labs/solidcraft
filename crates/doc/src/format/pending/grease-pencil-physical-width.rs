@@ -13,7 +13,7 @@ pub fn step(design: &mut Value) -> crate::Result<()> {
             if wire.get("ink_diameter").is_none_or(Value::is_null)
                 && let Some(width) = width.as_f64()
             {
-                wire.insert("ink_diameter".into(), json!(width / 8.0));
+                wire.insert("ink_diameter".into(), json!((width / 8.0).clamp(1e-9, 1e9)));
             }
         }
     }

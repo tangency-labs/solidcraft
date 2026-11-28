@@ -7244,6 +7244,15 @@ pub(crate) fn report_title(d: &Dialog) -> String {
     title_of(d).to_string()
 }
 
+fn ink_scale_factor(app: &SolveApp, factor: &str) -> Result<f64, &'static str> {
+    app.session
+        .doc
+        .eval(factor, ValueKind::Unitless)
+        .ok()
+        .filter(|factor| (0.01..=100.0).contains(factor))
+        .ok_or_else(|| solidcraft_ui_text::tr("sketch.grease_pencil.scale_range"))
+}
+
 /// The commands OK runs (an edit rebuilds its feature in place); the live preview runs the same.
 pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     // Remove Tube on every tube of an edited Frame Member: OK deletes it, as `frame.remove_member`
@@ -8357,8 +8366,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             (crate::grease_pencil::EDIT, edit.params().ok_or_else(|| solidcraft_ui_text::tr("sketch.grease_pencil.style_required"))?)
         }
         Kind::ScaleInk { strokes, factor } => {
-            let factor =
-                s.doc.eval(factor, ValueKind::Unitless).ok().filter(|f| (0.01..=100.0).contains(f)).ok_or("Enter a scale factor from 0.01 to 100")?;
+            let factor = ink_scale_factor(app, factor)?;
             (crate::grease_pencil::SCALE, json!({"strokes": strokes, "factor": factor}))
         }
         Kind::Scale { .. } => {
@@ -11410,6 +11418,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
 mod param_refusal_tests {
     use super::*;
     use solidcraft_engine::Session;
+
+    #[test]
+    fn scale_strokes_accepts_the_range_shown_by_the_dialog() {
+        let app = SolveApp::new(Session::default(), Default::default());
+        assert_eq!(ink_scale_factor(&app, "0.01"), Ok(0.01));
+        assert_eq!(ink_scale_factor(&app, "100"), Ok(100.0));
+        assert_eq!(ink_scale_factor(&app, "101"), Err(solidcraft_ui_text::tr("sketch.grease_pencil.scale_range")));
+    }
 
     #[test]
     fn a_refused_parameter_change_shows_why() {

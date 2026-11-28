@@ -2164,6 +2164,11 @@ mod tests {
         let opened = read(&file.to_string()).unwrap();
         assert!(opened.newer_file.is_none());
         assert_eq!(opened.sketch(id).unwrap().wires[0].ink_diameter, Some(1.0));
+        for (width, diameter) in [(1e-10, 1e-9), (1e11, 1e9)] {
+            file["features"][0]["sketch"]["wires"][0]["ink_width"] = Value::from(width);
+            let opened = read(&file.to_string()).unwrap();
+            assert_eq!(opened.sketch(id).unwrap().wires[0].ink_diameter, Some(diameter));
+        }
 
         // The next patch added a physical diameter and color. An old screen width
         // alongside the diameter must not override it.

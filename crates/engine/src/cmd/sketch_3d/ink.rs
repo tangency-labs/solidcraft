@@ -5,11 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
-use solidcraft_doc::{IDENTITY, Mat, apply_point, mat_inverse, mat_mul, rigid};
-use solidcraft_geom::Vec3Geom as _;
+use solidcraft_doc::{IDENTITY, Mat};
+use solidcraft_kernel::{affine, points};
 use solidcraft_sketch::{DEFAULT_INK_DIAMETER, MAX_FIT_POINTS, Sketch, WirePoint, WireSpace};
 
-use super::{edit, edit_drawn, inverse_owner_frame, place_points, point_values, points3, reply, sketch_store};
+use super::{edit, edit_drawn, inverse_owner_frame, owner_frame, place_points, point_values, points3, reply, sketch_store};
 use crate::cmd::{CommandSpec, component};
 use crate::params::bad;
 use crate::schema::inspect::SketchTarget;
@@ -100,12 +100,12 @@ fn paste_ink(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.paste_ink";
     let params = PasteInkParams::deserialize(p).map_err(|err| bad(cmd, err.to_string()))?;
     let existing = if params.sketch.is_some() || sketch_store::active(s).is_some() { Some(sketch_store::target(s, p, cmd)?) } else { None };
-    let (mut sketch, inverse) = if let Some(id) = existing {
-        (sketch_store::read(&s.doc, id)?.clone(), inverse_owner_frame(s, p, cmd)?)
+    let (mut sketch, owner) = if let Some(id) = existing {
+        (sketch_store::read(&s.doc, id)?.clone(), owner_frame(s, id, cmd)?)
     } else {
-        let inverse = mat_inverse(&s.active_component_frame()).ok_or_else(|| bad(cmd, "the component placement is not invertible"))?;
-        (Sketch::new(), inverse)
+        (Sketch::new(), s.active_component_frame())
     };
+    let inverse = affine::inverse(&owner).map_err(|_| bad(cmd, "the sketch owner placement is not invertible"))?;
     if !(1..=crate::params::MAX_STRING_LIST).contains(&params.strokes.len()) {
         return Err(bad(cmd, "give at least one stroke"));
     }
@@ -114,7 +114,7 @@ fn paste_ink(s: &mut Session, p: &Value) -> Result<Value> {
         if !(2..=MAX_FIT_POINTS).contains(&stroke.points.len()) || !(1e-9..=1e9).contains(&stroke.diameter) {
             return Err(bad(cmd, "a stroke needs 2 to 500 points and a valid diameter"));
         }
-        let points: Vec<_> = stroke.points.into_iter().map(|[x, y, z]| apply_point(&inverse, Vec3::new(x, y, z))).collect();
+        let points: Vec<_> = stroke.points.into_iter().map(|p| Vec3::from(affine::apply_point(&inverse, p))).collect();
         strokes.push(add_ink(&mut sketch, &points, stroke.diameter, stroke.color)?);
     }
     let sketch = if let Some(id) = existing {
@@ -132,6 +132,7 @@ fn paste_ink(s: &mut Session, p: &Value) -> Result<Value> {
         id
     };
     s.selection = strokes.iter().map(|id| crate::Sel::ExternalSketchCurve { sketch, id: id.clone() }).collect();
+    s.selection_all_bodies = false;
     reply(cmd, PasteInkResult { sketch, strokes })
 }
 
@@ -140,12 +141,11 @@ fn move_ink(s: &mut Session, p: &Value) -> Result<Value> {
     let params = MoveInkParams::deserialize(p).map_err(|err| bad(cmd, err.to_string()))?;
     let transform = match (params.matrix, params.by) {
         (Some(matrix), None) => component::matrix::rigid(&matrix.0, 1e-9, cmd)?,
-        (None, Some([x, y, z])) => {
-            let delta = Vec3::new(x, y, z);
-            if delta.len2() > 1e12 {
+        (None, Some(delta)) => {
+            if !points::points_meet([0.0; 3], delta, 1e6).unwrap_or(false) {
                 return Err(bad(cmd, "`by` must be a world offset within 1,000,000 mm"));
             }
-            rigid(delta, Vec3::ZERO, Vec3::Z, 0.0)
+            affine::translation(delta).map_err(|e| bad(cmd, e.to_string()))?
         }
         _ => return Err(bad(cmd, "give one of `by` or `matrix`")),
     };
@@ -249,35 +249,43 @@ pub(in crate::cmd) fn delete_strokes(s: &mut Session, id: u64, ids: &[String]) -
     Ok(())
 }
 
-fn transform_strokes(s: &mut Session, cmd: &str, strokes: Vec<InkStroke>, mut world_move: Mat, factor: f64) -> Result<Value> {
-    let groups = stroke_groups(s, strokes, cmd)?;
-    if factor != 1.0 {
-        let mut bounds = crate::geom::Aabb3::EMPTY;
-        let world = s.world_state()?;
-        for (&id, ids) in &groups {
-            let sketch = world.sketch(id).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
-            for wire in sketch.sketch.wires.iter().filter(|wire| ids.contains(&wire.id)) {
-                for &point in &wire.pts {
-                    bounds.add(point);
-                }
-            }
-        }
-        let shift = bounds.center() * (1.0 - factor);
-        for (i, x) in [shift.x, shift.y, shift.z].into_iter().enumerate() {
-            world_move[i][i] = factor;
-            world_move[3][i] = x;
-        }
-    }
+fn transform_strokes(s: &mut Session, cmd: &str, strokes: Vec<InkStroke>, world_move: Mat, factor: f64) -> Result<Value> {
+    let groups =
+        stroke_groups(s, strokes, cmd)?.into_iter().map(|(id, wires)| Ok((id, wires, owner_frame(s, id, cmd)?))).collect::<Result<Vec<_>>>()?;
+    let world_move = if factor == 1.0 {
+        world_move
+    } else {
+        // Place the evaluated strokes through the same frames used to edit them below.
+        let model = s.model.state();
+        let sketches = groups
+            .iter()
+            .map(|(id, ids, owner)| {
+                let sketch = model.sketch(*id).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
+                Ok((&sketch.sketch, ids, owner))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let points = sketches.into_iter().flat_map(|(sketch, ids, owner)| {
+            sketch.wires.iter().filter(move |wire| ids.contains(&wire.id)).flat_map(move |wire| {
+                wire.pts.iter().map(
+                    move |&point| {
+                        if wire.space == WireSpace::Component { affine::apply_point(owner, point.into()) } else { point.into() }
+                    },
+                )
+            })
+        });
+        let center = points::point_bounds_center(points).ok_or_else(|| bad(cmd, "the strokes have no evaluated points"))?;
+        affine::scaling(center, factor).map_err(|e| bad(cmd, e.to_string()))?
+    };
     let mut moved = 0;
     let mut sketch = Value::Null;
-    for (id, wires) in groups {
+    for (id, wires, owner) in groups {
         let picks: Vec<_> = wires.into_iter().map(|id| (id, None)).collect();
         let target = json!({"sketch": id});
-        let inverse = inverse_owner_frame(s, &target, cmd)?;
-        let owner = mat_inverse(&inverse).ok_or_else(|| bad(cmd, "the sketch owner placement is not invertible"))?;
-        let local_move = mat_mul(&mat_mul(&inverse, &world_move), &owner);
+        let inverse = affine::inverse(&owner).map_err(|_| bad(cmd, "the sketch owner placement is not invertible"))?;
+        let world_from_local = affine::then(&owner, &world_move).map_err(|e| bad(cmd, e.to_string()))?;
+        let local_move = affine::then(&world_from_local, &inverse).map_err(|e| bad(cmd, e.to_string()))?;
         let (count, solved) = edit_drawn(s, &target, cmd, &picks, factor, |space, q| {
-            apply_point(if space == WireSpace::Component { &local_move } else { &world_move }, q)
+            Vec3::from(affine::apply_point(if space == WireSpace::Component { &local_move } else { &world_move }, q.into()))
         })?;
         moved += count;
         sketch = solved;

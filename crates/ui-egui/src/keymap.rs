@@ -438,7 +438,9 @@ fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
 }
 
 pub fn display_for(app: &SolveApp, id: &str) -> Option<String> {
-    effective(app, id).map(|key| crate::ui_kit::chord_label(&key))
+    effective(app, id)
+        .filter(|key| id != crate::grease_pencil::COMMAND || grease_pencil_key_enabled(app, key))
+        .map(|key| crate::ui_kit::chord_label(&key))
 }
 
 /// Commands bound to `key` now.
@@ -481,6 +483,16 @@ fn runs_everywhere(id: &str) -> bool {
     scope(id) == Scope::Everywhere || ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p))
 }
 
+/// The registered G resumes drawing in an ink sketch. Starting in Model also needs the
+/// preference unless G is a saved binding. Other bindings keep their usual dispatch.
+fn grease_pencil_key_enabled(app: &SolveApp, key: &str) -> bool {
+    let id = crate::grease_pencil::COMMAND;
+    key != "G"
+        || app.keymap.custom.contains_key(id)
+        || crate::keyboard_profiles::chosen(app).and_then(|profile| profile.mapped.get(id)).is_some_and(|keys| keys.iter().any(|k| k == key))
+        || if app.session.active_sketch.is_some() { crate::grease_pencil::editing(app) } else { app.preferences.model_g_starts_grease_pencil }
+}
+
 /// The enabled command a key press runs, if any: one of the mode the view is in (a sketch tool
 /// while a sketch is open, a model command otherwise) before any other. With Preferences ›
 /// Shortcuts › Keep model keys out of sketches on, only one of that mode or one that works
@@ -499,7 +511,7 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
         .into_iter()
         .filter(|id| {
             let available = match *id {
-                crate::grease_pencil::COMMAND => model_view,
+                crate::grease_pencil::COMMAND => model_view && grease_pencil_key_enabled(app, key),
                 crate::grease_pencil::ERASE => model_view && here == Scope::Sketch,
                 _ => match scope(id) {
                     Scope::Render => here == Scope::Render,
@@ -613,15 +625,18 @@ fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
 }
 
 /// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
-/// Normal/Construction (a mode of the drawing in progress), the Finish Sketch panel, nor a Modify
-/// tool other than Offset, which offsets a face sketch's projected edges.
+/// Normal/Construction (a mode of the drawing in progress), the Finish Sketch panel, a Modify
+/// tool other than Offset, or Grease Pencil, which starts directly from Model.
 fn sketch_tool_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     if app.session.active_sketch.is_some() || crate::render_workspace::active(app) {
         return None;
     }
     commands_for(app, key).into_iter().find(|id| {
         solidcraft_engine::find_command(id).is_some_and(|c| {
-            c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && (c.panel != "MODIFY" || c.id == "sketch.offset") && c.id != "sketch.construction"
+            c.tab == "SKETCH"
+                && c.panel != "FINISH SKETCH"
+                && (c.panel != "MODIFY" || c.id == "sketch.offset")
+                && !matches!(c.id, "sketch.construction" | crate::grease_pencil::COMMAND)
         })
     })
 }

@@ -77,37 +77,51 @@ pub(crate) fn grabbed_face(app: &SolveApp, proj: &Proj, p: Pos2) -> Option<(Stri
     faces(crate::viewport::pick_all(app, proj, p)).find(|(body, _)| crate::selection::holds_body(s, body)).or(Some(front))
 }
 
-/// Begin a drag on the part under `p` when nothing holds it in place. True when one began.
-pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2, rotating: bool) -> bool {
-    let Some((body, at)) = grabbed_face(app, proj, p) else { return false };
-    let Some(path) = placement_of(app, &body) else { return false };
+/// Prepare the same drag for the navigation check and the gesture itself. The checkpoint is only
+/// taken when the gesture starts.
+fn prepare(app: &SolveApp, proj: &Proj, p: Pos2, rotating: bool) -> Result<Option<Drag>, String> {
+    let Some((body, at)) = grabbed_face(app, proj, p) else { return Ok(None) };
+    let Some(path) = placement_of(app, &body) else { return Ok(None) };
     let s = &app.session;
-    if let Err(error) = s.drag_group(&path) {
-        if rotating {
-            app.set_status(error.to_string(), true);
-        }
-        return false;
-    }
+    s.drag_group(&path).map_err(|error| error.to_string())?;
     let Some(local) = s.occurrence_placement(&path).ok().and_then(|x| mat_inverse(&x.world)).map(|inv| apply_point(&inv, at)) else {
-        return false;
+        return Ok(None);
     };
     let turn = if rotating {
         let state = crate::open_meshing::shown_world(app);
-        let scene = s.model.state();
-        let bounds = s
-            .doc
-            .body_frames(&scene)
+        let frames = s.doc.body_frames(&s.model.state());
+        let corners = frames
             .iter()
             .filter(|(_, _, placed, _)| placed.starts_with(&path))
             .filter_map(|(name, _, _, _)| state.body(name)?.body.exact_bounds().ok())
-            .fold(solidcraft_engine::geom::Aabb3::EMPTY, |total, b| total.union(&b));
-        let Some(turn) = (!bounds.is_empty()).then(|| ViewTurn::new(proj, bounds.center(), p)).flatten() else { return false };
+            .filter(|bounds| !bounds.is_empty())
+            .flat_map(|bounds| [bounds.min.into(), bounds.max.into()]);
+        let Some(turn) = solidcraft_kernel::points::point_bounds_center(corners).and_then(|center| ViewTurn::new(proj, center.into(), p)) else {
+            return Ok(None);
+        };
         Some((turn, 0.0))
     } else {
         None
     };
-    let checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|r| r["checkpoint"].as_u64());
-    app.viewport.occurrence_drag = Some(Drag { path, local, origin: at, normal: proj.ray(p).1, turn, checkpoint, step: None });
+    Ok(Some(Drag { path, local, origin: at, normal: proj.ray(p).1, turn, checkpoint: None, step: None }))
+}
+
+pub(crate) fn can_rotate_at(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
+    prepare(app, proj, p, true).is_ok_and(|drag| drag.is_some())
+}
+
+/// Begin a drag on the part under `p` when nothing holds it in place. True when one began.
+pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2, rotating: bool) -> bool {
+    let mut drag = match prepare(app, proj, p, rotating) {
+        Ok(Some(drag)) => drag,
+        Err(error) if rotating => {
+            app.set_status(error, true);
+            return false;
+        }
+        _ => return false,
+    };
+    drag.checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|r| r["checkpoint"].as_u64());
+    app.viewport.occurrence_drag = Some(drag);
     true
 }
 
@@ -136,7 +150,8 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         if delta.abs() < 1e-9 {
             return;
         }
-        (at, angle, Some(crate::dialogs_move::matrix_rows(&turn.matrix(delta))))
+        let Some(matrix) = turn.matrix(delta) else { return };
+        (at, angle, Some(crate::dialogs_move::matrix_rows(&matrix)))
     } else {
         let (o, dir) = proj.ray(p);
         let facing = dir.dot(d.normal);

@@ -1211,13 +1211,13 @@ impl Sketch {
     /// Join drawn 3D curves that meet: each end of the curves `ids` (a 3D point is its own end)
     /// that is at the same place as an end of another drawn curve, in the same space, gets a
     /// Coincident with it, unless the two are joined already. Lines drawn end to end, one call
-    /// or one segment at a time, stay joined when their constraints are solved. Returns the
-    /// constraints added.
+    /// or one segment at a time, stay joined when their constraints are solved. Ink strokes
+    /// do not get automatic joints. Returns the constraints added.
     pub fn join_drawn_ends(&mut self, ids: &[String]) -> Result<Vec<String>> {
         let ends: Vec<(WirePoint, Vec3, crate::WireSpace)> = self
             .wires
             .iter()
-            .filter(|w| w.link.is_none() && !w.fit.is_empty())
+            .filter(|w| w.link.is_none() && w.ink_diameter.is_none() && !w.fit.is_empty())
             .flat_map(|w| {
                 let last = w.fit.len() - 1;
                 let idx: Vec<usize> = if last == 0 { vec![0] } else { vec![0, last] };
