@@ -1197,9 +1197,45 @@ fn to_f32(mesh: &mut TriMesh) {
 /// times that. Over the solid's area, less than its six sides' and the two bores' walls, that
 /// bounds the volume.
 fn f32_volume_bound() -> f64 {
-    let moved = 3f64.sqrt() * 60. * f64::from(f32::EPSILON) / 2.;
     let area = 2. * (60. * 40. + 60. * 30. + 40. * 30.) + PI * (10. * 60. + 8. * 40.);
-    3. * moved * area
+    f32_circle_bound() * area
+}
+
+/// How far f32 moves a circle fitted to the bored blocks' vertices, as [`f32_volume_bound`]
+/// derives it: three times sqrt(3) * 60 * 2^-24.
+fn f32_circle_bound() -> f64 {
+    3. * 3f64.sqrt() * 60. * f64::from(f32::EPSILON) / 2.
+}
+
+/// Each cylinder of `body` lies on one of `bores` (a point of its axis, the axis direction and
+/// the radius), within `bound` along the 60 mm of the block, and each bore has one.
+fn assert_bores(k: &Kernel, body: &Brep, bores: &[(Vec3, Vec3, f64)], bound: f64, what: &str) {
+    let mut found = vec![false; bores.len()];
+    for &id in body.face_list() {
+        let surface = face::surface(body, id).unwrap().unwrap();
+        if !matches!(surface.kind(), SurfaceKind::Cone(c) if c.is_cylinder()) {
+            continue;
+        }
+        let domain = face::uv_domain(body, id).unwrap();
+        let record = record_face(k, surface, &domain).unwrap();
+        let crate::eval::Surface::Cylinder { frame, radius } = &record.surface else {
+            panic!("{what}: {record:?}");
+        };
+        let [o, x, y] =
+            [frame.origin, frame.x_axis, frame.y_axis].map(|v| Vec3::new(v[0], v[1], v[2]));
+        let ends = [o, o + x.cross(y) * 60.];
+        let bore = bores.iter().position(|&(point, direction, r)| {
+            (radius - r).abs() <= bound
+                && ends
+                    .iter()
+                    .all(|&p| (p - point).cross(direction).length() <= bound)
+        });
+        let Some(bore) = bore else {
+            panic!("{what}: a cylinder off every bore: {:?}", record.surface);
+        };
+        found[bore] = true;
+    }
+    assert!(found.iter().all(|&f| f), "{what}: {found:?}");
 }
 
 /// The regions and shells of a body: a solid with one connected boundary and no cavity has two
@@ -1287,6 +1323,13 @@ fn a_block_bored_on_two_axes_gets_exact_cylinders_and_planes() {
         assert_eq!(regions_and_shells(&mut k, &body), (2, 2), "{what}");
         let bound = if f32_input { f32_volume_bound() } else { 1e-6 };
         assert_volume(&mut k, &mut body, expected, bound);
+        let (x_z, y_z) = if crossing { (15., 15.) } else { (8., 22.) };
+        let bores = [
+            (Vec3::new(0., 20., x_z), Vec3::X, 5.),
+            (Vec3::new(30., 0., y_z), Vec3::Y, 4.),
+        ];
+        let bound = if f32_input { f32_circle_bound() } else { 1e-9 };
+        assert_bores(&k, &body, &bores, bound, &what);
     }
 }
 
@@ -1330,13 +1373,19 @@ fn a_block_bored_along_x_and_z_gets_exact_cylinders_and_planes() {
         let expected = block - bores + crossing_cylinders_volume(5., 4.);
         let bound = if f32_input { f32_volume_bound() } else { 1e-6 };
         assert_volume(&mut k, &mut body, expected, bound);
+        let bores = [
+            (Vec3::new(0., 20., 15.), Vec3::X, 5.),
+            (Vec3::new(30., 20., 0.), Vec3::Z, 4.),
+        ];
+        let bound = if f32_input { f32_circle_bound() } else { 1e-9 };
+        assert_bores(&k, &body, &bores, bound, &what);
     }
 }
 
-/// A kernel failure building the intersection keeps the source's facets rather than refusing a
-/// mesh the conversion took before (the B-rep Boolean's `NoRadialEdgeUse`, which the X and Y
-/// bores of the tests met before the tool seams were turned), while a stop the caller asked for
-/// still stops it.
+/// A kernel failure status building the intersection keeps the source's facets rather than
+/// refusing a mesh the conversion took before (the B-rep Boolean's `NoRadialEdgeUse`, which the
+/// X and Y bores of the tests met before the tool seams were turned), while an unported call or
+/// a stop the caller asked for stays an error.
 #[test]
 fn a_kernel_failure_building_a_crossed_solid_keeps_the_facets_and_cancellation_stops() {
     let failure = SolidError::boolean(
@@ -1356,6 +1405,9 @@ fn a_kernel_failure_building_a_crossed_solid_keeps_the_facets_and_cancellation_s
         crossed::refusal(Ok(None)),
         Ok(Err(crossed::Refused::NotAnIntersection))
     ));
+    // An unported call stands for no failure status: it stays an error.
+    let unported = SolidError::unported("SmBrep::Unknown", "boolean.merge");
+    assert!(crossed::refusal(Err(unported)).is_err());
     let block = bored_block(true, 40., 30.);
     let mesh = weld(&block.positions, &block.triangles, 0.05).unwrap();
     let mut k = Kernel::default();

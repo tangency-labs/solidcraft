@@ -4,13 +4,14 @@
 //! The extrusion of a solid's end caps holds the solid when every point of it projects into the
 //! caps' section, and the intersection of such extrusions is the solid's visual hull from those
 //! directions (A. Laurentini, "The visual hull concept for silhouette-based image understanding",
-//! IEEE PAMI 16(2), 1994). The hull is the solid when it holds no more material. So a solid is
-//! taken only when every source vertex lies inside every extrusion, every source triangle lies
-//! whole on a cap or within the tolerance of a wall of one of them (the chord certificate of
-//! [`super::curves`]), and its volume is the source's within the tolerance times the source's
-//! area. The solid built is the first extrusion less the holes of the others' sections, which
-//! holds their intersection. A kernel error while building or measuring it keeps the source's
-//! facets, which the step only replaces ([`Refused::Failed`]).
+//! IEEE PAMI 16(2), 1994). The hull is the solid when it holds no more material. The solid built
+//! is the first extrusion less the holes of the others' sections, which holds their
+//! intersection. It is taken only when every source vertex lies inside every extrusion, every
+//! source triangle is a cap triangle of the first extrusion or lies whole within the tolerance
+//! of one of its walls or of a hole's wall of a later one (the chord certificate of
+//! [`super::curves`]): so the source lies on the built solid's boundary; and the volumes agree
+//! within the tolerance times the source's area. A kernel failure status while building or
+//! measuring it keeps the source's facets, which the step only replaces ([`Refused::Failed`]).
 //!
 //! Deviations: no upstream counterpart. No recursion.
 
@@ -48,16 +49,20 @@ pub(super) fn reconstruct(
     refusal(candidate(k, mesh, tolerance))
 }
 
-/// The answer of [`reconstruct`] from the candidate's: a stop the caller asked for (cancellation,
-/// spent fuel) stays an error, any other error is [`Refused::Failed`].
+/// The answer of [`reconstruct`] from the candidate's. An error that may stand for a kernel
+/// failure status is [`Refused::Failed`]; one that no status stands for (a stop the caller asked
+/// for, an unported call, a port invariant), which [`crate::error::native_failure`] passes on,
+/// stays an error.
 pub(super) fn refusal(
     candidate: Result<Option<Brep>>,
 ) -> Result<std::result::Result<Brep, Refused>> {
     match candidate {
         Ok(Some(body)) => Ok(Ok(body)),
         Ok(None) => Ok(Err(Refused::NotAnIntersection)),
-        Err(error) if error.is_cancelled() => Err(error),
-        Err(error) => Ok(Err(Refused::Failed(error))),
+        Err(error) => match crate::error::native_failure::<()>(Err(error.clone())) {
+            Ok(_) => Ok(Err(Refused::Failed(error))),
+            Err(_) => Err(error),
+        },
     }
 }
 
@@ -92,6 +97,7 @@ fn candidate(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Br
     }
     k.check_cancelled("reconstruct mesh")?;
     for &p in &mesh.positions {
+        k.check_cancelled("reconstruct mesh")?;
         for prism in &prisms {
             if !inside(prism, p, tolerance) {
                 return Ok(None);
@@ -100,6 +106,7 @@ fn candidate(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Br
     }
     let mut area = 0.;
     for &[a, b, c] in &mesh.triangles {
+        k.check_cancelled("reconstruct mesh")?;
         let (Some(&a), Some(&b), Some(&c)) = (
             mesh.positions.get(a as usize),
             mesh.positions.get(b as usize),
@@ -138,6 +145,7 @@ fn candidate(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Br
             return Ok(None);
         };
         for hole in prism.regions.iter().flat_map(|region| &region.holes) {
+            k.check_cancelled("reconstruct mesh")?;
             // A fitted circle starts on its frame's x direction, which is horizontal for every
             // horizontal axis: the seams of two bores at one height then lie in one plane and
             // meet where the bores cross, and the Boolean fails when rounding moves them apart
@@ -171,6 +179,11 @@ fn candidate(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Br
     if body.face_list().len() > MAX_FACES || !native::is_valid(k, &mut body)? {
         return Ok(None);
     }
+    // Where the built boundary follows the source within the tolerance, the two solids differ
+    // by at most a band that wide along the source's surface, its area times the tolerance, and
+    // the cap triangles' rounding across a section, epsilon times size squared. A larger
+    // difference is boundary the source does not have, such as a part of the first extrusion
+    // that no source triangle lies on.
     let original = mesh.volume();
     let Some(volume) = native::volume(k, &mut body)? else {
         return Ok(None);
