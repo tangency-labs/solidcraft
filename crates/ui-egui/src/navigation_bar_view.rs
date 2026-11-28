@@ -1,5 +1,5 @@
 //! Measured single-row navigation bar. Commands own all view changes.
-use crate::nav_bar::{self, Bar, BarLabels, ContextItem, Menu, MenuEntry, MenuRow, NavAction, SlotView};
+use crate::nav_bar::{self, Bar, BarLabels, ContextItem, Menu, NavAction, SlotView};
 use crate::navigation::NavCaps;
 use crate::navigation_bar::{self, MenuDisplay, NavigationBar, Slot};
 use crate::ui_kit::nav_bar_layout::{BarLayout, measure};
@@ -183,16 +183,19 @@ fn set_projection(app: &mut SolveApp, perspective: bool) {
 
 /// The Isolate slot's right-click rows: how the view shows what an Isolate hid, the current one
 /// marked (`view.isolate_others`).
-fn isolate_show_rows(app: &SolveApp) -> Vec<(String, String, bool)> {
-    let mut rows: Vec<(String, String, bool)> = crate::viewport::ISOLATE_SHOWS
-        .iter()
-        .map(|(show, id, label)| ((*id).to_owned(), app.tr(label).to_owned(), app.preferences.isolate_others == *show))
-        .collect();
-    // Whether clicks select the parts drawn, only while they are drawn.
+fn isolate_show_rows(app: &SolveApp) -> Vec<ui_kit::Item> {
+    let choice = |id: &str, label: &str, selected| {
+        let mut item = ui_kit::Item::action(id, label, "");
+        item.checked = Some(selected);
+        item.radio = true;
+        item
+    };
+    let mut rows: Vec<_> =
+        crate::viewport::ISOLATE_SHOWS.iter().map(|(show, id, label)| choice(id, app.tr(label), app.preferences.isolate_others == *show)).collect();
     if app.preferences.isolate_others != solidcraft_engine::schema::view_navigation::IsolateShow::Hidden {
         let pick = app.preferences.isolate_others_pick;
-        rows.push(("pick:select".into(), app.tr("ui.isolate_pick_select_row").to_owned(), pick));
-        rows.push(("pick:through".into(), app.tr("ui.isolate_pick_through_row").to_owned(), !pick));
+        rows.push(choice("pick:select", app.tr("ui.isolate_pick_select_row"), pick));
+        rows.push(choice("pick:through", app.tr("ui.isolate_pick_through_row"), !pick));
     }
     rows
 }
@@ -450,14 +453,28 @@ pub(crate) fn paint_row(
     views.iter().zip(responses).filter_map(|(view, response)| Some((view.index, navigation_bar::find(view.id)?, response))).collect()
 }
 
+fn menu_row(id: impl Into<String>, label: impl Into<String>, icon: impl Into<String>, target: impl Into<String>) -> ui_kit::Item {
+    let (id, label, icon, target) = (id.into(), label.into(), icon.into(), target.into());
+    let mut item = ui_kit::Item::action(&id, &label, &icon);
+    if !target.is_empty() {
+        item.aliases.push(target);
+    }
+    item
+}
+
 /// The rows of the menu slot `id` opens (none for an unknown one, which closes it).
 fn menu(app: &SolveApp, id: &str, zoom: f32) -> Menu {
     match id {
         SHEET_ZOOM => Menu {
             entries: vec![
-                MenuEntry::Percent { value: (zoom * 10.0).round() as u32, label: app.tr("ui.sheet_page.zoom").into(), target: "sheet:zoom".into() },
-                MenuEntry::Row(MenuRow::new("actual", app.tr("ui.sheet_page.actual_size"), "zoom", "sheet:actual_size")),
-                MenuEntry::Row(MenuRow::new("fit", app.tr("ui.sheet_page.fit"), "fit", "sheet:fit")),
+                {
+                    let mut item = menu_row("percent", app.tr("ui.sheet_page.zoom"), "", "sheet:zoom");
+                    item.number = Some(ui_kit::MenuNumber { value: f64::from(zoom), min: 5.0, max: 3200.0, speed: 1.0, suffix: " %".into() });
+                    item.keep_open = true;
+                    item
+                },
+                menu_row("actual", app.tr("ui.sheet_page.actual_size"), "zoom", "sheet:actual_size"),
+                menu_row("fit", app.tr("ui.sheet_page.fit"), "fit", "sheet:fit"),
             ],
             close_on_pick: true,
         },
@@ -472,102 +489,119 @@ fn menu(app: &SolveApp, id: &str, zoom: f32) -> Menu {
 /// runs `select.mode` and closes the menu.
 fn selection_menu(app: &SolveApp) -> Menu {
     use solidcraft_engine::PickMode;
-    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.selection.heading").to_owned())];
+    let mut entries = vec![ui_kit::Item::heading(app.tr("navbar.selection.heading"))];
     for (mode, icon) in crate::navigation_slots::selection_mode_icons() {
         if mode == PickMode::Sketch {
-            entries.push(MenuEntry::Separator);
+            entries.push(ui_kit::Item::sep());
         }
         let id = crate::selection_mode::id(mode);
-        let mut row = MenuRow::new(&id, app.tr(crate::selection_mode::label_id(mode)), icon, format!("nav:selection:{id}"));
+        let mut row = menu_row(&id, app.tr(crate::selection_mode::label_id(mode)), icon, format!("nav:selection:{id}"));
         row.selected = app.ui.pick_mode == mode;
-        entries.push(MenuEntry::Row(row));
+        row.checked = Some(row.selected);
+        row.radio = true;
+        entries.push(row);
     }
-    entries.extend([MenuEntry::Separator, MenuEntry::Row(pick_filters_row(app))]);
+    entries.extend([ui_kit::Item::sep(), pick_filters_row(app)]);
     Menu { entries, close_on_pick: true }
 }
 
 /// The detailed pick, one row deep: which kinds of object a click can take, and the drag shape.
 /// Its flyout stays open, as several filters are often changed in one visit.
-fn pick_filters_row(app: &SolveApp) -> MenuRow {
+fn pick_filters_row(app: &SolveApp) -> ui_kit::Item {
     let off = crate::selection_mode::filters_off(app);
     let filter = |id: &str, label: &str, indent: bool| {
-        let mut row = MenuRow::new(format!("filter:{id}"), label, "", format!("nav:filter:{id}"));
-        row.check = Some(!app.ui.pick_off.iter().any(|x| x == id));
-        row.indent = indent;
-        MenuEntry::Row(row)
+        let mut row = menu_row(format!("filter:{id}"), label, "", format!("nav:filter:{id}"));
+        row.checked = Some(!app.ui.pick_off.iter().any(|x| x == id));
+        row.indent = usize::from(indent);
+        row
     };
-    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.filters_solid").to_owned())];
+    let mut entries = vec![ui_kit::Item::heading(app.tr("navbar.filters_solid"))];
     entries.extend(crate::selection_mode::SOLID_FILTERS.iter().map(|(id, label)| filter(id, solidcraft_ui_text::tr_label(label), false)));
-    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.filters_sketch").to_owned())]);
+    entries.extend([ui_kit::Item::sep(), ui_kit::Item::heading(app.tr("navbar.filters_sketch"))]);
     entries.extend(crate::selection_mode::SKETCH_FILTERS.iter().map(|(id, key, indent)| filter(id, app.tr(key), *indent)));
     entries.extend([
-        MenuEntry::Separator,
-        MenuEntry::Heading(app.tr("navbar.filters_shape").to_owned()),
-        MenuEntry::Segments {
-            id: "shape".into(),
-            options: vec![app.tr("navbar.shape_rectangle").to_owned(), app.tr("navbar.shape_lasso").to_owned()],
-            selected: usize::from(app.ui.lasso_select),
-            targets: vec!["nav:shape:rectangle".into(), "nav:shape:lasso".into()],
+        ui_kit::Item::sep(),
+        ui_kit::Item::heading(app.tr("navbar.filters_shape")),
+        {
+            let mut item = menu_row("shape:0", app.tr("navbar.shape_rectangle"), "", "nav:shape:rectangle");
+            item.checked = Some(!app.ui.lasso_select);
+            item.radio = true;
+            item.keep_open = true;
+            item
         },
-        MenuEntry::Separator,
-        MenuEntry::Row(MenuRow::new("filters_reset", app.tr("navbar.filters_reset"), "reset", "nav:filter:reset")),
+        {
+            let mut item = menu_row("shape:1", app.tr("navbar.shape_lasso"), "", "nav:shape:lasso");
+            item.checked = Some(app.ui.lasso_select);
+            item.radio = true;
+            item.keep_open = true;
+            item
+        },
+        ui_kit::Item::sep(),
+        menu_row("filters_reset", app.tr("navbar.filters_reset"), "reset", "nav:filter:reset"),
     ]);
-    let mut row = MenuRow::new("pick_filters", app.tr("navbar.pick_filters"), "filter", "nav:selection:pick_filters");
-    row.detail = (off > 0).then(|| solidcraft_ui_text::format("navbar.filters_off", &[("count", &off.to_string())]));
-    row.submenu = entries;
+    let mut row = menu_row("pick_filters", app.tr("navbar.pick_filters"), "filter", "nav:selection:pick_filters");
+    row.shortcut = if off > 0 { solidcraft_ui_text::format("navbar.filters_off", &[("count", &off.to_string())]) } else { String::new() };
+    row.children = entries;
     row.keep_open = true;
     row
 }
 
 /// Visual style: the four styles, then Translucent (later); a pick closes the menu.
 fn style_menu(app: &SolveApp) -> Menu {
-    let mut entries: Vec<MenuEntry> = crate::navigation_slots::VISUAL_STYLES
+    let mut entries: Vec<ui_kit::Item> = crate::navigation_slots::VISUAL_STYLES
         .iter()
         .enumerate()
         .map(|(index, (style, _))| {
-            let mut row = MenuRow::new(
+            let mut row = menu_row(
                 *style,
                 app.tr(&format!("navbar.style.{style}")),
                 crate::navigation_slots::visual_style_icon(index as u8),
                 format!("nav:style:{style}"),
             );
             row.selected = app.ui.visual_style == index as u8;
-            MenuEntry::Row(row)
+            row.checked = Some(row.selected);
+            row.radio = true;
+            row
         })
         .collect();
-    entries.push(MenuEntry::Separator);
-    let mut later = MenuRow::new("translucent", app.tr("navbar.translucent"), "style_translucent", "");
+    entries.push(ui_kit::Item::sep());
+    let mut later = menu_row("translucent", app.tr("navbar.translucent"), "style_translucent", "");
     later.enabled = false;
-    later.detail = Some(app.tr("navbar.later").to_owned());
-    entries.push(MenuEntry::Row(later));
+    later.shortcut = app.tr("navbar.later").to_owned();
+    entries.push(later);
     Menu { entries, close_on_pick: true }
 }
 
 /// The View menu: graphics preset, what the view shows, projection, cursor and the assistant.
 fn display_menu(app: &SolveApp) -> Menu {
     let row = |id: &str, label: &str, icon: &str, target: &str, selected: bool| {
-        let mut row = MenuRow::new(id, label, icon, target);
+        let mut row = menu_row(id, label, icon, target);
         row.selected = selected;
+        row.checked = Some(selected);
         row
     };
-    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.graphics").to_owned())];
+    let mut entries = vec![ui_kit::Item::heading(app.tr("navbar.graphics"))];
     let current = crate::prefs::graphics_preset(&app.preferences);
-    let mut preset = MenuRow::new("preset", app.tr("navbar.preset"), "", "view:graphics_preset");
-    preset.detail = Some(app.tr(&format!("ui.graphics_{current}")).to_owned());
-    preset.submenu = [("performance", "ui.graphics_performance"), ("quality", "ui.graphics_quality")]
+    let mut preset = menu_row("preset", app.tr("navbar.preset"), "", "view:graphics_preset");
+    preset.shortcut = app.tr(&format!("ui.graphics_{current}")).to_owned();
+    preset.children = [("performance", "ui.graphics_performance"), ("quality", "ui.graphics_quality")]
         .into_iter()
-        .map(|(id, label)| MenuEntry::Row(row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id)))
+        .map(|(id, label)| {
+            let mut item = row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id);
+            item.radio = true;
+            item
+        })
         .collect();
-    entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.show").to_owned())]);
+    entries.extend([preset, ui_kit::Item::sep(), ui_kit::Item::heading(app.tr("navbar.show"))]);
     for id in ["grid", "ground_shadow", "ambient_occlusion"] {
         let Some(slot) = navigation_bar::find(id) else { continue };
-        entries.push(MenuEntry::Row(row(
+        entries.push(row(
             slot.id,
             app.tr(slot.label),
             slot.current_icon(crate::navigation_slots::value(&app.ui, slot)),
             &format!("view:{id}"),
             selected(app, slot.id),
-        )));
+        ));
     }
     let mode = crate::prefs::ground_shadow_mode(app);
     let key = match mode {
@@ -575,13 +609,17 @@ fn display_menu(app: &SolveApp) -> Menu {
         "projected" => "ui.ground_shadow_projected",
         _ => "ui.ground_shadow_ellipse",
     };
-    let mut style = MenuRow::new("ground_shadow_style", app.tr("ui.ground_shadow_style"), "", "view:ground_shadow_style");
-    style.detail = Some(app.tr(key).to_owned());
-    style.submenu = [("off", "ui.ground_shadow_off"), ("ellipse", "ui.ground_shadow_ellipse"), ("projected", "ui.ground_shadow_projected")]
+    let mut style = menu_row("ground_shadow_style", app.tr("ui.ground_shadow_style"), "", "view:ground_shadow_style");
+    style.shortcut = app.tr(key).to_owned();
+    style.children = [("off", "ui.ground_shadow_off"), ("ellipse", "ui.ground_shadow_ellipse"), ("projected", "ui.ground_shadow_projected")]
         .into_iter()
-        .map(|(value, label)| MenuEntry::Row(row(value, app.tr(label), "", &format!("view:ground_shadow:{value}"), mode == value)))
+        .map(|(value, label)| {
+            let mut item = row(value, app.tr(label), "", &format!("view:ground_shadow:{value}"), mode == value);
+            item.radio = true;
+            item
+        })
         .collect();
-    entries.push(MenuEntry::Row(style));
+    entries.push(style);
     let mut axes = row(
         "origin_axes_across_view",
         app.tr("prefs.origin_axes_across_view"),
@@ -590,16 +628,16 @@ fn display_menu(app: &SolveApp) -> Menu {
         app.preferences.origin_axes_across_view,
     );
     axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
-    entries.push(MenuEntry::Row(axes));
+    entries.push(axes);
     // The scale bar in the view's bottom left corner (#375).
     let mut scale_bar = row("scale_bar", app.tr("view.scale_bar"), "measure", "view:scale_bar_toggle", app.preferences.scale_bar);
     scale_bar.tip = Some(app.tr("view.scale_bar_help").to_owned());
-    entries.push(MenuEntry::Row(scale_bar));
+    entries.push(scale_bar);
     // The Browser tree panel closes from its own host menu, which left no way back (#16058).
     let mut browser = row("browser_tree", app.tr("cmd.view_browser"), "list", "view:browser_tree", crate::browser::panel_open(app));
     browser.tip = Some(app.tr("help.view.browser").to_owned());
-    entries.push(MenuEntry::Row(browser));
-    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.projection_heading").to_owned())]);
+    entries.push(browser);
+    entries.extend([ui_kit::Item::sep(), ui_kit::Item::heading(app.tr("navbar.projection_heading"))]);
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
             key,
@@ -610,22 +648,22 @@ fn display_menu(app: &SolveApp) -> Menu {
         );
         item.enabled = !projection_locked(app);
         item.tip = projection_locked(app).then(|| app.tr("nav.perspective.sketch").to_owned());
-        entries.push(MenuEntry::Row(item));
+        entries.push(item);
     }
-    entries.push(MenuEntry::Separator);
+    entries.push(ui_kit::Item::sep());
     for (id, label, on) in [
         ("auto_ortho_faces", "Perspective while orbiting, ortho on faces", app.ui.auto_ortho_faces),
         ("tool_cursor", "Show tool at cursor", app.ui.tool_cursor),
     ] {
-        entries.push(MenuEntry::Row(row(id, solidcraft_ui_text::tr_label(label), "select", &format!("view:{id}"), on)));
+        entries.push(row(id, solidcraft_ui_text::tr_label(label), "select", &format!("view:{id}"), on));
     }
     // The View angles readout under the orientation gizmo (#6032).
     let mut angles = row("view_angles", app.tr("ui.view_angles"), "select", "view:view_angles", app.preferences.show_view_angles);
     angles.tip = Some(app.tr("ui.view_angles_help").to_owned());
-    entries.extend([MenuEntry::Row(angles), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.assistant").to_owned())]);
-    entries.push(MenuEntry::Row(row("agent_cursor", app.tr("navbar.agent_cursor"), "select", "view:agent_cursor", app.ui.agent_cursor.show)));
+    entries.extend([angles, ui_kit::Item::sep(), ui_kit::Item::heading(app.tr("navbar.assistant"))]);
+    entries.push(row("agent_cursor", app.tr("navbar.agent_cursor"), "select", "view:agent_cursor", app.ui.agent_cursor.show));
     if crate::agent_chat::shown(app) {
-        entries.push(MenuEntry::Row(row("agent_chat", app.tr("navbar.agent_chat"), "agent_chat", "view:agent_chat", app.agent_chat.open)));
+        entries.push(row("agent_chat", app.tr("navbar.agent_chat"), "agent_chat", "view:agent_chat", app.agent_chat.open));
     }
     Menu { entries, close_on_pick: false }
 }
@@ -885,11 +923,11 @@ mod tests {
         assert!(on.enabled && on.selected && on.icon == "unisolate" && !on.show_text, "on, Unisolate's icon alone");
         assert!(navigation_bar::strong(ISOLATE) && !navigation_bar::strong("grid"), "only Isolate takes the strong fill");
         // Its right-click rows choose how the view shows what an Isolate hid, the current marked.
-        let rows: Vec<(&str, bool)> = on.context.iter().map(|(id, _, selected)| (id.as_str(), *selected)).collect();
+        let rows: Vec<(&str, bool)> = on.context.iter().map(|item| (item.id.as_str(), item.checked == Some(true))).collect();
         assert_eq!(rows, [("hidden", true), ("transparent", false), ("wireframe", false)], "no click choice while hidden");
         run(&mut h.app, &h.ctx, NavAction::Item { menu: ISOLATE.into(), item: "wireframe".into() });
         assert_eq!(h.app.preferences.isolate_others, solidcraft_engine::schema::view_navigation::IsolateShow::Wireframe);
-        let rows: Vec<(String, bool)> = view(&h).context.into_iter().map(|(id, _, selected)| (id, selected)).collect();
+        let rows: Vec<(String, bool)> = view(&h).context.into_iter().map(|item| (item.id, item.checked == Some(true))).collect();
         let rows: Vec<(&str, bool)> = rows.iter().map(|(id, selected)| (id.as_str(), *selected)).collect();
         assert_eq!(rows, [("hidden", false), ("transparent", false), ("wireframe", true), ("pick:select", true), ("pick:through", false)]);
         run(&mut h.app, &h.ctx, NavAction::Item { menu: ISOLATE.into(), item: "pick:through".into() });

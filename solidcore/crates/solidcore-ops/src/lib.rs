@@ -143,6 +143,7 @@ pub use blend::edge_faces_along;
 pub use blend::edge_faces_along_ordered;
 pub use blend::edges_share_wedge;
 pub use blend::fillet_variable;
+pub use blend::fillet_variable_chain_from;
 pub use blend::fillet_variable_from;
 pub use blend::fillet_variable_from_with;
 pub use blend::fillet_variable_ordered;

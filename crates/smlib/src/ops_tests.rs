@@ -363,6 +363,30 @@ fn blends_take_a_size_per_edge() {
     assert!(c.blend(Blend::Round, &tops, &[2.0], 0.1).is_err());
 }
 
+/// A chain of one edge takes the whole law along that edge: the round of [`Brep::fillet_variable`],
+/// from either end. Edges that are not one chain (two of the cube's parallel top edges) are refused.
+#[test]
+fn a_variable_round_along_a_chain_of_one_edge_is_the_edge_round() {
+    let c = cube(20.0);
+    let knots = [0.0, 0.0, 1.0, 1.0];
+    for start in [[0.0, 20.0, 20.0], [20.0, 20.0, 20.0]] {
+        let one = c.fillet_variable([10.0, 20.0, 20.0], 0.1, start, 1, &knots, &[3.0, 1.0]).unwrap();
+        let chain = c.fillet_variable_chain(&[[10.0, 20.0, 20.0]], 0.1, start, 1, &knots, &[3.0, 1.0]).unwrap();
+        assert_close(volume(&chain), volume(&one), 1e-9, "a chain of one edge");
+        // At 0.5 mm inward from both faces, R3 removes the point and R1
+        // retains it: (R - 0.5) sqrt(2) exceeds R only for R > 1.707.
+        // Sample well away from the ends; the law still clearly separates them.
+        for x in [2.0, 18.0] {
+            let expected = if (x - start[0]).abs() < 10.0 { crate::PointClass::Outside } else { crate::PointClass::Inside };
+            let point = [x, 19.5, 19.5];
+            assert_eq!(one.classify_point(point).unwrap(), expected);
+            assert_eq!(chain.classify_point(point).unwrap(), expected);
+        }
+    }
+    let apart = c.fillet_variable_chain(&[[10.0, 20.0, 20.0], [10.0, 0.0, 20.0]], 0.1, [0.0, 20.0, 20.0], 1, &knots, &[3.0, 1.0]);
+    assert!(matches!(apart, Err(Error::Unported(_))), "{:?}", apart.err());
+}
+
 /// A variable round is the union of its balls: in each plane square to the edge, the corner cut off
 /// by rays from it, each meeting the union first at the least entry over the balls, integrated
 /// along the edge (a linear law's balls envelop a cone). The balls' great circles, (1 - pi/4) r²

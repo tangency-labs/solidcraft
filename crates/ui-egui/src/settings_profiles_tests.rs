@@ -1055,14 +1055,14 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     let card = crate::scenario::rect_of("prefs:profile").unwrap();
     h.step(&json!({"click":[card.left() + 3.0, card.center().y]})).unwrap();
     h.frames(2);
-    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the card's padding opens its real menu");
+    assert!(crate::scenario::rect_of("menu:Laptop").is_some(), "the card's padding opens its real menu");
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.prefs_window.shell.open);
-    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
+    assert!(crate::scenario::rect_of("menu:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
-    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the same trigger opens from the keyboard");
-    h.step(&json!({"click":{"handle":"dialog:list:Laptop"}})).unwrap();
+    assert!(crate::scenario::rect_of("menu:Laptop").is_some(), "the same trigger opens from the keyboard");
+    h.step(&json!({"click":{"handle":"menu:Laptop"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
     assert!(!h.app.preferences.zoom_reverse);
@@ -1113,7 +1113,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"text":"Next profile"})).unwrap();
     h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
     h.frames(2);
-    h.step(&json!({"click":{"handle":"dialog:list:Desk"}})).unwrap();
+    h.step(&json!({"click":{"handle":"menu:Desk"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert_eq!(

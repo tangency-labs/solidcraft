@@ -876,9 +876,8 @@ impl Torus {
     /// Not upstream: the torus of a label's own numbers (a placement and two radii) on the
     /// face's NURBS form `form`, for a reader that works a torus back out of the form
     /// ([`Self::is_nurb_surface_torus`], as SMLib's flat arrays are read) and has `found` that
-    /// one, where such a reader needs the label: `found` is missing, or `form` does not lie
-    /// on it ([`crate::surface::implicit::lies_on`], the test of
-    /// `AnalyticSupport::label_stands`).
+    /// one, where such a reader needs the label: `found` is missing, or the form does not prove
+    /// it ([`AnalyticSupport::proved_on`]: the form lies on it and it evaluates as the form).
     ///
     /// A torus worked back out of its form is good only to the form's rounding over the square
     /// of the arc its tube shows. A 1.2 degree arc of a tube of radius 13.7 comes back 3e-10
@@ -889,12 +888,12 @@ impl Torus {
     /// on them (`AnalyticSupport::build`: the form lies on the torus, and the torus evaluates
     /// as the form at the form's own parameters).
     ///
-    /// `None` where `form` lies on `found` (the reader keeps `found`, to the last bit) and
+    /// `None` where the form proves `found` (the reader keeps `found`, to the last bit) and
     /// where the form does not prove the label (the label gives the reader no torus).
     ///
     /// # Errors
     ///
-    /// Those of [`crate::surface::implicit::lies_on`]. From the proof of the label only an
+    /// Those of [`AnalyticSupport::proved_on`]. From the proof of the label only an
     /// unported path or a cancellation ([`SolidError::is_unported_or_cancelled`]): a label
     /// its form does not prove is no torus, as it is none for the record's reader.
     pub fn from_label_unless_found_stands(
@@ -905,9 +904,9 @@ impl Torus {
         form: &BSplineSurface,
         found: Option<&crate::surface::surface::Surface>,
     ) -> Result<Option<crate::surface::surface::Surface>> {
-        use crate::surface::implicit::{lies_on, AnalyticSupport};
-        if let Some(of_found) = found.and_then(AnalyticSupport::of) {
-            if lies_on(form, &of_found.implicit())? {
+        use crate::surface::implicit::AnalyticSupport;
+        if let Some(found) = found {
+            if AnalyticSupport::proved_on(k, found, form)? {
                 return Ok(None);
             }
         }

@@ -116,6 +116,7 @@ pub(crate) use features::plane_name_problem;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::rail_fit_form;
 pub use features::shown_scope;
+pub use features::shown_scope_for;
 pub(crate) use features::sketch_key;
 pub(crate) use features::sweep_orientation;
 pub(crate) use features_more::MAX_SKETCH_ID;
