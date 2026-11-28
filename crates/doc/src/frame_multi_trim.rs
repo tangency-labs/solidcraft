@@ -205,10 +205,12 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
     // The tools that reach the end zone, each with how deep its crossing may run: the section plus the tool's
     // own size.
     let mut reach = Vec::new();
+    // A cheap first look: the tool's box against the box round the deepest zone a tool gets (back half the member's
+    // length into it), which holds every tool's own zone. Fails closed on a non-finite bound.
+    let widest = zone(end_point, toward, (w, out), half / 2.0)?.exact_bounds()?;
     for &tool in tools {
         let b = tool.body.exact_bounds()?;
-        // A cheap first look at the tool's box; fails closed on a non-finite distance.
-        if !(end_point.dist(end_point.max(b.min).min(b.max)) <= out) {
+        if !b.meets(&widest) {
             continue;
         }
         let size = b.max - b.min;
