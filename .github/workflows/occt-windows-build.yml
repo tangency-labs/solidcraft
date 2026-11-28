@@ -97,9 +97,9 @@ jobs:
           SolidCraft test build with the Open CASCADE (OCCT 8.0.1) kernel adapter on (backend-occt).
           Built from tangency-labs/solidcraft $env:GITHUB_SHA. Unsigned, not a release.
 
-          solidcraft.exe runs with OCCT on by default: primitives, booleans, plain fillets,
+          solidcraft.exe runs with OCCT on by default: primitives, booleans (Split too), fillets,
           extrudes, revolves, equal chamfers, shells, thicken, offset faces, drafts and
-          two-section ruled lofts try OCCT first; anything OCCT can't do, or whose result doesn't
+          two-section ruled lofts, lofts to a point and plane trims try OCCT first; anything OCCT can't do, or whose result doesn't
           name as solidcore's does, falls back to solidcore (logged with the reason). There is no in-app switch: "SolidCraft (solidcore
           kernel).cmd" (or SOLIDCRAFT_KERNEL=solidcore) runs the same build on solidcore only.
           solidcraft-cli.exe is the matching command-line tool (same switch).
