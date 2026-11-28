@@ -681,7 +681,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::SketchLink { sketch, link } => sketch_link_items(app, *sketch, link),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
-        Target::ViewGizmo => crate::view_gizmo::menu_items(app),
+        Target::ViewGizmo => view_gizmo_items(app),
         Target::Section { plane } => crate::browser::section_items(app, *plane),
         Target::Analysis => crate::browser::analysis_items(app),
         Target::FrameTubes => crate::dialogs_frame::menu_items(app),
@@ -1688,6 +1688,23 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         });
     }
     entries
+}
+
+/// The view navigator's menu: Set as Front / Top (#6455) makes the principal axis nearest the
+/// view that face for this design; then the navigator's own items (its type, Axes or Custom, and
+/// Home).
+fn view_gizmo_items(app: &SolveApp) -> Vec<Item> {
+    // Midway between two faces, a Set as is refused, so its item is off too.
+    let set = |face: &str, label: &str| {
+        let which = if face == "front" { solidcraft_viewport::FrameFace::Front } else { solidcraft_viewport::FrameFace::Top };
+        let ok = solidcraft_viewport::ViewFrame::set_from_view(&app.cam, which).is_some();
+        act("view.frame", label, "camera").with(json!({"set": face, "camera": app.cam})).on(ok)
+    };
+    let mut set_as = act("ui.setAs", app.tr("ui.set_as"), "camera");
+    set_as.children = vec![set("front", "Front"), set("top", "Top")];
+    let mut items = vec![set_as, Item::sep()];
+    items.extend(crate::view_gizmo::menu_items(app));
+    items
 }
 
 /// Visit every entry of a menu, each flyout's entries before the row that opens it, so a visit
@@ -5743,5 +5760,27 @@ mod workspace_menu_tests {
         assert!(h.app.tool.is_some() || h.app.dialog.is_some());
         assert!(!render_row(&h.app), "a modelling operation still locks Render");
         assert!(crate::render_workspace::enter(&mut h.app, true).is_err());
+    }
+
+    /// #6455: the navigator's menu offers Set as with Front and Top.
+    #[test]
+    fn the_navigator_menu_offers_set_as_front_and_top() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}));
+        let rows = items(&h.app, &Target::ViewGizmo);
+        let set_as = rows.iter().find(|i| i.label == "Set as").expect("a Set as row");
+        let faces: Vec<_> = set_as.children.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(faces, ["Front", "Top"]);
+        // Looking straight at a face Set as is on; midway between two faces (Home is one) it is off.
+        let mut face = h.app.cam;
+        face.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam = face;
+        let rows = items(&h.app, &Target::ViewGizmo);
+        let set_as = rows.iter().find(|i| i.label == "Set as").expect("a Set as row");
+        assert!(set_as.children.iter().all(|c| c.enabled), "on at a face");
+        h.app.cam = solidcraft_viewport::Camera::default();
+        let rows = items(&h.app, &Target::ViewGizmo);
+        let set_as = rows.iter().find(|i| i.label == "Set as").expect("a Set as row");
+        assert!(set_as.children.iter().all(|c| !c.enabled), "off midway between faces");
     }
 }

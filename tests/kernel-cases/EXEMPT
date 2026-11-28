@@ -603,6 +603,7 @@ view.bottom                       the view: camera, layout, display
 view.browser                      the view: camera, layout, display
 view.delete                       the view: camera, layout, display
 view.fit                          the view: camera, layout, display
+view.frame                        the view: camera, layout, display
 view.front                        the view: camera, layout, display
 view.graphics_preset              the view: camera, layout, display
 view.grid                         the view: camera, layout, display
