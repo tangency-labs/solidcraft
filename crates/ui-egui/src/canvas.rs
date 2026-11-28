@@ -479,6 +479,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::overlay(app, painter, proj, &d);
+        app.dialog = Some(d);
+        return;
+    }
     if crate::dialogs_sheet::overlay(app, painter, proj.rect, &d) {
         app.dialog = Some(d);
         return;
@@ -1488,6 +1493,49 @@ fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2,
     value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), (hint, note), place);
 }
 
+fn box_dropped_id() -> egui::Id {
+    egui::Id::unique("sc_canvas_box_dropped")
+}
+
+/// Every frame. A dropped box keeps its place only while shown, so the next opens by its handle.
+pub(crate) fn share_box_drag(ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    let shown_last = ctx.data(|d| d.get_temp::<u64>(box_dropped_id().with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
+    if !shown_last {
+        ctx.data_mut(|d| d.insert_temp(box_dropped_id(), None::<Pos2>));
+    }
+}
+
+fn dropped(ctx: &egui::Context) -> Option<Pos2> {
+    ctx.data(|d| d.get_temp::<Option<Pos2>>(box_dropped_id())).flatten().filter(|p| p.is_finite())
+}
+
+fn box_grip(ui: &mut egui::Ui, area: egui::Id) {
+    let ctx = ui.ctx().clone();
+    let shown = ctx.memory(|m| m.area_rect(area));
+    // Registered before the label and field, so the field keeps its own presses. Inset: the box
+    // is placed edge to edge with a handle's reach (#6608), and that edge is the handle's.
+    let grip = ui
+        .interact(shown.map_or(egui::Rect::NOTHING, |r| r.shrink(2.0)), area.with("grip"), egui::Sense::drag())
+        .on_hover_cursor(egui::CursorIcon::Grab);
+    // By where the pointer is, not by each frame's motion: the box moves a frame after it.
+    let pointer = grip.interact_pointer_pos();
+    let held = area.with("grip_held");
+    if grip.drag_started()
+        && let (Some(r), Some(p)) = (shown, pointer)
+    {
+        ctx.data_mut(|d| d.insert_temp(held, p - r.min));
+    }
+    if grip.dragged() || grip.drag_stopped() {
+        ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        let to = pointer.zip(ctx.data(|d| d.get_temp::<egui::Vec2>(held))).map(|(p, by)| p - by);
+        if let Some(to) = to {
+            ctx.data_mut(|d| d.insert_temp(box_dropped_id(), Some(to)));
+            ctx.request_repaint();
+        }
+    }
+}
+
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
 /// one (a hole's reference distances), with the point of the box that sits at `at`. Returns where
 /// the field is.
@@ -1521,6 +1569,15 @@ fn value_box_full(
         return None;
     }
     let t = Tokens::get();
+    let main = area == egui::Id::unique("sc_canvas_area");
+    if main {
+        let frame = ui.ctx().cumulative_frame_nr();
+        ui.ctx().data_mut(|d| d.insert_temp(box_dropped_id().with("shown"), frame));
+    }
+    let pinned = main.then(|| dropped(ui.ctx())).flatten().map(|p| {
+        let (size, view) = (box_size(ui, area, label, note), place.view.unwrap_or_else(|| ui.clip_rect()));
+        (p.clamp(view.min, (view.max - size).max(view.min)), egui::Align2::LEFT_TOP)
+    });
     // Held in place while the pointer is over it and value stepping is on (see `value_box`): by
     // its pivot, the point of the box that sits at `at`, which is not always its top-left corner.
     let pointer = ui.ctx().pointer_hover_pos();
@@ -1534,12 +1591,15 @@ fn value_box_full(
     // either of them moves out of it.
     // Always inside the drawing area too: a box hung from a handle that has left the window
     // (a far drag) would be cut off at its edge, out of reach (#18722).
-    let at = if place.dialog.is_some() || place.handles.is_some() || place.view.is_some() {
+    let at = if pinned.is_some() {
+        at
+    } else if place.dialog.is_some() || place.handles.is_some() || place.view.is_some() {
         let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), place);
         pivot.pos_in_rect(&kept)
     } else {
         at
     };
+    let (at, pivot) = pinned.unwrap_or((at, pivot));
     let mut field = None;
     // Background: under Preferences, Report a bug and other system windows (#9016). The box is
     // already kept clear of the command window (#6608), which floats at Middle with Features.
@@ -1547,9 +1607,17 @@ fn value_box_full(
         let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
         Container::show_backing(ui, frame, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption),
-                );
+                if main {
+                    box_grip(ui, area);
+                }
+                let caption =
+                    egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption);
+                if main {
+                    // Its label drags the box rather than selecting its text.
+                    ui.add(egui::Label::new(caption).selectable(false));
+                } else {
+                    ui.label(caption);
+                }
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab, hint);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
@@ -2880,7 +2948,12 @@ struct AngleTurn {
 /// A face as the base is captured by the engine in the authoring frame, so the square the
 /// preview draws is not one the handle can stand on: the angle box types the angle instead.
 fn angle_plane_turn(app: &SolveApp, d: &Dialog) -> Option<AngleTurn> {
-    let Kind::AnglePlane { angle, direction_only } = &d.kind else { return None };
+    let Kind::AnglePlane { angle, direction_only, through_axis } = &d.kind else { return None };
+    // "Through the axis" moves the plane onto the axis first, so the square the preview draws
+    // is not the base's: the angle box types the angle, as for a face base.
+    if *through_axis && !*direction_only {
+        return None;
+    }
     let base = d.inputs.first().and_then(|i| i.items.first()).and_then(|sel| match sel {
         Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name),
         _ => None,
@@ -3327,6 +3400,30 @@ mod tests {
         assert_eq!(clear_of_dialog(inside, place), inside, "a box inside stays where it is");
     }
 
+    /// A dropped box stays while it is shown; once it is gone for a frame the next opens by its
+    /// handle.
+    #[test]
+    fn a_dropped_box_is_forgotten_when_it_closes() {
+        let ctx = egui::Context::default();
+        let frame = |shown: bool| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                share_box_drag(ui.ctx());
+                if shown {
+                    let f = ui.ctx().cumulative_frame_nr();
+                    ui.ctx().data_mut(|d| d.insert_temp(box_dropped_id().with("shown"), f));
+                }
+            });
+            out.textures_delta.clear();
+            dropped(&ctx)
+        };
+        frame(true);
+        ctx.data_mut(|d| d.insert_temp(box_dropped_id(), Some(egui::pos2(300.0, 120.0))));
+        assert_eq!(frame(true), Some(egui::pos2(300.0, 120.0)), "stays where dropped while shown");
+        assert_eq!(frame(true), Some(egui::pos2(300.0, 120.0)));
+        frame(false);
+        assert_eq!(frame(true), None, "the next box opens by its handle");
+    }
+
     /// Canvas value boxes sit under Preferences and Report a bug (#9016).
     #[test]
     fn a_value_box_draws_under_system_windows() {
@@ -3350,6 +3447,45 @@ mod tests {
                 "Preferences covers the Distance box where they overlap"
             );
         }
+    }
+
+    fn moving_body() -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.step(&serde_json::json!({"start": "solid.move"})).unwrap();
+        h.frames(6);
+        h
+    }
+
+    fn main_box(h: &crate::scenario::Harness) -> egui::Rect {
+        h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the value box")
+    }
+
+    /// The value box drags by its frame, and stays.
+    #[test]
+    fn a_value_box_drags_by_its_frame_and_stays() {
+        let mut h = moving_body();
+        let first = main_box(&h);
+        let from = egui::pos2(first.left() + 4.0, first.center().y);
+        h.step(&serde_json::json!({"drag": [[from.x, from.y], [from.x - 80.0, from.y - 120.0]], "steps": 8})).unwrap();
+        h.frames(10);
+        let by = main_box(&h).min - first.min;
+        assert!((by - egui::vec2(-80.0, -120.0)).length() < 3.0, "moved with the pointer: {by:?}");
+        h.frames(10);
+        assert!((main_box(&h).min - first.min - by).length() < 0.5, "and stays there");
+    }
+
+    /// A press in the value field focuses it rather than dragging the box.
+    #[test]
+    fn a_click_in_the_value_field_focuses_it() {
+        let mut h = moving_body();
+        let first = main_box(&h);
+        h.step(&serde_json::json!({"click": [first.right() - 20.0, first.center().y]})).unwrap();
+        h.frames(4);
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_canvas_value")));
+        assert_eq!(dropped(&h.ctx), None, "not dragged");
+        assert!((main_box(&h).min - first.min).length() < 0.5);
     }
 
     /// A box placed past an arrow keeps clear of where a press takes the arrow, whichever way the

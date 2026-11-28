@@ -1875,6 +1875,145 @@ fn a_rim_round_runs_through_a_near_tangent_corner() {
     }
 }
 
+/// The plate of [`a_window_rim_round_runs_through_its_near_tangent_joins`]: 240 x 10 x 160
+/// (y 0..10), a window cut through it along y whose outline, in (x, z), is two cubic splines
+/// of nine control points each on clamped uniform knots, meeting at x = 0 at z = 60 and
+/// z = -40. The right half leaves and arrives along x; the left half's second and eighth
+/// control points are raised by `d`, so its end tangents stand atan(d / 25) off x. With it the
+/// record indices of the two rim edges in the front (y = 0), and the outline's length.
+fn window_plate(d: f64) -> (Body, [usize; 2], f64) {
+    let right = [
+        [0.0, -40.0],
+        [25.0, -40.0],
+        [55.0, -38.0],
+        [75.0, -20.0],
+        [80.0, 10.0],
+        [72.0, 40.0],
+        [50.0, 58.0],
+        [25.0, 60.0],
+        [0.0, 60.0],
+    ];
+    let left = [
+        [0.0, 60.0],
+        [-25.0, 60.0 + d],
+        [-50.0, 58.0],
+        [-72.0, 40.0],
+        [-80.0, 10.0],
+        [-75.0, -20.0],
+        [-55.0, -38.0],
+        [-25.0, -40.0 + d],
+        [0.0, -40.0],
+    ];
+    // nine points of degree 3: six spans, the knots 0 (x4), 1/6 .. 5/6, 1 (x4)
+    let knots: Vec<f64> = [0.0; 3]
+        .into_iter()
+        .chain((0..=6).map(|i| f64::from(i) / 6.0))
+        .chain([1.0; 3])
+        .collect();
+    let half = |p: &[[f64; 2]; 9]| Curve::Nurbs {
+        degree: 3,
+        points: p.iter().map(|p| [p[0], -10.0, p[1], 1.0]).collect(),
+        knots: knots.clone(),
+    };
+    let tool = extrude(
+        &[half(&right), half(&left)],
+        [0.0, 1.0, 0.0],
+        40.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let plate = make_box([-120.0, 0.0, -70.0], [240.0, 10.0, 160.0]).unwrap();
+    let b = solidcore_ops::boolean::boolean(plate, tool, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let edges = [
+        nearest_edge(&b, [80.0, 0.0, 10.0]),
+        nearest_edge(&b, [-80.0, 0.0, 10.0]),
+    ];
+    // The length of a half: its speed integrated span by span (a cubic's speed on a span is
+    // smooth, and 4 panels of 8 points take it past 1e-12). The derivative of a B-spline of
+    // degree 3 is the B-spline of degree 2 on the inner knots with the control points
+    // 3 (P[i+1] - P[i]) / (u[i+4] - u[i+1]) (Piegl and Tiller, The NURBS Book, eq. 3.4).
+    let length = |p: &[[f64; 2]; 9]| {
+        let q: Vec<[f64; 2]> = (0..8)
+            .map(|i| {
+                let w = 3.0 / (knots[i + 4] - knots[i + 1]);
+                [w * (p[i + 1][0] - p[i][0]), w * (p[i + 1][1] - p[i][1])]
+            })
+            .collect();
+        let u = &knots[1..knots.len() - 1];
+        let speed = |t: f64| {
+            // de Boor on the degree 2 curve, in the span [u[s], u[s + 1])
+            let s = (2..8).rev().find(|&s| u[s] <= t).unwrap();
+            let mut c = [q[s - 2], q[s - 1], q[s]];
+            for r in 1..=2 {
+                for j in (r..=2).rev() {
+                    let i = s - 2 + j;
+                    let a = (t - u[i]) / (u[i + 3 - r] - u[i]);
+                    c[j] = [0, 1].map(|x| (1.0 - a) * c[j - 1][x] + a * c[j][x]);
+                }
+            }
+            c[2][0].hypot(c[2][1])
+        };
+        (0..6)
+            .map(|i| gauss(&speed, f64::from(i) / 6.0, f64::from(i + 1) / 6.0, 8, 4))
+            .sum::<f64>()
+    };
+    (b, edges, length(&right) + length(&left))
+}
+
+/// #23151: a window whose outline is two splines meeting almost tangentially, its front rim
+/// (both edges) rounded r 1. The joins stand atan(d / 25) off tangent: 0.0046, 0.046, 0.11
+/// and 0.23 degrees for d = 0.002, 0.02, 0.05 and 0.1, with the exactly tangent outline and
+/// one 0.46 degrees off (d = 0.2) as controls. The round was refused at each of the four
+/// ("Corner Edge Computation Failure") at any radius; now each builds a closed solid that
+/// passes every check.
+///
+/// The volume taken off: the round's section, the spandrel between the front and the
+/// window's wall (square to each other), A = (1 - pi/4) r^2, stands in the outline's normal
+/// plane with its centroid c outside the outline, A c = M = (5/6 - pi/4) r^3. Carried round a
+/// convex outline of length L, whose tangent turns 2 pi in all, the centroid travels
+/// L + 2 pi c, so the round takes A L + 2 pi M. A join of angle t, mitred, takes
+/// 2 M tan(t / 2) where the sweep takes M t: they differ by M t^3 / 12, under 1e-9 here, and
+/// the two joins turn opposite ways.
+///
+/// Every trim of the result maps onto its edge within the tolerance the corners are built to
+/// here, 4e-5 (their solvers' 3D tolerance on this plate), proved over the whole edge
+/// ([`Body::edge_trim_gap_bound`]). A Join's section runs across the second round a radius
+/// times the sine of the angle from that round's own end at one rail and through it at the
+/// other; joined by its two ends only, its trim stood up to 1e-3 from the edge at these
+/// angles, which a closed solid and its volume do not show.
+#[test]
+fn a_window_rim_round_runs_through_its_near_tangent_joins() {
+    const TRIM_TOL: f64 = 4e-5;
+    all_fixes();
+    let r: f64 = 1.0;
+    for d in [0.0, 0.002, 0.02, 0.05, 0.1, 0.2] {
+        let (b, edges, outline) = window_plate(d);
+        let before = volume(&b);
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {report}");
+        let want =
+            (1.0 - PI / 4.0) * r * r * outline + 2.0 * PI * (5.0 / 6.0 - PI / 4.0) * r.powi(3);
+        let off = before - volume(&b);
+        assert!(rel(off, want) < 1e-6, "d {d}: {off} off, want {want}");
+        // every trim maps onto its edge: the section a Join shares runs across the second
+        // round, and a mitre ends where its two rounds touch
+        let order = b.own_order();
+        for edge in 0..order.edges.len() {
+            let gap = b.edge_trim_gap_bound(&order, edge, TRIM_TOL).unwrap();
+            assert!(
+                gap.is_some(),
+                "d {d}: edge {edge}'s trim is not proved on its edge"
+            );
+        }
+    }
+}
+
 /// A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it (x 15..25, y 10..20), the boss's four
 /// base edges rounded r 1: at each upright boss edge two concave rounds turn round the sharp
 /// convex edge. Each base edge gains the spandrel A = (1 - pi/4) r^2 along its 10, and each
@@ -9220,5 +9359,92 @@ fn a_short_ridge_end_rounds_and_chamfers_past_twice_its_length() {
         let expected = frustum - leaning_end_cut(round, size, 2.0 * top_h, lean);
         let v = volume(&body);
         assert!(rel(v, expected) < 1e-9, "{case}: {v} {expected}");
+    }
+}
+
+/// The plate of the kernel case `22151-fillet-wing-cusps-tangent-chain-r2` (#22151): the body
+/// its blend takes, followed back through the copies and tags to a body the entry gives. A
+/// plate outlined by a centre arc R 25, wings R 15 at x = +-45 and tangent lines, extruded 20
+/// at -2 degrees, under a boss whose foot circle is the centre arcs' top edge, drafted alike.
+fn wing_plate() -> Body {
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/kernel_cases/fillets/22151-fillet-wing-cusps-tangent-chain-r2"
+    );
+    let entry: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(format!("{dir}.json")).unwrap()).unwrap();
+    let calls = entry["calls"].as_array().unwrap();
+    let given = entry["bodies"].as_object().unwrap();
+    let blend_call = calls
+        .iter()
+        .find(|c| c["op"].as_str().unwrap().starts_with("blend"))
+        .unwrap();
+    let mut id = blend_call["inputs"][0].as_str().unwrap().to_owned();
+    while !given.contains_key(&id) {
+        let made = calls
+            .iter()
+            .find(|c| {
+                c["outputs"]
+                    .as_array()
+                    .is_some_and(|o| o.iter().any(|x| x.as_str() == Some(id.as_str())))
+            })
+            .unwrap();
+        id = made["inputs"][0].as_str().unwrap().to_owned();
+    }
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(format!("{dir}.bodies.json.gz")).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let mut records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records[&id].take()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// A wing's four top edges (`side` +1 the right wing, -1 its mirror image) rounded r 2 in one
+/// blend: the inner arc at the boss's foot (concave), the outer arc and the two lines (convex).
+/// The volume it removes and the body.
+fn wing_rounded(side: f64) -> (f64, Body) {
+    let b = wing_plate();
+    let before = b.volume(1e-10).unwrap();
+    let edges: Vec<usize> = [
+        [24.301_584_610_165_037, 0.0, 20.0],
+        [26.789_241_024_481_07, -18.818_968_619_381_54, 20.0],
+        [59.301_584_610_165_02, 0.0, 20.0],
+        [26.789_241_024_481_12, 18.818_968_619_381_565, 20.0],
+    ]
+    .iter()
+    .map(|p| nearest_edge(&b, [side * p[0], p[1], p[2]]))
+    .collect();
+    blend(&b, Blend::Round, &edges, &[2.0], &[], Corners::Filled).unwrap();
+    (before - b.volume(1e-10).unwrap(), b)
+}
+
+/// #22151: each line runs tangentially into the arc at the boss's foot, so the wing's top
+/// narrows to zero width at two cusps. The rounds meet there as the blend corner's Roll-over
+/// (convex first, then the concave round with the lines' rounds' ends on the boss's cone as
+/// one chain), not the Mixed corner, whose Coons fill removed 46.650 here and 46.625 on the
+/// mirror image, following where the cone's parametric seam lay. A mirror image removes the
+/// same volume, to rounding, and no face is a Mixed corner's.
+#[test]
+fn a_wing_through_its_cusps_rolls_over_alike_on_either_side() {
+    rig_fixes();
+    let (right, rb) = wing_rounded(1.0);
+    let (left, lb) = wing_rounded(-1.0);
+    assert!(
+        (right - left).abs() <= 1e-9 * right,
+        "right {right} left {left}"
+    );
+    for b in [&rb, &lb] {
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        let (_, brep) = kernel_copy(b);
+        for &f in brep.face_list() {
+            let s = brep.face(f).unwrap().surface.as_ref().unwrap();
+            let mixed = matches!(
+                s.procedural_blend(),
+                Some(BlendRef::Corner { corner, .. })
+                    if corner.kind() == solidcore::surface::procedural_blend::corner::CornerKind::Mixed
+            );
+            assert!(!mixed, "a Mixed corner's face");
+        }
     }
 }
