@@ -1685,3 +1685,23 @@ fn exports_round_reported_numbers() {
     let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
     assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }
+
+#[test]
+fn rebuild_diagnostics_include_failed_sketch_solves() {
+    use crate::schema::parameters::FailedFeature;
+    use std::sync::Arc;
+
+    let mut s = Session::default();
+    block(&mut s);
+    let mut results = s.model.results.clone();
+    let r = results.iter_mut().find(|r| r.state.sketch(r.id).is_some()).unwrap();
+    r.warning = Some("sketch solve failed".into());
+    r.error = None;
+    assert!(FailedFeature::message(r).is_none(), "a warning alone is not a failed rebuild");
+    let state = Arc::make_mut(&mut r.state);
+    let sketch = state.sketches.iter_mut().find(|sk| sk.feature == r.id).unwrap();
+    Arc::make_mut(sketch).report.status = solidcraft_sketch::SolveStatus::Failed;
+    assert_eq!(FailedFeature::message(r).as_deref(), Some("sketch solve failed"));
+    let name = r.name.clone();
+    assert!(FailedFeature::of(&results).iter().any(|f| f.feature == name && f.error == "sketch solve failed"));
+}
