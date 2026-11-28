@@ -4858,6 +4858,88 @@ fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
     assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }
 
+/// The pattern repeats the full cut, including the tapered bore, helical groove, and any lead-in.
+fn check_modelled_tapered_hole_patterns(circular: bool, lead_in: bool) {
+    use solidcore_record::Vec3;
+    for designation in ["Rc 1/2", "1/2-14 NPT"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 120, "height": 16, "body_name": "Plate"}));
+        let stock = volume(&mut s);
+        let mut hole = json!({
+            "position": [15, 50, 16], "direction": [0, 0, -1], "diameter": 18, "thread_depth": 10,
+            "thread": designation, "modeled": true, "name": "Tap"
+        });
+        if lead_in {
+            hole["chamfer_distance"] = json!(1);
+        }
+        run(&mut s, "solid.hole", hole);
+        let drilled = volume(&mut s);
+        let one_cut = stock - drilled;
+        assert!(one_cut > 0.0, "{designation}: the seed hole must remove material");
+
+        for count in [2, 4, 6] {
+            let (command, params) = if circular {
+                (
+                    "solid.pattern.circular",
+                    json!({"features": ["Tap"], "axis": {"origin": [50, 50, 0], "dir": [0, 0, 1]}, "count": count, "angle": 360}),
+                )
+            } else {
+                (
+                    "solid.pattern.rectangular",
+                    json!({"features": ["Tap"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 35,
+                        "dir2": [0, 1, 0], "count2": count / 2, "spacing2": 28}),
+                )
+            };
+            let case = format!("{designation}, {command}, count {count}, lead-in {lead_in}");
+            let result = s.execute(command, &params).unwrap_or_else(|err| panic!("{case}: {err}"));
+            assert!(result["error"].is_null() && result["warning"].is_null(), "{case}: {result}");
+            // Rigid copies of disjoint cuts in the same stock remove additive volumes.
+            // The command count includes the seed, which is already removed from drilled.
+            let removed = drilled - volume(&mut s);
+            let expected = f64::from(count - 1) * one_cut;
+            assert!(rel(removed, expected) < 1e-3, "{case}: removed {removed} mm³, expected {expected} mm³");
+
+            let state = s.world_state().unwrap();
+            assert_eq!(state.bodies.len(), 1, "{case}");
+            for index in 0..count {
+                let (x, y) = if circular {
+                    let theta = 2.0 * PI * f64::from(index) / f64::from(count);
+                    (50.0 - 35.0 * theta.cos(), 50.0 - 35.0 * theta.sin())
+                } else {
+                    (15.0 + 35.0 * f64::from(index % 2), 50.0 + 28.0 * f64::from(index / 2))
+                };
+                let point = Vec3::new(x, y, 8.0);
+                assert_eq!(
+                    state.bodies[0].body.classify_point(point).unwrap(),
+                    solidcraft_kernel::PointClass::Outside,
+                    "{case}: missing hole at {point:?}"
+                );
+            }
+            run(&mut s, "edit.undo", json!({}));
+        }
+    }
+}
+
+#[test]
+fn rectangular_patterns_repeat_modelled_tapered_holes() {
+    check_modelled_tapered_hole_patterns(false, false);
+}
+
+#[test]
+fn rectangular_patterns_repeat_modelled_tapered_holes_with_lead_in() {
+    check_modelled_tapered_hole_patterns(false, true);
+}
+
+#[test]
+fn circular_patterns_repeat_modelled_tapered_holes() {
+    check_modelled_tapered_hole_patterns(true, false);
+}
+
+#[test]
+fn circular_patterns_repeat_modelled_tapered_holes_with_lead_in() {
+    check_modelled_tapered_hole_patterns(true, true);
+}
+
 /// A spacing expression that places a copy past the brep coordinate ceiling is an error,
 /// and the design stays as it was. `Brep::validate_built` rejects a vertex with absolute value
 /// above 1e12. This shaft's radius is 4, so a spacing of 1e12 cannot fit; a spacing of 1e9 plus
