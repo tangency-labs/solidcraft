@@ -1094,8 +1094,11 @@ mod local_operation {
     /// which the mean-value certifier proves instead (#22037): edge 89 of the four `fc`
     /// cases (bound 6.4e-3, proved 9.0e-7, tolerance 1e-5), and two each of `gen0000`,
     /// `gen0031`, `gen0041` and `gen0070` (bounds 8.5e-4 to 1.9e-2, proved at most 2.6e-6,
-    /// tolerances 1e-5 and 2e-5). A change in the kernel's enclosure shows here.
-    const MEAN_VALUE_CERTIFIED: usize = 12;
+    /// tolerances 1e-5 and 2e-5), and edges 23 and 24 of `gen0050`, whose revolved circle's
+    /// side round the axis is turned on as its torus (#14370; bounds 3.5e-4 and 2.5e-4,
+    /// proved 4.8e-7 and 2.5e-6, tolerances 1e-5 and 2e-5). A change in the kernel's
+    /// enclosure shows here.
+    const MEAN_VALUE_CERTIFIED: usize = 14;
 
     /// The cases whose input model's `check_brep` level 2 reports lines of its own, with
     /// their count: `Solids/nurb_fillet.smb`'s B-spline surface discontinuity across a knot

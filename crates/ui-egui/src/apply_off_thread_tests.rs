@@ -542,6 +542,28 @@ fn a_changed_display_quality_warms_the_result_without_replaying_commands() {
     h.step(&json!({"expect":{"bodies":1,"volume":13000}})).unwrap();
 }
 
+/// OK's result waits for the display quality this window draws at, not for the process-wide
+/// level: another window in the process (every other test's, on a busy test run) setting its own
+/// level each frame kept the result waiting until `until_applied` gave up.
+#[test]
+fn a_result_warmed_for_a_new_display_quality_is_adopted_while_another_window_draws_at_its_own() {
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
+    let mut h = square_on_a_block();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    let prepared = result(&h);
+    let finish = hold_result(&mut h, false);
+    h.app.preferences.display_quality = "fine".into();
+    let _other = crate::dialogs::other_window_draws_at(DisplayQuality::Normal);
+    finish.send(prepared).ok().unwrap();
+    h.frames(1);
+    let progress = h.app.applying.as_ref().expect("the new display plans run off the window thread").progress.clone();
+    until_applied(&mut h);
+    assert!(h.app.applying.is_none(), "the warmed result is still waiting for the process-wide display quality");
+    assert_eq!(progress.features(), (0, 0), "changing display quality does not replay the geometry commands");
+    assert!(h.app.dialog.is_none());
+    h.step(&json!({"expect":{"bodies":1,"volume":13000}})).unwrap();
+}
+
 /// #2698: Section Stack fits a sketch for every plane, which takes seconds on a large scan, so OK
 /// computes it beside the window though the dialog has no live preview, and adopts it as one
 /// undo step.

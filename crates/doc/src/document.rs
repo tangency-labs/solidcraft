@@ -205,7 +205,15 @@ pub enum ProfileSel {
     /// curves cut them (order and repeats don't matter; see `sketch::profile_by_curves`). Found
     /// again on every evaluation, so stable across parameter changes; no match or several is
     /// an error, never another profile.
-    Curves { loops: Vec<Vec<String>> },
+    Curves {
+        loops: Vec<Vec<String>>,
+        /// For each loop, the side of each of its curves the profile lay on when it was picked
+        /// (inside or outside a circle, left or right of a line), or empty when that was not
+        /// saved (older designs, loops with free curves). Used only when the curves come to bound
+        /// several profiles after a change (#23291): the one that lies the same way is taken.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sides: Vec<Vec<SidedCurve>>,
+    },
     /// Complete current boundaries of topology-aware analytic offset associations.
     /// The local association identity survives retirement and resurrection of arc roles.
     OffsetBoundaries { associations: Vec<String> },
@@ -531,6 +539,12 @@ pub struct Extent {
     /// From Object as a reference, as `to_ref`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_ref: Option<ObjectRef>,
+    /// To Object on a curved face: end every part of the profile on the face's surface carried
+    /// on past its edges (a cylinder, cone or torus continued along its surface, a plane
+    /// without end) instead of refusing a profile that reaches past the face. Off in a
+    /// design saved before it: they keep the refusal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub extend_to_face: bool,
 }
 
 /// A To / From Object that is a construction plane or point, not a body face: see
@@ -1414,6 +1428,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Length")]
         length: Option<Expr>,
+        /// How far from the end it starts at (`from`) the thread starts, leaving that much of the
+        /// face plain; `length` and `up_to` are measured from there. `None` (or 0): at that end.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
         /// Continuous flank faces for this feature. Missing in older designs: keep
@@ -2976,8 +2995,9 @@ pub enum FeatureKind {
     },
     /// A surface body's boundary edges through `edges` extended outward: by `distance`, or up
     /// to `up_to`; the surface continued (`mode` natural) or a run-off face along each edge
-    /// (tangent, curvature). `neighbours`: the edges next to an extended edge are lengthened to
-    /// meet it (else the extension's sides run square to the edge).
+    /// (tangent, curvature), or a strip built from the edges themselves leaving them at `angle`
+    /// to the surface (law; 0° when missing). `neighbours`: the edges next to an extended edge
+    /// are lengthened to meet it (else the extension's sides run square to the edge).
     SurfaceExtend {
         body: BodyName,
         edges: Vec<Position>,
@@ -2985,6 +3005,10 @@ pub enum FeatureKind {
         distance: Expr,
         #[serde(default, skip_serializing_if = "ExtendMode::is_natural")]
         mode: ExtendMode,
+        /// The law extension's angle to the surface at the edge (0: tangent), law mode only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         up_to: Option<ExtendTo>,
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
@@ -3337,6 +3361,9 @@ pub enum ExtendMode {
     Tangent,
     /// A run-off that keeps the surface's curvature across the edge (G2).
     Curvature,
+    /// A ruled strip built from the edges themselves, leaving them at the feature's angle to the
+    /// surface (trimmed edges too).
+    Law,
 }
 
 impl ExtendMode {
@@ -3395,6 +3422,8 @@ pub enum FilletStyle {
     Curvature,
     /// `radius` at the end of each edge nearest `start`, `radius2` at the other; `mid` radii at
     /// positions between (0 to 1 from the start end); straight between them, or `smooth`.
+    /// With the fillet's `tangent_chain`, "each edge" is each picked edge's tangent chain when
+    /// it has two ends: the radius runs along the whole chain in one round.
     Variable {
         #[walk(length = "End radius")]
         radius2: Expr,
@@ -3407,7 +3436,8 @@ pub enum FilletStyle {
     },
     /// The radius along each edge as a clamped B-spline of the position from the end nearest
     /// `start` (0) to the other (1): `radius` is its first control radius and `radii` the rest,
-    /// its degree what `knots` leave (knots = control radii + degree + 1).
+    /// its degree what `knots` leave (knots = control radii + degree + 1). With the fillet's
+    /// `tangent_chain`, "each edge" is each picked edge's tangent chain, as for `Variable`.
     Spline {
         start: Position,
         knots: Vec<f64>,

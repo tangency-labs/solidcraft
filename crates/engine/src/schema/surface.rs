@@ -24,8 +24,8 @@ use super::features::FeatureResult;
 use super::motion::require;
 use super::surface_boundary::message;
 use super::types::{
-    FeatureCommon, IdOrName, LengthExpr, OperationParam, PlaneParam, Point3, ProfilesParam, RailFitParam, SketchRef, TouchingParam, feature_common,
-    guide_rails_problem, present,
+    AngleExpr, FeatureCommon, IdOrName, LengthExpr, OperationParam, PlaneParam, Point3, ProfilesParam, RailFitParam, SketchRef, TouchingParam,
+    feature_common, guide_rails_problem, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -447,17 +447,17 @@ fn extend_edges_schema(generator: &mut SchemaGenerator) -> Schema {
 fn extend_mode<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     match Value::deserialize(d)? {
         Value::Null => Ok(None),
-        Value::String(m) if ["natural", "tangent", "curvature"].contains(&m.trim()) => Ok(Some(m)),
-        Value::String(m) => Err(D::Error::custom(whole(format!("`mode` must be natural, tangent or curvature, not `{}`", m.trim())))),
-        _ => Err(D::Error::custom("must be natural, tangent or curvature")),
+        Value::String(m) if ["natural", "tangent", "curvature", "law"].contains(&m.trim()) => Ok(Some(m)),
+        Value::String(m) => Err(D::Error::custom(whole(format!("`mode` must be natural, tangent, curvature or law, not `{}`", m.trim())))),
+        _ => Err(D::Error::custom("must be natural, tangent, curvature or law")),
     }
 }
 
 fn extend_mode_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "How the surface continues: natural, the surface itself continued; tangent, tangent to it across the edge (G1); curvature, keeping its curvature across the edge too (G2). Default: natural.",
+        "description": "How the surface continues: natural, the surface itself continued; tangent, tangent to it across the edge (G1); curvature, keeping its curvature across the edge too (G2); law, a ruled strip built from the picked edges themselves (one chain; trimmed edges too) leaving them at `angle` to the surface. Default: natural.",
         "type": "string",
-        "enum": ["natural", "tangent", "curvature"]
+        "enum": ["natural", "tangent", "curvature", "law"]
     })
 }
 
@@ -512,6 +512,11 @@ pub struct SurfaceExtendParams {
     #[serde(default, deserialize_with = "extend_mode", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "extend_mode_schema")]
     pub mode: Option<String>,
+    /// Law mode only: the strip's angle to the surface at the edge, strictly between -90 and 90
+    /// deg; 0 is tangent to the surface, positive turns toward the side the face's normal points
+    /// to. Default: 0 deg.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
     // Kept as given: the handler reads its forms, with its messages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "up_to_schema")]
