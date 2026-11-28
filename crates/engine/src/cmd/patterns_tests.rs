@@ -5076,6 +5076,7 @@ fn save_reload_after_moving_planar_path_owner_matches_live_pipe() {
     assert!(lmin.dist(rmin) < 1e-3 && lmax.dist(rmax) < 1e-3, "live ({lmin:?},{lmax:?}) vs reopened ({rmin:?},{rmax:?})");
 }
 
+/// A plate with a hole, moved into another component, where the hole
 /// is patterned afterwards. The copies are drilled from the carried hole, not from its authored
 /// spot, so every copy cuts (or the command refuses): never a success that cuts nothing.
 fn plate_with_hole_in_a_moved_component() -> (Session, f64) {
