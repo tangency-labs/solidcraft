@@ -269,6 +269,12 @@ pub enum BlendEnd {
     /// `SM_BEND_AT_SMOOTH` (smlib 41a39ec): its edge runs on tangentially into an edge not
     /// blended, cut square to the edge there ([`end`]).
     AtSmooth,
+    /// Not the fork's: an End on its end face whose rail on one
+    /// face never reaches that face's side edge (the side edge dips towards the round and
+    /// turns back short of the rail, so the round run on past the vertex would never leave
+    /// the part through the end face). Cut square to its edge at the vertex, with the cap
+    /// of `AtSmooth` ([`end::cap_end_whose_rail_misses_side_edge`]).
+    Capped,
 }
 
 /// `SmBlendTurn`: a Turn's two modes.
@@ -352,6 +358,15 @@ impl BlendCorner {
     #[must_use]
     pub fn is_end_on_end_face(self) -> bool {
         self.event == BlendCornerEvent::End && self.end == BlendEnd::OnEndFace
+    }
+
+    /// An End cut by a plane through its vertex, whose patch is that cap
+    /// ([`FilletCorner::end_cap`](crate::blend::fillet_corner::p3::FilletCorner::end_cap)):
+    /// at a smooth vertex, or where a rail never reaches its side edge ([`BlendEnd::Capped`]).
+    #[must_use]
+    pub fn has_end_cap(self) -> bool {
+        self.event == BlendCornerEvent::End
+            && matches!(self.end, BlendEnd::AtSmooth | BlendEnd::Capped)
     }
 
     /// `IsClosedJoin` (the fork's 543d25a): a Join of one closed blended edge meeting

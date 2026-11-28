@@ -274,77 +274,15 @@ impl FilletCorner {
         let corner_vertex = need(self.vertex, "corner without vertex")?;
 
         // P: through the vertex, where the first rail reaches its face's end
-        let e = eu1::edge(target, fil_eu)?.ok_or_else(|| {
-            nul("the blended edge use has no edge, though its solver was made for that edge")
-        })?;
-        let ivl = edge::interval(target, e)?;
-        let at_start = edge::start_vertex(target, e)? == Some(corner_vertex);
-        let curve = edge::curve(target, e)?.ok_or_else(|| {
-            nul("the blended edge has no curve, though its solver's rails were set up along it")
-        })?;
-        let pv = curve.evaluate(
+        self.end_cap = Some(end_cap_surface(
             k,
-            if at_start { ivl.min() } else { ivl.max() },
-            1,
-            true,
-            true,
-        )?;
-        let origin = vertex::point(target, corner_vertex)?;
-        let tangent = pv
-            .get(1)
-            .copied()
-            .ok_or_else(|| {
-                nul(
-                    "the edge curve's evaluation asked for its first derivative returned no \
-                     tangent, though it returns the point and each derivative asked for",
-                )
-            })?
-            .unitize()?;
-        // the round's radius, and the angle at which a face's end is a crease, not a tangent
-        // edge the rail rolls over: the corner's 3D tolerance over the radius
-        let mut radius: f64 = 0.0;
-        for slot in solver.surfaces.iter().flatten() {
-            radius = radius.max(slot.surface.offset_distance().abs());
-        }
-        let crease_rad = if radius > 0.0 {
-            self.approx_tol_3d / radius
-        } else {
-            self.tangency_tol_radians
-        };
-        let at = EndAt {
-            vertex: corner_vertex,
+            target,
+            self,
+            solver,
             fil_eu,
-            blended: e,
+            corner_vertex,
             faces,
-            tangent,
-            onto: if at_start { tangent } else { -tangent },
-            radius,
-            crease_rad,
-            tol_3d: self.approx_tol_3d,
-            tangent_cos: self.tangency_tol_radians.cos(),
-        };
-        let normal = end_cap(k, target, &at)?;
-        let mut x = if normal.x.abs() < 0.9 {
-            Vec3::new(1.0, 0.0, 0.0)
-        } else {
-            Vec3::new(0.0, 1.0, 0.0)
-        };
-        x = x - normal * x.dot(normal);
-        x = x.unitize()?;
-        let y = normal.cross(x).unitize()?;
-        // P's extent: past every point of the side faces from the vertex (the blend lies
-        // between them)
-        let mut reach: f64 = 0.0;
-        for &f in &faces {
-            let bbox = crate::query::face::p3::calculate_tight_bounding_box(k, &mut *target, f)?;
-            reach = reach.max(bbox.min().distance(origin));
-            reach = reach.max(bbox.max().distance(origin));
-        }
-        reach *= 2.0;
-        let uv_domain = Extent2d::from_bounds(-reach, -reach, 2.0 * reach, 2.0 * reach);
-        let mut plane = Plane::new(origin, x, y, Vec2::new(1.0, 1.0), &uv_domain);
-        plane.make_nurb()?;
-        self.end_cap = Some(Surface::from(plane));
+        )?);
 
         // the rails' ends on P, and the vertex
         let mut ends = [None, None];
@@ -380,15 +318,6 @@ impl FilletCorner {
                  for each of the blend's two faces",
             ));
         };
-        let on_vertex = new_corner_vertex(k, pseudo, corner)?;
-        let v = pseudo.fillet_vertex_mut(on_vertex)?;
-        v.set_point_class(
-            PointClassType::Vertex,
-            Some(EntityRef::Vertex(corner_vertex)),
-        );
-        v.set_fillet_vertex_type(FilletVertexType::OnVertex);
-        self.vertices.push(on_vertex);
-
         // the end rib, then the cap's edges on the side faces: a loop of the cap
         let rib = pseudo.make_fillet_edge(Some(end0), Some(end1), Some(corner))?;
         pseudo
@@ -400,6 +329,41 @@ impl FilletCorner {
         )?;
         pseudo.set_edgeuse_fillet_geom(prim, Some(geom))?;
         self.edges.push(rib);
+        let _on_vertex =
+            self.push_end_cap_loop(k, pseudo, corner, corner_vertex, [end0, end1], faces)?;
+
+        self.blending = false;
+        Ok(())
+    }
+
+    /// The cap's loop beside its end rib (already the corner's first edge, between the rails'
+    /// ends `ends`, `ends[i]` on `faces[i]`): the fillet vertex on the corner's vertex
+    /// (`SM_FV_ON_VERTEX`) and the cap's two edges on the side faces from the rails' ends to
+    /// it (`SM_FE_PRECOMPUTED`; their curves `CalcEndCapEdges`), in the order
+    /// `MakeEndAtSmoothVertex` makes them (the loop's orientation is read from them). Returns
+    /// the vertex on the corner's vertex, its geometry still to be placed (`CalcVertOnVert`).
+    ///
+    /// # Errors
+    /// Those of the pseudo-topology operations.
+    pub(crate) fn push_end_cap_loop(
+        &mut self,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        corner: FilletCornerId,
+        corner_vertex: VertexId,
+        ends: [VertexId; 2],
+        faces: [FaceId; 2],
+    ) -> Result<VertexId> {
+        let [end0, end1] = ends;
+        let on_vertex = new_corner_vertex(k, pseudo, corner)?;
+        let v = pseudo.fillet_vertex_mut(on_vertex)?;
+        v.set_point_class(
+            PointClassType::Vertex,
+            Some(EntityRef::Vertex(corner_vertex)),
+        );
+        v.set_fillet_vertex_type(FilletVertexType::OnVertex);
+        self.vertices.push(on_vertex);
+
         let [face0, face1] = faces;
         let on_second = pseudo.make_fillet_edge(Some(end1), Some(on_vertex), Some(corner))?;
         let fe = pseudo.fillet_edge_mut(on_second)?;
@@ -411,8 +375,113 @@ impl FilletCorner {
         fe.set_fillet_edge_type(FilletEdgeType::Precomputed);
         fe.set_original_face(Some(face0));
         self.edges.push(on_first);
-
-        self.blending = false;
-        Ok(())
+        Ok(on_vertex)
     }
+}
+
+/// The cap P of an End cut at its vertex: the plane through `vertex` where the round of
+/// `solver` (the blended edge use `fil_eu`'s, between `faces`) ends ([`end_cap`]: square to
+/// the edge there unless a face's end leans across that plane), sized past every point of
+/// the side faces, as `MakeEndAtSmoothVertex` makes it. The round's radius is the largest of
+/// the solver's offsets; a face's end is a crease where its faces meet at more than the
+/// corner's 3D tolerance over that radius (a tangent end is rolled over instead).
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without the blended edge or its curve; those of the evaluation, the
+/// unitizations, the tight boxes and the plane's NURB.
+pub(crate) fn end_cap_surface(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+    solver: &crate::blend::fillet_solver::p1::FilletSolver,
+    fil_eu: EdgeuseId,
+    vertex: VertexId,
+    faces: [FaceId; 2],
+) -> Result<Surface> {
+    let nul = |why: &'static str| missing_defect(OP, why);
+    let e = eu1::edge(target, fil_eu)?.ok_or_else(|| {
+        nul("the blended edge use has no edge, though its solver was made for that edge")
+    })?;
+    let ivl = edge::interval(target, e)?;
+    let at_start = edge::start_vertex(target, e)? == Some(vertex);
+    let curve = edge::curve(target, e)?.ok_or_else(|| {
+        nul("the blended edge has no curve, though its solver's rails were set up along it")
+    })?;
+    let pv = curve.evaluate(
+        k,
+        if at_start { ivl.min() } else { ivl.max() },
+        1,
+        true,
+        true,
+    )?;
+    let origin = vertex::point(target, vertex)?;
+    let tangent = pv
+        .get(1)
+        .copied()
+        .ok_or_else(|| {
+            nul(
+                "the edge curve's evaluation asked for its first derivative returned no \
+                 tangent, though it returns the point and each derivative asked for",
+            )
+        })?
+        .unitize()?;
+    // the round's radius, and the angle at which a face's end is a crease, not a tangent
+    // edge the rail rolls over: the corner's 3D tolerance over the radius
+    let mut radius: f64 = 0.0;
+    for slot in solver.surfaces.iter().flatten() {
+        radius = radius.max(slot.surface.offset_distance().abs());
+    }
+    let crease_rad = if radius > 0.0 {
+        corner.approx_tol_3d / radius
+    } else {
+        corner.tangency_tol_radians
+    };
+    let at = EndAt {
+        vertex,
+        fil_eu,
+        blended: e,
+        faces,
+        tangent,
+        onto: if at_start { tangent } else { -tangent },
+        radius,
+        crease_rad,
+        tol_3d: corner.approx_tol_3d,
+        tangent_cos: corner.tangency_tol_radians.cos(),
+    };
+    let normal = end_cap(k, target, &at)?;
+    cap_plane_through(k, target, faces, origin, normal)
+}
+
+/// The plane through `origin` square to `normal`, as a cap of the round between `faces`:
+/// its extent past every point of the side faces from `origin` (the blend lies between
+/// them), with its NURB made, as `MakeEndAtSmoothVertex` sizes its cap.
+///
+/// # Errors
+/// Those of the unitizations, the tight boxes and the plane's NURB.
+pub(crate) fn cap_plane_through(
+    k: &Kernel,
+    target: &mut Brep,
+    faces: [FaceId; 2],
+    origin: crate::math::Point3,
+    normal: Vec3,
+) -> Result<Surface> {
+    let mut x = if normal.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
+    };
+    x = x - normal * x.dot(normal);
+    x = x.unitize()?;
+    let y = normal.cross(x).unitize()?;
+    let mut reach: f64 = 0.0;
+    for &f in &faces {
+        let bbox = crate::query::face::p3::calculate_tight_bounding_box(k, &mut *target, f)?;
+        reach = reach.max(bbox.min().distance(origin));
+        reach = reach.max(bbox.max().distance(origin));
+    }
+    reach *= 2.0;
+    let uv_domain = Extent2d::from_bounds(-reach, -reach, 2.0 * reach, 2.0 * reach);
+    let mut plane = Plane::new(origin, x, y, Vec2::new(1.0, 1.0), &uv_domain);
+    plane.make_nurb()?;
+    Ok(Surface::from(plane))
 }
