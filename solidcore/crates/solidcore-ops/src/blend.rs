@@ -18,7 +18,7 @@
 //!   application grouping the edges of a curvature-continuous blend.
 //! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, on the
 //!   kernel's measures.
-//! - [`delete_fillet_chain`]: a set of adjacent fillet faces removed together, on a copy.
+//! - [`delete_fillet_chain`]: a round, or a chain of adjacent rounds, removed together, on a copy.
 //!
 //! The kernel's session is driven as the C API's `round_edges` drove SMLib's executive:
 //! the turn, parameters, the set-back vertices, the corners (setbacks set, a chamfer's

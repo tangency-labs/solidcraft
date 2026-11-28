@@ -487,6 +487,9 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                         )
                     };
                     let refused = fail(format!("face {by} ({}), borders face {f}, {}: {reason}", surface_kind(&rec, by), surface_kind(&rec, f)));
+                    if del.iter().any(|&g| matches!(surf_of(&rec, g), Some(Surf::Plane { .. }))) {
+                        return Err(refused);
+                    }
                     return Ok(delete_rounds(body, &del, refused));
                 }
             }
@@ -910,9 +913,9 @@ fn heal_by_wedge(
     Ok(Some(result.with_history(History { operands: 1, faces, edges }, &[body])?))
 }
 
-/// A selection the planar healer refuses (`refused`) because a neighbour is curved goes to
-/// solidcore's fillet removal, one face or a chain; `refused` stands when that finds no
-/// removable fillet, and its other errors are its own.
+/// A selection of curved faces the planar healer refuses (`refused`) because a neighbour is
+/// curved goes to solidcore's fillet removal, one face or a chain. `refused` stands when solidcore
+/// finds no removable fillet; solidcore's other refusals and errors are returned as its own.
 fn delete_rounds(body: &Body, del: &BTreeSet<usize>, refused: KernelError) -> Result<Body> {
     delete_fillet_chain(body, del)?.ok_or(refused)
 }
@@ -1002,21 +1005,24 @@ mod tests {
         assert!(history.edges.iter().any(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Meet { .. }])));
     }
 
+    /// A stopped removal of a round beside a curved face returns its own "cancelled" failure,
+    /// not the planar healer's refusal.
     #[test]
-    fn a_stopped_round_chain_removal_keeps_its_own_error() {
-        let ball = crate::sphere(Vec3::ZERO, 5.0).unwrap();
-        let upper = box_solid(Vec3::new(-6.0, -6.0, 0.0), Vec3::new(6.0, 6.0, 6.0)).unwrap();
-        let half = boolean(&ball, &upper, BoolOp::Intersect).unwrap().unwrap();
-        let rim = crate::tangent_chain(&half, &[Vec3::new(0.0, 5.0, 0.0)]).unwrap();
-        let rounded = fillet(&half, &rim, 1.0).unwrap();
+    fn a_stopped_round_removal_beside_a_cylinder_keeps_its_own_error() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let boss = cylinder(Vec3::new(20.0, 15.0, 5.0), Vec3::Z, 5.0, 8.0).unwrap();
+        let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let rounded = fillet(&bossed, &[Vec3::new(25.0, 15.0, 5.0)], 1.0).unwrap();
         let record = crate::brep_record(&rounded).unwrap();
-        let rounds: Vec<usize> = (0..record.faces.len())
-            .filter(|&f| !matches!(crate::offset::surf_of(&record, f), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Sphere { .. })))
+        let round: Vec<usize> = (0..record.faces.len())
+            .filter(|&f| {
+                !matches!(crate::offset::surf_of(&record, f), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Cylinder { .. }))
+            })
             .collect();
-        assert_eq!(rounds.len(), 2, "{rounds:?}");
+        assert_eq!(round.len(), 1, "{round:?}");
         let stop = solidcraft_smlib::stop::Stop::new();
         stop.stop();
-        let err = stop.within(|| delete_faces(&rounded, &rounds)).unwrap_err();
+        let err = stop.within(|| delete_faces(&rounded, &round)).unwrap_err();
         assert!(matches!(&err, crate::KernelError::Failed(why) if why.contains("cancelled")), "{err}");
     }
 
@@ -1616,7 +1622,6 @@ mod tests {
             let round = round_at(&rounded);
             assert_eq!(round.len(), 1, "{edge:?}: {round:?}");
             let back = delete_faces(&rounded, &round).unwrap();
-            // Exact, not the meshed volume: a 1e-3 chord loses ~0.06 on the Ø10 boss.
             let v = back.volume_at(1e-3).unwrap();
             assert!((v - sharp).abs() < 1e-6 * sharp, "{edge:?}: {v}");
             assert_eq!(back.face_count(), 8, "{edge:?}");
@@ -1657,5 +1662,24 @@ mod tests {
         assert_eq!(cone.len(), 1, "{cone:?}");
         let e = delete_faces(&chamfered, &cone).unwrap_err().to_string();
         assert!(e.contains("select all the round faces"), "{e}");
+    }
+
+    /// A flat face beside curved faces is no round: the planar healer's refusal stands, and
+    /// fillet removal is not asked.
+    #[test]
+    fn a_flat_side_of_an_obround_boss_keeps_the_planar_refusal() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let mut part = boolean(&plate, &box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(30.0, 20.0, 10.0)).unwrap(), BoolOp::Union).unwrap().unwrap();
+        for x in [10.0, 30.0] {
+            let end = cylinder(Vec3::new(x, 15.0, 5.0), Vec3::Z, 5.0, 5.0).unwrap();
+            part = boolean(&part, &end, BoolOp::Union).unwrap().unwrap();
+        }
+        let record = crate::brep_record(&part).unwrap();
+        let side: Vec<usize> = (0..record.faces.len())
+            .filter(|&f| matches!(crate::offset::surf_of(&record, f), Some(crate::offset::Surf::Plane { n, d }) if n.y.abs() > 0.99 && (d.abs() - 10.0).abs() < 1e-9))
+            .collect();
+        assert_eq!(side.len(), 1, "{side:?}");
+        let e = delete_faces(&part, &side).unwrap_err().to_string();
+        assert!(e.contains("healing this selection requires planar neighbours"), "{e}");
     }
 }
