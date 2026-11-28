@@ -1270,10 +1270,7 @@ fn a_circle_along_tangent_3d_arcs_with_tiny_rounded_bridge_does_not_double_back(
             (v.z * 1e6).round() / 1e6,
         )
     };
-    let mut k = Kernel {
-        fixes: solidcore::kernel::UpstreamFixes::all(),
-        ..Kernel::default()
-    };
+    let mut k = Kernel::default();
     let bend_r = 50.0_f64;
     let pipe_r = 3.0_f64;
     let ang1 = 53.0_f64.to_radians();
@@ -1394,10 +1391,7 @@ fn a_tight_bend_smaller_than_pipe_radius_still_doubles_back() {
     use solidcore::primitive::primitive_creation::p3::prepare_curve_sweep;
     use solidcore::surface::surface::assert_valid::grid_has_non_monotonic_points_to_rounding;
 
-    let k = Kernel {
-        fixes: solidcore::kernel::UpstreamFixes::all(),
-        ..Kernel::default()
-    };
+    let k = Kernel::default();
     let line = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();
     let bend_r = 2.0_f64;
     let pipe_r = 4.0_f64;
