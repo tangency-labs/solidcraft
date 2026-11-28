@@ -992,6 +992,8 @@ pub struct SolveApp {
     /// after a few seconds (an export that left bodies out).
     pub status_sticky_at: Option<f64>,
     pub quit_requested: bool,
+    /// How long quitting has waited for queued view memories (`view_memory::quit_may_proceed`).
+    quit_wait: std::cell::Cell<view_memory::QuitWait>,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
     /// Lock files next to the open designs (the desktop app turns them on; #5467).
@@ -1354,6 +1356,7 @@ impl SolveApp {
             status_save_sc: false,
             status_sticky_at: None,
             quit_requested: false,
+            quit_wait: std::cell::Cell::new(view_memory::QuitWait::default()),
             autosave: None,
             locks: None,
             lock_prompts: Vec::new(),
@@ -1601,7 +1604,6 @@ impl SolveApp {
         }
         render_workspace::sync_backend(self);
         ai_connect::tick(self);
-        self.msaa_supported = rs.msaa_supported.clone();
         let info = rs.adapter.get_info();
         self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
         self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
@@ -2478,6 +2480,13 @@ impl SolveApp {
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
+                    // A design read from its file gets back the views it was closed with, as the
+                    // window's own open gives them (the browser runs `doc.open` here, #23271).
+                    if id == "doc.open"
+                        && let Some(path) = self.session.path.clone()
+                    {
+                        documents::design_opened(self, &path);
+                    }
                 }
                 if matches!(id, "file.save" | "file.save_as") {
                     history_folds::remember(self);
@@ -4199,11 +4208,15 @@ impl SolveApp {
         self.home.open = false;
         documents::prepare_open(self);
         let params = self.load_params(path, options);
+        self.docs.camera_recalled = false;
         let r = self.run("doc.open", params)?;
         // An opened design comes up at the home view, not at the angle the design before it
-        // was left at: `prepare_open` keeps the camera when it reuses a blank design.
-        self.cam.set_view(StandardView::Iso);
-        self.fit_view();
+        // was left at: `prepare_open` keeps the camera when it reuses a blank design. One that
+        // got back the camera it was closed with keeps that (#23271).
+        if !self.docs.camera_recalled {
+            self.cam.set_view(StandardView::Iso);
+            self.fit_view();
+        }
         stand_up::offer(self, path, &[], Some(&r));
         // The import's warnings, as the desktop's open says them (`file_load`), before the
         // notices that follow it there too.
@@ -4862,7 +4875,9 @@ impl SolveApp {
                 toolbar::shortcuts(self, ctx);
             }
         }
-        recovery_ui::tick(self);
+        if let Some(delay) = recovery_ui::tick(self, ctx) {
+            ctx.request_repaint_after(delay);
+        }
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
         #[cfg(feature = "usage-stats")]
@@ -5085,6 +5100,7 @@ impl SolveApp {
         let _blur_scope = self.blur.begin(ui.ctx());
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
+        canvas::share_box_drag(ui.ctx());
         // #9841: dialog buttons answer their first letter only when the preference says so;
         // off is the old behaviour, so the kit default and this preference default agree.
         ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
@@ -5284,9 +5300,10 @@ impl SolveApp {
         }
     }
 
-    /// Whether the host can close after queued view preferences have reached disk.
+    /// Whether the host can close: queued view preferences have reached disk, or quitting has
+    /// waited `view_memory::QUIT_WAIT` (10 s) for them (another process may hold their file).
     pub fn ready_to_quit(&self) -> bool {
-        self.quit_requested && !crate::view_memory::pending()
+        self.quit_requested && crate::view_memory::quit_may_proceed(&self.quit_wait)
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {

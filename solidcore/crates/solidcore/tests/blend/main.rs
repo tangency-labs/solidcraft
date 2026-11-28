@@ -159,6 +159,8 @@ mod issue_2307_peg_chamfers;
 mod issue_2307_tab_run_after_hole_rim;
 #[path = "../issue_2314_tab_corner_arcs.rs"]
 mod issue_2314_tab_corner_arcs;
+#[path = "../issue_23288_fillet_past_center_hole.rs"]
+mod issue_23288_fillet_past_center_hole;
 #[path = "../issue_2343_curved_setback.rs"]
 mod issue_2343_curved_setback;
 #[path = "../issue_2349_closed_angle.rs"]

@@ -127,6 +127,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 one_sided_direction: _,
                 to_ref: _,
                 from_ref: _,
+                extend_to_face: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && !through_all2 && to2.is_none() && components.get(&sketch.0) == Some(&f.component)
         }

@@ -432,6 +432,23 @@ pub(crate) const SEAM_ANGLE: f64 = 0.6131;
 /// Cylinder with base centre `base`, axis direction `axis`, radius and height.
 pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "cylinder");
+    let c = cylinder_plan(base, axis, radius, height)?;
+    crate::smlib_sweeps::cylinder(&c.plane, c.radius, c.lo, c.hi, &c.region)
+}
+
+/// A cylinder as [`cylinder`] builds it: its base plane, radius, the span along the axis and the
+/// circle it extrudes (its seam at an odd angle), checked.
+pub(crate) struct CylinderPlan {
+    pub plane: Plane,
+    pub radius: f64,
+    pub lo: f64,
+    pub hi: f64,
+    pub region: Region2,
+}
+
+/// [`cylinder`]'s checks and plan: what another kernel builds the same cylinder from, and what
+/// names it after.
+pub(crate) fn cylinder_plan(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<CylinderPlan> {
     let plane = Plane::from_normal(base, axis).ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
     if !frame_ok(&plane) {
         return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
@@ -447,9 +464,9 @@ pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body
     }
     // The seams at an odd angle: on the frame's axes they would lie exactly where faces placed
     // on a grid cut the cylinder (along a seam edge, which booleans don't survive).
-    let r = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
-    region_ok(&r)?;
-    crate::smlib_sweeps::cylinder(&plane, radius, lo, hi, &r)
+    let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
+    region_ok(&region)?;
+    Ok(CylinderPlan { plane, radius, lo, hi, region })
 }
 
 /// Sphere: SMLib's own (smlib_make_sphere), each face swept from the arc (segment 0) of the half
@@ -1166,32 +1183,52 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 
 /// [`loft`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
-/// sections between. Without rails, the plain loft.
-pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "loft_with_rails");
+type LoftPieces = Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)>;
+
+/// A loft's sections as the kernel lofts them: whether they run reversed, numbered, matched
+/// into loops, and the index of the section given first.
+#[allow(clippy::type_complexity)]
+fn loft_start(sections: &[(Plane, Loop2)]) -> Result<(bool, Vec<(Plane, NumberedLoop)>, Vec<(Plane, NumberedLoop)>, usize)> {
     let reversed = loft_reversed(sections)?;
     let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
     let loops = loft_numbered_loops(&numbered, reversed)?;
     let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
-    let pieces_of = |loops: &[(Plane, NumberedLoop)]| -> Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> {
-        loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
-    };
-    let mut pieces = pieces_of(&loops);
+    Ok((reversed, numbered, loops, first))
+}
+
+fn loft_pieces_of(loops: &[(Plane, NumberedLoop)]) -> LoftPieces {
+    loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
+}
+
+/// [`loft`]'s sections as its skin takes them, and the index of the section given first: what
+/// another kernel lofts, and what names it after.
+pub(crate) fn loft_plan(sections: &[(Plane, Loop2)]) -> Result<(LoftPieces, usize)> {
+    let (reversed, numbered, loops, first) = loft_start(sections)?;
+    let mut pieces = loft_pieces_of(&loops);
     // The smlib wrapper's `MAX_CURVES` bounds the curves in all its sections (and stations): matching
     // can give each section more segments than the largest has, so past that bound the sections
     // are re-split instead, to no more than the largest has.
+    if pieces.iter().map(|(_, p)| p.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
+        pieces = loft_pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+    }
+    Ok((pieces, first))
+}
+
+/// sections between. Without rails, the plain loft.
+pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_with_rails");
     if rails.is_empty() {
-        if pieces.iter().map(|(_, p)| p.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
-            pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
-        }
+        let (pieces, first) = loft_plan(sections)?;
         return crate::smlib_sweeps::loft(&pieces, first);
     }
+    let (reversed, numbered, loops, first) = loft_start(sections)?;
+    let mut pieces = loft_pieces_of(&loops);
     if rails.len() > 2 {
         return crate::smlib_sweeps::loft_many_rails(&pieces, first, rails, fit);
     }
     let mut all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     if all.iter().map(Vec::len).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
-        pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+        pieces = loft_pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
         all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     }
     crate::smlib_sweeps::loft_curves(&pieces, first, &all)

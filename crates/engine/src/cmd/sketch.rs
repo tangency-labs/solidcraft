@@ -1840,6 +1840,7 @@ fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
     step.active_sketch = None;
     step.sketching_view = None;
     step.sketch_restore_marker = None;
+    step.sketch_entry = None;
 }
 
 /// Fold only the steps still belonging to this edit. Its snapshots describe the complete
@@ -1868,6 +1869,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             active_sketch: None,
             sketching_view: None,
             sketch_restore_marker: None,
+            sketch_entry: None,
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: entry.pending_moves.clone(),
             pending_move_records: entry.pending_move_records.clone(),
@@ -1889,6 +1891,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             snap.active_sketch = None;
             snap.sketching_view = None;
             snap.sketch_restore_marker = None;
+            snap.sketch_entry = None;
         }
     }
 }
