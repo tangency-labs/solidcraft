@@ -88,6 +88,24 @@ API uint32_t occt_fillet_nearest(uint32_t h, const void* points, size_t count, d
   });
 }
 
+// Whether two of the edges nearest each point (count * 3 doubles) share a vertex: 1 if so, 0 if
+// not.
+API int32_t occt_picked_edges_meet(uint32_t h, const void* points, size_t count) {
+  return guard<int32_t>(-1, [&]() {
+    const ShapeMap chosen = nearest(get_shape(h), TopAbs_EDGE, points, count);
+    ShapeMap seen;
+    for (int e = 1; e <= chosen.Extent(); ++e) {
+      ShapeMap ends;
+      TopExp::MapShapes(chosen(e), TopAbs_VERTEX, ends);
+      for (int v = 1; v <= ends.Extent(); ++v) {
+        if (seen.Contains(ends(v))) return 1;
+      }
+      for (int v = 1; v <= ends.Extent(); ++v) seen.Add(ends(v));
+    }
+    return 0;
+  });
+}
+
 // Constant-radius fillets, the edge nearest each point (count * 3 doubles) at its own radius
 // (count doubles). Two points nearest one edge are refused.
 API uint32_t occt_fillet_each(uint32_t h, const void* points, const void* radii, size_t count) {

@@ -34,6 +34,7 @@ mod raw {
         pub fn occt_common(a: u32, b: u32) -> u32;
         pub fn occt_fillet_nearest(h: u32, points: *const f64, count: usize, radius: f64) -> u32;
         pub fn occt_fillet_each(h: u32, points: *const f64, radii: *const f64, count: usize) -> u32;
+        pub fn occt_picked_edges_meet(h: u32, points: *const f64, count: usize) -> i32;
         pub fn occt_chamfer_nearest(h: u32, points: *const f64, count: usize, distance: f64) -> u32;
         pub fn occt_shell_nearest(h: u32, points: *const f64, count: usize, thickness: f64) -> u32;
         pub fn occt_draft_nearest(
@@ -71,7 +72,7 @@ mod raw {
 }
 
 /// The ABI these bindings were written for.
-pub const ABI_VERSION: u32 = 9;
+pub const ABI_VERSION: u32 = 10;
 
 /// Why the module refused a call, in its own words.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,6 +198,17 @@ impl Shape {
         let flat: Vec<f64> = points.iter().flatten().copied().collect();
         // SAFETY: a live handle and `points.len()` triples of doubles.
         shape(unsafe { raw::occt_fillet_nearest(self.0, flat.as_ptr(), points.len(), radius) })
+    }
+
+    /// Whether two of the edges nearest `points` share a vertex.
+    pub fn picked_edges_meet(&self, points: &[[f64; 3]]) -> Result<bool> {
+        let flat: Vec<f64> = points.iter().flatten().copied().collect();
+        // SAFETY: a live handle and `points.len()` triples of doubles.
+        match unsafe { raw::occt_picked_edges_meet(self.0, flat.as_ptr(), points.len()) } {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(last_error()),
+        }
     }
 
     /// Constant-radius rounds, the edge nearest each of `points` at the radius in the same place
