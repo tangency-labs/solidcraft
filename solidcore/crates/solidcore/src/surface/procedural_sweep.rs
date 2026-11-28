@@ -326,7 +326,7 @@ pub enum Motion {
 }
 
 /// A swept wall by its definition (module docs).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProceduralSweep {
     profile: BSplineCurve,
     motion: Motion,
@@ -339,6 +339,25 @@ pub struct ProceduralSweep {
     map: SweepMap,
     /// The definition is the wall's label only ([`ProceduralSweep::is_label`]).
     label: bool,
+}
+
+/// The derived text of the fields, and `label` only when it is set: a live definition's text,
+/// which goldens hash, is the same as before labels were added.
+impl std::fmt::Debug for ProceduralSweep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("ProceduralSweep");
+        d.field("profile", &self.profile)
+            .field("motion", &self.motion)
+            .field("stations", &self.stations)
+            .field("halves", &self.halves)
+            .field("taus", &self.taus)
+            .field("bound", &self.bound)
+            .field("map", &self.map);
+        if self.label {
+            d.field("label", &self.label);
+        }
+        d.finish()
+    }
 }
 
 /// `sum_{n >= 0} (-1)^n c(n) p0 r^n` enclosed, for `0 <= p0`, `0 <= r` and terms that fall
