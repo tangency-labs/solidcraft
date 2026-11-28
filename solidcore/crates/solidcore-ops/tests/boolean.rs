@@ -4807,6 +4807,113 @@ fn a_boss_overhanging_a_frustums_rim_by_exactly_the_tolerance_joins() {
     );
 }
 
+/// #22816 (stress corpus S7573): a frustum of the same radii with its top rim rounded by a variable
+/// radius, 0.14 at (1, 0, 3) rising linearly to 0.28 half way round and back (SolidCraft's
+/// `type: variable` with `mid: [[0.5, 0.28]]`), less a Ø0.2 hole 0.8 deep from the top whose
+/// rim runs across the round. The hole at (0, -0.85) failed ("the traced UV control polygon
+/// is not proved inside the surface domain"): the drop of the round's tangent edge on the top
+/// face onto the round clamped its ends onto the round's boundary, and the UV tangent kept
+/// across that boundary put a control point of the span outside the domain, by 2e-16 here
+/// and by 7e-7 for the hole at (-0.8, 0.3). The mirror holes at (0, 0.85) and (-0.8, -0.3)
+/// built. Each cut is one valid solid (Level 2), and by the part's mirror symmetry in y (the
+/// law takes the same radius at angles θ and -θ) each hole's volume is its mirror's. Both
+/// lie between the closed forms that bound them: the frustum 7π, less the rim's constant
+/// round of 0.28 (0.14), the corner's area r²(cot(α/2) - (π - α)/2) (α the rim's angle,
+/// cos α = -1/√10) turned about z at its centroid (Pappus), and less the hole's column
+/// through z 2.2..3 (through z 2.2..2.72, below every round).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn a_hole_through_a_variable_round_on_a_frustums_rim_cuts_on_either_side() {
+    all_fixes();
+    // the frustum as SolidCraft's cone makes it: its half section turned about -z, which
+    // runs the rim's parameter, and the round's, clockwise from the seam at +x
+    let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let section = [
+        line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]),
+        line([2.0, 0.0, 0.0], [1.0, 0.0, 3.0]),
+        line([1.0, 0.0, 3.0], [0.0, 0.0, 3.0]),
+        line([0.0, 0.0, 3.0], [0.0, 0.0, 0.0]),
+    ];
+    let rounded = || {
+        let b = round_tripped(&revolve(&section, [0.0; 3], [0.0, 0.0, -1.0], TAU, true).unwrap());
+        let rim = solidcore_ops::pick::edges(&b, &[[0.0, -1.0, 3.0]], 1e-6)
+            .unwrap()
+            .unwrap();
+        solidcore_ops::fillet_variable_from(
+            &b,
+            rim[0],
+            [1.0, 0.0, 3.0],
+            1,
+            &[0.0, 0.0, 0.5, 1.0, 1.0],
+            &[0.14, 0.28, 0.14],
+        )
+        .unwrap();
+        round_tripped(&b)
+    };
+    // the round removed from the rim (1, 3) at radius r, turned about z at its centroid
+    let alpha = (-1.0 / 10.0_f64.sqrt()).acos();
+    let removed = |r: f64| {
+        let t = r / (alpha / 2.0).tan();
+        let (u1, u2) = ([-1.0, 0.0], [1.0 / 10.0_f64.sqrt(), -3.0 / 10.0_f64.sqrt()]);
+        let bis = [u1[0] + u2[0], u1[1] + u2[1]];
+        let n = bis[0].hypot(bis[1]);
+        let d = r / (alpha / 2.0).sin();
+        let c = [1.0 + bis[0] / n * d, 3.0 + bis[1] / n * d];
+        // the corner, the two tangent points and the arc between them, as a polygon fine
+        // enough that its centroid is the region's to far below the bounds' slack
+        let a1 = (3.0 - c[1]).atan2(1.0 - t - c[0]);
+        let a2 = (3.0 + u2[1] * t - c[1]).atan2(1.0 + u2[0] * t - c[0]);
+        let da = (a2 - a1 + PI).rem_euclid(TAU) - PI;
+        let mut pts = vec![[1.0, 3.0], [1.0 - t, 3.0]];
+        pts.extend((1..4000).map(|k| {
+            let a = a1 + da * f64::from(k) / 4000.0;
+            [c[0] + r * a.cos(), c[1] + r * a.sin()]
+        }));
+        pts.push([1.0 + u2[0] * t, 3.0 + u2[1] * t]);
+        let (mut area, mut moment) = (0.0, 0.0);
+        for (p, q) in pts.iter().zip(pts.iter().cycle().skip(1)) {
+            let cross = p[0] * q[1] - q[0] * p[1];
+            area += cross / 2.0;
+            moment += (p[0] + q[0]) * cross / 6.0;
+        }
+        let closed = r * r * (1.0 / (alpha / 2.0).tan() - (PI - alpha) / 2.0);
+        assert!(
+            (area.abs() - closed).abs() <= 1e-6 * closed,
+            "{area} {closed}"
+        );
+        TAU * moment.abs()
+    };
+    let column = |h: f64| PI * 0.1 * 0.1 * h;
+    let frustum = 7.0 * PI;
+    let (low, high) = (
+        frustum - removed(0.28) - column(0.8),
+        frustum - removed(0.14) - column(0.52),
+    );
+    for [x, y] in [[0.0, 0.85], [-0.8, 0.3]] {
+        let mut volumes = Vec::new();
+        for side in [-1.0, 1.0] {
+            let hole = round_tripped(&rod([x, side * y, 2.2], 0.1, 0.8));
+            let cut = boolean(rounded(), hole, BooleanOp::Subtract)
+                .unwrap_or_else(|e| panic!("({x}, {}): {e:?}", side * y))
+                .unwrap();
+            let report = cut.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "({x}, {}): {}", side * y, report.text);
+            assert_eq!(cut.solid_count().unwrap(), 1, "({x}, {})", side * y);
+            let v = volume(&cut);
+            assert!(
+                low < v && v < high,
+                "({x}, {}): {v} not in {low}..{high}",
+                side * y
+            );
+            volumes.push(v);
+        }
+        assert!(
+            near(volumes[0], volumes[1]),
+            "({x}, ±{y}): {volumes:?} differ by more than the mirror allows"
+        );
+    }
+}
+
 /// #18274: the r 2 ball cut flat at z 1.2 (a cap edge of radius 1.6), less a notch of radius
 /// 0.19 from z -0.4 up to the cap, centred on the cap's edge just off the ball's seam meridian
 /// so that its side passes `d` outside the corner (1.6, 0, 1.2) where the seam meets the cap's

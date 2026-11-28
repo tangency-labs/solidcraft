@@ -1,0 +1,287 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b9": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 6.283185307179586,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -0.0,
+          -1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "line": {
+              "end": [
+                2.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1.0,
+                0.0,
+                3.0
+              ],
+              "start": [
+                2.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                3.0
+              ],
+              "start": [
+                1.0,
+                0.0,
+                3.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                3.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "fillet_variable",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "degree": 1,
+        "edge": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.9999999999999998,
+                  0.0,
+                  3.0000000000000004
+                ],
+                [
+                  0.9999999999999998,
+                  0.0,
+                  3.0000000000000004
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              -0.9999999999999998,
+              5.551115123125783e-17,
+              3.0000000000000004
+            ]
+          ],
+          "tolerance": 0.3211562118716425
+        },
+        "knots": [
+          0.0,
+          0.0,
+          0.5,
+          1.0,
+          1.0
+        ],
+        "radii": [
+          0.14,
+          0.28,
+          0.14
+        ],
+        "start": [
+          1.0,
+          0.0,
+          3.0
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b8"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 0.8,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                -0.85,
+                2.2
+              ],
+              "end": 6.896285307179586,
+              "radius": 0.1,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b6",
+        "b9"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "22816-hole-through-a-variable-round-on-a-frustums-rim",
+  "expected": {
+    "body_count": 1,
+    "method": "bounds: the frustum 7 pi = 21.99114858, less the rim's round of a constant radius 0.28 (0.14): the corner's area r^2 (cot(a/2) - (pi - a)/2), cos a = -1/sqrt(10), turned about z at its centroid (Pappus): 0.04600476 (0.01167637); less the hole's column pi 0.1^2 h through z 2.2..3, h = 0.8 (through z 2.2..2.72, below every round, h = 0.52): V in [21.99114858 - 0.04600476 - 0.02513274, 21.99114858 - 0.01167637 - 0.01633628] = [21.92001107, 21.96313592]. By the part's mirror symmetry in y the volume is the mirror hole's (solidcore-ops boolean.rs, a_hole_through_a_variable_round_on_a_frustums_rim_cuts_on_either_side); one body",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#22816"
+    ],
+    "volume_mm3": [
+      21.92001107,
+      21.96313592
+    ],
+    "what": "a frustum (radii 2 and 1, height 3) with its top rim rounded by a variable radius, 0.14 at (1, 0, 3) rising linearly to 0.28 half way round and back, less a 0.2 mm hole 0.8 deep from the top at (0, -0.85) whose rim runs across the round; the cut failed (\"the traced UV control polygon is not proved inside the surface domain\") while its mirror hole at (0, 0.85) built"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 14,
+      "faces": 7,
+      "vertices": 9
+    }
+  },
+  "records": "22816-hole-through-a-variable-round-on-a-frustums-rim.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 45.744151564788076,
+      "body_count": 1,
+      "edges": 14,
+      "faces": 7,
+      "vertices": 9,
+      "volume_mm3": 21.939145986184098
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#22816"
+  ],
+  "traced_ops": [
+    "revolve",
+    "copy",
+    "tagged",
+    "fillet_variable",
+    "extrude",
+    "boolean_tagged"
+  ],
+  "ungraded": [],
+  "what": "a frustum (radii 2 and 1, height 3) with its top rim rounded by a variable radius, 0.14 at (1, 0, 3) rising linearly to 0.28 half way round and back, less a 0.2 mm hole 0.8 deep from the top at (0, -0.85) whose rim runs across the round. The case replays SolidCraft's traced round and cut from the revolved and extruded records; the cut failed (\"the traced UV control polygon is not proved inside the surface domain\") while its mirror hole at (0, 0.85) built",
+  "why_not": []
+}

@@ -2950,8 +2950,13 @@ impl Surface {
                             }
                         }
 
-                        // fix boundary tangents
-                        if !preserve_uv {
+                        // fix boundary tangents (not upstream: with the traced jets kept, only
+                        // a tangent at an end on the boundary that would take the span out
+                        // of the domain, before the span is tested, #22816)
+                        if preserve_uv {
+                            let _fix_bt_change =
+                                start.keep_boundary_tangents_inside(&s_uv_domain, &mut end);
+                        } else {
                             let _fix_bt_change = start.fix_boundary_tangents(
                                 &s_uv_domain,
                                 &mut end,
