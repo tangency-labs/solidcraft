@@ -6791,7 +6791,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-window-gpu"
-version = "0.51.1"
+version = "0.51.2"
 dependencies = [
  "egui",
  "egui-wgpu",
