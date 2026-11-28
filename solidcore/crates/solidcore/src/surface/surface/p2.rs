@@ -9978,3 +9978,214 @@ mod swap_definition_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod order_dependence_tests {
+    use super::*;
+    use crate::curve::curve::CurveKind;
+    use crate::math::det;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{gamma, CPoint};
+    use crate::surface::torus::TorusOptions;
+
+    fn frame(z: f64) -> Axis2Placement {
+        Axis2Placement::new(Point3::new(0.0, 0.0, z), Vec3::X, Vec3::Y)
+    }
+
+    fn sphere(k: &Kernel, radius: f64) -> Surface {
+        Surface::from(Sphere::create_canonical(k, &frame(0.0), radius).unwrap())
+    }
+
+    /// The torus about the z axis through the origin, major radius 10, minor radius 3.
+    fn torus(k: &Kernel) -> Surface {
+        let t =
+            Torus::create_canonical(k, &frame(0.0), 10.0, 3.0, TorusOptions::default(), None)
+                .unwrap();
+        assert!(t.base().planar_generator);
+        Surface::from(t)
+    }
+
+    /// The cylinder of `radius` about the z axis from z = -20 to 20.
+    fn cylinder(k: &Kernel, radius: f64) -> Surface {
+        let mut c = Cone::new_cylinder_bounded(
+            Point3::new(0.0, 0.0, -20.0),
+            Vec3::X,
+            Vec3::Y,
+            radius,
+            0.0,
+            360.0,
+            40.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(k).unwrap();
+        let s = Surface::from(c);
+        assert_eq!(s.type_code(), CYLINDER_TYPE);
+        s
+    }
+
+    /// The cone about the z axis whose radius is `10 + z`, from z = -5 to 5.
+    fn cone(k: &Kernel) -> Surface {
+        let mut c = Cone::new_bounded(
+            Point3::new(0.0, 0.0, -5.0),
+            Vec3::X,
+            Vec3::Y,
+            5.0,
+            15.0,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(k).unwrap();
+        let s = Surface::from(c);
+        assert_eq!(s.type_code(), CONE_TYPE);
+        s
+    }
+
+    /// The surface of revolution of the line x = 12 from z = -5 to 5 about the z axis.
+    fn revolved_line(k: &Kernel) -> Surface {
+        let line = NurbCurve::new(
+            vec![
+                CPoint::new(12.0, 0.0, -5.0, 1.0),
+                CPoint::new(12.0, 0.0, 5.0, 1.0),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let mut r = SurfOfRevolution::new(
+            k,
+            Curve::from(BSplineCurve::from_nurb(line, 1, false)),
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        assert!(r.planar_generator());
+        r.make_nurb(k).unwrap();
+        Surface::from(r)
+    }
+
+    /// The curves' points at nine parameters each, to compare two results bit for bit.
+    fn points(k: &Kernel, out: &SurfaceIntersection) -> Vec<Vec<Point3>> {
+        out.curves_3d
+            .iter()
+            .map(|c| {
+                let ivl = c.natural_interval();
+                (0..9)
+                    .map(|i| {
+                        let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 8.0;
+                        c.evaluate_point(k, t).unwrap()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Both orders of `a` and `b` give the same circles about the z axis, one at each
+    /// `(z, rho)` of `want` (from the closed form), as analytic circles: the special case
+    /// ran, not the general intersector, whose curves are traced B-splines.
+    fn assert_same_circles(k: &Kernel, what: &str, a: &Surface, b: &Surface, want: &[(f64, f64)]) {
+        let (da, db) = (
+            a.natural_uv_domain_with_nurb(k).unwrap(),
+            b.natural_uv_domain_with_nurb(k).unwrap(),
+        );
+        let ab = a
+            .global_surface_intersect(k, &da, b, &db, [false; 2], None, None)
+            .unwrap();
+        let ba = b
+            .global_surface_intersect(k, &db, a, &da, [false; 2], None, None)
+            .unwrap();
+        for (order, out) in [("first", &ab), ("second", &ba)] {
+            let kinds: Vec<_> = out
+                .curves_3d
+                .iter()
+                .map(|c| matches!(c.kind(), CurveKind::Ellipse(_)))
+                .collect();
+            assert_eq!(kinds, vec![true; want.len()], "{what}, {order} order: circles");
+            // the closed form's circles: each point's height and distance from the axis. The
+            // circle's centre and radius (from where the generators meet) and its rational
+            // evaluation are each a few rounded operations on coordinates below 20: γ₃₂ of
+            // that size covers 32 of them.
+            let bound = gamma(32) * 20.0;
+            let mut curves = points(k, out);
+            curves.sort_by(|x, y| x[0].z.total_cmp(&y[0].z));
+            for (curve, &(z, rho)) in curves.iter().zip(want) {
+                let off = curve
+                    .iter()
+                    .map(|p| (p.z - z).abs().max((det::hypot(p.x, p.y) - rho).abs()))
+                    .fold(0.0f64, f64::max);
+                eprintln!("{what}, {order} order: circle at z {z}, rho {rho}: off {off:e}");
+                assert!(off <= bound, "{what}, {order} order: {off:e} off z {z}, rho {rho}");
+            }
+        }
+        // the same special case in either order: the same curves bit for bit, the UV curves
+        // swapped
+        assert_eq!(points(k, &ab), points(k, &ba), "{what}: the same curves");
+        assert_eq!(ab.curve_types, ba.curve_types, "{what}");
+        assert_eq!(ab.deviations, ba.deviations, "{what}");
+        for (x, y) in [
+            (&ab.surface1_uv_curves, &ba.surface2_uv_curves),
+            (&ab.surface2_uv_curves, &ba.surface1_uv_curves),
+        ] {
+            let some = |v: &Vec<Option<Curve>>| v.iter().map(Option::is_some).collect::<Vec<_>>();
+            assert_eq!(some(x), some(y), "{what}: the UV curves swapped");
+        }
+    }
+
+    /// A sphere or torus meets a cylinder, a cone, a sphere or a surface of revolution
+    /// about its own axis in the same exact circles whichever surface comes first.
+    #[test]
+    fn coaxial_sphere_and_torus_pairs_take_their_closed_form_in_either_order() {
+        let k = Kernel::default();
+        // sphere x² + y² + z² = 25 and cylinder rho = 3: z = ±4
+        assert_same_circles(
+            &k,
+            "sphere/cylinder",
+            &sphere(&k, 5.0),
+            &cylinder(&k, 3.0),
+            &[(-4.0, 3.0), (4.0, 3.0)],
+        );
+        // the torus (rho - 10)² + z² = 9 and rho = 12: z = ±√5
+        let s5 = 5.0f64.sqrt();
+        assert_same_circles(
+            &k,
+            "torus/cylinder",
+            &torus(&k),
+            &cylinder(&k, 12.0),
+            &[(-s5, 12.0), (s5, 12.0)],
+        );
+        assert_same_circles(
+            &k,
+            "torus/revolved line",
+            &torus(&k),
+            &revolved_line(&k),
+            &[(-s5, 12.0), (s5, 12.0)],
+        );
+        // and rho = 10 + z: 2z² = 9
+        let h = 3.0 / 2.0f64.sqrt();
+        assert_same_circles(
+            &k,
+            "torus/cone",
+            &torus(&k),
+            &cone(&k),
+            &[(-h, 10.0 - h), (h, 10.0 + h)],
+        );
+        // and rho² + z² = 100: 20 rho - 100 = 91
+        let rho: f64 = 191.0 / 20.0;
+        let z = (100.0 - rho * rho).sqrt();
+        assert_same_circles(
+            &k,
+            "torus/sphere",
+            &torus(&k),
+            &sphere(&k, 10.0),
+            &[(-z, rho), (z, rho)],
+        );
+    }
+}
