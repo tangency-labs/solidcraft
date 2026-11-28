@@ -75,6 +75,14 @@ impl Brep {
         core::check_local(self.core(), faces, edges, level)
     }
 
+    /// The corners of face `face`'s surface (an index in the body's face order) where its u and
+    /// v directions are parallel, as points: what the check's first surface test refuses
+    /// (`SmSurface::Test #1 Bad Surf FlatCorner`). Empty when it has none; a corner where a side
+    /// collapses to a point is none. An index past the faces is [`crate::Error::Argument`].
+    pub fn face_flat_corners(&self, face: usize) -> Result<Vec<[f64; 3]>> {
+        core::face_flat_corners(self.core(), face)
+    }
+
     /// [`Brep::check`] of a body nobody else reads, which it takes: the token over this thread's
     /// work ([`crate::stop`]) stops it ([`crate::Error::Cancelled`]). A check left part way may
     /// leave the body's caches half-built, so it runs only on a body it consumes.
@@ -116,6 +124,11 @@ mod tests {
         }
         assert!(matches!(b.check_local(&[6], &[], CheckLevel::All), Err(crate::Error::Argument)));
         assert!(matches!(b.check_local(&[], &[12], CheckLevel::All), Err(crate::Error::Argument)));
+        // a box's faces have square corners; a face past them is an argument error
+        for f in 0..6 {
+            assert!(b.face_flat_corners(f).unwrap().is_empty(), "face {f}");
+        }
+        assert!(matches!(b.face_flat_corners(6), Err(crate::Error::Argument)));
     }
 
     #[test]

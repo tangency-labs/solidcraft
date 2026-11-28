@@ -4,6 +4,7 @@
 use std::fmt::Write as _;
 
 use solidcore::geom::assert_array::{obj_type_string, AssertArray, AssertReport};
+use solidcore::geom::tol::ANG_TOL_DEG;
 use solidcore::topology::brep::validation::{
     check_brep_local, check_brep_scoped, BrepCheck, CheckLevel as KernelCheckLevel,
 };
@@ -17,7 +18,7 @@ use solidcore::SolidError;
 
 use crate::body::Body;
 use crate::order::Order;
-use crate::session::{measure_body, measure_body_mapped};
+use crate::session::{measure_body, measure_body_mapped, read_body};
 use crate::{Error, Result};
 
 /// How many of solidcore's tests to run.
@@ -189,7 +190,36 @@ impl Body {
             answer(unknown, || check_brep_local(k, b, lv, &faces, &edges))
         })?)
     }
+
+    /// The flat corners of record face `face`'s surface (`order`): the corners of its natural
+    /// domain where its u and v derivatives are parallel, to the angle the surface's check holds
+    /// them to ([`ANG_TOL_DEG`]; `Surface::flat_corners`, test #1 of a surface's check), as
+    /// points; empty for a face without a surface or with none. A corner where a derivative
+    /// vanishes (a side collapsed to a point) is no flat corner. The body is only read.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces; the kernel's error.
+    pub fn face_flat_corners(&self, order: &Order, face: usize) -> Result<Vec<[f64; 3]>> {
+        let f = crate::order::face(order, face)?;
+        read_body("face_flat_corners", self, |k, b| {
+            let Some(surface) = b.face(f)?.surface.as_ref() else {
+                return Ok(Vec::new());
+            };
+            let found = surface.flat_corners(k, ANG_TOL_DEG, true)?;
+            let points = found.points.unwrap_or([solidcore::Vec3::UNDEF; 4]);
+            Ok(FLAT_CORNER_BITS
+                .iter()
+                .zip(points)
+                .filter(|(bit, p)| found.flags & **bit != 0 && !p.is_undef())
+                .map(|(_, p)| [p.x, p.y, p.z])
+                .collect())
+        })
+    }
 }
+
+/// [`FlatCorners::flags`](solidcore::surface::surface::p7::FlatCorners::flags)'s bit for each corner of
+/// [`FlatCorners::points`](solidcore::surface::surface::p7::FlatCorners::points), in that order.
+const FLAT_CORNER_BITS: [u32; 4] = [1, 2, 4, 8];
 
 /// The kernel's level for `level`.
 const fn kernel_level(level: CheckLevel) -> KernelCheckLevel {
