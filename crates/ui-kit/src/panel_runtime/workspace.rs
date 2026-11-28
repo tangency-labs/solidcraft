@@ -3415,6 +3415,7 @@ impl WorkspacePanelHost {
         let layout = runtime.layout().layout();
         let mut groups = Vec::new();
         let mut content_actions = Vec::new();
+        let mut content_heading: Option<String> = None;
         let mut tabs = Vec::new();
         match &menu {
             HostMenu::Panel(instance) => {
@@ -3474,6 +3475,7 @@ impl WorkspacePanelHost {
                         groups.push(admitted);
                     }
                 }
+                content_heading = metadata.get(instance).and_then(|presentation| presentation.menu_heading.clone());
                 let actions = metadata.get(instance).into_iter().flat_map(|presentation| &presentation.actions);
                 content_actions.extend(actions.filter(|entry| {
                     !frame.controls.iter().any(|control| {
@@ -3519,13 +3521,23 @@ impl WorkspacePanelHost {
             if !content_actions.is_empty() && !items.is_empty() {
                 items.push(ui_kit::Item::sep());
             }
+            // A heading names the panel's own section of rows.
+            if let Some(heading) = content_heading.as_deref().filter(|_| !content_actions.is_empty()) {
+                items.push(ui_kit::Item::heading(heading));
+            }
             let spec = layout.instance(instance).and_then(|panel| runtime.layout().registry().get(&panel.kind)).ok();
             for action in content_actions {
                 let target = HostControlTarget::Content { instance: instance.clone(), action: action.id.clone() };
                 let registered = spec.and_then(|spec| spec.header_actions.iter().find(|entry| entry.id == action.id));
                 let widget = control_id(runtime, owners, &target);
                 let mut item = panel_menu_item(widget, &action.label, action.enabled);
-                item.icon = registered.map_or("settings", |entry| entry.icon.as_str()).into();
+                // Under a heading, an on/off row with no header icon shows its check where the icon goes.
+                item.icon = match registered {
+                    Some(entry) => entry.icon.as_str(),
+                    None if content_heading.is_some() && action.pressed.is_some() => "",
+                    None => "settings",
+                }
+                .into();
                 item.checked = action.pressed;
                 item.tip.clone_from(&action.disabled_reason);
                 let command = if registered.is_some() {

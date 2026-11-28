@@ -30,6 +30,9 @@
 //!   and on Windows a minidump next to the journal ([`native_paths`]); the next start puts them
 //!   into the unclean exit's report.
 //!
+//! - **Lost graphics devices** ([`device_lost`]): the app closes and starts again by itself, and
+//!   the run that lost its device writes a `device_lost` report first, so the next start offers it.
+//!
 //! Reports are folders `crashes/<time>-<signature>/` holding `report.json`, and when known
 //! `design.sc` (`design.solidcraft` in reports from earlier releases), `replay.json` and `minidump.dmp`. Nothing is ever sent anywhere.
 
@@ -82,7 +85,7 @@ pub struct Build {
 pub struct Summary {
     /// The report's id, which `diagnostics.crash_report` reads.
     pub id: String,
-    /// `command_panic`, `panic`, `kernel_panic_recovered` or `unclean_exit`.
+    /// `command_panic`, `panic`, `kernel_panic_recovered`, `unclean_exit` or `device_lost`.
     pub kind: String,
     /// When the report was first recorded (UTC). Unclean exits are recorded at a later launch,
     /// which may be days after the session ended, rather than at the exact exit time.
@@ -99,6 +102,13 @@ pub struct Summary {
     pub path: String,
     /// `replay.json` and the design (`design.sc`) are there: the crash can be replayed.
     pub replayable: bool,
+    /// The renderer of the run that crashed, as it recorded it ([`set_environment`]), if it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer: Option<String>,
+    /// The graphics failed ([`graphics_failure`]): the device was lost, the run died in a graphics
+    /// startup step, or the native crash was in a graphics driver.
+    #[serde(default)]
+    pub graphics_failure: bool,
 }
 
 struct State {
@@ -468,6 +478,195 @@ pub fn end_session() {
     }
 }
 
+/// The window's graphics device was lost (#4172) and the app is closing to start again: a
+/// `device_lost` report, written now (the next start can't learn the reason any other way), so
+/// the next start offers it with this run's renderer and log as it does a crash. The same loss
+/// again (its signature: the driver's reason, digits ignored) is counted, not written again.
+/// Returns the report's id when one was written.
+pub fn device_lost(reason: &str) -> Option<String> {
+    let state = STATE.get()?;
+    let reason = limited(reason.trim(), MAX_MESSAGE);
+    let said = if reason.is_empty() { "no reason given".to_string() } else { reason.clone() };
+    let p = Panic {
+        message: format!("The graphics device was lost (the graphics driver stopped responding or was reset): {said}"),
+        location: "graphics device lost".into(),
+        thread: std::thread::current().name().unwrap_or("(unnamed)").to_string(),
+        backtrace: Vec::new(),
+        recovered: false,
+        on_pool: false,
+        signature: signature("graphics device lost", &said),
+    };
+    let known = state.known.lock().ok().and_then(|k| k.get(&p.signature).map(|e| e.1.clone()));
+    let (written, on_file) = match known {
+        Some(id) => {
+            bump(&state.dir, &id, 1);
+            (None, Some(id))
+        }
+        None => {
+            let id = write_from_journal(state, "device_lost", Some(&p));
+            (id.clone(), id)
+        }
+    };
+    // Reported (or counted): the journal left behind, should the process end before its clean
+    // exit, is not an unclean exit at the next start.
+    if let Some(id) = &on_file
+        && let Ok(mut j) = state.journal.try_lock()
+    {
+        j.record(&json!({ "reported": id }));
+    }
+    if let Some(id) = &written {
+        solidcraft_geom::note!("SolidCraft graphics: device lost; crash report {}", state.dir.join(id).display());
+    }
+    written
+}
+
+/// The startup steps that are the graphics coming up (egui-wgpu's and the app's): a run that died
+/// in one died in the graphics driver, as far as anyone can tell.
+pub const GRAPHICS_STEPS: &[&str] = &[
+    "graphics instance",
+    "window surface",
+    "adapter request",
+    "adapter chosen",
+    "device creation",
+    "egui renderer (shader compile)",
+    "surface configure",
+    "first frame (present)",
+    "viewport pipelines (shader compile)",
+    "first frame",
+];
+
+/// The start of a native crash's module name (lowercase, no folder) that is a graphics driver
+/// or graphics API runtime: Intel, NVIDIA, AMD, Apple, Mesa, and the APIs' loaders.
+const GRAPHICS_MODULES: &[&str] = &[
+    "igvk",
+    "igd",
+    "ig9icd",
+    "ig7icd",
+    "ig75icd",
+    "igxelp",
+    "igc",
+    "nvogl",
+    "nvwgf",
+    "nvd3dum",
+    "nvldumd",
+    "nvvk",
+    "nvcuda",
+    "atio",
+    "atig",
+    "atiumd",
+    "aticfx",
+    "amdvlk",
+    "amdxc",
+    "amdxx",
+    "vulkan-1",
+    "d3d12",
+    "d3d11",
+    "dxgi",
+    "opengl32",
+    "libgl",
+    "libegl",
+    "libvulkan",
+    "libnvidia",
+    "libagx",
+    "agxmetal",
+    "libmetal",
+    "radeonsi",
+    "iris_dri",
+    "swrast_dri",
+    "libvk_swiftshader",
+];
+
+/// Whether a report (`report.json`) is a graphics failure: a lost device, a run that died in a
+/// graphics startup step ([`GRAPHICS_STEPS`]), or a native crash in a graphics driver
+/// ([`GRAPHICS_MODULES`]).
+pub fn graphics_failure(report: &Value) -> bool {
+    let kind = report.get("kind").and_then(Value::as_str).unwrap_or_default();
+    if kind == "device_lost" {
+        return true;
+    }
+    if kind != "unclean_exit" {
+        return false;
+    }
+    let step = report.get("startup_phase").and_then(|p| p.get("step")).and_then(Value::as_str);
+    if step.is_some_and(|s| GRAPHICS_STEPS.contains(&s)) {
+        return true;
+    }
+    let module = report.get("native").and_then(|n| n.get("module")).and_then(Value::as_str).unwrap_or_default();
+    let short = module.rsplit(['\\', '/']).next().unwrap_or_default().to_ascii_lowercase();
+    !short.is_empty() && GRAPHICS_MODULES.iter().any(|m| short.starts_with(m))
+}
+
+/// The graphics a run recorded ([`set_environment`]): its API, adapter and driver.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Graphics {
+    /// The API as wgpu names it (`Vulkan`, `Dx12`, `Gl`, `Metal`).
+    pub api: String,
+    /// The adapter's name.
+    pub adapter: String,
+    /// `IntegratedGpu`, `DiscreteGpu`, `Cpu`, … when recorded.
+    pub device_type: Option<String>,
+    /// The driver's name and version, when recorded.
+    pub driver: Option<String>,
+}
+
+impl Graphics {
+    /// The API as the Graphics preference names it (`vulkan`, `dx12`, `gl`, `metal`).
+    pub fn api_id(&self) -> Option<&'static str> {
+        match self.api.as_str() {
+            "Vulkan" => Some("vulkan"),
+            "Dx12" => Some("dx12"),
+            "Gl" => Some("gl"),
+            "Metal" => Some("metal"),
+            _ => None,
+        }
+    }
+}
+
+/// The graphics in a renderer line ([`set_environment`]): `Renderer: <API> <adapter>
+/// (<device type>, driver <driver>)[, MSAA <n>x]`, and from earlier releases `Renderer: <API>
+/// <adapter> (<driver>), MSAA <n>x`. None for a line that names no API.
+pub fn graphics(environment: &str) -> Option<Graphics> {
+    let line = environment.trim().strip_prefix("Renderer:")?.trim();
+    let line = match line.rfind(", MSAA ") {
+        Some(i) if line[i..].ends_with('x') => &line[..i],
+        _ => line,
+    };
+    let (api, rest) = line.split_once(' ').unwrap_or((line, ""));
+    if !matches!(api, "Vulkan" | "Dx12" | "Gl" | "Metal" | "BrowserWebGpu") {
+        return None;
+    }
+    let rest = rest.trim();
+    // The last bracketed group, brackets inside it (a driver's `Mesa 25.0 (LLVM 19.1.7)`) kept.
+    let open = rest.strip_suffix(')').and_then(|body| {
+        let mut depth = 0usize;
+        for (i, c) in body.char_indices().rev() {
+            match c {
+                ')' => depth += 1,
+                '(' if depth == 0 => return Some(i),
+                '(' => depth -= 1,
+                _ => {}
+            }
+        }
+        None
+    });
+    let (adapter, inner) = match open {
+        Some(i) => (&rest[..i], Some(&rest[i + 1..rest.len() - 1])),
+        None => (rest, None),
+    };
+    let (device_type, driver) = match inner {
+        Some(inner) => match inner.split_once(", driver ") {
+            Some((t, d)) => (Some(t.trim().to_string()), Some(d.trim().to_string())),
+            None => match inner.strip_prefix("driver ") {
+                Some(d) => (None, Some(d.trim().to_string())),
+                None if inner.ends_with("Gpu") || inner == "Cpu" || inner == "Other" => (Some(inner.to_string()), None),
+                None => (None, Some(inner.trim().to_string())),
+            },
+        },
+        None => (None, None),
+    };
+    Some(Graphics { api: api.to_string(), adapter: adapter.trim().to_string(), device_type, driver: driver.filter(|d| !d.is_empty()) })
+}
+
 /// The panic hook. Returns true when the panic was recorded for a command or the kernel (which
 /// will catch it), so the default "thread panicked" message is not printed.
 fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
@@ -717,7 +916,8 @@ pub(crate) fn command_done(
             recent,
             base: json!("the design as it was when the command started"),
             notes: left_out,
-            fields: serde_json::Map::new(),
+            // This run, as its journal names it: the log the app keeps finds its lines by it.
+            fields: [("run".to_string(), json!({ "pid": std::process::id(), "start": utc(state.started) }))].into_iter().collect(),
             attach: Vec::new(),
         };
         write_report(state, kind, Some(&p), extra);
@@ -1136,6 +1336,12 @@ fn from_journal(j: JournalRead) -> Extra {
         notes.push("the design changed outside commands before this; it cannot be rebuilt from the journal".into());
     }
     let mut fields = serde_json::Map::new();
+    // Which run it was: the log the app keeps finds the run's own lines by them.
+    let pid = j.header.get("pid").and_then(Value::as_u64);
+    let start = j.header.get("start").and_then(Value::as_str);
+    if pid.is_some() || start.is_some() {
+        fields.insert("run".into(), json!({ "pid": pid, "start": start }));
+    }
     if let Some((p, ms)) = j.phase.filter(|(p, _)| p != RUNNING) {
         fields.insert("startup_phase".into(), json!({ "step": p, "ms": ms }));
     }
@@ -1345,6 +1551,13 @@ pub fn list(dir: &Path) -> Vec<Summary> {
                 version: v.get("app").and_then(|a| a.get("version")).and_then(Value::as_str).unwrap_or_default().to_string(),
                 path: folder.to_string_lossy().into_owned(),
                 replayable: folder.join("replay.json").is_file(),
+                renderer: v
+                    .get("system")
+                    .and_then(|s| s.get("environment"))
+                    .and_then(Value::as_str)
+                    .filter(|e| !e.is_empty())
+                    .map(|e| limited(e, 500)),
+                graphics_failure: graphics_failure(&v),
                 id,
             })
         })

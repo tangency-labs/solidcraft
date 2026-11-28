@@ -10,6 +10,8 @@
 #![forbid(unsafe_code)]
 
 mod content;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod http;
 mod schema;
 mod server;
 
@@ -17,6 +19,10 @@ pub use content::Contents;
 pub use content::base64;
 pub use content::image_result;
 pub use content::text_result;
+#[cfg(not(target_arch = "wasm32"))]
+pub use http::HttpConfig;
+#[cfg(not(target_arch = "wasm32"))]
+pub use http::HttpStop;
 pub use schema::Effect;
 pub use schema::check_arguments;
 pub use schema::object;
@@ -28,10 +34,12 @@ pub use server::Info;
 pub use server::PROTOCOL_VERSION;
 pub use server::ProgressReporter;
 pub use server::Reference;
+pub use server::ResourceError;
 pub use server::SUPPORTED_VERSIONS;
 pub use server::Server;
 pub use server::Tools;
 pub use server::cancelled_notification;
+pub use server::notification;
 pub use server::progress_notification;
 pub use server::progress_token;
 pub use server::read_message;
