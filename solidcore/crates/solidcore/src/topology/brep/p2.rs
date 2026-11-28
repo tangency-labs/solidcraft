@@ -2311,14 +2311,18 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
 }
 
 /// Whether `ray` (a unit direction) meets edge `e` of `b` at its curve parameter `t` too close
-/// to the edge's tangent to cross it: within the tolerance (the edge's, at least
-/// `ray_zone_tol_3d`) of the edge everywhere near the hit. A ray at angle `theta` to a curve
-/// of curvature `kappa` stays within `tol` of it while `sin theta <= sqrt(2 tol kappa)`: a
-/// tangent line is within `tol` of the curve for an arc of `s` with `s^2 kappa / 2 <= tol`,
-/// over which the tangent turns by `s kappa`, and a chord at that angle is at most its sagitta
-/// `theta^2 / (2 kappa) <= tol` inside. Its direction across the edge is then a rounding
-/// error, and the edge's sectors would classify it either way. A straight edge (`kappa = 0`)
-/// is grazed only along its own line, which `radial_sector_of_curve_classify` refuses.
+/// to the edge's tangent for the hit to say which side the ray crosses to. The hit is found
+/// to the ray's tolerance `ray_zone_tol_3d`. Near a tangency the ray's distance to a curve of
+/// curvature `kappa` grows as `s^2 kappa / 2` along an arc `s`, so the hit is fixed only to an
+/// arc of `sqrt(2 tol / kappa)`, over which the tangent turns by `sqrt(2 tol kappa)`. A ray
+/// with `sin theta <= sqrt(2 tol kappa)` to the tangent at the hit is therefore within that
+/// uncertainty of the tangent at some point near it (or is a chord whose sagitta
+/// `theta^2 / (2 kappa)` is at most `tol`). Its direction across the edge is then a rounding
+/// error, and the edge's sectors would classify it either way. The edge's own tolerance is
+/// not used: it says where the edge may lie, not how well the hit was found, and a large one
+/// (a body the validity check is to report) would refuse rays that cross the edge.
+/// A straight edge (`kappa = 0`) is grazed only along its own line, which
+/// `radial_sector_of_curve_classify` refuses.
 /// A wire edge, which classifies by its region alone, and an edge whose curve does not
 /// evaluate there (the kernel's status) are not grazed.
 ///
@@ -2351,9 +2355,8 @@ fn ray_grazes_edge(
         return Ok(false);
     }
     let curvature = d1.cross(d2).length() / (speed * speed * speed);
-    let tolerance = record.tolerance.max(ray_zone_tol_3d);
     let sine = (d1 / speed).cross(ray).length();
-    Ok(sine <= (2.0 * tolerance * curvature).sqrt())
+    Ok(sine <= (2.0 * ray_zone_tol_3d * curvature).sqrt())
 }
 
 // ---- geometry replacement -----------------------------------------------------------------
