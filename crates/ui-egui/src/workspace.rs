@@ -693,7 +693,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "INSERT",
         panel: "LIBRARY",
         promoted: 3,
-        ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert", "pulley.insert"],
+        ids: &["parts.fastener", "parts.library", "parts.resize", "gear.insert", "parts.insert", "gear.edit", "pulley.insert"],
     },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },

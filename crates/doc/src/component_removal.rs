@@ -141,6 +141,7 @@ impl Document {
         }
         self.assembly.rigid_groups.retain(|g| !inside.contains(&g.component));
         self.parts.retain(|c, _| !removed_components.contains(c));
+        self.gears.retain(|c, _| !removed_components.contains(c));
         self.links.retain(|c, _| !removed_components.contains(c));
         self.remove_configuration_components(&components);
         let mut removed =

@@ -140,6 +140,7 @@ pub(crate) use file::up_form;
 pub(crate) use file::usable_path;
 pub use file::use_import_cache_dir;
 pub use frame::member_section_view;
+pub use gears::gear_diameters;
 pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
@@ -192,6 +193,8 @@ pub mod frame;
 mod frame_end_cap;
 mod frame_gusset;
 mod frame_rotate_member;
+mod gear_profile;
+mod gears;
 pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
@@ -236,6 +239,8 @@ pub(crate) use measure_sel::shape_of;
 pub(crate) use measure_shape::Shape;
 pub(crate) use point_cloud::filters as point_cloud_filters;
 pub(crate) use script::step_params;
+#[cfg(test)]
+mod gears_tests;
 #[cfg(test)]
 mod kernel_heal_tests;
 mod panels;
@@ -693,6 +698,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
+    v.extend(gears::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(pulleys::COMMANDS.iter());
     v.extend(shaft_spline::COMMANDS.iter());

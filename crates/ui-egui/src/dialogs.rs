@@ -576,6 +576,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             InsertDrawing(crate::dialogs_insert_drawing::Place),
             /// Insert Airfoil: how the picked section goes in (`dialogs_insert_airfoil`).
             InsertAirfoil(crate::dialogs_insert_airfoil::Airfoil),
+            /// Insert Gear and Edit Gear (`dialogs_gear`).
+            Gear(crate::dialogs_gear::Gear),
             /// Shaft Spline: a splined shaft, its hub or both (`dialogs_shaft_spline`).
             ShaftSpline(Box<crate::dialogs_shaft_spline::Spline>),
             /// Plastic features (`dialogs_plastic`).
@@ -1507,6 +1509,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_motion::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
                     .or_else(|| crate::dialogs_part_size::start(app, id))
+                    .or_else(|| crate::dialogs_gear::start(app, id))
                     .or_else(|| crate::dialogs_pulley::start(app, id))
                     .or_else(|| crate::sketch_text::start(app, id))
                     .or_else(|| crate::sketch_text_move::start(app, id))
@@ -1822,6 +1825,8 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
+            // Web previews run on the window thread: a helical gear's sweep can outlast a frame.
+            Kind::Gear(g) => return !(cfg!(target_arch = "wasm32") && g.helix_angle != 0.0),
             Kind::Frame(_)
             | Kind::EndCap(_)
             | Kind::Dogbone(_)
@@ -3681,6 +3686,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
         Kind::InsertAirfoil(_) => crate::dialogs_insert_airfoil::title(),
+        Kind::Gear(g) => crate::dialogs_gear::title(g),
         Kind::ShaftSpline(_) => crate::dialogs_shaft_spline::title(),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
@@ -8805,6 +8811,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::UrdfExport(_) | Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
+        Kind::Gear(g) => return crate::dialogs_gear::commands(g),
         Kind::ShaftSpline(k) => return crate::dialogs_shaft_spline::commands_with(app, k, &d.inputs),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),

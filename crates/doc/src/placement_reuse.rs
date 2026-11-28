@@ -159,6 +159,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         sheet,
         plastic,
         parts,
+        gears,
         links,
         // What a file keeps of its links; a design in memory holds their bodies either way.
         linked_bodies_left_out: _,
@@ -211,6 +212,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *sheet == b.sheet
         && *plastic == b.plastic
         && *parts == b.parts
+        && *gears == b.gears
         && *links == b.links
         && *configs == b.configs
         && *favorites == b.favorites

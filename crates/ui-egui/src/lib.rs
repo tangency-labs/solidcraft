@@ -66,6 +66,7 @@ pub mod dialogs_dogbone;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
+pub mod dialogs_gear;
 pub mod dialogs_gusset;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;

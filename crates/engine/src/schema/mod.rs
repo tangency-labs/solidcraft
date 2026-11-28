@@ -100,6 +100,7 @@ pub mod file;
 pub mod file_library;
 pub mod frame;
 pub mod frame_plate;
+pub mod gears;
 pub mod gusset;
 pub mod hole_stacks;
 pub mod insert_mesh;
