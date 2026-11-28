@@ -679,8 +679,11 @@ fn split_by_arc(
 /// stored net rounds its control points by a few ulps of the arc's size (about 3,
 /// so under 1e-15 each), so the stored arcs' gap is within 1e-14 of `gap`; the
 /// bound must hold it and stay within 1e-12 of it.
-fn check_arc_split(make: impl Fn(&Kernel, f64) -> solidcore::curve::curve::Curve, kind: &str) {
-    let gap = 1e-6;
+fn check_arc_split(
+    make: impl Fn(&Kernel, f64) -> solidcore::curve::curve::Curve,
+    kind: &str,
+    gap: f64,
+) {
     let (gaps, b, witness) = split_by_arc(make, gap);
     assert!(
         (witness - gap).abs() <= 1e-14,
@@ -695,21 +698,21 @@ fn check_arc_split(make: impl Fn(&Kernel, f64) -> solidcore::curve::curve::Curve
 fn faces_split_by_a_hyperbola_report_its_gap() {
     use solidcore::curve::hyperbola::Hyperbola;
     use solidcore::geom::extent1d::Extent1d;
-    check_arc_split(
-        |_, dx| {
-            Hyperbola::new(
-                solidcore::math::Point3::new(dx, 0.0, 0.0),
-                Vec3::X,
-                Vec3::Y,
-                Extent1d::from_min_max(-1.0, 1.0),
-                2.0,
-                1.0,
-                3,
-            )
-            .into()
-        },
-        "SmHyperbola_TYPE",
-    );
+    let hyperbola = |_: &Kernel, dx| {
+        Hyperbola::new(
+            solidcore::math::Point3::new(dx, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(-1.0, 1.0),
+            2.0,
+            1.0,
+            3,
+        )
+        .into()
+    };
+    for gap in [1e-6, 2e-6] {
+        check_arc_split(hyperbola, "SmHyperbola_TYPE", gap);
+    }
 }
 
 #[test]
@@ -729,6 +732,7 @@ fn faces_split_by_a_parabola_report_its_gap() {
             .into()
         },
         "SmParabola_TYPE",
+        1e-6,
     );
 }
 
@@ -752,6 +756,7 @@ fn faces_split_by_an_ellipse_report_its_gap() {
             .into()
         },
         "SmEllipse_TYPE",
+        1e-6,
     );
 }
 
