@@ -958,6 +958,42 @@ fn a_socket_is_blocked_by_a_rib_in_its_path_and_not_by_a_wall_beside_it() {
     }
 }
 
+/// Socket Reach over a bolt head with mesh bodies about: one far from the socket's space is
+/// left out, as a solid there would be; one in its way cannot be measured, so the socket is not
+/// reported clear and the body is listed as unchecked.
+#[test]
+fn a_mesh_body_in_the_sockets_way_keeps_it_from_being_reported_clear() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-socket-mesh-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = |name: &str, corner: [f64; 3]| {
+        let path = dir.join(format!("{name}.stl"));
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 6, "width": 6, "height": 6, "corner": corner, "body_name": name}));
+        run(&mut part, "file.export", json!({"path": path.to_string_lossy()}));
+        path
+    };
+    let (far, near) = (stl("Far", [80.0, 40.0, 0.0]), stl("Near", [27.0, 27.0, 20.0]));
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 100, "width": 60, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 30, 5], "radius": 6.5, "height": 5, "operation": "new", "body_name": "Head"}));
+    let reach = |s: &mut Session| run(s, "inspect.socket_reach", json!({"edge": [36.5, 30, 10], "diameter": 19, "length": 30}));
+    let meshes = |s: &Session| s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect::<Vec<_>>();
+    run(&mut s, "file.insert_mesh", json!({"path": far.to_string_lossy()}));
+    let far_name = meshes(&s);
+    assert_eq!(far_name.len(), 1, "the far cube is a mesh body");
+    let clear = reach(&mut s);
+    assert_eq!((clear["clear"].clone(), clear["unchecked"].clone()), (json!(true), json!([])), "far from the socket: {clear}");
+    run(&mut s, "file.insert_mesh", json!({"path": near.to_string_lossy()}));
+    let near_name: Vec<String> = meshes(&s).into_iter().filter(|n| !far_name.contains(n)).collect();
+    let _ = std::fs::remove_dir_all(&dir);
+    let unsure = reach(&mut s);
+    assert_eq!(unsure["clear"], json!(false), "a mesh body in the way is not measured: {unsure}");
+    assert_eq!(unsure["blocked"], json!([]), "{unsure}");
+    let rows: Vec<&str> = unsure["unchecked"].as_array().into_iter().flatten().filter_map(|u| u["body"].as_str()).collect();
+    assert_eq!(rows, near_name, "only the cube in the way: {unsure}");
+}
+
 /// #22050: a tenon seated flush inside a matching slot/window (nominally coincident faces,
 /// vertices within ~3e-5 mm) is flush contact (0 mm), not left in `unchecked`, while a tenon
 /// that actually penetrates the slot wall is reported as an overlap (never falsely cleared),

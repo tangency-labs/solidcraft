@@ -24,6 +24,7 @@ const CONTACT_VOLUME: f64 = 0.01;
 const MAX_BODIES: usize = 20_000;
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.socket_reach", "Socket Reach", crate::checked!("inspect.socket_reach", socket_reach))
+    .at("SOLID", "INSPECT")
     .icon("interference")
     .noundo()
     .read_only()
@@ -33,8 +34,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.socket_reach",
         "edge: [x,y,z] (a point on a circular edge: a hole's rim, a bolt head's or a nut's top edge); diameter: mm (the socket's outside diameter); \
          length: mm (how far along the axis to check, from the edge's plane); flip?: bool (approach from the other side; default: the side the edge has no material on); \
          ignore?: [bodies] (bodies the socket may overlap, such as the fastener) \
-         → origin (the edge's centre), direction (unit, the way the socket's space runs), diameter_mm, length_mm, clear: bool, \
-         blocked: [{body, volume_mm3, from_mm (along the axis from the edge's plane), bbox}] (largest first), unchecked: [{body, reason}] (mesh bodies). \
+         → origin (the edge's centre), direction (unit, the way the socket's space runs), diameter_mm, length_mm, clear: bool (nothing blocks it and no body that may reach into it went unchecked), \
+         blocked: [{body, volume_mm3, from_mm (along the axis from the edge's plane), bbox}] (largest first), unchecked: [{body, reason}] (mesh bodies near the socket, overlaps that failed). \
          Overlaps are measured on the exact faces; nothing is added to the design",
     )];
 
@@ -105,13 +106,14 @@ fn socket_reach(s: &mut Session, p: &Value) -> Result<Value> {
         if ignore.contains(&b.name) {
             continue;
         }
-        if b.body.is_mesh() {
-            unchecked.push(Unchecked { body: b.name.clone(), reason: "mesh body: not checked".into() });
+        // A body whose exact box stays clear of the space's cannot reach into it (a mesh body's
+        // box is its own outline's). A box the kernel cannot give rules nothing out: the body is
+        // intersected.
+        if b.body.exact_bounds().is_ok_and(|bounds| solidcraft_geom::mesh_distance::box_gap(&bounds, &space_box) > 0.0) {
             continue;
         }
-        // A body whose exact box stays clear of the space's cannot reach into it. A box the
-        // kernel cannot give rules nothing out: the body is intersected.
-        if b.body.exact_bounds().is_ok_and(|bounds| solidcraft_geom::mesh_distance::box_gap(&bounds, &space_box) > 0.0) {
+        if b.body.is_mesh() {
+            unchecked.push(Unchecked { body: b.name.clone(), reason: "mesh body: not checked".into() });
             continue;
         }
         let shared = match solidcraft_kernel::boolean(&b.body, &space, solidcraft_kernel::BoolOp::Intersect) {
@@ -143,7 +145,8 @@ fn socket_reach(s: &mut Session, p: &Value) -> Result<Value> {
         direction: [direction.x, direction.y, direction.z],
         diameter_mm: diameter,
         length_mm: length,
-        clear: blocked.is_empty(),
+        // Clear only when nothing blocks it and no body that may reach into it went unchecked.
+        clear: blocked.is_empty() && unchecked.is_empty(),
         blocked,
         unchecked,
     };
