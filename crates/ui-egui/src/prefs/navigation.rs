@@ -139,15 +139,20 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         crate::scenario::publish_target("prefs:upright_orbit_unrolls", unrolls.rect);
         let mark = setting::mark_orbit_point(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.mark_orbit_point.help"));
         crate::scenario::publish_target("prefs:mark_orbit_point", mark.rect);
-        ui.horizontal_wrapped(|ui| {
-            setting::radial_context_menu(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.navigation.radial_help"));
-            let customize = ui_kit::button(ui, app.tr("radial.customize"), ui_kit::Button::Normal);
-            crate::scenario::publish_target("prefs:radial_customize", customize.rect);
-            if customize.clicked() {
-                app.menu.radial_editor = true;
-                app.menu.radial_editor_sketch = app.session.active_sketch.is_some();
-            }
-        });
+        let radial_label = solidcraft_ui_text::tr_label("Radial context menu");
+        if ui_kit::settings_search::visible(ui, &[radial_label, app.tr("radial.customize")]) {
+            ui_kit::settings_search::push_passthrough(ui);
+            ui.horizontal_wrapped(|ui| {
+                setting::radial_context_menu(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.navigation.radial_help"));
+                let customize = ui_kit::button(ui, app.tr("radial.customize"), ui_kit::Button::Normal);
+                crate::scenario::publish_target("prefs:radial_customize", customize.rect);
+                if customize.clicked() {
+                    app.menu.radial_editor = true;
+                    app.menu.radial_editor_sketch = app.session.active_sketch.is_some();
+                }
+            });
+            ui_kit::settings_search::pop_passthrough(ui);
+        }
         setting::quick_menu_after_selection(app, ui);
         let label = app.tr("Middle double-click");
         let width = ui_kit::ContentWidth::label(ui, label);
