@@ -166,6 +166,26 @@ pub(crate) fn bottom_readout_rect(app: &SolveApp, mut viewport: Rect) -> Rect {
     viewport
 }
 
+/// The panels along the left of the shared host this frame: the docked ones and a floating
+/// Browser in the left half. Read from the host's layout, which is there before the view paints
+/// (`shell.browser` is only filled in after it).
+pub(crate) fn left_panels(app: &SolveApp) -> Vec<Rect> {
+    use solidcraft_engine::panels::Zone;
+    let Some(frame) = app.universal_panel_frame() else { return Vec::new() };
+    let middle = app.viewport.rect.map_or(f32::INFINITY, |view| view.center().x);
+    frame
+        .layout
+        .sections
+        .iter()
+        .filter(|section| {
+            let browser = matches!(section.instance.0.as_str(), "browser" | "render-browser");
+            section.zone == Zone::Left || (section.zone == Zone::Floating && browser)
+        })
+        .map(|section| crate::panel_runtime::egui_rect(section.outer))
+        .filter(|bounds| bounds.is_positive() && bounds.center().x < middle)
+        .collect()
+}
+
 /// Tool sheets may cover Browser and History, while shell chrome and Assistant stay clear.
 /// Assistant's outside-rail exception stays in its owner.
 pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {

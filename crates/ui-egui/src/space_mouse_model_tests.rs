@@ -269,35 +269,74 @@ fn the_corner_picture_goes_where_it_is_told_and_clears_the_bars() {
     let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
     let size = egui::vec2(160.0, 120.0);
     // Free: lower left for Current and Left, lower right for Right.
-    assert_eq!(corner_rect(view, Current, &[]).left_bottom(), egui::pos2(12.0, 588.0));
-    assert_eq!(corner_rect(view, Left, &[]).left_bottom(), egui::pos2(12.0, 588.0));
-    assert_eq!(corner_rect(view, Right, &[]).right_bottom(), egui::pos2(788.0, 588.0));
+    assert_eq!(corner_rect(view, Current, &[], &[]).left_bottom(), egui::pos2(12.0, 588.0));
+    assert_eq!(corner_rect(view, Left, &[], &[]).left_bottom(), egui::pos2(12.0, 588.0));
+    assert_eq!(corner_rect(view, Right, &[], &[]).right_bottom(), egui::pos2(788.0, 588.0));
     // The History bar along the bottom pushes each one up to clear it.
     let history = egui::Rect::from_min_max(egui::pos2(0.0, 556.0), egui::pos2(800.0, 596.0));
     for position in [Current, Left, Right] {
-        let rect = corner_rect(view, position, &[history]);
+        let rect = corner_rect(view, position, &[history], &[]);
         assert_eq!(rect.size(), size);
         assert!(!rect.intersects(history) && rect.bottom() <= history.top() - 12.0 + f32::EPSILON, "{position:?}");
     }
     // A bar that does not reach the picture leaves it where it was.
     let elsewhere = egui::Rect::from_min_max(egui::pos2(300.0, 556.0), egui::pos2(500.0, 596.0));
     for position in [Current, Left, Right] {
-        assert_eq!(corner_rect(view, position, &[elsewhere]), corner_rect(view, position, &[]));
+        assert_eq!(corner_rect(view, position, &[elsewhere], &[]), corner_rect(view, position, &[], &[]));
     }
     // The navigation bar in the middle of a narrow view is not covered either, nor is anything else stacked.
     let narrow = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(420.0, 600.0));
     let navigation = egui::Rect::from_min_max(egui::pos2(100.0, 520.0), egui::pos2(330.0, 560.0));
     let history = egui::Rect::from_min_max(egui::pos2(0.0, 566.0), egui::pos2(420.0, 600.0));
     for position in [Left, Right] {
-        let rect = corner_rect(narrow, position, &[history, navigation]);
+        let rect = corner_rect(narrow, position, &[history, navigation], &[]);
         assert!(narrow.contains_rect(rect), "{position:?} stays inside the view");
         assert!(!rect.intersects(history) && !rect.intersects(navigation), "{position:?} clears both bars: {rect:?}");
     }
     // A view narrower than the picture keeps it at the left edge rather than outside.
     let tiny = egui::Rect::from_min_size(egui::pos2(50.0, 0.0), egui::vec2(100.0, 400.0));
-    assert!(corner_rect(tiny, Right, &[]).left() >= tiny.left());
+    assert!(corner_rect(tiny, Right, &[], &[]).left() >= tiny.left());
     // An empty bar is no bar.
-    assert_eq!(corner_rect(view, Left, &[egui::Rect::NOTHING]), corner_rect(view, Left, &[]));
+    assert_eq!(corner_rect(view, Left, &[egui::Rect::NOTHING], &[]), corner_rect(view, Left, &[], &[]));
+}
+
+/// Left Viewport above the History card, and right of a Browser grown down over its corner, the
+/// same margin from the Browser as from the window's edge; a short Browser leaves it at the edge.
+/// The other positions stay where they are told.
+#[test]
+fn left_viewport_moves_right_of_a_browser_grown_down_over_its_corner() {
+    use crate::prefs::SpaceMouseGhost::{LeftViewport, LeftWindow, RightViewport};
+    // The view above the History card, as `shell::bottom_readout_rect` leaves it.
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 556.0));
+    let long = egui::Rect::from_min_max(egui::pos2(8.0, 8.0), egui::pos2(260.0, 548.0));
+    let short = egui::Rect::from_min_max(egui::pos2(8.0, 8.0), egui::pos2(260.0, 300.0));
+    let alone = corner_rect(view, LeftViewport, &[], &[]);
+    assert_eq!(alone.left_bottom(), egui::pos2(12.0, 544.0));
+    let beside = corner_rect(view, LeftViewport, &[], &[long]);
+    assert_eq!(beside.left_bottom(), egui::pos2(272.0, 544.0), "12 from the Browser, still above History");
+    assert!(!beside.intersects(long));
+    assert_eq!(corner_rect(view, LeftViewport, &[], &[short]), alone, "a short Browser leaves it at the edge");
+    assert_eq!(corner_rect(view, LeftViewport, &[], &[egui::Rect::NOTHING]), alone);
+    // Left Window sits under the Browser by choice; Right Viewport is not near it.
+    assert_eq!(corner_rect(view, LeftWindow, &[], &[long]), corner_rect(view, LeftWindow, &[], &[]));
+    assert_eq!(corner_rect(view, RightViewport, &[], &[long]), corner_rect(view, RightViewport, &[], &[]));
+    // A Browser as wide as the view keeps the picture inside it.
+    let wide = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(790.0, 556.0));
+    assert!(view.contains_rect(corner_rect(view, LeftViewport, &[], &[wide])));
+}
+
+/// A bar that moves the Left Viewport picture up can bring it under a short Browser that was clear
+/// of the corner: it then moves right of the Browser too, and stays clear of the bar.
+#[test]
+fn a_bar_that_lifts_the_picture_under_a_short_browser_moves_it_right_of_it() {
+    use crate::prefs::SpaceMouseGhost::LeftViewport;
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 556.0));
+    let short = egui::Rect::from_min_max(egui::pos2(8.0, 8.0), egui::pos2(260.0, 300.0));
+    let notice = egui::Rect::from_min_max(egui::pos2(0.0, 300.0), egui::pos2(300.0, 556.0));
+    let rect = corner_rect(view, LeftViewport, &[notice], &[short]);
+    assert_eq!(rect.left_bottom(), egui::pos2(272.0, 288.0), "12 right of the Browser, 12 above the bar");
+    assert!(!rect.intersects(short) && !rect.intersects(notice));
+    assert!(view.contains_rect(rect));
 }
 
 #[test]
@@ -308,7 +347,7 @@ fn stacked_bars_in_a_short_view_do_not_push_the_picture_out_of_it() {
     let navigation = egui::Rect::from_min_max(egui::pos2(0.0, 130.0), egui::pos2(500.0, 170.0));
     let chip = egui::Rect::from_min_max(egui::pos2(0.0, 80.0), egui::pos2(500.0, 120.0));
     for position in [LeftViewport, RightViewport, LeftWindow] {
-        let rect = corner_rect(view, position, &[history, navigation, chip]);
+        let rect = corner_rect(view, position, &[history, navigation, chip], &[]);
         assert!(rect.top() >= view.top() && view.contains_rect(rect), "{position:?}: {rect:?} is outside {view:?}");
     }
 }

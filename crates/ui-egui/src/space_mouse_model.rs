@@ -204,10 +204,12 @@ const CORNER: egui::Vec2 = egui::vec2(160.0, 120.0);
 
 /// Where the corner picture sits in `view`: the two left positions at its lower left, the right one
 /// at its lower right, each a margin in from the edge (the caller passes the viewport area for the
-/// Viewport positions and the whole window for Left Window). Any of `obstacles` (the History bar,
-/// the navigation bar, the agent chip) that would cover it moves it up to just above them, and it
-/// stays inside `view`.
-pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGhost, obstacles: &[egui::Rect]) -> egui::Rect {
+/// Viewport positions and the whole window for Left Window, each above the History bar). Left
+/// Viewport moves right of any of `beside` (the panels along the left, such as a Browser grown
+/// down to the bottom) that would cover it, the same margin from its edge. Any of `obstacles` (the
+/// navigation bar, the agent chip) that would cover it moves it up to just above them, then it is
+/// checked against the panels again. It stays inside `view`.
+pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGhost, obstacles: &[egui::Rect], beside: &[egui::Rect]) -> egui::Rect {
     use crate::prefs::SpaceMouseGhost;
     const MARGIN: f32 = 12.0;
     let x = match position {
@@ -215,9 +217,27 @@ pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGh
         SpaceMouseGhost::RightViewport => (view.right() - MARGIN - CORNER.x).max(view.left() + MARGIN),
     };
     let mut rect = egui::Rect::from_min_size(egui::pos2(x, view.bottom() - MARGIN - CORNER.y), CORNER);
-    for _ in 0..obstacles.len() {
+    // A move up can bring it under a panel again, and a move right under a bar: each is checked
+    // after every move. Each kind of move is counted, so this ends.
+    let (mut ups, mut rights) = (0, 0);
+    loop {
+        if position == SpaceMouseGhost::LeftViewport
+            && rights < beside.len() * (obstacles.len() + 1)
+            && let Some(panel) = beside.iter().find(|panel| panel.is_positive() && panel.intersects(rect))
+        {
+            let right = (panel.right() + MARGIN).min(view.right() - MARGIN - CORNER.x).max(view.left() + MARGIN);
+            if right > rect.left() {
+                rect = rect.translate(egui::vec2(right - rect.left(), 0.0));
+                rights += 1;
+                continue;
+            }
+        }
+        if ups >= obstacles.len() {
+            break;
+        }
         let Some(blocking) = obstacles.iter().find(|bar| bar.is_positive() && bar.intersects(rect)) else { break };
         rect = rect.translate(egui::vec2(0.0, blocking.top() - MARGIN - rect.bottom()));
+        ups += 1;
     }
     // Stacked obstacles in a short view must not push it out of the top.
     rect.translate(egui::vec2(0.0, (view.top() - rect.top()).max(0.0)))
