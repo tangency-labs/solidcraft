@@ -1741,10 +1741,14 @@ pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
             unlink(&mut v.intersector_mut().through_points, through);
 
             // mark the last throughParameter distance when extension clipping
-            if v.intersector().doing_extension_clipping && v.intersector().through_points.is_empty()
-            {
+            if v.intersector().through_points.is_empty() {
                 let param = v.intersector().point(through)?.curve_parameter;
-                v.intersector_mut().last_through_parameter = param;
+                // Not upstream (#2500, SolidCraft #19684): where the traced curve ends,
+                // clipping or not, for the closure of its extension past the end
+                v.intersector_mut().traced_end_parameter = Some(param);
+                if v.intersector().doing_extension_clipping {
+                    v.intersector_mut().last_through_parameter = param;
+                }
             }
 
             // remember that a through point was hit

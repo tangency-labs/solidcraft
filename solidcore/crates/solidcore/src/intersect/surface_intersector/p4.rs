@@ -2081,6 +2081,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     }
     // Not upstream (#2500): an extension past the end stops back at the start
     v.intersector_mut().extension_closed = false;
+    v.intersector_mut().traced_end_parameter = None;
     if v.intersector().extension_stops_on_closure
         && opts.extend_after_end
         && v.intersector().end_point.is_none()
@@ -2114,8 +2115,12 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     // of the gap), for the extension back from the start below
     let forward_closed = traced && v.intersector().extension_closed;
     if forward_closed {
-        // the extension past the end came back to the start: half of it
-        let from = v.intersector().last_through_parameter;
+        // the extension past the end came back to the start: half of its run from the
+        // traced curve's end (SolidCraft #19684: not `last_through_parameter`, which only
+        // an arc's clipped extension records; elsewhere it read 0, the start, and a closed
+        // run round a spline kept half of the whole curve, dropping the end of the edge's
+        // own span). A trace that never reached its last through point ends at its start.
+        let from = v.intersector().traced_end_parameter.unwrap_or(0.0);
         keep_half_of_closed_extension(v, from)?;
     }
     v.intersector_mut().extension_closes_at = None;
