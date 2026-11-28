@@ -459,6 +459,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "angle: expr; ",
             "direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); ",
             "pivot?: point ref (only with direction_only; vertex, sketch point, construction point); ",
+            "through_axis?: bool (default false: the base turns about the axis where it is; true: the base is first brought onto the axis, so the plane goes through it even when it is off the base; not with direction_only); ",
             "name?",
         )),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face)).begins_edit()
@@ -4673,6 +4674,13 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
         None => None,
     };
+    if p.get("through_axis").is_some_and(|v| !v.is_boolean() && !v.is_null()) {
+        return Err(bad(cmd, "`through_axis` must be true or false"));
+    }
+    let through_axis = crate::params::bool_(p, "through_axis").unwrap_or(false);
+    if through_axis && direction_only {
+        return Err(bad(cmd, "`through_axis` and `direction_only` exclude each other: pick one"));
+    }
     let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(base),
         axis_origin: axis_origin.clone(),
@@ -4681,6 +4689,7 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         line: line.clone(),
         direction_only,
         pivot: pivot.clone(),
+        through_axis,
     };
     // No reference plane, with a body edge as the axis: a flat face that meets the edge, so the
     // plane goes through the edge and the angle is measured from that face (#20233).

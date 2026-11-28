@@ -199,9 +199,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, through_axis, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
             direction_only: bool = false => *direction_only,
+            // A new plane starts with it on (#6180), see `start`.
+            through_axis: bool = false => *through_axis,
         } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
         TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
@@ -7981,7 +7983,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { direction_only, .. } => {
+        Kind::AnglePlane { direction_only, through_axis, .. } => {
             // With no plane picked, a body edge as the axis is enough: the command measures the
             // angle from a flat face along the edge (#20233).
             let edge_only = sels(d, 0).is_empty() && matches!(sels(d, 1).first(), Some(Sel::Edge { .. }));
@@ -7998,6 +8000,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = json!({"axis": axis, "direction_only": direction_only});
             if !edge_only {
                 p["base"] = plane_arg(app, sels(d, 0).first())?;
+            }
+            // Sent only when it applies: direction only wins, as in the dense form (#6180).
+            if *through_axis && !*direction_only && !edge_only {
+                p["through_axis"] = json!(true);
             }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
