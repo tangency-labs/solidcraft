@@ -152,11 +152,46 @@ impl TessPlan {
     /// [`TessError::TooManyVertices`] for a mesh with more vertices than a `u32` index names:
     /// none is numbered past `u32::MAX`, so no two vertices share an index.
     pub fn welded(&self) -> Result<(WeldedMesh, Vec<RefusedFace>)> {
+        self.welded_with_parallel(self.parallel_eval())
+    }
+
+    pub(crate) fn welded_with_parallel(
+        &self,
+        parallel: bool,
+    ) -> Result<(WeldedMesh, Vec<RefusedFace>)> {
+        let evaluated = crate::par::map("face welding evaluation", &self.faces, parallel, |f| {
+            let nodes = self.nodes(f);
+            Ok((nodes.positions, nodes.failure))
+        });
+        let mut total_tris = 0usize;
+        let mut est_verts = 0usize;
+        let mut est_shared = 0usize;
+        for (f, res) in self.faces.iter().zip(&evaluated) {
+            if let Ok((positions, None)) = res {
+                let nodes = positions.len();
+                let valid = f
+                    .triangles
+                    .iter()
+                    .filter(|t| t.iter().all(|&i| (i as usize) < nodes))
+                    .count();
+                total_tris = total_tris.saturating_add(valid);
+                let shared_n = f.fixed.len().min(nodes);
+                est_shared = est_shared.saturating_add(shared_n / 2);
+                est_verts = est_verts.saturating_add(nodes - shared_n);
+            }
+        }
         let mut out = WeldedMesh::default();
+        let _ = out
+            .positions
+            .try_reserve(est_verts.saturating_add(est_shared));
+        let _ = out.triangles.try_reserve_exact(total_tris);
+        let _ = out.tri_face.try_reserve_exact(total_tris);
+        let _ = out.edges.try_reserve_exact(self.edges.len());
         let mut refused = Vec::new();
         // The shared nodes so far, by position bit for bit (-0.0 as 0.0). Only looked up: the
         // numbering follows the faces' order.
         let mut shared: BitsMap<[u64; 3], u32> = BitsMap::default();
+        let _ = shared.try_reserve(est_shared);
         let key = |p: Vec3| [p.x, p.y, p.z].map(|x| (x + 0.0).to_bits());
         let push = |positions: &mut Vec<Vec3>, p: Vec3| -> Result<u32> {
             let i = vertex_index(positions.len())?;
@@ -174,17 +209,26 @@ impl TessPlan {
             shared.insert(key(p), id);
             Ok(id)
         };
-        for f in &self.faces {
-            let nodes = self.nodes(f);
-            if let Some(reason) = nodes.failure {
+        for (f, res) in self.faces.iter().zip(evaluated) {
+            let (positions, failure) = match res {
+                Ok(pair) => pair,
+                Err(e) => {
+                    refused.push(RefusedFace {
+                        face: f.face as usize,
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
+            };
+            if let Some(reason) = failure {
                 refused.push(RefusedFace {
                     face: f.face as usize,
                     reason,
                 });
                 continue;
             }
-            let mut ids: Vec<u32> = Vec::with_capacity(nodes.positions.len());
-            for (k, p) in nodes.positions.iter().enumerate() {
+            let mut ids: Vec<u32> = Vec::with_capacity(positions.len());
+            for (k, p) in positions.iter().enumerate() {
                 let id = if k < f.fixed.len() {
                     shared_id(&mut shared, &mut out.positions, *p)?
                 } else {
@@ -238,5 +282,82 @@ mod welded_tests {
         );
         let message = vertex_index(past).unwrap_err().to_string();
         assert!(message.contains(&u32::MAX.to_string()), "{message}");
+    }
+
+    #[test]
+    fn parallel_welded_matches_serial_bit_for_bit() {
+        use crate::{EvalSurface, FacePlan};
+        use solidcore::Vec3 as K;
+
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let nurbs = EvalSurface::nurbs(
+            [2, 1],
+            [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+            [3, 2],
+            vec![
+                [1.0, 0.0, 0.0, 1.0],
+                [w, w, 0.0, w],
+                [0.0, 1.0, 0.0, 1.0],
+                [1.0, 0.0, 2.0, 1.0],
+                [w, w, 2.0 * w, w],
+                [0.0, 1.0, 2.0, 1.0],
+            ],
+        );
+        let degenerate = EvalSurface::Plane {
+            origin: K::ZERO,
+            du: K::ZERO,
+            dv: K::ZERO,
+        };
+        let shared_a = Vec3::new(1.0, 0.0, 0.0);
+        let shared_b = Vec3::new(0.0, 1.0, 0.0);
+        let grid_uv: Vec<[f64; 2]> = (0..64u32)
+            .map(|k| [f64::from(k % 8) / 7.0, f64::from(k / 8) / 7.0])
+            .collect();
+        let mut tris = Vec::new();
+        for r in 0..7u32 {
+            for c in 0..7u32 {
+                let i = r * 8 + c;
+                tris.push([i, i + 1, i + 8]);
+                tris.push([i + 1, i + 9, i + 8]);
+            }
+        }
+        let mut faces = Vec::new();
+        for fi in 0..8u32 {
+            faces.push(FacePlan {
+                face: fi,
+                surface: Some(u32::from(fi == 4)),
+                uv: grid_uv.clone(),
+                fixed: vec![shared_a, shared_b],
+                normals: vec![],
+                flip: false,
+                triangles: tris.clone(),
+                poles: vec![],
+            });
+        }
+        let plan = TessPlan {
+            surfaces: vec![nurbs, degenerate],
+            faces,
+            edges: vec![vec![shared_a, shared_b]],
+            edge_faces: vec![vec![0, 1]],
+        };
+        assert!(plan.parallel_eval());
+        let (serial_mesh, serial_refused) = plan.welded_with_parallel(false).unwrap();
+        let (par_mesh, par_refused) = plan.welded_with_parallel(true).unwrap();
+        let (auto_mesh, auto_refused) = plan.welded().unwrap();
+        assert_eq!(serial_refused.len(), 1);
+        assert_eq!(serial_refused[0].face, 4);
+        assert_eq!(serial_refused, par_refused);
+        assert_eq!(serial_refused, auto_refused);
+        let bits = |vs: &[Vec3]| -> Vec<[u64; 3]> {
+            vs.iter()
+                .map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()])
+                .collect()
+        };
+        for other in [&par_mesh, &auto_mesh] {
+            assert_eq!(bits(&serial_mesh.positions), bits(&other.positions));
+            assert_eq!(serial_mesh.triangles, other.triangles);
+            assert_eq!(serial_mesh.tri_face, other.tri_face);
+            assert_eq!(serial_mesh.edges, other.edges);
+        }
     }
 }

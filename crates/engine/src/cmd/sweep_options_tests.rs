@@ -447,3 +447,62 @@ fn an_older_sweep_along_a_3d_spline_keeps_its_faces_for_what_refers_to_them() {
     run(&mut s, "surface.sweep", json!({"sketch": "Sketch2", "curves": ["l1"], "path_sketch": "Sketch1", "path": ["w1"], "body_name": "New"}));
     assert_eq!(s.model.state().body("New").unwrap().body.face_count(), 1);
 }
+
+/// A sweep along each edge of a coil (centre line radius 20, a round section 4 across, 3
+/// turns of pitch 8) builds the solid its closed form gives, or is refused with the reason. The
+/// coil's edges are its seam, a helix of radius R = 22 from (22, 0, 0) to (22, 0, 24), and its
+/// two end sections, circles of radius 2 in the XZ plane round (20, 0, 0) and (20, 0, 24).
+///
+/// A circle of radius r = 0.5 centred on the path, its plane at the angle g to the path's normal
+/// plane, sweeps A L cos g (the volume swept by a moving plane region is its area times the
+/// normal component of its centroid's velocity when the centroid stays on the path; the tube does
+/// not overlap itself: r is far under the helix's radius of curvature, about 22.07, and under
+/// half the pitch). The helix is L = n sqrt((2 pi R)^2 + p^2) long. Square to it the circle is a
+/// pipe, pi r^2 L. Drawn on XZ it leans by g = atan(p / 2 pi R) = 3.3 deg (about
+/// -0.16%), giving pi r^2 L cos g = pi r^2 n 2 pi R. The bound 1e-4 tells the two apart: they
+/// differ by 1 - cos g = 1.7e-3.
+///
+/// Round an end section, a circle across it makes a torus, 2 pi^2 (2) r^2. A circle drawn on XZ
+/// lies along that section all the way round and sweeps no volume: a refusal naming that.
+#[test]
+fn a_sweep_along_each_edge_of_a_coil_is_its_closed_form_or_refused() {
+    let (r, big_r, p, n) = (0.5, 22.0, 8.0, 3.0);
+    let length = n * ((2.0 * PI * big_r).powi(2) + p * p).sqrt();
+    let mut s = Session::default();
+    run(&mut s, "solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 3, "pitch": 8, "body_name": "Spring"}));
+    // A profile drawn on XZ.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "OnXZ"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [22, 0], "radius": r}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Square to the helix where it starts: its direction there is (0, 2 pi R, p).
+    let t = (2.0 * PI * big_r).hypot(p);
+    run(
+        &mut s,
+        "sketch.create",
+        json!({"plane": {"origin": [22, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, p / t, -2.0 * PI * big_r / t]}, "name": "Square"}),
+    );
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": r}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Across the start section at (22, 0, 0), where it runs along Z.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [22, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Across"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": r}));
+    run(&mut s, "sketch.finish", json!({}));
+    let along = |s: &mut Session, sketch: &str, pick: [f64; 3], body: &str| {
+        s.execute("solid.sweep", &json!({"sketch": sketch, "path_body": "Spring", "path_edges": [pick], "operation": "new", "body_name": body}))
+            .map_err(|e| e.to_string())
+    };
+    let close = |got: f64, want: f64, what: &str| assert!((got - want).abs() < want * 1e-4, "{what}: {got} vs {want}");
+    along(&mut s, "Square", [22.0, 0.0, 0.0], "Pipe").unwrap();
+    close(measure(&s, "Pipe").volume, PI * r * r * length, "pipe");
+    along(&mut s, "OnXZ", [22.0, 0.0, 0.0], "Leaning").unwrap();
+    close(measure(&s, "Leaning").volume, PI * r * r * n * 2.0 * PI * big_r, "leaning");
+    along(&mut s, "Across", [18.0, 0.0, 0.0], "Ring").unwrap();
+    close(measure(&s, "Ring").volume, 2.0 * PI * PI * 2.0 * r * r, "ring");
+    // [20, 0, 0] is as near the seam as the section; the section is taken.
+    let before = s.doc.features.len();
+    for pick in [[18.0, 0.0, 0.0], [20.0, 0.0, 0.0], [22.0, 0.0, 4.0], [18.0, 0.0, 4.0]] {
+        let e = along(&mut s, "OnXZ", pick, "Flat").unwrap_err();
+        assert!(e.contains("the profile lies along the path") && !e.contains("SMLib"), "{pick:?}: {e}");
+        assert_eq!(s.doc.features.len(), before, "{pick:?}");
+    }
+}

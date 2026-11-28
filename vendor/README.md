@@ -131,22 +131,10 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
 - `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
   exposing the effective sample count so host paint callbacks can match it.
 - `src/winit.rs`: use that same effective count for depth and resolve attachments.
-- `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
-  or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
 - Other backends retain requested MSAA, without another adapter or device probe.
 - `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
   depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a
   device without it failed pipeline validation, a panic at start.
-- `src/setup.rs`: the default device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` when
-  the adapter has it, so 2x and 8x work where the adapter supports them (WebGPU only
-  guarantees 1x and 4x).
-- `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
-  instead of exactly 8192.
-- `src/setup.rs`: the default device never asks for a limit the adapter does not offer
-  (`or_worse_values_from(adapter.limits())`). Older drivers (Mesa 20.3 on Debian 11) report
-  fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
-  defaults refused the device, so no window opened. An adapter at or above the defaults gets
-  the same request as before.
 - `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
   device and the window's surface up (instance, surface, adapter request, the chosen adapter,
   device, renderer, surface configure, first present), so the app's crash journal can say which
@@ -157,22 +145,6 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   an unsupported surface no longer unwrap.
 - `src/winit.rs`: acquire a drawable before preparing paint callbacks, so a skipped
   surface frame cannot discard initialization commands for cached viewport meshes.
-- `src/lib.rs`, `src/winit.rs`: surfaces are configured under `capture_errors` (error scopes):
-  a configuration the device refuses (D3D12 "Failed to wait for GPU to come idle before
-  reconfiguring the Surface", #1935) is logged, the frame is skipped and the configure is tried
-  again, instead of the device's uncaptured-error handler panicking. A streak of refusals warns
-  once (debug after), waits 16 ms doubling up to 1 s between tries and recreates the surface
-  every `SURFACE_RECREATE_AFTER` refusals (`ConfigureRetry`). Each surface keeps the deadline of
-  its next try: until it is due, no configure or recreate happens, whether the repaint comes
-  from input, an animation, a resize (its size is kept for the retry) or an outdated surface,
-  and the frame is skipped with a repaint asked for when it is due. The streak and the deadline
-  survive a recreate; a configure the device takes ends the streak, a recreate it asked for
-  included. A recreate for a lost surface goes ahead as before.
-- `src/lib.rs`, `src/winit.rs`: a window other than the main one (an immediate viewport, drawn
-  and presented inside the main window's frame) is configured with Mailbox, else Immediate,
-  when the configured mode waits for vsync and the surface offers one (`viewport_present_mode`).
-  Waiting on both surfaces in one frame halved the frame rate, and on Wayland a window the
-  compositor wasn't showing stalled the main window behind its present.
 - `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
   (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
   submits a command buffer holding a debug marker (`DeviceLost::probe`), so a device the
@@ -182,13 +154,6 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   A reset that lands after the probe is still met by a queue write or the present: the painter
   runs the frame under `DeviceLost::survive`, which takes that panic for the loss once the probe
   then finds the device lost, and lets any other panic carry on (#10240).
-- `src/lib.rs`, `src/winit.rs`: a surface configure that meets a lost device is not taken as
-  configured (`configure_captured`): wgpu reports device-loss errors to no error scope, and on
-  D3D12 a driver reset found by the configure has already dropped the surface's configuration.
-  The next acquire failed with "Surface is not configured for presentation" and the device's
-  default handler panicked (#7007). An unsupported surface is a refused configure too. The
-  acquire runs under `capture_errors`, and the `Validation` status it then returns reconfigures
-  the surface instead of skipping every later frame.
 - `src/lib.rs`, `src/winit.rs`: the painter holds an acquired frame as `AcquiredFrame`, which
   destroys a second handle to the frame's texture once the frame is presented or dropped. On a
   lost device wgpu's present and discard keep the frame's image in the surface, and dropping
