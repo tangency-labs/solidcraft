@@ -38,7 +38,9 @@
 //!   convex side of the edge never cross: a chamfer of 6 around a hole of radius 5 is not
 //!   refused by it.
 //! - **The foot.** Foot i is the first transversal crossing of support i's section with the
-//!   circle of radius `d_i` about the edge point, counted from the edge, with a proof that no
+//!   circle of radius `d_i` about the edge point, counted from the edge (read as from the
+//!   edge's projection on the support, since the edge lies on it only within tolerance), with
+//!   a proof that no
 //!   nearer root exists. A tangency, a double root, a section that never reaches `d_i`
 //!   (`|d k| ≥ 2` on a circle of curvature k), or a foot past the polar line does not fit:
 //!   the asked chamfer is too large there.
@@ -56,9 +58,10 @@
 //! cross-section (a rational net with unequal weights there is projective in t, not affine),
 //! and the net's s along the rails is the definition's s through the stored map.
 //!
-//! The certified enclosures of these systems over an s-span (Krawczyk's operator on the foot
-//! system with s as an interval, the first-crossing exclusion, the crossing condition by
-//! enclosure) are not here yet; the functions below are the point solves they start from.
+//! The certified enclosures of these systems over an s-span (Krawczyk's operator over Taylor
+//! models in s, the first-crossing proof, the crossing condition by enclosure, the chord's
+//! coupled system) are [`super::setback_enclose`]'s; the functions below are the point
+//! solves they start from.
 //! The tests check them against the closed form on a circle section of curvature k,
 //! `F = C + d (cos β t + sin β w)`, `β = asin(d k / 2)`.
 //!
