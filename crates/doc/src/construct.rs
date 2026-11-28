@@ -966,6 +966,15 @@ pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
+/// The plane of a verified planar B-rep face at `at` (rejects curved faces and mesh bodies).
+pub fn planar_face_plane(st: &ModelState, at: Vec3) -> Result<Plane> {
+    let (b, fi, _) = face_of(st, at, &None)?;
+    match kernel::face_surface(&b.body, fi) {
+        Some(FaceSurface::Plane { normal, point }) => Plane::from_normal(point, normal).ok_or_else(|| bad("degenerate face")),
+        _ => Err(bad("the face is not planar")),
+    }
+}
+
 /// A reference as a plane.
 pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     match g {
@@ -1206,7 +1215,8 @@ fn touched<'a>(ctx: &Ctx<'a>, g: &GeoRef) -> Result<Touched<'a>> {
             let (b, fi, _) = face_of(ctx.st, *at, name)?;
             Ok(kernel::face_surface(&b.body, fi).map_or(Touched::Face(b, fi), Touched::Surface))
         }
-        GeoRef::Plane { .. } => {
+        // A construction or origin plane, or a component's origin plane (#23006).
+        GeoRef::Plane { .. } | GeoRef::Datum { .. } => {
             let pl = plane(ctx, g)?;
             Ok(Touched::Surface(FaceSurface::Plane { normal: pl.normal().unit().ok_or_else(|| bad("degenerate plane"))?, point: pl.origin }))
         }
@@ -1366,6 +1376,18 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
     Some(o + d * ((p.origin - o).dot(n) / den))
 }
 
+/// Drop `at` onto the plane midway between two parallel planes. `None` when they are not
+/// parallel; the bisector of planes that meet is the midplane constructor's, below.
+pub(crate) fn midway(a: (Vec3, Vec3), b: (Vec3, Vec3), at: Vec3) -> Option<Vec3> {
+    let (pa, na) = a;
+    let (pb, nb) = b;
+    // Measure both levels from `at`. `square_plane_offset` also checks that the normals are
+    // parallel.
+    let a = kernel::affine::square_plane_offset(&crate::IDENTITY, (pa - at).into(), na.into(), nb.into()).ok()??;
+    let b = kernel::affine::distance_along(at.into(), nb.into(), pb.into());
+    Some(at + nb * a.midpoint(b))
+}
+
 /// Planes built from model geometry (the `PlaneRef` kinds that need the model).
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
@@ -1373,10 +1395,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
-            if na.cross(nb).len() < 1e-9 {
-                // Parallel: half way between them.
-                let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                let center = pa.origin + half;
+            if let Some(center) = midway((pa.origin, na), (pb.origin, nb), pa.origin) {
                 // A design saved before the midplane took a world plane's frame keeps the
                 // frame it was saved with: the first plane's own origin and axes (#18260).
                 if *old_frame {

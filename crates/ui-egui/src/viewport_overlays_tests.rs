@@ -1188,6 +1188,34 @@ fn bottom_readouts_clear_floating_history_on_the_first_frame() {
     }
 }
 
+/// With the status bar on, the bottom readouts end above it: the bar is window chrome spanning
+/// the window's bottom edge, so a readout pinned to the view's bottom sits behind it (#22911).
+#[test]
+fn bottom_readouts_clear_the_status_bar() {
+    let mut h = Harness::new();
+    // The corner legend remains available through the analysis HUD compatibility setting.
+    h.app.preferences.viewport_analysis_status = false;
+    h.app.home.open = false;
+    h.app.ui.layout = LayoutMode::Floating;
+    h.app.preferences.timeline_left = false;
+    h.app.ui.show_timeline = false;
+    h.app.preferences.show_frame_rate = true;
+    h.app.run("inspect.draft", json!({})).unwrap();
+    h.call("ui.prefs", json!({"status_bar": true}));
+    h.settle();
+    let bar = crate::scenario::rect_of("status:bar").expect("the status bar is drawn");
+    let viewport = h.app.viewport.rect.unwrap();
+    for name in ["analysis:legend", "viewport:frame_rate"] {
+        let readout = crate::scenario::rect_of(name).unwrap();
+        assert!(viewport.contains_rect(readout), "{name}: {readout:?} outside {viewport:?}");
+        assert!(!readout.intersects(bar), "{name}: {readout:?} under the bar {bar:?}");
+        assert!(
+            (readout.bottom() - (bar.top() - solidcraft_theme::Tokens::get().space_8 - 12.0)).abs() < 0.01,
+            "{name}: {readout:?} just above the bar {bar:?}"
+        );
+    }
+}
+
 #[test]
 fn continuity_legend_clears_floating_history() {
     let mut h = Harness::new();
@@ -3095,7 +3123,7 @@ fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
     let effect = isolate(&h).expect("an Isolate status");
     let item = crate::viewport_status::presentation(&h.app, &effect).expect("a pill, the bar having no Isolate slot");
     assert_eq!((item.name.as_str(), item.setting.as_str()), ("Isolation", "1 hidden"));
-    assert_eq!(item.clear_key.as_deref(), Some("Ctrl+Shift+I"), "its close names its own key, not Escape");
+    assert_eq!(item.clear_key.as_deref(), Some(crate::ui_kit::chord_label("Ctrl+Shift+I").as_str()), "its close names its own key, not Escape");
     let close = format!("viewport_status:{}:close", item.id);
     assert!(solidcraft_ui_registry::handle_at(&close).is_some(), "drawn with its close");
     h.app.preferences.escape_closes_analyses = true;

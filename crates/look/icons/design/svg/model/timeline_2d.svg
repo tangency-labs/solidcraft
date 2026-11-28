@@ -1,13 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Timeline 2D</title>
-  <circle cx="9.5" cy="32" r="2.4" fill="#8e9faf"/>
-  <circle cx="9.5" cy="53.5" r="2.4" fill="#8e9faf"/>
-  <circle cx="24.5" cy="10.5" r="2.4" fill="#8e9faf"/>
-  <circle cx="24.5" cy="32" r="2.4" fill="#8e9faf"/>
-  <circle cx="39.5" cy="10.5" r="2.4" fill="#8e9faf"/>
-  <circle cx="39.5" cy="53.5" r="2.4" fill="#8e9faf"/>
-  <circle cx="54.5" cy="32" r="2.4" fill="#8e9faf"/>
-  <circle cx="54.5" cy="53.5" r="2.4" fill="#8e9faf"/>
-  <path d="M4 5L15 5L15 16L4 16ZM19 48L30 48L30 59L19 59ZM49 5L60 5L60 16L49 16Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M34 26.5L45 26.5L45 37.5L34 37.5Z" fill="#328bd3" stroke="#328bd3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="9.5" cy="20" r="2.8" fill="currentColor"/>
+  <circle cx="24.5" cy="20" r="2.8" fill="currentColor"/>
+  <circle cx="54.5" cy="20" r="2.8" fill="currentColor"/>
+  <circle cx="39.5" cy="44" r="2.8" fill="currentColor"/>
+  <path d="M35 15.5 L44 15.5 L44 24.5 L35 24.5 Z M5 39.5 L14 39.5 L14 48.5 L5 48.5 Z M20 39.5 L29 39.5 L29 48.5 L20 48.5 Z M50 39.5 L59 39.5 L59 48.5 L50 48.5 Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>

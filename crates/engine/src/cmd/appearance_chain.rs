@@ -26,6 +26,16 @@ fn component(s: &Session, cmd: &str, value: &Value) -> Result<u64> {
     s.component_or_placement(&key).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, "unknown or root component"))
 }
 
+/// A face of `body`: its zero-based `model.faces` index, or the name listed there (#22984).
+pub(super) fn face_index(s: &Session, cmd: &str, body: &str, face: &Value) -> Result<usize> {
+    if face.is_string() {
+        crate::cmd::face_ref_form(face).map_err(|why| bad(cmd, why))?;
+        let name = face.as_str().unwrap_or_default();
+        return solidcraft_doc::naming::locate_one(&s.model.state(), Some(body), name).map(|hit| hit.face).map_err(|why| bad(cmd, why));
+    }
+    face.as_u64().and_then(|f| usize::try_from(f).ok()).ok_or_else(|| bad(cmd, "face must be a zero-based unsigned index or a face name"))
+}
+
 pub(super) fn chain(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "appearance.chain";
     let target = p.get("target").and_then(Value::as_object).ok_or_else(|| bad(cmd, "give one target object"))?;
@@ -34,10 +44,7 @@ pub(super) fn chain(s: &mut Session, p: &Value) -> Result<Value> {
     let body = target.get("body").map(|b| name(cmd, b).map(|n| s.own_body_name(n).unwrap_or_else(|| n.to_string()))).transpose()?;
     let target = match (body.as_deref(), target.get("face"), target.get("component")) {
         (Some(body), None, None) if target.len() == 1 => AppearanceTarget::Body(body),
-        (Some(body), Some(face), None) if target.len() == 2 => AppearanceTarget::Face {
-            body,
-            face: face.as_u64().and_then(|f| usize::try_from(f).ok()).ok_or_else(|| bad(cmd, "face must be a zero-based unsigned index"))?,
-        },
+        (Some(body), Some(face), None) if target.len() == 2 => AppearanceTarget::Face { body, face: face_index(s, cmd, body, face)? },
         (None, None, Some(id)) if target.len() == 1 => AppearanceTarget::Component(component(s, cmd, id)?),
         _ => return Err(bad(cmd, "target must be {body}, {body, face}, or {component}")),
     };

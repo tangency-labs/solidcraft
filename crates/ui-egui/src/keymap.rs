@@ -401,8 +401,9 @@ pub(crate) fn user_key_holder(app: &SolveApp, id: &str, key: &str) -> Option<&'s
     app.keymap
         .custom
         .iter()
-        .find(|(other, keys)| other.as_str() != id && clash(other, id) && keys.iter().any(|k| k == key))
-        .and_then(|(other, _)| solidcraft_engine::find_command(other).map(|c| c.id))
+        .filter(|(other, keys)| other.as_str() != id && clash(other, id) && keys.iter().any(|k| k == key))
+        // A saved key can name a command that no longer exists; it holds nothing.
+        .find_map(|(other, _)| solidcraft_engine::find_command(other).map(|c| c.id))
 }
 
 /// The keys a command has with no keyboard profile: its registered shortcut, and for Redo also
@@ -582,8 +583,12 @@ fn keeps_old_show_hide(app: &SolveApp, key: &str) -> bool {
 
 /// What a family's key starts: the variant used last (#4308), unless that variant has a key of
 /// its own; then the family's key starts the command it is bound to, and the other key the
-/// variant.
+/// variant. With the shape tools' Sketch Palette option on, the key starts the command the menu
+/// lists it next to, whichever variant was used last (#22247).
 fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
+    if app.preferences.shortcut_starts_listed_tool {
+        return id;
+    }
     let chosen = app.preferences.sketch_variants.resolve(id);
     if chosen != id && effective(app, chosen).is_some() { id } else { chosen }
 }
@@ -2489,6 +2494,19 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_key_of_a_command_that_no_longer_exists_does_not_hide_the_real_holder() {
+        let mut a = app();
+        // Sorts before Home View, and clashes with every command.
+        a.keymap.custom.insert("no.such.command".into(), vec!["F8".into()]);
+        bind(&mut a, "view.home", "F8", false).unwrap();
+        a.preferences.keyboard_profile = "nx".into();
+        assert_eq!(user_key_holder(&a, "view.normal_to", "F8"), Some("view.home"));
+        assert!(!keys(&a, "view.normal_to").contains(&"F8".to_string()));
+        let left = crate::keyboard_profiles::chosen(&a).unwrap().left_out(&a);
+        assert!(left.iter().any(|l| l.command == "view.normal_to" && l.key == "F8" && l.taken_by == Some("view.home")));
+    }
+
+    #[test]
     fn a_keyboard_profile_sits_under_the_users_own_keys_and_survives_save_and_switching() {
         let mut a = app();
         assert_eq!(a.preferences.keyboard_profile, "solidcraft", "SolidCraft's keys by default");
@@ -2539,6 +2557,40 @@ mod tests {
         assert_eq!(keys(&a, "ui.assistant"), ["Ctrl+Shift+A"]);
         assert_eq!(keys(&a, "view.fit"), ["F9"]);
         assert_eq!(keys(&a, "view.home"), ["F8"]);
+    }
+
+    #[test]
+    fn onshape_keys_split_between_a_sketch_and_the_model() {
+        let mut a = app();
+        a.preferences.keyboard_profile = "onshape".into();
+        // In the model: Shift+letters build features, F fits, Y shows and hides.
+        assert_eq!(command_for(&a, "Shift+E"), Some("solid.extrude"));
+        assert_eq!(command_for(&a, "Shift+F"), Some("solid.fillet"));
+        assert_eq!(command_for(&a, "Shift+W"), Some("solid.revolve"));
+        assert_eq!(command_for(&a, "F"), Some("view.fit"));
+        assert_eq!(command_for(&a, "Y"), Some("ui.toggle_visibility"));
+        assert_eq!(keys(&a, "view.front"), ["Shift+1", "Ctrl+1"]);
+        assert_eq!(keys(&a, "solid.fillet"), ["Shift+F"], "Fit took F");
+        // In a sketch: single letters are tools and constraints.
+        a.run("sketch.create", json!({"plane":"XY","name":"S"})).unwrap();
+        for (key, id) in [
+            ("V", "sketch.constraint.vertical"),
+            ("H", "sketch.constraint.horizontal"),
+            ("E", "sketch.constraint.equal"),
+            ("T", "sketch.constraint.tangent"),
+            ("M", "sketch.trim"),
+            ("Q", "sketch.construction"),
+            ("X", "sketch.extend"),
+            ("R", "sketch.rectangle.center"),
+            ("G", "sketch.rectangle.two_point"),
+            ("U", "sketch.project"),
+            ("Shift+F", "sketch.fillet"),
+            ("Shift+S", "sketch.point"),
+        ] {
+            assert_eq!(command_for(&a, key), Some(id), "{key} in a sketch");
+        }
+        assert_eq!(keys(&a, "ui.toggle_visibility"), ["Y"], "Vertical took V");
+        assert!(crate::keyboard_profiles::chosen(&a).unwrap().left_out(&a).is_empty(), "Onshape's keys are all used");
     }
 
     #[test]
@@ -2649,16 +2701,15 @@ mod tests {
         h.frames(2);
         let nx = crate::scenario::handle_at("prefs:keyboard_profile:nx").expect("NX is offered");
         assert!(nx.y > picker.y, "the list opens below the drop-down");
-        for id in ["solidcraft", "fusion", "inventor", "solidworks"] {
+        for id in ["solidcraft", "fusion", "inventor", "onshape", "solidworks"] {
             assert!(crate::scenario::handle_at(&format!("prefs:keyboard_profile:{id}")).is_some(), "{id} is offered");
         }
         h.step(&json!({"click": {"handle": "prefs:keyboard_profile:nx"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.preferences.keyboard_profile, "nx");
-        assert!(
-            h.widget("Ctrl+W for Show/Hide Selection is not used: SolidCraft keeps this key for itself.").is_some(),
-            "the left-out key is reported"
-        );
+        // The note names the key as this platform writes it (the Command key on macOS).
+        let note = format!("{} for Show/Hide Selection is not used: SolidCraft keeps this key for itself.", crate::ui_kit::chord_label("Ctrl+W"));
+        assert!(h.widget(&note).is_some(), "the left-out key is reported: {note}");
     }
 }
 

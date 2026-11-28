@@ -559,6 +559,31 @@ pub(crate) fn fillet_variable(
     Ok(w)
 }
 
+/// The edges nearest `points`, one tangent chain, rounded with one radius law of `degree`,
+/// `knots` and `radii` along the whole chain, 0 at the chain's end nearest `start`
+/// ([`solidcore_ops::fillet_variable_chain_from`], on a copy of the body).
+pub(crate) fn fillet_variable_chain(
+    body: &Body,
+    points: &[[f64; 3]],
+    tolerance: f64,
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<Body> {
+    if !points_ok(points, false) || !start.iter().all(|x| x.is_finite()) || !tolerance_ok(tolerance) || !law_ok(degree, knots, radii) {
+        return Err(Error::Argument);
+    }
+    if law_pinches(degree, knots, radii) {
+        return Err(Error::Unsupported);
+    }
+    const CALL: &str = "smlib_fillet_variable_chain";
+    let w = copy(CALL, body)?;
+    let picked = picked_edges(CALL, &w, points, tolerance)?;
+    ops(CALL, &w, || solidcore_ops::fillet_variable_chain_from(&w, &picked.entities, start, degree, knots, radii))?;
+    Ok(w)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

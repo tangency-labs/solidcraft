@@ -81,7 +81,8 @@ negates it (`OffsetGeometryCreation::faceuse_offset_with_backend`, `offset/offse
 | surface of revolution | the generator offset in its plane and swept again: a line or circle stays a line or circle; a B-spline or conic generator is offset by `create_simple_offset` within the approximation tolerance | exact for lines and arcs; **fitted, not certified**, otherwise | `surface/surf_of_revolution/p2.rs` |
 | extrusion, B-spline, curve-bounded, STEP | an `OffsetSurface`: S + d n of a copy of the surface, evaluated on demand (`base_create_offset_surface`); the extrusion's own override is not ported (commented out upstream) | exact as a definition; its net is §3.2's | `surface/surface/p1.rs`, `surface/offset_surface.rs` |
 | round of the ball's circle, one radius | the round of radius r + τd on the supports offset by σᵢd, the same spine, leader and seeds; its net built on the stations and certified; r + τd ≤ 0: collapsed | certified | `surface/procedural_blend/offset.rs` |
-| round of an exact class | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of an exact class whose kind offsets as itself (line, circle, point: a cylinder, torus or sphere) | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of a rational exact class (a conic, a conic pair or a nodal quartic spine) | its kind's offset is the offset surface of its B-spline net, kept as it is; the net is S (bound 0), so it is S + d n; no definition kept, since that offset has no NURBS form to re-certify one on | exact as a definition; its net is §3.2's | `surface/procedural_blend/offset.rs` |
 | chamfer between planes | the plane offset as a plane; no definition kept | exact | `surface/surface/p1.rs` |
 | Gⁿ round (order ≥ 2), radius law, round on a B-spline support | the offset surface of the face, as an extrusion's | see §3.2 | `surface/procedural_blend/offset.rs` |
 | corner face, drafted face | the offset of the face's own surface kind; a drafted face's surface is its plane or cone, so the offset is exact; a corner keeps no definition | as its kind | `surface/surface/p1.rs` |
@@ -123,6 +124,14 @@ such a round is the offset of its net. That breaks the one rule, and the ledger
 drops its bound: the face gets `BSplineSurface::from_nurb(made.surface, false)`, a bare net with no
 stored ε (`p1.rs`). Both are open (§9).
 
+The face's edges were built on the implicit offset and stay within their tolerances of the net,
+but a seam edge must lie on the net's own seam line: the check's seam test flags a vertex more
+than 1e-9 beside it, and a later cut across the seam puts its vertex on the edge. So each seam
+edge of a face given its net (its UV trim curve an iso line) gets the net's iso curve along the
+seam, exactly, where that curve runs between the edge's own vertices within its tolerance
+(`seams_onto_iso_curves`, `p1.rs`). The seam lifted from the implicit offset lay up to 8.5e-7 off
+the net's seam line on a thickened closed loft.
+
 ## 4. Folds, collapses and the largest wall
 
 ![Left: a parabolic face whose least radius of curvature is 10 at its apex, its offset by 10 towards the centre of curvature with a cusp on the focal curve, and the wall between them. Right: the same face offset by 14, a curve that crosses itself between two cusps.](offset-and-shell/fold.svg)
@@ -161,6 +170,7 @@ job (§5.1).
 | `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test, naming the radius the collapse test found | `p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `certify_regular_knowing` |
 | `OffsetFailure::TubeFolds`, `TubeNotCertified` | a rounded offset's cap is the tube of radius \|d\| about a convex edge, `c + d u` with `u` on the arc between the faces' normals turned to the offset's side; it folds where `d (u · k) ≥ 1` (`k` the edge's curvature vector); `TubeNotCertified` when that is neither proved nor ruled out (#13685) | the edge, the distance and, for `TubeFolds`, `largest`, the largest distance at which the edge's tube is proved not to fold (none if none is; only the tube is proved there, so other defects can still appear at or near it) | on the first cap built for each edge, in every offset but the local operation (not a closing wall) | `offset_executive/p1.rs`, `refuse_folding_tube`; `query/tangent_edge.rs`, `tube_regularity` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
+| `OffsetFailure::WallsMeetAcross` | an inset's two opposite planar walls meet: their faces are exactly twice the distance apart across material, capped by a protrusion (a square boss inset by half its width), while the body keeps a cavity; or, in an unmerged inset (the merge alone changes topology, keeping the cavity's regions), a point of an offset face is closer than the distance to an opposite planar face, so the two insets crossed (a floor under a blind hole thinner than two walls); the points tested, both ways round, are each face's interior point, its vertices and the middles of its edges cut where, seen along the normal, they meet the other face's boundary, classified on the exact trims, within a budget past which nothing is refused | the face, the distance and `largest`, half the narrowest such gap | in the extended inset but the local operation: the meeting before the faces are offset, the crossing on the built faces before the stitch | `offset_executive/p2.rs`, `refuse_meeting_planar_insets`, `refuse_crossing_planar_insets` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
 | `OffsetFailure::FaceCloses` | in a local operation, a band bounded by two faces (a ring, or a cone between a ring and a hole) whose surface and its two neighbours' are planes, cylinders and cones about one axis would close: its two sides, where the meridians of the new surfaces cross, pass over each other | the face, its two neighbours and the largest move, the fraction of the move at which the edges meet times the move | before the executive, decided in closed form | `topology/brep/local_operation.rs`, `closing_band` |
@@ -284,13 +294,21 @@ supporting planes. The first scope requires
 simple vertices and strict convex facet cycles, distinct vertices and independent edge planes.
 Every reconstructed vertex must lie on the support's outward side and in every exposed face's
 material halfspace. Toleranced stored vertices and trims do not decide this certificate.
-Opposite exposed planes whose actual offset definitions have crossed certify that their halfspaces have empty
-intersection. The branch contributes no cavity, so both its offset sheets and the support's
-attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
+Two exposed planes whose normals are opposite within the angular tolerance pair; their actual offset
+definitions (each sheet's stored origin and axes, its normal the exact cross product of the axes)
+certify that their material halfspaces have no common interior point in the cell: the sum of the
+two sheets' exact plane functions is non-negative at every reconstructed vertex (a Farkas
+certificate with unit multipliers), hence on their convex hull. Where it is zero the two sheets
+coincide (a branch inset by exactly half its width): their common part is a piece of one plane, of
+zero volume, which the regularized offset does not keep, so the tie at coincident opposite sheets
+is decided as no cavity, exactly as a crossing is. For exactly opposite normals that sum is the
+constant crossing of the two planes; a branch turned by a rotation, whose normals are opposite only
+up to rounding, is decided the same way (#22784). The branch contributes no cavity, so both its offset sheets and the support's
+attachment loop are removed, and the walls meeting across it are not refused as meeting. The attachment is an artificial cut, not an exposed face: it
 supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
 
-This is an empty-cell certificate within the mitred construction, using outward-rounded
-interval inequalities and exact opposite normals, without a tolerance or an alternate
+This is an empty-cell certificate within the mitred construction, using exact expansion
+inequalities on the cell's vertices, without a distance tolerance or an alternate
 construction. The source body remains intact for the shell difference. Curved or nonconvex
 branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
 plane pair still require the general arrangement and cavity rule. This event does not complete
@@ -342,6 +360,15 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   face's chart seam split off past the neighbours' offsets, nearer the edge's middle than the
   whole curve's). A marched piece lying on an exact line or conic of the two surfaces is replaced
   by that curve.
+- **Tangent edges** are not mitred: their faces' offsets are tangent too. `extend_trim_edges`
+  carries each face's trim onto its offset, and `trim_extended_edge` ends it where a neighbour's
+  offset cuts it. At a vertex where those cuts are tangential it ends at the vertex's image
+  V + d n(V) instead, where the curve passes nearest it: at a lamina edge's vertex, between two
+  faces on one plane, and at a smooth vertex, where every edge is a tangent sector (a round's
+  rail meeting the tangent edge between its support and the next round) and every face moves by
+  the one distance (not in a local operation, nor at a face the shell keeps). There every face's
+  offset passes through the one image, and a tangential crossing is found only to about the
+  square root of its residual along the curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
   an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
   that has the input's face one wall behind it and none with it one wall ahead (a point solve
@@ -407,7 +434,12 @@ line on the neutral plane until it makes the draft angle with the pull; a cone o
 pull moves each control point radially, keeping its parameters. The hinge, the lean and a cone's
 sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The result is a plane
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
-operation (`solidcore-ops/src/offset.rs`, `draft`).
+operation (`solidcore-ops/src/offset.rs`, `draft`). The tangent blends on the drafted faces follow
+them as they follow moved faces (`OffsetFacesExecutive::move_onto`): taken off, the faces drafted,
+put back at their sizes. A blend rolled on the old surface cannot be extended to meet the drafted
+one: a round of a cylinder's rim lies off the cone the side drafts to, and leaning in, the cone
+passes inside the round's torus, so there is no meeting to bound. With no blend to follow, the
+draft is the local operation alone.
 
 **A complete radial wall drafted inward.** Where the one drafted face is a whole cylinder or cone
 about the pull (its UV box's four sides its whole boundary, bare planes across both rims, one
@@ -467,7 +499,9 @@ point of the body. If a turn before the shell fails, the shell builds, or is ref
 as it would without that turn. If a turn back fails, the result is the same valid body, with
 that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
 (`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
-then each other feature on its own.
+then each other feature on its own. Each cap's rim is taken out where the cap and the face beside
+it lie on one plane (`remove_cap_rims`), so that face runs on across the footprint; left in, a
+footprint touching the face's outer edge pinched the face, and the offset refused it (solidcraft#22785).
 
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with
