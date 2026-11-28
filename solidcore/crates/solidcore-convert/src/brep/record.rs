@@ -75,9 +75,7 @@ fn with_definition(
         return Ok((r::Surface::Blend { definition }, Some(net)));
     }
     // A screw-swept wall's net: its definition as its label.
-    if let Some(definition) =
-        face_sweep(surface)?.and_then(|d| crate::sweep::record_sweep(&d))
-    {
+    if let Some(definition) = face_sweep(surface)?.and_then(|d| crate::sweep::record_sweep(&d)) {
         let net = form.unwrap_or(label);
         let definition = Box::new(definition);
         return Ok((r::Surface::Sweep { definition }, Some(net)));

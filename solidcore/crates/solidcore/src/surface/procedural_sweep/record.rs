@@ -121,7 +121,8 @@ pub fn sweep_of(r: &SweepRecord) -> Result<ProceduralSweep> {
             "a sweep's map has finite terms and non-zero scales",
         ));
     }
-    let mut sweep = ProceduralSweep::create(&curve_of(&r.profile)?, motion, &r.stations, &r.halves)?;
+    let mut sweep =
+        ProceduralSweep::create(&curve_of(&r.profile)?, motion, &r.stations, &r.halves)?;
     sweep.map = SweepMap { a, b, swapped };
     if r.bound.is_finite() && r.bound > sweep.bound {
         sweep.bound = r.bound;
@@ -134,7 +135,10 @@ pub fn sweep_of(r: &SweepRecord) -> Result<ProceduralSweep> {
 /// coordinates' rounding). A net of another wall fails it; a check, not a proof, that keeps a
 /// record's definition from riding on a net it does not describe.
 fn agrees(k: &Kernel, net: &Surface, sweep: &ProceduralSweep) -> Result<bool> {
-    let d = net.natural_uv_domain();
+    let SurfaceKind::BSpline(spline) = net.kind() else {
+        return Ok(false);
+    };
+    let d = spline.natural_uv_domain();
     let (u, v) = (d.u_interval(), d.v_interval());
     let mid = |i: crate::geom::extent1d::Extent1d| 0.5 * (i.min() + i.max());
     for uv in [
@@ -174,7 +178,9 @@ pub fn adopt_sweeps(
         let Some(surface) = b.face(face)?.surface.as_ref() else {
             continue;
         };
-        if !matches!(surface.kind(), SurfaceKind::BSpline(_)) || surface.procedural_definition().is_some() {
+        if !matches!(surface.kind(), SurfaceKind::BSpline(_))
+            || surface.procedural_definition().is_some()
+        {
             continue;
         }
         // A definition that does not rebuild, or a net it does not describe, leaves the face on
@@ -187,7 +193,14 @@ pub fn adopt_sweeps(
         }
         let mut made = surface.clone();
         made.set_sweep_definition(sweep);
-        crate::topology::face::p1::set_surface(k, b, face, key_of(EntityRef::Face(face)), made, true)?;
+        crate::topology::face::p1::set_surface(
+            k,
+            b,
+            face,
+            key_of(EntityRef::Face(face)),
+            made,
+            true,
+        )?;
     }
     Ok(())
 }
