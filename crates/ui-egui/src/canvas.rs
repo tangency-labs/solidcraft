@@ -474,6 +474,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         return;
     }
     let Some(mut d) = app.dialog.take() else { return };
+    own_box_drag(ui.ctx(), d.opened);
     if matches!(d.kind, Kind::Assembly(_)) {
         crate::dialogs_assembly::overlay(app, painter, proj, &mut d);
         app.dialog = Some(d);
@@ -1577,6 +1578,18 @@ pub(crate) fn share_box_drag(ctx: &egui::Context) {
     let shown_last = ctx.data(|d| d.get_temp::<u64>(box_dropped_id().with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
     if !shown_last {
         ctx.data_mut(|d| d.insert_temp(box_dropped_id(), None::<Pos2>));
+    }
+}
+
+/// The main box belongs to the open dialog (`opened`, [`Dialog::opened`]): where another opening's
+/// box was dropped is forgotten, even when it closed only the frame before (#22388).
+fn own_box_drag(ctx: &egui::Context, opened: u64) {
+    let owner = box_dropped_id().with("opened");
+    if ctx.data(|d| d.get_temp::<u64>(owner)) != Some(opened) {
+        ctx.data_mut(|d| {
+            d.insert_temp(owner, opened);
+            d.insert_temp(box_dropped_id(), None::<Pos2>);
+        });
     }
 }
 
@@ -3704,6 +3717,69 @@ mod tests {
         assert!((by - egui::vec2(-80.0, -120.0)).length() < 3.0, "moved with the pointer: {by:?}");
         h.frames(10);
         assert!((main_box(&h).min - first.min - by).length() < 0.5, "and stays there");
+    }
+
+    /// One frame in which `key` is pressed, with no frame of its own before or after it.
+    fn press(h: &mut crate::scenario::Harness, key: egui::Key, modifiers: egui::Modifiers) {
+        h.frame_with(vec![egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers }]);
+    }
+
+    /// Where the Move box opens on the selected body when nothing was dragged: Move started
+    /// after a few frames with no box.
+    fn fresh_move_box(h: &mut crate::scenario::Harness) -> egui::Rect {
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(4);
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.app.start("solid.move");
+        h.frames(6);
+        main_box(h)
+    }
+
+    /// #22388: a dragged value box keeps its place only while its dialog is open. A box whose
+    /// dialog closes and is replaced on the very next frame (Enter, then Move again at once; or
+    /// Cancel and a new start between two frames) opens by its handle, not where the last was
+    /// dropped.
+    #[test]
+    fn a_dragged_value_box_is_forgotten_when_the_next_opens_on_the_next_frame() {
+        // Committed with Enter, then Move started again on the very next frame.
+        let mut h = moving_body();
+        let first = main_box(&h);
+        let from = egui::pos2(first.left() + 4.0, first.center().y);
+        h.step(&serde_json::json!({"drag": [[from.x, from.y], [from.x - 80.0, from.y - 120.0]], "steps": 8})).unwrap();
+        h.frames(10);
+        assert!((main_box(&h).min - first.min - egui::vec2(-80.0, -120.0)).length() < 3.0, "dragged: {first:?} -> {:?}", main_box(&h));
+        let field = main_box(&h);
+        h.step(&serde_json::json!({"click": [field.right() - 20.0, field.center().y]})).unwrap();
+        h.step(&serde_json::json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&serde_json::json!({"text": "5"})).unwrap();
+        press(&mut h, egui::Key::Enter, egui::Modifiers::NONE);
+        for _ in 0..120 {
+            if h.app.dialog.is_none() {
+                break;
+            }
+            h.frame();
+        }
+        assert!(h.app.dialog.is_none(), "Enter commits the move");
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.app.start("solid.move");
+        h.frames(6);
+        let next = main_box(&h);
+        let docked = fresh_move_box(&mut h);
+        assert!((next.min - docked.min).length() < 1.0, "the next box opens by its handle {docked:?}, not where the last was dropped: {next:?}");
+
+        // Closed and started again between two frames: no frame without a box.
+        let mut h = moving_body();
+        let first = main_box(&h);
+        let from = egui::pos2(first.left() + 4.0, first.center().y);
+        h.step(&serde_json::json!({"drag": [[from.x, from.y], [from.x - 80.0, from.y - 120.0]], "steps": 8})).unwrap();
+        h.frames(10);
+        assert!((main_box(&h).min - first.min - egui::vec2(-80.0, -120.0)).length() < 3.0, "dragged");
+        crate::dialogs::cancel(&mut h.app);
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.app.start("solid.move");
+        h.frames(6);
+        let next = main_box(&h);
+        assert!((next.min - first.min).length() < 1.0, "the next box opens by its handle {first:?}, not where the last was dropped: {next:?}");
     }
 
     /// A press in the value field focuses it rather than dragging the box.
