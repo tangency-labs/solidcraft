@@ -77,8 +77,9 @@ pub enum StakeRefusal {
     /// The web stands `gap` under the top sheet at the path's start, past the weld tolerance.
     #[error("the web stands {gap} under the top sheet: close the gap to the weld tolerance")]
     WebApart { gap: f64 },
-    /// The web reaches `by` up into the top sheet at the path's start, past the weld tolerance.
-    #[error("the web reaches {by} up into the top sheet: trim it to the sheet's underside")]
+    /// The web reaches `by` up into the top sheet at the path's start, as far as its outer face or
+    /// further: no sheet is left to weld through. (Less is built, with [`StakeSite::overlap`].)
+    #[error("the web reaches {by} up into the top sheet, through it: trim it to the sheet's underside")]
     WebOverlap { by: f64 },
     /// Snapped onto the web, `by` sideways, the pieces at joint `joint` no longer meet, or one of
     /// them runs backwards.
@@ -193,6 +194,10 @@ pub struct StakeSite {
     /// How far the line was moved onto the web's middle, when it was moved by more than the weld
     /// tolerance: the notice for the user.
     pub moved: Option<f64>,
+    /// How far the web reaches up into the top sheet at the start, when it reaches past the weld
+    /// tolerance: the notice for the user. The weld is built as the parts lie (Q135, T199); its
+    /// zone is cut to each part's metal, overlap and all.
+    pub overlap: Option<f64>,
 }
 
 /// The site of a stake weld of `width` drawn from `start` along `path` on record face `face` of
@@ -288,7 +293,8 @@ pub fn stake_site(skin: &Body, face: usize, web: &Body, start: [f64; 3], path: &
     // room to the face's edges checked below along the whole path, the path stays on it
     through(skin, face, add(new_start, scale(normal, -t)), normal, tol)?;
 
-    // the web touching the top sheet at the start, to the tolerance
+    // the web touching the top sheet at the start, to the tolerance; reaching into it, a notice
+    let mut overlap = None;
     match web.classify_point(Vec3::from(new_start))? {
         PointClass::OnBoundary => {}
         PointClass::Outside => match web.face_hits_by_ray(new_start, normal)?.first() {
@@ -296,13 +302,11 @@ pub fn stake_site(skin: &Body, face: usize, web: &Body, start: [f64; 3], path: &
             Some(h) if h.distance > tolerance => return Err(StakeRefusal::WebApart { gap: h.distance }),
             Some(_) => {}
         },
-        PointClass::Inside => {
-            if let Some(h) = web.face_hits_by_ray(new_start, scale(normal, -1.0))?.first()
-                && h.distance > tolerance
-            {
-                return Err(StakeRefusal::WebOverlap { by: h.distance });
-            }
-        }
+        PointClass::Inside => match web.face_hits_by_ray(new_start, scale(normal, -1.0))?.first() {
+            Some(h) if h.distance >= t - tol => return Err(StakeRefusal::WebOverlap { by: h.distance }),
+            Some(h) if h.distance > tolerance => overlap = Some(h.distance),
+            _ => {}
+        },
     }
 
     // the snapped path whole: room on the picked face, holes included
@@ -343,7 +347,7 @@ pub fn stake_site(skin: &Body, face: usize, web: &Body, start: [f64; 3], path: &
         }
     }
     let moved = (by.abs() > tolerance).then_some(by.abs());
-    Ok(StakeSite { start: new_start, path: new_path, normal, skin: t, moved })
+    Ok(StakeSite { start: new_start, path: new_path, normal, skin: t, moved, overlap })
 }
 
 /// The joints of `laid` moved `by` sideways (left about `normal`), on the face: with the pieces

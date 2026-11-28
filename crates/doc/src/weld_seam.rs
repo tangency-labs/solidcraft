@@ -38,7 +38,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
 use solidcraft_kernel::{Body, BoolOp, KernelError, affine};
 
-use crate::weld_spot::{MARKS, MarkTop, SpotPiece, SpotRefusal, SpotSheet, SpotSide, SpotZone, check_sheets, positive, spot_site};
+use crate::weld_spot::{MARKS, MarkTop, SpotPiece, SpotRefusal, SpotSheet, SpotSide, SpotZone, check_sheets, positive, spot_site_reaching};
 
 /// Why a seam is refused.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -233,9 +233,9 @@ pub struct SeamSite {
 /// `picked`, the sheets of the stack listed in `sheets` (any order, at least two).
 ///
 /// Every joint of the path (its start, and every piece's end) must be a spot site
-/// ([`spot_site`]) on the same sheets and faces; the whole path must keep half the width from
-/// every edge of every face it crosses, measured from each piece by the kernel's exact
-/// curve-to-edges solve. The sheets are read, never changed: the solves run on each body's kernel
+/// ([`crate::weld_spot::spot_site`]) on the same sheets and faces; the whole path must keep the
+/// band's edge zone (`1.05` times half the width) from every edge of every face it crosses,
+/// measured from each piece by the kernel's exact curve-to-edges solve. The sheets are read, never changed: the solves run on each body's kernel
 /// form, never on its record.
 ///
 /// # Errors
@@ -250,7 +250,8 @@ pub fn seam_site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], 
 
 /// [`seam_site`] for a weld along the path whose widest part reaches `widest` from it: every arc
 /// of the path must turn wider than that, by more than the zone tolerance, so the site never
-/// takes an arc the weld's build refuses.
+/// takes an arc the weld's build refuses, and the path must keep that much room to the faces'
+/// edges (`PastFaceEdge` names the width whose widest part fits).
 pub(crate) fn site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3], path: &[SeamPiece], width: f64, widest: f64) -> Result<SeamSite> {
     if path.is_empty() {
         return bad("a seam with no path");
@@ -259,7 +260,8 @@ pub(crate) fn site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3]
     if !joints.iter().flatten().all(|v| v.is_finite()) {
         return bad("a seam path point that is not finite");
     }
-    let at = |joint: usize, p: [f64; 3]| spot_site(sheets, picked, face, p, width).map_err(|why| SeamRefusal::AtJoint { joint, why });
+    let at =
+        |joint: usize, p: [f64; 3]| spot_site_reaching(sheets, picked, face, p, width, widest).map_err(|why| SeamRefusal::AtJoint { joint, why });
     let first = at(0, start)?;
     for (joint, &p) in joints.iter().enumerate().skip(1) {
         let here = at(joint, p)?;
@@ -308,8 +310,8 @@ pub(crate) fn site(sheets: &[&Body], picked: usize, face: usize, start: [f64; 3]
             }
         }
     }
-    if let Some((room, piece, sheet, face)) = tightest.filter(|(room, ..)| 2.0 * room < width) {
-        return Err(SeamRefusal::PastFaceEdge { piece, sheet, face, width, fits: 2.0 * room });
+    if let Some((room, piece, sheet, face)) = tightest.filter(|(room, ..)| *room < widest) {
+        return Err(SeamRefusal::PastFaceEdge { piece, sheet, face, width, fits: width * room / widest });
     }
 
     // the path moved from the picked face to the faying face

@@ -541,8 +541,8 @@ fn a_face_not_flat_or_not_square_is_refused() {
     assert!(matches!(got, Err(SpotRefusal::FaceNotSquare { sheet: 1, .. })), "{got:?}");
 }
 
-/// A spot of 5 on a 3 × 3 sheet passes its edges; it fits up to 3 (the distance to the nearest
-/// edge, twice), and just under that it builds.
+/// A spot of 5 on a 3 × 3 sheet passes its edges; it fits up to 3 / 1.05 (its marks' edge zone,
+/// 1.05 d / 2, within the distance to the nearest edge), and just under that it builds.
 #[test]
 fn a_footprint_past_a_face_edge_is_refused_with_the_diameter_that_fits() {
     let lower = sheet(0.0, 1.5);
@@ -552,9 +552,10 @@ fn a_footprint_past_a_face_edge_is_refused_with_the_diameter_that_fits() {
         panic!("{got:?}");
     };
     assert_eq!(diameter, D);
-    assert!((fits - 3.0).abs() < 1e-9, "fits {fits}");
+    assert!((fits - 3.0 / 1.05).abs() < 1e-9, "fits {fits}");
     let face = face_at(&lower, [0.0; 3]);
-    assert!(spot_site(&[&lower, &small], 0, face, [0.0; 3], 2.99).is_ok());
+    assert!(spot_site(&[&lower, &small], 0, face, [0.0; 3], 2.85).is_ok());
+    assert!(matches!(spot_site(&[&lower, &small], 0, face, [0.0; 3], 2.9), Err(SpotRefusal::PastFaceEdge { .. })));
 }
 
 /// Fewer than two sheets, a picked sheet or face not listed, a point that is not finite or a

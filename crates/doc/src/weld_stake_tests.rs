@@ -225,17 +225,24 @@ fn a_pocket_in_the_sheet_or_a_hole_in_the_web_between_the_ends_is_refused() {
 
 /// The web's top 0.3 and 0.6 mm under the sheet: apart, with the gap (0.6 is past half the
 /// sheet's thickness, where the line across is probed). 0.05 mm up into the sheet, within the
-/// tolerance: taken. 0.3 mm up: refused with the overlap. A web nowhere across the start: none.
+/// tolerance: taken without a word. 0.3 mm up: built, with the overlap as its notice. Up through
+/// the sheet: refused. A web nowhere across the start: none.
 #[test]
-fn a_web_apart_overlapping_or_missing_is_refused_with_how_far() {
+fn a_web_apart_or_missing_is_refused_and_an_overlap_built_with_how_far() {
     let s = skin();
     for gap in [0.3, 0.6] {
         let got = site_on(&s, &web(1.2, -gap), 0.0);
         assert!(matches!(got, Err(StakeRefusal::WebApart { gap: g }) if (g - gap).abs() < 1e-6), "{gap}: {got:?}");
     }
-    assert!(site_on(&s, &web(1.2, 0.05), 0.0).is_ok_and(|g| g.moved.is_none()));
-    let got = site_on(&s, &web(1.2, 0.3), 0.0);
-    assert!(matches!(got, Err(StakeRefusal::WebOverlap { by }) if (by - 0.3).abs() < 1e-6), "{got:?}");
+    assert!(site_on(&s, &web(1.2, 0.05), 0.0).is_ok_and(|g| g.moved.is_none() && g.overlap.is_none()));
+    let w = web(1.2, 0.3);
+    let got = site_on(&s, &w, 0.0).unwrap();
+    assert!(got.overlap.is_some_and(|o| (o - 0.3).abs() < 1e-6), "{got:?}");
+    for piece in built(&got, &s, &w).pieces {
+        check(&piece.body, "overlap");
+    }
+    let got = site_on(&s, &web(1.2, 1.2), 0.0);
+    assert!(matches!(got, Err(StakeRefusal::WebOverlap { by }) if (by - 1.2).abs() < 1e-6), "{got:?}");
     let across = block([-15.0, 5.0, -10.0], [15.0, 6.0, 0.0]);
     assert_eq!(site_on(&s, &across, 0.0), Err(StakeRefusal::NoWebUnder { nearest: None }));
 }

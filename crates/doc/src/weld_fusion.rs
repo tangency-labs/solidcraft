@@ -1,8 +1,8 @@
 //! Fusion spot and fusion seam welds on lapped sheets: arc, laser or electron beam welds made
 //! through the top sheet into the one under it ([`fusion_weld`]). A fusion spot is one point; a
 //! fusion seam runs along a path of lines and arcs, as a resistance seam does
-//! ([`crate::weld_seam`]). Where they sit is a spot site ([`crate::weld_spot::spot_site`]) of the
-//! weld's width, or a fusion seam site ([`fusion_seam_site`]).
+//! ([`crate::weld_seam`]). Where they sit is a fusion spot site ([`fusion_spot_site`]) or a fusion
+//! seam site ([`fusion_seam_site`]), each with room for the weld's widest part, the cap's `0.5 w`.
 //!
 //! SolidCraft's own, as the spot and the seam are: every body comes from the kernel interface; this module adds the
 //! weld's rules and sizes. The commands and their storage come with #15131.
@@ -33,7 +33,7 @@ use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
 use solidcraft_kernel::{Body, KernelError, affine};
 
 use crate::weld_seam::{Laid, SeamNotice, SeamPiece, SeamRefusal, SeamSite, add, corners, lay, scale, site};
-use crate::weld_spot::{SpotPiece, SpotSide, SpotZone, check_sheets, positive};
+use crate::weld_spot::{SpotPiece, SpotRefusal, SpotSide, SpotSite, SpotZone, check_sheets, positive, spot_site_reaching};
 
 /// Why a fusion weld is refused.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -207,6 +207,16 @@ pub fn fusion_weld(weld: &FusionWeld) -> Result<Fusion> {
     }
     let notices = if laid.is_empty() { Vec::new() } else { corners(&laid, n, tol / w)? };
     Ok(Fusion { pieces, notices })
+}
+
+/// The site of a fusion spot of `width` picked at `point` on record face `face` of sheet `picked`:
+/// a spot site ([`crate::weld_spot::spot_site`]) with room for this weld's widest part, the cap's
+/// `0.5 w` (a resistance spot's marks reach `0.525 d`).
+///
+/// # Errors
+/// The spot site's refusals.
+pub fn fusion_spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], width: f64) -> std::result::Result<SpotSite, SpotRefusal> {
+    spot_site_reaching(sheets, picked, face, point, width, 0.5 * width)
 }
 
 /// The site of a fusion seam of `width` drawn from `start` along `path` on record face `face` of

@@ -205,3 +205,19 @@ fn a_fusion_seam_site_takes_the_arcs_the_weld_builds() {
         check(&piece.body, "arc of 1.55");
     }
 }
+
+/// On a 3 × 3 top sheet, 1.5 from the spot to every edge: a fusion spot of width 2.9 (its cap 1.45
+/// from the line) fits; a resistance spot of 2.9 (its marks' edge zone 1.5225) does not.
+#[test]
+fn a_fusion_spot_site_keeps_room_for_its_cap() {
+    let lower = sheet(0.0, T2);
+    let small = box_solid(Vec3::new(-1.5, -1.5, T2), Vec3::new(1.5, 1.5, T2 + T1)).unwrap();
+    let top = T1 + T2;
+    let face = (0..small.face_count())
+        .find(|&f| small.face_square_level(f, Vec3::new(0.0, 0.0, 1.0), [0.0, 0.0, top].into()).unwrap().is_some_and(|l| l.level.abs() < 1e-9))
+        .unwrap();
+    let both: &[&Body] = &[&lower, &small];
+    assert!(fusion_spot_site(both, 1, face, [0.0, 0.0, top], 2.9).is_ok());
+    let got = crate::weld_spot::spot_site(both, 1, face, [0.0, 0.0, top], 2.9);
+    assert!(matches!(got, Err(SpotRefusal::PastFaceEdge { .. })), "{got:?}");
+}

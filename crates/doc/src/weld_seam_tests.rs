@@ -236,7 +236,7 @@ fn a_seam_drawn_on_top_gives_the_frame_the_sheets_and_the_moved_path() {
 
 /// The upper sheet has a notch from y = 1.5 out, 4 wide, over the middle of a path along the x
 /// axis: both ends have room, but the path passes 1.5 from the notch, so a seam of 5 is refused
-/// with the width that fits there, 3.
+/// with the width whose edge zone (1.05 times half the width) fits there, 3 / 1.05.
 #[test]
 fn a_path_passing_a_face_edge_is_refused_with_the_width_that_fits() {
     let lower = sheet(0.0, 1.5);
@@ -248,7 +248,7 @@ fn a_path_passing_a_face_edge_is_refused_with_the_width_that_fits() {
         panic!("{got:?}");
     };
     assert_eq!(width, W);
-    assert!((fits - 3.0).abs() < 1e-9, "fits {fits}");
+    assert!((fits - 3.0 / 1.05).abs() < 1e-9, "fits {fits}");
 }
 
 /// An arc of radius 2 drawn on the top is tighter than the edge zone (2.625): refused at the site,
