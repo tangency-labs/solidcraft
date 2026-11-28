@@ -26,6 +26,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::sweep::api_brep::create_taper_extrude;
@@ -94,8 +95,8 @@ fn removed(d: f64) -> f64 {
     let flat = TIP - (4.0 * R * d).sqrt();
     let wy = -R + (R - d) * R / (R + d);
     let triangle = 0.5 * ((TIP - flat) * wy).abs();
-    let b = ((R - d) / (R + d)).acos();
-    (triangle - 0.5 * R * R * (b - b.sin())) * H
+    let b = det::acos((R - d) / (R + d));
+    (triangle - 0.5 * R * R * (b - det::sin(b))) * H
 }
 
 /// The knife edge of the part (mirrored when `s` is -1) chamfered `d`: its volume, or why

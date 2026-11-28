@@ -32,6 +32,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -121,7 +122,8 @@ fn boss_with_foot_round(k: &mut Kernel) -> (Brep, FaceId) {
         .find(|&&f| {
             !is_plane(&b, f)
                 && face_points(&b, f).iter().all(|p| {
-                    ((p.x - 30.0).powi(2) + (p.y - 20.0).powi(2)).sqrt() > 9.99 && p.z > 11.9
+                    (det::powi(p.x - 30.0, 2) + det::powi(p.y - 20.0, 2)).sqrt() > 9.99
+                        && p.z > 11.9
                 })
         })
         .unwrap();

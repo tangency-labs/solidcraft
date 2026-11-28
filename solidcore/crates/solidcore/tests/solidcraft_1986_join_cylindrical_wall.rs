@@ -19,6 +19,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -44,7 +45,7 @@ const SIZE: f64 = 3.0;
 
 fn at(r: f64, deg: f64) -> Point3 {
     let a = deg.to_radians();
-    Point3::new(r * a.cos(), r * a.sin(), 0.0)
+    Point3::new(r * det::cos(a), r * det::sin(a), 0.0)
 }
 
 /// A counter-clockwise annular sector between `r0` and `r1`, from -60 to +60 degrees,

@@ -28,6 +28,7 @@
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::brep::p1::{edges, faces, vertices};
@@ -77,7 +78,7 @@ impl Tube {
     /// The unit axis: Z turned `y_deg` about Y (the turn about Z keeps Z).
     fn axis(self) -> Vec3 {
         let y = self.y_deg.to_radians();
-        Vec3::new(y.sin(), 0.0, y.cos())
+        Vec3::new(det::sin(y), 0.0, det::cos(y))
     }
 
     /// The tube's volume, πr²L.
@@ -166,7 +167,7 @@ fn overlap_volume(n: usize) -> f64 {
         let p = TOP.base() + a * ((i as f64 + 0.5) * dt);
         for j in 0..n {
             let phi = (j as f64 + 0.5) * dphi;
-            let u = e1 * phi.cos() + e2 * phi.sin();
+            let u = e1 * det::cos(phi) + e2 * det::sin(phi);
             if let Some((lo, hi)) = SEAT.ray_inside(p, u) {
                 sum += 0.5 * (hi * hi - lo * lo);
             }

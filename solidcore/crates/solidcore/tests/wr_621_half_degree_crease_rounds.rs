@@ -20,6 +20,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_taper_extrude;
@@ -34,7 +35,7 @@ fn line(a: (f64, f64), b: (f64, f64)) -> Curve {
 
 /// The rise of the crease above y = 20 for a turn of `turn` degrees.
 fn rise(turn: f64) -> f64 {
-    20.0 * (0.5 * turn * PI / 180.0).tan()
+    20.0 * det::tan(0.5 * turn * PI / 180.0)
 }
 
 /// The creased block, extruded 20 along z.
@@ -94,7 +95,7 @@ fn round(turn: f64, r: f64) -> solidcore::Result<f64> {
 
 fn removed(turn: f64, r: f64) -> f64 {
     let d = turn * PI / 180.0;
-    20.0 * r * r * ((0.5 * d).tan() - 0.5 * d)
+    20.0 * r * r * (det::tan(0.5 * d) - 0.5 * d)
 }
 
 #[test]
@@ -194,7 +195,7 @@ fn wr_621_a_shallow_crease_too_small_to_round_is_refused_before_solving() {
         turn > 0.5 * PI / 180.0 && turn < 2.0 * PI / 180.0,
         "turn {turn}"
     );
-    let reach = 1.0 / (0.5 * turn).cos() - 1.0;
+    let reach = 1.0 / det::cos(0.5 * turn) - 1.0;
     assert!(0.5 * reach < tolerance, "r 0.5 stands {} off", 0.5 * reach);
     assert_eq!(smallest_radius, tolerance / reach);
     assert!((smallest_radius - 0.715).abs() < 1e-3, "{smallest_radius}");

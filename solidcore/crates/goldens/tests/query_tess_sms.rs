@@ -1,6 +1,7 @@
 //! Non-CPP coverage of the production query.tess SMS reader.
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/query_tess_sms.rs"]
 mod query_tess_sms;
@@ -112,7 +113,7 @@ fn counts_validate_in_header_order() {
 }
 
 fn exclusive() -> f64 {
-    2.0_f64.powi(usize::BITS as i32)
+    det::powi(2.0_f64, usize::BITS as i32)
 }
 
 fn largest_count() -> f64 {

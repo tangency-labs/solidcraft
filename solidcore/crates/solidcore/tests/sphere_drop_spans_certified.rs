@@ -46,6 +46,7 @@ use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::vector2d::Point2;
 use solidcore::intersect::surface_intersector::sphere_span::{sphere_span_image, SpanImage};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
@@ -132,7 +133,7 @@ fn piece_off_circle(b: [Vec3; 4], circle: &Circle) -> f64 {
         .fold(0.0, f64::max)
         + margin;
     let h_max = h.iter().map(|v| v.abs()).fold(0.0, f64::max) + 1e-12 * scale.sqrt();
-    (h_max * h_max + (q_max / circle.radius).powi(2)).sqrt()
+    (h_max * h_max + det::powi(q_max / circle.radius, 2)).sqrt()
 }
 
 /// What a trim is certified against: the circle an analytic circle edge or a circle's
@@ -277,8 +278,9 @@ fn arcs_off_circle(segments: &[([Vec3; 3], [f64; 3])], circle: &Circle) -> f64 {
         let h_max = h.iter().map(|a| a.abs()).fold(0.0, f64::max) + 1e-12 * scale.sqrt();
         let w_min = w.iter().copied().fold(f64::INFINITY, f64::min);
         assert!(w_min > 0.0, "a weight that is not positive");
-        let d =
-            ((h_max / w_min).powi(2) + (q_max / (w_min * w_min * circle.radius)).powi(2)).sqrt();
+        let d = (det::powi(h_max / w_min, 2)
+            + det::powi(q_max / (w_min * w_min * circle.radius), 2))
+        .sqrt();
         worst = worst.max(d);
     }
     worst

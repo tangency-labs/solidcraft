@@ -25,6 +25,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cone};
 use solidcore::query::api_queries::edge_closest_point;
@@ -74,7 +75,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 fn cut_cone_volume(rb: f64, rt: f64, xp: f64) -> f64 {
     let area = |z: f64| {
         let r = rb + (rt - rb) * z / H;
-        let segment = r * r * (xp / r).acos() - xp * (r * r - xp * xp).sqrt();
+        let segment = r * r * det::acos(xp / r) - xp * (r * r - xp * xp).sqrt();
         PI * r * r - segment
     };
     let n = 2000;
@@ -118,8 +119,8 @@ fn rounded(rb: f64, rt: f64, xp: f64, small: f64) -> (Kernel, Brep, f64, [f64; 2
     let big = spandrel * BIG * BIG * top_length;
     let small_lower = spandrel * small * small * (H - BIG - small);
     let removed = [
-        big + small_lower - 2.0 * BIG.powi(3) - 2.0 * small.powi(3),
-        big + 2.0 * BIG.powi(3) + spandrel * small * small * H + 2.0 * small.powi(3),
+        big + small_lower - 2.0 * det::powi(BIG, 3) - 2.0 * det::powi(small, 3),
+        big + 2.0 * det::powi(BIG, 3) + spandrel * small * small * H + 2.0 * det::powi(small, 3),
     ];
     (k, b, base, removed)
 }

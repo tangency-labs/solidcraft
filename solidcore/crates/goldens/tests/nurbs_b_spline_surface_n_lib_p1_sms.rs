@@ -1,6 +1,7 @@
 //! Non-C++ tests of the exact SMS decoder used by the surface runner.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/nurbs_b_spline_surface_n_lib_p1_sms.rs"]
 mod sms;
@@ -99,7 +100,7 @@ fn signed_zero_and_nonfinite_payload_are_not_normalized() {
 
 #[test]
 fn invalid_and_exclusive_counts_in_every_position() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     for invalid in [
         "-1".into(),
         "0.5".into(),
@@ -132,7 +133,7 @@ fn ordered_header_validation_precedes_missing_later_headers() {
 
 #[test]
 fn huge_valid_counts_with_tiny_bodies_preflight_without_allocating() {
-    let huge = 2.0_f64.powi(usize::BITS as i32 - 5);
+    let huge = det::powi(2.0_f64, usize::BITS as i32 - 5);
     for position in 0..4 {
         let mut header = [
             "0".to_owned(),
@@ -150,7 +151,7 @@ fn huge_valid_counts_with_tiny_bodies_preflight_without_allocating() {
 
 #[test]
 fn checked_knot_point_stride_and_total_arithmetic() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     let eighth = half / 4.0;
     for header in [
         format!("{half:.0} 0 {half:.0} 0 0"),   // n+p
@@ -191,7 +192,7 @@ fn every_polynomial_and_rational_prefix_is_truncated() {
 
 #[test]
 fn eager_first_lexical_error_beats_headers_overflow_and_truncation() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     let lexical = "bad".parse::<f64>().unwrap_err().to_string();
     for text in [
         "bad".into(),

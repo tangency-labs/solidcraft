@@ -23,6 +23,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::sweep::api_brep::create_taper_extrude;
@@ -92,7 +93,7 @@ fn knife_edge(k: &Kernel, b: &Brep, s: f64) -> EdgeId {
 
 /// The volume the round of radius `r` takes off.
 fn removed(r: f64) -> f64 {
-    let beta = ((R - r) / (R + r)).acos();
+    let beta = det::acos((R - r) / (R + r));
     let ox = TIP - (4.0 * R * r).sqrt();
     let quad = 0.5 * (TIP - ox) * (R + r);
     (quad - 0.5 * R * R * beta - 0.5 * r * r * (PI - beta)) * H

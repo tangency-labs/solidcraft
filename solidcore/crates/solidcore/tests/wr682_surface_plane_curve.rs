@@ -21,6 +21,7 @@ use solidcore::error::ErrorKind;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder_surface;
 use solidcore::surface::cone::Cone;
@@ -34,7 +35,11 @@ const ANG_TOL: f64 = 0.2;
 
 fn ellipse(deg: f64) -> Point3 {
     let t = deg.to_radians();
-    Point3::new(10.0 * t.cos(), 10.0 * t.sin(), 20.0 + 5.0 * t.cos())
+    Point3::new(
+        10.0 * det::cos(t),
+        10.0 * det::sin(t),
+        20.0 + 5.0 * det::cos(t),
+    )
 }
 
 /// The cylinder as a B-spline surface, as a round's surface is: no analytic intersector takes
@@ -63,7 +68,7 @@ fn off_plane(x: Point3) -> f64 {
 }
 
 fn off_cylinder(x: Point3) -> f64 {
-    (x.x.hypot(x.y) - 10.0).abs()
+    (det::hypot(x.x, x.y) - 10.0).abs()
 }
 
 /// The length of the ellipse from `from` to `to` degrees.
@@ -212,7 +217,7 @@ fn the_start_direction_chooses_the_way_round() {
     let (cyl, plane) = (cylinder(&k), patch());
     let t = 45f64.to_radians();
     // the way the angle grows at 45 degrees, and the other way
-    let up = Vec3::new(-t.sin(), t.cos(), -0.5 * t.sin());
+    let up = Vec3::new(-det::sin(t), det::cos(t), -0.5 * det::sin(t));
     let short = intersect(&k, &cyl, &plane, 45.0, 135.0, Some(up)).unwrap();
     let length = check_curves(
         &k,
@@ -400,8 +405,8 @@ fn seamed_cylinder(k: &Kernel, seam_deg: f64) -> Surface {
     let t = seam_deg.to_radians();
     let frame = Axis2Placement::new(
         Point3::new(0.0, 0.0, 0.0),
-        Vec3::new(t.cos(), t.sin(), 0.0),
-        Vec3::new(-t.sin(), t.cos(), 0.0),
+        Vec3::new(det::cos(t), det::sin(t), 0.0),
+        Vec3::new(-det::sin(t), det::cos(t), 0.0),
     );
     let mut cylinder = Cone::create_canonical_cylinder(k, &frame, 10.0).unwrap();
     let mut domain = Extent2d::default();
@@ -413,7 +418,7 @@ fn seamed_cylinder(k: &Kernel, seam_deg: f64) -> Surface {
 /// The point at `deg` degrees on the circle of radius 10 about z at height 5.
 fn on_circle(deg: f64) -> Point3 {
     let t = deg.to_radians();
-    Point3::new(10.0 * t.cos(), 10.0 * t.sin(), 5.0)
+    Point3::new(10.0 * det::cos(t), 10.0 * det::sin(t), 5.0)
 }
 
 /// With `closed_by_start_direction` (not upstream), the closed circle a cylinder and a plane
@@ -476,7 +481,7 @@ fn a_closed_curve_runs_from_its_start_the_way_the_start_direction_says() {
 /// `swept` degrees from there runs.
 fn heading(deg: f64, swept: f64) -> Vec3 {
     let t = deg.to_radians();
-    Vec3::new(-t.sin(), t.cos(), 0.0) * swept.signum()
+    Vec3::new(-det::sin(t), det::cos(t), 0.0) * swept.signum()
 }
 
 /// With `closed_by_start_direction` (not upstream), a start direction neither way round the
@@ -492,7 +497,7 @@ fn a_heading_along_neither_way_round_is_refused() {
     for (from, to) in [(-10.0, 0.0), (20.0, 290.0), (0.0, 100.0)] {
         let t = f64::to_radians(from);
         for (what, mut dir) in [
-            ("normal", Vec3::new(t.cos(), t.sin(), 0.0)),
+            ("normal", Vec3::new(det::cos(t), det::sin(t), 0.0)),
             ("NaN", Vec3::new(f64::NAN, f64::NAN, f64::NAN)),
         ] {
             let e = srf_srf_intersection(
@@ -674,7 +679,7 @@ fn check_arc(
         let p = curve
             .evaluate_point(k, ivl.evaluate(f64::from(i) / f64::from(n)))
             .unwrap();
-        let off = (p.x.hypot(p.y) - 10.0).abs().max((p.z - 5.0).abs());
+        let off = (det::hypot(p.x, p.y) - 10.0).abs().max((p.z - 5.0).abs());
         assert!(off <= 1e-9, "{what}: {p:?} off the circle by {off}");
         length += p.distance(last);
         last = p;
@@ -702,7 +707,7 @@ fn sphere_seamed_at_90(k: &Kernel) -> Surface {
 fn on_level_circle(deg: f64) -> Point3 {
     let t = deg.to_radians();
     let r = 75.0_f64.sqrt();
-    Point3::new(r * t.cos(), r * t.sin(), 5.0)
+    Point3::new(r * det::cos(t), r * det::sin(t), 5.0)
 }
 
 /// #16354's seam-only UV pass-over, old to new. With `closed_by_start_direction`, an arc

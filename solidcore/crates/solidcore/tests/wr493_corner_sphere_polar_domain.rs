@@ -19,6 +19,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::primitive::api_curves::create_line_segment;
@@ -31,7 +32,11 @@ use solidcore::{Brep, Kernel};
 
 fn rounded_wedge(k: &mut Kernel, deg: f64, r: f64) -> Brep {
     let a = deg.to_radians();
-    let p = [(0.0, 0.0), (40.0, 0.0), (40.0 * a.cos(), 40.0 * a.sin())];
+    let p = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0 * det::cos(a), 40.0 * det::sin(a)),
+    ];
     let c: Vec<Curve> = (0..3)
         .map(|i| {
             let (s, e) = (p[i], p[(i + 1) % 3]);
@@ -66,7 +71,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// side edges, whose exterior angles sum to `2 pi`.
 fn rounded_prism_volume(deg: f64, r: f64) -> f64 {
     let a = deg.to_radians();
-    let (area, perimeter) = (800.0 * a.sin(), 80.0 + 80.0 * (a / 2.0).sin());
+    let (area, perimeter) = (800.0 * det::sin(a), 80.0 + 80.0 * det::sin(a / 2.0));
     let rho = 2.0 * area / perimeter;
     let s = (rho - r) / rho;
     let (tq, pq, hq) = (area * s * s, perimeter * s, 10.0 - 2.0 * r);

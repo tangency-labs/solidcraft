@@ -7,6 +7,7 @@
 )]
 
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::surface::procedural_blend::convert::{
@@ -260,7 +261,7 @@ fn interior_sections_hold_a_cubic_s_third_derivative() {
 /// arc-length derivative of its curvature vector (`h = 0`: a circle).
 fn helix(r: f64, h: f64, a: f64) -> (Point3, Vec3, Vec3, Vec3) {
     let c = (r * r + h * h).sqrt();
-    let (sin, cos) = a.sin_cos();
+    let (sin, cos) = det::sin_cos(a);
     (
         Point3::new(r * cos, r * sin, h * a),
         Vec3::new(-r * sin, r * cos, h) * (1.0 / c),

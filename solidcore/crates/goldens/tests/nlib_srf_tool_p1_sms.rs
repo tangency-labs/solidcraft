@@ -1,6 +1,7 @@
 //! Regression tests for the runner's actual SMS decoder, without C++ linkage.
 
 use goldens::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 #[path = "../src/units/fixtures/nlib_srf_tool_p1_sms.rs"]
@@ -75,7 +76,7 @@ fn scientific_counts_signed_zero_and_unrestricted_degrees() {
 
 #[test]
 fn every_count_rejects_invalid_and_unrepresentable_values() {
-    let exclusive = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for value in [
         "-1", "0.5", "NaN", "inf", "-inf", "1e300", "1e999", &exclusive,
     ] {
@@ -89,7 +90,7 @@ fn every_count_rejects_invalid_and_unrepresentable_values() {
 
 #[test]
 fn huge_representable_counts_with_short_bodies_do_not_allocate() {
-    let huge = 2.0_f64.powi((usize::BITS - 4) as i32).to_string();
+    let huge = det::powi(2.0_f64, (usize::BITS - 4) as i32).to_string();
     for index in 0..4 {
         let mut header = ["0", "0", "0", "0", "0"];
         header[index] = &huge;
@@ -100,11 +101,11 @@ fn huge_representable_counts_with_short_bodies_do_not_allocate() {
 
 #[test]
 fn checked_knot_net_coordinate_and_total_payload_arithmetic() {
-    let power = |bits| 2.0_f64.powi(bits).to_string();
+    let power = |bits| det::powi(2.0_f64, bits).to_string();
     let half = power(usize::BITS as i32 - 1);
     let quarter = power(usize::BITS as i32 - 2);
     let square = power((usize::BITS / 2) as i32);
-    let exclusive = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32);
     let largest = f64::from_bits(exclusive.to_bits() - 1).floor();
     // Compose MAX from two valid counts to reach the final knot-count +2.
     let remainder = (exclusive - largest - 1.0).to_string();

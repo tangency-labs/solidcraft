@@ -12,6 +12,7 @@ use std::f64::consts::{FRAC_PI_2, PI};
 
 use solidcore::error::Reason;
 use solidcore::error::Result;
+use solidcore::math::det;
 use solidcore::math::{Point2, Vec2};
 use solidcore::prism::fill::{
     fill, Channel, Contour, FillFailure, FillNote, FillOptions, FillSide, Filled,
@@ -31,7 +32,7 @@ fn line(a: Point2, b: Point2) -> Seg2 {
 }
 
 fn tan(deg: f64) -> f64 {
-    deg.to_radians().tan()
+    det::tan(deg.to_radians())
 }
 
 fn mirror(wall: &[Seg2]) -> Vec<Seg2> {
@@ -126,8 +127,8 @@ fn close(got: f64, want: f64) {
 /// The circular segment between a chord of half-length `a` and its arc of sagitta `h`.
 fn segment(a: f64, h: f64) -> f64 {
     let r = (a * a + h * h) / (2.0 * h);
-    let theta = 2.0 * a.atan2(r - h);
-    r * r / 2.0 * (theta - theta.sin())
+    let theta = 2.0 * det::atan2(a, r - h);
+    r * r / 2.0 * (theta - det::sin(theta))
 }
 
 /// A single-V (or Y with root face `c`) groove in plates `t` thick, included angle `angle`.
@@ -333,10 +334,11 @@ fn blended_cap(a: f64, h: f64, o: f64) -> f64 {
     let sum = (x * x + h * h) / (2.0 * h);
     let big = a * sum / x;
     let small = sum - big;
-    let main = 2.0 * a * (h - big) + a * (big * big - a * a).sqrt() + big * big * (a / big).asin();
+    let main =
+        2.0 * a * (h - big) + a * (big * big - a * a).sqrt() + big * big * det::asin(a / big);
     let blend = small * o
         - o / 2.0 * (small * small - o * o).sqrt()
-        - small * small / 2.0 * (o / small).asin();
+        - small * small / 2.0 * det::asin(o / small);
     main + 2.0 * blend
 }
 
@@ -420,7 +422,7 @@ fn tangent_at(seg: &Seg2, t: f64) -> Point2 {
     };
     let ang = start + sweep * t;
     let s = sweep.signum();
-    p(-ang.sin() * s, ang.cos() * s)
+    p(-det::sin(ang) * s, det::cos(ang) * s)
 }
 
 #[test]
@@ -558,7 +560,7 @@ fn a_depth_fills_the_channel_only_that_deep() {
     let cy = -(U_T - U_C) + U_R;
     // below the round's centre (at -cy) the cut keeps the strip of the round above y = -8
     let dy = 8.0 + cy;
-    let round = U_R * U_R / 2.0 * (dy / U_R).asin() + dy / 2.0 * (U_R * U_R - dy * dy).sqrt();
+    let round = U_R * U_R / 2.0 * det::asin(dy / U_R) + dy / 2.0 * (U_R * U_R - dy * dy).sqrt();
     let half = U_R * -cy + tan(U_FLANK) * cy * cy / 2.0 + round;
     close(area(&w), G * 8.0 + 2.0 * half);
 }
@@ -1225,9 +1227,9 @@ fn grown(c: &Case) -> f64 {
 fn toe_touch(c: &Case, a: f64, angle: f64) -> f64 {
     let b = grown(c);
     let t = angle.to_radians();
-    let (dx, y) = (b * t.cos(), b * t.sin());
+    let (dx, y) = (b * det::cos(t), b * det::sin(t));
     let k = (dx * (2.0 * a + dx) + y * y) / (2.0 * y);
-    a * a / (a.hypot(k) + k)
+    a * a / (det::hypot(a, k) + k)
 }
 
 #[test]
@@ -1672,8 +1674,8 @@ fn toe_arc(t: f64, rho: f64, down: bool) -> Seg2 {
     } else {
         (-1.0, -(0.5 / rho).min(0.5 * t))
     };
-    let center = p(1.0 + side * rho * t.sin(), -side * rho * t.cos());
-    let start = (0.0 - center.y).atan2(1.0 - center.x);
+    let center = p(1.0 + side * rho * det::sin(t), -side * rho * det::cos(t));
+    let start = det::atan2(0.0 - center.y, 1.0 - center.x);
     Seg2::Arc {
         center,
         radius: rho,
@@ -1738,7 +1740,10 @@ fn concave_fits_build_when_retried_on_every_scale() {
             let t = t.to_radians();
             walls.push((
                 None,
-                vec![line(p(1.0, 0.0), p(1.0 - 0.5 * t.cos(), -0.5 * t.sin()))],
+                vec![line(
+                    p(1.0, 0.0),
+                    p(1.0 - 0.5 * det::cos(t), -0.5 * det::sin(t)),
+                )],
             ));
         }
         // arc walls leaving the toe: down at 5, 1, 0.05 and 0.01 degrees, up at 5, 1, 0.2,
@@ -1828,7 +1833,7 @@ fn concave_fits_build_beside_shallow_and_curved_walls_that_leave_the_toe() {
     let t = 0.002_f64.to_radians();
     let line_wall = vec![line(
         p(1000.0, 0.0),
-        p(1000.0 - 500.0 * t.cos(), -500.0 * t.sin()),
+        p(1000.0 - 500.0 * det::cos(t), -500.0 * det::sin(t)),
     )];
     for (right, depth) in [(arc, 0.9), (line_wall, 900.0)] {
         let w = Case {
@@ -1930,15 +1935,15 @@ fn an_arc_whose_end_angle_rounds_away_keeps_an_honest_area_bound() {
     // CodeRabbit on #22653: from 2^53 a sweep of 1 rounds `start + sweep` back to `start`, so
     // the reading about the centre gave 0.5 with a bound of 3e-15; the exact term is
     // (1 + sin 1) / 2, about 0.92. That reading's bound now holds the end angle's rounding
-    let start = 2f64.powi(53);
+    let start = det::powi(2f64, 53);
     let arc = Seg2::Arc {
-        center: p(start.cos(), start.sin()),
+        center: p(det::cos(start), det::sin(start)),
         radius: 1.0,
         start,
         sweep: 1.0,
     };
     let (value, bound) = arc.area_term().unwrap();
-    let exact = (1.0 + 1f64.sin()) * 0.5;
+    let exact = (1.0 + det::sin(1f64)) * 0.5;
     assert!(
         (value - exact).abs() <= bound,
         "{value} vs {exact}, bound {bound}"
@@ -1992,7 +1997,10 @@ fn very_wide_blends_and_near_flat_walls_build_or_refuse_with_a_fit_that_builds()
     let mut walls = Vec::new();
     for (deg, f) in [(0.001, 100.0), (0.001, 1e4), (3e-4, 100.0), (1e-4, 100.0)] {
         let t = f64::to_radians(deg);
-        walls.push((line(p(1.0, 0.0), p(1.0 - 0.5 * t.cos(), -0.5 * t.sin())), f));
+        walls.push((
+            line(p(1.0, 0.0), p(1.0 - 0.5 * det::cos(t), -0.5 * det::sin(t))),
+            f,
+        ));
     }
     for (t, rho, down, sizes) in [
         (0.002, 3000.0, false, &[100.0, 1e3][..]),

@@ -28,6 +28,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
@@ -157,10 +158,10 @@ fn mitres(k: &Kernel, b: &Brep) -> Mitres {
                     .max(((p.x - cx) * ox - (p.y - cy) * oy).abs() / 2.0_f64.sqrt());
                 out.cyl = out
                     .cyl
-                    .max(((p.x - (cx + ox)).hypot(p.z - 11.0) - 1.0).abs());
+                    .max((det::hypot(p.x - (cx + ox), p.z - 11.0) - 1.0).abs());
                 out.cyl = out
                     .cyl
-                    .max(((p.y - (cy + oy)).hypot(p.z - 11.0) - 1.0).abs());
+                    .max((det::hypot(p.y - (cy + oy), p.z - 11.0) - 1.0).abs());
             }
             let mut faces = Vec::new();
             for eu in edge::edgeuses(b, e, None, None).unwrap() {
@@ -253,10 +254,10 @@ fn sloping_fin(k: &mut Kernel, mirrored: bool) -> Brep {
 /// and the sloping end of the side strip give `integral_0^(2/5) (1-q)(1/2-q) dt`
 /// - (3/4) integral_(2/5)^1 t(1-q) dt. The unrounded union is 100 + 30 - 13.5.
 fn sloping_fin_volume(radius: f64) -> f64 {
-    let angle = 0.75_f64.atan();
+    let angle = det::atan(0.75_f64);
     let strips = 5.5 - 1.5 * PI + 0.5 * angle;
     let corner = 53.0 / 120.0 - 3.0 * PI / 8.0 + 9.0 * angle / 8.0;
-    116.5 + strips * radius.powi(2) + corner * radius.powi(3)
+    116.5 + strips * det::powi(radius, 2) + corner * det::powi(radius, 3)
 }
 
 #[test]

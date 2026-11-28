@@ -6,6 +6,7 @@
 //! of radius r takes the band y < r off the top and z > 20 - r off the front, so at r 8 the
 //! footprint lies inside the band, at r 1.9 the band stops short of it.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
+use solidcore::math::det;
 
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
@@ -65,7 +66,7 @@ fn column_under_footprint() -> f64 {
     let spans = 4000;
     let h = PI / f64::from(spans);
     let f = |t: f64| {
-        let (c, d) = (t.cos(), 4.0 - 2.0 * t.sin());
+        let (c, d) = (det::cos(t), 4.0 - 2.0 * det::sin(t));
         8.0 * c * c * (8.0 - (64.0 - d * d).sqrt())
     };
     let mut sum = f(-0.5 * PI) + f(0.5 * PI);
@@ -101,12 +102,12 @@ fn wall_on_round(k: &Kernel, b: &Brep) -> f64 {
             let p = curve
                 .evaluate_point(k, ivl.evaluate(f64::from(s) / 256.0))
                 .unwrap();
-            on = ((p.x - 20.0).hypot(p.y - 4.0) - 2.0).abs() < tol
-                && ((p.y - 8.0).hypot(p.z - 12.0) - 8.0).abs() < tol;
+            on = (det::hypot(p.x - 20.0, p.y - 4.0) - 2.0).abs() < tol
+                && (det::hypot(p.y - 8.0, p.z - 12.0) - 8.0).abs() < tol;
             if !on {
                 break;
             }
-            let a = (p.y - 4.0).atan2(p.x - 20.0);
+            let a = det::atan2(p.y - 4.0, p.x - 20.0);
             if s > 0 {
                 let d: f64 = a - last;
                 span += d - (2.0 * PI) * (d / (2.0 * PI)).round();
@@ -299,7 +300,7 @@ fn assert_near_closed_form(v: f64, want: f64) {
 /// prisms' footprint 2 <= y <= 6: with u = 8 - y, `[u sqrt(64 - u^2) / 2 + 32 asin(u / 8)]`
 /// from 2 to 6.
 fn round_over_prism() -> f64 {
-    let f = |u: f64| 0.5 * u * (64.0 - u * u).sqrt() + 32.0 * (u / 8.0).asin();
+    let f = |u: f64| 0.5 * u * (64.0 - u * u).sqrt() + 32.0 * det::asin(u / 8.0);
     48.0 + f(6.0) - f(2.0)
 }
 
@@ -322,7 +323,7 @@ fn cone_pit_void() -> f64 {
         } else if d >= r {
             0.0
         } else {
-            r * r * (d / r).acos() - d * (r * r - d * d).sqrt()
+            r * r * det::acos(d / r) - d * (r * r - d * d).sqrt()
         }
     };
     let crossing = |g: &dyn Fn(f64) -> f64| {

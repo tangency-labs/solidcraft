@@ -9,6 +9,7 @@ use solidcore::blend::fillet_section::section::GnSectionFsg;
 use solidcore::geom::vector3d::Point3;
 use solidcore::intersect::adv_surface_intersector::NoSurfaceHandle;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -115,8 +116,8 @@ fn plane_x(x0: f64) -> Surface {
 fn arc(x: f64, c: f64, rad: f64, a0: f64, a1: f64) -> BSplineCurve {
     use solidcore::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
     let h = 0.5 * (a1 - a0);
-    let at = |a: f64, r: f64| Point3::new(x, c + r * a.cos(), c + r * a.sin());
-    let cps = [at(a0, rad), at(a0 + h, rad / h.cos()), at(a1, rad)];
+    let at = |a: f64, r: f64| Point3::new(x, c + r * det::cos(a), c + r * det::sin(a));
+    let cps = [at(a0, rad), at(a0 + h, rad / det::cos(h)), at(a1, rad)];
     BSplineCurve::create_canonical(&CanonicalData {
         dim: 3,
         degree: 2,
@@ -125,7 +126,7 @@ fn arc(x: f64, c: f64, rad: f64, a0: f64, a1: f64) -> BSplineCurve {
         knot_multiplicities: &[3, 3],
         knots: &[0.0, 1.0],
         knot_type: KnotType::Unspecified,
-        weights: Some(&[1.0, h.cos(), 1.0]),
+        weights: Some(&[1.0, det::cos(h), 1.0]),
         trim: None,
     })
     .unwrap()
@@ -152,8 +153,12 @@ fn a_round_on_a_round_reads_the_inner_round_by_its_definition() {
     let ui = (x0 - rho) / L;
     let vi = |a: f64| (a.to_degrees() - 180.0) / 90.0;
     let seed_inner = seg(Point2::new(ui, vi(a0)), Point2::new(ui, vi(a1)));
-    let wall_uv =
-        |a: f64| Point2::new((R + (R - rho) * a.cos()) / L, (R + (R - rho) * a.sin()) / L);
+    let wall_uv = |a: f64| {
+        Point2::new(
+            (R + (R - rho) * det::cos(a)) / L,
+            (R + (R - rho) * det::sin(a)) / L,
+        )
+    };
     let seed_wall = seg(wall_uv(a0), wall_uv(a1));
     // the sides: the ball's centre against each support's normal at its seed's start
     let m0 = leader.evaluate_point(0.0).unwrap();
@@ -207,7 +212,7 @@ fn a_round_on_a_round_reads_the_inner_round_by_its_definition() {
         // its first rail on the inner round's definition, the exact cylinder (its net, a
         // plane, is up to 0.4 off it), its second on the wall
         let p0 = outer.evaluate_point(&k, Point2::new(u, 0.0)).unwrap();
-        let on_cylinder = ((p0.y - R).powi(2) + (p0.z - R).powi(2)).sqrt() - R;
+        let on_cylinder = (det::powi(p0.y - R, 2) + det::powi(p0.z - R, 2)).sqrt() - R;
         assert!(
             on_cylinder.abs() < 1e-9,
             "rail 1 at {u}: {on_cylinder:e} ({p0:?})"

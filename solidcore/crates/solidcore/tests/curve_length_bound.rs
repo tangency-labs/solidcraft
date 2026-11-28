@@ -12,6 +12,7 @@ use solidcore::curve::length_bound::MAX_PIECES;
 use solidcore::error::curve::CurveFailure;
 use solidcore::error::Reason;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as Nurb;
@@ -54,7 +55,7 @@ fn quadratic_root_integral(a: f64, b: f64, c: f64) -> f64 {
         let s = (a * t * t + b * t + c).sqrt();
         let u = 2.0 * a * t + b;
         let disc = 4.0 * a * c - b * b;
-        u * s / (4.0 * a) + disc / (8.0 * a.powf(1.5)) * (2.0 * a.sqrt() * s + u).ln()
+        u * s / (4.0 * a) + disc / (8.0 * det::powf(a, 1.5)) * det::ln(2.0 * a.sqrt() * s + u)
     };
     f(1.0) - f(0.0)
 }
@@ -279,7 +280,7 @@ fn the_cone_frustum_arc_floor_follows_the_floor_law() {
     let k = Kernel::default();
     let arc = cone_arc();
     let ivl = Extent1d::from_min_max(1.0, 1.25);
-    let rt = 10.0 - 6.0 * (std::f64::consts::PI / 6.0).tan();
+    let rt = 10.0 - 6.0 * det::tan(std::f64::consts::PI / 6.0);
     let exact = 0.5 * std::f64::consts::PI * rt;
     let b = arc.length_bound(&k, &ivl, 4e-8).unwrap();
     println!(
@@ -295,7 +296,7 @@ fn the_cone_frustum_arc_floor_follows_the_floor_law() {
         },
         other => panic!("not refused: {other:?}"),
     };
-    let predicted = 9.672_260_325_999_105e-8 * (21.0_f64 / 375.0).powf(2.0 / 3.0);
+    let predicted = 9.672_260_325_999_105e-8 * det::powf(21.0_f64 / 375.0, 2.0 / 3.0);
     println!("FLOOR cone arc floor={floor:e} pieces={pieces} predicted={predicted:e}");
     let ratio = floor / predicted;
     assert!(

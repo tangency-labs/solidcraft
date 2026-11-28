@@ -44,6 +44,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
@@ -186,9 +187,9 @@ fn union_enclosure() -> ((f64, f64), [(f64, f64); 6]) {
     use std::f64::consts::PI;
     let r: f64 = 16.0;
     let (l1, l2) = (751.0659092250161_f64, 541.2019951093923_f64);
-    let delta = 150.0_f64.hypot(520.0) - l2;
+    let delta = det::hypot(150.0_f64, 520.0) - l2;
     let unit = |x: f64, z: f64| {
-        let n = x.hypot(z);
+        let n = det::hypot(x, z);
         [x / n, z / n]
     };
     let (a1, a2) = (unit(750.0, 40.0), unit(-150.0, 520.0));
@@ -256,7 +257,7 @@ fn union_enclosure() -> ((f64, f64), [(f64, f64); 6]) {
     let g2 = edge_quarter(n2, a2, n1, 1.0) + edge_quarter(n2, a2, n1, -1.0);
 
     let disc = PI * r * r;
-    let v_q = rhombus_quarter * 16.0 * r.powi(3) / (3.0 * sin_a);
+    let v_q = rhombus_quarter * 16.0 * det::powi(r, 3) / (3.0 * sin_a);
     let v_lo = disc * (l1 + l2) - v_q;
     let volume = (v_lo, v_lo + delta * disc);
     let top_wall = 2.0 * PI * r * l1 - 4.0 * r * r * g1 / sin_a;

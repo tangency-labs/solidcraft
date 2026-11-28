@@ -1,6 +1,7 @@
 //! Exercise the exact runner-private SMS parser without C++.
 
 use goldens::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 #[path = "../src/units/fixtures/surface_surface_p5_sms.rs"]
@@ -104,7 +105,7 @@ fn invalid_counts_in_each_header_position() {
 
 #[test]
 fn exclusive_usize_bound_is_rejected() {
-    let bound = 2.0_f64.powi(usize::BITS as i32);
+    let bound = det::powi(2.0_f64, usize::BITS as i32);
     for bad in [bound, bound * 2.0, f64::MAX] {
         for index in 0..4 {
             let mut header = vec!["0".to_owned(); 5];
@@ -116,7 +117,7 @@ fn exclusive_usize_bound_is_rejected() {
 }
 
 fn largest_count() -> usize {
-    let bound = 2.0_f64.powi(usize::BITS as i32);
+    let bound = det::powi(2.0_f64, usize::BITS as i32);
     f64::from_bits(bound.to_bits() - 1) as usize
 }
 

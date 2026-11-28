@@ -36,6 +36,7 @@ use solidcore::topology::brep::p1;
 use solidcore::topology::face;
 use solidcore::{Brep, Kernel};
 
+use solidcore::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The balance wire's fit points: straights joined by R2 rounds, in mm.
@@ -295,8 +296,8 @@ fn a_circle_along_an_arc_is_the_exact_torus() {
                         / 23.0,
             );
             let p = sweep.definition().evaluate_definition_point(uv).unwrap();
-            let ring = p.x.hypot(p.y);
-            let minor = (ring - 10.0).hypot(p.z);
+            let ring = det::hypot(p.x, p.y);
+            let minor = det::hypot(ring - 10.0, p.z);
             assert!((minor - RADIUS).abs() <= 1e-12, "{minor}");
             assert!(p.x >= -1e-12 && p.y >= -1e-12, "{p:?}");
         }
@@ -1093,7 +1094,7 @@ fn closed_rounded_rectangle_has_no_internal_pole() {
         }
         let area =
             solidcore::mass::integrator::properties::brep_area(&k, &mut swept, 1e-6).unwrap();
-        let expected = 96.0 * std::f64::consts::PI + 16.0 * std::f64::consts::PI.powi(2);
+        let expected = 96.0 * std::f64::consts::PI + 16.0 * det::powi(std::f64::consts::PI, 2);
         eprintln!(
             "cap {cap}, seam {start}: faces {}, area {area}, expected {expected}",
             all.len()
@@ -1122,7 +1123,7 @@ fn arc_through(k: &Kernel, start: Point3, through: Point3, end: Point3) -> BSpli
     let axis = axis * (1.0 / axis.length());
     let x = (start - centre) * (1.0 / radius);
     let to = end - centre;
-    let mut angle = to.dot(axis.cross(x)).atan2(to.dot(x));
+    let mut angle = det::atan2(to.dot(axis.cross(x)), to.dot(x));
     if angle <= 0.0 {
         angle += std::f64::consts::TAU;
     }

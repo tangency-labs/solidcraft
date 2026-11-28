@@ -25,6 +25,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -75,11 +76,11 @@ fn shelled(up: bool) -> (Kernel, Brep) {
 }
 
 fn closed_form() -> f64 {
-    let a = (HB / R).atan();
-    let y0 = 2.0 / a.cos();
+    let a = det::atan(HB / R);
+    let y0 = 2.0 / det::cos(a);
     let y1 = HB / R * (R - 2.0) + y0;
     let vase = PI * R * R * (HB / 3.0 + H - HB);
-    let cavity = PI * (R - 2.0).powi(2) * ((H - y1) + (y1 - y0) / 3.0);
+    let cavity = PI * det::powi(R - 2.0, 2) * ((H - y1) + (y1 - y0) / 3.0);
     vase - cavity
 }
 

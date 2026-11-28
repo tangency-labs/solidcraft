@@ -1,6 +1,7 @@
 //! WR-46: the simple twist's mixed derivative follows its first derivative.
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::surface::twist_volume::TwistVolume;
 use solidcore::surface::volume::{EvalOptions, Volume, VolumeKind};
 
@@ -40,7 +41,7 @@ fn simple_evaluation_matches_the_twist_closed_form() {
         let per = 2.0 * std::f64::consts::PI / period;
         for w in [0.0, 0.3] {
             let p = Vec3::new(0.7, -0.4, w);
-            let (c, s) = ((per * w).cos(), (per * w).sin());
+            let (c, s) = (det::cos(per * w), det::sin(per * w));
             for n in 0..=3 {
                 let got = twist
                     .evaluate_simple(p, n, &EvalOptions::default())
@@ -51,7 +52,7 @@ fn simple_evaluation_matches_the_twist_closed_form() {
                         for k in 0..n1 {
                             let dc = [c, -s, -c, s][k];
                             let ds = [s, c, -s, -c][k];
-                            let sc = per.powi(k as i32);
+                            let sc = det::powi(per, k as i32);
                             let want = if i + j + k > n {
                                 Vec3::ZERO
                             } else {

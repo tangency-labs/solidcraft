@@ -17,6 +17,7 @@ use solidcore::error::SolidError;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::math::CPoint;
@@ -573,7 +574,7 @@ fn regular(n: usize, r: f64) -> Vec<(f64, f64)> {
     (0..n)
         .map(|i| {
             let a = std::f64::consts::TAU * i as f64 / n as f64;
-            (r * a.cos(), r * a.sin())
+            (r * det::cos(a), r * det::sin(a))
         })
         .collect()
 }
@@ -628,9 +629,9 @@ fn chamfering_all_128_edges_of_an_outline_builds() {
     assert_eq!(b.edge_list().len(), 5 * n);
     assert_eq!(b.vertices().ids().count(), 3 * n);
     let nf = n as f64;
-    let area = 0.5 * nf * r * r * (std::f64::consts::TAU / nf).sin();
-    let perimeter = 2.0 * nf * r * (std::f64::consts::PI / nf).sin();
-    let k_sum = nf * (std::f64::consts::PI / nf).tan();
+    let area = 0.5 * nf * r * r * det::sin(std::f64::consts::TAU / nf);
+    let perimeter = 2.0 * nf * r * det::sin(std::f64::consts::PI / nf);
+    let k_sum = nf * det::tan(std::f64::consts::PI / nf);
     let want = area * h - (perimeter * d * d / 2.0 - k_sum * d * d * d / 3.0);
     let k = kernel();
     let mut b = b;

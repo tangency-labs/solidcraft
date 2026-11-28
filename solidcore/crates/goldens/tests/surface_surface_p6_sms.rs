@@ -1,6 +1,7 @@
 //! Non-C++ tests of the `surface.surface_p6` runner's actual pure SMS parser.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/surface_surface_p6_sms.rs"]
 mod sms;
@@ -87,7 +88,7 @@ fn invalid_counts_in_every_header_position() {
 
 #[test]
 fn exclusive_usize_bound_and_larger_counts() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     for value in [upper, upper * 2.] {
         for position in 0..4 {
             let mut header = vec!["0".to_owned(); 5];
@@ -117,7 +118,7 @@ fn independently_checked_knot_additions() {
 
 #[test]
 fn net_then_u_then_v_processing_order_with_huge_counts() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     // Both knot sums overflow, but the net is read first.
     rejected(
         &format!("{half:.0} {half:.0} {half:.0} {half:.0} 0"),
@@ -136,7 +137,7 @@ fn net_then_u_then_v_processing_order_with_huge_counts() {
 
 #[test]
 fn huge_representable_headers_preflight_without_allocation() {
-    let below_upper = 2.0_f64.powi(usize::BITS as i32) - 4096.;
+    let below_upper = det::powi(2.0_f64, usize::BITS as i32) - 4096.;
     for position in 0..4 {
         let mut header = vec!["0".to_owned(); 5];
         header[position] = "1000000000".to_owned();

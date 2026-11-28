@@ -32,6 +32,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
@@ -312,7 +313,7 @@ fn grade(k: &mut Kernel, law: &Law, size: f64, off: Option<&dyn Fn(Point3) -> f6
         seams: Vec::new(),
     };
     let off = |x: Point3| off.map_or(0.0, |f| f(x));
-    let loose = [1f64.to_radians().tan(), 0.01, 0.001, 0.0001];
+    let loose = [det::tan(1f64.to_radians()), 0.01, 0.001, 0.0001];
     let ids: Vec<FaceId> = b.faces().ids().collect();
     let edges: Vec<EdgeId> = b.edge_list().to_vec();
     let on_plane = |s: &Surface, i: usize| {

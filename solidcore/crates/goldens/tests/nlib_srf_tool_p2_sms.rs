@@ -1,6 +1,7 @@
 //! Exercise the actual SMS decoder without linking the C++ reference.
 
 use goldens::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 #[path = "../src/units/fixtures/nlib_srf_tool_p2_sms.rs"]
@@ -63,7 +64,7 @@ fn counts_accept_exponents_signed_zero_and_unrestricted_degrees() {
 
 #[test]
 fn every_count_rejects_invalid_nonfinite_and_exclusive_limit() {
-    let limit = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let limit = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for field in 0..4 {
         for bad in ["-1", "0.5", "NaN", "inf", "-inf", "1e300", limit.as_str()] {
             let mut header = ["0", "0", "0", "0", "0"];
@@ -79,7 +80,7 @@ fn every_count_rejects_invalid_nonfinite_and_exclusive_limit() {
 
 #[test]
 fn huge_representable_counts_fail_without_header_allocation() {
-    let huge = 2.0_f64.powi(usize::BITS as i32 - 2).to_string();
+    let huge = det::powi(2.0_f64, usize::BITS as i32 - 2).to_string();
     for field in 0..4 {
         let mut header = ["0", "0", "0", "0", "0"];
         header[field] = &huge;
@@ -93,8 +94,8 @@ fn huge_representable_counts_fail_without_header_allocation() {
 
 #[test]
 fn checked_knot_net_coordinate_and_token_totals() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1).to_string();
-    let quarter = 2.0_f64.powi(usize::BITS as i32 - 2).to_string();
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1).to_string();
+    let quarter = det::powi(2.0_f64, usize::BITS as i32 - 2).to_string();
     for header in [
         format!("{half} 0 {half} 0 0"),       // u knots
         format!("0 {half} 0 {half} 0"),       // v knots

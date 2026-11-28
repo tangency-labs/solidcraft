@@ -25,6 +25,7 @@ use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
@@ -285,7 +286,7 @@ fn derivative(p: [f64; 4]) -> [f64; 4] {
 fn gauss_legendre(n: usize) -> Vec<(f64, f64)> {
     (0..n)
         .map(|i| {
-            let mut x = (std::f64::consts::PI * (i as f64 + 0.75) / (n as f64 + 0.5)).cos();
+            let mut x = det::cos(std::f64::consts::PI * (i as f64 + 0.75) / (n as f64 + 0.5));
             let mut dp = 0.0;
             for _ in 0..100 {
                 let (mut p0, mut p1) = (1.0, x);
@@ -424,11 +425,11 @@ fn touch_arc(
     let u1 = fa * (1.0 / fa.length());
     let v = fb - u1 * fb.dot(u1);
     let u2 = v * (1.0 / v.length());
-    let phi = (fb.dot(u1) / fb.length()).clamp(-1.0, 1.0).acos();
+    let phi = det::acos((fb.dot(u1) / fb.length()).clamp(-1.0, 1.0));
     let a = sigma * phi;
     (
-        m + (u1 * a.cos() + u2 * a.sin()) * radius,
-        (u2 * a.cos() - u1 * a.sin()) * (radius * phi),
+        m + (u1 * det::cos(a) + u2 * det::sin(a)) * radius,
+        (u2 * det::cos(a) - u1 * det::sin(a)) * (radius * phi),
     )
 }
 

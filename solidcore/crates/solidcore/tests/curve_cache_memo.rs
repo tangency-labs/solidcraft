@@ -7,6 +7,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boo
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
@@ -27,7 +28,7 @@ fn section(a: f64, b: f64, z: f64, n: usize) -> solidcore::Result<Curve> {
     let mut pts: Vec<Point3> = (0..n)
         .map(|i| {
             let t = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
-            Point3::new(a * t.cos(), b * t.sin(), z)
+            Point3::new(a * det::cos(t), b * det::sin(t), z)
         })
         .collect();
     pts.extend(pts.first().copied());

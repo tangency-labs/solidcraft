@@ -1,6 +1,7 @@
 //! Non-C++ regression coverage for the runner's actual SMS parser.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/nlib_srf_offset_sms.rs"]
 mod sms;
@@ -36,7 +37,7 @@ fn huge_representable_header_is_rejected_without_panicking() {
 
 #[test]
 fn exclusive_usize_limit_is_rejected() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     for header in [
         format!("{upper:.0} 0 0 0 0"),
         format!("0 {upper:.0} 0 0 0"),
@@ -64,7 +65,7 @@ fn invalid_counts_are_rejected_in_every_header_position() {
 #[test]
 fn oversized_knot_dimensions_are_rejected() {
     assert_rejected("0 0 1e100 0 0 0 0 0", "bad p count");
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_rejected(
         &format!("{large:.0} 0 {large:.0} 0 0"),
         "u knot count overflow",
@@ -77,7 +78,7 @@ fn oversized_knot_dimensions_are_rejected() {
 
 #[test]
 fn point_token_arithmetic_overflow_is_rejected() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_rejected(
         &format!("{large:.0} {large:.0} 0 0 0"),
         "required token count overflow",

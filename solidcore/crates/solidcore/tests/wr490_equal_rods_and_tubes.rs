@@ -27,6 +27,7 @@
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -79,7 +80,7 @@ fn tube(k: &mut Kernel, ro: f64, ri: f64, len: f64, seam: f64, y_deg: f64, at: V
 /// The start of the brace at `y_deg` (+45 or -45): 40 before (0, 0, 30) along its axis
 /// (`sin 45` for both components, as the difftest fixture of the measurement has them).
 fn brace_start(y_deg: f64) -> Vec3 {
-    let s = 45f64.to_radians().sin();
+    let s = det::sin(45f64.to_radians());
     Vec3::new(0.0, 0.0, 30.0) - 40.0 * Vec3::new(s.copysign(y_deg), 0.0, s)
 }
 

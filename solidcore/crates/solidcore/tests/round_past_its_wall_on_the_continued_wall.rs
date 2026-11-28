@@ -21,6 +21,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -77,7 +78,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// `∫ sqrt(r² - u²) du` from 0 to `u`.
 fn quarter(u: f64, r: f64) -> f64 {
-    (u * (r * r - u * u).sqrt() + r * r * (u / r).asin()) / 2.0
+    (u * (r * r - u * u).sqrt() + r * r * det::asin(u / r)) / 2.0
 }
 
 /// The plate: the ball of centre (r, t - r) on the wall continued below
@@ -128,7 +129,7 @@ fn the_plate_round_is_on_the_continued_wall() {
 #[test]
 fn the_disc_round_is_on_the_continued_wall() {
     let (big, t, r) = (13.0_f64, 2.0_f64, 2.5_f64);
-    let s = 3.125 * PI / 2.0 - (0.5 * 6.0_f64.sqrt() / 2.0 + 3.125 * 0.2_f64.asin());
+    let s = 3.125 * PI / 2.0 - (0.5 * 6.0_f64.sqrt() / 2.0 + 3.125 * det::asin(0.2_f64));
     let removed = PI * (58.75 * 2.0 - 21.0 * s - (12.5 - (15.625 - 0.125) / 3.0));
     let continued = 338.0 * PI - removed;
     let mut k = kernel();

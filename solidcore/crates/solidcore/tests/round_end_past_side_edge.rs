@@ -35,6 +35,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -279,10 +280,10 @@ fn ring_with_wedge(k: &mut Kernel) -> Brep {
     let (t, c) = ([-4.0, 46.0], [-4.0 + 0.5 * s2, 46.0 - 0.5 * s2]);
     let e = [c[0] - 0.5, c[1]];
     let turn = (225.0_f64 + 17.0).to_radians();
-    let r = [4.0 * turn.cos(), 50.0 + 4.0 * turn.sin()];
+    let r = [4.0 * det::cos(turn), 50.0 + 4.0 * det::sin(turn)];
     // the profile in the half-plane at `deg` about the x axis: (x, radius)
     let profile = |k: &mut Kernel, deg: f64, points: &[[f64; 2]]| -> Vec<Curve> {
-        let (cos, sin) = (deg.to_radians().cos(), deg.to_radians().sin());
+        let (cos, sin) = (det::cos(deg.to_radians()), det::sin(deg.to_radians()));
         let at = |p: [f64; 2]| Point3::new(p[0], p[1] * cos, p[1] * sin);
         let radial = Vec3::new(0.0, cos, sin);
         let frame = Axis2Placement::new(at(c), Vec3::new(1.0, 0.0, 0.0), radial);
@@ -339,23 +340,23 @@ fn ring_with_wedge(k: &mut Kernel) -> Brep {
 /// arc's centre less the arc's sector, by its moment about the axis.
 fn wedge_round() -> f64 {
     let (r, d) = (0.5_f64, 17.0_f64.to_radians());
-    let along = |deg: f64| [deg.to_radians().cos(), deg.to_radians().sin()];
+    let along = |deg: f64| [det::cos(deg.to_radians()), det::sin(deg.to_radians())];
     let (p, u1, u2) = ([0.0, 50.0], along(45.0), along(242.0));
     let half = (std::f64::consts::PI - d) / 2.0;
     let bisector = [
-        (u1[0] + u2[0]) / 2.0 / half.cos(),
-        (u1[1] + u2[1]) / 2.0 / half.cos(),
+        (u1[0] + u2[0]) / 2.0 / det::cos(half),
+        (u1[1] + u2[1]) / 2.0 / det::cos(half),
     ];
     let at = |u: [f64; 2], t: f64| [p[0] + t * u[0], p[1] + t * u[1]];
-    let (a, b) = (at(u1, r / half.tan()), at(u2, r / half.tan()));
-    let c = at(bisector, r / half.sin());
+    let (a, b) = (at(u1, r / det::tan(half)), at(u2, r / det::tan(half)));
+    let c = at(bisector, r / det::sin(half));
     // a triangle's area and moment about the axis (its centroid's radius)
     let tri = |q: [f64; 2], s: [f64; 2]| {
         let area = ((q[0] - p[0]) * (s[1] - p[1]) - (s[0] - p[0]) * (q[1] - p[1])).abs() / 2.0;
         area * (p[1] + q[1] + s[1]) / 3.0
     };
     let sector = r * r * d / 2.0;
-    let centroid = c[1] - 4.0 * r * (d / 2.0).sin() / (3.0 * d) * bisector[1];
+    let centroid = c[1] - 4.0 * r * det::sin(d / 2.0) / (3.0 * d) * bisector[1];
     (tri(a, c) + tri(c, b) - sector * centroid) * 10.0_f64.to_radians()
 }
 
@@ -366,7 +367,7 @@ fn a_concave_round_whose_face_runs_on_past_the_end_face_builds() {
     let v0 = volume(&k, &mut b);
     let faces = b.face_list().len();
     // the seam: the arc at x = 0 of radius 50, 10 degrees long
-    let on_seam = |p: Point3| p.x.abs() < 1e-6 && (p.y.hypot(p.z) - 50.0).abs() < 1e-6;
+    let on_seam = |p: Point3| p.x.abs() < 1e-6 && (det::hypot(p.y, p.z) - 50.0).abs() < 1e-6;
     let seam: Vec<EdgeId> = b
         .edges()
         .ids()
@@ -418,7 +419,7 @@ fn d_with_block(k: &mut Kernel) -> Brep {
         Vec3::new(1.0, 0.0, 0.0),
         Vec3::new(0.0, 0.0, 1.0),
     );
-    let end = (0.6_f64).asin().to_degrees();
+    let end = det::asin(0.6_f64).to_degrees();
     let arc = Ellipse::create_canonical_circle(
         k,
         &frame,
@@ -451,7 +452,7 @@ fn round_d_with_block(r: f64) -> Outcome {
             let c = edge::curve(&b, e).unwrap().unwrap();
             [ivl.min(), ivl.mid(), ivl.max()].iter().all(|&t| {
                 let p = c.evaluate_point(&k, t).unwrap();
-                p.y.abs() < 1e-9 && (p.x.hypot(p.z) - 12.5).abs() < 1e-9
+                p.y.abs() < 1e-9 && (det::hypot(p.x, p.z) - 12.5).abs() < 1e-9
             }) && c.evaluate_point(&k, ivl.mid()).unwrap().distance(top) < 1e-6
         })
         .expect("the arc on the front cap");

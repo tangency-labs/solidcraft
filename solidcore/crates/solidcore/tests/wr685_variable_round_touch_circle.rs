@@ -21,6 +21,7 @@
     clippy::indexing_slicing,
     clippy::cast_precision_loss
 )]
+use solidcore::math::det;
 
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
@@ -471,7 +472,7 @@ fn cliff_corner(r0: f64, r1: f64, panels: usize) -> f64 {
     let h = |u: f64, y: f64| {
         let w = c * u + y - r0 * c;
         let b = r0 * m + c * w;
-        b - (b * b - m * ((u - r0).powi(2) + y * y) + w * w)
+        b - (b * b - m * (det::powi(u - r0, 2) + y * y) + w * w)
             .max(0.0)
             .sqrt()
     };
@@ -515,7 +516,7 @@ fn gauss_legendre(n: usize) -> (Vec<f64>, Vec<f64>) {
     let mut x = Vec::new();
     let mut w = Vec::new();
     for i in 1..=n {
-        let mut z = (std::f64::consts::PI * (i as f64 - 0.25) / (n as f64 + 0.5)).cos();
+        let mut z = det::cos(std::f64::consts::PI * (i as f64 - 0.25) / (n as f64 + 0.5));
         let mut dp = 1.0;
         for _ in 0..100 {
             let (mut p0, mut p1) = (1.0, z);

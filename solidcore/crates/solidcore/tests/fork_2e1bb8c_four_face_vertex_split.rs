@@ -25,6 +25,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -49,7 +50,7 @@ const T: f64 = 2.0;
 
 /// The drain's depth below the bottom edges: the long sides' facets fall 1 degree.
 fn drain_depth() -> f64 {
-    (LY / 2.0) * 1.0_f64.to_radians().tan()
+    (LY / 2.0) * det::tan(1.0_f64.to_radians())
 }
 
 /// A solid from planar polygons (each a closed loop of corner points), stitched and

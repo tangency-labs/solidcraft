@@ -12,6 +12,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
@@ -30,7 +31,7 @@ use solidcore::{Brep, Kernel};
 const AXIS: (f64, f64) = (30.0, 20.0);
 
 fn axis_distance(p: Point3) -> f64 {
-    (p.x - AXIS.0).hypot(p.y - AXIS.1)
+    det::hypot(p.x - AXIS.0, p.y - AXIS.1)
 }
 
 /// The plate with its boss and the r2 round at the boss's base.
@@ -164,7 +165,7 @@ fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_loose()
         .expect("the top piece x < 30");
     // the face's own plane turned and raised, so it keeps the face's parameterization
     let theta: f64 = -0.02;
-    let (c, s) = (theta.cos(), theta.sin());
+    let (c, s) = (det::cos(theta), det::sin(theta));
     let pivot = Point3::new(30.0, 0.0, 20.0);
     let turned_pivot = Point3::new(
         c * pivot.x + s * pivot.z,

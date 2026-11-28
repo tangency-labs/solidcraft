@@ -21,6 +21,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::query::api_queries::get_edges;
@@ -125,7 +126,7 @@ fn rounded(first: Point3, then: Point3, r: f64) -> (Brep, Kernel, f64) {
 
 fn arc_top() -> Point3 {
     let a = std::f64::consts::FRAC_PI_4;
-    Point3::new(CX - 21.0 * a.cos(), -21.0 + 21.0 * a.sin(), 10.0)
+    Point3::new(CX - 21.0 * det::cos(a), -21.0 + 21.0 * det::sin(a), 10.0)
 }
 
 const BACK: Point3 = Point3::new(30.0, 0.0, 10.0);
@@ -226,7 +227,7 @@ fn the_ridge_is_on_both_rounds_and_follows_the_closed_form() {
 
                 let on_axis = Vec3::new(0.0, q.y + r, q.z - (10.0 - r));
                 let to_cylinder = (on_axis.length() - r).abs();
-                let rho = (q.x - CX).hypot(q.y + 21.0);
+                let rho = det::hypot(q.x - CX, q.y + 21.0);
                 let centre = Point3::new(
                     CX + (21.0 + r) * (q.x - CX) / rho,
                     -21.0 + (21.0 + r) * (q.y + 21.0) / rho,
@@ -241,10 +242,10 @@ fn the_ridge_is_on_both_rounds_and_follows_the_closed_form() {
 
                 let sin_a =
                     on_axis.cross(on_centre).length() / (on_axis.length() * on_centre.length());
-                let a = sin_a.min(1.0).asin();
+                let a = det::asin(sin_a.min(1.0));
                 if a >= SHAPE_CHECK_MIN_ANGLE_DEG.to_radians() {
                     let off = off_ridge(q, r);
-                    let bound = tol / (0.5 * a).sin();
+                    let bound = tol / det::sin(0.5 * a);
                     assert!(
                         off <= bound,
                         "r {r}: {q:?} is {off} off the closed form, bound {bound} at {a} rad"

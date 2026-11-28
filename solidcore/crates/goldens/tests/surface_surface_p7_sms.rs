@@ -1,4 +1,5 @@
 //! Non-C++ tests of the exact SMS decoder used by the P7 adapter.
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/surface_surface_p7_sms.rs"]
 mod sms;
@@ -13,7 +14,7 @@ fn parse(text: &str) -> Result<sms::Parsed, String> {
 }
 
 fn exclusive() -> f64 {
-    2.0_f64.powi(usize::BITS as i32)
+    det::powi(2.0_f64, usize::BITS as i32)
 }
 
 fn largest_float_count() -> f64 {

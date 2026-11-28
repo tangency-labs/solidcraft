@@ -24,6 +24,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -129,7 +130,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// not fit, not for a fold.
 fn pin_on_a_slope(k: &mut Kernel) -> Brep {
     let a = std::f64::consts::PI / 3.0;
-    let (ca, sa) = (a.cos(), a.sin());
+    let (ca, sa) = (det::cos(a), det::sin(a));
     let mut slab = create_box(k, Point3::new(-20.0, -20.0, -20.0), 40.0, 40.0, 20.0).unwrap();
     let m = [
         [ca, 0.0, sa, 0.0],

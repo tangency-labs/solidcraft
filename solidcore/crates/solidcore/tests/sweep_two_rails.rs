@@ -12,6 +12,7 @@
 )] // test helpers
 
 use solidcore::curve::curve::Curve;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::primitive::api_curves::create_line_segment;
@@ -93,10 +94,10 @@ fn on_edge(k: &Kernel, b: &Brep, e: EdgeId, want: &[Point3], tol: f64) {
 /// The bump at the cubic's parameter `u`, its x scaled by `kx`, its z by `kz`, at y = `y`.
 fn bump_at(u: f64, kx: f64, kz: f64, y: f64) -> Point3 {
     let b = [
-        (1.0 - u).powi(3),
-        3.0 * u * (1.0 - u).powi(2),
+        det::powi(1.0 - u, 3),
+        3.0 * u * det::powi(1.0 - u, 2),
         3.0 * u * u * (1.0 - u),
-        u.powi(3),
+        det::powi(u, 3),
     ];
     let mut q = p(0.0, y, 0.0);
     for (w, c) in b.iter().zip(BUMP) {

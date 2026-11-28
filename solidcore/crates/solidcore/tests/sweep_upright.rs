@@ -11,6 +11,7 @@
 )] // test helpers
 
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -23,7 +24,11 @@ fn loop_rail(lift: f64) -> BSplineCurve {
     let mut points: Vec<Point3> = (0..16)
         .map(|i| {
             let t = std::f64::consts::TAU * f64::from(i) / 16.0;
-            Point3::new(10.0 * t.cos(), 10.0 * t.sin(), lift * (2.0 * t).cos())
+            Point3::new(
+                10.0 * det::cos(t),
+                10.0 * det::sin(t),
+                lift * det::cos(2.0 * t),
+            )
         })
         .collect();
     if let Some(&first) = points.first() {
@@ -101,7 +106,7 @@ fn a_rail_running_along_the_up_direction_is_refused() {
     let mut points: Vec<Point3> = (0..16)
         .map(|i| {
             let t = std::f64::consts::TAU * f64::from(i) / 16.0;
-            Point3::new(0.0, 10.0 * t.cos(), 10.0 * t.sin())
+            Point3::new(0.0, 10.0 * det::cos(t), 10.0 * det::sin(t))
         })
         .collect();
     if let Some(&first) = points.first() {

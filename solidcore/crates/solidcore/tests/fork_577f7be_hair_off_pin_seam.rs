@@ -22,6 +22,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -35,8 +36,8 @@ const SEAM: f64 = 0.6131;
 fn pin(k: &mut Kernel, x: f64) -> Brep {
     let frame = Axis2Placement::new(
         Point3::new(x, 0.0, -2.0),
-        Vec3::new(SEAM.cos(), SEAM.sin(), 0.0),
-        Vec3::new(-SEAM.sin(), SEAM.cos(), 0.0),
+        Vec3::new(det::cos(SEAM), det::sin(SEAM), 0.0),
+        Vec3::new(-det::sin(SEAM), det::cos(SEAM), 0.0),
     );
     let circle = Curve::from(Ellipse::create_canonical_circle(k, &frame, 3.0, None, None).unwrap());
     create_linear_sweep(k, &[Some(&circle)], Vec3::new(0.0, 0.0, 1.0), 9.0, true).unwrap()

@@ -5,6 +5,7 @@
 //! (`all`: every `UpstreamFixes` flag on, as SolidCraft runs).
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::math::det;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::{Result, Vec3};
@@ -31,7 +32,7 @@ fn ngon(n: usize) -> Result<Vec<Curve>> {
     let points: Vec<(f64, f64)> = (0..n)
         .map(|i| {
             let t = TAU * i as f64 / n as f64;
-            (30.0 * t.cos(), 30.0 * t.sin())
+            (30.0 * det::cos(t), 30.0 * det::sin(t))
         })
         .collect();
     polygon(&points)

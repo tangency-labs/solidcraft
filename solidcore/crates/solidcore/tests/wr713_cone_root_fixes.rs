@@ -31,6 +31,7 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, INFINITE_PARAMETER};
 use solidcore::surface::cone::Cone;
 use solidcore::surface::implicit::{curve_lies_on, lies_on, Implicit};
@@ -100,7 +101,7 @@ fn unbounded_cone_with_a_huge_axis_takes_it_as_a_direction() {
         pl.z_axis()
     );
     cone.make_nurb(&k).unwrap();
-    let t = 20f64.to_radians().tan();
+    let t = det::tan(20f64.to_radians());
     assert!(lies_on(cone.rev().base(), &on(o, pl.z_axis(), 1.0, t)).unwrap());
 }
 
@@ -146,7 +147,7 @@ fn unbounded_cone_takes_a_semi_angle_modulo_180() {
         let mut cone =
             Cone::create_canonical_with_semi_angle(&k, &pl, 1.0, semi, None, false, false).unwrap();
         assert_eq!(cone.semi_angle_deg(), rep, "semi {semi}");
-        let t = rep.to_radians().tan();
+        let t = det::tan(rep.to_radians());
         let apex = -1.0 / t;
         let (lo, hi) = (cone.bot_height(), cone.top_height());
         assert!(
@@ -175,7 +176,7 @@ fn unbounded_cone_far_from_the_origin_lies_on_its_cone() {
     for semi in [30.0f64, -30.0, 1e-9] {
         let mut cone = Cone::new_unbounded(&k, o, x, y, 2.0, semi, false, false).unwrap();
         cone.make_nurb(&k).unwrap();
-        let t = semi.to_radians().tan();
+        let t = det::tan(semi.to_radians());
         assert!(
             lies_on(cone.rev().base(), &on(o, z, 2.0, t)).unwrap(),
             "semi {semi}: off its cone"
@@ -201,7 +202,7 @@ fn scaled_unbounded_cone_keeps_its_apex_end() {
     let k = Kernel::default();
     let pl = Axis2Placement::IDENTITY;
     let semi = 25.0f64;
-    let t = semi.to_radians().tan();
+    let t = det::tan(semi.to_radians());
     let mut cone =
         Cone::create_canonical_with_semi_angle(&k, &pl, 1.0, semi, None, false, false).unwrap();
     assert!((cone.bot_height() - (-1.0 / t)).abs() <= 1e-12);
@@ -279,7 +280,7 @@ fn copied_offset_rebuilds_its_polar_circle_on_the_offset() {
     let k = Kernel::default();
     let pl = Axis2Placement::IDENTITY;
     let semi = 30.0f64;
-    let (t, c) = (semi.to_radians().tan(), semi.to_radians().cos());
+    let (t, c) = (det::tan(semi.to_radians()), det::cos(semi.to_radians()));
     let z = Vec3::new(0.0, 0.0, 1.0);
     let cone =
         Cone::create_canonical_with_semi_angle(&k, &pl, 1.0, semi, None, false, false).unwrap();
@@ -311,7 +312,7 @@ fn offsets_of_an_unbounded_cone_are_its_offset_cones() {
     let k = Kernel::default();
     let pl = Axis2Placement::IDENTITY;
     let semi = 30.0f64;
-    let (t, c) = (semi.to_radians().tan(), semi.to_radians().cos());
+    let (t, c) = (det::tan(semi.to_radians()), det::cos(semi.to_radians()));
     let z = Vec3::new(0.0, 0.0, 1.0);
     let cone =
         Cone::create_canonical_with_semi_angle(&k, &pl, 1.0, semi, None, false, false).unwrap();
@@ -330,7 +331,7 @@ fn offsets_of_an_unbounded_cone_are_its_offset_cones() {
         let want = if d < 0.0 {
             -r / t
         } else {
-            -1.0 / t - semi.to_radians().sin() * d
+            -1.0 / t - det::sin(semi.to_radians()) * d
         };
         let end = off.bot_height() + off.rev().position().origin().z;
         // the truncated cone's heights come through the unbounded span: its rounding,

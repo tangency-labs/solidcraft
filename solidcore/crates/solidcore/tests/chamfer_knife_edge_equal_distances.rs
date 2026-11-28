@@ -21,6 +21,7 @@ use solidcore::error::blend::BlendFailure;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::surface::procedural_blend::chamfer::ChamferSize;
@@ -88,8 +89,8 @@ fn removed(d: f64) -> f64 {
     let flat = TIP - (4.0 * R * d).sqrt();
     let wy = -R + (R - d) * R / (R + d);
     let triangle = 0.5 * ((TIP - flat) * wy).abs();
-    let b = ((R - d) / (R + d)).acos();
-    (triangle - 0.5 * R * R * (b - b.sin())) * H
+    let b = det::acos((R - d) / (R + d));
+    (triangle - 0.5 * R * R * (b - det::sin(b))) * H
 }
 
 #[test]
@@ -270,7 +271,7 @@ fn the_distance_named_builds_the_sliver_the_chord_keeps() {
     let s = (R * named).sqrt();
     let (a, b) = (TIP - s, R * TIP / s - R);
     let hypotenuse = (a * a + b * b).sqrt();
-    let centre = ((TIP - 2.0 * s).powi(2) + named * named + H * H).sqrt();
+    let centre = (det::powi(TIP - 2.0 * s, 2) + named * named + H * H).sqrt();
     let solve_tol = 1.0e-9 * centre.max(1.0);
     assert!(
         (v - want).abs() <= solve_tol * hypotenuse * H,

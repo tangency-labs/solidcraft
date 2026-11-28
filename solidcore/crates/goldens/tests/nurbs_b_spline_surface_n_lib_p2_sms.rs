@@ -1,5 +1,6 @@
 //! Non-C++ regressions exercising the production SMS decoder.
 pub use goldens::HarnessError;
+use solidcore::math::det;
 #[path = "../src/units/fixtures/nurbs_b_spline_surface_n_lib_p2_sms.rs"]
 mod sms;
 
@@ -106,7 +107,7 @@ fn nonfinite_payload_and_numeric_tails_are_not_validated() {
 
 #[test]
 fn all_count_positions_reject_invalid_values_and_exclusive_boundary() {
-    let boundary = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let boundary = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for bad in ["-1", "0.5", "NaN", "inf", "-inf", "1e300", &boundary] {
         for position in 0..4 {
             let mut header = vec!["0"; position];
@@ -125,7 +126,7 @@ fn eager_lexical_errors_precede_headers_overflows_and_missing_body() {
             format!("sample.sms: {parse_error}")
         );
     }
-    let h = 2.0_f64.powi((usize::BITS - 1) as i32);
+    let h = det::powi(2.0_f64, (usize::BITS - 1) as i32);
     assert_eq!(
         error(&format!("{h} {h} 0 0 0 oops")),
         format!("sample.sms: {parse_error}")
@@ -154,7 +155,7 @@ fn every_prefix_of_rational_and_polynomial_payload_is_truncated() {
 
 #[test]
 fn huge_in_range_counts_with_tiny_bodies_do_not_allocate_output() {
-    let huge = 2.0_f64.powi((usize::BITS - 4) as i32).to_string();
+    let huge = det::powi(2.0_f64, (usize::BITS - 4) as i32).to_string();
     for position in 0..4 {
         let mut header = ["0", "0", "0", "0", "0"];
         header[position] = &huge;

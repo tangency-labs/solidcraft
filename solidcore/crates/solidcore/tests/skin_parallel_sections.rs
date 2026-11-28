@@ -26,6 +26,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::SurfParamType;
@@ -52,8 +53,8 @@ fn section(z: f64, a: f64, b: f64, dx: f64) -> Curve {
     let mut pts: Vec<Point3> = (0..16)
         .map(|j| {
             let t = 2.0 * std::f64::consts::PI * f64::from(j) / 16.0;
-            let r = 1.0 + 0.12 * (2.0 * t).cos();
-            Point3::new(dx + a * r * t.cos(), b * r * t.sin(), z)
+            let r = 1.0 + 0.12 * det::cos(2.0 * t);
+            Point3::new(dx + a * r * det::cos(t), b * r * det::sin(t), z)
         })
         .collect();
     pts.extend(pts.first().copied());
@@ -138,7 +139,7 @@ fn circle(z: f64, r: f64) -> Curve {
     let mut pts: Vec<Point3> = (0..16)
         .map(|j| {
             let t = 2.0 * std::f64::consts::PI * f64::from(j) / 16.0;
-            Point3::new(r * t.cos(), r * t.sin(), z)
+            Point3::new(r * det::cos(t), r * det::sin(t), z)
         })
         .collect();
     pts.extend(pts.first().copied());
