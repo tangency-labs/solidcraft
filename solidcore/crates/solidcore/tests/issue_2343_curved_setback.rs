@@ -1580,6 +1580,55 @@ fn d_prism_asked_past_the_rails_names_the_setback_that_fits() {
     }
 }
 
+/// #13649: a setback asked past the chord's room (12, its length; the far vertex sets nothing
+/// back) is refused naming the same size as one asked short of the room but past the far
+/// Mitre's cut (above): 6 + sqrt 15 (9.873) less the fit margin, a thousand of the chord's
+/// tolerances, the lesser of the two bounds. Main named the room (12 less the margin) from
+/// the overlap check before the trace, a size the rails then refuse. Asked 12 and 15 on the
+/// bored prism and on the plain one. The size named is the one the test above names and
+/// builds on the plain prism (the bored one is refused there by the bore, not the rails).
+#[test]
+fn d_prism_asked_past_the_room_names_the_far_cut() {
+    for (bore, faces) in [(Some(6.9), 14), (None, 13)] {
+        for asked in [12.0, 15.0] {
+            let (mut k, mut b, edges, case) = d_prism_eight_case(bore, faces);
+            let v = vertex_at(&b, case.v);
+            let want = 6.0 + 15.0f64.sqrt() - 1000.0 * edge::tolerance(&b, edges[0]).unwrap();
+            let r = round_asked(
+                &mut k,
+                &mut b,
+                &edges,
+                &[1.0, 1.5, 2.0],
+                case.v,
+                Some(asked),
+            );
+            assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+            assert!(!r.ok, "{}, asked {asked}: built", case.name);
+            match r.refusal {
+                Some(BlendRefusal::SetbackTooLong {
+                    vertex,
+                    largest,
+                    why,
+                }) => {
+                    assert_eq!(vertex, v, "{}, asked {asked}", case.name);
+                    assert_eq!(
+                        why,
+                        SetbackTooLongWhy::PastRails,
+                        "{}, asked {asked}",
+                        case.name
+                    );
+                    assert!(
+                        (largest - want).abs() <= 1e-9,
+                        "{}, asked {asked}: {largest} against {want}",
+                        case.name
+                    );
+                }
+                other => panic!("{}, asked {asked}: {other:?}, {}", case.name, r.reason),
+            }
+        }
+    }
+}
+
 /// The least distance from the prism's axis of the top face's spring curve at the corner of
 /// [`d_prism_eight_case`] when every setback is `s`, by its closed form: the top is a plane,
 /// so the spring curve is the parabola (P, X, Q) itself, P on the chord's rail x = 7, `s`

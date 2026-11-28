@@ -163,9 +163,12 @@ pub enum SetbackTooShortWhy {
 pub enum SetbackTooLongWhy {
     /// With its ease it leaves an edge at its corner no length past the far end's claim (that
     /// end's fill's setback and ease, or the setback set on its corner; 0 where it has none):
-    /// an open bound. Every set-back corner, before the blends are traced; `largest` is the
-    /// least of `length - ease - far` less the fit margin, a thousand of the edge's
-    /// tolerances, and a setback above it is refused.
+    /// an open bound. Decided before the blends are traced, but at the Setback on an edge
+    /// whose far end makes no claim once the far corners are placed, refused as
+    /// [`SetbackTooLongWhy::PastRails`] instead where a far corner cuts a round's rail nearer
+    /// (#13649). `largest` is the least of
+    /// `length - ease - far` less the fit margin, a thousand of the edge's tolerances, and a
+    /// setback above it is refused.
     Overlap,
     /// At a Setback corner, with its ease it does not lie below an edge's room by the
     /// tolerance: `setback + ease >= length - claim - tol`, the far end's claim its fill's
