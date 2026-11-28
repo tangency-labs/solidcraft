@@ -3694,4 +3694,109 @@ mod tests {
             );
         }
     }
+
+    /// One line of the solution types and their line parameters (`parameters[0]`).
+    fn line_solutions(solutions: &[crate::geom::solution_array::Solution<SideHandle>]) -> String {
+        if solutions.is_empty() {
+            return "none".to_string();
+        }
+        solutions
+            .iter()
+            .map(|sol| match sol.solution_type {
+                SolutionType::RangeOfValues => format!(
+                    "RangeOfValues({}..{})",
+                    sol.start.parameters[0], sol.end.parameters[0]
+                ),
+                other => format!("{other:?}({})", sol.start.parameters[0]),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// A near-axial line through a cylinder's seam is one point on the side, not a range and not
+    /// nothing.
+    ///
+    /// Radius 20, height 40, axis +Z, base at the origin (`create_cylinder`). Closed form: on
+    /// x^2 + y^2 = 400 the line (20 + t sin phi, 0, 20 + t cos phi) meets the infinite cylinder
+    /// at t = 0 and at t = -40/sin phi. t = 0 is on the side (z = 20). The other root has
+    /// |t| = 40/|sin phi|, which for phi <= 1e-3 is at least about 40000, so z is far outside
+    /// [0, 40]. The finite side therefore meets the line once, at t = 0: a
+    /// `SolutionType::SingleValue` whose line parameter is that t. A `RangeOfValues` alone is
+    /// the line lying on the face, which is not a meeting. The same line rotated 33 degrees off
+    /// the seam, through (20 cos 33 degrees, 20 sin 33 degrees, 20) in direction
+    /// (sin phi cos 33 degrees, sin phi sin 33 degrees, cos phi), is that same single meeting.
+    #[test]
+    fn a_near_axial_line_through_a_cylinders_seam_is_a_point() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 20.0, 40.0)
+                .unwrap();
+        let sides: Vec<_> = crate::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|f| {
+                matches!(
+                    crate::topology::face::surface(&b, *f)
+                        .unwrap()
+                        .map(Surface::kind),
+                    Some(crate::surface::surface::SurfaceKind::Cone(c)) if c.is_cylinder()
+                )
+            })
+            .collect();
+        assert_eq!(sides.len(), 1, "one cylindrical side: {sides:?}");
+        let side = sides[0];
+        let s = crate::topology::face::surface(&b, side).unwrap().unwrap();
+        let handle = SideHandle(s.natural_uv_domain_with_nurb(&k).unwrap());
+        let domain = crate::topology::face::uv_domain(&b, side).unwrap();
+        let tol = crate::topology::face::tolerance(&b, side).unwrap();
+        // (place, azimuth off the +X seam in degrees, tilt phi off +Z in radians).
+        let cases: [(&str, f64, f64); 9] = [
+            ("seam", 0.0, 1e-6),
+            ("seam", 0.0, 5e-6),
+            ("seam", 0.0, 1e-4),
+            ("seam", 0.0, 1e-3),
+            ("off seam", 33.0, 1e-7),
+            ("off seam", 33.0, 1e-6),
+            ("off seam", 33.0, 5e-6),
+            ("off seam", 33.0, 1e-4),
+            ("off seam", 33.0, 1e-3),
+        ];
+        let mut report = Vec::new();
+        let mut failed = false;
+        for (place, azimuth_deg, phi) in cases {
+            let azimuth = azimuth_deg.to_radians();
+            let (sin_a, cos_a) = azimuth.sin_cos();
+            let (sin_p, cos_p) = phi.sin_cos();
+            let through = Point3::new(20.0 * cos_a, 20.0 * sin_a, 20.0);
+            let direction = Vec3::new(sin_p * cos_a, sin_p * sin_a, cos_p);
+            let line = match global_line_intersect(
+                &k, &mut b, side, handle, &domain, through, direction, None, false, tol,
+            ) {
+                Err(error) => {
+                    failed = true;
+                    format!("FAIL {place} phi={phi:.1e}: error {error:?}")
+                }
+                Ok(solutions) => {
+                    let described = line_solutions(solutions.as_slice());
+                    let kept = solutions.as_slice().iter().any(|sol| {
+                        sol.solution_type == SolutionType::SingleValue
+                            && sol.start.parameters[0].abs() <= 1e-6
+                    });
+                    if !kept {
+                        failed = true;
+                    }
+                    format!(
+                        "{} {place} phi={phi:.1e}: {described}",
+                        if kept { "PASS" } else { "FAIL" }
+                    )
+                }
+            };
+            report.push(line);
+        }
+        assert!(
+            !failed,
+            "a near-axial line through a cylinder seam is a point:\n{}",
+            report.join("\n")
+        );
+    }
 }

@@ -145,19 +145,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
 dependencies = [
  "cfg-if",
- "cipher 0.4.4",
+ "cipher",
  "cpufeatures 0.2.17",
-]
-
-[[package]]
-name = "aes"
-version = "0.9.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0fc36d7440d015b45468ba08a21e80e056ebbd014c611c6298bb7503e04bd1"
-dependencies = [
- "cipher 0.5.2",
- "cpubits",
- "cpufeatures 0.3.1",
 ]
 
 [[package]]
@@ -167,8 +156,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
 dependencies = [
  "aead",
- "aes 0.8.4",
- "cipher 0.4.4",
+ "aes",
+ "cipher",
  "ctr",
  "ghash",
  "subtle",
@@ -180,7 +169,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69fa2b352dcefb5f7f3a5fb840e02665d311d878955380515e4fd50095dd3d8c"
 dependencies = [
- "aes 0.8.4",
+ "aes",
 ]
 
 [[package]]
@@ -204,21 +193,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "alloc-no-stdlib"
-version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc7bb162ec39d46ab1ca8c77bf72e890535becd1751bb45f64c597edb4c8c6b3"
-
-[[package]]
-name = "alloc-stdlib"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e76a019e91224d279006ff972f1e984179a6e9feb050adba6ce8274aef23195"
-dependencies = [
- "alloc-no-stdlib",
 ]
 
 [[package]]
@@ -655,15 +629,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "block-padding"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "710f1dd022ef4e93f8a438b4ba958de7f64308434fa6a87104481645cc30068b"
-dependencies = [
- "hybrid-array",
-]
-
-[[package]]
 name = "block2"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -701,17 +666,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7"
 dependencies = [
  "byteorder",
- "cipher 0.4.4",
-]
-
-[[package]]
-name = "brotli-decompressor"
-version = "5.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a32acac15fe1967bc3986b2a6347dffc965602354ea6f450ad07e8bfd253583"
-dependencies = [
- "alloc-no-stdlib",
- "alloc-stdlib",
+ "cipher",
 ]
 
 [[package]]
@@ -995,7 +950,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3264e2574e9ef2b53ce6f536dea83a69ac0bc600b762d1523ff83fe07230ce30"
 dependencies = [
  "byteorder",
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
@@ -1012,7 +967,7 @@ dependencies = [
  "maybe-owned",
  "rustix 1.1.6",
  "rustix-linux-procfs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
  "winx",
 ]
 
@@ -1034,7 +989,7 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26b07d673db1ccf000e90f54b819db9e75a8348d6eb056e9b8ab53231b7a9911"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
@@ -1055,16 +1010,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26b52a9543ae338f279b96b0b9fed9c8093744685043739079ce85cd58f289a6"
 dependencies = [
- "cipher 0.4.4",
-]
-
-[[package]]
-name = "cbc"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce2dc9ee5f88d11e0beb842c88b33c8a5cf0d1329c4b19494af42b07dbfe8896"
-dependencies = [
- "cipher 0.5.2",
+ "cipher",
 ]
 
 [[package]]
@@ -1085,7 +1031,7 @@ version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "738b8d467867f80a71351933f70461f5b56f24d5c93e0cf216e59229c968d330"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
@@ -1178,17 +1124,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common 0.1.7",
- "inout 0.1.4",
-]
-
-[[package]]
-name = "cipher"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
-dependencies = [
- "crypto-common 0.2.2",
- "inout 0.2.6",
+ "inout",
 ]
 
 [[package]]
@@ -1206,7 +1142,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8543454e3c3f5126effff9cd44d562af4e31fb8ce1cc0d3dcd8f084515dbc1aa"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
  "dbl",
  "digest 0.10.7",
 ]
@@ -1362,12 +1298,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpubits"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b85f9c39137c3a891689859392b1bd49812121d0d61c9caf00d46ed5ce06ae"
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1387,7 +1317,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "image",
  "naga",
@@ -1401,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin-wasm"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "cap-std",
  "craft-plugin",
@@ -1650,7 +1580,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
@@ -1770,9 +1700,9 @@ version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "708b509edf7889e53d7efb0ffadd994cc6c2345ccb62f55cfd6b0682165e4fa6"
 dependencies = [
- "aes 0.8.4",
- "block-padding 0.3.3",
- "cbc 0.1.2",
+ "aes",
+ "block-padding",
+ "cbc",
  "dbus",
  "fastrand",
  "hkdf",
@@ -1853,7 +1783,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
@@ -1994,19 +1924,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9954fabd903b82b9d7a68f65f97dc96dd9ad368e40ccc907a7c19d53e6bfac28"
 dependencies = [
  "aead",
- "cipher 0.4.4",
+ "cipher",
  "cmac",
  "ctr",
  "subtle",
-]
-
-[[package]]
-name = "ecb"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26f2a8b3e564eba0877223dc343703ad0385794e882e6d13f3a4dd5c6b1f41ac"
-dependencies = [
- "cipher 0.5.2",
 ]
 
 [[package]]
@@ -2326,7 +2247,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2725,7 +2646,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
 dependencies = [
  "color_quant",
- "weezl 0.1.12",
+ "weezl",
 ]
 
 [[package]]
@@ -3163,7 +3084,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "075557004419d7f2031b8bb7f44bb43e55a83ca7b63076a8fb8fe75753836477"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
@@ -3252,18 +3173,8 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
- "block-padding 0.3.3",
+ "block-padding",
  "generic-array",
-]
-
-[[package]]
-name = "inout"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a580c13f0ffc335ef42dd3f6b1a41b726051c5e1656d9a3aa6fddb3c5dfbbf9"
-dependencies = [
- "block-padding 0.4.2",
- "hybrid-array",
 ]
 
 [[package]]
@@ -3616,33 +3527,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
-name = "lopdf"
-version = "0.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfffda0fe1ab0157e1a13c14bebd3f28671f2fccb7922f0722ec53926e6922d3"
-dependencies = [
- "aes 0.9.4",
- "bitflags 2.13.2",
- "brotli-decompressor",
- "cbc 0.2.1",
- "ecb",
- "encoding_rs",
- "flate2",
- "getrandom 0.4.3",
- "indexmap",
- "itoa",
- "log",
- "md-5 0.11.0",
- "nom",
- "rand 0.10.3",
- "rangemap",
- "sha2 0.11.1",
- "stringprep",
- "thiserror 2.0.21",
- "weezl 0.2.1",
-]
-
-[[package]]
 name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3662,16 +3546,6 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
-]
-
-[[package]]
-name = "md-5"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
-dependencies = [
- "cfg-if",
- "digest 0.11.3",
 ]
 
 [[package]]
@@ -3758,7 +3632,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "png",
  "thiserror 2.0.21",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3769,9 +3643,9 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "naga"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a616d2fb8c89516ac2723a581f69d6c18576046bed761bd6b305e5618e6ae130"
+checksum = "fd0dd362bf26c0ffdd143df6da66a25d287e196eff482f117771010b207ad163"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -3795,9 +3669,9 @@ dependencies = [
 
 [[package]]
 name = "naga-types"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "590afbf58a6f4f62873cd5cff4468061844bafa1cdf399cc954537c22d768d49"
+checksum = "14474170feb673cfb18b3565111a9869797cc1d290fb9ec969c53f5e1e231c6d"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
@@ -4361,10 +4235,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c196e0276c471c843dd5777e7543a36a298a4be942a2a688d8111cd43390dedb"
 dependencies = [
  "aead",
- "cipher 0.4.4",
+ "cipher",
  "ctr",
  "subtle",
 ]
+
+[[package]]
+name = "occt-capi"
+version = "0.1.0"
 
 [[package]]
 name = "once_cell"
@@ -4429,7 +4307,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4568,13 +4446,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7275cbf21850789239e1be05d9a887e6bba6aa8085a81be09ca021c8379baef"
 dependencies = [
  "aead",
- "aes 0.8.4",
+ "aes",
  "aes-gcm",
  "aes-kw",
  "argon2",
  "base64 0.22.1",
  "bitfields",
- "block-padding 0.3.3",
+ "block-padding",
  "blowfish",
  "buffer-redux",
  "byteorder",
@@ -4582,7 +4460,7 @@ dependencies = [
  "camellia",
  "cast5",
  "cfb-mode",
- "cipher 0.4.4",
+ "cipher",
  "const-oid 0.9.6",
  "crc24",
  "curve25519-dalek",
@@ -4604,7 +4482,7 @@ dependencies = [
  "idea",
  "k256",
  "log",
- "md-5 0.10.6",
+ "md-5",
  "memchr",
  "nom",
  "num-bigint-dig",
@@ -4999,7 +4877,6 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
 dependencies = [
- "chacha20",
  "getrandom 0.4.3",
  "rand_core 0.10.1",
 ]
@@ -5043,12 +4920,6 @@ name = "range-alloc"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
-
-[[package]]
-name = "rangemap"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a611d15b50743feb4c76b7d03edcb0e64f399c26961e4efe6975bc398be6aa3d"
 
 [[package]]
 name = "raw-window-handle"
@@ -5402,7 +5273,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5469,7 +5340,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5586,8 +5457,8 @@ version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4d35ad99a181be0a60ffcbe85d680d98f87bdc4d7644ade319b87076b9dbfd4"
 dependencies = [
- "aes 0.8.4",
- "cbc 0.1.2",
+ "aes",
+ "cbc",
  "futures-util",
  "generic-array",
  "hkdf",
@@ -6129,7 +6000,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -6177,11 +6048,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.51.0"
+version = "0.51.2"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "image",
  "log",
@@ -6199,11 +6070,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-color"
-version = "0.51.0"
+version = "0.51.2"
 
 [[package]]
 name = "solidcraft-control"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -6212,7 +6083,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-control-egui"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "egui",
  "image",
@@ -6222,7 +6093,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6231,7 +6102,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-design-preview"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6240,7 +6111,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-develop"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "solidcore-record",
  "solidcraft-kernel",
@@ -6249,11 +6120,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-display-units"
-version = "0.51.0"
+version = "0.51.2"
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "log",
  "serde",
@@ -6276,7 +6147,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-dynamics"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6287,7 +6158,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
@@ -6331,7 +6202,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-format"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "crc32fast",
  "serde_json",
@@ -6341,7 +6212,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6353,15 +6224,17 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "image",
  "log",
  "naga",
  "pollster 0.4.0",
+ "rayon",
  "robust",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-engine",
@@ -6377,14 +6250,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-icon-svg"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "tiny-skia",
 ]
 
 [[package]]
 name = "solidcraft-io"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -6432,10 +6305,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "cadmpeg-ir",
  "log",
+ "occt-capi",
  "proptest",
  "rayon",
  "serde",
@@ -6457,7 +6331,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel-api"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "cadmpeg-ir",
  "serde",
@@ -6468,7 +6342,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-look"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "egui",
  "log",
@@ -6480,7 +6354,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "image",
  "serde_json",
@@ -6496,14 +6370,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp-server"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "solidcraft-panel-layout"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "schemars",
  "serde",
@@ -6513,7 +6387,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "serde_json",
  "web-time",
@@ -6521,7 +6395,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-quicklook"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
@@ -6538,7 +6412,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-render"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "flate2",
  "image",
@@ -6555,12 +6429,12 @@ dependencies = [
  "solidcraft-viewport",
  "sysinfo",
  "web-time",
- "weezl 0.1.12",
+ "weezl",
 ]
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "harfrust",
  "serde",
@@ -6577,7 +6451,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "flate2",
  "log",
@@ -6591,18 +6465,18 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "solidcraft-testkit"
-version = "0.51.0"
+version = "0.51.2"
 
 [[package]]
 name = "solidcraft-theme"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "egui",
  "serde",
@@ -6612,10 +6486,12 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "arboard",
  "craft-plugin",
+ "ed25519-dalek",
+ "eframe",
  "egui",
  "egui-wgpu",
  "flate2",
@@ -6623,7 +6499,6 @@ dependencies = [
  "getrandom 0.2.17",
  "image",
  "log",
- "lopdf",
  "minisign-verify",
  "nix 0.31.3",
  "pollster 0.4.0",
@@ -6662,7 +6537,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-kit"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "arboard",
  "egui",
@@ -6675,6 +6550,7 @@ dependencies = [
  "solidcraft-color",
  "solidcraft-icon-svg",
  "solidcraft-panel-layout",
+ "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
@@ -6687,14 +6563,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-registry"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "solidcraft-ui-text"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "flate2",
  "log",
@@ -6705,7 +6581,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "image",
  "serde",
@@ -6717,7 +6593,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-egui"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -6728,7 +6604,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-gpu"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "log",
  "naga",
@@ -6745,7 +6621,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-views"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "schemars",
  "serde",
@@ -6755,7 +6631,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "eframe",
  "egui",
@@ -6769,10 +6645,26 @@ dependencies = [
  "solidcraft-look",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
+ "solidcraft-viewport-gpu",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "solidcraft-window-gpu"
+version = "0.51.2"
+dependencies = [
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "log",
+ "pollster 0.4.0",
+ "thiserror 2.0.21",
+ "web-time",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]
@@ -6840,17 +6732,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 dependencies = [
  "float-cmp",
-]
-
-[[package]]
-name = "stringprep"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4df3d392d81bd458a8a621b8bffbd2302a12ffe288a9d931670948749463b1"
-dependencies = [
- "unicode-bidi",
- "unicode-normalization",
- "unicode-properties",
 ]
 
 [[package]]
@@ -6971,10 +6852,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7036,7 +6917,7 @@ dependencies = [
  "flate2",
  "half",
  "quick-error",
- "weezl 0.1.12",
+ "weezl",
  "zune-jpeg",
 ]
 
@@ -7240,7 +7121,7 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a78e83a30223c757c3947cd144a31014ff04298d8719ae10d03c31c0448c8013"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
@@ -7284,12 +7165,12 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "ui-kit-gallery"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "eframe",
  "egui",
@@ -8117,16 +7998,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
-name = "weezl"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4ca08e5ef825b65b056d9efbd95c8750683f0a6d0466d02e96dc2e4e360f3d2"
-
-[[package]]
 name = "wgpu"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "527ccdf43dd5b2e8676eed9984ce00e2bbb0a1b85b70c1969dcb6cd2eb55ab9e"
+checksum = "146fc3d654250e6207921a66c87534c621bc886c70df83dcf466c1d66813810e"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.2",
@@ -8154,9 +8029,9 @@ dependencies = [
 
 [[package]]
 name = "wgpu-core"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c018fce9b6270aa203c2fdd56f3cce996713534bd757e4ea58c8560b121f14"
+checksum = "ad661da2ee99f208c30090b585284b2ab5b8bf2358ddf2d2215592808ec62f1a"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -8189,45 +8064,45 @@ dependencies = [
 
 [[package]]
 name = "wgpu-core-deps-apple"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061f3d319a40d39d00b1ecc2c33b89fe21d4e6fe01859df3500a3a8ecccd6b68"
+checksum = "7d3f2f24aee039ffe9ef527300daf6b7428c58edeefdaa1700f4fa0fd754df16"
 dependencies = [
  "wgpu-hal",
 ]
 
 [[package]]
 name = "wgpu-core-deps-emscripten"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98b86cf4abf524a902dd35f18ca6a3f08fc2ae9847c8f10b48e30491b1f0b86"
+checksum = "55ccf093bd215ae9dc4f96df293e675513ac1f2569f8293a2911cc34ca3505d1"
 dependencies = [
  "wgpu-hal",
 ]
 
 [[package]]
 name = "wgpu-core-deps-wasm"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d260ca2ca8adc654f513a869bf3cac0b47f5b8d3f87803d6942015f8de597aae"
+checksum = "b20f43aeb9962d05e61e3ccb717e2e27ba1b04e979d4ca7e361384f8ee03db56"
 dependencies = [
  "wgpu-hal",
 ]
 
 [[package]]
 name = "wgpu-core-deps-windows-linux-android"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7586165fd5f6d881cb9ce4bb71f40d6caab2c0f1837e3fc1d9788a197fb6004f"
+checksum = "1331b08fa2362c5d454eccc4448e6e4f01eccfea569a00e310adbfc4415f2bdc"
 dependencies = [
  "wgpu-hal",
 ]
 
 [[package]]
 name = "wgpu-hal"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58"
+checksum = "a57452fe453658e141aafdb09de1028afa498805fab518238ddf372a518813ff"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -8281,9 +8156,9 @@ dependencies = [
 
 [[package]]
 name = "wgpu-naga-bridge"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2f62e73117bb7a62bfd9c5a5841438a823f6566c6442a808ee269d2d055c081"
+checksum = "44a62ead68aad7cd40ac9e2cd2b8ec64f32dfbad2765f429b9fb74b8b735869f"
 dependencies = [
  "naga",
  "wgpu-types",
@@ -8291,9 +8166,9 @@ dependencies = [
 
 [[package]]
 name = "wgpu-types"
-version = "30.0.1"
+version = "30.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99dad6f1fbdbbdb4c278a6508b059d44688f5cebddf78d005a46a31340269286"
+checksum = "a9f6ee0bd50f5ab79fb8c25e3f33afb27126f034af4ba5909c7a0967058659e6"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
@@ -8333,7 +8208,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8707,7 +8582,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8884,7 +8759,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "flate2",
  "proc-macro2",

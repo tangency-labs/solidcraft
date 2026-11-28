@@ -505,6 +505,7 @@ pub fn circle_projection(
 mod tests {
     use super::*;
     use crate::eval::{CurveEval, EvalCurve};
+    use crate::math::det;
     use crate::math::Vec2;
     use crate::prism::profile::to_local;
 
@@ -1016,7 +1017,7 @@ mod tests {
             .map(|i| {
                 let x = f64::from(i);
                 let w = 1.0 + x * 0.1;
-                [x * w, x.sin() * w, 0.0, w]
+                [x * w, det::sin(x) * w, 0.0, w]
             })
             .collect();
         let pieces = split_clamped(3, &knots, &controls, 5).unwrap();

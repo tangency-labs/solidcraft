@@ -91,6 +91,7 @@ contact_sets	false
 continuity	false
 convert_sheet	false
 copy	false
+corner_join	false
 curvature_comb	false
 curvature_map	false
 cut	false
@@ -101,6 +102,7 @@ delete_face	false
 dimension	false
 discord	false
 display	false
+dogbone	false
 dome	false
 dots	false
 draft	false
@@ -220,6 +222,7 @@ measure	false
 merge_lines	false
 mesh_body	false
 mesh_export	false
+mesh_import	false
 mesh_reduce	false
 min_radius	false
 mirror	false
@@ -331,6 +334,9 @@ settings	false
 settings_profile	false
 shaft_spline	false
 sheet	false
+sheet_corner_butt	false
+sheet_corner_overlap	false
+sheet_corner_overlap_flipped	false
 sheet_rules	false
 sheet_tab	false
 shell	false
@@ -385,6 +391,7 @@ surface_extrude	false
 surface_fair	false
 surface_fillet	false
 surface_loft	false
+surface_morph	false
 surface_offset	false
 surface_patch	false
 surface_reverse_normal	false
@@ -397,6 +404,7 @@ surface_trim	false
 surface_unstitch	false
 surface_untrim	false
 svg	false
+swap	false
 sweep	false
 text	false
 thread	false
@@ -413,6 +421,17 @@ unisolate	false
 update	false
 warning	false
 web	false
+weld	false
+weld_both_sides	false
+weld_face_concave	false
+weld_face_convex	false
+weld_face_flat	false
+weld_flag_tack	false
+weld_new_bead	false
+weld_tangent_chain	false
+weld_type_fillet	false
+weld_type_groove	false
+weld_type_spot	false
 window_other	false
 ws_design	false
 ws_drawing	false

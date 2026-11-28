@@ -9,6 +9,7 @@
 use solidcore_record::brep::blend::{
     BlendDefinition, BlendDefinitionRecord, NurbsCurveRecord, NurbsSurfaceRecord, ProceduralBlendRecord, RevolutionRecord, SupportRecord,
 };
+use solidcore_record::brep::sweep::{SweepDefinition, SweepMotion};
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 
 /// A rotation (rows of an orthonormal matrix with determinant +1) and a translation:
@@ -134,7 +135,26 @@ impl Rigid {
             // The definition moves as the kernel moves it: its supports, leader and centre. A
             // procedural blend's bound takes in the motion's rounding, from its net ([`moved`]).
             Surface::Blend { definition } => Surface::Blend { definition: Box::new(self.blend(definition)?) },
+            // A screw sweep moves exactly with a proper rigid motion: its profile, axis and law
+            // direction; the pitch, stations and map stay, as does the handedness.
+            Surface::Sweep { definition } => Surface::Sweep { definition: Box::new(self.sweep(definition)?) },
         })
+    }
+
+    /// A screw sweep's definition moved. `None` for a motion only near rigid, as for a blend.
+    fn sweep(&self, d: &SweepDefinition) -> Option<SweepDefinition> {
+        if !self.exact() {
+            return None;
+        }
+        let mut d = d.clone();
+        d.profile = self.curve(&d.profile)?;
+        let SweepMotion::Screw { origin, axis, law, .. } = &mut d.motion;
+        *origin = self.point(*origin);
+        *axis = self.direction(*axis);
+        if let Some(law) = law {
+            law.direction = self.direction(law.direction);
+        }
+        Some(d)
     }
 
     /// Whether the rotation is orthonormal to rounding: a motion [`moved`] moves blend
@@ -142,6 +162,81 @@ impl Rigid {
     /// their definition move by any rigid motion.
     pub fn is_exact(&self) -> bool {
         self.exact()
+    }
+
+    fn stored_point_fits(&self, p: [f64; 3]) -> bool {
+        fits_point(self.point(p))
+    }
+
+    /// Homogeneous controls as stored, `R·(xw, yw, zw) + w·t`, weight unchanged. The stored
+    /// components, not the cartesian point: a weight above 1 can fail while the point does not.
+    fn stored_homogeneous_fits(&self, h: [f64; 4]) -> bool {
+        let [x, y, z, _] = self.homogeneous(h);
+        fits(x) && fits(y) && fits(z)
+    }
+
+    /// Frame origin after the motion. Re-unitized axes stay unit, so they cannot newly fail the
+    /// ceiling; [`Self::frame`] returning `None` is not a ceiling failure.
+    fn frame_origin_fits(&self, frame: &Frame) -> bool {
+        self.frame(frame).is_none_or(|frame| fits_point(frame.origin))
+    }
+
+    fn plane_fits(&self, origin: [f64; 3], u_axis: [f64; 3], v_axis: [f64; 3]) -> bool {
+        let Ok([u_axis, v_axis]) = solidcore_ops::affine::rigid_plane_axes(&self.matrix(), u_axis, v_axis) else {
+            return true;
+        };
+        self.stored_point_fits(origin) && u_axis.into_iter().chain(v_axis).all(fits)
+    }
+
+    fn plane_through_fits(&self, origin: [f64; 3], u_point: [f64; 3], v_point: [f64; 3]) -> bool {
+        let Ok((origin, [u_axis, v_axis])) = solidcore_ops::affine::rigid_plane_through(&self.matrix(), origin, u_point, v_point) else {
+            return true;
+        };
+        fits_point(origin) && u_axis.into_iter().chain(v_axis).all(fits)
+    }
+
+    /// The revolution's placement after this motion: the matrix entries `validate_built` reads.
+    /// Profile, origin and axis are not moved.
+    fn placement_fits(&self, matrix: &[[f64; 4]; 4]) -> bool {
+        compose(&self.matrix(), matrix).into_iter().flatten().all(fits)
+    }
+
+    /// Numbers [`Self::curve`] stores that the record's `numbers` check sees. Knots, weights,
+    /// radii and tolerances are unchanged.
+    fn curve_fits(&self, c: &Curve) -> bool {
+        match c {
+            Curve::Line { start, end } => self.stored_point_fits(*start) && self.stored_point_fits(*end),
+            Curve::Circle { frame, .. } | Curve::Ellipse { frame, .. } => self.frame_origin_fits(frame),
+            Curve::Polyline { points } => points.iter().all(|p| self.stored_point_fits(*p)),
+            Curve::Spline { points, .. } => points.iter().all(|p| self.stored_point_fits(*p)),
+            Curve::RationalSpline { homogeneous, .. } => homogeneous.iter().all(|h| self.stored_homogeneous_fits(*h)),
+            Curve::SurfaceIntersection { surfaces, leader, .. } => {
+                self.surface_fits(&surfaces[0]) && self.surface_fits(&surfaces[1]) && self.curve_fits(leader)
+            }
+        }
+    }
+
+    /// Numbers [`Self::surface`] stores that the record's `numbers` check sees. A blend
+    /// definition is finite-only, so its net is not under that ceiling.
+    fn surface_fits(&self, s: &Surface) -> bool {
+        match s {
+            Surface::Plane { origin, u_axis, v_axis } => self.plane_fits(*origin, *u_axis, *v_axis),
+            Surface::PlaneThrough { origin, u_point, v_point } => self.plane_through_fits(*origin, *u_point, *v_point),
+            Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => {
+                self.frame_origin_fits(frame)
+            }
+            Surface::BallPatch { center, .. } => self.stored_point_fits(*center),
+            Surface::Spline { points, .. } => points.iter().flatten().all(|p| self.stored_point_fits(*p)),
+            Surface::RationalSpline { homogeneous, .. } => homogeneous.iter().flatten().all(|h| self.stored_homogeneous_fits(*h)),
+            Surface::PlacedRevolution { matrix, .. } => self.placement_fits(matrix),
+            Surface::Blend { .. } => true,
+            // A sweep's profile and axis point move; its axis, law direction and numbers that
+            // are not coordinates stay within the ceiling.
+            Surface::Sweep { definition } => {
+                let SweepMotion::Screw { origin, .. } = &definition.motion;
+                self.curve_fits(&definition.profile) && self.stored_point_fits(*origin)
+            }
+        }
     }
 
     fn exact(&self) -> bool {
@@ -274,6 +369,29 @@ fn face_net(s: &Surface) -> Option<Vec<([f64; 3], f64)>> {
     }
 }
 
+/// The ceiling `Brep::validate_built` applies to a stored coordinate: finite, absolute value at
+/// most 1e12.
+const COORDINATE_CEILING: f64 = 1e12;
+
+fn fits(x: f64) -> bool {
+    x.is_finite() && x.abs() <= COORDINATE_CEILING
+}
+
+fn fits_point(p: [f64; 3]) -> bool {
+    p.into_iter().all(fits)
+}
+
+/// Whether every coordinate [`moved`] would store, that the record's `numbers` check sees, is
+/// finite and at most 1e12 in absolute value. Does not clone the record. A move helper returning
+/// `None` is not a failure here: [`moved`] does not store that record. Unchanged fields (knots,
+/// weights, radii, angles, intervals) are not read again. A blend definition's net is not under
+/// this ceiling; the blend face's own NURBS form is.
+pub fn within_coordinate_ceiling(brep: &Brep, motion: &Rigid) -> bool {
+    brep.vertices.iter().all(|v| motion.stored_point_fits(v.point))
+        && brep.edges.iter().all(|e| motion.curve_fits(&e.curve) && e.nurbs.as_ref().is_none_or(|n| motion.curve_fits(n)))
+        && brep.faces.iter().all(|f| motion.surface_fits(&f.surface) && f.nurbs.as_ref().is_none_or(|n| motion.surface_fits(n)))
+}
+
 /// `a · b` of column-major 4×4 matrices.
 fn compose(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
     let mut out = [[0.0; 4]; 4];
@@ -304,11 +422,16 @@ pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
         {
             d.bound = widened(d.bound, face_net(f.nurbs.as_ref()?)?);
         }
+        // So is a screw sweep's.
+        if let Surface::Sweep { definition } = &mut f.surface {
+            definition.bound = widened(definition.bound, face_net(f.nurbs.as_ref()?)?);
+        }
     }
     for e in &mut out.edges {
-        // An edge on a blend by its definition is the kernel's: its curve's copy of the blend
-        // keeps no net of its own to take in the rounding by.
-        if matches!(&e.curve, Curve::SurfaceIntersection { surfaces, .. } if surfaces.iter().any(|s| matches!(**s, Surface::Blend { .. }))) {
+        // An edge on a blend or sweep by its definition is the kernel's: its curve's copy of the
+        // surface keeps no net of its own to take in the rounding by.
+        if matches!(&e.curve, Curve::SurfaceIntersection { surfaces, .. } if surfaces.iter().any(|s| matches!(**s, Surface::Blend { .. } | Surface::Sweep { .. })))
+        {
             return None;
         }
         e.curve = motion.curve(&e.curve)?;
@@ -415,7 +538,8 @@ impl Affine {
             | Surface::BallPatch { .. }
             | Surface::Torus { .. }
             | Surface::PlacedRevolution { .. }
-            | Surface::Blend { .. } => return None,
+            | Surface::Blend { .. }
+            | Surface::Sweep { .. } => return None,
         })
     }
 

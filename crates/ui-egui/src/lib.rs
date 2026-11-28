@@ -50,9 +50,11 @@ mod cut_bodies;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_report;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
+mod dialog_drag_undo;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -60,6 +62,7 @@ pub mod dialogs_capture;
 pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
+pub mod dialogs_dogbone;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
@@ -76,6 +79,7 @@ pub mod dialogs_plastic;
 pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
+pub mod dialogs_scan_align;
 pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
@@ -83,6 +87,7 @@ pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
+pub mod dialogs_weld;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -137,6 +142,7 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
+pub(crate) mod keyboard_profiles;
 pub mod keymap;
 #[cfg(test)]
 mod kit_gallery_tests;
@@ -236,7 +242,7 @@ pub(crate) mod frame_watch;
 #[cfg(test)]
 mod history_off_thread_tests;
 mod move_preview;
-pub use file_picker::FilePickerFuture;
+pub use file_picker::{FilePickerFuture, FilesPickerFuture};
 #[cfg(test)]
 mod blend_arrow_tests;
 #[cfg(test)]
@@ -292,6 +298,7 @@ mod plugin_themes_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod plugin_tint;
 pub(crate) mod plugin_updates;
+pub(crate) mod plugin_workspaces;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
@@ -450,9 +457,14 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+mod weld_figures;
+#[doc(hidden)]
+pub mod weld_panel;
+pub mod weld_symbol_paint;
 pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
+pub mod workshop;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -502,6 +514,9 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Show only constraints of selected geometry in the Sketch Palette (view-only).
+    #[serde(skip)]
+    pub constraint_glyphs_selected_only: bool,
     /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
     /// The saved design and Preferences remain unchanged.
     #[serde(skip)]
@@ -555,6 +570,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            constraint_glyphs_selected_only: false,
             sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
@@ -579,6 +595,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// Show the designs the browser keeps for itself; None: the host has no such store.
     pub browser_files: Option<Box<dyn Fn()>>,
+    /// The page runs in Safari, the one browser that reports a two-finger twist (Preferences
+    /// offers the twist there only, #22848).
+    pub browser_safari: bool,
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
@@ -619,11 +638,22 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
-    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
-    /// Browse button and the text field still accepts a pasted path, the document library cannot
-    /// choose a folder, and Settings › Design hides the folder settings.
+    /// Open a dialog for several files at once (the agent chat's files): the types it names listed
+    /// under its label, or any type when it names none (a coding agent reads them itself). `None`:
+    /// one file, with `pick_file`.
+    pub pick_files: Option<Box<dyn Fn(&str, &[&str]) -> FilesPickerFuture>>,
+    /// Open one dialog for files and folders together, several at once, where the system's dialog
+    /// can (macOS). `None` elsewhere: the chat offers files and folders apart.
+    pub pick_files_or_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used):
+    /// a plugin field's Browse button, the document library's folder, or one the agent chat
+    /// attaches. `None` on the web build and when the host has no folder picker: a plugin field
+    /// shows no Browse button and the text field still accepts a pasted path, the document library
+    /// cannot choose a folder, and Settings › Design hides the folder settings.
     pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
+    /// Open a dialog for several folders at once (the agent chat's files). `None`: one, with
+    /// `pick_folder`.
+    pub pick_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -650,6 +680,9 @@ pub struct Services {
     pub usage_http: Option<tickets::Http>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
     pub window_system: Option<&'static str>,
+    /// HTTPS GET to workshop.solidcraft.io with the signature headers, for Workshop links
+    /// (`workshop`); None: links are not opened (browser, tests).
+    pub workshop_get: Option<workshop::HttpGet>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -813,6 +846,8 @@ pub struct SolveApp {
     pub(crate) plugin_install: plugin_install::State,
     /// Plugin updates found at start, and the one being downloaded or reviewed.
     pub(crate) plugin_updates: plugin_updates::State,
+    /// A Workshop link being looked up, downloaded or asked about (`workshop`).
+    pub(crate) workshop: workshop::State,
     /// What an importer plugin could not carry over from the file it just opened.
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -845,6 +880,8 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
+    /// The Inspect Design window, when it is open (#20662).
+    pub design_report: Option<design_report::DesignReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -966,6 +1003,8 @@ pub struct SolveApp {
     /// after a few seconds (an export that left bodies out).
     pub status_sticky_at: Option<f64>,
     pub quit_requested: bool,
+    /// How long quitting has waited for queued view memories (`view_memory::quit_may_proceed`).
+    quit_wait: std::cell::Cell<view_memory::QuitWait>,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
     /// Lock files next to the open designs (the desktop app turns them on; #5467).
@@ -1099,6 +1138,7 @@ pub struct SolveApp {
     /// Plugin state kept between frames. New plugin state goes in [`app_plugins::State`].
     pub(crate) plugins: app_plugins::State,
     plugin_slots: plugin_slots::State,
+    pub(crate) plugin_workspaces: plugin_workspaces::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1248,6 +1288,7 @@ impl SolveApp {
             easyprint: Default::default(),
             plugin_install: Default::default(),
             plugin_updates: Default::default(),
+            workshop: Default::default(),
             import_report: None,
             saving: None,
             host_saves: Vec::new(),
@@ -1267,6 +1308,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
+            design_report: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1325,6 +1367,7 @@ impl SolveApp {
             status_save_sc: false,
             status_sticky_at: None,
             quit_requested: false,
+            quit_wait: std::cell::Cell::new(view_memory::QuitWait::default()),
             autosave: None,
             locks: None,
             lock_prompts: Vec::new(),
@@ -1393,6 +1436,7 @@ impl SolveApp {
             control_answering: Vec::new(),
             plugins: Default::default(),
             plugin_slots: Default::default(),
+            plugin_workspaces: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1571,7 +1615,6 @@ impl SolveApp {
         }
         render_workspace::sync_backend(self);
         ai_connect::tick(self);
-        self.msaa_supported = rs.msaa_supported.clone();
         let info = rs.adapter.get_info();
         self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
         self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
@@ -1743,7 +1786,17 @@ impl SolveApp {
         self.home.recent = v
             .get("recent")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
+            .map(|a| {
+                // A path listed twice (saved by an older version, or written by two pages) is
+                // shown once (#23033).
+                let mut recent: Vec<String> = Vec::new();
+                for p in a.iter().filter_map(Value::as_str) {
+                    if recent.len() < home::MAX_RECENT && !recent.iter().any(|r| r == p) {
+                        recent.push(p.to_string());
+                    }
+                }
+                recent
+            })
             .unwrap_or_default();
         self.home.forgotten = keys("recent_forgotten");
         if let Some(s) = v.get("shortcut_box") {
@@ -2017,6 +2070,10 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some("edit.undo" | "edit.redo") if r.is_ok() => {
+                self.agent_chat.clear_model_changes();
+                r
+            }
             Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
             Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
@@ -2211,7 +2268,8 @@ impl SolveApp {
                 };
                 render_workspace::selection_editor(self, &selected);
             }
-            if id == "view.layout" {
+            // The organization's layout stays; the command changes nothing while a policy sets it.
+            if id == "view.layout" && !self.policy.locks("layout") {
                 let layout =
                     if v.get("mode").and_then(Value::as_str) == Some("compact") { ui_kit::LayoutMode::Docked } else { ui_kit::LayoutMode::Floating };
                 self.preferences.layout = layout;
@@ -2429,10 +2487,18 @@ impl SolveApp {
                     self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
-                    self.cam = Camera::default();
+                    // A design opens at its own Home: its orientation, when it has one.
+                    self.cam = Camera { frame: self.session.doc.view_frame, ..Camera::default() };
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
+                    // A design read from its file gets back the views it was closed with, as the
+                    // window's own open gives them (the browser runs `doc.open` here, #23271).
+                    if id == "doc.open"
+                        && let Some(path) = self.session.path.clone()
+                    {
+                        documents::design_opened(self, &path);
+                    }
                 }
                 if matches!(id, "file.save" | "file.save_as") {
                     history_folds::remember(self);
@@ -3192,6 +3258,10 @@ impl SolveApp {
             sketch_report::open(self);
             return;
         }
+        if id == "document.inspect" {
+            design_report::open(self);
+            return;
+        }
         if id == "assembly.bom" {
             if bom_panel::available(self) {
                 bom_panel::set_focus_pending(self, true);
@@ -3281,6 +3351,23 @@ impl SolveApp {
             }
         }
         self.prepared_edit_starts.remove(&self.session.uid);
+        // Finishing the sketch puts the timeline back and drops the selection, because a face
+        // picked on a later feature would no longer exist. A profile of this sketch still does,
+        // and Extrude and Revolve are started to use it (#22673).
+        let kept_profiles = if matches!(id, "solid.extrude" | "solid.revolve") {
+            previous_sketch
+                .map(|sketch| {
+                    self.session
+                        .selection
+                        .iter()
+                        .filter(|sel| matches!(sel, solidcraft_engine::Sel::Profile { sketch: owner, .. } if *owner == sketch))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let finished = match crate::sketch_view::prepare_edit(self, id, &Value::Null) {
             Ok(event) => event,
             Err(error) => {
@@ -3288,6 +3375,11 @@ impl SolveApp {
                 return;
             }
         };
+        for sel in kept_profiles {
+            if !self.session.selection.iter().any(|have| crate::selection::same_item(have, &sel)) {
+                self.session.selection.push(sel);
+            }
+        }
         let finished_sketch = finished.filter(|event| matches!(event.domain, solidcraft_engine::SketchDomain::Model)).map(|event| event.sketch);
         if starts_edit {
             self.prepared_edit_starts.insert(self.session.uid, id.into());
@@ -3405,6 +3497,10 @@ impl SolveApp {
             }
             if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
+            }
+            // An open sketch window would keep the keyboard from the tool's size boxes.
+            if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchModify(_))) {
+                dialogs::cancel(self);
             }
             self.tool = Some(t);
             self.set_tool_hint(tools::hint(id));
@@ -3884,13 +3980,27 @@ impl SolveApp {
         self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
     }
 
-    /// Everything shown as selected: the selection plus the open dialog's inputs.
+    /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
+        if joint_handles::began_on(self).is_some() {
+            // While dragging a Move handle on the GPU motion table, sub-body highlights
+            // (face/edge/vertex) would stay at the pre-drag pose and force a CPU world rebuild;
+            // highlight their whole body instead so it moves with the GPU motion table.
+            for item in &mut v {
+                if let solidcraft_engine::Sel::Face { body, .. }
+                | solidcraft_engine::Sel::Edge { body, .. }
+                | solidcraft_engine::Sel::Vertex { body, .. } = item
+                {
+                    *item = solidcraft_engine::Sel::Body { name: std::mem::take(body) };
+                }
+            }
+        }
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
         v.extend(agent_chat::hovered_chip(self).iter().cloned());
+        v.extend(agent_chat::model_changes_targets(self));
         v.extend(sketch_text::highlighted(self));
         v.extend(sketch_text_move::highlighted(self));
         v
@@ -4132,11 +4242,15 @@ impl SolveApp {
         self.home.open = false;
         documents::prepare_open(self);
         let params = self.load_params(path, options);
+        self.docs.camera_recalled = false;
         let r = self.run("doc.open", params)?;
         // An opened design comes up at the home view, not at the angle the design before it
-        // was left at: `prepare_open` keeps the camera when it reuses a blank design.
-        self.cam.set_view(StandardView::Iso);
-        self.fit_view();
+        // was left at: `prepare_open` keeps the camera when it reuses a blank design. One that
+        // got back the camera it was closed with keeps that (#23271).
+        if !self.docs.camera_recalled {
+            self.cam.set_view(StandardView::Iso);
+            self.fit_view();
+        }
         stand_up::offer(self, path, &[], Some(&r));
         // The import's warnings, as the desktop's open says them (`file_load`), before the
         // notices that follow it there too.
@@ -4277,6 +4391,17 @@ impl SolveApp {
             self.insert_path_async(path);
         } else {
             self.open_path_async(path);
+        }
+    }
+
+    /// The design's own FRONT and TOP changed (#6455): the camera takes them and keeps the picture
+    /// it shows, roll included. A Set as turns it to the face itself (`view.frame` sets the camera).
+    pub fn follow_view_frame(&mut self) {
+        let (right, _, back) = self.cam.basis();
+        self.cam_anim = None;
+        self.cam.frame = self.session.doc.view_frame;
+        if let Some(turned) = self.cam.with_frame(right, back) {
+            self.cam = turned;
         }
     }
 
@@ -4696,6 +4821,9 @@ impl SolveApp {
         self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
+        // The orbit's wrap setting covers label drags too; a synthetic drag (control channel,
+        // scripts) has no real cursor to move.
+        ui_kit::set_scrub_cursor_wrap(ctx, self.preferences.orbit_cursor_wrap && !self.synthetic_press);
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.
@@ -4762,6 +4890,9 @@ impl SolveApp {
         if self.cam.up != self.ui.up_axis {
             self.set_up_axis(self.ui.up_axis);
         }
+        if self.cam.frame != self.session.doc.view_frame {
+            self.follow_view_frame();
+        }
         self.step_view_animation(ctx);
         self.poll_control_jobs(ctx);
         self.drain_control(ctx);
@@ -4792,12 +4923,15 @@ impl SolveApp {
                 toolbar::shortcuts(self, ctx);
             }
         }
-        recovery_ui::tick(self);
+        if let Some(delay) = recovery_ui::tick(self, ctx) {
+            ctx.request_repaint_after(delay);
+        }
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
         #[cfg(feature = "usage-stats")]
         usage_stats::tick(self, ctx);
         plugin_updates::tick(self, ctx);
+        workshop::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);
@@ -5014,6 +5148,7 @@ impl SolveApp {
         let _blur_scope = self.blur.begin(ui.ctx());
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
+        canvas::share_box_drag(ui.ctx());
         // #9841: dialog buttons answer their first letter only when the preference says so;
         // off is the old behaviour, so the kit default and this preference default agree.
         ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
@@ -5111,6 +5246,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            self.agent_chat.clear_model_changes();
             app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {
@@ -5133,6 +5269,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // A Workshop link can arrive while Home shows: its question shows there too.
+                workshop::show(self, ui.ctx());
                 // The recovery banner's Discard all asks here (File view lists the designs inline).
                 recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
@@ -5165,6 +5303,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
+        design_report::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
@@ -5177,6 +5316,7 @@ impl SolveApp {
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
+        workshop::show(self, ui.ctx());
         import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
@@ -5208,9 +5348,10 @@ impl SolveApp {
         }
     }
 
-    /// Whether the host can close after queued view preferences have reached disk.
+    /// Whether the host can close: queued view preferences have reached disk, or quitting has
+    /// waited `view_memory::QUIT_WAIT` (10 s) for them (another process may hold their file).
     pub fn ready_to_quit(&self) -> bool {
-        self.quit_requested && !crate::view_memory::pending()
+        self.quit_requested && crate::view_memory::quit_may_proceed(&self.quit_wait)
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
@@ -5238,18 +5379,7 @@ impl SolveApp {
         } else {
             viewport::show(self, ui);
         }
-        if let Some(view) = view_window_drag::hovered_view(self) {
-            let rect = if view == self.docs.views.active().id {
-                self.viewport.rect
-            } else {
-                self.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
-            };
-            if let Some(rect) = rect.filter(|rect| rect.is_positive()) {
-                let t = solidcraft_theme::Tokens::get();
-                ui.painter().rect_filled(rect.shrink(2.0), 6, t.accent.gamma_multiply(0.035));
-                ui.painter().rect_stroke(rect.shrink(2.0), 6, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
-            }
-        }
+        view_window_drag::paint_hover_outline(self, ui);
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {

@@ -584,6 +584,232 @@ fn wait_feature_preview(h: &mut crate::scenario::Harness) {
 }
 
 #[test]
+fn transform_face_preview_rotates_about_the_pick_and_cancel_leaves_the_block_intact() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    let point = Vec3::new(4.0, 2.0, 10.0);
+    let body = h.app.session.model.state();
+    let index = body.body("Body1").unwrap().body.face_at_point(point).unwrap().unwrap();
+    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index, point }];
+    let saved = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.app.start("solid.transform_face");
+    let dialog = h.app.dialog.as_mut().unwrap();
+    let Kind::TransformFace { translate, axis, angle, explicit_pivot, .. } = &mut dialog.kind else { panic!("expected face form") };
+    assert!(!*explicit_pivot);
+    assert_eq!(*axis, 2);
+    translate[2] = "2 mm".into();
+    *axis = 0;
+    *angle = "45 deg".into();
+    wait_feature_preview(&mut h);
+    assert_eq!(h.app.preview.replaced, ["Body1"]);
+    assert!(h.app.preview.moving_layer().is_none());
+    // Tilt about y=2, z=10 then raise by 2: the roof is z=10+y. The bottom stays at zero.
+    assert!((h.app.preview.bounds.max.z - 20.0).abs() < 1e-7 && h.app.preview.bounds.min.z.abs() < 1e-7, "{:?}", h.app.preview.bounds);
+    let volume = |app: &SolveApp| solidcraft_engine::kernel::measure(&app.session.model.state().body("Body1").unwrap().body).unwrap().volume;
+    assert!((volume(&h.app) - 1000.0).abs() < 1e-6);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none() && !h.app.preview.active && h.app.preview.replaced.is_empty());
+    assert_eq!(h.app.session.doc.to_json(), saved);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!((volume(&h.app) - 1000.0).abs() < 1e-6);
+}
+
+#[test]
+fn transform_face_dragging_an_arrow_then_a_ring_keeps_both_motions_until_ok() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    let point = Vec3::new(5.0, 2.0, 10.0);
+    h.app.cam = h.app.cam.looking_from(Vec3::X); // See the Z arrow and the X ring face-on.
+    h.app.cam.target = point;
+    h.app.cam.distance = 100.0;
+    h.app.session.selection = vec![picked(&h.app, Vec3::new(5.0, 5.0, 10.0), point)];
+    let saved = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let count = h.app.session.doc.features.len();
+    h.app.start("solid.transform_face");
+    h.frames(3);
+
+    // Move four world millimetres from the published arrow grip, rather than clicking on the face.
+    let grip = h.at(&json!({"handle":"move_z"})).unwrap();
+    let from = h.at(&json!({"world":[5,2,10]})).unwrap();
+    let to = h.at(&json!({"world":[5,2,14]})).unwrap();
+    let end = [grip[0] + to[0] - from[0], grip[1] + to[1] - from[1]];
+    h.step(&json!({"drag":[grip,end],"steps":12,"ctrl":true})).unwrap();
+    wait_feature_preview(&mut h);
+    assert!((h.app.preview.bounds.max.z - 14.0).abs() < 1e-5, "{:?}", h.app.preview.bounds);
+    assert_eq!(h.app.session.doc.to_json(), saved);
+    assert_eq!(h.app.session.undo.len(), undo);
+
+    // Looking from +X, 45° about X is counterclockwise on screen (screen Y points down).
+    let centre = h.at(&json!({"handle":"move_ball"})).unwrap();
+    let grip = h.at(&json!({"handle":"move_rx"})).unwrap();
+    let (dx, dy) = (grip[0] - centre[0], grip[1] - centre[1]);
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let end = [centre[0] + s * (dx + dy), centre[1] + s * (dy - dx)];
+    h.step(&json!({"drag":[grip,end],"steps":12})).unwrap();
+    wait_feature_preview(&mut h);
+    // The roof is z = 10 + (y - 2) + 4. Dropping the first drag would leave it 4 mm too low.
+    assert!((h.app.preview.bounds.max.z - 22.0).abs() < 1e-5, "{:?}", h.app.preview.bounds);
+    assert_eq!(h.app.session.doc.to_json(), saved);
+    assert_eq!(h.app.session.undo.len(), undo);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), count + 1);
+    let volume = solidcraft_engine::kernel::measure(&h.app.session.model.state().body("Body1").unwrap().body).unwrap().volume;
+    // The unsnapped arrow was positioned in screen pixels. Compare mean height at the
+    // same length tolerance as the preview, not volume at that length tolerance.
+    assert!((volume / 100.0 - 17.0).abs() < 1e-5, "expected mean height 17 mm, got {}", volume / 100.0);
+}
+
+#[test]
+fn transform_face_ring_drags_restore_expressions_and_compose_about_world_axes() {
+    use crate::dialogs::transform_face::drag;
+    use crate::gizmo::{self, Change, Drag, Handle};
+
+    let mut app = app_with(json!([
+        {"command":"solid.box","params":{"length":10,"width":10,"height":10}},
+        {"command":"parameters.add","params":{"name":"tilt","expression":"0 deg"}}
+    ]));
+    app.session.selection = vec![face(&app, Vec3::new(5.0, 5.0, 10.0))];
+    app.start("solid.transform_face");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::TransformFace { angle, .. } = &mut d.kind else { panic!("expected face form") };
+    *angle = "tilt".into();
+    let ring = |d: &mut Dialog, axis, degrees: f64, started, done| {
+        drag(&app, d, Drag { handle: Handle::Ring(axis), change: Change::Rotate { axis, angle: degrees.to_radians() }, started, done });
+    };
+    let params = |d: &Dialog| apply_commands(&app, d).unwrap().remove(0).1;
+    let before = params(&d);
+    assert_eq!(before["angle"], "tilt");
+    ring(&mut d, 0, 30.0, true, false);
+    assert_ne!(params(&d)["angle"], "tilt");
+    ring(&mut d, 0, 0.0, false, true);
+    assert_eq!(params(&d), before);
+
+    ring(&mut d, 0, 90.0, true, true);
+    ring(&mut d, 1, 30.0, true, false);
+    ring(&mut d, 1, 90.0, false, true);
+    let p = params(&d);
+    let [x, y, z]: [f64; 3] = serde_json::from_value(p["axis"].clone()).unwrap();
+    let angle = app.session.doc.eval(p["angle"].as_str().unwrap(), ValueKind::Angle).unwrap();
+    let rotation = gizmo::rotation(Vec3::new(x, y, z), angle);
+    // First X then world Y: X -> -Z, Y -> X, Z -> -Y. The second ring travelled
+    // 90 degrees total, not 30 degrees followed by another 90.
+    for (basis, expected) in [(Vec3::X, -Vec3::Z), (Vec3::Y, Vec3::X), (Vec3::Z, -Vec3::Y)] {
+        assert!(gizmo::apply(&rotation, basis).dist(expected) < 1e-12, "{p}");
+    }
+}
+
+#[test]
+fn transform_face_pick_pivot_on_corner_middle_and_face_center() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.preferences.snap_points = false; // Explicit picking does not require background hover snaps.
+    let pick = picked(&h.app, Vec3::new(5.0, 5.0, 10.0), Vec3::new(3.0, 4.0, 10.0));
+    h.app.session.selection = vec![pick.clone()];
+    h.app.cam = h.app.cam.looking_from(Vec3::Z);
+    h.app.cam.target = Vec3::new(5.0, 5.0, 10.0);
+    h.app.cam.distance = 48.0;
+    h.app.start("solid.transform_face");
+    let d = h.app.dialog.as_mut().unwrap();
+    let Kind::TransformFace { translate, axis, angle, .. } = &mut d.kind else { panic!("expected face form") };
+    translate[2] = "2 mm".into();
+    *axis = 0;
+    *angle = "45 deg".into();
+    let original = h.app.session.doc.to_json();
+    // A +45° tilt about (x,y0,10), then +2 in Z, has its highest point at z = 22 - y0.
+    for (x, y) in [(5., 5.), (5., 0.), (10., 0.)] {
+        wait_feature_preview(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:Pivot"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Pivot:ui.transform_face.pick_on_face"}})).unwrap();
+        h.frames(3);
+        assert!(!h.app.preview.active, "pick the pivot on the untransformed face");
+        if (x, y) == (5.0, 5.0) {
+            // Inside the face but not on one of its markers. It must not replace the face or pivot.
+            h.step(&json!({"click":{"world":[2.5,2.5,10]}})).unwrap();
+            assert!(crate::dialogs::transform_face::pivot_face(h.app.dialog.as_ref().unwrap()).is_some());
+        }
+        h.step(&json!({"click":{"world":[x,y,10]}})).unwrap();
+        assert!(crate::dialogs::transform_face::pivot_face(h.app.dialog.as_ref().unwrap()).is_none(), "click at ({x},{y}) must set the pivot");
+        wait_feature_preview(&mut h);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.as_slice(), std::slice::from_ref(&pick));
+        let triad = crate::dialogs::transform_face::triad(&h.app, d).unwrap();
+        assert!(triad.center.dist(Vec3::new(x, y, 12.0)) < 1e-7, "pivot after translation: {:?}", triad.center);
+        assert!((h.app.preview.bounds.max.z - (22.0 - y)).abs() < 1e-7);
+        assert_eq!(h.app.session.doc.to_json(), original, "repicking only changes the preview");
+    }
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let feature = h.app.session.doc.features.last().unwrap().id;
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":feature}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let triad = crate::dialogs::transform_face::triad(&h.app, d).unwrap();
+    assert!(triad.center.dist(Vec3::new(10.0, 0.0, 12.0)) < 1e-7, "reopened corner pivot: {:?}", triad.center);
+}
+
+#[test]
+fn transform_face_ok_creates_one_feature_and_edit_redefines_the_same_face_and_motion() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, expression) in [("lift", "2 mm"), ("halfspan", "5 mm"), ("tilt", "8 deg")] {
+        h.app.run("parameters.add", json!({"name":name,"expression":expression})).unwrap();
+    }
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    let count = h.app.session.doc.features.len();
+    let pick = face(&h.app, Vec3::new(5.0, 5.0, 10.0));
+    h.app.session.selection = vec![pick];
+    h.app.start("solid.transform_face");
+    let d = h.app.dialog.as_mut().unwrap();
+    let Kind::TransformFace { translate, axis, custom_axis, explicit_pivot, origin, angle } = &mut d.kind else { panic!("expected face form") };
+    translate[2] = "lift".into();
+    *axis = 3;
+    *custom_axis = ["0.6", "0.8", "0"].map(String::from);
+    *explicit_pivot = true;
+    *origin = ["halfspan", "halfspan", "2 * halfspan"].map(String::from);
+    *angle = "tilt".into();
+    h.frames(3);
+    // Accept with Enter so the following timeline double-click starts a fresh click sequence.
+    // A click on OK within the same multi-click interval counts toward egui's triple-click.
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), count + 1);
+    let feature = h.app.session.doc.features.last().unwrap().clone();
+    let saved_names = feature.face_names.clone();
+    assert_eq!(saved_names.len(), 1);
+    let volume =
+        |h: &crate::scenario::Harness| solidcraft_engine::kernel::measure(&h.app.session.model.state().body("Body1").unwrap().body).unwrap().volume;
+    // Pivot in the middle of the top: its mean height remains 10 + lift despite the tilt.
+    assert!((volume(&h) - 1200.0).abs() < 1e-6);
+    h.step(&json!({"click":{"handle":format!("timeline:{}",feature.name)},"double":true})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.editing, Some((feature.id, None)));
+    assert!(matches!(&d.inputs[0].items[..], [Sel::Face { body, .. }] if body == "Body1"));
+    let cmds = apply_commands(&h.app, d).unwrap();
+    let [(cmd, edit)] = cmds.as_slice() else { panic!("expected one redefine") };
+    assert_eq!(cmd, "timeline.redefine");
+    assert_eq!(edit["feature"], feature.id);
+    assert_eq!(edit["command"], "solid.transform_face");
+    let p = &edit["params"];
+    assert_eq!(p["body"], "Body1");
+    assert_eq!(p["translate"][2], "lift");
+    let axis: [f64; 3] = serde_json::from_value(p["axis"].clone()).unwrap();
+    for (component, expected) in axis.into_iter().zip([0.6, 0.8, 0.0]) {
+        assert!((component - expected).abs() < 1e-14, "restored axis: {axis:?}");
+    }
+    assert_eq!(p["angle"], "tilt");
+    assert_eq!(p["origin"], json!(["halfspan", "halfspan", "2 * halfspan"]));
+    let Kind::TransformFace { translate, axis, explicit_pivot, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("expected face form") };
+    assert!(*explicit_pivot && *axis == 3);
+    translate[2] = "2 * lift".into();
+    h.frames(3);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), count + 1);
+    assert_eq!(h.app.session.doc.feature(feature.id).unwrap().face_names, saved_names);
+    assert!((volume(&h) - 1400.0).abs() < 1e-6);
+}
+
+#[test]
 fn saved_feature_pattern_vectors_are_visible_clearable_and_replaceable() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"name":"Base"})).unwrap();
@@ -4007,6 +4233,37 @@ fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
     assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
 }
 
+/// A new Plane at Angle starts with "Through the axis" off, as before; ticking it in the dialog
+/// sends `through_axis` and the plane goes through an edge off the base (#6180).
+#[test]
+fn plane_at_angle_through_the_axis_starts_off_and_can_be_turned_on() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    let mut made = Vec::new();
+    for on in [true, false] {
+        h.app.start("construct.plane.at_angle");
+        h.frames(2);
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(matches!(d.kind, Kind::AnglePlane { through_axis: false, direction_only: false, .. }), "{:?}", d.kind);
+        if let Kind::AnglePlane { through_axis, .. } = &mut d.kind {
+            *through_axis = on;
+        }
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.extra.insert("axis".into(), json!({"edge": [20, 0, 20]}));
+        let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+        assert_eq!(params.get("through_axis"), on.then_some(&json!(true)), "{params}");
+        h.app.dialog = None;
+        made.push(h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap());
+    }
+    let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+    let height = |id: u64| planes.iter().find(|(fid, _, _)| *fid == id).map(|(_, _, pl)| pl.height(Vec3::new(10.0, 0.0, 20.0)).abs()).unwrap();
+    assert!(height(made[0]) < 1e-6, "through the top front edge");
+    assert!((height(made[1]) - 20.0).abs() < 1e-6, "turned about the edge where it is, as before");
+    // Reopened, each shows how it was made.
+    let reopened = crate::dialogs::for_feature(&h.app, made[0], None).unwrap();
+    assert!(matches!(reopened.kind, Kind::AnglePlane { through_axis: true, .. }), "{:?}", reopened.kind);
+}
+
 #[test]
 fn offset_plane_picks_a_3d_spline_tip_and_keeps_its_reference() {
     check_offset_plane_wire_point(2, Vec3::new(50., 40., 30.));
@@ -4319,6 +4576,84 @@ fn delete_face_asks_for_faces_and_takes_the_preselected_one() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     assert!(volume(&h) > filleted + 1.0, "the rounded edge is square again");
+}
+
+/// #18645, #4510: Delete Face with Heal unchecked leaves an open surface body rather than failing to heal.
+#[test]
+fn delete_face_without_healing_leaves_an_open_surface_body() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Box"})).unwrap();
+
+    let top_face = crate::dialogs::face_sel(&h.app.session, Vec3::new(10.0, 10.0, 20.0)).expect("top face");
+    h.app.session.selection = vec![top_face];
+    h.app.start("face.delete");
+    h.frames(1);
+
+    match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        Some(crate::dialogs::Kind::DeleteFaces { heal }) => {
+            assert!(*heal, "Delete Face defaults to heal: true");
+            *heal = false;
+        }
+        other => panic!("expected Kind::DeleteFaces, got {other:?}"),
+    }
+
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+
+    let st = h.app.session.world_state().unwrap();
+    let body = &st.body("Box").unwrap().body;
+    assert!(body.is_surface(), "body is now a surface quilt");
+    assert_eq!(body.face_count(), 5, "top face was deleted without healing");
+
+    // Re-editing from timeline preserves heal: false (verifying against fresh defaults with memory off)
+    let doc = &h.app.session.doc;
+    let feat = doc.features.last().expect("DeleteFace feature");
+    h.app.preferences.remember_dialog_values = false;
+    let edit_dialog = crate::dialogs::for_feature(&h.app, feat.id, None).expect("edit dialog");
+    assert!(matches!(edit_dialog.kind, crate::dialogs::Kind::DeleteFaces { heal: false }), "heal: false preserved in timeline edit");
+    h.app.preferences.remember_dialog_values = true;
+
+    // The next face.delete invocation remembers heal: false
+    h.app.session.selection.clear();
+    h.app.start("face.delete");
+    h.frames(1);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: false })),
+        "heal toggle is remembered across uses"
+    );
+    crate::dialogs::cancel(&mut h.app);
+}
+
+/// #18645, #4510: Delete Face dialog has a Heal toggle that starts enabled (heal: true)
+/// across all tabs (preserving previous default solid behavior without changing defaults),
+/// and can be unchecked to delete faces without healing leaving open surface bodies.
+#[test]
+fn delete_face_defaults_to_heal_true() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = false;
+
+    for tab in ["SOLID", "SURFACE"] {
+        h.app.ui.tab = tab.into();
+        h.app.start("face.delete");
+        h.frames(1);
+        assert!(
+            matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
+            "Delete Face in {tab} tab defaults to heal: true"
+        );
+        crate::dialogs::cancel(&mut h.app);
+    }
+
+    // Context menu / command search path started while in Surface tab
+    h.app.ui.tab = "SURFACE".into();
+    h.app.command_tab_before_start = Some("SURFACE".into());
+    h.app.start("face.delete");
+    h.frames(1);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
+        "Delete Face started from search/context menu in Surface tab defaults to heal: true"
+    );
+    crate::dialogs::cancel(&mut h.app);
 }
 
 /// #2494: two planes selected first, Axis Through Two Planes takes both and makes the axis
@@ -4720,6 +5055,75 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     let state = h.app.session.model.state();
     assert!(!state.body("Mesh").unwrap().body.is_mesh(), "rebuilt as faces");
+}
+
+/// #2698: Section Stack opens a dialog that takes the selected mesh body and a plane, and OK
+/// sketches a section on each plane (the 10 x 20 x 30 mm box every 10 mm up from XY, from 0 to 30
+/// kept just inside its ends: 0.001, 10.001, 20.001 and 29.999) without changing the mesh. With
+/// dialog values remembered, the next one keeps the spacing but not the ends, which belonged to
+/// that body: it spans its body again.
+#[test]
+fn section_stack_takes_the_mesh_and_a_plane_and_sketches_each_section() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Imported mesh"),
+    )
+    .unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    h.app.session = Session::new(doc);
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.section_stack");
+    h.frames(1);
+    let d = h.app.dialog.as_mut().expect("the Section Stack dialog");
+    assert!(matches!(d.kind, Kind::MeshSectionStack { .. }), "{:?}", d.kind);
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Mesh".into() }]);
+    // OK with no plane is refused in the dialog, and nothing is made.
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_some(), "no plane yet");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[1].items = vec![Sel::Plane { name: "XY".into() }];
+    if let Kind::MeshSectionStack { spacing, from, to, .. } = &mut d.kind {
+        *spacing = "10 mm".into();
+        *from = "0 mm".into();
+        *to = "30 mm".into();
+    }
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let state = h.app.session.model.state();
+    let heights: Vec<f64> = h
+        .app
+        .session
+        .doc
+        .features
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        .filter_map(|f| state.sketch(f.id).map(|sk| sk.plane.origin.z))
+        .collect();
+    assert_eq!(heights.len(), 4, "{heights:?}");
+    for (z, want) in heights.iter().zip([0.001, 10.001, 20.001, 29.999]) {
+        assert!((z - want).abs() < 1e-9, "{heights:?}");
+    }
+    assert!(state.body("Mesh").unwrap().body.is_mesh());
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.section_stack");
+    h.frames(1);
+    let d = h.app.dialog.as_ref().expect("the Section Stack dialog again");
+    let Kind::MeshSectionStack { spacing, from, to, .. } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!((spacing.as_str(), from.as_str(), to.as_str()), ("10 mm", "", ""));
 }
 
 /// Direct calls, previews and dialog apply all use the one source-bound naming scheme.

@@ -149,6 +149,7 @@ pub use airfoil::MAX_AIRFOIL_POINTS;
 pub use airfoil::read_airfoil;
 pub use dxf::DxfReadProfile;
 pub use dxf::DxfWriteOptions;
+pub use dxf::dxf_text_from_bytes;
 pub use dxf::read_dxf;
 pub use dxf::read_dxf_file;
 pub use dxf::read_dxf_file_with_profile;
@@ -1869,7 +1870,7 @@ pub fn export_with_parts_noted(
 }
 
 /// Most threads an export meshes its bodies on, as many as the model cache encodes them on.
-const EXPORT_THREADS: usize = 16;
+pub(crate) const EXPORT_THREADS: usize = 16;
 
 /// Keep each triangle's source index through welding so its face and colour follow it.
 type TaggedTriangles = (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>);

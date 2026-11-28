@@ -4,9 +4,10 @@
 //! glyphs and picked like vertices from further away, so a centre in empty space can be clicked.
 //! Sketch tools that place points take them too (#11229): a 2D tool's point lands on the
 //! sketch plane where the snap point projects to, a 3D sketch tool's on the point itself.
-//! On by default; the `snap_points` preference turns them off.
-//! They stay awake across empty space and faces, and sleep when another edge or curve is hovered
-//! (a face only replaces a face's points), or when the input stops taking them.
+//! On by default; `snap_points` turns hover snapping off. Hover snaps stay awake across empty
+//! space and faces, and sleep when another edge or curve is hovered (a face only replaces a
+//! face's points), or when the input stops taking them. An explicit face-pivot pick instead
+//! shows just the selected face's points from the start, independent of hover and that preference.
 
 use egui::{Painter, Pos2, Stroke};
 use solidcore_record::Vec3;
@@ -46,11 +47,27 @@ impl Woken {
     pub fn has(&self, sel: &Sel) -> bool {
         [&self.item, &self.face].into_iter().flatten().any(|w| same_item(w, sel))
     }
+
+    /// Only this item's handles, without any contributed by a second face.
+    fn only_item(&self, item: &Sel, revision: u64) -> bool {
+        self.revision == revision && self.face.is_none() && self.item.as_ref().is_some_and(|w| same_item(w, item))
+    }
 }
 
 /// Whether snap points are on and the active dialog input or sketch tool takes them.
 pub fn wanted(app: &SolveApp) -> bool {
-    app.preferences.snap_points && (input_takes(app) || sketch_drawing(app))
+    pivot_face(app).is_some() || (app.preferences.snap_points && (input_takes(app) || sketch_drawing(app)))
+}
+
+/// The only source of point handles while picking an explicit Transform Face pivot.
+pub(crate) fn pivot_face(app: &SolveApp) -> Option<&Sel> {
+    app.dialog.as_ref().and_then(crate::dialogs::transform_face::pivot_face)
+}
+
+/// Validate a committed pick, including one sent directly to the dialog before its first frame.
+pub(crate) fn is_face_snap(s: &solidcraft_engine::Session, face: &Sel, pick: &Sel) -> bool {
+    matches!((face, pick), (Sel::Face { body, .. }, Sel::Vertex { body: owner, point })
+        if body == owner && solidcraft_engine::snap::snap_points(s, face).iter().any(|p| p.at == *point))
 }
 
 /// Whether the active dialog input takes snap points (Move, Align, Measure, joints).
@@ -128,6 +145,18 @@ pub fn update(app: &mut SolveApp, hits: &[Hit], keep: bool, near: Option<(&Proj,
     // An edit, undo or redo sleeps the woken points, whatever is under the pointer now.
     if app.viewport.woken.revision != app.session.revision {
         app.viewport.woken = Woken { revision: app.session.revision, ..Woken::default() };
+    }
+    if let Some(face) = pivot_face(app) {
+        if app.viewport.woken.only_item(face, app.session.revision) {
+            return;
+        }
+        app.viewport.woken = Woken {
+            points: solidcraft_engine::snap::snap_points(&app.session, face),
+            item: Some(face.clone()),
+            revision: app.session.revision,
+            ..Woken::default()
+        };
+        return;
     }
     if keep && input_takes(app) && app.viewport.woken.item.is_some() {
         return;
@@ -321,6 +350,10 @@ fn in_model(app: &SolveApp, item: &Sel) -> Sel {
 /// The woken points where they show: a point of a body a Move dialog moves is where the move
 /// so far draws that body, not where the design keeps it.
 pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
+    // A control-channel pick between frames must not see the previous input's handles.
+    if pivot_face(app).is_some_and(|face| !app.viewport.woken.only_item(face, app.session.revision)) {
+        return Vec::new();
+    }
     let moved = crate::dialogs_move::chained(app);
     let at = |p: &SnapPoint| match &moved {
         Some((bodies, m)) if bodies.contains(&p.body) => solidcraft_engine::doc::apply_point(m, p.at),

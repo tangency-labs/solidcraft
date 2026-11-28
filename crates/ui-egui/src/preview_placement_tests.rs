@@ -107,6 +107,23 @@ fn extrude_cut_preview_on_a_face_sketch_in_a_translated_component_sits_at_the_sk
     let FeatureKind::Sketch { plane: PlaneRef::Face { .. }, .. } = s.doc.feature(sketch).unwrap().kind else { panic!("a sketch on a face") };
 }
 
+#[test]
+fn transform_face_preview_and_redefine_draw_the_placed_support() {
+    let (mut s, _, _) = ear(false);
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark());
+    let params = |rise| json!({"body":"EarBlock","face":[30,30,10],"translate":[0,0,rise]});
+    let command = "solid.transform_face";
+    let check = |s: &Session, id: &str, p: Value, height: f64| {
+        let built = crate::preview::compute(s, &[(id.into(), p)], colors).unwrap();
+        assert!(built.layer.is_none(), "a face edit must not move the whole body as a GPU layer");
+        assert!(built.bounds.min.dist(Vec3::new(10.0, 20.0, 0.0)) < 1e-6, "{:?}", built.bounds);
+        assert!(built.bounds.max.dist(Vec3::new(50.0, 40.0, height)) < 1e-6, "{:?}", built.bounds);
+    };
+    check(&s, command, params(2), 12.0);
+    let feature = run(&mut s, command, params(2))["feature"].as_u64().unwrap();
+    check(&s, "timeline.redefine", json!({"feature":feature,"command":command,"params":params(4)}), 14.0);
+}
+
 /// #2103: the shape of the STEP repro — a component whose body was mirrored, placed as a copy
 /// (a document keeps occurrence placements rigid, so an import's mirror sits in the geometry).
 /// The Cut preview must still sit on the sketch at its world position, not at the component's

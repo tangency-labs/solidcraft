@@ -268,12 +268,11 @@ pub fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str, names:
     {
         let mut more_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_more").max_rect(more_rect));
         let ui = &mut more_ui;
-        super::Menu::text(ui, "…", |ui| {
-            if super::MenuItem::new(names.remove, names.remove_label, "").show(ui).clicked() {
-                action = Some(InspectorAction::Remove);
-                ui.close();
-            }
-        });
+        let more = super::text_button(ui, "\u{2026}", true);
+        let items = [super::Item::action(names.remove, names.remove_label, "")];
+        if super::Menu::button_items(&more, &items).is_some() {
+            action = Some(InspectorAction::Remove);
+        }
     }
     let badge_width = ui.painter().layout_no_wrap(kind.to_owned(), crate::type_face::semibold(t.font_small), t.form_ink).size().x + t.space_16;
     let badge = egui::Rect::from_center_size(
@@ -652,15 +651,12 @@ impl<'a> Panel<'a> {
                     .interact(grip_rect, ui.scope_id().with("workspace_grip"), egui::Sense::click_and_drag())
                     .on_hover_cursor(egui::CursorIcon::Grab);
                 solidcraft_ui_registry::publish_target(&format!("{}:grip", options.id), grip.rect);
-                super::Menu::context(&grip, |ui| {
-                    let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
-                    let item = super::MenuItem::new(options.move_command, label, "").show(ui);
-                    solidcraft_ui_registry::publish_target(&format!("{}:move_side", options.id), item.rect);
-                    if item.clicked() {
-                        move_side = Some(target);
-                        ui.close();
-                    }
-                });
+                let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
+                let mut item = super::Item::action(options.move_command, label, "");
+                item.aliases.push(format!("{}:move_side", options.id));
+                if super::Menu::context_items(&grip, &[item]).is_some() {
+                    move_side = Some(target);
+                }
                 header(ui, &options);
                 solidcraft_ui_registry::publish_rect(&format!("{}:header", options.id), band);
                 if grip.dragged() {
@@ -935,9 +931,36 @@ impl<'a> Panel<'a> {
         heading: FeatureOptions<'_>,
         disabled: bool,
         valid: bool,
-        mut collapsed: Option<&mut bool>,
+        collapsed: Option<&mut bool>,
         body: impl FnOnce(&mut Ui) -> ComputeStatus,
     ) -> (bool, super::Action) {
+        self.feature_contents(ui, heading, disabled, valid, collapsed, (body, None::<fn(&mut Ui)>))
+    }
+
+    /// Feature card with an explicit left footer control. Keeps the bottom action row together
+    /// even when the general dialog preference places actions at the top.
+    pub fn feature_with_left(
+        &self,
+        ui: &mut Ui,
+        heading: FeatureOptions<'_>,
+        disabled: bool,
+        valid: bool,
+        body: impl FnOnce(&mut Ui) -> ComputeStatus,
+        left: impl FnOnce(&mut Ui),
+    ) -> (bool, super::Action) {
+        self.feature_contents(ui, heading, disabled, valid, None, (body, Some(left)))
+    }
+
+    fn feature_contents(
+        &self,
+        ui: &mut Ui,
+        heading: FeatureOptions<'_>,
+        disabled: bool,
+        valid: bool,
+        mut collapsed: Option<&mut bool>,
+        contents: (impl FnOnce(&mut Ui) -> ComputeStatus, Option<impl FnOnce(&mut Ui)>),
+    ) -> (bool, super::Action) {
+        let (body, left) = contents;
         let card = |ui: &mut Ui| {
             let t = Tokens::get();
             let min = ui.cursor().min;
@@ -948,7 +971,7 @@ impl<'a> Panel<'a> {
                 crate::frame::drag_dock(ui, band, heading.drag_key, heading.moved, self.bounded_anchor(ui.ctx()) - heading.docked);
             }
             let mut close = false;
-            let top = if DialogButtons::current(ui.ctx()) == DialogButtons::Top {
+            let top = if left.is_none() && DialogButtons::current(ui.ctx()) == DialogButtons::Top {
                 Some(TopHeader::new(ui, self.ok, heading.apply_label, self.cancel, collapsed.as_deref_mut(), &mut close))
             } else {
                 if let Some(collapsed) = collapsed.as_deref_mut() {
@@ -1051,6 +1074,9 @@ impl<'a> Panel<'a> {
                 valid && !state.applying,
                 super::Footer { apply: heading.apply_label, status: state.text.as_deref(), corners: Some(corners), ..Default::default() },
                 |ui| {
+                    if let Some(left) = left {
+                        left(ui);
+                    }
                     if state.busy {
                         let (rect, _) = ui.allocate_exact_size(vec2(t.space_16, ui.available_height()), egui::Sense::hover());
                         egui::Spinner::new().size(t.space_14).paint_at(ui, rect);

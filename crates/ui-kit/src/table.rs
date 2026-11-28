@@ -185,7 +185,25 @@ struct SelectionPaint {
 
 /// Table grid with caller-supplied header actions through Table::headers.
 /// Custom cells own their actions; all body rows share the same widths and metrics.
+/// Headers are opt-in: omit Table::headers for a headerless card with the same row padding and rules.
 pub fn table_custom<'a, R>(ui: &mut Ui, id: &str, columns: &'a [Column<'a>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'a>) -> R) -> R {
+    table_sized(ui, id, columns, empty, false, add)
+}
+
+/// A card whose columns fit its available width. It has no scrolling axes; column minimums
+/// yield proportionally when the card cannot accommodate them, keeping the shared cell clips.
+pub fn table_fitted<'a, R>(ui: &mut Ui, id: &str, columns: &'a [Column<'a>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'a>) -> R) -> R {
+    table_sized(ui, id, columns, empty, true, add)
+}
+
+fn table_sized<'a, R>(
+    ui: &mut Ui,
+    id: &str,
+    columns: &'a [Column<'a>],
+    empty: &str,
+    fitted: bool,
+    add: impl FnOnce(&mut Ui, &mut Table<'a>) -> R,
+) -> R {
     let t = Tokens::get();
     let columns = columns.get(..columns.len().min(MAX_COLUMNS)).unwrap_or_default();
     let mut reveal = None;
@@ -195,16 +213,18 @@ pub fn table_custom<'a, R>(ui: &mut Ui, id: &str, columns: &'a [Column<'a>], emp
         .fill(t.table_fill())
         .stroke(t.container_border(t.border))
         .show(ui, |ui| {
-            egui::ScrollArea::horizontal().id_salt(("table", id)).content_margin(egui::Margin::ZERO).auto_shrink([false, true]).show_viewport(
-                ui,
-                |ui, viewport| {
+            egui::ScrollArea::new([!fitted, false])
+                .id_salt((if fitted { "table_fitted" } else { "table" }, id))
+                .content_margin(egui::Margin::ZERO)
+                .auto_shrink([false, true])
+                .show_viewport(ui, |ui, viewport| {
                     // ScrollArea snaps its content rect. Measure here, after that rounding and any
                     // enclosing list margins, and never allocate more than the actual viewport.
                     let ppp = ui.ctx().pixels_per_point().max(0.5);
                     let available = (dimension(ui.available_width()).min(viewport.width()) * ppp).floor() / ppp;
                     let mut table = Table {
                         columns,
-                        widths: column_widths(ui, columns, available),
+                        widths: column_widths(ui, columns, available, fitted),
                         min_width: available,
                         id: id.to_owned(),
                         rows: 0,
@@ -228,6 +248,9 @@ pub fn table_custom<'a, R>(ui: &mut Ui, id: &str, columns: &'a [Column<'a>], emp
                         },
                     };
                     ui.spacing_mut().item_spacing.y = 0.0;
+                    if fitted {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    }
                     let result = add(ui, &mut table);
                     table.finish_selection();
                     table.finish_cells(ui);
@@ -236,8 +259,7 @@ pub fn table_custom<'a, R>(ui: &mut Ui, id: &str, columns: &'a [Column<'a>], emp
                     }
                     reveal = table.reveal;
                     result
-                },
-            )
+                })
         })
         .inner;
     solidcraft_ui_registry::publish_rect(&format!("dialog:table:{id}:viewport"), output.inner_rect);
@@ -256,7 +278,7 @@ const MANUAL_MIN_WIDTH: f32 = 24.0;
 /// Each column's width in points for a table `available` points wide: dragged columns keep their
 /// width, fixed columns measure their heading and controls, and flexible columns share the rest by
 /// weight, each frozen at its minimum before the others divide what remains.
-fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
+fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32, fitted: bool) -> Vec<f32> {
     let t = Tokens::get();
     let mut widths: Vec<_> = columns
         .iter()
@@ -300,6 +322,15 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
             break;
         }
     }
+    if fitted {
+        let budget = (available - gaps).max(0.0);
+        let total: f32 = widths.iter().sum();
+        if total > budget {
+            for width in &mut widths {
+                *width *= budget / total;
+            }
+        }
+    }
     // Round cumulative column edges, not each width independently: independent rounding
     // can add a pixel to an otherwise exactly fitting grid and create a scrollbar. The gaps need
     // not be whole pixels (8 points is 7.5 px at 0.9375), so a fitting grid's last edge could
@@ -310,7 +341,7 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
     let mut rounded_edge = 0.0;
     for (index, width) in widths.iter_mut().enumerate() {
         edge += *width;
-        let mut next = (edge * ppp).round() / ppp;
+        let mut next = if fitted { (edge * ppp).floor() / ppp } else { (edge * ppp).round() / ppp };
         if index == last && next + gaps > available && edge + gaps <= available + 0.01 {
             next = available - gaps;
         }
@@ -649,7 +680,7 @@ impl<'a> Table<'a> {
         painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, t.form_dim);
         let pill = egui::Rect::from_min_size(egui::pos2(left + label_width + t.space_8, rect.center().y - t.space_8), vec2(count_width, t.space_16));
         painter.rect_filled(pill, (t.space_16 * 0.5).round() as u8, t.text.gamma_multiply(0.13));
-        painter.galley(egui::pos2(pill.left() + t.space_6, pill.center().y - count_galley.size().y * 0.5), count_galley, t.form_dim);
+        painter.galley(crate::text::centred_in(&painter, &count_galley, pill.center()), count_galley, t.form_dim);
         if response.has_focus() {
             painter.rect_stroke(
                 rect.shrink2(vec2(t.space_4, t.space_2 * 0.5)),

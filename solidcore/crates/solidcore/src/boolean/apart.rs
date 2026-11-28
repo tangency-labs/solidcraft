@@ -329,12 +329,50 @@ fn face_box(
     Ok(Some(held))
 }
 
+/// Certified union bounding box of closed manifold solid `b` (all solid shells' certified
+/// [`face_box`]es united and expanded by `b`'s intersection tolerance), after gluing
+/// self-touching edge copies as a boolean union does. Returns `None` when `b` is not a closed
+/// manifold solid or when any face has no certified box.
+///
+/// Two B-reps whose [`certified_union_box`]es are disjoint (`are_disjoint(_, 0.0)`) have every
+/// shell box of one farther than `max(xsect_tol(a), xsect_tol(b))` from every shell box of the
+/// other, satisfying [`proved_apart`]'s geometric separation proof.
+pub(crate) fn certified_union_box(k: &mut Kernel, b: &mut Brep) -> Result<Option<Extent3d>> {
+    k.check_cancelled(OP)?;
+    crate::boolean::api_brep::glue_self_touching_edges(k, b)?;
+    if probe(crate::topology::brep::p2::is_manifold_solid(b))? != Some(true) {
+        return Ok(None);
+    }
+    let Some(shells) = solid_shell_faces(k, b)? else {
+        return Ok(None);
+    };
+    let Some(boxes) = shell_boxes(k, b, &shells)? else {
+        return Ok(None);
+    };
+    let mut held = Extent3d::new();
+    for x in &boxes {
+        held = held.union(x);
+    }
+    if held.has_negative_volume() || !held.is_defined() || !held.is_bounded() {
+        return Ok(None);
+    }
+    held.expand_absolute(brep_xsect_tol_3d(k, b, SmallTopoType::NormalSize));
+    Ok(Some(held))
+}
+
 /// `b`'s topology copied into `a` and the union's tail run ([`union_if_apart`]).
 ///
 /// # Errors
 /// Those of the merge and the tail.
 fn side_by_side(k: &mut Kernel, a: &mut Brep, b: &Brep) -> Result<()> {
     crate::boolean::merge::p3::combine_brep(k, a, b, None, None, true)?;
+    finish_side_by_side_tail(k, a)
+}
+
+/// Runs the union merge tail once on `a` after one or more disjoint solids have been copied in:
+/// solid and void regions set by nesting, outer shells first, slit loops and zero-area two-edge
+/// faces removed with attributes preserved, and cached topology refreshed.
+pub(crate) fn finish_side_by_side_tail(k: &mut Kernel, a: &mut Brep) -> Result<()> {
     // as a union's merge ends (`put_outer_shells_first`): solid and void regions set again by
     // nesting, each region's outer shell first
     let regions = crate::topology::brep::p1::regions(a, None)?;

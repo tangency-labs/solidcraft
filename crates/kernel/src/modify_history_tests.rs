@@ -329,6 +329,32 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
+#[test]
+fn transform_face_tracks_the_retrimmed_cap_and_the_stationary_floor() {
+    let b = cube();
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let floor = Vec3::new(20.0, 15.0, 0.0);
+    let raised = crate::transform_face(&b, top, Vec3::Z * 2.0, top, Vec3::Z, 0.0).unwrap();
+    let h = verified(&raised, &b, Reach { made: 0.0, moved: 2.1 });
+    for (before, after, change) in [(top, top + Vec3::Z * 2.0, Change::Modified), (floor, floor, Change::Kept)] {
+        let i = raised.face_at_point(after).unwrap().unwrap();
+        assert_eq!(h.faces[i].origins, [face(b.face_at_point(before).unwrap().unwrap())]);
+        assert_eq!(h.faces[i].change, change);
+    }
+}
+
+#[test]
+fn transform_face_noop_records_identity_over_the_rounded_input() {
+    let b = cube();
+    let rounded = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
+    assert!(rounded.rounds().is_some() && rounded.face_count() > b.face_count());
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let slide = crate::transform_face(&rounded, top, Vec3::X, top, Vec3::Z, 0.0).unwrap();
+    assert!(slide.same(&rounded));
+    assert_eq!(slide.history(), Some(&History::identity(&rounded)));
+    assert!(slide.rounds().is_none());
+}
+
 /// A narrow annular end must be picked on its exact trims, independently of the body's length
 /// (and hence the chord tolerance of the old picking mesh).
 #[test]
@@ -499,6 +525,7 @@ fn painted_cube() -> Body {
         opacity: 1.,
         faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
         name: None,
+        layer: None,
     }))
 }
 
@@ -633,6 +660,46 @@ mod smlib {
         assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
     }
 
+    /// Where the kernel refused a wall for folding and no thinner wall builds, the refusal says
+    /// the wall is not the obstacle, in exactly these words.
+    #[test]
+    fn a_folding_shell_no_thinner_wall_fixes_says_so_in_its_words() {
+        use crate::offset_backend::thinner_shell_hint;
+        use solidcraft_smlib::Error as SmError;
+        let folds = SmError::WallFolds { largest: None };
+        let e = thinner_shell_hint(1.5875, &folds, crate::KernelError::Invalid("fold".into()), |_| false);
+        assert_eq!(
+            e,
+            crate::KernelError::Invalid(
+                "shell: a wall of 1.5875 mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
+                 a face of the body curves too tightly to offset inwards, or the body has faces too small or too many to offset into a solid \
+                 (a curve cut as many tiny flat pieces, for example); round the tight bend or rebuild the body with smoother faces"
+                    .into()
+            )
+        );
+    }
+
+    /// A shell the kernel refuses for any other reason than a fold (a result that is not a solid,
+    /// a refusal of its own, a status) at every wall keeps the kernel's refusal (solidcore#3424):
+    /// a kernel defect is never told to the user as a face that curves too tightly. A thinner
+    /// wall that builds is still named.
+    #[test]
+    fn a_shell_refused_at_every_wall_for_another_reason_keeps_the_kernels_refusal() {
+        use crate::offset_backend::thinner_shell_hint;
+        use solidcraft_smlib::Error as SmError;
+        let not_solid = SmError::RefusedWithDiagnostic {
+            refusal: solidcore_ops::Error::NotSolid,
+            diagnostic: "offset::offset_executive::p2::shell_brep: the body built is not a manifold solid, as its input was".into(),
+        };
+        for failure in [not_solid, SmError::NotSolid, SmError::Status(1001), SmError::Solidcore("shell: refused".into())] {
+            let first = crate::KernelError::Failed(format!("SMLib shell: operation: {failure}"));
+            let e = thinner_shell_hint(1.5875, &failure, first.clone(), |_| false);
+            assert_eq!(e, first, "{failure:?}");
+            let e = thinner_shell_hint(1.5875, &failure, first.clone(), |w| w <= 0.8).to_string();
+            assert!(e.contains("the walls offset from this body do not close into a solid; a wall of 0.79375 mm builds"), "{e}");
+        }
+    }
+
     /// A tube of outer radius 1 shelled open at the top by 2 mm cannot fit; whatever wall the
     /// refusal offers builds when used (#20781).
     #[test]
@@ -711,5 +778,18 @@ mod smlib {
         assert!((volume(&frustum) - exact).abs() < 1e-3, "{} vs {exact}", volume(&frustum));
         let e = offset_backend::draft(&b, &[Vec3::new(20.0, 15.0, 20.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
         assert!(e.to_string().contains("not supported yet"), "{e}");
+    }
+
+    /// #22807: drafting an Ø20 x 100 mm cylinder by 6° about XY closes the cone to an apex at
+    /// z = 10 / tan(6°) ≈ 95.14 mm < 100 mm. The refusal names that geometric reason and is
+    /// `KernelError::Invalid`, not "not supported yet".
+    #[test]
+    fn draft_cylinder_closing_below_top_is_refused_with_reason() {
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 100.0).unwrap();
+        let e = offset_backend::draft(&rod, &[Vec3::new(10.0, 0.0, 50.0)], &Plane::XY, Vec3::Z, 6.0_f64.to_radians()).unwrap_err();
+        assert!(matches!(e, crate::KernelError::Invalid(_)), "{e:?}");
+        let text = e.to_string();
+        assert!(text.contains("a drafted cone would close within the face"), "{text}");
+        assert!(!text.contains("not supported yet"), "{text}");
     }
 }
