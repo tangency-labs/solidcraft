@@ -3321,6 +3321,860 @@ mod arc_conversion_regressions {
     }
 
     #[test]
+    fn zero_length_line_beside_sub_cell_sliver_never_emits_collapsing_distinct_vertices() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let snap = |p: Vec2| Vec2::new(grid(p.x).unwrap(), grid(p.y).unwrap());
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let (a, b, c) = (Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(1.0002, 1.0));
+        let b2 = Vec2::new(1.0002, 0.0);
+        let sliver = line(b, b2);
+
+        let check_no_encoded_collapse = |shapes: &[PathShape<Vec2>]| {
+            for shape in shapes {
+                if let &PathShape::BulgedPolyline {
+                    ref vertices,
+                    closed,
+                } = shape
+                {
+                    for pair in vertices.windows(2) {
+                        assert!(
+                            pair[0].at == pair[1].at || snap(pair[0].at) != snap(pair[1].at),
+                            "distinct stored vertices collapse under encoding: {vertices:?}"
+                        );
+                    }
+                    if closed && vertices.len() >= 2 {
+                        let (first, last) =
+                            (vertices.first().unwrap().at, vertices.last().unwrap().at);
+                        assert_ne!(
+                            first, last,
+                            "closed polyline duplicates endpoint: {vertices:?}"
+                        );
+                        assert_ne!(
+                            snap(first),
+                            snap(last),
+                            "closed polyline endpoints collapse under encoding: {vertices:?}"
+                        );
+                    }
+                }
+            }
+        };
+
+        for open_path in [
+            vec![line(b, b), sliver, line(b2, c)],
+            vec![line(a, b), line(b, b), line(b, b), sliver, line(b2, c)],
+        ] {
+            let shapes =
+                path_shapes(PlanarPath::Open(&open_path), PathStyle::Polyline, encoding).unwrap();
+            check_no_encoded_collapse(&shapes);
+        }
+
+        let end_only = path_shapes(
+            PlanarPath::Open(&[line(b, b), sliver]),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&end_only);
+        assert!(matches!(
+            end_only.as_slice(),
+            [PathShape::BulgedPolyline { vertices, closed: false }] if vertices.len() == 2
+        ));
+
+        let closed_start = Loop2 {
+            segs: vec![line(b, b), sliver, line(b2, c), line(c, a), line(a, b)],
+        };
+        let closed_middle = Loop2 {
+            segs: vec![line(a, b), line(b, b), sliver, line(b2, c), line(c, a)],
+        };
+        let closed_end = Loop2 {
+            segs: vec![line(b2, c), line(c, a), line(a, b), line(b, b), sliver],
+        };
+        for (i, lp) in [&closed_start, &closed_middle, &closed_end]
+            .into_iter()
+            .enumerate()
+        {
+            let shapes =
+                path_shapes(PlanarPath::Closed(lp), PathStyle::Polyline, encoding).unwrap();
+            check_no_encoded_collapse(&shapes);
+            if i == 0 {
+                // `line(b, b)` is an authored zero-length piece (preserved), the sliver merges,
+                // and the three remaining edges close back through `lead`: 4 vertices, closed.
+                assert!(matches!(
+                    shapes.as_slice(),
+                    [PathShape::BulgedPolyline { vertices, closed: true }] if vertices.len() == 4
+                ));
+            }
+        }
+    }
+
+    fn check_no_encoded_collapse(shapes: &[PathShape<Vec2>], grid: fn(f64) -> Option<f64>) {
+        let snap = |p: Vec2| Vec2::new(grid(p.x).unwrap(), grid(p.y).unwrap());
+        for shape in shapes {
+            if let PathShape::BulgedPolyline { vertices, closed } = shape {
+                for pair in vertices.windows(2) {
+                    assert!(
+                        pair[0].at == pair[1].at || snap(pair[0].at) != snap(pair[1].at),
+                        "distinct stored vertices collapse under encoding: {vertices:?}"
+                    );
+                }
+                if *closed && vertices.len() >= 2 {
+                    let (first, last) = (vertices.first().unwrap().at, vertices.last().unwrap().at);
+                    assert_ne!(
+                        first, last,
+                        "closed polyline duplicates endpoint: {vertices:?}"
+                    );
+                    assert_ne!(
+                        snap(first),
+                        snap(last),
+                        "closed polyline endpoints collapse under encoding: {vertices:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn interleaved_zero_length_lines_and_slivers_preserve_vertices_and_loop_closure() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let p3 = Vec2::new(1.0003, 0.0);
+        let q = Vec2::new(1.0, 2.0);
+        let r = Vec2::new(3.0, 2.0);
+
+        let open_interleaved = [
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p1),
+            line(p1, p2),
+            line(p2, p2),
+            line(p2, p3),
+            line(p3, q),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&open_interleaved),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3), vertex(p3), vertex(p3), vertex(p3), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        let open_end_only = [line(p0, p0), line(p0, p1), line(p1, p1), line(p1, p2)];
+        let end_shapes = path_shapes(
+            PlanarPath::Open(&open_end_only),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&end_shapes, grid);
+        assert_eq!(
+            end_shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p2), vertex(p2), vertex(p2)],
+                closed: false,
+            }]
+        );
+
+        // Closed loop starting with interleaved zero-length lines and slivers (exercises `lead`).
+        let closed_start = Loop2 {
+            segs: vec![
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, q),
+                line(q, r),
+                line(r, p0),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_start),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p2), vertex(p2), vertex(p2), vertex(q), vertex(r)],
+                closed: true,
+            }]
+        );
+
+        // Closed loop starting with a sliver before interleaved zero-length + sliver pairs.
+        let closed_lead_sliver_first = Loop2 {
+            segs: vec![
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, p2),
+                line(p2, p3),
+                line(p3, q),
+                line(q, r),
+                line(r, p0),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_lead_sliver_first),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3), vertex(p3), vertex(p3), vertex(q), vertex(r)],
+                closed: true,
+            }]
+        );
+
+        // Closed loop with interleaved zero-length lines and slivers in the middle.
+        let closed_middle = Loop2 {
+            segs: vec![
+                line(r, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, q),
+                line(q, r),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_middle),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(r), vertex(p2), vertex(p2), vertex(p2), vertex(q)],
+                closed: true,
+            }]
+        );
+
+        // Closed loop ending with interleaved zero-length lines and slivers: first and last
+        // vertices encode to the same point, so the polyline stays open.
+        let closed_end = Loop2 {
+            segs: vec![
+                line(p2, q),
+                line(q, r),
+                line(r, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_end),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![
+                    vertex(p2),
+                    vertex(q),
+                    vertex(r),
+                    vertex(p2),
+                    vertex(p2),
+                    vertex(p2),
+                ],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn nonzero_edge_or_arc_before_zero_length_sliver_suffix_is_never_shifted() {
+        use std::f64::consts::FRAC_PI_2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let a = Vec2::ZERO;
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let q = Vec2::new(1.0, 2.0);
+
+        let after_line = [
+            line(a, p0),
+            line(p0, p0),
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p2),
+            line(p2, q),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&after_line), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        let after_line_trailing = [
+            line(a, p0),
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p1),
+            line(p1, p2),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&after_line_trailing),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2)],
+                closed: false,
+            }]
+        );
+
+        let arc = Seg2::Arc {
+            center: Vec2::new(0.0, 0.0),
+            radius: 2.0,
+            start: 0.0,
+            sweep: FRAC_PI_2,
+        };
+        let arc_start = arc.start();
+        let arc_end = arc.end();
+        let arc_p1 = Vec2::new(arc_end.x + 1e-4, arc_end.y);
+        let arc_p2 = Vec2::new(arc_end.x + 2e-4, arc_end.y);
+        let expected_bulge = (FRAC_PI_2 * 0.25).tan();
+
+        let after_arc = [
+            arc,
+            line(arc_end, arc_end),
+            line(arc_end, arc_end),
+            line(arc_end, arc_p1),
+            line(arc_p1, arc_p2),
+            line(arc_p2, q),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&after_arc), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![
+                    Vertex {
+                        at: arc_start,
+                        bulge: expected_bulge,
+                    },
+                    vertex(arc_p2),
+                    vertex(arc_p2),
+                    vertex(arc_p2),
+                    vertex(q),
+                ],
+                closed: false,
+            }]
+        );
+
+        let after_arc_trailing = [
+            arc,
+            line(arc_end, arc_end),
+            line(arc_end, arc_p1),
+            line(arc_p1, arc_p2),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&after_arc_trailing),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![
+                    Vertex {
+                        at: arc_start,
+                        bulge: expected_bulge,
+                    },
+                    vertex(arc_p2),
+                    vertex(arc_p2),
+                ],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn disjoint_run_or_exact_entity_after_zero_length_sliver_suffix_flushes_shifted_vertices() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let a = Vec2::ZERO;
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let d = Vec2::new(5.0, 0.0);
+        let e = Vec2::new(6.0, 0.0);
+
+        let disjoint_line = [
+            line(a, p0),
+            line(p0, p0),
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p2),
+            line(d, e),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&disjoint_line),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![
+                PathShape::BulgedPolyline {
+                    vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2)],
+                    closed: false,
+                },
+                PathShape::BulgedPolyline {
+                    vertices: vec![vertex(d), vertex(e)],
+                    closed: false,
+                },
+            ]
+        );
+
+        let cubic = Seg2::Cubic {
+            p0: p2,
+            p1: Vec2::new(2.0, 1.0),
+            p2: Vec2::new(3.0, 1.0),
+            p3: d,
+        };
+        let with_exact = [line(a, p0), line(p0, p0), line(p0, p1), line(p1, p2), cubic];
+        let shapes =
+            path_shapes(PlanarPath::Open(&with_exact), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(shapes.len(), 2);
+        assert_eq!(
+            shapes[0],
+            PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2)],
+                closed: false,
+            }
+        );
+        assert!(matches!(shapes[1], PathShape::Spline { .. }));
+
+        // Closed loop interrupted by an exact entity immediately after a zero-length + sliver suffix.
+        let closed_interrupted = Loop2 {
+            segs: vec![
+                line(a, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p2),
+                cubic,
+                line(d, a),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_interrupted),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(shapes.len(), 3);
+        assert_eq!(
+            shapes[0],
+            PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2)],
+                closed: false,
+            }
+        );
+        assert!(matches!(shapes[1], PathShape::Spline { .. }));
+        assert_eq!(
+            shapes[2],
+            PathShape::BulgedPolyline {
+                vertices: vec![vertex(d), vertex(a)],
+                closed: false,
+            }
+        );
+
+        // Disconnected sliver after suffix neither corrupts the flushed run nor re-closes a loop.
+        let disjoint_sliver = Loop2 {
+            segs: vec![
+                line(a, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p2),
+                line(d, Vec2::new(d.x + 1e-4, d.y)),
+                line(p2, a),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&disjoint_sliver),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(a)],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn closed_loop_of_only_zero_length_lines_and_slivers_stays_open_at_final_endpoint() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let p3 = Vec2::new(1.0003, 0.0);
+
+        let zero_first = Loop2 {
+            segs: vec![
+                line(p0, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p2),
+                line(p2, p2),
+                line(p2, p3),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&zero_first),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3); 4],
+                closed: false,
+            }]
+        );
+
+        let sliver_first = Loop2 {
+            segs: vec![
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, p2),
+                line(p2, p3),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&sliver_first),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3); 3],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn curved_conic_sub_grid_slivers_after_zero_length_lines_shift_to_final_endpoint() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let a = Vec2::ZERO;
+        let p0 = Vec2::new(1.0, 0.0);
+        let p0_apex = Vec2::new(1.0001, 0.0001);
+        let p1 = Vec2::new(1.0002, 0.0);
+        let p1_apex = Vec2::new(1.00025, -0.0001);
+        let p2 = Vec2::new(1.0003, 0.0);
+        let q = Vec2::new(1.0, 2.0);
+        let r = Vec2::new(3.0, 2.0);
+
+        // Conic with `a == b` and `apex != a` inside one writer cell.
+        let conic_same_ends = Seg2::Conic {
+            a: p0,
+            apex: p0_apex,
+            b: p0,
+            w: 0.7,
+        };
+        let shapes = path_shapes(
+            PlanarPath::Open(&[line(a, p0), line(p0, p0), conic_same_ends, line(p0, q)]),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p0), vertex(p0), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        // Chained `Conic` slivers with `a != b` after zero-length lines.
+        let conic_01 = Seg2::Conic {
+            a: p0,
+            apex: p0_apex,
+            b: p1,
+            w: 0.7,
+        };
+        let conic_12 = Seg2::Conic {
+            a: p1,
+            apex: p1_apex,
+            b: p2,
+            w: 0.7,
+        };
+        let shapes = path_shapes(
+            PlanarPath::Open(&[
+                line(a, p0),
+                line(p0, p0),
+                line(p0, p0),
+                conic_01,
+                conic_12,
+                line(p2, q),
+            ]),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        // Closed loop starting with zero-length line + conic sliver (`a != b`) closes via `lead`.
+        let closed_conic = Loop2 {
+            segs: vec![line(p0, p0), conic_01, line(p1, q), line(q, r), line(r, p0)],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_conic),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p1), vertex(p1), vertex(q), vertex(r)],
+                closed: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn signed_zero_across_zero_length_suffix_and_sliver_preserves_semantics() {
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+
+        let neg_a = Vec2::new(-1.0, 0.0);
+        let pos_zero = Vec2::new(0.0, 0.0);
+        let neg_zero = Vec2::new(-0.0, 0.0);
+        let p1 = Vec2::new(1e-4, 0.0);
+        let pos_b = Vec2::new(1.0, 0.0);
+
+        // Without any sliver, untouched zero-length vertices preserve their original +/-0.0 sign bits.
+        let unshifted = [
+            line(neg_a, pos_zero),
+            line(neg_zero, neg_zero),
+            line(pos_zero, pos_zero),
+            line(pos_zero, pos_b),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&unshifted), PathStyle::Polyline, encoding).unwrap();
+        let [PathShape::BulgedPolyline {
+            vertices,
+            closed: false,
+        }] = shapes.as_slice()
+        else {
+            panic!("expected single open polyline, got {shapes:?}");
+        };
+        assert_eq!(vertices.len(), 5);
+        assert_eq!(vertices[0].at, neg_a);
+        assert!(vertices[1].at.x == 0.0 && vertices[1].at.x.is_sign_negative());
+        assert!(vertices[2].at.x == 0.0 && vertices[2].at.x.is_sign_positive());
+        assert!(vertices[3].at.x == 0.0 && vertices[3].at.x.is_sign_positive());
+        assert_eq!(vertices[4].at, pos_b);
+
+        // With a sliver starting at +0.0 after a -0.0 zero-length line, the -0.0 vertex shifts to p1
+        // while the earlier non-zero vertex at neg_a stays untouched.
+        let shifted = [
+            line(neg_a, pos_zero),
+            line(neg_zero, neg_zero),
+            line(pos_zero, p1),
+            line(p1, pos_b),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&shifted), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        let [PathShape::BulgedPolyline {
+            vertices,
+            closed: false,
+        }] = shapes.as_slice()
+        else {
+            panic!("expected single open polyline, got {shapes:?}");
+        };
+        assert_eq!(vertices.len(), 4);
+        assert_eq!(vertices[0].at, neg_a);
+        assert_eq!(vertices[1].at, p1);
+        assert_eq!(vertices[2].at, p1);
+        assert_eq!(vertices[3].at, pos_b);
+
+        // A sliver landing on -0.0 before a real edge starting at +0.0 materializes the suffix at -0.0.
+        let to_neg_zero = [line(p1, p1), line(p1, neg_zero), line(pos_zero, pos_b)];
+        let shapes = path_shapes(
+            PlanarPath::Open(&to_neg_zero),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        let [PathShape::BulgedPolyline {
+            vertices,
+            closed: false,
+        }] = shapes.as_slice()
+        else {
+            panic!("expected single open polyline, got {shapes:?}");
+        };
+        assert_eq!(vertices.len(), 3);
+        assert!(vertices[0].at.x == 0.0 && vertices[0].at.x.is_sign_negative());
+        assert!(vertices[1].at.x == 0.0 && vertices[1].at.x.is_sign_positive());
+        assert_eq!(vertices[2].at, pos_b);
+    }
+
+    #[test]
+    fn zero_length_lines_and_many_slivers_export_in_linear_time() {
+        use std::time::{Duration, Instant};
+        let grid = |v: f64| Some((v * 1e9).round() / 1e9);
+        let encoding = scalar_encoding(grid);
+
+        let n = 80_000usize;
+        let point = |i: usize| Vec2::new(1.0 + (i as f64) * 1e-15, 1.0);
+        let p = point(0);
+        let end = point(n);
+        let q = Vec2::new(10.0, 1.0);
+
+        // Block pattern: n zero-length lines followed by n chained sub-grid slivers + 1 real line.
+        let block_elapsed = {
+            let mut block = Vec::with_capacity(2 * n + 1);
+            for _ in 0..n {
+                block.push(Seg2::Line { a: p, b: p });
+            }
+            for i in 0..n {
+                block.push(Seg2::Line {
+                    a: point(i),
+                    b: point(i + 1),
+                });
+            }
+            block.push(Seg2::Line { a: end, b: q });
+
+            let start = Instant::now();
+            let shapes =
+                path_shapes(PlanarPath::Open(&block), PathStyle::Polyline, encoding).unwrap();
+            let elapsed = start.elapsed();
+            assert!(matches!(
+                shapes.as_slice(),
+                [PathShape::BulgedPolyline { vertices, closed: false }]
+                    if vertices.len() == n + 2
+                        && vertices[..=n].iter().all(|v| v.at == end)
+                        && vertices[n + 1].at == q
+            ));
+            elapsed
+        };
+
+        // Interleaved pattern: (zero-length line, sub-grid sliver) repeated n times + 1 real line.
+        let interleaved_elapsed = {
+            let mut interleaved = Vec::with_capacity(2 * n + 1);
+            for i in 0..n {
+                let pi = point(i);
+                interleaved.push(Seg2::Line { a: pi, b: pi });
+                interleaved.push(Seg2::Line {
+                    a: pi,
+                    b: point(i + 1),
+                });
+            }
+            interleaved.push(Seg2::Line { a: end, b: q });
+
+            let start = Instant::now();
+            let shapes = path_shapes(
+                PlanarPath::Open(&interleaved),
+                PathStyle::Polyline,
+                encoding,
+            )
+            .unwrap();
+            let elapsed = start.elapsed();
+            assert!(matches!(
+                shapes.as_slice(),
+                [PathShape::BulgedPolyline { vertices, closed: false }]
+                    if vertices.len() == n + 2
+                        && vertices[..=n].iter().all(|v| v.at == end)
+                        && vertices[n + 1].at == q
+            ));
+            elapsed
+        };
+
+        assert!(
+            block_elapsed < Duration::from_millis(3_000)
+                && interleaved_elapsed < Duration::from_millis(3_000),
+            "expected linear-time export (< 3000 ms), got block={block_elapsed:?}, interleaved={interleaved_elapsed:?}"
+        );
+    }
+
+    #[test]
     fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
         let arc = Seg2::Arc {
             center: Vec2::ZERO,

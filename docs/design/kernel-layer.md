@@ -328,6 +328,8 @@ Why the record and not a new format:
   - corner balls (`BallPatch`);
   - blends by their definition plus a certified net (`Blend { definition }`; see
     `solidcore/docs/definitions-and-certificates.md`);
+  - from the stages of [screw-surface-record.md](screw-surface-record.md) on, screw-swept walls
+    (threads, coils) by their definition (`Sweep { definition }`);
   - pcurves, and tolerances per body, edge and vertex.
 - **Its validator gives one canonical order.** Persistent names follow history in that order.
   Once a backend's history is renumbered into it, which kernel made the body doesn't matter (§4).

@@ -5276,7 +5276,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         hash_placement(&owner_in_lca, &mut h);
         has_captured_profile = true;
     } else {
-        for (sketch, _) in f.kind.profile_sels() {
+        // Thin extrudes skip `profile_sels` (they follow curves, not profiles) yet still map
+        // their sketch through `constructor_profile_in_frame`.
+        let thin_extrude = match &f.kind {
+            FeatureKind::Extrude { sketch, thin: Some(_), .. } => Some(sketch.0),
+            _ => None,
+        };
+        for sketch in f.kind.profile_sels().into_iter().map(|(s, _)| s).chain(thin_extrude) {
             if doc.feature(sketch).is_some_and(|s| s.component != f.component) {
                 reads.sketch(doc, sketch);
                 // A later transfer can preserve this profile's historical frame. Changes to that
@@ -5336,48 +5342,75 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             _ => {}
         }
     }
-    let path = match &f.kind {
-        FeatureKind::Sweep { path_sketch, .. }
-        | FeatureKind::SurfaceSweep { path_sketch, .. }
-        | FeatureKind::Pipe { path_sketch, .. }
-        | FeatureKind::Pattern { pattern: crate::PatternKind::Path { path_sketch, .. }, .. } => Some(*path_sketch),
-        FeatureKind::FrameMember { path_sketch, .. } => *path_sketch,
-        _ => None,
-    };
-    let wired = |id: &crate::SketchId| doc.sketch(id.0).is_ok_and(|sketch| !sketch.wires.is_empty());
-    let rails: &[crate::SweepRail] = match &f.kind {
-        FeatureKind::Sweep { rails, .. }
-        | FeatureKind::SurfaceSweep { rails, .. }
-        | FeatureKind::Loft { rails, .. }
-        | FeatureKind::SurfaceLoft { rails, .. } => rails,
-        _ => &[],
-    };
-    // Members map their frame sketch into their own component's frame, 2D lines included.
-    let member = matches!(f.kind, FeatureKind::FrameMember { .. });
-    // A feature that captured its component's frame reads the components it names through that
-    // frame, so their placement still counts (the path of a sweep, the rails of any of them).
-    if path.as_ref().is_some_and(|p| member || wired(p) || has_captured_profile) || rails.iter().any(|r| wired(&r.sketch) || has_captured_profile) {
-        if let Some(path) = path {
-            reads.sketch(doc, path.0);
+    // Every sketch evaluation maps into `f.component` (via `path_in_frame`, `path_curves`,
+    // `rail_polylines`, `profile_in_frame`, or `sketch_in_feature_frame`): register it when
+    // owned by another component or carrying World-space wires in a non-root component, so a
+    // component holding a planar path or rail that moves recomputes the feature.
+    let read_mapped_sketch = |reads: &mut PlacementReads, id: u64| {
+        let owner = doc.feature(id).map(|s| s.component).unwrap_or(0);
+        let world = f.component != 0 && doc.sketch(id).is_ok_and(|sk| sk.wires.iter().any(|w| w.space == solidcraft_sketch::WireSpace::World));
+        if owner != f.component || world {
+            reads.sketch(doc, id);
         }
-        // A sweep's profile and the rails' components place them too.
-        let profile = match &f.kind {
-            FeatureKind::Sweep { sketch, .. } | FeatureKind::SurfaceSweep { sketch, .. } => Some(sketch),
-            _ => None,
-        };
-        for sketch in profile.into_iter().chain(rails.iter().map(|r| &r.sketch)) {
-            reads.sketch(doc, sketch.0);
-        }
-    }
-    // A network through 3D sketch curves reads their points through the components the
-    // feature and those sketches are placed in, as a sweep's wired path does.
-    if let FeatureKind::SurfaceNetwork { u, v, .. } = &f.kind {
-        let sketches: Vec<crate::SketchId> = u.iter().chain(v).filter_map(|c| c.sketch).collect();
-        if sketches.iter().any(wired) {
-            for sketch in &sketches {
-                reads.sketch(doc, sketch.0);
+    };
+    match &f.kind {
+        FeatureKind::Sweep { sketch, path_sketch, path, path_body, rails, .. } => {
+            if path_body.is_none() {
+                read_mapped_sketch(&mut reads, path_sketch.0);
+                for entry in path {
+                    read_mapped_sketch(&mut reads, entry.split(*path_sketch).0.0);
+                }
+                read_mapped_sketch(&mut reads, sketch.0);
+            }
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
             }
         }
+        FeatureKind::SurfaceSweep { sketch, path_sketch, path_body, rails, .. } => {
+            if path_body.is_none() {
+                read_mapped_sketch(&mut reads, path_sketch.0);
+                read_mapped_sketch(&mut reads, sketch.0);
+            }
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
+            }
+        }
+        FeatureKind::Pipe { path_sketch, .. } | FeatureKind::Pattern { pattern: crate::PatternKind::Path { path_sketch, .. }, .. } => {
+            read_mapped_sketch(&mut reads, path_sketch.0);
+        }
+        FeatureKind::FrameMember { path_sketch: Some(p), .. } => {
+            read_mapped_sketch(&mut reads, p.0);
+        }
+        FeatureKind::Loft { rails, .. } => {
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
+            }
+        }
+        FeatureKind::SurfaceLoft { sections, rails, .. } => {
+            for sec in sections {
+                if sec.body.is_none() {
+                    read_mapped_sketch(&mut reads, sec.sketch.0);
+                }
+            }
+            for r in rails {
+                read_mapped_sketch(&mut reads, r.sketch.0);
+            }
+        }
+        FeatureKind::SurfaceNetwork { u, v, .. } => {
+            for sketch in u.iter().chain(v).filter_map(|c| c.sketch) {
+                read_mapped_sketch(&mut reads, sketch.0);
+            }
+        }
+        FeatureKind::SurfaceBoundary { sketch, .. } => {
+            read_mapped_sketch(&mut reads, sketch.0);
+        }
+        FeatureKind::SurfaceTrim { curves: Some(c), .. } => {
+            read_mapped_sketch(&mut reads, c.sketch.0);
+        }
+        FeatureKind::SurfaceExtrude { sketch, .. } | FeatureKind::SurfaceRevolve { sketch, .. } if f.profile_frame.is_none() => {
+            read_mapped_sketch(&mut reads, sketch.0);
+        }
+        _ => {}
     }
     // The faces To / From Object names, in `face_points` order.
     let object_names = match &f.kind {
@@ -17389,7 +17422,9 @@ enum Tapped {
 #[path = "eval_thread.rs"]
 mod thread;
 use thread::thread_on;
-pub use thread::{ThreadInfo, metric_thread_sizes, parse_metric_thread, suggested_thread, suggested_thread_in};
+pub use thread::{
+    THREAD_OFFSET_NEGATIVE, THREAD_OFFSET_WITH_TIP, ThreadInfo, metric_thread_sizes, parse_metric_thread, suggested_thread, suggested_thread_in,
+};
 
 /// Height above `plane` (along its normal) of the object at `p` as seen from `centre`: the face
 /// there if it is planar and parallel (its plane), else where a ray from `centre` along the

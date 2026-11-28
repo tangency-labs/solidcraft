@@ -5133,6 +5133,31 @@ fn a_shafts_thread_is_seen_from_the_side() {
     assert!((limits[0].0.y - 148.5).abs() < 1e-6 && (limits[0].0.dist(limits[0].1) - 8.0).abs() < 1e-6, "{v}");
 }
 
+/// #23145: a thread offset from its end stops inside its face at both ends, so it has a limit line
+/// at each. The same shaft and view as above (paper y = 138.5 + z): M8, offset 4 and length 10
+/// from the top runs z 16 down to 6, its roots y 144.5 to 154.5 with a limit line, the major
+/// diameter long, at each.
+#[test]
+fn an_offset_shaft_thread_has_a_limit_line_at_each_end() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "length": 10, "offset": 4, "from": [4, 0, 20]}));
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    let minor = 4.0 - 5.0 * (1.25 * 3f64.sqrt() / 2.0) / 8.0;
+    let mut roots: Vec<(Vec2, Vec2)> = thread_segs(&v, "root", "visible").iter().map(top_first).collect();
+    roots.sort_by(|p, q| p.0.x.total_cmp(&q.0.x));
+    assert_eq!(roots.len(), 2, "{v}");
+    for ((top, bottom), x) in roots.iter().zip([210.0 - minor, 210.0 + minor]) {
+        assert!(top.dist(Vec2::new(x, 154.5)) < 1e-6 && bottom.dist(Vec2::new(x, 144.5)) < 1e-6, "{top:?} {bottom:?} {v}");
+    }
+    let mut limits: Vec<(Vec2, Vec2)> = thread_segs(&v, "limit", "visible").iter().map(top_first).collect();
+    limits.sort_by(|p, q| p.0.y.total_cmp(&q.0.y));
+    assert_eq!(limits.len(), 2, "{v}");
+    for ((a, b), y) in limits.iter().zip([144.5, 154.5]) {
+        assert!((a.y - y).abs() < 1e-6 && (b.y - y).abs() < 1e-6 && (a.dist(*b) - 8.0).abs() < 1e-6, "{a:?} {b:?} {v}");
+    }
+}
+
 /// `s`'s front view at 1:2 ([`three_views_of`]) and a full section of it along the line through
 /// `points` on its plane (x along the model's x, y up its z), its arrows to the right.
 fn front_section(s: Session, points: &[[f64; 2]]) -> (Session, u64) {

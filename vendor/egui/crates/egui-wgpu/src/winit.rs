@@ -24,8 +24,6 @@ struct SurfaceState {
     needs_recreate: bool,
 }
 
-/// SolidCraft: whether a frame was presented yet (`crate::STEP_FIRST_PRESENT`).
-static FIRST_PRESENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Everything you need to paint egui with [`wgpu`] on [`winit`].
 ///
@@ -67,7 +65,6 @@ impl Painter {
         support_transparent_backbuffer: bool,
         options: RendererOptions,
     ) -> Self {
-        crate::startup_step(crate::STEP_INSTANCE, ""); // SolidCraft
         let instance = config.wgpu_setup.new_instance().await;
 
         Self {
@@ -219,7 +216,6 @@ impl Painter {
         if let Some(window) = window {
             let size = window.inner_size();
             if !self.surfaces.contains_key(&viewport_id) {
-                crate::startup_step(crate::STEP_SURFACE, ""); // SolidCraft
                 let surface = self.instance.create_surface(window)?;
                 self.add_surface(surface, viewport_id, size).await?;
             }
@@ -269,18 +265,9 @@ impl Painter {
             let render_state =
                 RenderState::create(&self.config, &self.instance, Some(&surface), self.options)
                     .await?;
-            // SolidCraft: attachment sample counts must match the backend-adjusted pipelines.
-            self.options.msaa_samples = render_state.msaa_samples;
             self.render_state = Some(render_state);
         }
-        crate::startup_step(crate::STEP_SURFACE_CONFIGURE, ""); // SolidCraft
-        self.install_surface(
-            surface,
-            viewport_id,
-            size.width,
-            size.height,
-            false,
-        );
+        self.install_surface(surface, viewport_id, size.width, size.height, false);
         Ok(())
     }
 
@@ -536,52 +523,6 @@ impl Painter {
         capture_data: Vec<egui::ScreenshotCallback>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
-        // SolidCraft: a device lost while the frame is drawn panics inside wgpu at the first
-        // queue write to meet it (#4172, #10240). That panic is survived: the probe in `survive`
-        // marks the loss, the painter draws nothing more and the app restarts.
-        let watch = self.render_state.as_ref().map(|rs| {
-            (
-                rs.device_lost.clone(),
-                rs.device.clone(),
-                rs.queue.clone(),
-            )
-        });
-        let context = self.context.clone();
-        let paint = || {
-            self.paint_frame(
-                viewport_id,
-                pixels_per_point,
-                clear_color,
-                clipped_primitives,
-                textures_delta,
-                capture_data,
-                window,
-            )
-        };
-        let Some((lost, device, queue)) = watch else {
-            return paint();
-        };
-        lost.survive(&device, &queue, paint).unwrap_or_else(|| {
-            log::error!(
-                "The graphics device was lost during a frame: {}",
-                lost.reason().unwrap_or_default()
-            );
-            context.request_repaint_of(viewport_id);
-            0.0
-        })
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    fn paint_frame(
-        &mut self,
-        viewport_id: ViewportId,
-        pixels_per_point: f32,
-        clear_color: [f32; 4],
-        clipped_primitives: &[epaint::ClippedPrimitive],
-        textures_delta: &mut epaint::textures::TexturesDelta,
-        capture_data: Vec<egui::ScreenshotCallback>,
-        window: &Arc<winit::window::Window>,
-    ) -> f32 {
         profiling::function_scope!();
 
         /// Guard to ensure that commands are always submitted to the renderer queue
@@ -608,26 +549,6 @@ impl Painter {
 
         let capture = !capture_data.is_empty();
         let mut vsync_sec = 0.0;
-        // SolidCraft: one clock reading for this frame (`refused_for`).
-        let now = web_time::Instant::now();
-
-        // SolidCraft: a lost device draws nothing more; the app sees `RenderState::device_lost`
-        // and restarts (#4172).
-        if self
-            .render_state
-            .as_ref()
-            .is_some_and(|rs| rs.device_lost.is_lost())
-        {
-            if let Some(rs) = &self.render_state
-                && let Some(effect) = &rs.renderer.read().frame_compositor
-            {
-                effect.suspend();
-            }
-            // The app's frame (not this paint) acts on it: keep its frames coming.
-            self.context
-                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
-            return vsync_sec;
-        }
 
         // If the previous frame produced `CurrentSurfaceTexture::Lost`, the action match
         // below set `needs_recreate`. Recreate the surface now, before re-borrowing
@@ -639,13 +560,6 @@ impl Painter {
             && let Err(err) = self.recreate_surface(viewport_id, window)
         {
             log::error!("Failed to recreate surface for {viewport_id:?}: {err}");
-            if viewport_id == ViewportId::ROOT {
-                crate::note_refused(now);
-            }
-            // SolidCraft: nothing else may draw the next frame, which tries again and lets the
-            // app's hang check see the time without a texture grow (#3321 review).
-            self.context
-                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
             return vsync_sec;
         }
 
@@ -682,23 +596,8 @@ impl Painter {
             profiling::scope!("get_current_texture");
             // This is what vsync-waiting happens on my Mac.
             let start = web_time::Instant::now();
-            // SolidCraft: the first frame is the last startup step.
-            if !FIRST_PRESENT.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                crate::startup_step(crate::STEP_FIRST_PRESENT, "");
-            }
             let output_frame = surface_state.surface.get_current_texture();
-            let elapsed = start.elapsed();
-            vsync_sec += elapsed.as_secs_f32();
-            // SolidCraft: the main window's frames that wait out the acquire are a hung GPU
-            // (#3321); only one that gives a texture ends its time without one.
-            if viewport_id == ViewportId::ROOT {
-                let frame = matches!(
-                    output_frame,
-                    wgpu::CurrentSurfaceTexture::Success(_)
-                        | wgpu::CurrentSurfaceTexture::Suboptimal(_)
-                );
-                crate::note_acquire(elapsed, frame);
-            }
+            vsync_sec += start.elapsed().as_secs_f32();
             output_frame
         };
 

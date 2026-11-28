@@ -39,6 +39,32 @@ fn every_page_draws_in_light_and_dark_with_the_theme_panel_open() {
 }
 
 #[test]
+fn reports_gallery_has_four_crash_cards_one_expanded_and_translated_actions() {
+    let ctx = context();
+    ctx.enable_accesskit();
+    let mut gallery = Gallery::new(&ctx);
+    gallery.page = PAGES.iter().position(|page| page.id == "reports").unwrap();
+    let titles = [
+        "Fillet stopped unexpectedly",
+        "SolidCraft closed unexpectedly",
+        "Sketch offset failed, your design was restored",
+        "Extrude stopped unexpectedly",
+    ];
+    for dark in [false, true] {
+        gallery.theme.choose_tone(dark);
+        for _ in 0..3 {
+            let output = frame(&ctx, &mut gallery, Vec::new());
+            let nodes = &output.platform_output.accesskit_update.as_ref().unwrap().nodes;
+            let cards: Vec<_> = nodes.iter().filter(|(_, node)| node.label().is_some_and(|label| titles.contains(&label))).collect();
+            assert_eq!(cards.len(), 4);
+            assert_eq!(cards.iter().filter(|(_, node)| node.is_expanded() == Some(true)).count(), 1);
+            assert_eq!(nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some("Report")).count(), 4);
+            assert!(!nodes.iter().any(|(_, node)| node.label().is_some_and(|label| label.starts_with("ui.crash_card."))));
+        }
+    }
+}
+
+#[test]
 fn every_built_in_theme_draws_a_page() {
     let ctx = context();
     let mut gallery = Gallery::new(&ctx);
