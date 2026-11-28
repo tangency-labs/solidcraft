@@ -1785,7 +1785,7 @@ fn main() -> eframe::Result {
         if let Some(reason) = device_lost::reason(loss_reason.as_deref()) {
             log::warn!("graphics: the last launch lost its device ({reason})");
         }
-        notes.push(device_lost::note_with_oom(cpu_renderer, after_oom_loss, loss_reason.as_deref(), unkept.as_deref()));
+        notes.push(device_lost::note(cpu_renderer, after_oom_loss, loss_reason.as_deref(), unkept.as_deref()));
     }
     // Safe graphics mode: after a launch that failed to come up or lost its device, or when asked
     // for, this one starts on the plain path (`startup::SafeGraphics`). Decided and saved before

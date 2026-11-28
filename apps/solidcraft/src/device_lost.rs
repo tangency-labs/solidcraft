@@ -81,15 +81,10 @@ pub fn reason(reason: Option<&str>) -> Option<String> {
 }
 
 /// What the start after a lost device tells the user, `software` when it runs on the software
-/// renderer, with what the driver reported ([`REASON_ENV`]) and the designs whose unsaved changes
-/// the lost launch couldn't keep ([`startup::UNKEPT_ENV`]).
-pub fn note(software: bool, reason: Option<&str>, unkept: Option<&str>) -> String {
-    note_with_oom(software, is_out_of_memory(reason), reason, unkept)
-}
-
-/// As [`note`], with an explicit `out_of_memory` classification decided before [`REASON_ENV`]
-/// truncation.
-pub fn note_with_oom(software: bool, out_of_memory: bool, reason: Option<&str>, unkept: Option<&str>) -> String {
+/// renderer, `out_of_memory` when memory ran out (decided before [`REASON_ENV`] truncation), with
+/// what the driver reported ([`REASON_ENV`]) and the designs whose unsaved changes the lost launch
+/// couldn't keep ([`startup::UNKEPT_ENV`]).
+pub fn note(software: bool, out_of_memory: bool, reason: Option<&str>, unkept: Option<&str>) -> String {
     let unsaved = startup::unsaved_clause(unkept, "unsaved changes were kept for recovery");
     let mut first = unsaved.chars();
     let unsaved = first.next().map(|c| c.to_uppercase().chain(first).collect::<String>()).unwrap_or_default();
@@ -213,11 +208,11 @@ mod tests {
         assert!(super::restart_on_software(true, false, None));
         assert!(super::restart_on_software(false, true, None));
         assert!(super::restart_on_software(true, false, Some("Lost: Device lost (vkQueueSubmit)")));
-        assert!(super::note(true, None, None).contains("software rendering"));
-        assert!(!super::note(false, None, None).contains("software rendering"));
-        assert!(super::note(false, None, None).contains("Unsaved changes were kept for recovery."));
+        assert!(super::note(true, false, None, None).contains("software rendering"));
+        assert!(!super::note(false, false, None, None).contains("software rendering"));
+        assert!(super::note(false, false, None, None).contains("Unsaved changes were kept for recovery."));
         // A design the lost launch couldn't keep is named, not promised (#3321).
-        let note = super::note(false, None, Some("Bracket: autosave is off"));
+        let note = super::note(false, false, None, Some("Bracket: autosave is off"));
         assert!(note.contains("Some unsaved changes couldn't be kept for recovery (Bracket: autosave is off)."), "{note}");
         assert!(!note.contains("were kept"), "{note}");
     }
@@ -246,14 +241,14 @@ mod tests {
             assert!(!super::is_out_of_memory(other), "unexpected OOM for {other:?}");
         }
 
-        let note = super::note(false, Some("DeviceLost: Out of memory"), None);
+        let note = super::note(false, true, Some("DeviceLost: Out of memory"), None);
         assert!(note.contains("memory"), "{note}");
         assert!(!note.contains("the graphics driver stopped responding"), "{note}");
         assert!(!note.contains("software rendering"), "{note}");
         assert!(note.contains("Unsaved changes were kept for recovery."), "{note}");
         assert!(note.ends_with("The graphics driver reported: DeviceLost: Out of memory"), "{note}");
 
-        let unkept_note = super::note(false, Some("Out of memory"), Some("Bracket: autosave is off"));
+        let unkept_note = super::note(false, true, Some("Out of memory"), Some("Bracket: autosave is off"));
         assert!(unkept_note.contains("Some unsaved changes couldn't be kept for recovery (Bracket: autosave is off)."), "{unkept_note}");
         assert!(!unkept_note.contains("the graphics driver stopped responding"), "{unkept_note}");
 
@@ -269,7 +264,7 @@ mod tests {
         assert_eq!(oom_flag.as_deref(), Some("1"));
         assert!(!super::is_out_of_memory(truncated_reason.as_deref()), "tail was truncated");
         assert!(super::was_out_of_memory(oom_flag.as_deref(), truncated_reason.as_deref()));
-        let long_note = super::note_with_oom(false, true, truncated_reason.as_deref(), None);
+        let long_note = super::note(false, true, truncated_reason.as_deref(), None);
         assert!(long_note.starts_with("Graphics or system memory ran out"), "{long_note}");
 
         let driver_cmd = super::command(std::path::PathBuf::from("solidcraft"), Vec::new(), false, 1_000, "Lost: Device lost", &[]);
@@ -298,9 +293,9 @@ mod tests {
         assert_eq!(env(&command, crate::startup::UNKEPT_ENV), Some(None));
         assert_eq!(env(&command, crate::startup::RENDERER_ENV), None);
 
-        let note = super::note(false, Some("Lost: Device lost"), None);
+        let note = super::note(false, false, Some("Lost: Device lost"), None);
         assert!(note.ends_with("The graphics driver reported: Lost: Device lost"), "{note}");
-        assert!(!super::note(false, Some(" \n "), None).contains("reported"));
+        assert!(!super::note(false, false, Some(" \n "), None).contains("reported"));
         let long = "x".repeat(1_000);
         assert_eq!(super::reason(Some(&long)).map(|r| r.chars().count()), Some(300));
     }
