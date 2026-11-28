@@ -4,7 +4,9 @@
 //! Disconnected vertex links are accepted, as they were by the reducer's
 //! original edge-based validation.
 
-use super::{check_cancel, check_stride, dot, face_normal, invalid, Result};
+use super::{
+    buffer, check_cancel, check_stride, dot, face_normal, filled, invalid, invariant, Result,
+};
 
 /// Compare directions without changing the original corner attributes. Scaling
 /// first avoids overflow and underflow for finite, nonzero normals.
@@ -30,9 +32,142 @@ pub(super) fn same_normal_direction(a: [f64; 3], b: [f64; 3]) -> bool {
     })
 }
 
+/// Normalized topology. Retained facet slots keep their original order and winding.
+#[derive(Debug)]
+pub(super) struct PreparedTopology {
+    pub protected: Vec<bool>,
+    pub retained: Vec<bool>,
+    pub triangles: usize,
+    pub closed: bool,
+}
+
+fn triangle_at(indices: &[u32], face: usize) -> Option<[u32; 3]> {
+    let start = face.checked_mul(3)?;
+    match indices.get(start..start.checked_add(3)?)? {
+        &[a, b, c] => Some([a, b, c]),
+        _ => None,
+    }
+}
+
+// Integer records only. Heap sorting needs no scratch allocation and checks cancellation
+// through its comparisons rather than leaving one input-sized uninterruptible sort.
+fn sort_records<T: Ord>(items: &mut [T], cancel: &mut impl FnMut() -> bool) -> Result<()> {
+    fn swap<T>(items: &mut [T], a: usize, b: usize) -> Result<()> {
+        if a == b {
+            return items
+                .get(a)
+                .map(|_| ())
+                .ok_or_else(|| invariant("invalid sort slot"));
+        }
+        let (low, high) = if a < b { (a, b) } else { (b, a) };
+        let (left, right) = items
+            .split_at_mut_checked(high)
+            .ok_or_else(|| invariant("invalid sort slot"))?;
+        let a = left
+            .get_mut(low)
+            .ok_or_else(|| invariant("invalid sort slot"))?;
+        let b = right
+            .first_mut()
+            .ok_or_else(|| invariant("invalid sort slot"))?;
+        std::mem::swap(a, b);
+        Ok(())
+    }
+    fn sift<T: Ord>(
+        items: &mut [T],
+        mut root: usize,
+        end: usize,
+        work: &mut usize,
+        cancel: &mut impl FnMut() -> bool,
+    ) -> Result<()> {
+        loop {
+            check_stride(*work, cancel)?;
+            *work = work.wrapping_add(1);
+            let left = root
+                .checked_mul(2)
+                .and_then(|n| n.checked_add(1))
+                .ok_or_else(|| invariant("sort child overflow"))?;
+            if left >= end {
+                return Ok(());
+            }
+            let right = left
+                .checked_add(1)
+                .ok_or_else(|| invariant("sort child overflow"))?;
+            let mut child = left;
+            if right < end
+                && items
+                    .get(left)
+                    .ok_or_else(|| invariant("invalid sort slot"))?
+                    < items
+                        .get(right)
+                        .ok_or_else(|| invariant("invalid sort slot"))?
+            {
+                child = right;
+            }
+            if items
+                .get(root)
+                .ok_or_else(|| invariant("invalid sort slot"))?
+                >= items
+                    .get(child)
+                    .ok_or_else(|| invariant("invalid sort slot"))?
+            {
+                return Ok(());
+            }
+            swap(items, root, child)?;
+            root = child;
+        }
+    }
+    check_cancel(cancel)?;
+    let mut work = 0;
+    let len = items.len();
+    for root in (0..len / 2).rev() {
+        sift(items, root, len, &mut work, cancel)?;
+    }
+    for end in (1..len).rev() {
+        swap(items, 0, end)?;
+        sift(items, 0, end, &mut work, cancel)?;
+    }
+    check_cancel(cancel)
+}
+
+fn check_duplicate(
+    indices: &[u32],
+    normals: Option<&[[f64; 3]]>,
+    first: usize,
+    other: usize,
+) -> Result<()> {
+    let a = triangle_at(indices, first).ok_or_else(|| invariant("missing original triangle"))?;
+    let b = triangle_at(indices, other).ok_or_else(|| invariant("missing duplicate triangle"))?;
+    let start = a
+        .iter()
+        .position(|vertex| b.first() == Some(vertex))
+        .ok_or_else(|| invariant("mismatched duplicate vertices"))?;
+    for corner in 0..3 {
+        let original = (start + corner) % 3;
+        if a.get(original) != b.get(corner) {
+            return Err(invalid("oppositely wound duplicate triangle"));
+        }
+        if let Some(normals) = normals {
+            let x = first
+                .checked_mul(3)
+                .and_then(|n| n.checked_add(original))
+                .and_then(|n| normals.get(n))
+                .ok_or_else(|| invalid("invalid corner normals"))?;
+            let y = other
+                .checked_mul(3)
+                .and_then(|n| n.checked_add(corner))
+                .and_then(|n| normals.get(n))
+                .ok_or_else(|| invalid("invalid corner normals"))?;
+            if x != y {
+                return Err(invalid("duplicate triangle has conflicting corner normals"));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 fn validate(indices: &[u32], positions: &[[f64; 3]]) -> Result<Vec<bool>> {
-    validate_with_cancel(indices, positions, None, &mut || false)
+    validate_with_cancel(indices, positions, None, &mut || false).map(|topology| topology.protected)
 }
 
 /// Validate topology and mark endpoints of boundary, sharp and normal-seam edges.
@@ -41,17 +176,17 @@ pub(super) fn validate_with_cancel(
     positions: &[[f64; 3]],
     corner_normals: Option<&[[f64; 3]]>,
     cancel: &mut impl FnMut() -> bool,
-) -> Result<Vec<bool>> {
+) -> Result<PreparedTopology> {
     if indices.len() % 3 != 0 {
         return Err(invalid("indices are not triangle triples"));
     }
-
-    // Keep the two sorts separate so their allocations do not overlap.
+    let original_triangles = indices.len() / 3;
+    let mut retained = filled(original_triangles, true)?;
+    let mut triangles = original_triangles;
+    // Drop the grouping records before allocating the edge table. Original IDs in the
+    // key select the earliest occurrence, while the mask preserves input facet order.
     {
-        let mut faces = Vec::new();
-        faces
-            .try_reserve_exact(indices.len() / 3)
-            .map_err(|_| invalid("mesh topology is too large"))?;
+        let mut faces = buffer(original_triangles)?;
         for (i, tri) in indices.chunks_exact(3).enumerate() {
             check_stride(i, cancel)?;
             let &[a, b, c] = tri else {
@@ -68,15 +203,22 @@ pub(super) fn validate_with_cancel(
             }
             let mut face = [a, b, c];
             face.sort_unstable();
-            faces.push(face);
+            faces.push((face, i));
         }
-        check_cancel(cancel)?;
-        faces.sort_unstable();
-        check_cancel(cancel)?;
-        for (i, pair) in faces.windows(2).enumerate() {
+        sort_records(&mut faces, cancel)?;
+        let mut first = None;
+        for (i, &(key, face)) in faces.iter().enumerate() {
             check_stride(i, cancel)?;
-            if matches!(pair, [a, b] if a == b) {
-                return Err(invalid("duplicate triangle"));
+            if let Some((_, original)) = first.filter(|(previous, _)| *previous == key) {
+                check_duplicate(indices, corner_normals, original, face)?;
+                *retained
+                    .get_mut(face)
+                    .ok_or_else(|| invariant("invalid duplicate slot"))? = false;
+                triangles = triangles
+                    .checked_sub(1)
+                    .ok_or_else(|| invariant("duplicate count underflow"))?;
+            } else {
+                first = Some((key, face));
             }
         }
     }
@@ -84,10 +226,21 @@ pub(super) fn validate_with_cancel(
     // The low bit records direction; the remaining bits are the face index.
     let mut edges = Vec::new();
     edges
-        .try_reserve_exact(indices.len())
+        .try_reserve_exact(
+            triangles
+                .checked_mul(3)
+                .ok_or_else(|| invalid("mesh topology is too large"))?,
+        )
         .map_err(|_| invalid("mesh topology is too large"))?;
     for (face, tri) in indices.chunks_exact(3).enumerate() {
         check_stride(face, cancel)?;
+        if !retained
+            .get(face)
+            .copied()
+            .ok_or_else(|| invariant("invalid retained face"))?
+        {
+            continue;
+        }
         let &[a, b, c] = tri else {
             return Err(invalid("indices are not triangle triples"));
         };
@@ -98,7 +251,7 @@ pub(super) fn validate_with_cancel(
         }
     }
     check_cancel(cancel)?;
-    edges.sort_unstable();
+    sort_records(&mut edges, cancel)?;
     check_cancel(cancel)?;
 
     let mut protected = Vec::new();
@@ -131,6 +284,7 @@ pub(super) fn validate_with_cancel(
     };
     let mut i = 0;
     let mut groups = 0usize;
+    let mut closed = triangles != 0;
     while i < edges.len() {
         check_stride(groups, cancel)?;
         groups += 1;
@@ -152,7 +306,10 @@ pub(super) fn validate_with_cancel(
                 .get(hi as usize)
                 .ok_or_else(|| invalid("invalid triangle indices"))?;
         let sharp = match end - i {
-            1 => true,
+            1 => {
+                closed = false;
+                true
+            }
             2 => {
                 let second = edges
                     .get(i + 1)
@@ -196,12 +353,17 @@ pub(super) fn validate_with_cancel(
         i = end;
     }
     check_cancel(cancel)?;
-    Ok(protected)
+    Ok(PreparedTopology {
+        protected,
+        retained,
+        triangles,
+        closed,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{same_normal_direction, validate, validate_with_cancel};
+    use super::{same_normal_direction, sort_records, validate, validate_with_cancel};
 
     const P: [[f64; 3]; 5] = [
         [0.0, 0.0, 0.0],
@@ -280,6 +442,7 @@ mod tests {
         let mut normals = [[0.0, 0.0, 1.0]; 12];
         let protected = |normals: &[[f64; 3]]| {
             validate_with_cancel(&indices, &positions, Some(normals), &mut || false)
+                .map(|topology| topology.protected)
         };
         assert_eq!(
             protected(&normals).unwrap(),
@@ -293,5 +456,27 @@ mod tests {
         normals[1] = [1.0, 0.0, 0.0];
         assert_eq!(protected(&normals).unwrap(), vec![true; 5]);
         assert!(protected(&[]).is_err());
+    }
+
+    #[test]
+    fn integer_record_sort_orders_ties_and_cancels_during_its_work() {
+        let original: Vec<_> = (0..20_000).rev().map(|value| (value % 31, value)).collect();
+        let mut expected = original.clone();
+        expected.sort_unstable();
+        let mut ordered = original.clone();
+        sort_records(&mut ordered, &mut || false).unwrap();
+        assert_eq!(ordered, expected);
+        let mut cancelled = original;
+        let mut checks = 0;
+        let error = sort_records(&mut cancelled, &mut || {
+            checks += 1;
+            checks == 3
+        })
+        .unwrap_err();
+        assert!(error.is_cancelled());
+        assert_eq!(
+            checks, 3,
+            "cancelled sorting must not keep comparing records"
+        );
     }
 }

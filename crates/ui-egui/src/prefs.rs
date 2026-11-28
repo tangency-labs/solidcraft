@@ -1556,6 +1556,10 @@ pub struct PrefsWindow {
     /// The Profile operations preference the profiler last followed: applied when it changes,
     /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
     applied_profile: Option<bool>,
+    /// The display quality this window's frame set up its views with ([`apply`]), so a result
+    /// waiting for it is adopted by what this window set, not by what the process-wide level
+    /// reads (another window in the process may have set it since).
+    drawn_quality: Option<solidcraft_engine::doc::display_quality::DisplayQuality>,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
     window_theme: Option<egui::SystemTheme>,
     /// Last observed OS tone, independent of the selected theme's tone.
@@ -2195,6 +2199,12 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
     }
 }
 
+/// The display quality this window's views are drawn at this frame: what its last [`apply`] set
+/// (the process-wide level before the first).
+pub(crate) fn drawn_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::DisplayQuality {
+    app.prefs_window.drawn_quality.unwrap_or_else(solidcraft_engine::doc::display_quality::current)
+}
+
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     crate::plugins::sync_policy(app);
@@ -2215,9 +2225,9 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_sketch_limit(&app.preferences);
     apply_tolerance_heal(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
-    solidcraft_engine::doc::display_quality::set_current(
-        solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
-    );
+    let quality = solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
+    solidcraft_engine::doc::display_quality::set_current(quality);
+    app.prefs_window.drawn_quality = Some(quality);
     // The view's up axis follows the preference (set in the dialog, by ui.prefs or loaded).
     if app.prefs_window.applied_up.as_deref() != Some(app.preferences.up_axis.as_str()) {
         up_axis_changed(app);
@@ -2345,7 +2355,7 @@ pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
 pub fn set_autosave(app: &mut SolveApp) {
     let m = app.autosave_minutes;
     if let Some(a) = app.autosave.as_mut() {
-        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::from_secs(u64::MAX / 4) };
+        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::MAX };
     }
 }
 

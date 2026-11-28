@@ -431,6 +431,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `SelectionBar`, `SelectionAction`, `SelectionBarResponse` | Selection count, labelled actions and clear control inside the owning card. | `selected_bg`, `form_primary/ink`, `control_*`, `radius_lg`, `space_*` |
 | `Panel::feature_with_left` | Scrolling feature body and pinned bottom actions with a left footer slot, for forms that keep a live-apply control alongside Cancel/OK. | Shared feature and footer tokens |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
+| `icon_choices`, `IconChoice` | Left-aligned square icon buttons for a choice or toggles (plugin dialogs); the selected one has the accent fill and the artwork for its ink; `None` when the row does not fit | `control_height/radius`, `control_*`, `hover`, `TabAccent`, icon palette |
 | `checkbox`, `checkbox_indeterminate`, `checkbox_icon`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices; `checkbox_icon` adds a command icon between box and label (Customize Toolbar) | `space_14/3/2`, `space_16`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
 | `tool_choices`, `ToolChoice`, `toggle_icon` | Wrapped command modes or independent icon toggles | sketch mode/icon tokens, `accent` |
@@ -526,13 +527,13 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 1 | Border 1, padding 3, gap 2, bottom offset 7; separator width 1 + two 4 margins, height 18 | `NAV_BORDER/PADDING/GAP/BOTTOM/SEPARATOR/SEPARATOR_HEIGHT` |
 | Bar 2 | Menu padding left 7 / right 6, gap 5, chevron 12; medium text 12.5 | `NAV_MENU_LEFT/RIGHT/GAP`, `NAV_CHEVRON/TEXT` |
 | Bar 3 | Hover / press and open / latched; focus outline 2 with offset 1 | `navigation_visual`, `navigation_fill`, `NAV_FOCUS_WIDTH/OFFSET`; `nav_hover`, `nav_press`, `selected_bg`, `form_primary` |
-| Bar 5 | Width 244, padding 5, radius 10; shared menu shadow (0,14), blur 36; row 30, radius 6, inset 8, icon 17, gap 9; heading 22, text 11, tracking .07em | `NAV_POPUP_*`, `NAV_MENU_*`, `NAV_ROW_GAP`, `NAV_HEADING_*`, `navigation_popup_frame`, `Container::menu_frame` |
+| Bar 5 | Menu width follows its content and available viewport; row density, headings, padding, radius and shadow follow the shared menu's theme tokens and frame | `Item`, `Menu::popup`, `Menu::frame`, `Container::menu_frame` |
 | Bar 6 | Left / Centre / Right, 12 edge inset | `Position`, `NAV_EDGE`; legacy bottom / bottom_left / bottom_right deserialize as centre / left / right |
-| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `nav_bar_layout::measure` |
+| Bar 7 | More button follows the selected size; its shared menu measures content width; value text drops before labels and overflow | `NavigationMetrics`, `nav_bar_layout::measure`, `Menu::popup` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
 | Bar 10 | Render's product view hides Selection mode, which its pick filter sets; Render's result and flat canvases hide Orbit, Spin, Look at, Projection, Visual style and Selection mode, retaining Home and Display; an open sketch hides Selection mode | `Slot::available`, `canvas_caps`, `navigation_bar_view::shows` |
-| Bar 11 | Context width 232; bar has Customise / Hide / Reset, slot has Remove | `NAV_CONTEXT_WIDTH`, `navigation_bar_view::context_menu` |
+| Bar 11 | Context menu width follows its content and available viewport; bar has Customise / Hide / Reset, slot has Remove | `Item`, `Menu::context_items`, `nav_bar::context_items` |
 | Settings 1, 8 | Stage height 96, radius 8, padding 12 inside its 1 border; a miniature of the 3D view (the view's gradient and grid colours); the bar follows the chosen anchor (side and top or bottom edge) live, and the slot count sits beside it on the side facing the view's middle | `NAV_STAGE_HEIGHT/RADIUS/INSET`, `navigation_stage`, `editor_layout` |
 | Settings 5 | Position is one picker of six anchors on a miniature of the view (`prefs:navbar:anchor:0..5`, top row then bottom row); the separator source is a dashed chip at the end of the Available heading, apart from the button tiles | `navigation_anchor_picker`, `navigation_separator_source` |
 | Settings 1–3 | Standard settings section and full-width detail card; actions stay on one line, with name truncation before icon-only actions | `settings_section`, `settings_card`, `inspector_header_layout` |
@@ -659,17 +660,39 @@ activation, rule and preview handles remain. The "+ Add column" button above the
 Add forms and column-removal band have been removed.
 
 
-Crash Reports uses `report_list` (bordered bounded scroll), `report_header` (kind,
-count pill and mono UTC time), `path_chip` (clipped mono path and adjacent action),
-`empty_box` (dashed empty state), and `icon_label_button` (secondary icon/text,
-optional danger ink). These use `dialog_rule/footer`, `control_*`, `form_*`,
-`font_label/small` and spacing tokens. The report header retains the combined-title
-cell alias; bins retain the previous Delete handle. Report actions remain immediate.
-`list_frame` supplies the same border to virtualised library rows.
-The list frame owns its border and horizontal padding; the report viewport adds
-no inherited scroll margin. Report list measurements publish
-`dialog:list:KEY:viewport` and `dialog:list:KEY:content_width`. Reports use vertical
-scrolling; the horizontal rule beneath each report remains a divider.
+Read-only reports use `report_list(ui, key, height, columns, empty, |ui, table| …)`,
+a thin bounded viewport over `table_custom` with one shared header band. Add comparable
+results with `Table::row` and `TableRow::cell`; `Table::group` supplies optional folding
+sections. Interference pairs, contact collision depths and unconstrained sketch entities
+use this path, with flexible columns and the table's horizontal overflow in narrow windows.
+`report_header(ui, table, key, title, actions)` is a summary/action row on that same grid.
+Measurement item descriptions wrap above the table so complete coordinate triples stay visible.
+Single-unit results use named value rows, preserving distance selection and copy;
+dual-unit measurements retain a wrapping report so both units remain visible in narrow panels; import losses,
+plugin details and folding importer groups use shared tables with header bands too.
+Crash reports use compact expandable `report_card` cards with `space_4` inner margins, spaced by `space_8`.
+The host supplies the copy-path action's tooltip as data; the kit does not reference host message IDs.
+Their headers use hover and expanded tints only; clicking or focusing a header adds no outline.
+`ReportCardSummary` supplies the title, short subtitle, severity icon and semantic ink;
+`ReportCardDetails` supplies `(key, label, value)` fields and the original diagnostic text.
+The caller owns a per-report expansion boolean and receives `ReportCardAction` responses.
+The chevron, tinted severity tile and text form one keyboard-focusable disclosure; Report
+and Delete are separate framed buttons. Expanded cards have an accent outline, a divider,
+a three-column details grid (one column when narrow), and a mono code strip with Copy
+details and Copy path actions. Values are selectable, elided with full-text tooltips and
+registered as `dialog:card:KEY:FIELD`; summary, toggle, code and actions also publish targets.
+CrashUi keeps expansion in memory only and retains the `crash:ID:report/copy/delete` and
+legacy dialog button aliases. The gallery has four severity examples, one initially expanded.
+The gallery has no runtime pending-catalogue loader: its small build script merges pending
+English messages with the base and shared catalogues into `OUT_DIR`, rejecting duplicate IDs.
+Source catalogues and pending files remain untouched, so new kit labels work before the locale fold.
+All surfaces, ink and sizing come from existing theme tokens. The existing plain shield and
+stop icons stand in for shield-check and power, which are absent from the icon set.
+`path_chip` supplies a clipped mono path and adjacent action, `empty_box` the dashed empty
+state, and `list_frame` the border for virtualised library rows. Report viewports publish
+`dialog:list:KEY`, `dialog:list:KEY:viewport` and `dialog:list:KEY:content_width` alongside
+the table's `dialog:table:…` targets. These components use the table, typography, colour
+and spacing tokens; report actions remain immediate.
 Appearance uses a 340 pt card derived from card/label/spacing tokens, with the
 104 pt label basis where space permits, 10 pt body gaps, and a count on In This Design.
 

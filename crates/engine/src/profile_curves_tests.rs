@@ -83,7 +83,7 @@ fn a_profile_picked_by_curves_follows_a_parameter_change() {
 fn a_point_pick_is_stored_by_curves() {
     let mut s = tray();
     run(&mut s, "solid.extrude", json!({"sketch": "Tray", "profiles": [{"point": [25, 10]}], "distance": 10}));
-    let ProfileSel::Curves { loops } = extrude_kind(&s) else { panic!("{:?}", extrude_kind(&s)) };
+    let ProfileSel::Curves { loops, .. } = extrude_kind(&s) else { panic!("{:?}", extrude_kind(&s)) };
     let mut ids = loops[0].clone();
     ids.sort();
     assert_eq!(ids, ["bottom", "div", "left", "top"]);
@@ -98,7 +98,7 @@ fn a_point_pick_is_stored_by_curves() {
 fn explicit_curve_pick_normalizes_repeats_before_save_and_parameter_edit() {
     let mut s = tray();
     run(&mut s, "solid.extrude", json!({"sketch":"Tray","profiles":[{"curves":["top","bottom","div","left","bottom","top"]}],"distance":10}));
-    let ProfileSel::Curves { loops } = extrude_kind(&s) else { panic!("{:?}", extrude_kind(&s)) };
+    let ProfileSel::Curves { loops, .. } = extrude_kind(&s) else { panic!("{:?}", extrude_kind(&s)) };
     assert_eq!(loops, vec![vec!["top", "bottom", "div", "left"]]);
     let mut reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
     run(&mut reopened, "parameters.change", json!({"name":"split","expression":"20 mm"}));
@@ -115,7 +115,7 @@ fn repeated_explicit_curve_ids_do_not_count_split_graph_spans() {
     run(&mut s, "sketch.finish", json!({}));
     assert_eq!(s.model.state().sketches[0].profiles[0].outer_curves.iter().filter(|id| *id == "a").count(), 2);
     run(&mut s, "solid.extrude", json!({"sketch":"S","profiles":[{"curves":["d","a","a","a","c","b"]}],"distance":2}));
-    let ProfileSel::Curves { loops } = extrude_kind(&s) else { panic!("{:?}", extrude_kind(&s)) };
+    let ProfileSel::Curves { loops, .. } = extrude_kind(&s) else { panic!("{:?}", extrude_kind(&s)) };
     assert_eq!(loops, vec![vec!["d", "a", "c", "b"]]);
     let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
     assert_eq!(last_error(&reopened), None);
@@ -200,7 +200,8 @@ fn curve_picks_save_load_and_edit() {
     assert!(matches!(extrude_kind(&t), ProfileSel::Curves { .. }), "{:?}", extrude_kind(&t));
     assert!((volumes(&t)[0] - 4000.0).abs() < 1.0, "{:?}", volumes(&t));
     // An old design's point pick still loads and evaluates.
-    let old = text.replace(r#"{"type":"curves","loops":[["left","bottom","div","top"]]}"#, r#"{"type":"points","points":[[25.0,10.0]]}"#);
+    let saved = serde_json::to_string(&extrude_kind(&s)).unwrap();
+    let old = text.replace(&saved, r#"{"type":"points","points":[[25.0,10.0]]}"#);
     assert_ne!(old, text);
     let t = Session::new(solidcraft_doc::format::read(&old).unwrap());
     assert!((volumes(&t)[0] - 6000.0).abs() < 1.0, "{:?}", volumes(&t));
