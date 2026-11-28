@@ -24,6 +24,12 @@
 //! other is no cliff overflow: the cliff-overflow choice refuses it as a rail leaving its
 //! face (`NoRoomReason::RailLeavesFace`), before the corners, where the bevelled End
 //! corners would only later turn the global merge on (the fork's own refusal).
+//!
+//! tangency-labs/solidcraft#17646: that judgment followed where each closed rail's parameter
+//! starts. A closed rail of an open edge is now judged by its stretches in span. Both rails'
+//! far-side runs lie wholly past the ends, and the back-face rail's crossing of the bottom
+//! face's edge, in span, heads out past the bottom end, so the rails fit on both kernels. The
+//! smooth-vertex End at the bottom refuses the chamfer instead (`ROLLS_INTO_SMOOTH_END`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -31,6 +37,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::blend::blend_corner::end::ROLLS_INTO_SMOOTH_END;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -181,4 +188,53 @@ fn chamfer_past_the_bottom_is_refused_with_the_blend_corner() {
 fn chamfer_past_the_bottom_is_no_room_on_the_default_kernel() {
     let mut k = Kernel::default();
     assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
+}
+
+/// The chamfer as [`chamfer`] drives it, refused: its error info's comment.
+fn refusal(k: &mut Kernel) -> String {
+    let mut b = body(k);
+    let e = pick(k, &b, [3.1526309873924174, 22.5, 0.04277569594852188]);
+    let r = chamfer_radius(k, &mut b, e, 0.5);
+    let mut s = FilletSession::new(k, &mut b).unwrap();
+    s.prepare_per_edge_constant_radius_with_second(
+        k,
+        &[e],
+        &[r],
+        &[r],
+        &[FilletSurfaceGeneratorType::Linear],
+        1,
+        1.0,
+    )
+    .unwrap();
+    s.create_corners(k, None).unwrap();
+    for id in s.fillet_corners().unwrap() {
+        s.set_corner_bevel(id, true).unwrap();
+    }
+    assert!(s.do_filleting(k, None).is_err());
+    let info = s.error_info();
+    assert_eq!(
+        info.code,
+        FilletErrorType::NoRoom as i32,
+        "{}",
+        info.comment
+    );
+    info.comment.clone()
+}
+
+/// tangency-labs/solidcraft#17646: both rails of the chamfer are closed circles that run off
+/// their faces round the far side, past both ends of the rim edge, and come back. The
+/// back-face rail first leaves its face across the bottom face's edge, in span, heading out
+/// past the bottom end, where that edge is tangent to the rim. Neither run is off its face
+/// between the ends: the far side is the corners' to trim, and the crossing is the bottom
+/// End's to judge. That End is at a smooth vertex, and its rail end on the cap plane is off
+/// the face, so the End refuses the chamfer on both kernels (`ROLLS_INTO_SMOOTH_END`).
+/// Before, the back-face rail's run was one interior run on the default kernel, judged a
+/// wrap (`NoRoomReason::RailLeavesFace`), and two pieces split by its parameter seam on
+/// SolidCraft's, passed over.
+#[test]
+fn both_kernels_refuse_the_chamfer_at_its_smooth_end() {
+    let mut k = solidcraft_kernel();
+    assert_eq!(refusal(&mut k), ROLLS_INTO_SMOOTH_END);
+    let mut k = Kernel::default();
+    assert_eq!(refusal(&mut k), ROLLS_INTO_SMOOTH_END);
 }
