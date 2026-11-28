@@ -48,6 +48,13 @@
 //! - **Join in place.** `JoinWith` hands `this` and the other curve to
 //!   `CreateByJoining`, which may elevate or flatten them in place; the port moves both
 //!   into the segment slice and back, so the other curve sees the same edits.
+//! - **Radius tolerance (#13763).** Not upstream: `AssertValid` tests 13 and 14 hold a
+//!   bounded curve's least radius of curvature to a ten-thousandth of its size (of its
+//!   mapped size, for a UV trim measured on its surface), a length, so the verdict is the
+//!   same whatever interval the curve's parameter runs over ([`bounded_radius_tol`]).
+//!   Upstream holds it to the tolerance of tests 11 and 12, the average speed over 10000
+//!   (`size / domain length / 10000`), which is that length only on an interval of
+//!   length 1.
 //! - **Ignored statuses (WR-663).** Where upstream ignores a status (the `TrimGap`
 //!   evaluations, extensions, trims and control point edits,
 //!   `SubdivideAtDiscontinuity`'s trims, `HasInternalPole`'s knots, `AssertValid`'s
@@ -316,12 +323,22 @@ enum CurveProperty {
     MinimizeRadiusOfCurvature,
 }
 
-/// The tolerance and the solution spacing of `AssertValid`'s derivative and radius tests
-/// (11-14) for a bounded curve whose bounding box has diagonal `size_xyz` over a
-/// parameter interval `size_t` long: a ten-thousandth of its average speed, and its size
-/// over at least 20.
+/// The tolerance of `AssertValid`'s derivative tests (11, 12) and the solution spacing of
+/// its derivative and radius tests (11-14) for a bounded curve whose bounding box has
+/// diagonal `size_xyz` over a parameter interval `size_t` long: a ten-thousandth of its
+/// average speed, and its size over at least 20.
 fn bounded_scale(size_xyz: f64, size_t: f64) -> (f64, f64) {
     ((size_xyz / size_t) / 10000.0, size_xyz / max2(20., size_t))
+}
+
+/// The tolerance of `AssertValid`'s radius tests (13, 14) for a bounded curve whose
+/// bounding box has diagonal `size`: a ten-thousandth of it (not upstream, #13763). A
+/// radius of curvature is a length, so it is held to a length, and the same curve gets
+/// the same verdict whatever interval its parameter runs over. Upstream holds it to the
+/// derivative tests' tolerance, the average speed over 10000 ([`bounded_scale`]), which
+/// is that length only on an interval of length 1.
+fn bounded_radius_tol(size: f64) -> f64 {
+    size / 10000.0
 }
 
 /// Where test 14 of `AssertValid` finds a curve's radius of curvature too small, as
@@ -1823,7 +1840,7 @@ impl BSplineCurve {
     /// How test 14 of `AssertValid` reads this curve's radius of curvature, as for a
     /// bounded 3D curve on no face's trim and with no zero-speed tangent end (WR-668): the
     /// first solution of the same search, over the natural interval with the same spacing,
-    /// against the same tolerance ([`bounded_scale`]); on an end where the derivative test
+    /// against the same tolerance ([`bounded_radius_tol`]); on an end where the derivative test
     /// takes a solution to be on one (within `EFF_ZERO` scaled by the interval).
     fn small_radius(&self, k: &Kernel) -> Result<SmallRadius> {
         let domain = self.natural_interval();
@@ -1837,7 +1854,11 @@ impl BSplineCurve {
         else {
             return Ok(SmallRadius::Elsewhere);
         };
-        let (tol, sep) = bounded_scale(bbox.size().length(), domain.length());
+        let size = bbox.size().length();
+        let (tol, sep) = (
+            bounded_radius_tol(size),
+            bounded_scale(size, domain.length()).1,
+        );
         let (ok, solutions) = global_property_analysis(
             k,
             self,
@@ -2546,6 +2567,7 @@ impl BSplineCurve {
             let mut has_metric = false;
             let mut mapped: Option<BSplineCurve> = None;
             let mut mapped_scale: Option<(f64, f64)> = None;
+            let mut mapped_size: Option<f64> = None;
             if sized {
                 if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
                     has_metric = true;
@@ -2562,7 +2584,8 @@ impl BSplineCurve {
                         .and_then(|b| b.normal),
                         None => None,
                     };
-                    mapped_scale = mapped_box.map(|b| bounded_scale(b.size().length(), size_t));
+                    mapped_size = mapped_box.map(|b| b.size().length());
+                    mapped_scale = mapped_size.map(|size| bounded_scale(size, size_t));
                 }
             }
             // the search reports its own status (as the fork, tangency-labs/smlib
@@ -2686,13 +2709,26 @@ impl BSplineCurve {
             }
 
             // (WR-560, above) a radius of curvature is a length: test 13 of a UV trim runs
-            // on the mapped trim; a mapped trim that cannot be sized fails it
-            let (mut radius_sized, mut radius_tol, mut radius_sep) = (sized, tol, min_sep);
+            // on the mapped trim; a mapped trim that cannot be sized fails it.
+            //
+            // Not upstream (#13763): a bounded curve's radius is held to a length, a
+            // ten-thousandth of its size (of the mapped trim's size for a UV trim measured
+            // on its surface), not to `tol`, its average speed ([`bounded_radius_tol`]).
+            let radius_of = |size: f64| {
+                if bounded {
+                    bounded_radius_tol(size)
+                } else {
+                    tol
+                }
+            };
+            let (mut radius_sized, mut radius_tol, mut radius_sep) =
+                (sized, radius_of(size_xyz), min_sep);
             if has_metric {
                 radius_sized = mapped_scale.is_some();
                 rtn &= bool_report(&mut list, key, 13, radius_sized)?;
-                if let Some(scale) = mapped_scale {
-                    (radius_tol, radius_sep) = scale;
+                if let (Some(size), Some((_, sep))) = (mapped_size, mapped_scale) {
+                    radius_tol = radius_of(size);
+                    radius_sep = sep;
                 }
             }
             let copy_curve = mapped.as_ref().unwrap_or(self);
@@ -3314,6 +3350,121 @@ mod tests {
         assert!(!ok && idx.contains(&14), "{idx:?}");
     }
 
+    /// The reports of test `index` among those `c`'s `AssertValid` fails (on `surface`, for a
+    /// UV trim), each as its tolerance and its value.
+    fn reports_of(
+        k: &Kernel,
+        c: &BSplineCurve,
+        surface: Option<&Surface>,
+        index: u64,
+    ) -> Vec<(f64, f64)> {
+        let mut list = AssertArray::new();
+        c.assert_valid_on(k, Some(&mut list), true, ObjectKey(3), surface)
+            .unwrap();
+        (0..list.len())
+            .filter_map(|i| list.get(i))
+            .filter(|r| r.test_index == index)
+            .map(|r| (r.tol3d, r.value))
+            .collect()
+    }
+
+    /// The least radius of curvature of the cubic Bezier `(0,0) (h,0) (h,h) (1,1)`, `h = 1e-4`,
+    /// near `t = 0.0041` of its range: the closed form, minimised over its Bernstein
+    /// derivatives.
+    const SHARP_CUBIC_RADIUS: f64 = 5.815_501_563_457_4e-6;
+
+    /// #13763: a radius of curvature is a length, so test 14 gives a curve the same verdict,
+    /// and reports the same tolerance, whatever its parameter runs over. Each curve's knots are
+    /// stretched to `[0, T]`, which leaves it the same in space.
+    ///
+    /// - The cubic Bezier `(0,0) (h,0) (h,h) (1,1)`, `h = 1e-4`, bends at radius
+    ///   [`SHARP_CUBIC_RADIUS`] in a box of diagonal `sqrt 2`: under `sqrt 2 / 10000`, so it is
+    ///   reported at every `T`, at that tolerance. Held to the average speed over 10000,
+    ///   `sqrt 2 / T / 10000`, it passed from `T = 50` on.
+    /// - The quarter turn of radius 0.06 as one cubic, `(r,0) (r,kr) (kr,r) (0,r)` with
+    ///   `k = 4 (sqrt 2 - 1) / 3`, has a least radius of 0.0595 in a box of diagonal
+    ///   `0.06 sqrt 2 = 0.0849`: far above `0.0849 / 10000`, so it is reported at no `T`. Held
+    ///   to the speed, it failed at `T = 1e-4`, with a tolerance of 0.0849.
+    #[test]
+    fn a_curve_s_radius_test_is_the_same_over_any_parameter_range() {
+        let k = Kernel::default();
+        let h = 1e-4;
+        let (r, kr) = (0.06, 0.06 * 4.0 * (2.0_f64.sqrt() - 1.0) / 3.0);
+        let expected = 2.0_f64.sqrt() / 10000.0;
+        for t in [1e-4, 1.0, 50.0, 1e3] {
+            let knots = [0.0, 0.0, 0.0, 0.0, t, t, t, t];
+            let sharp = curve(
+                3,
+                &[[0.0, 0.0, 0.0], [h, 0.0, 0.0], [h, h, 0.0], [1.0, 1.0, 0.0]],
+                &knots,
+            );
+            let reports = reports_of(&k, &sharp, None, 14);
+            assert_eq!(reports.len(), 1, "T = {t}: {reports:?}");
+            let (tolerance, radius) = reports[0];
+            assert!(
+                (radius - SHARP_CUBIC_RADIUS).abs() <= 1e-9 * SHARP_CUBIC_RADIUS,
+                "T = {t}: {radius}"
+            );
+            assert!(
+                (tolerance - expected).abs() <= 1e-12 * expected,
+                "T = {t}: {tolerance}"
+            );
+            let round = curve(
+                3,
+                &[[r, 0.0, 0.0], [r, kr, 0.0], [kr, r, 0.0], [0.0, r, 0.0]],
+                &knots,
+            );
+            assert_eq!(reports_of(&k, &round, None, 14), vec![], "T = {t}");
+        }
+    }
+
+    /// The interval of the #22815 arc's parameter: a hair of a quarter turn's grid, 2.02e-5
+    /// long.
+    const ISSUE_22815_INTERVAL: [f64; 2] = [0.249_989_9, 0.250_010_1];
+
+    /// The exact arc of radius `r` from -30 to 30 degrees about `(cx, cy)`, one rational
+    /// quadratic over [`ISSUE_22815_INTERVAL`], of dimension `dim`, its control points'
+    /// coordinates divided by `(sx, sy)` (a UV trim on a plane spanning `sx` x `sy` over
+    /// `[0,1]^2`; `(1, 1)` for the arc itself).
+    fn issue_22815_arc(
+        dim: u64,
+        (cx, cy, r): (f64, f64, f64),
+        (sx, sy): (f64, f64),
+    ) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let (s, c) = det::sin_cos(PI / 6.0);
+        let control = [
+            Vec3::new((cx + r * c) / sx, (cy - r * s) / sy, 0.0),
+            Vec3::new((cx + r / c) / sx, cy / sy, 0.0),
+            Vec3::new((cx + r * c) / sx, (cy + r * s) / sy, 0.0),
+        ];
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &ISSUE_22815_INTERVAL,
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, c, 1.0]),
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// #22815: the arc of a r 0.06 notch, whose parameter runs over 2.02e-5 (a hair of a
+    /// quarter turn), is an exact circle: its radius is 0.06 everywhere, in a box of diagonal
+    /// at least its chord 0.06 and at most 0.0625 (its control triangle's). Held to a
+    /// ten-thousandth of that, at most 6.3e-6, it is not reported. Held to the average speed
+    /// over 10000, at least 0.06 / 2.02e-5 / 10000 = 0.297, it was: a notch cut through a
+    /// rounded half torus was refused for it.
+    #[test]
+    fn issue_22815_an_exact_arc_over_a_short_parameter_interval_is_no_kink() {
+        let k = Kernel::default();
+        let arc = issue_22815_arc(3, (0.0, 0.0, 0.06), (1.0, 1.0));
+        assert_eq!(reports_of(&k, &arc, None, 14), vec![]);
+    }
+
     #[test]
     fn subdivide_single_span() {
         let k = Kernel::default();
@@ -3353,9 +3504,15 @@ mod tests {
     /// The exact rational trim of a circle of radius `r` about `(cx, cy)` on a plane
     /// spanning `sx` x `sy` over `[0,1]^2`, and that plane: in (u, v) an ellipse
     /// `sy / sx` times as wide as it is long.
-    fn circle_trim_on_plane(
+    fn circle_trim_on_plane(circle: (f64, f64, f64), plane: (f64, f64)) -> (BSplineCurve, Surface) {
+        circle_trim_on_plane_over(circle, plane, 1.0)
+    }
+
+    /// [`circle_trim_on_plane`] with the trim's parameter running from 0 to `span`.
+    fn circle_trim_on_plane_over(
         (cx, cy, r): (f64, f64, f64),
         (sx, sy): (f64, f64),
+        span: f64,
     ) -> (BSplineCurve, Surface) {
         use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
         use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -3378,7 +3535,7 @@ mod tests {
             control_points: &control,
             form: BSplineCurveForm::Unspecified,
             knot_multiplicities: &[3, 2, 2, 2, 3],
-            knots: &[0.0, 0.25, 0.5, 0.75, 1.0],
+            knots: &[0.0, 0.25 * span, 0.5 * span, 0.75 * span, span],
             knot_type: KnotType::Unspecified,
             weights: Some(&[1.0, w, 1.0, w, 1.0, w, 1.0, w, 1.0]),
             trim: None,
@@ -3528,6 +3685,72 @@ mod tests {
         assert!(idx.contains(&11), "{idx:?}");
         let idx = failed_tests(&k, &trim, None);
         assert!(idx.contains(&11), "{idx:?}");
+    }
+
+    /// #13763 for a UV trim measured on its surface (test 13): its radius and its size are
+    /// those of its image, and the verdict is the same whatever the trim's parameter runs over.
+    ///
+    /// - The cubic of [`SHARP_CUBIC_RADIUS`] drawn on a plane spanning 4 x 2 over `[0,1]^2`
+    ///   (the trim's control points are the cubic's over `(4, 2)`, so its image is the cubic)
+    ///   is reported at every `T`, at that radius and at the tolerance `sqrt 2 / 10000` of
+    ///   its image's size. Held to the average speed, it passed from `T = 50` on.
+    /// - The exact trim of a r 1 circle on a plane spanning 600 x 3 is that circle on the
+    ///   plane, reported at no `T`. Held to the speed, it failed at `T = 1e-4`: the tolerance
+    ///   was its image's size, `2 sqrt 2`, above its radius.
+    #[test]
+    fn a_uv_trim_s_radius_test_is_the_same_over_any_parameter_range() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let k = Kernel::default();
+        let h = 1e-4;
+        let (_, plane) = circle_trim_on_plane((2.0, 1.0, 0.5), (4.0, 2.0));
+        let expected = 2.0_f64.sqrt() / 10000.0;
+        for t in [1e-4, 1.0, 50.0, 1e3] {
+            let sharp = BSplineCurve::create_canonical(&CanonicalData {
+                dim: 2,
+                degree: 3,
+                control_points: &[
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(h / 4.0, 0.0, 0.0),
+                    Vec3::new(h / 4.0, h / 2.0, 0.0),
+                    Vec3::new(0.25, 0.5, 0.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, t],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap();
+            let reports = reports_of(&k, &sharp, Some(&plane), 13);
+            assert_eq!(reports.len(), 1, "T = {t}: {reports:?}");
+            let (tolerance, radius) = reports[0];
+            assert!(
+                (radius - SHARP_CUBIC_RADIUS).abs() <= 1e-9 * SHARP_CUBIC_RADIUS,
+                "T = {t}: {radius}"
+            );
+            assert!(
+                (tolerance - expected).abs() <= 1e-12 * expected,
+                "T = {t}: {tolerance}"
+            );
+            let (circle, plane) = circle_trim_on_plane_over((300.0, 1.5, 1.0), (600.0, 3.0), t);
+            assert_eq!(reports_of(&k, &circle, Some(&plane), 13), vec![], "T = {t}");
+        }
+    }
+
+    /// #22815's arc as a UV trim of a flat face, a plane spanning 1000 x 1000 over `[0,1]^2`,
+    /// about its middle. The trim is mapped onto the plane (WR-560) by the plane's own metric,
+    /// which is exact, so the mapped trim is the arc: radius 0.06, size at most 0.0625. Being
+    /// rational, it is not certified on the surface (`radius_clears_on_surface` takes
+    /// polynomial trims only), so the search's solution on the mapped trim decides: held to a
+    /// ten-thousandth of the mapped size it is not reported; held to the mapped trim's
+    /// average speed over 10000, at least 0.297, it was.
+    #[test]
+    fn issue_22815_an_exact_arc_trim_over_a_short_parameter_interval_is_no_kink() {
+        let k = Kernel::default();
+        let (_, plane) = circle_trim_on_plane((500.0, 500.0, 1.0), (1000.0, 1000.0));
+        let trim = issue_22815_arc(2, (500.0, 500.0, 0.06), (1000.0, 1000.0));
+        assert_eq!(reports_of(&k, &trim, Some(&plane), 13), vec![]);
     }
 
     /// A rational quadratic B-spline of dimension `dim` with `points`, `weights` and the
@@ -4985,14 +5208,54 @@ mod tests {
         assert!(c.split_sharp_ends(&k).unwrap().is_none());
     }
 
+    /// #13763: a cubic sharp at its end is cut to an end piece within its own tolerance,
+    /// however sharp, down to the zone tolerance.
+    ///
+    /// Leg 1e-3: the radius at t = 1 is `r_end = 1.5 leg^2 / (45 / sqrt 2)` = 4.7e-8
+    /// (`sharp_cubic`), and the radius grows away from the end. Near the end the curve is
+    /// `P3 - 3 leg u s + 3 (P1 - 2 P2 + P3) s^2` in `s = 1 - t`, with
+    /// `|P1 - 2 P2 + P3|` about `|(-40, 5)|` = 40.3: an end piece `[1 - l, 1]` with `l` well
+    /// past `leg / 40` is about `121 l^2` across, a quarter of that once `l` is halved. Test 14
+    /// holds the piece to a ten-thousandth of its size, so it passes once its size is at
+    /// most `1e4 r_end` = 4.7e-4: the halving cut stops at the first `l = 2^-j` there, with
+    /// a size between a quarter of `1e4 r_end` and `1e4 r_end` (`l = 2^-9`, size 4.6e-4).
+    /// Under the average speed this curve was not cut: a piece's tolerance tended to the
+    /// end's speed over 1e4, 3 leg / 1e4 = 3e-7, as the piece shrank, above `r_end`.
+    ///
+    /// Below the zone tolerance `z` the cut stops (an edge that short is degenerate): with
+    /// `1e4 r_end < z`, every end piece that would pass is smaller than `z`, so a leg with
+    /// `r_end` a quarter of `z / 1e4` is left as given.
     #[test]
-    fn a_cubic_too_sharp_at_its_end_to_cut_off_is_not_cut() {
-        // leg 1e-3: the radius at t = 1 is 1.5e-6 / 31.82 = 4.7e-8 (`sharp_cubic`). A piece
-        // cut off there has a tolerance of its average speed over 1e4, which tends to the
-        // end's speed, 3 leg = 3e-3, over 1e4 = 3e-7 as the piece shrinks, and the speed
-        // only grows away from the end: no piece passes, so the curve is left as given
+    fn a_cubic_too_sharp_at_its_end_is_cut_to_an_end_piece_within_its_own_tolerance() {
         let k = Kernel::default();
+        let r_end = |leg: f64| 1.5 * leg * leg / (45.0 / 2.0_f64.sqrt());
+        let request = BoundingBoxRequest {
+            normal: true,
+            pseudo: false,
+            polar: false,
+        };
         let c = sharp_cubic(1e-3);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(1));
+        let pieces = c.split_sharp_ends(&k).unwrap().expect("cut");
+        assert_cut_exactly(&k, &c, &pieces);
+        assert_eq!(pieces.len(), 2);
+        let end = &pieces[1];
+        let ivl = end.natural_interval();
+        assert_eq!([ivl.min(), ivl.max()], [1.0 - det::powi(2.0, -9), 1.0]);
+        let size = end
+            .calculate_bounding_box(&ivl, request)
+            .unwrap()
+            .normal
+            .unwrap()
+            .size()
+            .length();
+        let most = 1e4 * r_end(1e-3);
+        assert!(size <= most && size > most / 4.0, "{size} against {most}");
+        // the lower bound: r_end a quarter of what the zone tolerance lets through
+        let zone = zone_tol_3d(&k, SmallTopoType::NormalSize);
+        let leg = (zone / 1e4 / 4.0 * (45.0 / 2.0_f64.sqrt()) / 1.5).sqrt();
+        assert!((r_end(leg) - zone / 4e4).abs() <= 1e-12 * zone);
+        let c = sharp_cubic(leg);
         assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(1));
         assert!(c.split_sharp_ends(&k).unwrap().is_none());
     }
