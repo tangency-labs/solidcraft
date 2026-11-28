@@ -275,6 +275,38 @@ fn registry_files_are_searchable_and_listed_without_their_parent_folder() {
     assert_eq!(full.bytes(), tiny_font().as_slice());
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_font_registered_with_fontconfig_is_found_by_family() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    const FONT_FILE: &str = "SOLIDCRAFT_TEST_FONTCONFIG_FILE";
+    if let Some(file) = std::env::var_os(FONT_FILE) {
+        assert!(!crate::font_dirs().contains(&PathBuf::from(&file)), "drawing font search keys must stay compact");
+        let font = font_data(Some("Tiny Block")).unwrap();
+        assert_eq!(font.path(), Some(std::path::Path::new(&file)));
+        assert!(crate::installed_families().iter().any(|family| family == "Tiny Block"));
+        return;
+    }
+
+    // Give only the child process a Fontconfig listing. The font lives outside all search folders.
+    let folder = Folder::new("fontconfig\nregistered");
+    let list = folder.0.join("fc-list");
+    std::fs::write(&list, "#!/bin/sh\nprintf '%s\"' \"$SOLIDCRAFT_TEST_FONTCONFIG_FILE\"\n").unwrap();
+    std::fs::set_permissions(list, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let result = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "font_tests::a_font_registered_with_fontconfig_is_found_by_family", "--nocapture"])
+        .env("PATH", &folder.0)
+        .env(FONT_FILE, folder.font())
+        .env_remove("SOLIDCRAFT_FONT_DIRS")
+        .env_remove("CRAFT_FONTS_DIR")
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+}
+
 #[test]
 fn a_warm_family_cache_still_resolves_full_names() {
     let folder = Folder::new("warm-full-name");

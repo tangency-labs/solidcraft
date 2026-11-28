@@ -241,7 +241,8 @@ becomes a dimension of that side, and the other sides stay equal to it.
 `sketch.edit_text` take a `font`, the family or full name of an installed font ("DejaVu Sans") or the path
 of a `.ttf` / `.otf` file, and the **Edit Text** dialog has a **Font** field for it. An unknown font is an
 error, and the font is kept with the text in the design, so the text stays editable in it. `SOLIDCRAFT_FONT_DIRS`
-adds folders to the ones searched for installed fonts. On Windows, SolidCraft also reads installed
+adds folders to the ones searched for installed fonts. On Linux, SolidCraft also finds fonts
+registered with Fontconfig when its `fc-list` tool is available. On Windows, SolidCraft reads installed
 font files from the current user's and machine's `Software\Microsoft\Windows NT\CurrentVersion\Fonts`
 registry keys, including absolute file paths outside the standard Windows and per-user Fonts
 folders. Restart SolidCraft after installing fonts to refresh the cached list. A text's `height`, its
