@@ -289,7 +289,8 @@ pub enum TraceStations<'o, 'c> {
 pub struct StationLeader {
     /// The leader's interval: no station is stepped past it.
     pub interval: Extent1d,
-    /// Whether the leader is closed (its period is not handled yet).
+    /// Whether the leader is closed: its stations run one period, from its seam round to it
+    /// (`seam_stations`), with no extension.
     pub closed: bool,
     /// The solver's stand-off from the leader (a chamfer of setbacks' larger setback): an
     /// extension stops once foot 0 has moved [`STATION_EXTENSION_FACTOR`] times it, each
@@ -1116,7 +1117,9 @@ impl SurfaceIntersector<'_> {
 ///   pass the span test, as the law's at its mean parameter; no station from the first to
 ///   the last given point may lie outside a surface's domain (the trace would clip before
 ///   its last given point: `PointOutsideDomain`).
-/// - A closed leader is refused (`StationLeaderClosed`): its period is not handled yet.
+/// - **A closed leader** (#13710, a whole rim) has no ends to extend past: its stations run one
+///   period of the edge, the given points at its seam taking either end of its interval
+///   (`seam_stations`), and no extension is stepped.
 ///
 /// # Errors
 ///
@@ -1450,12 +1453,6 @@ fn station_anchors<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     let leader = v.station_leader(k)?.ok_or_else(|| {
         SolidError::invalid_input(OP_DLI, "the intersector's solver has no stations")
     })?;
-    if leader.closed {
-        return Err(SolidError::blend_solver(
-            OP_DLI,
-            SolverFailure::StationLeaderClosed,
-        ));
-    }
 
     // the given points, each at its own s, its feet kept
     let mut ss: Vec<f64> = Vec::new();
@@ -1464,6 +1461,9 @@ fn station_anchors<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         v.given_station(k, &mut p, tol)?;
         ss.push(p.user_doubles[0]);
         *v.intersector_mut().point_mut(id)? = p;
+    }
+    if leader.closed {
+        seam_stations(v, k, points, &leader, &mut ss)?;
     }
     let (Some(&s_first), Some(&s_second), Some(&s_last)) = (ss.first(), ss.get(1), ss.last())
     else {
@@ -1492,12 +1492,13 @@ fn station_anchors<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         station_in_domains(v, &p, &span)?;
     }
 
-    let before = if opts.extend_before_start {
+    // a closed leader has no ends to extend past: its stations run one period
+    let before = if opts.extend_before_start && !leader.closed {
         extend_stations(v, k, first, -1.0, &leader, &span)?
     } else {
         Vec::new()
     };
-    let after = if opts.extend_after_end {
+    let after = if opts.extend_after_end && !leader.closed {
         extend_stations(v, k, last, 1.0, &leader, &span)?
     } else {
         Vec::new()
@@ -1506,6 +1507,60 @@ fn station_anchors<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     anchors.extend_from_slice(points);
     anchors.extend(after);
     Ok((anchors, span))
+}
+
+/// A closed leader's given points at its seam (#13710): the first and last given points of
+/// a closed edge both lie at its one vertex, the seam, where the edge's parameter is either
+/// end of its interval and the solver finds one of them for both. The stations run one
+/// period: the first takes the end the trace starts from and the last the other, up the
+/// edge unless the given points between them run down it (no point between: up, the edge's
+/// own direction), each re-solved there (the same feet, the tangents at that end). Given
+/// points not both at the seam are left as they are (a trace across the seam is not taken:
+/// `StationsNotMonotone` decides it).
+///
+/// # Errors
+///
+/// `StationNotSolved` where the station at an end is not found; those of the solver.
+fn seam_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    points: &[TsectId],
+    leader: &StationLeader,
+    ss: &mut [f64],
+) -> Result<()> {
+    let (lo, hi) = (leader.interval.min(), leader.interval.max());
+    let room = 1e-9 * (hi - lo).abs();
+    let at_seam = |s: f64| (s - lo).abs() <= room || (s - hi).abs() <= room;
+    let n = ss.len();
+    let (Some(&first), Some(&last), Some(&id_first), Some(&id_last)) =
+        (ss.first(), ss.last(), points.first(), points.last())
+    else {
+        return Ok(());
+    };
+    if n < 2 || !(at_seam(first) && at_seam(last)) {
+        return Ok(());
+    }
+    // the given points between, in order: their direction, else up the edge
+    let up = match (ss.get(1), n.checked_sub(2).and_then(|i| ss.get(i))) {
+        (Some(&a), Some(&b)) if n > 2 && a != b => a < b,
+        (Some(&a), _) if n > 2 => a > 0.5 * (lo + hi),
+        _ => true,
+    };
+    let (s0, s1) = if up { (lo, hi) } else { (hi, lo) };
+    for (id, s, slot) in [(id_first, s0, 0), (id_last, s1, n - 1)] {
+        let p = v.intersector().point(id)?.clone();
+        let guesses = [p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second)];
+        let mut q = v.station_point(k, s, guesses)?.ok_or_else(|| {
+            SolidError::blend_solver(OP_DLI, SolverFailure::StationNotSolved { s })
+        })?;
+        q.point_type = p.point_type;
+        q.curve_parameter = p.curve_parameter;
+        *v.intersector_mut().point_mut(id)? = q;
+        if let Some(x) = ss.get_mut(slot) {
+            *x = s;
+        }
+    }
+    Ok(())
 }
 
 /// The stations of the extension from the end station `end`, outwards (`outward` `1` after

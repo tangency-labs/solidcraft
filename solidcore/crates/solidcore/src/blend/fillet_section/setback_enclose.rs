@@ -798,8 +798,102 @@ struct Continued {
     far_below: bool,
 }
 
-/// The partials over a cell's (u, v) box, on the support the proof reads (`cont`).
+/// A face closed along a parameter (#13710): that parameter's range `[lo, hi]`, its first and
+/// last control rows one ([`crate::eval::uv::closed`]), so past one end the face is its other
+/// end's piece, a period on.
+#[derive(Debug, Clone, Copy)]
+struct Seam {
+    lo: f64,
+    hi: f64,
+}
+
+/// The face's seams along u and v (`None` where it does not close on itself there).
+fn seams(face: &Nurbs) -> [Option<Seam>; 2] {
+    // the net's (u, v) point at `i nv + j`: as `uv::closed` reads it, v first
+    let ctrl: Vec<[f64; 4]> = face
+        .pw
+        .chunks_exact(4)
+        .map(|c| match c {
+            [x, y, z, w] => [*x, *y, *z, *w],
+            _ => [f64::NAN; 4],
+        })
+        .collect();
+    let [closed_v, closed_u] = crate::eval::uv::closed(
+        [face.q, face.p],
+        &[face.v.clone(), face.u.clone()],
+        [face.nv, face.nu],
+        &ctrl,
+    );
+    let seam = |closed: bool, u: &[f64], p: usize, n: usize| {
+        closed.then(|| Seam {
+            lo: knot(u, p as isize),
+            hi: knot(u, n as isize),
+        })
+    };
+    [
+        seam(closed_u, &face.u, face.p, face.nu),
+        seam(closed_v, &face.v, face.q, face.nv),
+    ]
+}
+
+/// The parts of `x` on the face's range along a closed parameter: the part inside as it is,
+/// the parts past either end a period on (outward-rounded, cut back to the range); `None`
+/// for a range past more than one period.
+fn round_the_seam(x: Ivl, seam: Seam) -> Option<Vec<Ivl>> {
+    let Seam { lo, hi } = seam;
+    let period = Ivl::from(hi) - Ivl::from(lo);
+    if !(x.lo >= lo - period.lo && x.hi <= hi + period.lo && period.lo > 0.0) {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if x.lo < lo {
+        let shifted = Ivl::new(x.lo, x.hi.min(lo)) + period;
+        parts.push(Ivl::new(shifted.lo.max(lo), shifted.hi.min(hi)));
+    }
+    if x.hi >= lo && x.lo <= hi {
+        parts.push(Ivl::new(x.lo.max(lo), x.hi.min(hi)));
+    }
+    if x.hi > hi {
+        let shifted = Ivl::new(x.lo.max(hi), x.hi) - period;
+        parts.push(Ivl::new(shifted.lo.max(lo), shifted.hi.min(hi)));
+    }
+    Some(parts.into_iter().filter(|p| p.lo <= p.hi).collect())
+}
+
+/// The partials over a cell's (u, v) box, on the support the proof reads (`cont`); along a
+/// closed a (`seam`, a face closed round the edge's direction: a whole rim's), the box's
+/// parts past the face's range read the face round its seam.
 fn support_partials(
+    face: &Nurbs,
+    box_uv: [Ivl; 2],
+    ib: usize,
+    cont: Option<Continued>,
+    seam: Option<Seam>,
+) -> Result<Option<Vec<Partials<Ivl>>>> {
+    let Some(seam) = seam else {
+        return support_partials_on(face, box_uv, ib, cont);
+    };
+    let ia = 1 - ib;
+    let a = box_uv.get(ia).copied().unwrap_or_else(Ivl::whole);
+    let Some(parts) = round_the_seam(a, seam) else {
+        return Ok(None);
+    };
+    let mut out = Vec::new();
+    for part in parts {
+        let mut b = box_uv;
+        if let Some(x) = b.get_mut(ia) {
+            *x = part;
+        }
+        let Some(p) = support_partials_on(face, b, ib, cont)? else {
+            return Ok(None);
+        };
+        out.extend(p);
+    }
+    Ok((!out.is_empty()).then_some(out))
+}
+
+/// [`support_partials`] on a box within the face's range along a.
+fn support_partials_on(
     face: &Nurbs,
     box_uv: [Ivl; 2],
     ib: usize,
@@ -872,6 +966,7 @@ fn cell_values(
     cell: &Cell,
     a_is_u: bool,
     cont: Option<Continued>,
+    seam: Option<Seam>,
 ) -> Result<Option<CellValues>> {
     let [u, v, s] = *cell;
     let Some(cd) = proved(curve_derivs_over(edge, s, 1, None))? else {
@@ -881,7 +976,7 @@ fn cell_values(
         return Ok(None);
     };
     let ib = usize::from(a_is_u);
-    let Some(parts) = support_partials(face, [u, v], ib, cont)? else {
+    let Some(parts) = support_partials(face, [u, v], ib, cont, seam)? else {
         return Ok(None);
     };
     let mut out: Option<CellValues> = None;
@@ -1006,6 +1101,7 @@ struct Crossing<'a> {
     d2: f64,
     into: V3<Ivl>,
     cont: Option<Continued>,
+    seam: Option<Seam>,
 }
 
 /// The first-crossing proof (module docs) for the foot `foot` at the setback `d` (an
@@ -1129,6 +1225,8 @@ pub fn first_crossing(
             z: Ivl::from(into[2]),
         },
         cont,
+        // a face closed along the edge (a whole rim's support): the corridor round its seam
+        seam: seams(face).get(usize::from(!a_is_u)).copied().flatten(),
     };
     let mut spent = 0usize;
     let least = 2.0 / f64::from(1u32 << SUBSPAN_HALVINGS);
@@ -1225,7 +1323,7 @@ fn crossing_on(k: &Kernel, c: &Crossing<'_>, t: Ivl, spent: &mut usize) -> Resul
             [b, a, s]
         }
     };
-    let values = |cell: &Cell| cell_values(c.face, c.edge, cell, a_is_u, c.cont);
+    let values = |cell: &Cell| cell_values(c.face, c.edge, cell, a_is_u, c.cont, c.seam);
     // the signs: F_2's along a and det J's, at the foot's box
     let Some(at_foot) = values(&cell_of(fa, fb, span_s))? else {
         return Ok(false);

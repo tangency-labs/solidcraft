@@ -423,10 +423,6 @@ pub enum SolverFailure {
         /// The trace's 3D approximation tolerance the dropping tolerances scale.
         tol: f64,
     },
-    /// A station trace's leader (the edge a chamfer of setbacks stands on) is closed: its
-    /// period is not handled yet, a case the trace does not handle
-    /// ([`ErrorKind::Unsupported`]).
-    StationLeaderClosed,
     /// A station trace's solver finds no station at the edge parameter `s` (a foot's Newton
     /// does not settle, or its motion is not finite): an empty search
     /// ([`ErrorKind::NotFound`]).
@@ -635,7 +631,6 @@ impl SolverFailure {
             Self::SolverEdgeUseMissing { .. } => ErrorKind::InvalidInput,
             Self::SpineStationNotFound => ErrorKind::NotFound,
             Self::SplitPointDoesNotDropOnRail { .. } => ErrorKind::NotFound,
-            Self::StationLeaderClosed => ErrorKind::Unsupported,
             Self::StationNotSolved { .. } => ErrorKind::NotFound,
             Self::StationSpanEmpty { .. } => ErrorKind::Failed,
             Self::StationStepBackwards { .. } => ErrorKind::Failed,
@@ -734,7 +729,6 @@ impl SolverFailure {
             Self::SolverEdgeUseMissing { .. } => SM_ERR_NULL_POINTER,
             Self::SpineStationNotFound => SM_ERR,
             Self::SplitPointDoesNotDropOnRail { .. } => SM_ERR,
-            Self::StationLeaderClosed => SM_ERR,
             Self::StationNotSolved { .. } => SM_ERR,
             Self::StationSpanEmpty { .. } => SM_ERR,
             Self::StationStepBackwards { .. } => SM_ERR,
@@ -1024,9 +1018,6 @@ impl core::fmt::Display for SolverFailure {
                 f,
                 "the split point does not drop onto the rail at 1, 10 or 20 times {tol}"
             ),
-            Self::StationLeaderClosed => {
-                f.write_str("the station trace's leader is closed, which it does not handle yet")
-            }
             Self::StationNotSolved { s } => {
                 write!(f, "the station trace's solver finds no station at s = {s}")
             }

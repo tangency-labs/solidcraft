@@ -2982,20 +2982,4 @@ mod tests {
             "{err:?}"
         );
     }
-
-    /// A closed leader (the rim's whole circle as the edge) is refused, typed: its period is
-    /// not handled yet.
-    #[test]
-    fn station_trace_refuses_a_closed_leader() {
-        let d = [1.0, 0.5];
-        let mut h = half_rim_on(d, arc(RIM_R, RIM_Z, -45.0, 4));
-        let given = [TsectPnt::new(), TsectPnt::new()];
-        let t = trace(&mut h, &given, &StationTraceOptions::default());
-        let err = t.result.expect_err("refused");
-        assert_eq!(
-            err.blend_failure(),
-            Some(&BlendFailure::Solver(SolverFailure::StationLeaderClosed)),
-            "{err:?}"
-        );
-    }
 }

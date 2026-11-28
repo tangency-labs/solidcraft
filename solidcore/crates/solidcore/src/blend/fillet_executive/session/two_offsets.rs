@@ -1289,7 +1289,11 @@ mod tests {
         /// with no end effect. `full` is the whole turn's volume as #20253 gives it (bnoa's,
         /// checked by Pappus independently), twice this half's: a cross-check of the derivation,
         /// not the expectation.
-        fn ball_rim_chamfered_by_setbacks_1_and_1(r: f64, z0: f64, full: f64) {
+        ///
+        /// `whole`: the whole ball (`create_partial_sphere` over the whole turn) instead, its
+        /// rim one closed edge (#13710, a closed leader), the expectation turned the whole
+        /// turn (2π): twice the half's.
+        fn ball_rim_chamfered_by_setbacks_1_and_1(r: f64, z0: f64, full: f64, whole: bool) {
             let r0 = (r * r - z0 * z0).sqrt();
             let a0 = z0.atan2(r0);
             let phi = 2.0 * (0.5 / r).asin();
@@ -1303,18 +1307,20 @@ mod tests {
             let cap = r - z0;
             let kept = 0.5 * (4.0 / 3.0 * PI * r.powi(3) - PI * cap * cap * (3.0 * r - cap) / 3.0);
             let removed = PI * (tri * tri_r + seg * seg_r);
-            let want = kept - removed;
+            let half = kept - removed;
             assert!(
-                (2.0 * want - full).abs() <= 1e-7,
-                "the half's {want} is not half the whole turn's {full}"
+                (2.0 * half - full).abs() <= 1e-7,
+                "the half's {half} is not half the whole turn's {full}"
             );
+            let turns = if whole { 2.0 } else { 1.0 };
+            let want = turns * half;
             let mut k = fixed_kernel();
             let ball = crate::primitive::api_primitives::create_partial_sphere(
                 &mut k,
                 Point3::new(0.0, 0.0, 0.0),
                 r,
                 0.0,
-                180.0,
+                if whole { 360.0 } else { 180.0 },
             )
             .unwrap();
             let below = crate::primitive::api_primitives::create_box(
@@ -1334,7 +1340,7 @@ mod tests {
                 .filter(|&e| {
                     along_edge(&k, &b, e)
                         .iter()
-                        .all(|q| (q.z - z0).abs() < 1e-9 && q.y > 1e-6)
+                        .all(|q| (q.z - z0).abs() < 1e-9 && (whole || q.y > 1e-6))
                 })
                 .collect();
             assert_eq!(rim.len(), 1, "{rim:?}");
@@ -1347,10 +1353,10 @@ mod tests {
             let faces = setback_faces(&k, &b);
             assert_eq!(faces.len(), 1, "one chamfer of setbacks");
             let bound = faces[0].1;
-            // the chamfer's area: the chord PS turned half a turn about the axis at its
-            // midpoint's radius (Pappus)
+            // the chamfer's area: the chord PS turned about the axis at its midpoint's radius
+            // (Pappus)
             let chord = ((s[0] - p[0]).powi(2) + (s[1] - p[1]).powi(2)).sqrt();
-            let area = PI * 0.5 * (p[0] + s[0]) * chord;
+            let area = turns * PI * 0.5 * (p[0] + s[0]) * chord;
             let v = volume(&k, &mut b);
             assert!(
                 (v - want).abs() <= bound * area + 1e-8 * want,
@@ -1364,7 +1370,7 @@ mod tests {
         /// whole turn's 3510.1200237.
         #[test]
         fn a_ball_cut_at_5_rim_chamfered_by_setbacks_is_its_pappus_volume() {
-            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7);
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7, false);
         }
 
         /// Half a ball of radius 10 (y >= 0) cut at z = 0, the part below kept: a hemisphere on
@@ -1384,7 +1390,28 @@ mod tests {
         /// the line, not on the piece beyond it (which refused it as `SectionNotProved`).
         #[test]
         fn a_hemisphere_rim_on_the_ball_s_knot_line_chamfered_by_setbacks_is_its_pappus_volume() {
-            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2);
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2, false);
+        }
+
+        /// The whole hemisphere of radius 10 on its flat, its rim one closed edge (a closed
+        /// leader: the stations run one period of the edge, with no extension past ends it does
+        /// not have), chamfered by setbacks 1 and 1: the half's Pappus derivation above turned
+        /// the whole turn, 2094.3951023932 kept less 30.8013937990 removed, 2063.5937085942
+        /// (#20253's 2063.5937).
+        #[test]
+        fn a_whole_hemisphere_rim_chamfered_by_setbacks_is_its_pappus_volume() {
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2, true);
+        }
+
+        /// The whole ball of radius 10 cut at z = 5, the part below kept, its rim (radius
+        /// 8.660254037844387, 120 degrees) one closed edge, chamfered by setbacks 1 and 1. By
+        /// Pappus over the whole turn (the half's derivation above): the ball less its cap of
+        /// height 5 keeps 3534.2917352885; the region between the chord from P = (7.660254, 5)
+        /// to the sphere foot S = (9.1163274, 4.1100578), the flat and the arc removes
+        /// 24.1717115566; 3510.1200237319 (#20253's 3510.1200).
+        #[test]
+        fn a_whole_ball_cut_at_5_rim_chamfered_by_setbacks_is_its_pappus_volume() {
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7, true);
         }
 
         /// A foot crossing a smooth seam mid-edge: a slab, the profile x in [0, 40], y in [-5, 30]

@@ -2819,16 +2819,23 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         // (not upstream, #13710) a solver's own stations: its station at the share of the
         // span's s (each end's as the solver finds it, never a stale user double), strictly
         // between them, never a plane's (whose adjusting retry may solve another s), its
-        // tangents along the span; a closed leader's seam is not handled yet
+        // tangents along the span; on a closed leader, an end at the seam is the end of the
+        // interval nearer the other end (the edge's parameter there is either)
         if let Some(leader) = solver.station_leader(k)? {
+            let (mut from, mut to) = (solver.station_of(k, pj)?, solver.station_of(k, pj1)?);
             if leader.closed {
-                return Err(SolidError::blend_solver(
-                    OP_FLUSH,
-                    SolverFailure::StationLeaderClosed,
-                ));
+                let (lo, hi) = (leader.interval.min(), leader.interval.max());
+                let room = 1e-9 * (hi - lo).abs();
+                let onto = |x: f64, other: f64| {
+                    let at_seam = (x - lo).abs() <= room || (x - hi).abs() <= room;
+                    match (at_seam, (other - lo).abs() < (hi - other).abs()) {
+                        (true, true) => lo,
+                        (true, false) => hi,
+                        (false, _) => x,
+                    }
+                };
+                (from, to) = (onto(from, to), onto(to, from));
             }
-            let from = solver.station_of(k, pj)?;
-            let to = solver.station_of(k, pj1)?;
             let s = (1.0 - frac) * from + frac * to;
             let between = (s - from) * (to - s) > 0.0;
             if !between {
