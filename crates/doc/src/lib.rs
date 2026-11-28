@@ -160,6 +160,7 @@ pub use sheet_surface_features::{CornerJoinKind, CornerJoinParams, SheetEdgeName
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
+pub mod weld_float;
 pub mod weld_fusion;
 pub mod weld_groove;
 pub mod weld_projection;
