@@ -1407,7 +1407,7 @@ pub fn delete_glyph(app: &mut SolveApp) -> bool {
             _ => None,
         })
         .collect();
-    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": app.ui.project_link_tools }));
+    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": true }));
     true
 }
 
@@ -1620,26 +1620,27 @@ pub(crate) fn start_repair(app: &mut SolveApp, link: &str) {
     app.start("sketch.repair_link");
 }
 
-/// Translate Project's default-off session choice into explicit command inputs. Shared by dialog preview,
-/// deferred requests and immediate commands; an explicit caller's choice is kept.
+/// Translate the projection workflow's defaults into explicit command inputs: strict
+/// occurrence references and link-preserving deletes. Shared by dialog preview, deferred
+/// requests and immediate commands; an explicit caller's choice is kept.
 pub(crate) fn projection_policy(app: &SolveApp, command: &str, params: &mut Value) {
     if matches!(command, "sketch.project" | "sketch.intersect" | "sketch.include_3d") {
         if let Some(object) = params.as_object_mut() {
-            object.entry("strict_occurrence_references").or_insert(json!(app.ui.project_link_tools));
+            object.entry("strict_occurrence_references").or_insert(json!(true));
         }
-        if app.ui.project_link_tools && params.get("strict_occurrence_references").and_then(Value::as_bool) == Some(true) {
+        if params.get("strict_occurrence_references").and_then(Value::as_bool) == Some(true) {
             projection_paths(app, params);
         }
     }
     if matches!(command, "sketch.delete" | "selection.delete")
         && let Some(object) = params.as_object_mut()
     {
-        object.entry("preserve_projection_link").or_insert(json!(app.ui.project_link_tools));
+        object.entry("preserve_projection_link").or_insert(json!(true));
     }
 }
 
-/// Put the placement actually displayed by the viewport into opt-in projection requests.
-/// Model bodies carry a world instance name; sketches are displayed at their first placement
+/// Put the placement actually displayed by the viewport into projection requests that take
+/// the strict occurrence policy. Model bodies carry a world instance name; sketches are displayed at their first placement
 /// (`world_state`), so a repeated sketch pick must name that path rather than become ambiguous.
 pub(crate) fn projection_paths(app: &SolveApp, params: &mut Value) {
     let doc = &app.session.doc;
