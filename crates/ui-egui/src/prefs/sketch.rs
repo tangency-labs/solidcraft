@@ -448,10 +448,14 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
-        // Larger constraint glyphs, readable at any zoom (#10794).
-        let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.constraint_glyph_size"));
+        // Larger constraint glyphs and grouping threshold (#10794).
+        let label_width = ["prefs.constraint_glyph_size", "prefs.constraint_group_threshold"]
+            .into_iter()
+            .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
+            .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
+            setting::constraint_group_threshold(app, ui).backing_on_hover_text(app.tr("prefs.constraint_group_threshold_note"));
         });
     });
 }

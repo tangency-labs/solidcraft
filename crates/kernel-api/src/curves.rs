@@ -55,6 +55,8 @@ pub trait Curves: Backend {
     /// Sample `curve` over `interval` (or its natural range when `None`) at `distance` arc length
     /// from its start (or from its end when `from_end` is `true`).
     fn point_at_arc_length(&self, curve: &Curve, interval: Option<[f64; 2]>, from_end: bool, distance: f64) -> Result<CurveSample, CurveRefused>;
+    /// Total arc length and samples of `curve` over `interval` at normalized arc-length `fractions`.
+    fn samples_at_fractions(&self, curve: &Curve, interval: Option<[f64; 2]>, fractions: &[f64]) -> Result<(f64, Vec<CurveSample>), CurveRefused>;
     /// What a fit spline of cubic `pieces` certifies against the points `near` its fit points.
     fn fit_spline_bounds(&self, pieces: &[[[f64; 3]; 4]], near: &[(usize, [f64; 3])]) -> Result<FitSplineBounds, CurveRefused>;
     /// Splines through `p` (closed when `periodic`), each at most `limit` points.

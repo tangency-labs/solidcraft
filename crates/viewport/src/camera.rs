@@ -498,6 +498,11 @@ impl Camera {
         let (cp, sp) = (self.pitch.cos(), self.pitch.sin());
         self.from_frame(Vec3::new(-self.yaw.sin() * cp, -self.yaw.cos() * cp, sp).normalized().unwrap_or(Vec3::Z))
     }
+    /// Absolute cosine of the angle between the camera view axis and a unit surface normal
+    /// (`1.0` face-on, `0.0` edge-on).
+    pub fn facing_cos(&self, normal: Vec3) -> f64 {
+        self.back().dot(normal).abs()
+    }
     /// The world's up direction (the design's TOP when it has its own frame).
     pub fn up_dir(&self) -> Vec3 {
         self.frame.map_or(self.up.dir(), |f| f.top())
@@ -1839,5 +1844,13 @@ mod tests {
         assert!(huge.is_valid() && (huge.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{huge:?}");
         let a = huge.view_angles();
         assert!(a.yaw.is_finite() && a.roll.is_finite() && a.pitch == 90.0, "{a:?}");
+    }
+
+    #[test]
+    fn facing_cos_measures_view_alignment_with_surface_normal() {
+        let mut cam = Camera::default();
+        cam.set_view(StandardView::Top);
+        assert!((cam.facing_cos(Vec3::Z) - 1.0).abs() < 1e-12);
+        assert!(cam.facing_cos(Vec3::X).abs() < 1e-12);
     }
 }

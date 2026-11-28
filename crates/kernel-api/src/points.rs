@@ -132,6 +132,23 @@ pub trait Points: Backend {
     /// The distance from `point` to the polyline through `points`, and its closest point; `None`
     /// for a polyline of no points.
     fn polyline_2d_closest_point(&self, point: [f64; 2], points: &[[f64; 2]]) -> Result<Option<(f64, [f64; 2])>, PointsRefused>;
+    /// Axis-aligned `(min, max)` bounds of a 2D polyline; `None` for an empty slice.
+    fn polyline_2d_bounds(&self, points: &[[f64; 2]]) -> Result<Option<([f64; 2], [f64; 2])>, PointsRefused>;
+    /// Intersection point of two 2D segments within `tol`, if they meet.
+    fn segment_2d_intersection(&self, a1: [f64; 2], a2: [f64; 2], b1: [f64; 2], b2: [f64; 2], tol: f64) -> Result<Option<[f64; 2]>, PointsRefused>;
+    /// Crossing points between two 2D polylines within `tol`.
+    fn polyline_2d_crossings(&self, a: &[[f64; 2]], b: &[[f64; 2]], tol: f64) -> Result<Vec<[f64; 2]>, PointsRefused>;
+    /// Tangent contact point between a 2D line `(a, b)` and circle `(center, radius)` within `tol`.
+    fn tangent_contact_line_circle_2d(
+        &self,
+        a: [f64; 2],
+        b: [f64; 2],
+        center: [f64; 2],
+        radius: f64,
+        tol: f64,
+    ) -> Result<Option<[f64; 2]>, PointsRefused>;
+    /// Tangent contact point between two 2D circles `(c1, r1)` and `(c2, r2)` within `tol`.
+    fn tangent_contact_circle_circle_2d(&self, c1: [f64; 2], r1: f64, c2: [f64; 2], r2: f64, tol: f64) -> Result<Option<[f64; 2]>, PointsRefused>;
     /// Whether `point` still lies on face `face` of `record`, on its surface and within its trims,
     /// to a thousandth of the body's box diagonal.
     fn stored_face(&self, record: &Brep, face: usize, point: [f64; 3]) -> Result<bool, PointsRefused>;

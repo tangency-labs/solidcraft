@@ -10,5 +10,6 @@
   {"call": "engine.execute", "params": {"command": "sketch.constraint.equal", "params": {"a": "l5", "b": "l6"}}},
   {"call": "ui.view", "params": {"view": "top"}},
   {"call": "ui.view", "params": {"view": "fit"}},
-  {"expect": {"glyphs": {"k1": 1, "k5": 2, "k6": 2, "k7": 2, "k8": 2}}}
+  {"call": "ui.prefs", "params": {"constraint_group_threshold": 10}},
+  {"expect": {"glyphs": {"k1": 1, "k5": 2, "k6": 1, "k7": 1, "k8": 2}}}
 ]

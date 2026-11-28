@@ -61,6 +61,41 @@ pub fn polyline_2d_closest_point(point: [f64; 2], points: &[[f64; 2]]) -> Result
     }
 }
 
+/// Axis-aligned `(min, max)` bounds of a 2D polyline; `None` for an empty slice.
+pub fn polyline_2d_bounds(points: &[[f64; 2]]) -> Result<Option<([f64; 2], [f64; 2])>, PointsRefused> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.polyline_2d_bounds(points),
+    }
+}
+
+/// Intersection point of two 2D segments within `tol`, if they meet.
+pub fn segment_2d_intersection(a1: [f64; 2], a2: [f64; 2], b1: [f64; 2], b2: [f64; 2], tol: f64) -> Result<Option<[f64; 2]>, PointsRefused> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.segment_2d_intersection(a1, a2, b1, b2, tol),
+    }
+}
+
+/// Crossing points between two 2D polylines within `tol`.
+pub fn polyline_2d_crossings(a: &[[f64; 2]], b: &[[f64; 2]], tol: f64) -> Result<Vec<[f64; 2]>, PointsRefused> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.polyline_2d_crossings(a, b, tol),
+    }
+}
+
+/// Tangent contact point between a 2D line `(a, b)` and circle `(center, radius)` within `tol`.
+pub fn tangent_contact_line_circle_2d(a: [f64; 2], b: [f64; 2], center: [f64; 2], radius: f64, tol: f64) -> Result<Option<[f64; 2]>, PointsRefused> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.tangent_contact_line_circle_2d(a, b, center, radius, tol),
+    }
+}
+
+/// Tangent contact point between two 2D circles `(c1, r1)` and `(c2, r2)` within `tol`.
+pub fn tangent_contact_circle_circle_2d(c1: [f64; 2], r1: f64, c2: [f64; 2], r2: f64, tol: f64) -> Result<Option<[f64; 2]>, PointsRefused> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.tangent_contact_circle_circle_2d(c1, r1, c2, r2, tol),
+    }
+}
+
 /// Whether `point` still lies on face `face` of `record`, on its surface and within its trims,
 /// to a thousandth of the body's box diagonal.
 pub fn stored_face(record: &Brep, face: usize, point: [f64; 3]) -> Result<bool, PointsRefused> {

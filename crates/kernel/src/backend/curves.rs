@@ -62,6 +62,20 @@ impl Curves for Solidcore {
             .map_err(refused)
     }
 
+    fn samples_at_fractions(&self, curve: &Curve, interval: Option<[f64; 2]>, fractions: &[f64]) -> Result<(f64, Vec<CurveSample>), CurveRefused> {
+        curve::samples_at_fractions(curve, interval, fractions)
+            .map(|(total, samples)| {
+                (
+                    total,
+                    samples
+                        .into_iter()
+                        .map(|s| CurveSample { parameter: s.parameter, point: s.point, tangent: s.tangent, past_end: s.past_end })
+                        .collect(),
+                )
+            })
+            .map_err(refused)
+    }
+
     fn fit_spline_bounds(&self, pieces: &[[[f64; 3]; 4]], near: &[(usize, [f64; 3])]) -> Result<FitSplineBounds, CurveRefused> {
         curve_fit::fit_spline_bounds(pieces, near).map_err(refused)
     }

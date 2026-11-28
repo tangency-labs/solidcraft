@@ -91,6 +91,13 @@ pub fn point_at_arc_length(curve: &Curve, interval: Option<[f64; 2]>, from_end: 
     }
 }
 
+/// Total arc length and samples of `curve` over `interval` at normalized arc-length `fractions`.
+pub fn samples_at_fractions(curve: &Curve, interval: Option<[f64; 2]>, fractions: &[f64]) -> Result<(f64, Vec<CurveSample>), CurveRefused> {
+    match which(OpKind::Curves) {
+        Which::Solidcore => Solidcore.samples_at_fractions(curve, interval, fractions),
+    }
+}
+
 /// What a fit spline of cubic `pieces` certifies against the points `near` its fit points.
 pub fn fit_spline_bounds(pieces: &[[[f64; 3]; 4]], near: &[(usize, [f64; 3])]) -> Result<FitSplineBounds, CurveRefused> {
     match which(OpKind::Curves) {
