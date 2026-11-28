@@ -2345,7 +2345,7 @@ pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
 pub fn set_autosave(app: &mut SolveApp) {
     let m = app.autosave_minutes;
     if let Some(a) = app.autosave.as_mut() {
-        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::from_secs(u64::MAX / 4) };
+        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::MAX };
     }
 }
 

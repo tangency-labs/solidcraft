@@ -4861,7 +4861,9 @@ impl SolveApp {
                 toolbar::shortcuts(self, ctx);
             }
         }
-        recovery_ui::tick(self);
+        if let Some(delay) = recovery_ui::tick(self, ctx) {
+            ctx.request_repaint_after(delay);
+        }
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
         #[cfg(feature = "usage-stats")]
