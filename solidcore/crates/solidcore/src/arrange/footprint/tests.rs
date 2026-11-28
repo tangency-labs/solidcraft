@@ -167,6 +167,44 @@ fn crossing_lines_split_and_stray_lines_are_dropped() {
 }
 
 #[test]
+fn a_spike_tip_is_never_tidied_away() {
+    // The tip (10, 0) is nearly on the line through its neighbours but far from the segment
+    // between them: dropping it would lose the spike.
+    let ring = [
+        Vec2::new(0.0, 0.0),
+        Vec2::new(10.0, 0.0),
+        Vec2::new(1.0, 5e-8),
+        Vec2::new(0.0, 1.0),
+    ];
+    assert_eq!(tidy(&ring, 1e-6).len(), 4);
+    assert_eq!(thin(&ring, 1e-6).len(), 4);
+    // A corner on a straight edge still goes.
+    let straight = [
+        Vec2::new(0.0, 0.0),
+        Vec2::new(5.0, 1e-9),
+        Vec2::new(10.0, 0.0),
+        Vec2::new(10.0, 10.0),
+        Vec2::new(0.0, 10.0),
+    ];
+    assert_eq!(tidy(&straight, 1e-6).len(), 4);
+}
+
+#[test]
+fn a_drawing_crossing_itself_everywhere_gets_its_hull() {
+    // 400 lines across 400 others: more crossings than an outline is worked out from.
+    let mut grid = Vec::new();
+    for k in 0..400 {
+        let v = f64::from(k) * 0.25;
+        grid.push(line((v, -1.0), (v, 100.0)));
+        grid.push(line((-1.0, v), (100.0, v)));
+    }
+    let f = outline_of(&grid).unwrap();
+    assert!(f.hull);
+    // It covers every line: at least the square they cross in.
+    assert!(area(&f.shape.outer) >= 99.75 * 99.75);
+}
+
+#[test]
 fn hostile_drawings_are_errors_never_panics() {
     assert!(outline_of(&[]).is_err());
     assert!(outline_of(&[line((0.0, 0.0), (0.0, 0.0))]).is_err());

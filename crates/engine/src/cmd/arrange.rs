@@ -211,6 +211,16 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let (lay_flat, keep, avoid) = (flag("lay_flat", true)?, flag("copy", false)?, flag("avoid", true)?);
+    // Moving a body in a component placed more than once would move it in every placement.
+    if !keep && let Some(pc) = pieces.iter().find(|pc| pc.shared) {
+        return Err(bad(
+            cmd,
+            format!(
+                "`{}` is in a component placed more than once, so moving it would move every placement: arrange copies instead (copy: true)",
+                pc.name()
+            ),
+        ));
+    }
     // The sheets: the rectangle and those beside it, or flat faces of other bodies and sketch
     // areas in one plane at any tilt. The layout is worked out in the sheets' frame (rows: along
     // it, across it, out of it), where they are level.
@@ -409,11 +419,31 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     // Bodies are in the way only where the parts will be, in height; one just below the sheet
     // (the table under it) is not.
     let (zlo, zhi) = spans.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (a, b)| (lo.min(*a), hi.max(*b)));
-    let ztol = 1e-6 * (zhi - zlo).abs().max(1.0);
+    // Touching, not overlapping, is only float rounding at these heights: the tolerance follows
+    // where the sheet is, never how tall the parts are, so a thin plate on the sheet stays in the way.
+    let ztol = 1e-9 * zlo.abs().max(zhi.abs()).max(1.0);
     let level = |lo: f64, hi: f64| hi > zlo + ztol && lo < zhi - ztol;
-    // The other bodies shown on the sheets stand where they are (hidden ones are not in the way);
-    // the sheet's own body (a tray's walls round its floor) is the sheet's edge already.
-    for b in world.bodies.iter().filter(|b| avoid && !in_piece(&b.name) && !sheet_owners.contains(&b.name) && s.body_visible(&b.name)) {
+    // The room over the sheets, in the sheet's frame, from just above the sheet face to the top of
+    // the tallest part. What of the sheet's own body is in it (a lip or a shelf over a tray's
+    // floor) is in the way; its walls round the floor only meet the room's sides and are not.
+    // Footprints have no holes, so the walls must not reach the packer: their outline would
+    // cover the whole floor.
+    // The room starts a modelling tolerance over the face, clear of the floor's own top: a cut
+    // that close to coplanar is fragile, and real overhangs are far thicker.
+    let floor = sheet_z + ztol.max(1e-6);
+    let room = || {
+        let regions: Vec<solidcore_record::Region2> = sheet_list
+            .iter()
+            .map(|sh| solidcore_record::Region2 {
+                outer: solidcore_record::Loop2::polygon(&sh.outer),
+                holes: sh.holes.iter().map(|h| solidcore_record::Loop2::polygon(h)).collect(),
+            })
+            .collect();
+        solidcraft_kernel::extrude_planar_regions(&solidcore_record::Plane::XY, &regions, floor, zhi).ok()
+    };
+    let room = if avoid && !sheet_owners.is_empty() && zhi > floor { room() } else { None };
+    // The other bodies shown on the sheets stand where they are (hidden ones are not in the way).
+    for b in world.bodies.iter().filter(|b| avoid && !in_piece(&b.name) && s.body_visible(&b.name)) {
         let turned;
         let local = if tilted {
             match solidcraft_kernel::transform_matrix(&b.body, matrix(into_sheet)) {
@@ -425,6 +455,22 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
             }
         } else {
             &b.body
+        };
+        let over_sheet;
+        let local = if sheet_owners.contains(&b.name) {
+            // A mesh can't be cut, and with no room there is nothing over the sheet: the body is
+            // the sheet's edge only.
+            let Some(room) = room.as_ref().filter(|_| !local.is_mesh()) else { continue };
+            match solidcraft_kernel::boolean(local, room, solidcraft_kernel::BoolOp::Intersect) {
+                Ok(Some(part)) => {
+                    over_sheet = part;
+                    &over_sheet
+                }
+                // Nothing over the sheet, or a cut that failed: as before, only its edge.
+                _ => continue,
+            }
+        } else {
+            local
         };
         let Ok(bb) = local.exact_bounds() else { continue };
         if !over(bb.min, bb.max) || !level(bb.min.z, bb.max.z) {
@@ -750,6 +796,8 @@ struct Piece {
     placed: bool,
     /// For one in a placed component: from the frame its geometry is in to the world.
     frame: Option<solidcraft_doc::Mat>,
+    /// Whether its component is placed more than once: moving its geometry moves them all.
+    shared: bool,
 }
 
 impl Piece {
@@ -767,8 +815,10 @@ fn pieces(s: &Session, names: &[String]) -> Vec<Piece> {
     names
         .iter()
         .map(|n| {
-            let frame = frames.iter().find(|f| &f.0 == n && !f.3.is_empty()).map(|f| f.4);
-            Piece { bodies: vec![n.clone()], placed: frame.is_some(), frame }
+            let found = frames.iter().find(|f| &f.0 == n && !f.3.is_empty());
+            let frame = found.map(|f| f.4);
+            let shared = found.is_some_and(|f| frames.iter().filter(|g| g.1 == f.1 && g.2 == f.2).nth(1).is_some());
+            Piece { bodies: vec![n.clone()], placed: frame.is_some(), frame, shared }
         })
         .collect()
 }
@@ -857,8 +907,17 @@ fn sheet_areas(s: &Session, list: &[Value], pieces: &[Piece], cmd: &str) -> Resu
     for v in list {
         if let Some(face) = v.get("face") {
             let at = super::face::face_ref(s, face, None, cmd)?;
+            // A face named is its own body's: where two bodies touch flush, the point is on both
+            // and their faces there look opposite ways, so that body is looked in first.
+            let named = face.as_str().and_then(|name| {
+                let st = if crate::frames::mapped() { s.model.state() } else { s.world_state().ok()? };
+                let hit = solidcraft_doc::naming::locate_one(&st, None, name).ok()?;
+                st.bodies.get(hit.body).map(|b| b.name.clone())
+            });
+            let own = world.bodies.iter().filter(|b| named.as_ref() == Some(&b.name));
+            let rest = world.bodies.iter().filter(|b| named.as_ref() != Some(&b.name));
             let mut found = None;
-            for b in world.bodies.iter().filter(|b| !b.body.is_mesh() && !in_piece(&b.name)) {
+            for b in own.chain(rest).filter(|b| !b.body.is_mesh() && !in_piece(&b.name)) {
                 let Ok(record) = solidcraft_kernel::brep_record(&b.body) else { continue };
                 if let Some(face) = flat_face_at(&record, at, 1e-4) {
                     found = Some((face, b.name.clone()));
@@ -925,9 +984,12 @@ fn sheet_areas(s: &Session, list: &[Value], pieces: &[Piece], cmd: &str) -> Resu
             for p in ring {
                 let (q, h) = flat(*p);
                 size = size.max(q.x.abs()).max(q.y.abs()).max(h.abs());
+                // One plane: heights agree to a millionth of how high they are, plus the
+                // rounding of taking them into the frame (which grows with how far out they
+                // are, not with how far apart): parts far along the sheet move neither.
                 match z {
                     None => z = Some(h),
-                    Some(z0) if (h - z0).abs() <= 1e-6 * size => {}
+                    Some(z0) if (h - z0).abs() <= 1e-6 * h.abs().max(z0.abs()).max(1.0) + 1e-12 * size => {}
                     Some(_) => return Err(bad(cmd, "the sheet's faces and areas must all lie in one plane")),
                 }
                 pts.push(q);

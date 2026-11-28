@@ -677,6 +677,23 @@ fn a_cancelled_run_stops() {
         ),
         Err(ArrangeError::Cancelled)
     );
+    // Already cancelled: asked once, before any shape is worked on.
+    let asked = std::cell::Cell::new(0usize);
+    let once = || {
+        asked.set(asked.get() + 1);
+        true
+    };
+    assert_eq!(
+        arrange_around(
+            &items,
+            &Shape2::rectangle(10.0, 10.0),
+            &[Shape2::rectangle(1.0, 1.0)],
+            &ArrangeOptions::default(),
+            &once
+        ),
+        Err(ArrangeError::Cancelled)
+    );
+    assert_eq!(asked.get(), 1);
 }
 
 #[test]

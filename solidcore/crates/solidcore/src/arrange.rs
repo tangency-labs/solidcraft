@@ -335,6 +335,11 @@ pub fn arrange_hurried(
     if obstacles.len() > MAX_OBSTACLES {
         return Err(ArrangeError::TooMuchWork);
     }
+    // Asked before the shapes are worked on, and between each: a request already cancelled
+    // does none of it.
+    if cancel() {
+        return Err(ArrangeError::Cancelled);
+    }
     for (what, v) in [("spacing", options.spacing), ("margin", options.margin)] {
         if !(0.0..=MAX_COORD).contains(&v) {
             return Err(ArrangeError::BadDistance { what, value: v });
@@ -351,6 +356,9 @@ pub fn arrange_hurried(
     let mut kinds = Vec::new();
     let mut boxes = Vec::new();
     for (i, item) in items.iter().enumerate() {
+        if cancel() {
+            return Err(ArrangeError::Cancelled);
+        }
         if item.rotations_deg.len() > MAX_ROTATIONS {
             return Err(ArrangeError::TooManyRotations { item: i });
         }
@@ -390,6 +398,9 @@ pub fn arrange_hurried(
     let reach = sheet.shape.bbox.grow(options.spacing + options.margin);
     let mut fixed = Vec::new();
     for (i, o) in obstacles.iter().enumerate() {
+        if cancel() {
+            return Err(ArrangeError::Cancelled);
+        }
         let region = Region::new(o, &format!("obstacle {i}"))?;
         corners = corners.saturating_add(region.shape.corners());
         if corners > MAX_POSE_CORNERS {

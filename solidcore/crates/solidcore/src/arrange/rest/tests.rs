@@ -190,6 +190,18 @@ fn a_box_has_six_sides_largest_first() {
 }
 
 #[test]
+fn a_box_far_from_the_origin_keeps_its_areas() {
+    // About the origin, the products would be near 1e16 and a unit area lost in rounding.
+    let at = 1e8;
+    let sides = flat_sides(Fixture::prism(&rect(at, at, at + 1.0, at + 2.0), &[], [0.0, 3.0]).of());
+    assert_eq!(sides.len(), 6, "{sides:?}");
+    let areas: Vec<f64> = sides.iter().map(|s| s.area).collect();
+    for (got, want) in areas.iter().zip([6.0, 6.0, 3.0, 3.0, 2.0, 2.0]) {
+        assert!((got - want).abs() < 1e-6, "{areas:?}");
+    }
+}
+
+#[test]
 fn a_hole_through_a_plate_takes_its_area_off_both_faces() {
     let hole = {
         let mut h = rect(10.0, 5.0, 20.0, 15.0);

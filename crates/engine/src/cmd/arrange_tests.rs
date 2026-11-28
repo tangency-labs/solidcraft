@@ -1171,3 +1171,20 @@ fn a_sheet_of_sketch_areas_joins_those_that_touch() {
     assert_eq!(names(&r["placed"]), ["Small"], "{r}");
     assert!((bounds(&s, "Small").0[2] - 5.0).abs() < 1e-6);
 }
+
+#[test]
+fn a_body_in_a_component_placed_twice_is_copied_never_moved() {
+    let mut s = Session::default();
+    let (_, bodies) = pegged_plate(&mut s, "Plate", [0.0, 0.0, 0.0]);
+    run(&mut s, "occurrence.copy", json!({"component": "Plate", "translate": [0, 60, 0]}));
+    let stood = bounds(&s, &bodies[0]);
+    let q = json!({"bodies": [bodies[0]], "width": 100, "length": 100, "origin": [200, 0]});
+    // Moving it would move the other placement too: refused, and nothing moves.
+    assert!(s.execute("solid.arrange", &q).is_err(), "{q}");
+    same(bounds(&s, &bodies[0]).0, stood.0);
+    // Keep Originals lays out a copy of the design's own.
+    let r = run(&mut s, "solid.arrange", json!({"bodies": [bodies[0]], "width": 100, "length": 100, "origin": [200, 0], "copy": true}));
+    let copy = r["placed"][0]["body"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    assert_laid_out(&mut s, &[&copy], [200.0, 0.0, 300.0, 100.0], 0.0);
+    same(bounds(&s, &bodies[0]).0, stood.0);
+}

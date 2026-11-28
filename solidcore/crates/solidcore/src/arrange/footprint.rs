@@ -333,6 +333,10 @@ fn outer_ring(segs: &[(Vec2, Vec2)], tol: f64) -> Option<Vec<Vec2>> {
         };
         order.sort_by(|&a, &b| lox(a).total_cmp(&lox(b)));
         let mut cuts: BTreeMap<usize, Vec<Vec2>> = BTreeMap::new();
+        // Edges crossing edges can make far more cuts than edges (every one of 10 000 across
+        // every one of 10 000 others): past this many it is no outline a layout could take,
+        // and the caller falls back to the hull.
+        let mut count = 0usize;
         for (k, &ia) in order.iter().enumerate() {
             let (a0, a1) = ends(ia);
             let hix = a0.x.max(a1.x) + tol;
@@ -348,11 +352,16 @@ fn outer_ring(segs: &[(Vec2, Vec2)], tol: f64) -> Option<Vec<Vec2>> {
                     let (c, d) = ends(e);
                     if on_inside(p, c, d, tol) {
                         cuts.entry(e).or_default().push(p);
+                        count += 1;
                     }
                 }
                 if let Some(x) = crossing(a0, a1, b0, b1, tol) {
                     cuts.entry(ia).or_default().push(x);
                     cuts.entry(ib).or_default().push(x);
+                    count += 2;
+                }
+                if count > MAX_PIECES {
+                    return None;
                 }
             }
         }
@@ -538,14 +547,7 @@ const THIN_RUN: usize = 256;
 fn thin(ring: &[Vec2], tol: f64) -> Vec<Vec2> {
     let n = ring.len();
     let at = |i: usize| ring.get(i % n.max(1)).copied().unwrap_or(Vec2::ZERO);
-    let near = |a: Vec2, b: Vec2, p: Vec2| {
-        let ab = (b.x - a.x).hypot(b.y - a.y);
-        if ab > tol {
-            cross(a, b, p).abs() / ab <= tol
-        } else {
-            (p.x - a.x).hypot(p.y - a.y) <= tol
-        }
-    };
+    let near = |a: Vec2, b: Vec2, p: Vec2| to_segment(a, b, p) <= tol;
     let mut kept = Vec::new();
     let mut i = 0;
     while i < n {
@@ -567,9 +569,21 @@ fn thin(ring: &[Vec2], tol: f64) -> Vec<Vec2> {
 
 fn tidy(ring: &[Vec2], tol: f64) -> Vec<Vec2> {
     prune(ring, |a, p, b| {
-        let ab = (b.x - a.x).hypot(b.y - a.y);
-        (p.x - a.x).hypot(p.y - a.y) <= tol || (ab > tol && cross(a, b, p).abs() / ab <= tol)
+        (p.x - a.x).hypot(p.y - a.y) <= tol || to_segment(a, b, p) <= tol
     })
+}
+
+/// How far `p` is from the segment `a`-`b`: from its line only between its ends, so a corner
+/// beyond them (the tip of a spike) is never within it.
+fn to_segment(a: Vec2, b: Vec2, p: Vec2) -> f64 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 > 0.0 {
+        (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p.x - (a.x + dx * t)).hypot(p.y - (a.y + dy * t))
 }
 
 /// `ring` with corners taken off while `drop(before, corner, after)` says so, first corner first,

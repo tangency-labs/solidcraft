@@ -229,14 +229,18 @@ fn size(body: Body<'_>) -> f64 {
 fn face_area(body: Body<'_>, i: usize, n: Vec3) -> Option<f64> {
     let face = body.brep.faces.get(i)?;
     let mut twice = 0.0;
+    // About a point of the face itself, not the origin: far from the origin, the products
+    // about it would be huge and their difference lost in rounding.
+    let mut origin = None;
     for lp in &face.loops {
         let Loop::Edges { edges } = lp else { continue };
         for oe in edges {
             let edge = body.brep.edges.get(oe.edge as usize)?;
             // The curve runs from the edge's start vertex to its end (its interval does).
             let (c, _) = C3::of_edge(edge).ok()?;
+            let o = *origin.get_or_insert_with(|| c.at(c.domain()[0]));
             let sign = if oe.forward { 1.0 } else { -1.0 };
-            twice += sign * swept(&c, n)?;
+            twice += sign * swept(&c, n, o)?;
         }
     }
     Some(twice * 0.5)
@@ -259,11 +263,11 @@ const W: [f64; 5] = [
     0.236_926_885_056_189,
 ];
 
-/// `∫ n · (p × p') dt` over the curve: twice the signed area it sweeps about the origin, seen
-/// along `n`.
-fn swept(c: &C3, n: Vec3) -> Option<f64> {
+/// `∫ n · ((p - o) × p') dt` over the curve: twice the signed area it sweeps about `o`, seen
+/// along `n`. Over a closed loop it is the same about any point.
+fn swept(c: &C3, n: Vec3, o: Vec3) -> Option<f64> {
     if let C3::Line { a, b } = c {
-        return Some(n.dot(a.cross(*b)));
+        return Some(n.dot((*a - o).cross(*b - o)));
     }
     // Five-point Gauss–Legendre on each piece between breaks, each piece split in eight.
     let mut breaks = c.breaks();
@@ -283,7 +287,7 @@ fn swept(c: &C3, n: Vec3) -> Option<f64> {
             let (mid, half) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
             for (x, wt) in X.iter().zip(W) {
                 let t = mid + half * x;
-                sum += wt * half * n.dot(c.at(t).cross(c.d1(t)));
+                sum += wt * half * n.dot((c.at(t) - o).cross(c.d1(t)));
             }
         }
     }
@@ -433,11 +437,25 @@ fn face_rings(body: Body<'_>, i: usize, o: Vec3, e1: Vec3, e2: Vec3) -> Option<L
             let (c, _) = C3::of_edge(edge).ok()?;
             let [_, t1] = c.domain();
             let mut ts = c.breaks();
-            if !matches!(c, C3::Line { .. }) {
-                let sag = |a: f64, b: f64| {
-                    let (pa, pb, pm) = (flat(c.at(a)), flat(c.at(b)), flat(c.at((a + b) * 0.5)));
+            // How far the curve strays from its chord between `a` and `b`: for a spline, its
+            // furthest control point cut to that part (the hull holds the curve, and distance
+            // from the chord is greatest at a corner of it), with rounding counted; an arc,
+            // flat in the face, strays most at its middle.
+            let sag = |a: f64, b: f64| {
+                let (pa, pb) = (flat(c.at(a)), flat(c.at(b)));
+                if let Some(h) = c.hull([a, b]) {
+                    let far = h
+                        .iter()
+                        .map(|q| to_chord(pa, pb, flat(*q)))
+                        .fold(0.0, f64::max);
+                    let scale = pa.x.abs().max(pa.y.abs()).max(pb.x.abs()).max(pb.y.abs());
+                    far + 64.0 * f64::EPSILON * scale.max(1.0)
+                } else {
+                    let pm = flat(c.at((a + b) * 0.5));
                     (pm.x - (pa.x + pb.x) * 0.5).hypot(pm.y - (pa.y + pb.y) * 0.5)
-                };
+                }
+            };
+            if !matches!(c, C3::Line { .. }) {
                 let cut =
                     |a: f64, b: f64, n: u32, k: u32| a + (b - a) * f64::from(k) / f64::from(n);
                 let mut fine: Vec<f64> = Vec::new();
@@ -464,9 +482,10 @@ fn face_rings(body: Body<'_>, i: usize, o: Vec3, e1: Vec3, e2: Vec3) -> Option<L
             // Each point but the last: the next edge starts there.
             for w in ts.windows(2) {
                 let &[t0, t1] = w else { continue };
-                let (a, b, m) = (flat(c.at(t0)), flat(c.at(t1)), flat(c.at((t0 + t1) * 0.5)));
-                error = error.max((m.x - (a.x + b.x) * 0.5).hypot(m.y - (a.y + b.y) * 0.5));
-                ring.push(a);
+                if !matches!(c, C3::Line { .. }) {
+                    error = error.max(sag(t0.min(t1), t0.max(t1)));
+                }
+                ring.push(flat(c.at(t0)));
             }
         }
         if ring.len() >= 3 && ring.iter().all(|p| p.x.is_finite() && p.y.is_finite()) {
@@ -494,6 +513,18 @@ fn face_rings(body: Body<'_>, i: usize, o: Vec3, e1: Vec3, e2: Vec3) -> Option<L
         z,
         error,
     })
+}
+
+/// How far `p` is from the segment `a`-`b`.
+fn to_chord(a: Vec2, b: Vec2, p: Vec2) -> f64 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 > 0.0 {
+        (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p.x - (a.x + dx * t)).hypot(p.y - (a.y + dy * t))
 }
 
 /// Each side of the closed ring `r`: a corner and the next, the last back to the first.

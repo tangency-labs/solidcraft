@@ -138,12 +138,15 @@ pub struct ArrangedBody {
     pub copy_of: Option<String>,
     /// Which sheet it is on, from 0.
     pub sheet: usize,
-    /// How far the body moved along X after turning, in mm.
+    /// How far the body moved along the sheet's X after turning, in mm (the world's X unless
+    /// the reply gives a `sheet_frame`). These are the layout's own values on the sheet: the
+    /// whole move, with the lift onto the sheet, is the Move feature the body got.
     pub x: f64,
-    /// How far the body moved along Y after turning, in mm.
+    /// How far the body moved along the sheet's Y after turning, in mm.
     pub y: f64,
-    /// How far the body turned about the world Z axis through the origin, counter-clockwise, in
-    /// degrees (after it was laid down, when it was).
+    /// How far the body turned about the sheet's normal through the frame's origin (the world Z
+    /// axis unless there is a `sheet_frame`), counter-clockwise, in degrees (after it was laid
+    /// down, when it was).
     pub angle_deg: f64,
     /// When the body was laid on a flat side: that side's outward normal before the move. The
     /// body was first turned about the origin to point it down, then by `angle_deg`, moved by
