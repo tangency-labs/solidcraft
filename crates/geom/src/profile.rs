@@ -255,7 +255,7 @@ pub fn regions_apart(regions: &[Region2], gap: f64) -> bool {
     }
     let mut outlines = Vec::with_capacity(regions.len());
     for r in regions {
-        let loops: Vec<Ring<Vec2>> = std::iter::once(&r.outer).chain(&r.holes).map(|l| l.polyline(tol)).collect();
+        let loops: Vec<Ring<Vec2>> = r.loops().map(|l| l.polyline(tol)).collect();
         let Some(outer) = loops.first().filter(|l| l.len() >= 2) else { return false };
         if outer.iter().any(|p| !p.is_finite()) {
             return false;
@@ -920,7 +920,7 @@ impl Region2Geom for Region2 {
         for k in 1..16 {
             let y = y0 + (y1 - y0) * k as f64 / 16.0;
             let mut xs: Vec<f64> = Vec::new();
-            for l in std::iter::once(&self.outer).chain(&self.holes) {
+            for l in self.loops() {
                 let pl = l.polyline(1e-2);
                 let n = pl.len();
                 for i in 0..n {
@@ -946,12 +946,12 @@ impl Region2Geom for Region2 {
         self.outer.contains(p) && !self.holes.iter().any(|h| h.contains(p))
     }
     fn inradius(&self, tol: f64) -> f64 {
-        let loops: Vec<Ring<Vec2>> = std::iter::once(&self.outer).chain(&self.holes).map(|l| l.polyline(tol)).collect();
+        let loops: Vec<Ring<Vec2>> = self.loops().map(|l| l.polyline(tol)).collect();
         max_clearance(&loops)
     }
     fn triangulate(&self, tol: f64) -> Vec<[Vec2; 3]> {
         let mut edges: Vec<(Vec2, Vec2)> = Vec::new();
-        for l in std::iter::once(&self.outer).chain(&self.holes) {
+        for l in self.loops() {
             let pl = l.polyline(tol);
             let n = pl.len();
             for i in 0..n {
@@ -1338,7 +1338,7 @@ mod tests {
     fn triangulation_sweep_matches_every_edge_against_every_slab() {
         fn every_edge(r: &Region2, tol: f64) -> Vec<[Vec2; 3]> {
             let mut edges = Vec::new();
-            for l in std::iter::once(&r.outer).chain(&r.holes) {
+            for l in r.loops() {
                 let pl = l.polyline(tol);
                 for i in 0..pl.len() {
                     let (a, b) = (pl[i], pl[(i + 1) % pl.len()]);
