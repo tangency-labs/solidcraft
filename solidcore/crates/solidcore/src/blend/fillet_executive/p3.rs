@@ -150,8 +150,9 @@ pub enum NoRoomReason {
     BallDoesNotFit,
     /// A rail leaves the face it rolls on between its ends (the fork's
     /// `RailsFitTheirFaces`; WR-302) where no cliff cuts the face off: a closed rail that
-    /// leaves past one end of the filleted edge and comes back past the other
-    /// (`RailsFit::wraps_past_both_ends`, tangency-labs/solidcore#2175). A rail that leaves
+    /// leaves past one end of the filleted edge and comes back past the other, off its face
+    /// across the whole span between the ends (`RailsFit::wraps_past_both_ends`,
+    /// tangency-labs/solidcore#2175; a run wholly past the ends is trimmed there, #17646). A rail that leaves
     /// across a cliff is built as a cliff overflow or refused with the overflow's own reason
     /// ([`Self::ConcaveOverflow`] and the others).
     RailLeavesFace,
