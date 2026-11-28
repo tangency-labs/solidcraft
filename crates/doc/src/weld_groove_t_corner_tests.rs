@@ -1,8 +1,10 @@
 //! T and corner joints: a beveled corner, outside and flush, and a beveled T on a through plate
 //! longer than the stem, each filled flat to its groove's closed-form volume whichever part is
 //! passed first, the parts only read, and an outer face facing into the corner and a stem
-//! standing off its through plate refused; a fillet over the T's groove (Q23) as one weld, its
-//! legs past the groove or short of it, flat and convex, and a leg off its face refused.
+//! standing off its through plate refused; a 135° corner, and a stem on a chamfered through
+//! plate's edge, filled; a fillet over the T's groove (Q23) as one weld, its legs past the groove
+//! or short of it, flat and convex, and a leg off its face and a fillet with no groove under it
+//! refused.
 
 use super::*;
 
@@ -78,6 +80,40 @@ fn a_beveled_t_joint_is_filled_flush_with_the_stem_along_the_stem_only() {
     // the parts are only read
     let after: Vec<_> = [&through, &stem].iter().map(|b| b.record().clone()).collect();
     assert_eq!(after, before);
+}
+
+/// brett19's point 2 on #22504: a corner of 135° (an octagonal frame's), the second outer face
+/// at 45° to both of the frame's axes. A lying plate 8 thick, its square end at x = 0, and a plate
+/// 4√2 thick running down at 45° from it, its square end from (4, -4) down to the lying plate's
+/// corner (0, -8): the triangle (0, 0), (4, -4), (0, -8), 16 mm² over 120, whichever part is
+/// first.
+#[test]
+fn a_135_degree_corner_is_filled_whichever_part_is_first() {
+    let lying = plate(&[(-40.0, 0.0), (-40.0, -8.0), (0.0, -8.0), (0.0, 0.0)]);
+    let sloped = plate(&[(0.0, -8.0), (28.0, -36.0), (32.0, -32.0), (4.0, -4.0)]);
+    let (lf, sf) = (facing(&lying, RIGHT), facing(&sloped, unit(-1.0, 1.0)));
+    assert_eq!((lf.len(), sf.len()), (1, 1), "{lf:?} {sf:?}");
+    let (l, s) = (picked(&lying, &lf, UP), picked(&sloped, &sf, unit(1.0, 1.0)));
+    for picks in [[&l, &s], [&s, &l]] {
+        let got = volume(picks);
+        assert!((got - 16.0 * 120.0).abs() <= 1e-6 * got, "{got}");
+    }
+}
+
+/// brett19's point 3 on #22504: the beveled T of [`t_joint`] on a through plate whose top ends at
+/// x = 0 in a 45° chamfer, right under the stem's side: the ray from the stem's toe meets the top
+/// and the chamfer at one point, (0, 0). The top counts whatever the record's face order.
+#[test]
+fn a_stem_flush_with_a_chamfered_edge_of_its_through_plate_is_filled() {
+    let (_, stem, bevel) = t_joint(0.0);
+    let from = Plane { origin: Vec3::new(0.0, 0.0, -40.0), ..Plane::XY };
+    let through = swept_by(&from, &[(-8.0, -8.0), (40.0, -8.0), (40.0, 0.0), (0.0, 0.0)], 200.0);
+    let top = facing(&through, UP);
+    let (t, s) = (picked(&through, &top, UP), picked(&stem, &bevel, [-1.0, 0.0, 0.0]));
+    for picks in [[&s, &t], [&t, &s]] {
+        let got = volume(picks);
+        assert!((got - 18.0 * 120.0).abs() <= 1e-6 * got, "{got}");
+    }
 }
 
 #[test]
@@ -159,4 +195,19 @@ fn a_fillet_leg_off_its_face_or_a_fillet_off_a_t_joint_is_refused() {
     let (parts, faces) = y_groove();
     let butt = groove_fillet_weld([&pick(&parts[0], &faces[0]), &pick(&parts[1], &faces[1])], &flat(), legs(4.0, 4.0));
     assert!(matches!(butt, Err(GrooveRefusal::Invalid(_))), "{butt:?}");
+}
+
+/// brett19's point 4 on #22504: a square-ended stem standing on the plate, its end picked as its
+/// groove face: the stem's toe is on the plate, so no groove lies under the fillet, refused before
+/// any leg is placed.
+#[test]
+fn a_fillet_over_a_square_ended_stem_is_refused() {
+    let from = Plane { origin: Vec3::new(0.0, 0.0, -40.0), ..Plane::XY };
+    let through = swept_by(&from, &[(-40.0, -8.0), (40.0, -8.0), (40.0, 0.0), (-40.0, 0.0)], 200.0);
+    let stem = plate(&[(0.0, 0.0), (10.0, 0.0), (10.0, 60.0), (0.0, 60.0)]);
+    let (top, end) = (facing(&through, UP), facing(&stem, [0.0, -1.0, 0.0]));
+    let [t, s] = t_picks(&through, &stem, &top, &end);
+    for picks in [[&s, &t], [&t, &s]] {
+        assert_eq!(groove_fillet_weld(picks, &flat(), legs(4.0, 4.0)).unwrap_err(), GrooveRefusal::NoGrooveUnderFillet);
+    }
 }
