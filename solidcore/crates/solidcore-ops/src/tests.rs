@@ -215,7 +215,11 @@ fn a_box_has_no_flat_corners() {
     let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
     let order = b.to_record().unwrap().1;
     for f in 0..order.faces.len() {
-        assert_eq!(b.face_flat_corners(&order, f).unwrap(), Vec::<[f64; 3]>::new(), "face {f}");
+        assert_eq!(
+            b.face_flat_corners(&order, f).unwrap(),
+            Vec::<[f64; 3]>::new(),
+            "face {f}"
+        );
     }
     assert!(matches!(
         b.face_flat_corners(&order, order.faces.len()),
