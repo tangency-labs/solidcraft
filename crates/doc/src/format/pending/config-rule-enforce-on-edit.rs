@@ -6,3 +6,7 @@
 //! release warns about the newer format number and names this change among those it doesn't know
 //! (`crates/doc/src/newer_file.rs`); it does not read the flag, so it ignores the restriction on an
 //! ordinary edit, and a save by it drops the flag.
+//!
+//! Generator insertion also retains its package ID, selected configuration and catalogue
+//! provenance under the existing component metadata key `org.solidcraft.generator`. This uses
+//! the existing namespaced metadata object format; it adds no field to the document schema.

@@ -252,6 +252,18 @@ impl Document {
             return Err(DocError::Invalid("configuration table exceeds limits or has incomplete rows".into()));
         }
         let mut next = self.clone();
+        // A rule-only suppression target starts unsuppressed for each row. Configured
+        // targets instead get their baseline from the row below, before ordered rules run.
+        for rule in &self.configs.rules {
+            if rule.enabled
+                && let crate::config_rules::RuleEffect::DriveSuppression { feature, .. } = rule.effect
+                && !self.configs.columns.contains(&Column::Suppress(feature))
+            {
+                let target =
+                    next.feature_mut(feature).ok_or_else(|| DocError::Unknown(format!("configuration `{row}`: feature {feature} is gone")))?;
+                target.suppressed = false;
+            }
+        }
         let changes: Vec<(String, String)> = self
             .configs
             .columns

@@ -76,6 +76,7 @@ impl std::error::Error for ScriptError {}
 pub struct Script {
     engine: Engine,
     ast: AST,
+    contextual: Vec<Engine>,
 }
 
 fn to_dynamic(v: &Json, depth: usize) -> Dynamic {
@@ -144,9 +145,9 @@ fn failure(message: impl Into<String>) -> Box<EvalAltResult> {
     Box::new(EvalAltResult::ErrorRuntime(Dynamic::from(message.into()), Position::NONE))
 }
 
-fn map_error(e: Box<EvalAltResult>) -> ScriptError {
-    match *e {
-        EvalAltResult::ErrorInFunctionCall(_, _, inner, _) => map_error(inner),
+fn map_error(e: EvalAltResult) -> ScriptError {
+    match e {
+        EvalAltResult::ErrorInFunctionCall(_, _, inner, _) => map_error(*inner),
         EvalAltResult::ErrorTooManyOperations(..) => ScriptError::Limit(format!("it ran more than {MAX_OPERATIONS} operations")),
         EvalAltResult::ErrorStackOverflow(..) => ScriptError::Limit(format!("it called functions more than {MAX_CALL_LEVELS} deep")),
         EvalAltResult::ErrorDataTooLarge(what, _) => ScriptError::Limit(format!("{what} grew too large")),
@@ -179,6 +180,13 @@ impl Script {
         if source.len() > MAX_SCRIPT_BYTES {
             return Err(ScriptError::Limit(format!("the script is larger than {} KiB", MAX_SCRIPT_BYTES / 1024)));
         }
+        let engine = Self::engine(templates.clone(), tables.clone());
+        let contextual = templates.iter().map(|t| Self::engine(Arc::new(vec![t.clone()]), tables.clone())).collect();
+        let ast = engine.compile(source).map_err(|e| ScriptError::Script(e.to_string()))?;
+        Ok(Script { engine, ast: ast.clone_functions_only(), contextual })
+    }
+
+    fn engine(templates: Arc<Vec<Template>>, tables: Arc<BTreeMap<String, Table>>) -> Engine {
         let mut engine = Engine::new();
         engine.set_max_operations(MAX_OPERATIONS);
         engine.set_max_call_levels(MAX_CALL_LEVELS);
@@ -232,8 +240,7 @@ impl Script {
             Err(failure(last.unwrap_or_else(|| "the generator has no template".into())))
         });
 
-        let ast = engine.compile(source).map_err(|e| ScriptError::Script(e.to_string()))?;
-        Ok(Script { engine, ast: ast.clone_functions_only() })
+        engine
     }
 
     /// Whether the script defines `name` with `arity` parameters.
@@ -242,8 +249,12 @@ impl Script {
     }
 
     fn call(&self, name: &str, arg: Json) -> Result<Json, ScriptError> {
+        self.call_in(&self.engine, name, arg)
+    }
+
+    fn call_in(&self, engine: &Engine, name: &str, arg: Json) -> Result<Json, ScriptError> {
         let mut scope = Scope::new();
-        let out = self.engine.call_fn::<Dynamic>(&mut scope, &self.ast, name, (to_dynamic(&arg, 0),)).map_err(map_error)?;
+        let out = engine.call_fn::<Dynamic>(&mut scope, &self.ast, name, (to_dynamic(&arg, 0),)).map_err(|e| map_error(*e))?;
         from_dynamic(&out, 0).map_err(ScriptError::Script)
     }
 
@@ -254,6 +265,28 @@ impl Script {
             return Ok(None);
         }
         self.call("resolve", Json::Object(fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect())).map(Some)
+    }
+
+    /// Resolve using the matched template for the script's `code_template` helper.
+    pub fn resolve_in(&self, fields: &Params, template: usize) -> Result<Option<Json>, ScriptError> {
+        if !self.defines("resolve", 1) {
+            return Ok(None);
+        }
+        let engine = self.contextual.get(template).ok_or_else(|| ScriptError::Script("no such template".into()))?;
+        self.call_in(engine, "resolve", Json::Object(fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect())).map(Some)
+    }
+
+    /// Describe using the matched template for the script's `code_template` helper.
+    pub fn describe_in(&self, fields: &Params, template: usize) -> Result<Option<String>, ScriptError> {
+        if !self.defines("describe", 1) {
+            return Ok(None);
+        }
+        let engine = self.contextual.get(template).ok_or_else(|| ScriptError::Script("no such template".into()))?;
+        match self.call_in(engine, "describe", Json::Object(fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect()))? {
+            Json::String(s) => Ok(Some(s)),
+            Json::Null => Ok(None),
+            other => Err(ScriptError::Script(format!("describe() must return text, not {other}"))),
+        }
     }
 
     /// `describe(parameters)`: a line of text beside the code. `None` when not defined.

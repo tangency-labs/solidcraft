@@ -326,7 +326,7 @@ fn decl(name: &str, d: &ParamDef) -> Result<Decl, GeneratorError> {
 impl Package {
     /// Load the package in `dir`.
     pub fn load(dir: &Path) -> Result<Package, GeneratorError> {
-        let text = read_limited(&dir.join("generator.toml"), MAX_MANIFEST_BYTES, "the manifest")?;
+        let text = read_limited(&inside(dir, "generator.toml")?, MAX_MANIFEST_BYTES, "the manifest")?;
         let mut table: toml::Table = text.parse().map_err(|e| GeneratorError::Package(format!("generator.toml: {e}")))?;
         strip_extension_keys(&mut table);
         let m: Manifest = toml::Value::Table(table).try_into().map_err(|e| GeneratorError::Package(format!("generator.toml: {e}")))?;
@@ -504,7 +504,7 @@ impl Package {
         let mut parameters = BTreeMap::new();
         let mut description = None;
         let scripted = match &self.script {
-            Some(s) => s.resolve(&fields).map_err(Self::script_refusal)?,
+            Some(s) => s.resolve_in(&fields, template).map_err(Self::script_refusal)?,
             None => None,
         };
         match scripted {
@@ -551,7 +551,7 @@ impl Package {
         if description.is_none()
             && let Some(s) = &self.script
         {
-            description = s.describe(&fields).map_err(Self::script_refusal)?;
+            description = s.describe_in(&fields, template).map_err(Self::script_refusal)?;
         }
         let row = configuration.as_ref().and_then(|c| self.rows.get(c).cloned().or_else(|| self.table_row_info(c)));
         let mut warnings = Vec::new();
@@ -571,6 +571,9 @@ impl Package {
         }
         let description = description.map(|d| fill(&d, &fields));
         let code = info.template.print(&fields).map_err(|e| error(e.to_string()))?;
+        if self.read_code(&code)?.0 != template {
+            return Err(error("the printed code selects a different template".into()));
+        }
         Ok(Resolved { template, fields, code, configuration, parameters, description, row, warnings })
     }
 
@@ -610,7 +613,10 @@ impl Package {
     pub fn parse_with(&self, code: &str, options: Option<&serde_json::Map<String, Json>>) -> Result<Resolved, Refusal> {
         let (template, mut fields) = self.read_code(code)?;
         if let Some(o) = options {
-            fields.entry("options".to_string()).or_insert_with(|| Json::Object(o.clone()));
+            if fields.contains_key("options") {
+                return Err(Refusal { kind: RefusalKind::Invalid, message: "options are supplied both in the code and outside it".into() });
+            }
+            fields.insert("options".to_string(), Json::Object(o.clone()));
         }
         self.resolve_fields(template, fields)
     }
@@ -624,7 +630,13 @@ impl Package {
                 continue;
             }
             match t.template.print(params) {
-                Ok(code) => return Ok((i, code)),
+                Ok(code) => {
+                    let (read_template, _) = self.read_code(&code).map_err(|e| TemplateError::NoMatch(e.message))?;
+                    if read_template != i {
+                        return Err(TemplateError::NoMatch("the printed code selects a different template".into()));
+                    }
+                    return Ok((i, code));
+                }
                 Err(e) => last = Some(e),
             }
         }
@@ -668,8 +680,18 @@ fn fill(text: &str, fields: &Params) -> String {
 fn read_tables(dir: &Path) -> Result<Arc<BTreeMap<String, Table>>, GeneratorError> {
     let mut out = BTreeMap::new();
     let folder = dir.join("tables");
-    let Ok(entries) = std::fs::read_dir(&folder) else { return Ok(Arc::new(out)) };
-    let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "csv")).collect();
+    let entries = match std::fs::read_dir(&folder) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Arc::new(out)),
+        Err(e) => return pkg(format!("cannot read `{}`: {e}", folder.display())),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| GeneratorError::Package(format!("cannot read `{}`: {e}", folder.display())))?.path();
+        if path.extension().is_some_and(|x| x == "csv") {
+            files.push(path);
+        }
+    }
     files.sort();
     if files.len() > MAX_TABLES {
         return Err(GeneratorError::Limit { what: "table files", limit: MAX_TABLES });

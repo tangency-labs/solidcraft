@@ -134,7 +134,7 @@ impl Table {
                 return Err(format!("row {line} has {} cells, the header has {}", rec.len(), columns.len()));
             }
             let cells: Vec<Json> = rec.iter().map(|c| typed(c)).collect();
-            let Some(key) = cells.first().and_then(key_text) else { return Err(format!("row {line}: the key cell is empty")) };
+            let Some(key) = rec.first().map(|s| s.trim()).filter(|s| !s.is_empty()) else { return Err(format!("row {line}: the key cell is empty")) };
             if index.insert(key.to_lowercase(), rows.len()).is_some() {
                 return Err(format!("row {line}: the key `{key}` is repeated"));
             }

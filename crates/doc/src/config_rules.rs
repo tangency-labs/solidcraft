@@ -585,6 +585,37 @@ mod tests {
         ConfigRule { id: id.into(), name: id.into(), enabled: true, length_unit: None, enforce_on_edit: false, condition, effect }
     }
     #[test]
+    fn suppression_without_column_depends_only_on_new_row() {
+        let mut doc = design();
+        let feature = doc
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "width".into(),
+                    width: "5 mm".into(),
+                    height: "5 mm".into(),
+                    operation: crate::Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.configs.rows.push(ConfigRow { id: 2, name: "A".into(), cells: vec!["20 mm".into(), "5 mm".into()] });
+        doc.configs.rules.push(rule(
+            "optional",
+            RuleCondition::Parameter { parameter: "width".into(), operator: RuleOperator::Gt, expression: "15 mm".into() },
+            RuleEffect::DriveSuppression { feature, value: true },
+        ));
+        let mut direct = doc.clone();
+        direct.apply_configuration("Default").unwrap();
+        doc.apply_configuration("A").unwrap();
+        assert!(doc.feature(feature).unwrap().suppressed);
+        doc.apply_configuration("Default").unwrap();
+        assert!(!doc.feature(feature).unwrap().suppressed);
+        assert_eq!(doc, direct);
+    }
+
+    #[test]
     fn ordered_rules_derive_values_without_overwriting_rows() {
         let mut doc = design();
         doc.configs.rules = vec![

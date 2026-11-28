@@ -77,6 +77,11 @@ fn parameters_are_kept_by_the_link_and_saved_with_the_design() {
     let mut again = Session::default();
     run(&mut again, "doc.open", json!({"path": file}));
     assert!(close(volume(&mut again), want), "{}", volume(&mut again));
+    let c = again.doc.components.iter().find(|c| c.id != 0).unwrap();
+    let metadata = serde_json::to_value(&c.metadata).unwrap();
+    let saved = metadata.to_string();
+    assert!(saved.contains("org.solidcraft.generator"), "{saved}");
+    assert!(saved.contains("metric-t-nut") && saved.contains("M6"), "{saved}");
     let component = run(&mut again, "component.links", json!({}))["links"][0]["component"].as_u64().unwrap();
     // Update Links builds it again with the saved values.
     run(&mut again, "component.update_links", json!({"component": component}));
@@ -191,4 +196,94 @@ fn a_limit_marked_enforce_on_edit_holds_on_an_ordinary_parameter_change() {
     assert!(e.contains("Width range"), "{e}");
     assert_eq!(s.doc.param_values().0["w"].v, 20.0, "a refused edit leaves the value");
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "30 mm"}));
+}
+
+#[test]
+fn parse_refuses_a_resolution_outside_the_source_limits() {
+    let dir = nut_package(None);
+    std::fs::write(
+        dir.path().join("generator.rhai"),
+        r#"fn resolve(f) {
+        #{ configuration: "M4", parameters: #{ length: "120 mm" } }
+    }"#,
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    let r = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r["message"].as_str().unwrap().contains("Length range"), "{r}");
+    assert_eq!(s.doc, before);
+}
+
+#[test]
+fn insertion_metadata_refusal_rolls_back_the_whole_part() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    s.set_command_check(Some(std::sync::Arc::new(
+        |id, _, _| {
+            if id == "component.metadata.set" { Err("part properties forbidden".into()) } else { Ok(()) }
+        },
+    )));
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let err = s.execute("generator.insert", &json!({"generator": path(&dir), "code": "TN-M4-40"})).unwrap_err();
+    assert!(err.to_string().contains("part properties forbidden"));
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(body_count(&mut s), 0);
+}
+
+#[test]
+fn field_insertion_uses_the_same_canonical_choices_as_code_insertion() {
+    let dir = nut_package(None);
+    std::fs::write(
+        dir.path().join("generator.rhai"),
+        r#"fn resolve(f) {
+        if f.size != "M6" { refuse("invalid", "noncanonical size"); }
+        #{ configuration: f.size, parameters: #{ length: f.length.to_string() + " mm" } }
+    }"#,
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "parameters": {"size": "m6", "length": 40}}));
+    assert_eq!(r["code"], "TN-M6-40");
+    assert_eq!(r["configuration"], "M6");
+}
+
+#[test]
+fn invalid_examples_fail_when_the_resolver_cannot_decide() {
+    let dir = nut_package(None);
+    let file = dir.path().join("generator.toml");
+    let manifest = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, manifest.replace("message_contains = \"not modelled\"", "").replace("code = \"TN-M8-40\"", "code = \"TN-M4-50\"")).unwrap();
+    std::fs::write(dir.path().join("generator.rhai"), "fn resolve(f) { loop {} }").unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert_eq!(r["results"][1]["ok"], false, "{r}");
+}
+
+#[test]
+fn check_reports_an_example_matching_two_templates() {
+    let dir = nut_package(None);
+    let file = dir.path().join("generator.toml");
+    let mut manifest = std::fs::read_to_string(&file).unwrap();
+    manifest.push_str("\n[[template]]\npattern = \"tn-{size}-{length}[-{grade}]\"\n");
+    std::fs::write(&file, manifest).unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["results"][0]["problems"].to_string().contains("multiple templates"), "{r}");
+}
+
+#[test]
+fn insertion_keeps_catalogue_provenance_in_component_metadata() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    let id = r["component"].as_u64().unwrap();
+    let c = s.doc.components.iter().find(|c| c.id == id).unwrap();
+    let saved = serde_json::to_value(&c.metadata).unwrap().to_string();
+    assert!(saved.contains("fixture table") && saved.contains("verified"), "{saved}");
 }

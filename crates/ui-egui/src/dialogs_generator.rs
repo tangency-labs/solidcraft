@@ -69,14 +69,15 @@ fn options(kind: &FieldKind) -> Option<Vec<String>> {
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Gen) -> bool {
     let packages = k.packages.get_or_insert_with(|| installed::list().0);
-    let Some(chosen) = packages.get(k.package.min(packages.len().saturating_sub(1))).cloned() else {
+    if packages.is_empty() {
         let folder = installed::dir().map(|d| d.display().to_string()).unwrap_or_default();
         text(ui, &app.tr("ui.generator.none").replace("{folder}", &folder), Text::Hint("generator_none"));
         return false;
-    };
+    }
     k.package = k.package.min(packages.len().saturating_sub(1));
     let names: Vec<&str> = packages.iter().map(|p| p.package.name.as_str()).collect();
     choice_row(ui, app.tr("ui.generator.generator"), "generator_package", &mut k.package, &names);
+    let Some(chosen) = packages.get(k.package) else { return false };
     let g: &Package = &chosen.package;
     if !g.description.is_empty() {
         text(ui, &g.description, Text::Note("generator_description"));

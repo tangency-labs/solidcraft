@@ -97,3 +97,42 @@ fn with_no_package_installed_there_is_nothing_to_insert() {
     g.code = "TN-40".into();
     assert!(apply_commands(&app, &d).is_err());
 }
+
+#[test]
+fn changing_package_refreshes_the_resolution_in_the_selection_frame() {
+    solidcraft_ui_registry::isolated(|| {
+        let (_dir, app, mut d) = opened();
+        let Kind::Generator(g) = &mut d.kind else { panic!("wrong dialog") };
+        let first = g.packages.as_ref().unwrap()[0].clone();
+        let mut second = Package::load(&first.path).unwrap();
+        second.name = "Second generator".into();
+        second.description = "Distinct package".into();
+        // A different literal makes a stale successful reading observable.
+        second.templates[0].template = solidcraft_engine::generator::code_template::Template::parse("OTHER-{length}", &second.declared).unwrap();
+        g.packages.as_mut().unwrap().push(Installed { path: first.path, package: Arc::new(second) });
+        g.code = "TN-40".into();
+        let ctx = egui::Context::default();
+        let mut frame = |events| {
+            let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                rows(&app, ui, g);
+            });
+        };
+        frame(Vec::new());
+        frame(Vec::new());
+        let label = app.tr("ui.generator.generator");
+        let trigger = solidcraft_ui_registry::handle_at(&format!("dialog:{label}")).unwrap();
+        let click = |pos| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+            ]
+        };
+        frame(click(trigger));
+        frame(Vec::new());
+        let option = solidcraft_ui_registry::handle_at(&format!("dialog:{label}:Second generator")).unwrap();
+        frame(click(option));
+        assert_eq!(g.package, 1);
+        assert!(g.reading.as_ref().unwrap().2.is_err());
+    });
+}

@@ -25,6 +25,7 @@ fn schemas_and_the_key_check_agree() {
             "name",
             "options",
             "origin",
+            "parameters",
             "parent",
             "path",
             "reuse",
@@ -34,7 +35,7 @@ fn schemas_and_the_key_check_agree() {
         ],
     );
     assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
-    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "names", "occurrence", "path"]);
+    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "names", "occurrence", "parameters", "path"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
     assert_keys(input_schema_for::<ExtractParams>(), &["component", "path"]);

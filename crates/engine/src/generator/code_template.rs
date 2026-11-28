@@ -209,7 +209,11 @@ fn spec_kind(spec: &str) -> Result<FieldKind, TemplateError> {
                     _ => return syntax(format!("`{word}` is not understood after an int range (only `step N`)")),
                 }
             }
-            if min > max || step < 1 || min.abs() > 1_000_000_000_000 || max.abs() > 1_000_000_000_000 {
+            if min > max
+                || step < 1
+                || !(-1_000_000_000_000..=1_000_000_000_000).contains(&min)
+                || !(-1_000_000_000_000..=1_000_000_000_000).contains(&max)
+            {
                 return syntax("an int field needs min <= max, |values| <= 10^12 and a step of 1 or more");
             }
             Ok(FieldKind::Int { min, max, step })
@@ -536,8 +540,41 @@ impl Template {
         if out.chars().count() > MAX_CODE_CHARS {
             return Err(TemplateError::Limit { what: "ordering code characters", limit: MAX_CODE_CHARS });
         }
+        let Some(read) = self.match_code(&out)? else {
+            return bad_field("code", "the printed code cannot be read back");
+        };
+        // Compare canonical spellings, so case-insensitive choices and numeric JSON forms agree.
+        let mut reread = String::new();
+        print_nodes(&self.nodes, &read, &mut reread)?;
+        if reread != out || !same_printed_fields(&self.nodes, params, &read)? {
+            return bad_field("code", "the printed code reads as different fields");
+        }
         Ok(out)
     }
+}
+
+fn same_printed_fields(nodes: &[Node], wanted: &Params, read: &Params) -> Result<bool, TemplateError> {
+    for node in nodes {
+        match node {
+            Node::Field { name, kind } => {
+                if let Some(value) = wanted.get(name) {
+                    let Some(actual) = read.get(name) else { return Ok(false) };
+                    if print_field(name, kind, value)? != print_field(name, kind, actual)? {
+                        return Ok(false);
+                    }
+                }
+            }
+            Node::Optional { nodes, flag, absent } => {
+                let default_of = |n: &str| absent.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
+                let there = flag.as_ref().map_or_else(|| present(nodes, wanted, &default_of), |f| wanted.get(f) == Some(&Json::Bool(true)));
+                if there && !same_printed_fields(nodes, wanted, read)? {
+                    return Ok(false);
+                }
+            }
+            Node::Lit(_) => {}
+        }
+    }
+    Ok(true)
 }
 
 /// Match `code` against each template in turn, sharing one step budget. The first complete
@@ -550,6 +587,18 @@ pub fn match_any(templates: &[Template], code: &str) -> Result<Option<(usize, Pa
         }
     }
     Ok(None)
+}
+
+/// Count complete template matches using one shared matching budget.
+pub fn match_count(templates: &[Template], code: &str) -> Result<usize, TemplateError> {
+    let mut budget = MATCH_BUDGET;
+    let mut count = 0;
+    for template in templates {
+        if template.match_with(code, &mut budget)?.is_some() {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 struct Matcher<'a> {
@@ -601,19 +650,31 @@ impl Matcher<'_> {
                 None => Ok(None),
             },
             Node::Field { name, kind } => {
-                // A free tail keeps the separators it starts with.
-                let at = if matches!(kind, FieldKind::Rest) { pos } else { self.skip(pos) };
-                for (len, value) in self.candidates(kind, at) {
-                    let mut f = fields.clone();
-                    // A letter map also keeps the letters as typed (`block_code`), next to the value.
-                    if let FieldKind::Map(pairs) = kind
-                        && let Some((code, _)) = pairs.iter().find(|(_, v)| value.as_str() == Some(v.as_str()))
-                    {
-                        f.insert(format!("{name}_code"), Json::String(code.clone()));
-                    }
-                    f.insert(name.clone(), value);
-                    if let Some(done) = self.run(tail, rest, at + len, f)? {
-                        return Ok(Some(done));
+                // A minus can be either a numeric sign or an optional separator.
+                let skipped = self.skip(pos);
+                let sign_at = skipped
+                    .checked_sub(1)
+                    .filter(|at| matches!(kind, FieldKind::Int { .. } | FieldKind::Decimal { .. }) && self.input.get(*at) == Some(&'-'));
+                let starts = match sign_at {
+                    Some(at) => vec![at, skipped],
+                    None => vec![if matches!(kind, FieldKind::Rest) { pos } else { skipped }],
+                };
+                for at in starts {
+                    for (len, value) in self.candidates(kind, at) {
+                        let mut f = fields.clone();
+                        if let FieldKind::Map(pairs) = kind
+                            && let Some((code, _)) = pairs.iter().find(|(code, v)| {
+                                code.chars().count() == len
+                                    && self.starts(at, &code.chars().collect::<Vec<_>>())
+                                    && value.as_str() == Some(v.as_str())
+                            })
+                        {
+                            f.insert(format!("{name}_code"), Json::String(code.clone()));
+                        }
+                        f.insert(name.clone(), value);
+                        if let Some(done) = self.run(tail, rest, at + len, f)? {
+                            return Ok(Some(done));
+                        }
                     }
                 }
                 Ok(None)
@@ -639,7 +700,7 @@ impl Matcher<'_> {
     }
 
     /// The readings of a field at `at`, best first: how many characters each takes and its value.
-    fn candidates(&self, kind: &FieldKind, at: usize) -> Vec<(usize, Json)> {
+    fn candidates(&mut self, kind: &FieldKind, at: usize) -> Vec<(usize, Json)> {
         let mut out = Vec::new();
         match kind {
             FieldKind::Choice(values) => {
@@ -659,10 +720,11 @@ impl Matcher<'_> {
                 }
             }
             FieldKind::Int { min, max, step } => {
-                let digits = self.input.get(at..).unwrap_or_default().iter().take(15).take_while(|c| c.is_ascii_digit()).count();
+                let sign = usize::from(self.input.get(at) == Some(&'-'));
+                let digits = sign + self.input.get(at + sign..).unwrap_or_default().iter().take(15).take_while(|c| c.is_ascii_digit()).count();
                 for len in (1..=digits).rev() {
                     let text: String = self.input.get(at..at + len).unwrap_or_default().iter().collect();
-                    if len > 1 && text.starts_with('0') {
+                    if len > sign + 1 && text.get(sign..).is_some_and(|s| s.starts_with('0')) {
                         continue;
                     }
                     let Ok(n) = text.parse::<i64>() else { continue };
@@ -673,7 +735,9 @@ impl Matcher<'_> {
                 }
             }
             FieldKind::Decimal { min, max, step, digits } => {
-                let run = self.input.get(at..).unwrap_or_default().iter().take(24).take_while(|c| c.is_ascii_digit() || **c == '.').count();
+                let sign = usize::from(self.input.get(at) == Some(&'-'));
+                let run =
+                    sign + self.input.get(at + sign..).unwrap_or_default().iter().take(24).take_while(|c| c.is_ascii_digit() || **c == '.').count();
                 for len in (1..=run).rev() {
                     let text: String = self.input.get(at..at + len).unwrap_or_default().iter().collect();
                     if text.matches('.').count() > 1 || text.starts_with('.') || text.ends_with('.') {
@@ -710,42 +774,39 @@ impl Matcher<'_> {
                     out.push((left.len(), Json::String(left.iter().collect())));
                 }
             }
-            FieldKind::Set(options) => out.push(self.options(options, at)),
+            FieldKind::Set(options) => self.options(options, at, at, &serde_json::Map::new(), &mut out),
         }
         out
     }
 
-    /// Read options in any order, each once, the longest code first; stops at the first thing that is none.
-    fn options(&self, options: &[SetOption], at: usize) -> (usize, Json) {
+    /// Enumerate complete and partial option readings under the shared search budget.
+    fn options(&mut self, options: &[SetOption], start: usize, at: usize, found: &serde_json::Map<String, Json>, out: &mut Vec<(usize, Json)>) {
+        if *self.budget == 0 {
+            return;
+        }
+        *self.budget -= 1;
         let mut order: Vec<&SetOption> = options.iter().collect();
         order.sort_by_key(|o| std::cmp::Reverse(o.code.chars().count()));
-        let mut found = serde_json::Map::new();
-        let mut p = at;
-        'more: loop {
-            for o in &order {
-                if found.contains_key(&o.key) {
-                    continue;
-                }
-                let code: Vec<(char, bool)> = o.code.chars().map(|c| (c, false)).collect();
-                let Some(after) = self.literal(p, &code) else { continue };
-                match &o.arg {
-                    None => {
-                        found.insert(o.key.clone(), Json::Bool(true));
-                        p = after;
-                        continue 'more;
-                    }
-                    Some(kind) => {
-                        if let Some((len, value)) = self.candidates(kind, after).into_iter().next() {
-                            found.insert(o.key.clone(), value);
-                            p = after + len;
-                            continue 'more;
-                        }
-                    }
+        for o in order {
+            if found.contains_key(&o.key) {
+                continue;
+            }
+            let code: Vec<(char, bool)> = o.code.chars().map(|c| (c, false)).collect();
+            let Some(after) = self.literal(at, &code) else { continue };
+            let values = match &o.arg {
+                None => vec![(0, Json::Bool(true))],
+                Some(kind) => self.candidates(kind, after),
+            };
+            for (len, value) in values {
+                let mut next = found.clone();
+                next.insert(o.key.clone(), value);
+                self.options(options, start, after + len, &next, out);
+                if *self.budget == 0 {
+                    return;
                 }
             }
-            break;
         }
-        (p - at, Json::Object(found))
+        out.push((at - start, Json::Object(found.clone())));
     }
 }
 
@@ -783,7 +844,19 @@ fn print_nodes(nodes: &[Node], params: &Params, out: &mut String) -> Result<(), 
                     }
                     return bad_field(name, "has no value");
                 };
-                out.push_str(&print_field(name, kind, v)?);
+                if let FieldKind::Map(pairs) = kind
+                    && let Some(token) = params.get(&format!("{name}_code")).and_then(Json::as_str)
+                {
+                    let Some((code, _)) = pairs
+                        .iter()
+                        .find(|(code, value)| code.eq_ignore_ascii_case(token) && v.as_str().is_some_and(|v| value.eq_ignore_ascii_case(v)))
+                    else {
+                        return bad_field(name, "the letter-map token does not match its value");
+                    };
+                    out.push_str(code);
+                } else {
+                    out.push_str(&print_field(name, kind, v)?);
+                }
             }
             Node::Optional { nodes, flag, absent } => {
                 let default_of = |n: &str| absent.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
@@ -846,6 +919,9 @@ fn print_field(name: &str, kind: &FieldKind, v: &Json) -> Result<String, Templat
             let mut s = format!("{:.*}", *digits, x);
             if s.contains('.') {
                 s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+            }
+            if s.parse::<f64>().ok() != Some(x) {
+                return bad_field(name, "cannot be represented at the declared precision");
             }
             Ok(s)
         }

@@ -1267,7 +1267,7 @@ struct SelectedConfiguration {
 
 fn selected_configuration(link: &DesignLink) -> Option<SelectedConfiguration> {
     let parameters = LinkParameters::intern(&link.parameters);
-    (link.configuration.is_some() || parameters.is_some()).then(|| SelectedConfiguration {
+    (link.configuration.is_some() || parameters.is_some()).then_some(SelectedConfiguration {
         row: link.configuration,
         identity: link.configuration_identity,
         parameters,
@@ -1467,6 +1467,15 @@ fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<Sele
         .row(key)
         .map(|row| Some(SelectedConfiguration { row: Some(row.id), identity: doc.configs.row_identity(row.id), parameters: None }))
         .ok_or_else(|| EngineError::Other(format!("configuration `{key}` does not exist in the source design")))
+}
+
+/// Validate a generator preview with the same source selection and evaluation as insertion.
+pub(super) fn validate_generator(s: &Session, file: &Path, row: Option<&str>, parameters: &std::collections::BTreeMap<String, String>) -> Result<()> {
+    let bytes = read_link(file, s.path.as_deref(), false)?;
+    let selected = configuration_id(&bytes, row.map(RowKey::Name))?;
+    let selected = with_parameters(selected, parameters);
+    design_bodies(&Source::File(file.to_path_buf()), &bytes, selected, s.validation())?;
+    Ok(())
 }
 
 /// Linked files' digests as [`file_sha256`] last worked them out, by file, with the time and
@@ -3959,7 +3968,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let configuration = configuration_id(&bytes, selection).map_err(|e| bad(cmd, e.to_string()))?;
     let no_parameters = std::collections::BTreeMap::new();
     let configuration = with_parameters(configuration, &link_parameters(p, if same_source { &link.parameters } else { &no_parameters }, cmd)?);
-    if same_source && p.get("configuration").is_none() && p.get("parameters").is_none() && configuration != selected_configuration(&link) {
+    if same_source && p.get("configuration").is_none() && configuration.and_then(|c| c.identity) != link.configuration_identity {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
     }
     if let Some(occurrence) = lone_placement(s, p, comp, cmd)? {

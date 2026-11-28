@@ -221,8 +221,8 @@ fn installed_generators_are_listed_by_folder_and_a_broken_one_is_skipped() {
     std::fs::write(base.path().join("broken/generator.toml"), "nope").unwrap();
     let (found, skipped) = super::installed::list_in(base.path());
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].package.id, "metric-t-nut");
-    assert_eq!(found[0].package.templates[0].template.prefixes(), ["TNM4", "TNM5", "TNM6", "TNM8"].map(String::from).to_vec());
+    assert_eq!(found[0].id, "metric-t-nut");
+    assert_eq!(found[0].prefixes, ["TNM4", "TNM5", "TNM6", "TNM8"].map(String::from).to_vec());
     assert_eq!(skipped.len(), 1, "{skipped:?}");
 }
 
@@ -232,7 +232,7 @@ fn options_outside_the_code_reach_the_script_and_a_tables_columns_are_the_proven
     std::fs::create_dir(dir.path().join("tables")).unwrap();
     std::fs::write(
         dir.path().join("tables/sizes.csv"),
-        "key,row,source,page,status\n6,M6,Fixture catalogue,7,needs_review\nM6,M6,Fixture catalogue,7,needs_review\n",
+        "key,row,source,page,status\n6,M6,Lookup source,99,verified\nM6,M6,Fixture catalogue,7,needs_review\n",
     )
     .unwrap();
     std::fs::write(
@@ -257,4 +257,94 @@ fn options_outside_the_code_reach_the_script_and_a_tables_columns_are_the_proven
     assert_eq!(g.parse("TN-M6-30").unwrap().description.as_deref(), Some("caps 0"));
     // The letters of a letter map are kept next to its value.
     assert_eq!(g.parse("TN-M6-30-S").unwrap().fields["grade_code"], json!("S"));
+}
+
+#[test]
+fn supplied_options_do_not_silently_replace_encoded_options() {
+    let manifest = MANIFEST.replace("TN-{size}-{length}[-{grade}]", "TN-{size}-{length}{options: set(-A, -B)}");
+    let dir = nut_package(Some(&manifest));
+    let g = load(&dir);
+    let options = json!({"caps": 2});
+    let error = g.parse_with("TN-M6-40", options.as_object()).unwrap_err();
+    assert_eq!(error.kind, RefusalKind::Invalid);
+    assert!(error.message.contains("both"));
+    assert!(g.parse("TN-M6-40-A").is_ok());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_manifest_link_outside_the_package_is_refused() {
+    let dir = nut_package(None);
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::rename(dir.path().join("generator.toml"), outside.path().join("generator.toml")).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("generator.toml"), dir.path().join("generator.toml")).unwrap();
+    assert!(Package::load(dir.path()).is_err());
+}
+
+#[test]
+fn table_directory_read_errors_are_not_treated_as_absent_tables() {
+    let dir = nut_package(None);
+    assert!(Package::load(dir.path()).is_ok());
+    std::fs::write(dir.path().join("tables"), "not a directory").unwrap();
+    let Err(error) = Package::load(dir.path()) else { panic!("a file cannot be read as a tables directory") };
+    assert!(error.to_string().contains("tables"));
+}
+
+#[test]
+fn printing_an_overlapping_later_template_is_refused() {
+    let manifest = r#"
+format = "solidcraft-generator/2"
+id = "overlapping-series"
+name = "Overlapping series"
+model = "tnut.sc"
+[[template]]
+pattern = "X{n: int 1..9}"
+fields = { series = "A" }
+[[template]]
+pattern = "X{n: int 5..12}"
+fields = { series = "B" }
+"#;
+    let dir = nut_package(Some(manifest));
+    let g = load(&dir);
+    let fields = [("n".to_string(), json!(5))].into_iter().collect();
+    assert!(g.code_for(&fields, Some("X{n: int 5..12}")).is_err());
+    let fields = [("n".to_string(), json!(12))].into_iter().collect();
+    assert_eq!(g.code_for(&fields, Some("X{n: int 5..12}")).unwrap().1, "X12");
+}
+
+#[test]
+fn script_code_template_uses_the_template_that_matched() {
+    let manifest = r#"
+format = "solidcraft-generator/2"
+id = "two-series"
+name = "Two series"
+model = "tnut.sc"
+[[template]]
+pattern = "A{size: int 1..9}"
+[[template]]
+pattern = "B{size: int 1..9}"
+"#;
+    let dir = nut_package(Some(manifest));
+    std::fs::write(dir.path().join("generator.rhai"), "fn resolve(f) { #{ description: code_template(f) } }").unwrap();
+    let g = load(&dir);
+    assert_eq!(g.parse("B2").unwrap().description.as_deref(), Some("B2"));
+    std::fs::write(dir.path().join("generator.rhai"), "fn describe(f) { code_template(f) }").unwrap();
+    assert_eq!(load(&dir).parse("B2").unwrap().description.as_deref(), Some("B2"));
+}
+
+#[test]
+fn decimal_key_provenance_can_refuse_the_selected_row() {
+    let manifest = r#"
+format = "solidcraft-generator/2"
+id = "decimal-keys"
+name = "Decimal keys"
+model = "tnut.sc"
+row_from = ["size"]
+[[template]]
+pattern = "X{size: 1.50}"
+"#;
+    let dir = nut_package(Some(manifest));
+    std::fs::create_dir(dir.path().join("tables")).unwrap();
+    std::fs::write(dir.path().join("tables/rows.csv"), "key,source,status\n1.50,Fixture,not_modelled\n").unwrap();
+    assert_eq!(load(&dir).parse("X1.50").unwrap_err().kind, RefusalKind::NotModelled);
 }

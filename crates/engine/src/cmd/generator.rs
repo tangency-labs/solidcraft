@@ -13,7 +13,7 @@ use crate::params::bad;
 use crate::schema::generator::{
     GeneratorCheckParams, GeneratorCheckResult, GeneratorCheckRow, GeneratorCodeParams, GeneratorCodeResult, GeneratorInsertParams,
     GeneratorInsertResult, GeneratorListParams, GeneratorListResult, GeneratorParseParams, GeneratorParseResult, GeneratorProvenance,
-    GeneratorSummary, GeneratorTemplateParams, GeneratorTemplateResult,
+    GeneratorTemplateParams, GeneratorTemplateResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -117,32 +117,21 @@ fn provenance(r: &Resolved) -> Option<GeneratorProvenance> {
 fn list(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "generator.list";
     let GeneratorListParams {} = params(cmd, p)?;
-    let (found, skipped) = installed::list();
-    let generators = found
-        .iter()
-        .map(|i| {
-            let g = &i.package;
-            GeneratorSummary {
-                id: g.id.clone(),
-                name: g.name.clone(),
-                description: g.description.clone(),
-                license: g.license.clone(),
-                author: g.author.clone(),
-                path: i.path.to_string_lossy().into_owned(),
-                templates: g.templates.iter().map(|t| t.template.source().to_string()).collect(),
-                prefixes: g.templates.iter().flat_map(|t| t.template.prefixes()).collect(),
-            }
-        })
-        .collect();
+    let (generators, skipped) = installed::summaries();
     reply(cmd, GeneratorListResult { generators, skipped, param_warnings: Vec::new() })
 }
 
-fn parse(_s: &mut Session, p: &Value) -> Result<Value> {
+fn parse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "generator.parse";
     let q: GeneratorParseParams = params(cmd, p)?;
     let g = load(cmd, &q.generator)?;
     let typed: String = q.code.trim().chars().take(128).collect();
-    let out = match g.parse_with(&q.code, q.options.as_ref()) {
+    let resolved = g.parse_with(&q.code, q.options.as_ref()).and_then(|r| {
+        super::component_link::validate_generator(s, &g.model, r.configuration.as_deref(), &r.parameters)
+            .map_err(|e| Refusal { kind: crate::generator::RefusalKind::Invalid, message: e.to_string() })?;
+        Ok(r)
+    });
+    let out = match resolved {
         Ok(r) => GeneratorParseResult {
             ok: true,
             reason: None,
@@ -279,7 +268,11 @@ fn run_insert(s: &mut Session, cmd: &str, g: &Package, r: &Resolved, placement: 
     let occurrence = made.get("occurrence").and_then(Value::as_u64);
     // The ordering code is the part number, so the bill of materials names the part as ordered.
     let description = r.description.clone().unwrap_or_else(|| g.name.clone());
-    let _ = s.execute("component.metadata.set", &json!({"component": component, "part_number": r.code, "description": description}));
+    s.execute(
+        "component.metadata.set",
+        &json!({"component": component, "part_number": r.code, "description": description,
+        "values": {"org.solidcraft.generator": {"id": g.id, "configuration": r.configuration, "provenance": provenance(r)}}}),
+    )?;
     let bodies: Vec<String> = body_names(s)?.into_iter().filter(|n| !before.contains(n)).collect();
     let (volume_mm3, bbox_mm, faces) = if bodies.is_empty() { (None, None, None) } else { measure(s, &bodies)? };
     Ok(Inserted { component, occurrence, bodies, volume_mm3, bbox_mm, faces })
@@ -297,8 +290,9 @@ fn resolve_for_insert(
         (Some(c), None) => g.parse_with(c, options).map_err(refused),
         (None, Some(m)) => {
             let fields = to_params(m);
-            let (i, _) = g.code_for(&fields, None).map_err(|e| bad(cmd, e.to_string()))?;
-            g.resolve_fields(i, fields).map_err(refused)
+            let (_, printed) = g.code_for(&fields, None).map_err(|e| bad(cmd, e.to_string()))?;
+            let supplied = fields.get("options").and_then(Value::as_object).or(options);
+            g.parse_with(&printed, supplied).map_err(refused)
         }
         _ => Err(bad(cmd, "give `code` or `parameters`, not both")),
     }
@@ -337,9 +331,18 @@ fn close(a: f64, b: f64, rel: f64, abs: f64) -> bool {
 
 fn check_example(g: &Package, e: &crate::generator::package::Example) -> GeneratorCheckRow {
     let mut problems = Vec::new();
+    let templates: Vec<Template> = g.templates.iter().map(|t| t.template.clone()).collect();
+    match crate::generator::code_template::match_count(&templates, &e.code) {
+        Ok(n) if n > 1 => problems.push("ordering code matches multiple templates".into()),
+        Err(err) => problems.push(err.to_string()),
+        _ => {}
+    }
     if e.invalid {
         match g.parse(&e.code) {
-            Err(Refusal { message, .. }) => {
+            Err(Refusal { kind, message }) => {
+                if !matches!(kind, crate::generator::RefusalKind::Invalid | crate::generator::RefusalKind::NotModelled) {
+                    problems.push(format!("generator could not decide: {message}"));
+                }
                 if let Some(text) = &e.message_contains
                     && !message.contains(text.as_str())
                 {

@@ -130,8 +130,7 @@ fn hostile_input_is_refused_not_run_away_with() {
     let src = (0..10).map(|i| format!("{{n{i}: int 0..99999}}")).collect::<String>();
     let greedy = Template::parse(&src, &Declared::new()).unwrap();
     let r = greedy.match_code(&format!("{}x", "1".repeat(100)));
-    assert!(matches!(r, Ok(None) | Err(TemplateError::Limit { .. })));
-    assert!(MATCH_BUDGET > 0);
+    assert!(matches!(r, Err(TemplateError::Limit { what: "matching steps", limit }) if limit == MATCH_BUDGET as usize));
 }
 
 #[test]
@@ -167,4 +166,63 @@ fn a_required_separator_must_be_there() {
 fn a_template_names_its_literal_prefixes_for_an_index() {
     let t = Template::parse(MGN, &declared()).unwrap();
     assert_eq!(t.prefixes(), ["MGN7", "MGN9", "MGN12", "MGN15"].map(String::from).to_vec());
+}
+
+#[test]
+fn signed_numeric_fields_round_trip_and_keep_separator_fallback() {
+    for (source, value, code) in [("N{n: int -5..5}", json!(-3), "N-3"), ("N{n: decimal -5..5 digits 1}", json!(-2.5), "N-2.5")] {
+        let t = Template::parse(source, &Declared::new()).unwrap();
+        let p = params(json!({"n": value}));
+        assert_eq!(t.print(&p).unwrap(), code);
+        assert_eq!(t.match_code(code).unwrap().unwrap()["n"], p["n"]);
+        assert_eq!(t.match_code(&code.replacen('N', "N _ ", 1)).unwrap().unwrap()["n"], p["n"]);
+    }
+    let t = Template::parse("N{n: int 1..5}", &Declared::new()).unwrap();
+    assert_eq!(t.match_code("N-3").unwrap().unwrap()["n"], 3);
+}
+
+#[test]
+fn option_sets_backtrack_to_shorter_and_empty_readings() {
+    let t = Template::parse("P{o: set(-A, -AB)}B", &Declared::new()).unwrap();
+    let p = params(json!({"o": {"A": true}}));
+    assert_eq!(t.print(&p).unwrap(), "P-AB");
+    assert_eq!(t.match_code("P-AB").unwrap(), Some(p));
+    assert_eq!(t.match_code("PB").unwrap().unwrap()["o"], json!({}));
+}
+
+#[test]
+fn minimum_signed_integer_bound_is_rejected_without_overflow() {
+    assert!(Template::parse("N{n: int -9223372036854775808..5}", &Declared::new()).is_err());
+}
+
+#[test]
+fn decimal_printing_rejects_lost_precision() {
+    let t = Template::parse("N{n: decimal 0..1 digits 1}", &Declared::new()).unwrap();
+    assert!(t.print(&params(json!({"n": 0.24}))).is_err());
+    assert_eq!(t.print(&params(json!({"n": 0.2}))).unwrap(), "N0.2");
+}
+
+#[test]
+fn letter_map_alias_keeps_the_matched_token() {
+    let t = Template::parse("{v: C=standard, D=standard}", &Declared::new()).unwrap();
+    let p = t.match_code("d").unwrap().unwrap();
+    assert_eq!(p["v_code"], "D");
+    assert_eq!(t.print(&p).unwrap(), "D");
+    assert!(t.print(&params(json!({"v": "standard", "v_code": "E"}))).is_err());
+}
+
+#[test]
+fn adjacent_fields_cannot_print_a_different_split() {
+    let p = params(json!({"a": 1, "b": 23}));
+    let t = Template::parse("X{a: int 1..99}{b: int 1..99}", &Declared::new()).unwrap();
+    assert!(t.print(&p).is_err());
+    let t = Template::parse("X{a: int 1..99}-{b: int 1..99}", &Declared::new()).unwrap();
+    assert_eq!(t.print(&p).unwrap(), "X1-23");
+    assert_eq!(t.print(&params(json!({"a": 12, "b": 3}))).unwrap(), "X12-3");
+}
+
+#[test]
+fn match_count_detects_case_insensitive_overlap() {
+    let templates = ["ABC", "abc"].map(|s| Template::parse(s, &Declared::new()).unwrap());
+    assert_eq!(super::code_template::match_count(&templates, "ABC").unwrap(), 2);
 }

@@ -111,3 +111,11 @@ fn tables_read_numbers_text_and_empty_cells_and_refuse_bad_files() {
     let many = format!("key\n{}", (0..5001).map(|i| format!("{i}\n")).collect::<String>());
     assert!(Table::parse(&many).is_err());
 }
+
+#[test]
+fn csv_keys_keep_their_original_decimal_spelling() {
+    let t = Table::parse("key,status\n1.50,not_modelled\nABC,needs_review\n").unwrap();
+    assert_eq!(t.row("1.50").unwrap()[1].1, &json!("not_modelled"));
+    assert!(t.row("1.5").is_none());
+    assert_eq!(t.row("abc").unwrap()[1].1, &json!("needs_review"));
+}
