@@ -21,6 +21,8 @@
 //! upstream makes them again for every check. The curves are a function of the surface
 //! value, the domain and the kernel's tolerances, so a hit gives what a fresh build
 //! gives; `Kernel::memoize_curve_caches` turns it off with the curve cache memo.
+//! [`SpGlobalSolver::local_solve_branch`] counts the leaves it solves or skips without
+//! an enclosure excluding them ([`SpGlobalSolver::leaves_solved`], #23057).
 //!
 //! Deviations: out-parameters become return values. The caller's object handles
 //! (`O`, the objects named in solutions) replace the `this` and `&crCurve` pointers
@@ -116,6 +118,7 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
@@ -3649,6 +3652,9 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             if are_same(uv_domain.max().x, uv_domain.min().x)
                 || are_same(uv_domain.max().y, uv_domain.min().y)
             {
+                // not upstream (#23057): a sliver of the patch is skipped unsolved,
+                // not excluded by its enclosure
+                self.leaves_solved += 1;
                 return Ok(false);
             }
         }
@@ -3700,6 +3706,10 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                 solve_for_surface = false;
             }
         }
+
+        // not upstream (#23057): no enclosure excluded this leaf, and its solve may find
+        // nothing, so an empty answer no longer proves that there is no point
+        self.leaves_solved += 1;
 
         // solve
         let solutions = sp_local_solve::<O>(
@@ -4353,7 +4363,7 @@ fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
     }
     let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
     let exponent = i32::try_from(p).ok()?;
-    let grow = ratio.powi(exponent) * (1.0 + gamma(p.saturating_add(1)));
+    let grow = det::powi(ratio, exponent) * (1.0 + gamma(p.saturating_add(1)));
     grow.is_finite().then_some(grow)
 }
 

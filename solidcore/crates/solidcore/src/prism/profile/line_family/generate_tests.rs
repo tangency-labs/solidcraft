@@ -5,6 +5,7 @@
     clippy::float_cmp
 )]
 //! Original analytic hatch-output cases; no external pattern library or CAD output.
+use crate::math::det;
 use std::f64::consts::FRAC_PI_2;
 
 use super::budget::Limits;
@@ -569,9 +570,9 @@ fn unresolvable_far_phase_indices_are_not_saturated_into_a_success() {
         [100_000.0, 0.0],
         0.0,
         10.0,
-        &[2.0_f64.powi(-40), -2.0_f64.powi(-40)],
+        &[det::powi(2.0_f64, -40), -det::powi(2.0_f64, -40)],
     )];
-    let r = region(-2.0_f64.powi(-50), -0.5, 2.0_f64.powi(-50), 0.5);
+    let r = region(-det::powi(2.0_f64, -50), -0.5, det::powi(2.0_f64, -50), 0.5);
     assert!(p[0].validate().is_ok());
     assert!(clip(&p, &r).is_err());
 }
@@ -608,7 +609,7 @@ fn a_large_member_phase_cancels_before_its_single_output_rounding() {
 
     // These dyadic bounds contain only member k and preserve their width
     // exactly. Stored origin, deltas and dashes all satisfy model admission.
-    let dy = 2.0_f64.powi(-40);
+    let dy = det::powi(2.0_f64, -40);
     let p = [family([0.0, 0.0], dx as f64, dy, &[1.0, -99.0])];
     let r = region(-2.0, (k as f64 - 0.25) * dy, 2.0, (k as f64 + 0.25) * dy);
     assert!(p[0].validate().is_ok());
@@ -648,9 +649,9 @@ fn a_large_decimal_cycle_preserves_the_stored_period_residual() {
     // K*dx + J*period = -1/32; adding the first dash gives
     // (n-2^50)/D = 2_476_979_795_053_773/D, exactly the stored 0.06875.
     // Repeating the rounded period would wrongly yield [0,0.1].
-    let dy = 2.0_f64.powi(-50);
+    let dy = det::powi(2.0_f64, -50);
     let p = [family([0.0, 0.0], -0.30000000000000004, dy, &[0.1, -0.2])];
-    let half_height = 2.0_f64.powi(-52);
+    let half_height = det::powi(2.0_f64, -52);
     let r = region(-0.0625, 1.0 - half_height, 0.1875, 1.0 + half_height);
     assert!(p[0].validate().is_ok());
     assert_marks(
@@ -935,7 +936,7 @@ fn near_tangent_root_bracket(numerator: u128) -> [f64; 2] {
     };
     assert!(lower * lower <= square && upper * upper >= square);
     assert!(upper <= (1_u128 << 53));
-    let unit = 2.0_f64.powi(-50);
+    let unit = det::powi(2.0_f64, -50);
     [lower as f64 * unit, upper as f64 * unit]
 }
 
@@ -983,7 +984,7 @@ fn assert_circle_line_enclosures(
 #[test]
 fn near_inner_tangency_keeps_distinct_gaps_contacts_and_strict_dot_counts() {
     let r = circular_region(true);
-    let delta = 2.0_f64.powi(-30);
+    let delta = det::powi(2.0_f64, -30);
     let denominator = 1_u128 << 60;
     let six_delta = 6_u128 << 30;
     // Analytic radicands over 2^60 avoid the cancellation of delta^2 in a

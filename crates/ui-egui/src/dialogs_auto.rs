@@ -158,6 +158,8 @@ fn choose(app: &SolveApp, tool: &'static str, picks: Vec<Sel>, was: Option<&Dial
     if let Some(w) = was {
         d.collapsed = w.collapsed;
         d.preview_enabled = w.preview_enabled;
+        // The same window, chosen again for its picks: it stays where it was dragged.
+        d.opened = w.opened;
     }
     d.advance();
     d.focus = true;

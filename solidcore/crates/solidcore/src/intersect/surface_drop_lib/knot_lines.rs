@@ -266,6 +266,7 @@ impl KnotLines {
 mod tests {
     use super::*;
     use crate::geom::vector2d::Vec2;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::surface::plane::Plane;
@@ -277,7 +278,7 @@ mod tests {
     /// control points' row on `u = 1` (`x = 3`): each side rises `fold_degrees` from the
     /// plane, so the normals on the two sides of that line are twice that apart.
     fn patch(fold_degrees: f64, jump: bool) -> Surface {
-        let rise = fold_degrees.to_radians().tan();
+        let rise = det::tan(fold_degrees.to_radians());
         let step = if jump { 2.0 } else { 1.0 };
         let net: Vec<Vec<CPoint>> = (0..8_i32)
             .map(|i| {

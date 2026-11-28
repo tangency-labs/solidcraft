@@ -329,7 +329,7 @@ fn present_null_is_refused_but_absent_is_fine() {
         assert_eq!(c.check(&p).len(), 1, "{key}: null");
     }
     // Keys today's reader treats `null` like absence stay optional.
-    for key in ["taper", "direction", "operation", "name"] {
+    for key in ["taper", "taper2", "direction", "operation", "name"] {
         let mut p = json!({"distance": 5});
         p[key] = Value::Null;
         assert!(c.check(&p).is_empty(), "{key}: null");

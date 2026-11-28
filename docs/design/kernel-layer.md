@@ -328,6 +328,8 @@ Why the record and not a new format:
   - corner balls (`BallPatch`);
   - blends by their definition plus a certified net (`Blend { definition }`; see
     `solidcore/docs/definitions-and-certificates.md`);
+  - from the stages of [screw-surface-record.md](screw-surface-record.md) on, screw-swept walls
+    (threads, coils) by their definition (`Sweep { definition }`);
   - pcurves, and tolerances per body, edge and vertex.
 - **Its validator gives one canonical order.** Persistent names follow history in that order.
   Once a backend's history is renumbered into it, which kernel made the body doesn't matter (§4).
@@ -355,6 +357,33 @@ becomes a change for every adapter, and that pull request updates them. An adapt
   record anyway, for names and display.
 - **Backends don't convert directly into each other.** They always go through the record, so N
   backends need N adapters, not N².
+
+### Exact bodies: crossing in memory
+
+A kernel that can't write the record's canonical order itself (its radial edge order, each
+round face's NURBS form, its measured tolerances, seams on closed surfaces) crosses as an
+**exact body** instead (`solidcraft_kernel_api::ExactBody`): vertices, edges on record curves,
+faces on record surfaces with their bounds, and shells, in the kernel's own order, each face
+and edge with the kernel's own id. Pcurves are optional per use. It is the input the record is
+assembled from, not a second body format: solidcore assembles it with the one stage that
+assembles every body read from a file (`solidcore/docs/import-assembly.md`), with no STEP on
+the way, and keeps the pcurves the kernel holds instead of fitting them again.
+
+- **Out of solidcore:** `Backend::import_exact` gets each operand as an exact body
+  (`solidcraft_kernel::exact::exact_body`) when the adapter says `takes_exact`: round faces as
+  the analytic surfaces they are, edges on conics bounded by their vertices, pcurves where they
+  are in the given surface's own (u, v).
+- **Into solidcore:** `Backend::export_exact` gives the result as an exact body with the
+  operation's history in its own indices (`ExactHistory`). The router assembles it
+  (`solidcraft_kernel::exact::body_from_exact`) and renumbers the history through the face and
+  edge each record item came from. Where an edge can't be followed (the record's edges were
+  rebuilt), the body comes back without history rather than with a guessed one.
+- **Measured** (`cargo run --release -p solidcraft-kernel --example exact_exchange`), a thread
+  as the thread feature makes it, out of solidcore and back: M20 × 2.5 (103 faces) 0.29 s by
+  STEP against 0.13 s exact; M30 × 1.5 over 64 turns (453 faces) 1.34 s against 0.59 s. What is
+  left is fitting the pcurves of helices on the core's cylinder, which has no closed form on the
+  cylinder's NURBS form, on either path.
+- The OCCT adapter still crosses by STEP; moving it onto exact bodies is its own change.
 
 ### What each backend loses
 

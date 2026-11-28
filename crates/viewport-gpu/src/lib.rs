@@ -21,6 +21,7 @@ use solidcore_tess::{EvalCurve, EvalSurface};
 
 pub mod capture;
 pub mod concurrent;
+mod device_lost;
 mod environment;
 pub mod pbr;
 #[cfg(not(target_arch = "wasm32"))]
@@ -28,6 +29,8 @@ pub mod select;
 #[cfg(test)]
 mod test_env;
 pub mod view;
+
+pub use device_lost::{DeviceLost, capture_errors};
 
 /// The tessellation compute shader (WGSL).
 pub const SHADER: &str = include_str!("../shaders/tess.wgsl");
@@ -48,6 +51,24 @@ pub fn depth_features(adapter: &wgpu::Adapter) -> wgpu::Features {
 /// viewport draws on is opened with it when its adapter offers it: the window's (desktop and
 /// web) and the offscreen ones ([`depth_features`]).
 pub const INDIRECT_DRAWS: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE;
+
+/// The window device's request on `adapter`: egui-wgpu's own (`base`) with two targeted changes.
+/// - Limits: only an adapter that can't meet `base`'s limits gets them lowered to what it offers.
+///   Older drivers (Debian 11's Mesa 20.3: 2 colour attachments where wgpu's defaults ask for 8)
+///   were refused a device, so no window opened (#22158). Every other adapter keeps `base`'s
+///   limits exactly.
+/// - Features: `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` where the adapter has it, so the scene
+///   can use the 2x and 8x sample counts the adapter supports (WebGPU only guarantees 1x and 4x).
+pub fn window_device_request(adapter: &wgpu::Adapter, base: wgpu::DeviceDescriptor<'static>) -> wgpu::DeviceDescriptor<'static> {
+    let offered = adapter.limits();
+    let required_limits = if base.required_limits.check_limits(&offered) {
+        base.required_limits.clone()
+    } else {
+        base.required_limits.clone().or_worse_values_from(&offered)
+    };
+    let required_features = base.required_features | (adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+    wgpu::DeviceDescriptor { required_limits, required_features, ..base }
+}
 
 /// The depth format to draw with on `device`: 32-bit float (reversed depth) where it can, with a
 /// stencil when `stencil` (the section cap needs one), else 24 bits with a stencil.
