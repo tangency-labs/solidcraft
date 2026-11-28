@@ -132,12 +132,14 @@ pub enum PrimitiveFailure {
     /// The fitted helix could not be evaluated where its deviation is measured (the
     /// evaluation's error is the cause). Class `failed`, status `SM_ERR`.
     HelixNotEvaluated,
-    /// A merge's Boolean returned without a result B-rep. Class `failed`, status
+    /// A merge's Boolean returned without a result B-rep: the kernel's own Boolean left
+    /// nothing it built. A defect ([`ErrorKind::StageFailed`]), status
     /// `SM_ERR_NULL_POINTER`.
     MergeGaveNoBrep,
     /// A merge stage was given no operand on one side (`other` is false for the
-    /// primary): an earlier stage's Boolean consumed it, or the merge released it. Class
-    /// `failed`, status `SM_ERR_NULL_POINTER`.
+    /// primary): an earlier stage's Boolean consumed it, or the merge released it. The
+    /// caller's use of a spent operand, as [`super::SweepFailure::MergeOtherBodyConsumed`]
+    /// is ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     MergeOperandMissing {
         /// The missing operand is the other (second) one.
         other: bool,
@@ -433,10 +435,11 @@ impl PrimitiveFailure {
     /// [`PrimitiveFailure::Missing`], [`ErrorKind::NotWithinTolerance`] for
     /// [`PrimitiveFailure::HelixDeviates`], [`ErrorKind::InvalidInput`] for
     /// [`PrimitiveFailure::PlaneCannotCover`] and the checks of the caller's arguments and
-    /// body, [`ErrorKind::Unsupported`] for a path or a sweep the planar-path sweep does not
-    /// take, [`ErrorKind::Degenerate`] for a collapsed offset or planar difference,
-    /// [`ErrorKind::Failed`] otherwise.
-    /// [`PrimitiveFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
+    /// body (a spent merge operand among them), [`ErrorKind::Unsupported`] for a path or a
+    /// sweep the planar-path sweep does not take, [`ErrorKind::Degenerate`] for a collapsed
+    /// offset or planar difference, [`ErrorKind::Failed`] otherwise.
+    /// [`PrimitiveFailure::Defect`] and [`PrimitiveFailure::MergeGaveNoBrep`] are
+    /// [`ErrorKind::StageFailed`], defects.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -451,11 +454,13 @@ impl PrimitiveFailure {
             | Self::EdgeWithoutFace
             | Self::FaceWithoutSurface
             | Self::HeightTooSmall { .. }
+            | Self::MergeOperandMissing { .. }
             | Self::NoCurveGiven
             | Self::NoProfiles
             | Self::NoRegion
             | Self::OffsetMapIndexOutOfRange { .. }
             | Self::OffsetMapMissing
+            | Self::PlaneCannotCover
             | Self::ProfileFrameDegenerate
             | Self::ProfileMakesSeveralFaces { .. }
             | Self::ProfileNotOneComposite { .. }
@@ -467,23 +472,32 @@ impl PrimitiveFailure {
             | Self::SweepAngleTooSmall { .. }
             | Self::TooFewProfiles { .. }
             | Self::TreeLeavesMoreBreps { .. } => ErrorKind::InvalidInput,
-            Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::ClosestPointNotFound
-            | Self::MergeGaveNoBrep
-            | Self::MergeOperandMissing { .. }
+            Self::Defect { .. } | Self::MergeGaveNoBrep => ErrorKind::StageFailed,
+            Self::AxisInsideFace
+            | Self::CircleNotMade
+            | Self::ClosestPointNotFound
+            | Self::ConeSurfaceNotMade
+            | Self::CylinderDomainNotSet
+            | Self::Failed(_)
+            | Self::HelixNotEvaluated
             | Self::OffsetFacesMissing
             | Self::OffsetMakesNoCurves
+            | Self::PolygonSideNotMade
             | Self::ProfileMakesNoWire
             | Self::SeamLeavesSpan { .. }
             | Self::SeamWeightNotPositive { .. }
+            | Self::SheetHasNoFace
             | Self::SphereEdgeNotDropped { .. }
             | Self::SweepEnclosesNoMaterial
+            | Self::SweptFaceNotMade
+            | Self::SweptSurfaceNotMade
             | Self::TreeLeftNoBrep => ErrorKind::Failed,
+            Self::HelixDeviates { .. } => ErrorKind::NotWithinTolerance,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::OffsetMakesNoSurface
             | Self::PlanarDifferenceEmpty
             | Self::RuledSidesTooShort { .. } => ErrorKind::Degenerate,
             Self::PathTurnsBack | Self::SweepDoesNotClose => ErrorKind::Unsupported,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -667,6 +681,26 @@ impl crate::SolidError {
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn primitive_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (PrimitiveFailure::AxisInsideFace, ErrorKind::Failed),
+            (PrimitiveFailure::CircleNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::ConeSurfaceNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::CylinderDomainNotSet, ErrorKind::Failed),
+            (PrimitiveFailure::Failed("x"), ErrorKind::Failed),
+            (PrimitiveFailure::HelixNotEvaluated, ErrorKind::Failed),
+            (PrimitiveFailure::Missing("x"), ErrorKind::Missing),
+            (PrimitiveFailure::PlaneCannotCover, ErrorKind::InvalidInput),
+            (PrimitiveFailure::PolygonSideNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::SheetHasNoFace, ErrorKind::Failed),
+            (PrimitiveFailure::SweptFaceNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::SweptSurfaceNotMade, ErrorKind::Failed),
+        ]);
+    }
 
     #[test]
     fn primitive_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
@@ -927,7 +961,8 @@ mod tests {
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.primitive_failure(), Some(&failure));
-            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+            assert_eq!(e.is_defect(), kind == K::StageFailed, "{failure:?}");
+            assert!(!e.is_refusal(), "{failure:?}");
             assert_eq!(e.to_string(), format!("{op}: {message}"));
         }
         // a caught error stays the cause; the status and class stay the site's
@@ -973,19 +1008,19 @@ mod tests {
             (
                 PrimitiveFailure::MergeOperandMissing { other: false },
                 SM_ERR_NULL_POINTER,
-                K::Failed,
+                K::InvalidInput,
                 "the merge stage has no primary operand",
             ),
             (
                 PrimitiveFailure::MergeOperandMissing { other: true },
                 SM_ERR_NULL_POINTER,
-                K::Failed,
+                K::InvalidInput,
                 "the merge stage has no other operand",
             ),
             (
                 PrimitiveFailure::MergeGaveNoBrep,
                 SM_ERR_NULL_POINTER,
-                K::Failed,
+                K::StageFailed,
                 "the merge gave no result B-rep",
             ),
             (
@@ -1199,7 +1234,8 @@ mod tests {
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.primitive_failure(), Some(&failure));
-            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+            assert_eq!(e.is_defect(), kind == K::StageFailed, "{failure:?}");
+            assert!(!e.is_refusal(), "{failure:?}");
             assert_eq!(e.to_string(), format!("{op}: {message}"));
         }
         // a caught error stays the cause: it decides defect, and the status stays the site's

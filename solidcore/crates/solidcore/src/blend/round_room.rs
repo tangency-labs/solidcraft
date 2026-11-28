@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::blend::BlendFailure;
-use crate::error::{EntityRef, SolidError, SM_ERR};
+use crate::error::{EntityRef, ErrorKind, SolidError, SM_ERR};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::math::Point3;
@@ -68,6 +68,21 @@ pub enum RoundRefusal {
         /// The radius the continued law gives there.
         radius: f64,
     },
+}
+
+impl RoundRefusal {
+    /// The refusal's stable [`ErrorKind`]: a refusal kind where one names it
+    /// ([`ErrorKind::is_refusal`]), [`ErrorKind::Unsupported`] for an end the kernel does not
+    /// know the room at, the caller's input for a radius law that gives no finite radius.
+    #[must_use]
+    pub const fn kind(&self) -> ErrorKind {
+        match self {
+            Self::FacesCloseAtBothEnds { .. } => ErrorKind::FaceConsumed,
+            Self::LawRadiusUnusable { .. } => ErrorKind::InvalidInput,
+            Self::RoomRunsOut { .. } | Self::RoundsCross { .. } => ErrorKind::FilletTooLarge,
+            Self::TaperEndUnsupported { .. } => ErrorKind::Unsupported,
+        }
+    }
 }
 
 /// [`SolidError::RoundRefused`] of `refusal`, by `operation`.

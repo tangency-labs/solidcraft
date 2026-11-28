@@ -267,6 +267,7 @@ pub enum BSplineFailure {
         tolerance: f64,
     },
     /// The degree `given` is outside the range `[min, max]` the method handles.
+    /// [`ErrorKind::InvalidInput`].
     DegreeOutside {
         /// The degree asked for.
         given: i64,
@@ -312,6 +313,7 @@ pub enum BSplineFailure {
     /// [`ErrorKind::InvalidInput`].
     EndTangentNotGiven,
     /// The ends to join are `distance` apart, farther than the tolerance.
+    /// [`ErrorKind::NotWithinTolerance`], as [`super::curve::CurveFailure::EndsApart`].
     EndsApart {
         /// The distance between the ends.
         distance: f64,
@@ -384,7 +386,7 @@ pub enum BSplineFailure {
     },
     /// No NURB is given to take the curve from. [`ErrorKind::InvalidInput`].
     NoNurbGiven,
-    /// The curve or surface holds no NURBS form to work on.
+    /// The curve or surface holds no NURBS form to work on. [`ErrorKind::Unsupported`].
     NoNurbsForm,
     /// The evaluation's output has no slot, not even one for the point.
     /// [`ErrorKind::InvalidInput`].
@@ -397,7 +399,8 @@ pub enum BSplineFailure {
     /// The method takes only a rational curve, and this one is not.
     /// [`ErrorKind::Unsupported`].
     NotRational,
-    /// The parameter is outside the domain `[lo, hi]`.
+    /// The parameter is outside the domain `[lo, hi]`. [`ErrorKind::OutsideDomain`], as
+    /// [`NurbsFailure::ParameterOutside`].
     ParameterOutside {
         /// The parameter.
         parameter: f64,
@@ -513,7 +516,7 @@ impl BSplineFailure {
     /// [`ErrorKind::InvalidInput`] for a check of the caller's arguments or curve,
     /// [`ErrorKind::Unsupported`] for a curve the method does not take,
     /// [`ErrorKind::NotWithinTolerance`] for a result outside the tolerance asked for; the
-    /// kind of its status otherwise.
+    /// kind its status had otherwise, named per variant.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -528,6 +531,7 @@ impl BSplineFailure {
             | Self::ControlPointsShort { .. }
             | Self::CurvesNotCoplanar { .. }
             | Self::DegreeBelowCurrent { .. }
+            | Self::DegreeOutside { .. }
             | Self::DegreeTooLarge { .. }
             | Self::DegreeTooLowToReduce { .. }
             | Self::DerivativeCurvesMissing
@@ -552,7 +556,8 @@ impl BSplineFailure {
             | Self::TooFewBreakpoints { .. }
             | Self::TooManyVectors { .. }
             | Self::TrimDomainOutside
-            | Self::WeightOnNonRational => ErrorKind::InvalidInput,
+            | Self::WeightOnNonRational
+            | Self::ZeroAxis => ErrorKind::InvalidInput,
             Self::ArcLoopDegenerate { .. }
             | Self::ArcSweepDegenerate { .. }
             | Self::GeneratorOnAxis
@@ -560,15 +565,23 @@ impl BSplineFailure {
             | Self::PatchWithoutSpan
             | Self::TangentsVanish => ErrorKind::Degenerate,
             Self::DegreeNotReducible { .. }
+            | Self::EndsApart { .. }
             | Self::IntervalNotSplittable { .. }
             | Self::NoFootWithinTolerance { .. }
             | Self::PointOffSurface { .. }
             | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
-            Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
-                ErrorKind::Unsupported
-            }
+            Self::EndsCoincide
+            | Self::ExpansionChangesCounts
+            | Self::Failed(_)
+            | Self::JoinNotBuilt
+            | Self::RoutineFailed => ErrorKind::Failed,
+            Self::Missing(_) => ErrorKind::Missing,
+            Self::ParameterOutside { .. } => ErrorKind::OutsideDomain,
+            Self::NoNurbsForm
+            | Self::NotRational
+            | Self::NotIntersectionCurve
+            | Self::ArcKindUnsupported => ErrorKind::Unsupported,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -818,14 +831,39 @@ impl NurbsFailure {
         })
     }
 
-    /// The failure's stable [`ErrorKind`].
+    /// The failure's stable [`ErrorKind`], the class of the routine's own contract:
+    /// [`ErrorKind::InvalidInput`] for arguments the routine rejects (an index, a matrix of
+    /// the wrong form, a knot vector, a degree, a weight, counts that do not agree, a buffer
+    /// too small); [`ErrorKind::Degenerate`] for a singular system or a vanishing derivative;
+    /// [`ErrorKind::OutsideDomain`] for a parameter outside the domain;
+    /// [`ErrorKind::NotConverged`] for an iteration that did not converge;
+    /// [`ErrorKind::Failed`] for the rest. [`NurbsFailure::Numerical`] stays
+    /// [`ErrorKind::Failed`]: it names a zero divisor (a degenerate system or knot span) and
+    /// an overflow or a value that is not finite alike, and no one class fits both.
+    /// Where the kernel passes a routine its own data, the routine's class is that of its
+    /// argument, not the caller's: the calling site says whose fault it is.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::BSpline(b) => b.kind(),
+            Self::CurveDefinition
+            | Self::Degree
+            | Self::DegreeTooHigh { .. }
+            | Self::DerivativeOrder { .. }
+            | Self::Index
+            | Self::IndexOutOfRange { .. }
+            | Self::Input
+            | Self::Knots
+            | Self::KnotsDecrease { .. }
+            | Self::NoDerivativeRows
+            | Self::Storage
+            | Self::SurfaceDefinition
+            | Self::Weight
+            | Self::WeightOutOfRange { .. } => ErrorKind::InvalidInput,
+            Self::Singular | Self::ZeroDerivative => ErrorKind::Degenerate,
             Self::NotConverged => ErrorKind::NotConverged,
             Self::Parameter | Self::ParameterOutside { .. } => ErrorKind::OutsideDomain,
-            _ => ErrorKind::Failed,
+            Self::CallFailed | Self::Geometry | Self::Memory | Self::Numerical => ErrorKind::Failed,
         }
     }
 }
@@ -993,6 +1031,24 @@ mod tests {
     use super::*;
     use crate::SolidError;
 
+    /// The B-spline causes that took their class from their status have it whatever status
+    /// they are recorded with (#21871).
+    #[test]
+    fn b_spline_causes_have_their_class_whatever_their_status() {
+        let cases = [
+            (BSplineFailure::EndsCoincide, ErrorKind::Failed),
+            (BSplineFailure::ExpansionChangesCounts, ErrorKind::Failed),
+            (BSplineFailure::Failed("x"), ErrorKind::Failed),
+            (BSplineFailure::JoinNotBuilt, ErrorKind::Failed),
+            (BSplineFailure::Missing("x"), ErrorKind::Missing),
+            (BSplineFailure::NoNurbsForm, ErrorKind::Unsupported),
+            (BSplineFailure::RoutineFailed, ErrorKind::Failed),
+            (BSplineFailure::ZeroAxis, ErrorKind::InvalidInput),
+        ]
+        .map(|(b, kind)| (NurbsFailure::BSpline(b), kind));
+        crate::error::tests::assert_kind_of_cause(&cases);
+    }
+
     #[test]
     fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
         super::super::tests::assert_stage_failure(
@@ -1000,16 +1056,19 @@ mod tests {
             "nurbs::op",
             SM_ERR,
         );
-        for cause in [
-            BSplineFailure::EndsCoincide,
-            BSplineFailure::EndsApart {
-                distance: 0.5,
-                tolerance: 0.01,
-            },
+        for (cause, kind) in [
+            (BSplineFailure::EndsCoincide, ErrorKind::Failed),
+            (
+                BSplineFailure::EndsApart {
+                    distance: 0.5,
+                    tolerance: 0.01,
+                },
+                ErrorKind::NotWithinTolerance,
+            ),
         ] {
             let e = SolidError::b_spline("nurbs::op", cause);
             assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
-            assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
+            assert_eq!(e.kind(), kind, "{cause:?}");
             assert!(!e.is_defect() && e.is_status_answer(), "{cause:?}");
         }
     }

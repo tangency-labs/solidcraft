@@ -398,7 +398,8 @@ pub enum OffsetFailure {
     /// so that side's offset edge is not extended.
     LaminaEdgeOtherSide,
     /// A local operation's geometry creator was asked for the surface of a face that is not
-    /// among the faces it was given.
+    /// among the faces it was given. Both come from the executive's own `build_local`, so
+    /// this is a defect ([`ErrorKind::StageFailed`]).
     LocalFaceNotListed,
     /// A gap in an offset face's loop is longer than `tolerance`, but its two ends are both
     /// within `tolerance` of the vertex the two edge uses share, or neither is, so the gap
@@ -652,7 +653,8 @@ pub enum OffsetFailure {
     },
     /// The tube of radius `|distance|` a rounded offset caps `edge` with is neither proved
     /// regular nor proved to fold (#13685): its proof ran out of pieces, or the edge has no
-    /// two faces or no NURBS form to decide it on.
+    /// two faces or no NURBS form to decide it on. Not a fold: [`ErrorKind::Unsupported`],
+    /// as [`OffsetFailure::NotCertified`] is.
     TubeNotCertified {
         /// The edge whose tube is not certified.
         edge: EdgeId,
@@ -1160,7 +1162,6 @@ impl OffsetFailure {
             | Self::GapEndWithoutEdge { .. }
             | Self::InvalidValue(_)
             | Self::LaminaEdgeOtherSide
-            | Self::LocalFaceNotListed
             | Self::LoopGapUncertified { .. }
             | Self::LoopsCross { .. }
             | Self::LooseTangentEdge { .. }
@@ -1200,6 +1201,7 @@ impl OffsetFailure {
             | Self::WallsTouch { .. } => false,
             Self::Defect { .. }
             | Self::Inconsistent(_)
+            | Self::LocalFaceNotListed
             | Self::LoopGapEndsAmbiguous { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::SplitAtEdgeEnd { .. }
@@ -1310,6 +1312,7 @@ impl OffsetFailure {
             | Self::EdgeOffsetsUnpaired { .. }
             | Self::EdgeuseHasNoUvTrim { .. }
             | Self::ExactCurveUncut
+            | Self::ExtendedCurveOffDomain { .. }
             | Self::ExtendedEdgeUntrimmed
             | Self::FaceCloses { .. }
             | Self::FacesApart { .. }
@@ -1318,7 +1321,7 @@ impl OffsetFailure {
             | Self::LaminaEdgeOtherSide
             | Self::LoopGapUncertified { .. }
             | Self::LooseTangentEdge { .. }
-            | Self::ExtendedCurveOffDomain { .. }
+            | Self::NotCertified { .. }
             | Self::OffsetBaseKindUnsupported { .. }
             | Self::PastSide { .. }
             | Self::PeriodicBranchAmbiguous
@@ -1333,6 +1336,7 @@ impl OffsetFailure {
             | Self::TangentEndOffCurve
             | Self::TangentGapsAtConcaveEdge
             | Self::TrimPastExtension
+            | Self::TubeNotCertified { .. }
             | Self::Unsound { .. }
             | Self::VertexArcInPlane
             | Self::VertexArcMissesPlane { .. }
@@ -1343,6 +1347,7 @@ impl OffsetFailure {
             | Self::ShellLeavesNoCavity { .. }
             | Self::WallsMeetAcross { .. } => ErrorKind::OffsetCollapses,
             Self::Defect { .. }
+            | Self::LocalFaceNotListed
             | Self::LoopGapEndsAmbiguous { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::SplitAtEdgeEnd { .. }
@@ -1365,7 +1370,7 @@ impl OffsetFailure {
             | Self::FaceuseHasNoShell { .. }
             | Self::FaceuseNotGiven
             | Self::FollowedBlendIncomplete
-            | Self::LocalFaceNotListed
+            | Self::InvalidValue(_)
             | Self::ShellFaceNotOfBody { .. }
             | Self::ShellHasNoRegion { .. }
             | Self::ShellWallUnresolved { .. }
@@ -1374,18 +1379,16 @@ impl OffsetFailure {
             | Self::VertexNotGiven => ErrorKind::InvalidInput,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
             // neither a defect nor a refusal: the failure keeps the error of the step that
-            // failed, which decides (`SolidError::is_defect`, `is_refusal`)
+            // failed, which decides (`SolidError::is_defect`, `is_refusal`); the phrase causes
+            // `Failed` and `Inconsistent` are neither either
             Self::FaceDomainUnresolved
+            | Self::Failed(_)
             | Self::GapCornerBlendNotMade { .. }
+            | Self::Inconsistent(_)
             | Self::VertexArcsNotOneSphere => ErrorKind::Failed,
-            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
-                ErrorKind::of_status(self.comparison_status())
-            }
-            Self::Folds { .. }
-            | Self::NotCertified { .. }
-            | Self::TubeFolds { .. }
-            | Self::TubeNotCertified { .. } => ErrorKind::OffsetFolds,
+            Self::Folds { .. } | Self::TubeFolds { .. } => ErrorKind::OffsetFolds,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
         }
     }
@@ -2002,6 +2005,26 @@ mod tests {
     use super::*;
     use crate::SolidError;
 
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn offset_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            // added on main since #21871 began (#21743): named, not taken from its status
+            (
+                OffsetFailure::ExtendedCurveOffDomain {
+                    edge: None,
+                    outside: 12.5,
+                },
+                ErrorKind::Unsupported,
+            ),
+            (OffsetFailure::Failed("x"), ErrorKind::Failed),
+            (OffsetFailure::Inconsistent("x"), ErrorKind::Failed),
+            (OffsetFailure::InvalidValue("x"), ErrorKind::InvalidInput),
+            (OffsetFailure::Missing("x"), ErrorKind::Missing),
+        ]);
+    }
+
     /// The offset failures that replaced a bare status or a stage failure keep its status and
     /// operation, and answer as the status did; their class is their own (a defect's is
     /// [`ErrorKind::StageFailed`]), and so is their entity (the input face a cause names, where
@@ -2502,9 +2525,9 @@ mod tests {
             ),
             (
                 O::LocalFaceNotListed,
-                ErrorKind::InvalidInput,
+                ErrorKind::StageFailed,
                 false,
-                false,
+                true,
                 true,
             ),
             (
@@ -2573,7 +2596,7 @@ mod tests {
                     face,
                     distance: 2.0,
                 },
-                ErrorKind::OffsetFolds,
+                ErrorKind::Unsupported,
                 false,
                 false,
                 false,
@@ -2754,7 +2777,7 @@ mod tests {
                     edge: EdgeId::from_index(2),
                     distance: 1.2,
                 },
-                ErrorKind::OffsetFolds,
+                ErrorKind::Unsupported,
                 false,
                 false,
                 false,
@@ -3157,14 +3180,17 @@ mod tests {
             ),
         ];
         for (cause, status, entity) in samples {
+            // the creator's face list is the executive's own (`build_local`): a defect
+            let defect = matches!(cause, OffsetFailure::LocalFaceNotListed);
             assert!(cause.replaces_upstream_status(), "{cause:?}");
-            assert!(!cause.is_phrase() && !cause.is_defect(), "{cause:?}");
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert_eq!(cause.is_defect(), defect, "{cause:?}");
             let e = SolidError::offset("offset::op", cause);
             assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
             assert_eq!(super::super::upstream_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
             assert_eq!(e.entity(), entity, "{cause:?}");
-            assert!(!e.is_defect(), "{cause:?}");
+            assert_eq!(e.is_defect(), defect, "{cause:?}");
         }
         // a solidcore-native refusal (#21743) replaced no status: it is not an upstream
         // status, but reports `SM_ERR` to the comparison and names its edge

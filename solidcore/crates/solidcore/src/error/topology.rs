@@ -761,10 +761,11 @@ pub enum TopologyFailure {
     /// The plane through a radial sweep's rims is not a plane. Class `failed`, status
     /// `SM_ERR`.
     RadialCapWithoutPlane,
-    /// The face being drafted has no surface. [`ErrorKind::Missing`], status
-    /// `SM_ERR_NULL_POINTER`.
+    /// The face being drafted has no surface. [`ErrorKind::InvalidInput`], as
+    /// [`TopologyFailure::FaceWithoutSurface`]; status `SM_ERR_NULL_POINTER`.
     RadialFaceWithoutSurface,
-    /// A rim edge use has no edge. [`ErrorKind::Missing`], status `SM_ERR_NULL_POINTER`.
+    /// A rim edge use has no edge. [`ErrorKind::InvalidInput`], as
+    /// [`TopologyFailure::EdgeuseWithoutEdge`]; status `SM_ERR_NULL_POINTER`.
     RadialRimWithoutEdge,
     /// The two rims of a radial sweep's cap are not concentric circles in one stored plane
     /// with the outer one the larger, so they bound no annulus. Class `failed`, status
@@ -856,7 +857,8 @@ pub enum TopologyFailure {
     /// A surface of revolution or extrusion has no generator curve, which its record
     /// needs (only the `empty()` constructors leave it out). [`ErrorKind::InvalidInput`].
     SurfaceWithoutGenerator,
-    /// A surface has no NURBS form. [`ErrorKind::Unsupported`].
+    /// A surface has no NURBS form. [`ErrorKind::InvalidInput`], as
+    /// [`crate::error::surface::SurfaceFailure::NoNurb`].
     SurfaceWithoutNurbs {
         /// The face the surface belongs to, where it has one.
         entity: Option<EntityRef>,
@@ -921,7 +923,8 @@ pub enum TopologyFailure {
     /// [`ErrorKind::InvalidInput`].
     UvDomainOutsideSurface,
     /// The edge use has no UV trim curve and making one failed; the error of the fetch that tried
-    /// is kept as the cause.
+    /// is kept as the cause. Class `failed`, as [`TopologyFailure::UvTrimCurvesNotMade`]:
+    /// whether it is a defect or a refusal is its cause's.
     UvTrimCurveNotMade,
     /// The UV trim curves of a face could not be made; the error that stopped them, where
     /// there is one, is the cause. Class `failed`; whether it is a defect or a refusal is
@@ -1263,7 +1266,8 @@ impl TopologyFailure {
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
     /// [`TopologyFailure::Missing`], [`TopologyFailure::RadialFaceWithoutSurface`] and
-    /// [`TopologyFailure::RadialRimWithoutEdge`], [`ErrorKind::InvalidInput`] for
+    /// [`TopologyFailure::RadialRimWithoutEdge`] and [`TopologyFailure::UvTrimCurveNotMade`],
+    /// [`ErrorKind::InvalidInput`] for
     /// [`TopologyFailure::InvalidValue`] and for a check of the caller's arguments, state or
     /// body, [`ErrorKind::Unsupported`] for a kind or configuration the routine does not
     /// handle, [`ErrorKind::NotWithinTolerance`] for a trim curve end off its edge, the
@@ -1274,24 +1278,70 @@ impl TopologyFailure {
         match self {
             Self::AbsorbedCurveAtNoFiniteDistance
             | Self::AllocationFailed
+            | Self::BinormalStaysZero
             | Self::BlendRecordNotProved
+            | Self::CoincidenceUndecided
             | Self::CurveNotApproximated
             | Self::CurvesNotJoined
+            | Self::EdgeNotSplit
+            | Self::EdgeUseNotClassified
             | Self::FaceStitchFailed
+            | Self::FacesNotCopiedOnce
+            | Self::Failed(_)
+            | Self::GatheredBothSides
+            | Self::HitAtRayStart { .. }
+            | Self::Inconsistent(_)
             | Self::InfiniteRegionNotFound
             | Self::IntersectingProtoEdgeEmpty
+            | Self::IsoLineNotMade
+            | Self::JoinedVertexReaches { .. }
             | Self::LoopOrientationUndecided
+            | Self::LoopSplitFaceEarly
+            | Self::LoopSplitNoFace
+            | Self::LoopTooLong { .. }
             | Self::MergeGaveNoVertex { .. }
+            | Self::MergedGroupNotOneFace
+            | Self::NoClassifiablePoint
             | Self::NoFinalVertexAtEnd
             | Self::NoFootOnCurve
             | Self::NoFootOnSeam
+            | Self::NoFootOnSurface
+            | Self::NoInteriorPoint
+            | Self::NoIsoLineCrossesFace
+            | Self::NoMatingCurve
             | Self::NoProjectedCurves
+            | Self::NoRadialCandidate
+            | Self::NoRadialSector
+            | Self::NoRadialSectorBetween
+            | Self::NoSampleOnSurface
+            | Self::NoSectorForNewEdgeuse
+            | Self::NoStepInsideInterval
             | Self::NoTrimmedBSpline
             | Self::NoVertexSector { .. }
             | Self::NotAMatedPair
+            | Self::OutOfMemory(_)
             | Self::OverlapBelowSplitResolution
+            | Self::RadialCapWithoutPlane
+            | Self::RadialRimsNotAnnulus
+            | Self::RadialRimsNotEllipses
+            | Self::RadialRimsOffEndPlane
+            | Self::RadialSweepNotOutward
+            | Self::RayFoundNoRegion
+            | Self::RayHitsAtStart
+            | Self::SeamSplitFailed
+            | Self::SectionPlaneNotMade
+            | Self::SheetReoriented
+            | Self::ShellSideUndecided { .. }
+            | Self::SideUndecided { .. }
             | Self::SplitDefinitionNotAdded
-            | Self::SurfaceCacheNotMade => ErrorKind::Failed,
+            | Self::SteppedOffFace
+            | Self::SteppedOutsideUvDomain
+            | Self::SurfaceCacheNotMade
+            | Self::TestVectorZero
+            | Self::TrimBoundaryNotBuilt
+            | Self::UvTrimCurveNotMade
+            | Self::UvTrimCurvesNotMade
+            | Self::ZeroSurfaceTangent => ErrorKind::Failed,
             Self::AttributeSlotEmpty
             | Self::BrepSideNotOneOrTwo { .. }
             | Self::CacheTargetNotBrep
@@ -1332,6 +1382,7 @@ impl TopologyFailure {
             | Self::FaceWithoutUses
             | Self::HitNotOnBoundary
             | Self::InfiniteRegionNotFirst
+            | Self::InvalidValue(_)
             | Self::LaminaNeighbourBound
             | Self::LoopEdgeNotLamina
             | Self::LoopIndexOutOfRange { .. }
@@ -1373,12 +1424,15 @@ impl TopologyFailure {
             | Self::PartNotEmpty
             | Self::ProtoEdgeWithoutDefinitions
             | Self::ProtoVertexNotAnEnd
+            | Self::RadialFaceWithoutSurface
+            | Self::RadialRimWithoutEdge
             | Self::RecipientIsVertexShell
             | Self::RecordTypeUnknown { .. }
             | Self::ShellHasNoFaceUses
             | Self::SolveViewWithoutCache
             | Self::SourceIsVertexShell
             | Self::SurfaceWithoutGenerator
+            | Self::SurfaceWithoutNurbs { .. }
             | Self::SurfaceWithoutOwningFace
             | Self::TooFewEdgeuses { .. }
             | Self::TooFewSurfaces { .. }
@@ -1411,19 +1465,21 @@ impl TopologyFailure {
             | Self::RadialSweepNeedsCones
             | Self::SurfaceDiscontinuous
             | Self::SurfaceNotTransformable { .. }
-            | Self::SurfaceWithoutNurbs { .. }
             | Self::UnorientedLoopsOnNonG1Surface
             | Self::VertexLoopInSharedFace
             | Self::VoidOwnerUndecided
             | Self::WireEndSqueezed => ErrorKind::Unsupported,
             Self::Defect { .. } => ErrorKind::StageFailed,
+            // the one kind still read from a status: the drop's own, which it records with
+            // statuses of several kinds (#21871)
+            Self::DropFailed { status } => ErrorKind::of_status(*status),
             Self::EdgeEndOffVertex { .. } | Self::TrimCurveOffEnd { .. } => {
                 ErrorKind::NotWithinTolerance
             }
             Self::FaceNotMade { class }
             | Self::MatrixNotDecomposed { class }
             | Self::NoPlaneThroughCurves { class } => *class,
-            _ => ErrorKind::of_status(self.comparison_status()),
+            Self::Missing(_) => ErrorKind::Missing,
         }
     }
 }
@@ -1946,6 +2002,67 @@ mod tests {
     use crate::topology::VertexuseId;
     use crate::SolidError;
 
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn topology_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (TopologyFailure::BinormalStaysZero, ErrorKind::Failed),
+            (TopologyFailure::CoincidenceUndecided, ErrorKind::Failed),
+            (TopologyFailure::EdgeNotSplit, ErrorKind::Failed),
+            (TopologyFailure::EdgeUseNotClassified, ErrorKind::Failed),
+            (TopologyFailure::FacesNotCopiedOnce, ErrorKind::Failed),
+            (TopologyFailure::Failed("x"), ErrorKind::Failed),
+            (TopologyFailure::GatheredBothSides, ErrorKind::Failed),
+            (TopologyFailure::Inconsistent("x"), ErrorKind::Failed),
+            (TopologyFailure::InvalidValue("x"), ErrorKind::InvalidInput),
+            (TopologyFailure::IsoLineNotMade, ErrorKind::Failed),
+            (TopologyFailure::LoopSplitFaceEarly, ErrorKind::Failed),
+            (TopologyFailure::LoopSplitNoFace, ErrorKind::Failed),
+            (TopologyFailure::MergedGroupNotOneFace, ErrorKind::Failed),
+            (TopologyFailure::Missing("x"), ErrorKind::Missing),
+            (TopologyFailure::NoClassifiablePoint, ErrorKind::Failed),
+            (TopologyFailure::NoFootOnSurface, ErrorKind::Failed),
+            (TopologyFailure::NoInteriorPoint, ErrorKind::Failed),
+            (TopologyFailure::NoIsoLineCrossesFace, ErrorKind::Failed),
+            (TopologyFailure::NoMatingCurve, ErrorKind::Failed),
+            (TopologyFailure::NoRadialCandidate, ErrorKind::Failed),
+            (TopologyFailure::NoRadialSector, ErrorKind::Failed),
+            (TopologyFailure::NoRadialSectorBetween, ErrorKind::Failed),
+            (TopologyFailure::NoSampleOnSurface, ErrorKind::Failed),
+            (TopologyFailure::NoSectorForNewEdgeuse, ErrorKind::Failed),
+            (TopologyFailure::NoStepInsideInterval, ErrorKind::Failed),
+            (TopologyFailure::OutOfMemory("x"), ErrorKind::Failed),
+            (TopologyFailure::RadialCapWithoutPlane, ErrorKind::Failed),
+            (
+                TopologyFailure::RadialFaceWithoutSurface,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::RadialRimWithoutEdge,
+                ErrorKind::InvalidInput,
+            ),
+            (TopologyFailure::RadialRimsNotAnnulus, ErrorKind::Failed),
+            (TopologyFailure::RadialRimsNotEllipses, ErrorKind::Failed),
+            (TopologyFailure::RadialRimsOffEndPlane, ErrorKind::Failed),
+            (TopologyFailure::RadialSweepNotOutward, ErrorKind::Failed),
+            (TopologyFailure::RayFoundNoRegion, ErrorKind::Failed),
+            (TopologyFailure::RayHitsAtStart, ErrorKind::Failed),
+            (TopologyFailure::SeamSplitFailed, ErrorKind::Failed),
+            (TopologyFailure::SectionPlaneNotMade, ErrorKind::Failed),
+            (TopologyFailure::SheetReoriented, ErrorKind::Failed),
+            (TopologyFailure::SteppedOffFace, ErrorKind::Failed),
+            (TopologyFailure::SteppedOutsideUvDomain, ErrorKind::Failed),
+            (TopologyFailure::TestVectorZero, ErrorKind::Failed),
+            (TopologyFailure::TrimBoundaryNotBuilt, ErrorKind::Failed),
+            (TopologyFailure::UvTrimCurveNotMade, ErrorKind::Failed),
+            (TopologyFailure::UvTrimCurvesNotMade, ErrorKind::Failed),
+            // added on main since #21871 began (#17678): named, not taken from its status
+            (TopologyFailure::VoidOwnerUndecided, ErrorKind::Unsupported),
+            (TopologyFailure::ZeroSurfaceTangent, ErrorKind::Failed),
+        ]);
+    }
+
     #[test]
     fn topology_failures_keep_the_status_kind_and_entity_of_the_upstream_they_replace() {
         let vu = Some(EntityRef::Vertexuse(VertexuseId::from_index(3)));
@@ -2133,7 +2250,7 @@ mod tests {
             (
                 TopologyFailure::SurfaceWithoutNurbs { entity: None },
                 SM_ERR_NULL_POINTER,
-                K::Unsupported,
+                K::InvalidInput,
             ),
             (TopologyFailure::FaceWithoutEdges, SM_ERR, K::Unsupported),
             (TopologyFailure::VoidOwnerUndecided, SM_ERR, K::Unsupported),
@@ -2191,12 +2308,12 @@ mod tests {
             (
                 TopologyFailure::RadialFaceWithoutSurface,
                 SM_ERR_NULL_POINTER,
-                K::Missing,
+                K::InvalidInput,
             ),
             (
                 TopologyFailure::RadialRimWithoutEdge,
                 SM_ERR_NULL_POINTER,
-                K::Missing,
+                K::InvalidInput,
             ),
             (
                 TopologyFailure::RadialSweepNeedsCones,
@@ -2797,7 +2914,7 @@ mod tests {
             (
                 TopologyFailure::UvTrimCurveNotMade,
                 SM_ERR_NULL_POINTER,
-                ErrorKind::Missing,
+                ErrorKind::Failed,
             ),
         ];
         for (failure, status, kind) in cases {

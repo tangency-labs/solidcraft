@@ -2770,7 +2770,7 @@ mod tests {
             e.surface_failure(),
             Some(&SurfaceFailure::OperationNotTaken)
         );
-        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
     }
 
     #[test]

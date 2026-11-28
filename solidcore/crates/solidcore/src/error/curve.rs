@@ -320,7 +320,8 @@ pub enum CurveFailure {
     },
     /// A piece `[a, b]` of a length bracket lies outside the knot span
     /// `[span_start, span_end]` it is blossomed in: the bracket's rounding bound holds only
-    /// for a piece within its span (a port invariant: the halving keeps every piece within).
+    /// for a piece within its span. The halving keeps every piece within, so this is the
+    /// kernel's defect ([`ErrorKind::StageFailed`]).
     PieceOutsideSpan {
         /// The piece's start.
         a: f64,
@@ -785,11 +786,10 @@ impl CurveFailure {
 
     /// Its stable [`ErrorKind`]: [`ErrorKind::NotWithinTolerance`] for a length bracket's
     /// refusal (the accuracy asked is finer than the computation resolves); for a routine's
-    /// failure, the kind of the status it replaced ([`ErrorKind::Failed`],
-    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]) and that of the status of a typed
-    /// cause that replaced one; [`ErrorKind::StageFailed`] for a stage that failed, reviewed
-    /// or not, a defect;
-    /// [`ErrorKind::PortInvariant`] for a piece outside its span, a port invariant broken;
+    /// failure, the kind the status it replaced had ([`ErrorKind::Failed`],
+    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]), named per variant; [`ErrorKind::StageFailed`] for a stage that failed, reviewed
+    /// or not, a defect, and for a piece outside its span (the halving broke its own
+    /// invariant: a defect, not a solidcore-side port failure);
     /// [`ErrorKind::InvalidInput`] for a check of the caller's argument or curve,
     /// [`ErrorKind::Unsupported`] for what the routine does not do,
     /// [`ErrorKind::Degenerate`] for a curve, arc or offset with no extent to work on,
@@ -802,11 +802,16 @@ impl CurveFailure {
             Self::AngleHasNoNurbParameter { .. }
             | Self::CacheNotBuilt
             | Self::CornerOnViewAxis
+            | Self::Failed(_)
             | Self::FunctionUndefined { .. }
+            | Self::InfiniteTangent { .. }
             | Self::LocalSolveFailed
             | Self::NurbNotTransformed
             | Self::PlacementNotSet
-            | Self::RootNotEvaluated { .. } => ErrorKind::Failed,
+            | Self::PointOnCurveWhenMaximising { .. }
+            | Self::RootNotEvaluated { .. }
+            | Self::SingleLinearCurve
+            | Self::ZeroTangent { .. } => ErrorKind::Failed,
             Self::AngleOutsideArc { .. }
             | Self::AuxiliaryAlongProjection
             | Self::AuxiliaryVectorZero
@@ -842,6 +847,7 @@ impl CurveFailure {
             | Self::TooFewBreakpoints { .. }
             | Self::TooManyDerivatives { .. }
             | Self::UnknownCurveType { .. }
+            | Self::ZeroDirection(_)
             | Self::ZeroScale { .. } => ErrorKind::InvalidInput,
             Self::BaseCurveMethod { .. }
             | Self::CornerByCurveExtension
@@ -866,15 +872,10 @@ impl CurveFailure {
             | Self::LengthPastPieceCap { .. }
             | Self::StartsApart { .. }
             | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
-            Self::Failed(_)
-            | Self::InfiniteTangent { .. }
-            | Self::Missing(_)
-            | Self::PointOnCurveWhenMaximising { .. }
-            | Self::SingleLinearCurve
-            | Self::ZeroDirection(_)
-            | Self::ZeroTangent { .. } => ErrorKind::of_status(self.comparison_status()),
-            Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
-            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::Missing(_) => ErrorKind::Missing,
+            Self::PieceOutsideSpan { .. } | Self::StageFailed | Self::Defect { .. } => {
+                ErrorKind::StageFailed
+            }
             Self::TargetDidNotDrop => ErrorKind::NotFound,
         }
     }
@@ -1267,6 +1268,18 @@ mod tests {
             .into_error()
     }
 
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn curve_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (CurveFailure::Failed("x"), ErrorKind::Failed),
+            (CurveFailure::Missing("x"), ErrorKind::Missing),
+            (CurveFailure::SingleLinearCurve, ErrorKind::Failed),
+            (CurveFailure::ZeroDirection("x"), ErrorKind::InvalidInput),
+        ]);
+    }
+
     #[test]
     fn curve_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
         let cases = [
@@ -1411,6 +1424,20 @@ mod tests {
             assert_eq!(e.to_string(), text);
             assert_eq!(e.curve_failure(), Some(&refusal));
         }
+        // a piece outside its span is the halving's own broken invariant: a defect, not a
+        // solidcore-side port failure, and it replaced no status either
+        let piece = CurveFailure::PieceOutsideSpan {
+            a: 0.0,
+            b: 2.0,
+            span_start: 0.0,
+            span_end: 1.0,
+        };
+        let e = Failure::new("curve::length_bound", piece).into_error();
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::StageFailed);
+        assert!(!piece.replaces_upstream_status());
+        assert!(e.is_defect() && !e.is_refusal());
+        assert!(!e.is_port_failure());
     }
 
     /// The named causes keep the status of the phrase they replace, and `upstream_status`

@@ -1985,9 +1985,9 @@ impl SolidError {
             Self::Cancelled { .. } => ErrorKind::Cancelled,
             Self::OutOfFuel { .. } => ErrorKind::OutOfFuel,
             Self::FilletRefused { .. } => ErrorKind::FilletTooLarge,
-            Self::BlendRefused { code, .. } | Self::RoundRefused { code, .. } => {
-                ErrorKind::of_status(*code)
-            }
+            // the refusal's own kind, whatever status its site records (#21871)
+            Self::BlendRefused { refusal, .. } => refusal.kind(),
+            Self::RoundRefused { refusal, .. } => refusal.kind(),
             Self::Failed(f) => f.kind(),
             Self::Unported { .. } => ErrorKind::Unported,
         }
@@ -2308,6 +2308,24 @@ mod tests {
         assert_eq!(e.is_status_answer(), twin.is_status_answer(), "{e:?}");
         assert!(!e.is_port_failure(), "{e:?}");
         assert_eq!(e.to_string(), text);
+    }
+
+    /// Each `(cause, kind)`: the cause's error is of class `kind` whatever status it is
+    /// recorded with, so its class is a function of the typed cause alone (#21871), and the
+    /// status it is recorded with is kept for the goldens.
+    pub(in crate::error) fn assert_kind_of_cause<R>(cases: &[(R, ErrorKind)])
+    where
+        R: Into<Reason> + Clone + core::fmt::Debug,
+    {
+        for (cause, kind) in cases {
+            for status in [SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER] {
+                let e = Failure::new("op", cause.clone())
+                    .with_status(status)
+                    .into_error();
+                assert_eq!(e.kind(), *kind, "{cause:?} recorded with {status}");
+                assert_eq!(e.sm_status(), Some(status), "{cause:?}");
+            }
+        }
     }
 
     #[test]
@@ -3040,8 +3058,8 @@ mod tests {
             ),
             (
                 SolidError::nurbs("op", nurbs::NurbsFailure::Knots),
-                ErrorKind::Failed,
-                6,
+                ErrorKind::InvalidInput,
+                1,
             ),
             (
                 SolidError::nurbs("op", nurbs::NurbsFailure::NotConverged),
@@ -3115,43 +3133,43 @@ mod tests {
             (
                 N::CurveDefinition,
                 "the curve's control point, knot and degree counts do not agree",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 1,
             ),
             (
                 N::SurfaceDefinition,
                 "the surface's control net, knot and degree counts do not agree",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 2,
             ),
             (
                 N::Degree,
                 "the degree is not allowed here",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 3,
             ),
             (
                 N::DegreeTooHigh { given: 21, max: 16 },
                 "degree 21 is above the largest degree, 16",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 3,
             ),
             (
                 N::Knots,
                 "the knot vector is not valid here",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 4,
             ),
             (
                 N::KnotsDecrease { index: 4 },
                 "the knot vector decreases at knot 4",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 4,
             ),
             (
                 N::Weight,
                 "a weight is not valid here",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 5,
             ),
             (
@@ -3162,7 +3180,7 @@ mod tests {
                     max: 8.0,
                 },
                 "the weight of control point 1 is -2, outside [0.5, 8]",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 5,
             ),
             (
@@ -3181,23 +3199,28 @@ mod tests {
                 ErrorKind::OutsideDomain,
                 6,
             ),
-            (N::Index, "an index is out of range", ErrorKind::Failed, 7),
+            (
+                N::Index,
+                "an index is out of range",
+                ErrorKind::InvalidInput,
+                7,
+            ),
             (
                 N::IndexOutOfRange { index: 9, len: 4 },
                 "index 9 is out of range for 4 items",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 7,
             ),
             (
                 N::ZeroDerivative,
                 "a derivative is zero where a direction is needed",
-                ErrorKind::Failed,
+                ErrorKind::Degenerate,
                 8,
             ),
             (
                 N::Storage,
                 "a buffer supplied by the caller is too small",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 9,
             ),
             (
@@ -3221,7 +3244,7 @@ mod tests {
             (
                 N::Input,
                 "the input data is not valid",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 14,
             ),
             (
@@ -3233,7 +3256,7 @@ mod tests {
             (
                 N::Singular,
                 "the system of equations is singular",
-                ErrorKind::Failed,
+                ErrorKind::Degenerate,
                 16,
             ),
             (
@@ -3245,13 +3268,13 @@ mod tests {
             (
                 N::NoDerivativeRows,
                 "the output has no row for the point itself",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 20,
             ),
             (
                 N::DerivativeOrder { given: 7, max: 4 },
                 "derivative order 7 is above the largest order, 4",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 20,
             ),
         ];
@@ -3303,7 +3326,7 @@ mod tests {
             (
                 B::NoNurbsForm,
                 "it holds no NURBS form",
-                ErrorKind::Failed,
+                ErrorKind::Unsupported,
                 SM_ERR,
             ),
             (
@@ -3325,7 +3348,7 @@ mod tests {
                     max: 17,
                 },
                 "degree 1 is outside [2, 17]",
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
                 SM_ERR,
             ),
             (
@@ -3335,7 +3358,7 @@ mod tests {
                     hi: 1.0,
                 },
                 "parameter 1.5 is outside the domain [0, 1]",
-                ErrorKind::Failed,
+                ErrorKind::OutsideDomain,
                 SM_ERR,
             ),
             (
@@ -3351,14 +3374,14 @@ mod tests {
             assert_eq!(error.to_string(), format!("{op}: {message}"));
             assert_eq!(error.operation(), op);
             assert_eq!(error.nurbs_failure(), Some(&N::BSpline(failure)));
-            // the same kind and statuses as the `Upstream` the method returned before
+            // the statuses of the `Upstream` the method returned before; the kind is the
+            // cause's own (#21871)
             let before = SolidError::Upstream {
                 operation: op,
                 code: status,
                 entity: None,
             };
             assert_eq!(error.kind(), kind, "{error}");
-            assert_eq!(error.kind(), before.kind(), "{error}");
             assert_eq!(error.sm_status(), before.sm_status(), "{error}");
             assert_eq!(error.upstream_status(), Some(status), "{error}");
             assert_eq!(error.is_port_failure(), before.is_port_failure());
@@ -3546,6 +3569,122 @@ mod tests {
             "mass/integrator.rs",
         ] {
             assert!(!library(rel).contains("nl_ser("), "nl_ser in {rel}");
+        }
+    }
+
+    /// A round's or a blend's refusal is of its refusal's class whatever status it carries,
+    /// and the status is kept (#21871): a refusal kind where one names it, so the error is a
+    /// refusal and not a defect.
+    #[test]
+    fn a_round_refusal_has_its_class_whatever_its_status() {
+        use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
+        use crate::blend::round_room::RoundRefusal;
+        use crate::topology::{EdgeId, VertexId};
+
+        let (edge, vertex) = (EdgeId::from_index(1), VertexId::from_index(2));
+        let law = RoundRefusal::LawRadiusUnusable {
+            at: 2.0,
+            radius: f64::INFINITY,
+        };
+        assert_eq!(
+            crate::blend::round_room::refused("op", law.clone()).kind(),
+            ErrorKind::InvalidInput
+        );
+        let rounds = [
+            (law, ErrorKind::InvalidInput),
+            (
+                RoundRefusal::RoundsCross {
+                    at: Vec::new(),
+                    fit: Some(1.0),
+                },
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                RoundRefusal::TaperEndUnsupported { vertex, lean: None },
+                ErrorKind::Unsupported,
+            ),
+            (
+                RoundRefusal::FacesCloseAtBothEnds { edge },
+                ErrorKind::FaceConsumed,
+            ),
+            (
+                RoundRefusal::RoomRunsOut {
+                    edge,
+                    at: 0.5,
+                    largest: 1.0,
+                },
+                ErrorKind::FilletTooLarge,
+            ),
+        ];
+        let blends = [
+            (
+                BlendRefusal::EdgeNotBlendable {
+                    edge,
+                    reason: crate::blend::blend_refusal::NotBlendable::NotTwoFaces,
+                },
+                ErrorKind::InvalidInput,
+            ),
+            (
+                BlendRefusal::ContinuesInto {
+                    edge,
+                    vertex,
+                    continues_into: EdgeId::from_index(3),
+                },
+                ErrorKind::TangentContinuationEnd,
+            ),
+            (
+                BlendRefusal::RoundTooSmall {
+                    edge,
+                    turn: 0.1,
+                    tolerance: 1e-6,
+                    smallest_radius: 1e-3,
+                },
+                ErrorKind::StripBelowResolution,
+            ),
+            (
+                BlendRefusal::SetbackTooShort {
+                    vertex,
+                    least: 1.0,
+                    why: SetbackTooShortWhy::RailsCross,
+                },
+                ErrorKind::Failed,
+            ),
+            (
+                BlendRefusal::SetbackTooLong {
+                    vertex,
+                    largest: 1.0,
+                    why: SetbackTooLongWhy::Overlap,
+                },
+                ErrorKind::CornersTakeWholeEdge,
+            ),
+            (
+                BlendRefusal::ChamferAngleTooLarge {
+                    edge,
+                    angle: 2.0,
+                    largest: 1.5,
+                },
+                ErrorKind::FilletTooLarge,
+            ),
+        ];
+        for code in [SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER] {
+            for (refusal, kind) in &rounds {
+                let e = SolidError::RoundRefused {
+                    operation: "op",
+                    code,
+                    refusal: refusal.clone(),
+                };
+                assert_eq!(e.kind(), *kind, "{code} {refusal:?}");
+                assert_eq!(e.sm_status(), Some(code));
+                assert_eq!(e.is_refusal(), kind.is_refusal(), "{refusal:?}");
+                assert!(!e.is_defect(), "{refusal:?}");
+            }
+            for (refusal, kind) in blends {
+                let e = refusal.error("op", code);
+                assert_eq!(e.kind(), kind, "{code} {refusal:?}");
+                assert_eq!(e.sm_status(), Some(code));
+                assert_eq!(e.is_refusal(), kind.is_refusal(), "{refusal:?}");
+                assert!(!e.is_defect(), "{refusal:?}");
+            }
         }
     }
 

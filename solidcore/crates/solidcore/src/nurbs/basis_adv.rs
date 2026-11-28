@@ -636,9 +636,11 @@ mod tests {
     fn increase_mult_repeats_inner_knots() {
         let u = [0., 0., 0., 0., 0.3, 0.5, 0.5, 1., 1., 1., 1.];
         assert_eq!(increase_knot_mult(&u, 3, 1).unwrap(), vec![0.3, 0.5]);
+        // The fixture's `edge_inc_mult_err`: a caller's knots, so `InvalidInput` (#21871).
         assert!(matches!(
             increase_knot_mult(&u, 3, 2),
             Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Knots))
+                && e.kind() == crate::error::ErrorKind::InvalidInput
         ));
         assert_eq!(
             increase_knot_mult(&[0., 0., 1., 1.], 1, 5).unwrap(),

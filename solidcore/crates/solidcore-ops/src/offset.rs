@@ -277,8 +277,7 @@ fn offset_refused(
         OffsetFailure::TubeFolds { largest, .. } => return Error::WallFolds { largest },
         OffsetFailure::WallsTouch { .. } => return Error::WallsTouch,
         OffsetFailure::EdgeVanishes { .. } => OffsetRefusal::EdgeVanishes,
-        // (the kernel's fold kind also covers an offset not certified regular, which is no
-        // fold: its own reason, #14783)
+        // an offset not certified regular is no fold: its own reason (#14783)
         OffsetFailure::NotCertified { distance, .. }
         | OffsetFailure::TubeNotCertified { distance, .. } => {
             OffsetRefusal::NotCertified { distance }
