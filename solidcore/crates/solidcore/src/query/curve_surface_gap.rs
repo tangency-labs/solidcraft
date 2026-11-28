@@ -347,10 +347,9 @@ impl NetSurface {
     /// (`query::seam_bound` refuses it). A cone (or cylinder) evaluates by its formula, not
     /// its net: the plane, structured-trim and bisection bounds count the distance between
     /// the two over the net's box ([`net_to_surface_bound`]), so its net is not continued past
-    /// its ends, and so do [`curve_face_gap_bound`] and the kept-trim cover's
-    /// `trim_distance_bound` ([`cone_net_offset`]); [`curve_uv_gap_bound`],
-    /// [`curve_uv_gap_lower_bound`] and [`curve_piece_gap_bound`] do not yet
-    /// (tangency-labs/solidcraft#21600).
+    /// its ends, and so do [`curve_face_gap_bound`], the kept-trim cover's
+    /// `trim_distance_bound`, [`curve_uv_gap_bound`], [`curve_uv_gap_lower_bound`] and
+    /// [`curve_piece_gap_bound`] ([`cone_net_offset`]).
     pub(crate) fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
         let Some(bs) = as_b_spline(k, surface)? else {
             return Ok(None);
@@ -1859,11 +1858,14 @@ fn kinks(cn: &NurbsCurve, lo: f64, hi: f64) -> Vec<f64> {
 
 /// A proved upper bound on `sup |C(t) − S(W(t))|` over `t` in `range`, for the 3D curve
 /// `curve` (`C`), a B-spline `uv` of parameters `(u, v, 0)` on the same parameter (`W`: a
-/// UV curve or trim of `C` on the surface), and `surface`'s net (`S`): how far the curve
-/// strays from the surface's image of its UV curve, the bound [`certified_gap`] encloses
-/// (not upstream, tangency-labs/solidcraft#18166). For a surface kept as the net of a
-/// definition (a blend's or a sweep's), `S` is the net: the caller adds the net's own bound.
-/// `floor` is the caller's scale, as for [`curve_face_gap_bound`].
+/// UV curve or trim of `C` on the surface), and `surface` (`S`): how far the curve strays
+/// from the surface's image of its UV curve — the bound [`certified_gap`] encloses on the
+/// surface's net, plus, for a cone (or cylinder), the distance from the net to the point the
+/// formula gives over `W`'s box ([`cone_net_offset`], rounded up), so the bound is on the
+/// surface and not only its net (not upstream, tangency-labs/solidcraft#18166, #21600). For
+/// a surface kept as the net of a definition (a blend's or a sweep's), `S` is the net: the
+/// caller adds the net's own bound. `floor` is the caller's scale, as for
+/// [`curve_face_gap_bound`].
 ///
 /// `None` when the gap is not enclosed: an empty, unordered or not finite `range`, a
 /// surface that is not a NURBS net or whose net's parameters are not the surface's
@@ -1896,14 +1898,21 @@ pub fn curve_uv_gap_bound(
     let Some(net) = NetSurface::of(k, &surface, &probe)? else {
         return Ok(None);
     };
-    certified_gap(k, curve, uv, &net, range, FIRST_PIECES, floor)
+    // (#21600 review: the bound is on the net's image; a cone's distance off its net added)
+    let Some(off) = cone_net_offset(k, &surface, &net, Some(uv))? else {
+        return Ok(None);
+    };
+    let gap = certified_gap(k, curve, uv, &net, range, FIRST_PIECES, floor)?;
+    Ok(gap.and_then(|g| plus_net_offset(g, off)))
 }
 
 /// A proved lower bound on `|C(t) − S(W(t))|` at the one parameter `t`, for the curves and
 /// surface of [`curve_uv_gap_bound`]: the same enclosures of `C(t)`, `W(t)` and the net's
-/// point over the box `W(t)` encloses, every rounding included, and the norm's lower end.
-/// It bounds the supremum [`curve_uv_gap_bound`] encloses from below (not upstream,
-/// tangency-labs/solidcraft#18195, a witness for ranking two gaps).
+/// point over the box `W(t)` encloses, every rounding included, and the norm's lower end,
+/// less, for a cone (or cylinder), the distance from the net to the formula over that box
+/// ([`cone_net_offset`], rounded down). It bounds the supremum [`curve_uv_gap_bound`]
+/// encloses of the surface from below (not upstream, tangency-labs/solidcraft#18195, #21600,
+/// a witness for ranking two gaps).
 ///
 /// `None` when the gap at `t` is not enclosed: `t` outside either curve's domain or not
 /// finite, a surface that is not a NURBS net or whose net's parameters are not the
@@ -1953,7 +1962,12 @@ pub fn curve_uv_gap_lower_bound(
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     };
-    Ok(norm_lower(minus(c0, surf)).map(|d| (Ivl::from(d) - Ivl::from(slack)).lo.max(0.0)))
+    // (#21600 review: the bound is on the net's image; a cone's distance off its net taken off)
+    let Some(off) = cone_net_offset(k, &surface, &net, Some(uv))? else {
+        return Ok(None);
+    };
+    let lower = norm_lower(minus(c0, surf)).map(|d| (Ivl::from(d) - Ivl::from(slack)).lo.max(0.0));
+    Ok(lower.and_then(|d| minus_net_offset(d, off)))
 }
 
 /// A proved upper bound on the distance from every point of `curve` over its parameters
@@ -1991,18 +2005,21 @@ pub fn curve_face_gap_bound(
         return Ok(None);
     };
     // (#20643 review: the bound is on the net's image; a cone's distance off its net added)
-    let Some(off) = cone_net_offset(k, &surface, &net, &correspondence)? else {
+    let Some(off) = cone_net_offset(k, &surface, &net, Some(&correspondence))? else {
         return Ok(None);
     };
     let gap = certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)?;
     Ok(gap.and_then(|g| plus_net_offset(g, off)))
 }
 
-/// Not upstream (#20643): the distance from the net `net` of a cone (or cylinder) `surface`
-/// to the point the cone evaluates ([`net_to_surface_bound`]), for a bound taken on a net
-/// [`NetSurface::of`] gives to hold for the surface; `0` for any other surface (whose net is
-/// its evaluation, or whose caller adds the net's own bound), and for an offset's net
-/// ([`bisection_residual`] bounds those). `None` where a cone's is not enclosed.
+/// Not upstream (#20643, #21600): the distance from the net `net` of a cone (or cylinder)
+/// `surface` to the point the cone evaluates ([`net_to_surface_bound`]), for a bound taken on
+/// a net [`NetSurface::of`] gives to hold for the surface; `0` for any other surface (whose
+/// net is its evaluation, or whose caller adds the net's own bound), and for an offset's net
+/// ([`bisection_residual`] bounds those). `uv` is the UV curve whose box the trim's image
+/// lies over ([`uv_box`]), so the seam's tear counts only where the trim reaches it; `None`
+/// takes the whole net (for a caller holding no UV curve, as [`curve_piece_gap_bound`] has
+/// only the two ends). `None` where a cone's is not enclosed.
 ///
 /// # Errors
 ///
@@ -2011,12 +2028,12 @@ pub(super) fn cone_net_offset(
     k: &Kernel,
     surface: &Surface,
     net: &NetSurface,
-    uv: &BSplineCurve,
+    uv: Option<&BSplineCurve>,
 ) -> Result<Option<f64>> {
     use crate::surface::surface::SurfaceKind;
     match surface.kind() {
         SurfaceKind::Cone(c) if net.offset.is_none() => {
-            cone_residual::cone_net_residual_within(k, c, &net.net, uv_box(uv))
+            cone_residual::cone_net_residual_within(k, c, &net.net, uv.and_then(uv_box))
         }
         _ => Ok(Some(0.0)),
     }
@@ -2062,6 +2079,19 @@ fn nurbs_uv_box(n: &NurbsCurve) -> Option<[[f64; 2]; 2]> {
 pub(super) fn plus_net_offset(bound: f64, off: f64) -> Option<f64> {
     let b = if off > 0.0 {
         (Ivl::from(bound) + Ivl::from(off)).hi
+    } else {
+        bound
+    };
+    b.is_finite().then_some(b)
+}
+
+/// Not upstream (#21600): `bound` less `off` ([`cone_net_offset`]) rounded down, at `0` where
+/// it would go under (a distance is not negative), and `bound` as it is for an `off` of `0`
+/// (an interval difference rounds outward, so taking `0` off would move it an ulp); `None`
+/// where it is not finite.
+pub(super) fn minus_net_offset(bound: f64, off: f64) -> Option<f64> {
+    let b = if off > 0.0 {
+        (Ivl::from(bound) - Ivl::from(off)).lo.max(0.0)
     } else {
         bound
     };
@@ -4592,7 +4622,10 @@ fn target_piece(
 /// is, never whether it holds), and the bound is that of [`certified_gap`]'s module docs: the
 /// larger end value plus `h^2 / 8 sup |g''|` per piece, the pieces cut at the curve's knots
 /// and bisected, every value enclosed in outward-rounded intervals. Bisection stops once the
-/// bound passes `limit` (it is then returned) or closes below `floor`.
+/// bound passes `limit` (it is then returned) or closes below `floor`. Against a cone (or
+/// cylinder) the piece is bounded to the target's net, and the distance from the whole net to
+/// the formula ([`cone_net_offset`], rounded up) is added, so the bound is the surface's
+/// (#21600).
 ///
 /// `None` when no bound is made: a curve kind without NURBS data ([`piece_nurbs`]), a range
 /// or target range outside its curve's domain, a surface without a net matching it at the
@@ -4622,21 +4655,26 @@ pub(crate) fn curve_piece_gap_bound(
     let Some((cn, err)) = piece_nurbs(curve, [lo, hi]) else {
         return Ok(None);
     };
-    let (prepared, target_err) = match target {
+    let (prepared, target_err, net_off) = match target {
         PieceTarget::Point(p) => {
             let p = V3 {
                 x: Ivl::from(p.x),
                 y: Ivl::from(p.y),
                 z: Ivl::from(p.z),
             };
-            (Prepared::Point(p), 0.0)
+            (Prepared::Point(p), 0.0, 0.0)
         }
         PieceTarget::Surface(s, [w0, w1]) => {
             let ends = if flip { [w1, w0] } else { [w0, w1] };
             let Some(net) = NetSurface::of(k, s, &ends)? else {
                 return Ok(None);
             };
-            (Prepared::Surface(net, ends), 0.0)
+            // (#21600 review: the bound is to the net's image; a cone's distance off its net
+            // over the whole net added, the two ends giving no box to hold the trim in)
+            let Some(off) = cone_net_offset(k, s, &net, None)? else {
+                return Ok(None);
+            };
+            (Prepared::Surface(net, ends), 0.0, off)
         }
         PieceTarget::Curve(c, [s0, s1]) => {
             let ends = if flip { [s1, s0] } else { [s0, s1] };
@@ -4644,7 +4682,7 @@ pub(crate) fn curve_piece_gap_bound(
             else {
                 return Ok(None);
             };
-            (Prepared::Curve(dn, ends), derr)
+            (Prepared::Curve(dn, ends), derr, 0.0)
         }
     };
     let range = [lo, hi];
@@ -4660,7 +4698,11 @@ pub(crate) fn curve_piece_gap_bound(
             _ => None,
         })
         .collect();
-    let extra = err + target_err;
+    // (a target's own rounding first, then a cone's residual, each rounded up; a target that
+    // adds neither gives the bound it gave before)
+    let Some(extra) = plus_net_offset(err + target_err, net_off) else {
+        return Ok(None);
+    };
     let mut worst = 0.0_f64;
     let mut made = stack.len();
     while let Some((a, b, depth, parent)) = stack.pop() {
@@ -6894,7 +6936,7 @@ mod tests {
                 let (net, w) = correspondence(&k, &s, d, &line, [0.0, 1.0])
                     .unwrap()
                     .unwrap();
-                let residual = cone_net_offset(&k, &s, &net, &w).unwrap().unwrap();
+                let residual = cone_net_offset(&k, &s, &net, Some(&w)).unwrap().unwrap();
                 assert!(
                     g >= residual,
                     "{e:e}: {g:e} under the residual {residual:e}"
@@ -6984,6 +7026,180 @@ mod tests {
             checked += 1;
         }
         assert_eq!(checked, 1);
+    }
+
+    /// The full-turn cylinder of radius 12.5 that `create_cylinder` builds about `at`, its
+    /// surface, the row of its net at the low `v` lifted `eps` off the axis (`x, y` of every
+    /// control point scaled by `1 + eps`, its weights unchanged), the UV line under that row,
+    /// and the net's `u` domain.
+    ///
+    /// At `at` far from the origin the enclosures round far below the seam's tear, and the
+    /// net's probe passes at the tear (its scale is the point's coordinate sum), so a bound
+    /// that leaves the tear out is seen there.
+    fn lifted_row(
+        k: &mut Kernel,
+        at: Point3,
+        eps: f64,
+    ) -> (Surface, BSplineCurve, BSplineCurve, [f64; 2]) {
+        use crate::surface::surface::SurfaceKind;
+        let b = crate::primitive::api_primitives::create_cylinder(k, at, 12.5, 3.0).unwrap();
+        for f in crate::query::api_queries::get_faces(&b).unwrap() {
+            let Some(s) = b
+                .face(f)
+                .unwrap()
+                .surface
+                .as_ref()
+                .map(|s| s.clone_for_evaluation().unwrap())
+            else {
+                continue;
+            };
+            if !matches!(s.kind(), SurfaceKind::Cone(_)) {
+                continue;
+            }
+            let net = NetSurface::of(k, &s, &[]).unwrap().unwrap().net;
+            // (the row at the low `v`, its `x` and `y` scaled by `1 + eps`, its weights kept)
+            let cps = (0..net.nu)
+                .map(|i| {
+                    let c = &net.pw[4 * (i * net.nv)..4 * (i * net.nv) + 4];
+                    CPoint::new(c[0] * (1.0 + eps), c[1] * (1.0 + eps), c[2], c[3])
+                })
+                .collect();
+            let row = NurbCurve::new(cps, net.p, net.u.clone()).unwrap();
+            let (t0, t1) = (net.u[net.p], net.u[net.nu]);
+            let v0 = net.v[net.q];
+            let uv = NurbCurve::new(
+                vec![CPoint::new(t0, v0, 0.0, 1.0), CPoint::new(t1, v0, 0.0, 1.0)],
+                1,
+                vec![t0, t0, t1, t1],
+            )
+            .unwrap();
+            return (
+                s,
+                BSplineCurve::from_nurb(row, 3, false),
+                BSplineCurve::from_nurb(uv, 2, false),
+                [t0, t1],
+            );
+        }
+        panic!("no cylinder face");
+    }
+
+    /// The largest same-parameter gap `|C(t) − S(W(t))|` of the curve `C` from the surface
+    /// `S` with the UV curve `W` under it, over `range`, at 4097 parameters.
+    fn measured(
+        k: &Kernel,
+        curve: &BSplineCurve,
+        uv: &BSplineCurve,
+        surface: &Surface,
+        [t0, t1]: [f64; 2],
+    ) -> f64 {
+        let mut worst = 0.0_f64;
+        for i in 0..=4096 {
+            let t = t0 + (t1 - t0) * f64::from(i) / 4096.0;
+            let w = uv.evaluate_point(t).unwrap();
+            let d = (curve.evaluate_point(t).unwrap()
+                - surface.evaluate_point(k, Point2::new(w.x, w.y)).unwrap())
+            .length();
+            worst = worst.max(d);
+        }
+        worst
+    }
+
+    /// [`curve_uv_gap_bound`] counts a cone's own distance off its net (#21600): the row of a
+    /// full-turn cylinder's net lifted `eps` off the axis is its own image at the UV line
+    /// under it, so its gap to the net is `eps r`; over the last `2e-7` of the net's `u` range
+    /// the net's seam snap tears the row from the formula by a hundred times that, and a bound
+    /// on the net alone comes in an order below.
+    #[test]
+    fn a_cylinders_uv_gap_bound_counts_its_net_residual() {
+        for eps in [0.0, 1.0e-9] {
+            let mut k = Kernel::default();
+            let at = Point3::new(1.0e4, 0.0, 0.0);
+            let (s, row, uv, [_, t1]) = lifted_row(&mut k, at, eps);
+            // (the seam's tear, where the net's probe passes at this distance of the point
+            // from the axis and the enclosures round far below it)
+            let range = [t1 - 2.0e-7, t1];
+            let worst = measured(&k, &row, &uv, &s, range);
+            assert!(worst > 1.0e-8, "eps {eps:e}: the tear is {worst:e}");
+            let g = curve_uv_gap_bound(&k, &row, &uv, &s, range, 1.0e-14)
+                .unwrap()
+                .unwrap_or_else(|| panic!("eps {eps:e}: no bound"));
+            assert!(g >= worst, "eps {eps:e}: {g:e} under the gap {worst:e}");
+        }
+    }
+
+    /// [`curve_uv_gap_lower_bound`] takes a cone's own distance off its net off the bound
+    /// (#21600): the formula's image of the UV line is on the surface, so its gap there is
+    /// zero, and a lower bound that leaves the seam's tear in it is positive.
+    #[test]
+    fn a_cylinders_uv_gap_lower_bound_takes_its_net_residual_off() {
+        let mut k = Kernel::default();
+        let at = Point3::new(1.0e4, 0.0, 0.0);
+        let (s, _, uv, [_, t1]) = lifted_row(&mut k, at, 0.0);
+        let u = t1 - 5.0e-8;
+        // the formula's image of the UV line at `u`: a straight generator, on the surface
+        let w = uv.evaluate_point(0.0).unwrap();
+        let (v0, v1) = (w.y, uv.evaluate_point(1.0).unwrap().y);
+        let line = |a: f64, b: f64| {
+            let (p, q) = (
+                s.evaluate_point(&k, Point2::new(u, a)).unwrap(),
+                s.evaluate_point(&k, Point2::new(u, b)).unwrap(),
+            );
+            BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    vec![
+                        CPoint::new(p.x, p.y, p.z, NOW),
+                        CPoint::new(q.x, q.y, q.z, NOW),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                3,
+                false,
+            )
+        };
+        let curve = line(v0, v1);
+        let uv_line = NurbCurve::new(
+            vec![CPoint::new(u, v0, 0.0, 1.0), CPoint::new(u, v1, 0.0, 1.0)],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let uv_line = BSplineCurve::from_nurb(uv_line, 2, false);
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let lower = curve_uv_gap_lower_bound(&k, &curve, &uv_line, &s, t)
+                .unwrap()
+                .unwrap_or_else(|| panic!("t {t}: no lower bound"));
+            // (the formula's point at `u` is on the surface: the gap there is zero)
+            assert!(lower < 1.0e-9, "t {t}: {lower:e} for a gap of zero");
+        }
+    }
+
+    /// [`curve_piece_gap_bound`] counts a cone target's own distance off its net (#21600), as
+    /// [`curve_uv_gap_bound`] does: the same lifted row against the surface.
+    #[test]
+    fn a_cylinders_piece_gap_bound_counts_its_net_residual() {
+        for eps in [0.0, 1.0e-9] {
+            let mut k = Kernel::default();
+            let at = Point3::new(1.0e4, 0.0, 0.0);
+            let (s, row, uv, [_, t1]) = lifted_row(&mut k, at, eps);
+            let v0 = uv.evaluate_point(0.0).unwrap().y;
+            let range = [t1 - 2.0e-7, t1];
+            let (w0, w1) = (Point2::new(range[0], v0), Point2::new(range[1], v0));
+            let worst = measured(&k, &row, &uv, &s, range);
+            assert!(worst > 1.0e-8, "eps {eps:e}: the tear is {worst:e}");
+            let g = curve_piece_gap_bound(
+                &k,
+                &Curve::from(row.clone_exact()),
+                range,
+                PieceTarget::Surface(&s, [w0, w1]),
+                1.0e-14,
+                f64::INFINITY,
+            )
+            .unwrap()
+            .unwrap_or_else(|| panic!("eps {eps:e}: no bound"));
+            assert!(g >= worst, "eps {eps:e}: {g:e} under the gap {worst:e}");
+        }
     }
 
     /// A curve bowing within a plane parallel to a box's face is bounded against the face
