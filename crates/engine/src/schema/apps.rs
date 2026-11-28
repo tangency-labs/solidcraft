@@ -24,6 +24,10 @@ pub struct SendToAppParams {
     /// selected bodies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bodies: Option<StringList>,
+    /// File name without extension, validated as for `file.send_to_slicer`. Default: the design
+    /// name and a distinguishing code. `sc` always adds a fresh `-v<N>`; ignored with `copy_to`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// A folder to keep the file in instead of this user's send folder (made if missing): the file
     /// is named after the design with the next free `-v<N>`, and is never replaced. The reply has
     /// `version` and `copy`.

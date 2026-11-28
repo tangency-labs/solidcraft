@@ -1,7 +1,9 @@
 //! The file name an export offers in the save dialog, from the Export file name preference: a
 //! template where `{design}` stands for the design's name, `{body}` for the exported body's,
+//! `{component}` for the explicitly exported component's name (else the usual export name),
 //! `{source}` for the name of the file it was imported from, and `{project}`, `{part_number}`, `{revision}` and the other Design Properties for their values.
 //! An empty template uses the export's default name; `{body}` chooses the body explicitly.
+//! The Send to Slicer file name preference names the file a slicer is sent the same way ([`sent`]).
 
 use solidcraft_engine::doc::metadata::{Owner, keys};
 use solidcraft_engine::doc::{FeatureKind, Metadata};
@@ -10,6 +12,8 @@ use solidcraft_engine::doc::{FeatureKind, Metadata};
 const DESIGN: &str = "design";
 /// Placeholder name for the exported body's name.
 const BODY: &str = "body";
+/// Placeholder name for the explicitly exported component.
+const COMPONENT: &str = "component";
 /// Placeholder name for the name, without extension, of the file the export was imported from.
 const SOURCE: &str = "source";
 
@@ -31,6 +35,8 @@ pub(crate) struct Names<'a> {
     /// The exported body (the first one when an export holds several; `None` when the design has
     /// no body, and `{body}` then reads as the design's name).
     pub body: Option<&'a str>,
+    /// The explicitly exported component, or the usual export name.
+    pub component: Option<&'a str>,
     /// The name, without extension, of the file the exported body was imported from (else the
     /// design's first import); `None` when nothing was imported, and `{source}` then reads as the
     /// design's name.
@@ -45,6 +51,7 @@ impl Names<'_> {
         match name {
             DESIGN => Some(self.design),
             BODY => Some(self.body.unwrap_or(self.design)),
+            COMPONENT => Some(self.component.unwrap_or(self.design)),
             SOURCE => Some(self.source.unwrap_or(self.design)),
             _ => keys(Owner::Design).find(|k| k.name == name).map(|k| self.metadata.text(k.name).unwrap_or_default()),
         }
@@ -70,7 +77,13 @@ pub(crate) fn stem(template: &str, names: &Names, legacy: &str) -> String {
     if safe.chars().all(|c| c == '_') {
         legacy.to_string()
     } else if is_windows_device(safe) {
-        format!("_{safe}")
+        // The `_` in front counts too: the name stays within the byte limit, cut between characters.
+        let mut cut = safe.len().min(MAX_BYTES - 1);
+        while !safe.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let kept = safe.get(..cut).unwrap_or_default().trim_end_matches(|c: char| c.is_whitespace() || c == '.');
+        format!("_{kept}")
     } else {
         safe.to_string()
     }
@@ -97,7 +110,7 @@ pub(crate) fn default_for_bodies(app: &crate::SolveApp, bodies: &[String]) -> St
 /// Sanitize the design name before using it as a filename fallback. Explicit templates
 /// already go through `stem` and retain their existing behaviour.
 fn safe_design_name(app: &crate::SolveApp) -> String {
-    let names = Names { design: &app.session.doc.name, body: None, source: None, metadata: &app.session.doc.metadata };
+    let names = Names { design: &app.session.doc.name, body: None, component: None, source: None, metadata: &app.session.doc.metadata };
     stem("{design}", &names, "Untitled")
 }
 
@@ -105,10 +118,18 @@ fn safe_design_name(app: &crate::SolveApp) -> String {
 /// the Export file name preference. Every place that asks where to export a design or its bodies
 /// takes its name from here; `legacy` is the export's suggested name with no template.
 pub(crate) fn offered(app: &crate::SolveApp, body: Option<&str>, legacy: &str) -> String {
+    offered_for_component(app, body, None, legacy)
+}
+
+/// The existing filename template may explicitly request a component's name.
+pub(crate) fn offered_for_component(app: &crate::SolveApp, body: Option<&str>, component: Option<u64>, legacy: &str) -> String {
     let template = &app.preferences.export_name;
+    let component = component.filter(|id| *id != 0).and_then(|id| app.session.doc.components.iter().find(|c| c.id == id));
+    let component = component.map_or(legacy, |c| c.name.as_str());
     // Only a template that asks for it evaluates the model to find the body's import.
     let source = if template.contains("{source}") { imported_file(&app.session, body) } else { None };
-    let names = Names { design: &app.session.doc.name, body, source: source.as_deref(), metadata: &app.session.doc.metadata };
+    let names =
+        Names { design: &app.session.doc.name, body, component: Some(component), source: source.as_deref(), metadata: &app.session.doc.metadata };
     stem(template, &names, legacy)
 }
 
@@ -139,6 +160,19 @@ fn file_stem(file: &str) -> &str {
     }
 }
 
+/// The name, without extension, of the file Send to Slicer writes for a send whose first body is
+/// `body`, from the Send to Slicer file name preference. `None` when the preference is empty or
+/// leaves nothing usable as a file name: the file then keeps the name `file.send_to_slicer` gives
+/// it (the design's name followed by a code).
+pub(crate) fn sent(app: &crate::SolveApp, body: Option<&str>) -> Option<String> {
+    let template = &app.preferences.slicer_file_name;
+    // As for exports: only a template that asks for it evaluates the model to find the body's import.
+    let source = if template.contains("{source}") { imported_file(&app.session, body) } else { None };
+    let names = Names { design: &app.session.doc.name, body, component: None, source: source.as_deref(), metadata: &app.session.doc.metadata };
+    let name = stem(template, &names, "");
+    (!name.is_empty()).then_some(name)
+}
+
 /// `template` with each `{placeholder}` replaced, in one pass: a value that holds braces itself
 /// (a body named `{revision}`) is kept as it is. Other text in braces is kept as typed.
 fn fill(template: &str, names: &Names) -> String {
@@ -167,7 +201,12 @@ fn fill(template: &str, names: &Names) -> String {
 
 /// Every placeholder with what it stands for, one per line, for the setting's help.
 pub(crate) fn placeholder_list() -> String {
-    let own = [(DESIGN, "prefs.export_name.design"), (BODY, "prefs.export_name.body"), (SOURCE, "prefs.export_name.source")];
+    let own = [
+        (DESIGN, "prefs.export_name.design"),
+        (BODY, "prefs.export_name.body"),
+        (COMPONENT, "prefs.export_name.component"),
+        (SOURCE, "prefs.export_name.source"),
+    ];
     own.into_iter()
         .chain(keys(Owner::Design).map(|k| (k.name, k.label)))
         .map(|(name, label)| format!("{{{name}}}  {}", solidcraft_ui_text::tr(label)))
@@ -195,7 +234,7 @@ mod tests {
     }
 
     fn name(template: &str, design: &str, body: Option<&str>, legacy: &str) -> String {
-        stem(template, &Names { design, body, source: None, metadata: &Metadata::default() }, legacy)
+        stem(template, &Names { design, body, component: None, source: None, metadata: &Metadata::default() }, legacy)
     }
 
     #[test]
@@ -254,10 +293,19 @@ mod tests {
     }
 
     #[test]
+    fn component_placeholder_uses_the_component_and_keeps_other_names() {
+        let names =
+            Names { design: "Assembly", body: Some("PartBody"), component: Some("Bracket/Rev"), source: None, metadata: &Metadata::default() };
+        assert_eq!(stem("", &names, "PartBody"), "PartBody");
+        assert_eq!(stem("{component}-{body}-{design}", &names, "PartBody"), "Bracket_Rev-PartBody-Assembly");
+        assert_eq!(stem("{body}", &names, "PartBody"), "PartBody");
+    }
+
+    #[test]
     fn design_properties_are_placeholders_and_an_unset_one_is_empty() {
         let m = metadata(json!({"project": "Rover", "part_number": "RV-102", "revision": "C", "author": "Sam",
             "organization": "Acme", "description": "Motor mount", "license": "CC-BY-4.0"}));
-        let names = Names { design: "Bracket", body: Some("Base"), source: None, metadata: &m };
+        let names = Names { design: "Bracket", body: Some("Base"), component: None, source: None, metadata: &m };
         let all = "{project} {part_number} {revision} {author} {organization} {description} {license}";
         assert_eq!(stem(all, &names, "x"), "Rover RV-102 C Sam Acme Motor mount CC-BY-4.0");
         assert_eq!(stem("{part_number}_rev{revision}", &names, "x"), "RV-102_revC");
@@ -265,12 +313,12 @@ mod tests {
         // The material and finish of a design that is one part (#20114) are placeholders too; a
         // template that named them before kept the braces as typed, and now fills them in.
         let m = metadata(json!({"material": "5052-H32, 0.090 in", "finish": "Powder coat, RAL 9005, matt"}));
-        let names = Names { design: "Bracket", body: None, source: None, metadata: &m };
+        let names = Names { design: "Bracket", body: None, component: None, source: None, metadata: &m };
         assert_eq!(stem("{design} {material} {finish}", &names, "x"), "Bracket 5052-H32, 0.090 in Powder coat, RAL 9005, matt");
-        let bare = Names { design: "Bracket", body: None, source: None, metadata: &metadata(json!({})) };
+        let bare = Names { design: "Bracket", body: None, component: None, source: None, metadata: &metadata(json!({})) };
         assert_eq!(stem("{design}-{material}", &bare, "x"), "Bracket-", "unset: empty, as every property");
 
-        let names = Names { design: "Bracket", body: None, source: None, metadata: &metadata(json!({"revision": 3})) };
+        let names = Names { design: "Bracket", body: None, component: None, source: None, metadata: &metadata(json!({"revision": 3})) };
         assert_eq!(stem("{design}_rev{revision}", &names, "x"), "Bracket_rev", "unset, or not text, reads as empty");
         assert_eq!(stem("{part_number}", &names, "Old"), "Old", "nothing is left");
     }
@@ -278,7 +326,7 @@ mod tests {
     #[test]
     fn a_value_with_braces_is_not_filled_in_again() {
         let m = metadata(json!({"revision": "C"}));
-        let names = Names { design: "{body}", body: Some("{revision}"), source: None, metadata: &m };
+        let names = Names { design: "{body}", body: Some("{revision}"), component: None, source: None, metadata: &m };
         assert_eq!(stem("{design}-{body}-{revision}", &names, "x"), "{body}-{revision}-C");
     }
 
@@ -319,6 +367,10 @@ mod tests {
             assert_eq!(name("{design}", fine, None, "x"), fine, "only the exact device names");
         }
         assert_eq!(name("", "CON", None, "CON"), "CON", "an empty template keeps the old name as it was");
+        // The `_` in front does not take a long name over the byte limit: 240 bytes before it.
+        let long = name(&format!("CON.{}", "🔧".repeat(59)), "Bracket", None, "x");
+        assert_eq!(long, format!("_CON.{}", "🔧".repeat(58)), "{} bytes", long.len());
+        assert!(long.len() <= MAX_BYTES);
     }
 
     #[test]
@@ -332,6 +384,7 @@ mod tests {
             [
                 "{design}",
                 "{body}",
+                "{component}",
                 "{source}",
                 "{project}",
                 "{part_number}",

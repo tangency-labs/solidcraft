@@ -69,6 +69,9 @@ pub(super) struct Send<'a> {
     /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
     pub quality: solidcraft_io::MeshQuality,
     pub dest: Dest<'a>,
+    /// Only for [`Dest::Folder`]: the file's name without extension, already checked with
+    /// `slicer_files::check_name`. `None` keeps the name made from the design and the bodies.
+    pub name: Option<&'a str>,
     /// Only for [`Dest::Folder`].
     pub copy: Option<Copy>,
     pub single_instance: bool,
@@ -134,13 +137,17 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
         return Ok(out);
     }
     let dir = slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?;
-    let stem = slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies);
+    let stem = match r.name {
+        Some(name) => name.to_string(),
+        None => slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies),
+    };
     if ext == "sc" {
         // A design copy an app may edit is never replaced by a later send: each is a new `-v<N>`.
         let (file, version) =
             slicer_files::write_private_version(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
         return Ok(json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": false, "version": version}));
     }
+
     let (file, numbered) = slicer_files::write(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
     let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back});
     laid.report(&mut out);
@@ -386,6 +393,7 @@ mod tests {
             format: Format::ThreeMf,
             quality: Default::default(),
             dest: Dest::Folder,
+            name: None,
             copy,
             single_instance: false,
             wait: Wait::No,
@@ -414,8 +422,10 @@ mod tests {
     fn a_design_copy_is_never_replaced_by_a_later_send_and_the_original_is_not_touched() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
-        let a = write_in_folder(&mut s, &design_send(None)).unwrap();
-        let b = write_in_folder(&mut s, &design_send(None)).unwrap();
+        let mut request = design_send(None);
+        request.name = Some("Chosen private design");
+        let a = write_in_folder(&mut s, &request).unwrap();
+        let b = write_in_folder(&mut s, &request).unwrap();
         assert_ne!(a["path"], b["path"], "{a} {b}");
         assert_eq!(b["version"].as_u64(), a["version"].as_u64().map(|v| v + 1));
         assert!(std::path::Path::new(a["path"].as_str().unwrap()).exists() && std::path::Path::new(b["path"].as_str().unwrap()).exists());

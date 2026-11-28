@@ -11,6 +11,8 @@ pub const TABLE: Page = Page {
     group: Group::Tables,
     items: &[
         "table_custom",
+        "table_fitted",
+        "settings_mouse_mapping",
         "Column",
         "Table",
         "TableRow",
@@ -49,6 +51,13 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
         "Don't delete a row without a bin in the row itself.",
     ],
     demo: |ui, d| {
+        state(ui, solidcraft_ui_text::tr("prefs.navigation"), |ui| {
+            // These three bindings are shared by the app's default mouse presets.
+            let bindings =
+                [("prefs.wheel", "prefs.zoom_toward_cursor"), ("prefs.left_click", "prefs.select"), ("prefs.right_click", "prefs.context_menu")]
+                    .map(|(input, action)| (vec![solidcraft_ui_text::tr(input).to_owned()], solidcraft_ui_text::tr(action).to_owned()));
+            ui_kit::settings_mouse_mapping(ui, &bindings, |_| {});
+        });
         state(ui, "Editable, sortable (click Name)", |ui| {
             let columns =
                 [ui_kit::Column::new("Name", 1.0), ui_kit::Column::new("Expression", 1.5).flex(), ui_kit::Column::new("Delete", 0.3).icon_only()];

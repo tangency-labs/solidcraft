@@ -269,6 +269,11 @@ pub struct RevolveParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "RevolveConventionParam")]
     pub convention: Option<RevolveConventionParam>,
+    /// Join pieces of the same circular profile. Default: true. Set false to keep the face and
+    /// edge layout of Revolve features saved before arc joining.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub join_profile_arcs: Option<bool>,
     /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
     /// and `direction`.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
@@ -911,6 +916,11 @@ pub struct PlaneAtAngleParams {
     /// Omit to use the base plane's origin. `null` counts as not given.
     #[serde(default)]
     pub pivot: Option<GeoRefParam>,
+    /// Bring `base` onto the axis first (moved along its normal, tilted when the axis is not
+    /// parallel to it), so the plane goes through the whole axis even when it is off the base.
+    /// Not with `direction_only`. Default false: `base` turns about the axis where it is.
+    #[serde(default)]
+    pub through_axis: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }

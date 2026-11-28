@@ -105,9 +105,9 @@ fn replies_match_the_output_schema_for_each_format_and_the_app_gets_one_argument
     let keep = dir.join("kept folder").to_string_lossy().into_owned();
     let mut replies = Vec::new();
     for p in [
-        json!({"target": "fakeapp", "bodies": ["Block"], "wait": 3000}),
+        json!({"target": "fakeapp", "bodies": ["Block"], "name": "Chosen mesh", "wait": 3000}),
         json!({"target": "Fake App", "format": "STEP", "bodies": ["Block"], "copy_to": keep, "wait": 3000}),
-        json!({"target": "fakeapp", "format": "sc", "wait": 3000}),
+        json!({"target": "fakeapp", "format": "sc", "name": "Chosen design", "wait": 3000}),
         json!({"target": "fakeapp", "format": "sc", "copy_to": keep, "wait": 3000}),
     ] {
         let r = s.execute("file.send_to_app", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
@@ -120,7 +120,14 @@ fn replies_match_the_output_schema_for_each_format_and_the_app_gets_one_argument
         assert!(r.get("app_error").is_none(), "{r}");
         replies.push(r);
     }
+    for name in [json!("../escape"), json!("CON"), json!(""), json!(42), json!(false)] {
+        let error = s.execute("file.send_to_app", &json!({"target": "fakeapp", "name": name})).unwrap_err();
+        assert!(matches!(error, crate::EngineError::BadParams { .. }), "{error}");
+    }
     apps::set_targets(&[]);
+    assert!(replies[0]["path"].as_str().unwrap().ends_with("Chosen mesh.3mf"));
+    let design_file = std::path::Path::new(replies[2]["path"].as_str().unwrap()).file_name().unwrap().to_str().unwrap();
+    assert!(design_file.starts_with("Chosen design-v") && design_file.ends_with(".sc"), "{design_file}");
     assert_eq!(replies[0]["format"], "3mf");
     assert_eq!(replies[1]["format"], "step");
     assert_eq!(replies[2]["format"], "sc");
