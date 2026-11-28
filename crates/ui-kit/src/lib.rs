@@ -241,6 +241,7 @@ pub use preferences_navigation::*;
 pub use preferences_small::*;
 pub use radial::RADIAL_RADIUS;
 pub use radial::radial_menu;
+pub use radial::radial_menu_preview;
 pub use reports::*;
 pub use review::ReviewAndApply;
 pub use search::CommandSearch;

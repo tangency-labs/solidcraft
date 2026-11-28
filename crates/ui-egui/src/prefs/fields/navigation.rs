@@ -99,6 +99,8 @@ macro_rules! navigation_preferences {
             quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");
             /// Show the radial ring and enable hold/flick gestures for viewport context menus.
             radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
+            /// Independent tool orders for the model and sketch context rings.
+            radial_tools: crate::radial_context::Config = Default::default(), PAGE_NAVIGATION;
             /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
             right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
             /// A key that, held when a mouse orbit drag starts, makes that drag roll the view about

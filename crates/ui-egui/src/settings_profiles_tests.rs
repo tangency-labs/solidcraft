@@ -43,10 +43,10 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 111 because
     // the keyboard profile (#15302) is a portable Shortcuts preference; 111 -> 113 because the Roll
     // key and the twist's roll (roll_key, trackpad_twist_rolls, #22691) are two more portable
-    // Navigation preferences.
+    // Navigation preferences. The radial menu tool lists add one more portable key (114).
     assert_eq!(
         keys.len(),
-        113,
+        114,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
@@ -54,6 +54,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "maya_horizontal_zoom",
         "mouse_gestures",
         "radial_context_menu",
+        "radial_tools",
         "zoom_reverse",
         "theme",
         "theme_day",
@@ -872,6 +873,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "project_options_dialog",
         "quick_measure",
         "radial_context_menu",
+        "radial_tools",
         "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
@@ -938,7 +940,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
     // Test change: one more portable key, keyboard_profile (the keyboard profile your keys sit on, #15302).
-    assert_eq!(expected.len(), 113);
+    assert_eq!(expected.len(), 114);
     assert_eq!(actual, expected);
 }
 
