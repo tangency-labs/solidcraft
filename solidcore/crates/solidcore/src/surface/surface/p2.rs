@@ -2074,11 +2074,11 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is [`Surface::copy`]).
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Self> {
-        self.copy_and_add_analytics_within(k, k.tolerances.zone_tol_3d)
+        self.copy_and_add_analytics_within(k, f64::INFINITY)
     }
 
     /// [`Surface::copy_and_add_analytics`], a B-spline made analytic only where the analytic
-    /// gives its points within `tol` too
+    /// gives its points within `tol` too, a hard bound (`f64::INFINITY`: none)
     /// ([`crate::nurbs::b_spline_surface::BSplineSurface::copy_and_add_analytics_within`],
     /// not upstream, #22584).
     ///
