@@ -6060,6 +6060,7 @@ dependencies = [
  "serde_json",
  "solidcore-record",
  "solidcraft-engine",
+ "solidcraft-exchange",
  "solidcraft-gpu",
  "solidcraft-kernel",
  "solidcraft-mcp",
@@ -6197,6 +6198,21 @@ dependencies = [
  "toml_edit",
  "wat",
  "web-time",
+ "zip",
+]
+
+[[package]]
+name = "solidcraft-exchange"
+version = "0.51.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "solidcraft-doc",
+ "solidcraft-geom",
+ "solidcraft-io",
+ "solidcraft-kernel",
+ "thiserror 2.0.21",
  "zip",
 ]
 

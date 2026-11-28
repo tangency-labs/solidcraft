@@ -1871,6 +1871,45 @@ pub fn export_with_parts_noted(
 /// Most threads an export meshes its bodies on, as many as the model cache encodes them on.
 pub(crate) const EXPORT_THREADS: usize = 16;
 
+/// A body's tessellation welded as the tagged 3MF export welds its mesh (docs/formats/3mf-face-tags.md):
+/// vertices within 10⁻⁶ of the body size merged, T-junctions split, counter-clockwise seen from
+/// outside, each triangle with the B-rep face it lies on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TaggedMesh {
+    pub positions: Vec<Vec3>,
+    pub triangles: Vec<[u32; 3]>,
+    /// The B-rep face (in the body's own face order) of each triangle.
+    pub tri_faces: Vec<u32>,
+    /// How many B-rep faces the body has (faces without triangles count too); every tag is below it.
+    pub faces: u32,
+}
+
+/// [`TaggedMesh`] of a body at chord tolerance `tolerance` (mm, finite and above zero): at the
+/// export's chord ([`MeshQuality::spec`]) the tagged 3MF export's own mesh.
+pub fn tagged_mesh(body: &solidcraft_kernel::Body, tolerance: f64) -> Result<TaggedMesh> {
+    Ok(tagged_mesh_with_edges(body, tolerance)?.0)
+}
+
+/// [`tagged_mesh`] with the body's B-rep edges, in its edge order: the welded vertices along
+/// each, in order (empty for an edge the mesh does not hold), and the faces it bounds.
+pub fn tagged_mesh_with_edges(body: &solidcraft_kernel::Body, tolerance: f64) -> Result<(TaggedMesh, Vec<Vec<u32>>, Vec<Vec<u32>>)> {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(IoError::Invalid(format!("chord tolerance {tolerance} is not a positive number")));
+    }
+    // The mesh path the exports take ([`export_mesh_noted`]), so at the export's chord this is
+    // the tagged 3MF's mesh.
+    let (Mesh { positions, triangles, tri_face, edges, edge_faces, .. }, _) = body.export_mesh(&solidcraft_kernel::MeshSpec::chord(tolerance))?;
+    // Weld with each triangle's own index as its tag: the pieces of a split triangle keep it,
+    // and its face follows from it.
+    let n = u32::try_from(triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
+    let (positions, triangles, origin, paths) =
+        threemf::weld_tagged_lines(&positions, &triangles, &(0..n).collect::<Vec<_>>(), weld_eps(body), &edges);
+    let tri_faces: Vec<u32> = origin.iter().map(|t| tri_face.get(*t as usize).copied().unwrap_or(0)).collect();
+    let most = tri_faces.iter().max().map_or(0, |f| f.saturating_add(1));
+    let faces = u32::try_from(body.face_count()).unwrap_or(u32::MAX).max(most);
+    Ok((TaggedMesh { positions, triangles, tri_faces, faces }, paths, edge_faces))
+}
+
 /// Keep each triangle's source index through welding so its face and colour follow it.
 type TaggedTriangles = (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>);
 
