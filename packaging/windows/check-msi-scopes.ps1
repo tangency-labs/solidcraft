@@ -12,6 +12,7 @@
        conditions, Registry roots (-1 is HKMU: HKLM for all users, HKCU just for me),
        Environment, and the scope actions in both sequences.
     3. Installs and checks, each with a verbose log in $Out:
+       (each check also covers the File Explorer thumbnail handler: its DLL and registry values)
        - all users, silent (the default, `/qn` with no properties), then a default upgrade;
        - just for me, silent (ALLUSERS=2 MSIINSTALLPERUSER=1), then an upgrade the way the in-app
          updater runs it (`/passive` with the same properties);
@@ -49,6 +50,8 @@ New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 # Stand-ins: any PE file will do for the installer; the wizard's Launch box is left unticked.
 Copy-Item "$env:SystemRoot\System32\where.exe" (Join-Path $Stage 'solidcraft.exe')
 Copy-Item "$env:SystemRoot\System32\where.exe" (Join-Path $Stage 'solidcraft-cli.exe')
+# The thumbnail handler's DLL: any DLL will do for the installer.
+Copy-Item "$env:SystemRoot\System32\version.dll" (Join-Path $Stage 'solidcraft_explorer.dll')
 foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
 $Icon = Join-Path $Root 'assets/icons/app/windows/exports/solidcraft.ico'
 
@@ -170,6 +173,29 @@ function Get-PathEntries([string] $Scope, [string] $Dir) {
 function Get-Command-Value([string] $Key) {
   return (Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).'(default)'
 }
+# The File Explorer thumbnail handler (solidcraft-registry.wxi). An x86 package's class goes to the
+# registry's 32-bit view (WOW6432Node); the extensions' ShellEx keys are shared by both views.
+$ThumbClsid = '{34025B8F-2354-4B5F-8967-89BA0B71FDCF}'
+$ThumbShellEx = 'ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}'
+$ClsidKey = if ($Arch -eq 'x86') { 'Software\Classes\WOW6432Node\CLSID' } else { 'Software\Classes\CLSID' }
+function Assert-Thumbnails([string] $Hive, [string] $Dir, [string] $Who) {
+  $class = "${Hive}:\$ClsidKey\$ThumbClsid"
+  Check (Test-Path -LiteralPath "$Dir\solidcraft_explorer.dll") "${Who}: solidcraft_explorer.dll"
+  Check ((Get-Command-Value $class) -eq 'SolidCraft design thumbnails') "${Who}: the thumbnail handler's class is named"
+  Check ((Get-Command-Value "$class\InprocServer32") -ieq "$Dir\solidcraft_explorer.dll") "${Who}: the thumbnail handler's class names the installed DLL"
+  Check ((Get-ItemProperty -LiteralPath "$class\InprocServer32" -ErrorAction SilentlyContinue).ThreadingModel -eq 'Apartment') "${Who}: the thumbnail handler is apartment-threaded"
+  Check ($null -eq (Get-ItemProperty -LiteralPath $class -ErrorAction SilentlyContinue).DisableProcessIsolation) "${Who}: the thumbnail handler runs isolated (no DisableProcessIsolation)"
+  foreach ($ext in '.sc', '.solidcraft') {
+    Check ((Get-Command-Value "${Hive}:\Software\Classes\$ext\$ThumbShellEx") -eq $ThumbClsid) "${Who}: $ext thumbnails come from the handler"
+  }
+}
+function Assert-NoThumbnails([string] $Hive, [string] $Dir, [string] $Who) {
+  Check (-not (Test-Path -LiteralPath "$Dir\solidcraft_explorer.dll")) "${Who}: no solidcraft_explorer.dll"
+  Check (-not (Test-Path -LiteralPath "${Hive}:\$ClsidKey\$ThumbClsid")) "${Who}: no thumbnail handler class"
+  foreach ($ext in '.sc', '.solidcraft') {
+    Check (-not (Test-Path -LiteralPath "${Hive}:\Software\Classes\$ext\$ThumbShellEx")) "${Who}: no $ext thumbnail handler"
+  }
+}
 function Assert-Machine([string] $Version) {
   Check (Test-Path "$MachineDir\solidcraft.exe") "all users: $MachineDir\solidcraft.exe"
   Check (Test-Path "$MachineDir\solidcraft-cli.exe") 'all users: solidcraft-cli.exe'
@@ -180,6 +206,7 @@ function Assert-Machine([string] $Version) {
   Check ((Get-PathEntries 'Machine' $MachineDir) -eq 1) 'all users: install folder once on the system PATH'
   $v = Get-Installed 4
   Check ($v.Count -eq 1 -and $v[0] -eq $Version) "all users: one installed product, version $Version (found $($v -join ', '))"
+  Assert-Thumbnails 'HKLM' $MachineDir 'all users'
 }
 function Assert-NoMachine {
   Check (-not (Test-Path "$MachineDir\solidcraft.exe")) 'no all-users files'
@@ -187,6 +214,7 @@ function Assert-NoMachine {
   Check (-not (Test-Path 'HKLM:\Software\SolidCraft')) 'no HKLM\Software\SolidCraft'
   Check ((Get-PathEntries 'Machine' $MachineDir) -eq 0) 'not on the system PATH'
   Check ((Get-Installed 4).Count -eq 0) 'no all-users product'
+  Assert-NoThumbnails 'HKLM' $MachineDir 'all users'
 }
 function Assert-User([string] $Version) {
   Check (Test-Path "$UserDir\solidcraft.exe") "just for me: $UserDir\solidcraft.exe"
@@ -199,6 +227,7 @@ function Assert-User([string] $Version) {
   Check ((Get-PathEntries 'User' $UserDir) -eq 1) "just for me: install folder once on the user's PATH"
   $v = Get-Installed 2
   Check ($v.Count -eq 1 -and $v[0] -eq $Version) "just for me: one installed product, version $Version (found $($v -join ', '))"
+  Assert-Thumbnails 'HKCU' $UserDir 'just for me'
 }
 function Assert-NoUser {
   Check (-not (Test-Path "$UserDir\solidcraft.exe")) 'no per-user files'
@@ -209,6 +238,7 @@ function Assert-NoUser {
   Check (-not (Test-Path 'HKCU:\Software\SolidCraft')) 'no HKCU\Software\SolidCraft'
   Check ((Get-PathEntries 'User' $UserDir) -eq 0) "not on the user's PATH"
   Check ((Get-Installed 2).Count -eq 0) 'no per-user product'
+  Assert-NoThumbnails 'HKCU' $UserDir 'just for me'
 }
 
 # ---- all users (the default) ---------------------------------------------------------------

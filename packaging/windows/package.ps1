@@ -15,6 +15,10 @@
   The icon comes from $env:SOLIDCRAFT_ICONS (solidcraft.ico, made by `solidcraft-cli icon`), or
   is drawn by the CLI just built when this machine can run it.
 
+  The MSI also installs solidcraft_explorer.dll, the File Explorer thumbnail handler
+  (apps/solidcraft-explorer). The portable zip and the plain .exe leave it out: nothing there
+  would register it.
+
   Signing happens outside this script (the release workflow sends files to SignPath), so the work
   can be split in two phases with signing in between:
     -Phase stage     build, check, and copy the three .exe files to the staging folder, then stop
@@ -81,13 +85,15 @@ if (-not $SkipBuild -and $Phase -ne 'package') {
   # GL backend, which would link opengl32.dll into the CLI too (see the import check below).
   Invoke-Native "cargo build app ($Target)" { cargo build --release --locked -p solidcraft --target $Target }
   Invoke-Native "cargo build CLI ($Target)" { cargo build --release --locked -p solidcraft-cli --target $Target }
+  # The thumbnail handler's DLL in an invocation of its own too, so the app's features stay out of it.
+  Invoke-Native "cargo build thumbnail handler ($Target)" { cargo build --release --locked -p solidcraft-explorer --target $Target }
 }
 $Bin = Join-Path $TargetDir "$Target\release"
 $Stage = Join-Path $TargetDir "windows-package\$Arch"
 # -Phase package checks the staged (by then signed) copies; the other phases check the build.
 $CheckDir = if ($Phase -eq 'package') { $Stage } else { $Bin }
 
-# Check both binaries' PE headers: Machine must match -Arch; Subsystem 2 = GUI (the app opens no
+# Check the binaries' PE headers: Machine must match -Arch; Subsystem 2 = GUI (the app opens no
 # console window), 3 = console (the CLI's output reaches the terminal).
 function Get-PeHeader([string] $Path) {
   $bytes = [System.IO.File]::ReadAllBytes($Path)
@@ -95,7 +101,7 @@ function Get-PeHeader([string] $Path) {
   return @{ Machine = [BitConverter]::ToUInt16($bytes, $pe + 4); Subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5C) }
 }
 $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } }
-foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3))) {
+foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3), @('solidcraft_explorer.dll', 2))) {
   $h = Get-PeHeader (Join-Path $CheckDir $check[0])
   if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
   if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
@@ -128,7 +134,7 @@ foreach ($exe in 'solidcraft-cli.exe') {
 if ($Phase -ne 'package') {
   Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe') $Stage
+  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe'), (Join-Path $Bin 'solidcraft_explorer.dll') $Stage
   foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
 }
 if ($Phase -eq 'stage') {
@@ -160,6 +166,7 @@ Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($Ms
 $Portable = Join-Path $TargetDir "windows-package\solidcraft-$Version-windows-$Arch-portable"
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
+# The .exe files only: the thumbnail handler's DLL needs the installer's registration.
 Copy-Item (Join-Path $Stage '*.exe') $Portable
 foreach ($f in 'README.md', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Portable }
 $Zip = Join-Path $Dist "solidcraft-$Version-windows-$Arch-portable.zip"

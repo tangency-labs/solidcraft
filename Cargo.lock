@@ -6106,6 +6106,7 @@ version = "0.51.2"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "zip",
 ]
 
@@ -6197,6 +6198,18 @@ dependencies = [
  "toml_edit",
  "wat",
  "web-time",
+ "zip",
+]
+
+[[package]]
+name = "solidcraft-explorer"
+version = "0.51.1"
+dependencies = [
+ "png",
+ "sha2 0.10.9",
+ "solidcraft-design-preview",
+ "windows",
+ "windows-core",
  "zip",
 ]
 

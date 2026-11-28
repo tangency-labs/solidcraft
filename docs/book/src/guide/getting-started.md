@@ -73,6 +73,13 @@ given person: to switch, uninstall it first, or install a newer version the othe
 Server lets only administrators run installers unless the `DisableMsi` policy allows it, so there
 "just for me" needs that policy set to 0.
 
+Installed either way, SolidCraft lets File Explorer show the picture each design was saved with
+as its thumbnail. A design saved without one (`cache: false`), or changed by another program
+after SolidCraft saved it, keeps the SolidCraft icon, and designs saved before 0.51 have a
+smaller picture, or none. The portable `.zip` and `.exe` set nothing up on the computer, so they
+add no thumbnails. Use the installer for your PC: File Explorer on 64-bit Windows cannot use the
+32-bit installer's thumbnails.
+
 ### macOS
 
 Open the release `.dmg` and drag `SolidCraft.app` onto Applications.

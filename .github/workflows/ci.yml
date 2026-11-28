@@ -257,13 +257,15 @@ jobs:
           # glue, the vendored egui, winit (its Windows event loop builds only there),
           # the title bar's hit test (the window chrome and the app bar's title-bar module, which
           # the app's Windows-only window procedure answers from), their scripts, the control
-          # server (its refusals, #10967), or a lockfile change that moves the graphics stack
+          # server (its refusals, #10967), the File Explorer thumbnail handler and the design reader
+          # it uses (its COM test, #8034), or a lockfile change that moves the graphics stack
           # (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
                 crates/gpu/*|crates/ui-kit/src/window_chrome*|crates/ui-egui/src/titlebar.rs|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
+                apps/solidcraft-explorer/*|crates/design-preview/*) windows=true ;;
               esac
             done < "$1"
             if [ "$windows" = false ] && grep -qxz 'Cargo.lock' "$1" \
@@ -1506,6 +1508,15 @@ jobs:
       # On Windows a reset loses the reply sent before it, so only here does this test see one (#10967).
       - name: Control channel refusals on Windows
         run: cargo test -p solidcraft-control --profile ci --locked -- server::tests::a_connection_past_the_limit_reads_why
+      # The File Explorer thumbnail handler through COM, called as File Explorer calls it, in both
+      # architectures a 64-bit runner can load (#8034). Nothing is registered: the test loads the
+      # DLL that cargo test builds beside it.
+      - name: File Explorer thumbnails through COM (x64)
+        run: cargo test -p solidcraft-explorer --profile ci --locked
+      - name: File Explorer thumbnails through COM (x86)
+        run: |
+          rustup target add i686-pc-windows-msvc
+          cargo test -p solidcraft-explorer --profile ci --locked --target i686-pc-windows-msvc
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

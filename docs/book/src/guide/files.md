@@ -341,6 +341,8 @@ It shows the model alone from the isometric view. SolidCraft draws a grid under 
 3D view colours, and the model lifts off the grid while the pointer is on its card. If your system
 turns animations off, it stays still. A missing picture is drawn again, and saving with
 `cache: false` omits it.
+On Windows File Explorer shows this picture as the file's thumbnail (when SolidCraft was
+installed with its installer), and on macOS Finder shows it as the file's icon.
 The repository's `docs/design-container.md` describes limits and encoding details.
 
 Designs are saved in the newest format this version of SolidCraft knows (`"format": "solidcraft/N"`

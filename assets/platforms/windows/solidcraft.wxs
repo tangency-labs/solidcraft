@@ -11,7 +11,9 @@
   the installed scope and folder and skips both pages), Ready, progress, and a Finish page with a
   ticked "Launch SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
   THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft`) and of `solidcraft://` links, and offers it under
-  "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
+  "Open with" for STEP, IGES, 3MF and STL. Registers a File Explorer thumbnail handler
+  (solidcraft_explorer.dll, apps/solidcraft-explorer) that shows the picture saved in a design as
+  the file's thumbnail. `msiexec /qn` installs silently.
 
   Install scope (docs/book/src/guide/getting-started.md, "Installing on Windows"). The package is
   per-machine exactly as before unless asked otherwise: ALLUSERS=1, and the Word Count summary
@@ -253,6 +255,11 @@
 
       <Component Id="SolidcraftCli">
         <File Id="SolidcraftCliExe" Source="$(var.BinDir)\solidcraft-cli.exe" KeyPath="yes" />
+      </Component>
+      <!-- The File Explorer thumbnail handler (apps/solidcraft-explorer). Its class and the .sc
+           and .solidcraft ShellEx values are in solidcraft-registry.wxi, once per install scope. -->
+      <Component Id="SolidcraftExplorer">
+        <File Id="SolidcraftExplorerDll" Source="$(var.BinDir)\solidcraft_explorer.dll" KeyPath="yes" />
       </Component>
       <!-- The install folder on the PATH, so MCP clients and shells find `solidcraft-cli` by name;
            removed again on uninstall. The system PATH for all users, the user's own PATH just for
