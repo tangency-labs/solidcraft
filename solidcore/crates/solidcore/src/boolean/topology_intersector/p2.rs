@@ -1992,7 +1992,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         mgr.combine_proto_vertices_with_incidence(k, &*brep)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
-        // (the list is re-read after each split: splitting appends proto edges)
+        // (the list is re-read after each split: splitting appends proto edges).
+        // Cache each proto edge's certified bounding box keyed by its current interval bits
+        // so disjoint curved pairs reject in O(1) without recomputing boxes or setting up
+        // `global_curve_intersect`.
+        let mut pe_boxes: std::collections::HashMap<ProtoEdgeId, (u64, u64, Option<Extent3d>)> =
+            std::collections::HashMap::new();
         let mut ii = 0usize;
         while ii < mgr.proto_edges().len() {
             k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
@@ -2006,8 +2011,25 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .proto_edges()
                     .get(jj)
                     .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "proto edge list"))?;
+                let mut cached_box = |pe: ProtoEdgeId| -> Result<Option<Extent3d>> {
+                    let Some(edge) = mgr.proto_edge(pe) else {
+                        return Ok(None);
+                    };
+                    let dom = edge.xsect_interval();
+                    let (min_b, max_b) = (dom.min().to_bits(), dom.max().to_bits());
+                    if let Some(&(c_min, c_max, bbox)) = pe_boxes.get(&pe) {
+                        if c_min == min_b && c_max == max_b {
+                            return Ok(bbox);
+                        }
+                    }
+                    let bbox = mgr.proto_edge_bounding_box(k, &*brep, pe)?;
+                    pe_boxes.insert(pe, (min_b, max_b, bbox));
+                    Ok(bbox)
+                };
+                let b1 = cached_box(pe1)?;
+                let b2 = cached_box(pe2)?;
                 // (status unchecked upstream; passed on here, WR-658)
-                let d = mgr.split_intersecting_proto_edges(k, brep, pe1, pe2)?;
+                let d = mgr.split_intersecting_proto_edges_with_boxes(k, brep, pe1, pe2, b1, b2)?;
                 deleted.extend(d);
                 jj += 1;
             }
@@ -2015,15 +2037,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         }
 
         // 2. for every ProtoEdge/ProtoVertex pair - remove edge-less proto vertices
-        // coincident with a proto edge (count backward: they are removed from the list)
+        // coincident with a proto edge (count backward: they are removed from the list;
+        // `remove_coincident_no_edge_proto_vertex` never edits `proto_edges`, so snapshot
+        // the list once outside the loop).
+        let pes = mgr.proto_edges().to_vec();
         let mut ii = mgr.proto_vertices().len();
         while ii > 0 {
             let pv = *mgr
                 .proto_vertices()
                 .get(ii - 1)
                 .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "proto vertex list"))?;
-            let pes = mgr.proto_edges().to_vec();
-            for pe in pes {
+            for &pe in &pes {
                 // a failure is FALSE (the SmBoolean function's error return)
                 let removed =
                     ignore_soft(mgr.remove_coincident_no_edge_proto_vertex(k, brep, pe, pv))?

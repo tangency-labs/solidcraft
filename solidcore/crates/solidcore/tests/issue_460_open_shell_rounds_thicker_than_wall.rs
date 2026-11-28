@@ -346,6 +346,58 @@ fn issue_18801_branch_extinction_requires_crossed_exposed_planes() {
     }
 }
 
+/// solidcraft#22785: a Ø4.8 x 4.8 boss on a 60 x 40 x 25 block, its side tangent to the
+/// block's +X side or `inside` it by up to twice the contact tolerance, shelled closed with
+/// walls of 2.4 and 3, as thick as the boss's radius or more. The boss is narrower than twice
+/// the wall and stays solid (#19072), as it does 0.0001 further in. Its take-off left the
+/// planar cap's rim on the top face, touching the face's outer edge at a point, and the shell
+/// of the block was refused there ("an edge would vanish"); the rim lies between two faces on
+/// one plane and is taken out, so the block shells as a plain block.
+///
+/// Closed form: the block and the boss, 60 * 40 * 25 + pi * 2.4^2 * 4.8, less the block's
+/// inset by the wall, (60 - 2t) (40 - 2t) (25 - 2t): the boss holds no cavity.
+#[test]
+fn issue_22785_a_boss_tangent_to_the_outer_edge_stays_solid_in_a_closed_shell() {
+    use solidcore::primitive::api_primitives::create_cylinder;
+    let body = 60.0 * 40.0 * 25.0 + PI * 2.4 * 2.4 * 4.8;
+    for inside in [0.0, 1e-5, 2e-5, 1e-4] {
+        for t in [2.4, 3.0] {
+            let mut k = Kernel::default();
+            let block =
+                create_box(&mut k, Point3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0).unwrap();
+            let boss =
+                create_cylinder(&mut k, Point3::new(27.6 - inside, 0.0, 25.0), 2.4, 4.8).unwrap();
+            let b = boolean_union(&mut k, block, boss).unwrap();
+            let options = ShellOptions {
+                offset: OffsetOptions {
+                    distance: -t,
+                    extend_convex_edges: true,
+                    merge_results: true,
+                },
+                create_offset_solid: true,
+                merge_sheet_side_walls: true,
+            };
+            let mut result = solidcore::offset::thin_features::shell_brep(&mut k, &b, options, &[])
+                .unwrap_or_else(|e| panic!("inside {inside}, wall {t}: {e}"));
+            result.refresh_cached_topology();
+            solidcore::topology::integrity::check(&result).unwrap();
+            assert!(brep_is_manifold_solid(&result).unwrap());
+            let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+            assert!(
+                check.is_valid(),
+                "inside {inside}, wall {t}: {:?}",
+                check.failures().collect::<Vec<_>>()
+            );
+            let want = body - (60.0 - 2.0 * t) * (40.0 - 2.0 * t) * (25.0 - 2.0 * t);
+            let got = volume(&k, &mut result).unwrap();
+            assert!(
+                (got - want).abs() <= 1e-6 * want,
+                "inside {inside}, wall {t}: {got} vs {want}"
+            );
+        }
+    }
+}
+
 /// `body` turned by `deg` about the vertical axis through the origin, then moved `dx` along x,
 /// with the affine matrix a body move hands the kernel (`p' = p A + t`).
 fn turned(k: &mut Kernel, mut body: Brep, deg: f64, dx: f64) -> Brep {

@@ -24,36 +24,47 @@ use solidcore_record::brep::{self, Frame, Surface};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::bspline::HPoint;
 use solidcraft_geom::tess::uv::Starts;
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};
 use crate::{KernelError, PathSeg, Result, guard, record};
 
-/// What splits the faces.
-#[derive(Clone, Debug)]
-pub enum SplitTool<'a> {
-    /// A plane (unbounded).
-    Plane(Plane),
-    /// The surface of another body's face (`face` in that body's face order), extended. Split
-    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
-    /// sheet as it is, or with the whole sheet where that does not cut through ([`split_body`]).
-    Face { body: &'a Body, face: usize },
-    /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
-    /// normal); each curve splits on its own, an open one extended past its ends.
-    Curves { plane: Plane, curves: Vec<Vec<Seg2>>, along: Option<Vec3> },
-    /// Curves in space (3D sketch curves), each its exact segments end to end swept along its
-    /// own direction ([`SweptCurve`], as [`curves3d_tool`] makes them); each splits on its own,
-    /// an open one extended past its ends along its end tangents.
-    Curves3d { wires: Vec<SweptCurve> },
+/// What splits the faces: a plane, another body's face, sketch curves swept, or curves in space
+/// swept ([`solidcraft_kernel_api::SplitTool`] over solidcore's body).
+pub type SplitTool<'a> = solidcraft_kernel_api::SplitTool<'a, Body>;
+
+use solidcraft_kernel_api::SpaceSeg;
+/// A curve in space as a split tool ([`curves3d_tool`] makes them).
+pub use solidcraft_kernel_api::SweptCurve;
+
+/// A segment of a 3D curve as the kernel interface carries it.
+fn space_seg(s: &PathSeg) -> SpaceSeg {
+    match s {
+        PathSeg::Line { a, b } => SpaceSeg::Line { a: *a, b: *b },
+        PathSeg::Arc { a, center, axis, angle } => SpaceSeg::Arc { a: *a, center: *center, axis: *axis, angle: *angle },
+        PathSeg::Curve { plane, seg } => SpaceSeg::Curve { plane: *plane, seg: *seg },
+        PathSeg::Bezier(b) => SpaceSeg::Bezier(b.ctrl().iter().map(|q| [q.x, q.y, q.z, q.w]).collect()),
+    }
 }
 
-/// A curve in space as a split tool: its segments end to end, and the unit direction its sheet
-/// is swept along.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SweptCurve {
-    pub segs: Vec<PathSeg>,
-    pub along: Vec3,
+/// A 3D split curve's segments as the kernel's path segments (a Bézier span whose control points
+/// are not a valid span refused).
+fn path_segs(w: &SweptCurve) -> Result<Vec<PathSeg>> {
+    w.segs
+        .iter()
+        .map(|s| match s {
+            SpaceSeg::Line { a, b } => Some(PathSeg::Line { a: *a, b: *b }),
+            SpaceSeg::Arc { a, center, axis, angle } => Some(PathSeg::Arc { a: *a, center: *center, axis: *axis, angle: *angle }),
+            SpaceSeg::Curve { plane, seg } => Some(PathSeg::Curve { plane: *plane, seg: *seg }),
+            SpaceSeg::Bezier(ctrl) => {
+                let h: Vec<HPoint> = ctrl.iter().map(|q| HPoint { x: q[0], y: q[1], z: q[2], w: q[3] }).collect();
+                crate::point_path::SpaceBezier::new(&h).map(PathSeg::Bezier)
+            }
+        })
+        .collect::<Option<Vec<PathSeg>>>()
+        .ok_or_else(|| invalid("a piece of the 3D split curve does not evaluate"))
 }
 
 /// Most points of one 3D curve the default direction is measured at.
@@ -135,7 +146,7 @@ pub fn curves3d_tool(body: &Body, faces: &[usize], wires: Vec<Vec<PathSeg>>, alo
                 }
             })
         })?;
-        out.push(SweptCurve { segs, along: v3(dir) });
+        out.push(SweptCurve { segs: segs.iter().map(space_seg).collect(), along: v3(dir) });
     }
     Ok(SplitTool::Curves3d { wires: out })
 }
@@ -156,13 +167,14 @@ fn chain_points(segs: &[PathSeg], tol: f64) -> Vec<Vec3> {
 /// sees it (the sweep crossed with the direction of travel).
 fn wire_patches(w: &SweptCurve, reach: &Aabb3) -> Result<Vec<Patch>> {
     use solidcore_ops::curve_sweep as cs;
-    let (Some(first), Some(last)) = (w.segs.first(), w.segs.last()) else { return Err(invalid("an empty 3D split curve")) };
-    if !w.segs.iter().all(|s| s.start().is_finite() && s.end().is_finite()) {
+    let given = path_segs(w)?;
+    let (Some(first), Some(last)) = (given.first(), given.last()) else { return Err(invalid("an empty 3D split curve")) };
+    if !given.iter().all(|s| s.start().is_finite() && s.end().is_finite()) {
         return Err(invalid("3D split curves need finite segments"));
     }
     let dir = a3(w.along);
     let (lo, hi) = (a3(reach.min), a3(reach.max));
-    let mut segs = w.segs.clone();
+    let mut segs = given.clone();
     let (mut lead, mut tail) = (None, None);
     if !cs::closes(a3(first.start()), a3(last.end())) {
         let no_tangent = || invalid("a 3D split curve with no tangent at an end");
@@ -630,9 +642,11 @@ pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Res
         SplitTool::Curves3d { wires } => wires
             .iter()
             .map(|w| {
-                let length: f64 = w.segs.iter().filter_map(PathSeg::length).sum();
+                // A curve that does not convert has no points (its patches refuse it).
+                let segs = path_segs(w).unwrap_or_default();
+                let length: f64 = segs.iter().filter_map(PathSeg::length).sum();
                 let tol = (length * 1e-3).max(1e-9);
-                let pts: Vec<[f64; 3]> = chain_points(&w.segs, tol).into_iter().map(a3).collect();
+                let pts: Vec<[f64; 3]> = chain_points(&segs, tol).into_iter().map(a3).collect();
                 match (pts.first(), pts.last()) {
                     (Some(a), Some(b)) if solidcore_ops::curve_sweep::closes(*a, *b) => {
                         (FieldKind::Loop, solidcore_ops::curve_sweep::loop_turn(&pts, a3(w.along)))
@@ -770,15 +784,11 @@ pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((sb.tagged(0).map_err(|e| failed(name, e))?, ob))
 }
 
-/// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged. A listed face the tool misses is an error naming it; a tool that runs into the
-/// faces and ends inside them, cutting none through, is an error saying so. The result's history is
-/// over `[body]`: each piece of a split face is Split from it, every other face Kept.
-pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
-    split_faces_with_map(body, faces, tool).map(|(b, _)| b)
-}
-
-/// Like [`split_faces`], with the body face each face of the result came from (in face order).
+/// Split the given faces (indices in `body`'s face order) where the tool meets them, with the
+/// body face each face of the result came from (in face order). The solid is unchanged. A listed
+/// face the tool misses is an error naming it; a tool that runs into the faces and ends inside
+/// them, cutting none through, is an error saying so. The result's history is over `[body]`: each
+/// piece of a split face is Split from it, every other face Kept.
 pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
     let _span = solidcraft_profile::span("kernel", "split_faces_with_map");
     let (b, map, made) = split(body, faces, tool)?;
@@ -1226,7 +1236,7 @@ fn split_by_sheet(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{box_solid, cylinder, measure};
+    use crate::{box_solid, cylinder, measure, split_faces};
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)

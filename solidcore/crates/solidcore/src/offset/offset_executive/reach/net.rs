@@ -194,6 +194,11 @@ pub(super) struct Net {
     /// (`surface/extend.rs`, `offset_extended`), so past a side `O` is the offset of the
     /// extension above ([`Net::offset_jet`]).
     offset: Option<f64>,
+    /// The points of the stations ([`Net::nearest_on_knots`]) the first time they are asked
+    /// for: the same for every point looked for, so enclosed once, not once per piece of an
+    /// edge (a thread's flank winds many turns: its stations are thousands, and on every
+    /// piece of every edge they were enclosed again).
+    stations: std::sync::OnceLock<Vec<((f64, f64), Vec3)>>,
 }
 
 /// The homogeneous lines `H + s (H_u + μ H)` the executive continues the rows by past a u
@@ -347,6 +352,7 @@ impl Net {
             },
             lines,
             offset: None,
+            stations: std::sync::OnceLock::new(),
         }))
     }
 
@@ -1140,18 +1146,28 @@ impl Net {
             out.dedup();
             out
         };
-        let [ru, rv] = self.range;
-        let (us, vs) = (stations(&self.cn.u, ru), stations(&self.cn.v, rv));
-        let mut best: Option<(f64, (f64, f64))> = None;
-        for &u in &us {
-            for &v in &vs {
-                let Some((p, _, _)) = self.at(u, v)? else {
-                    continue;
-                };
-                let d = (p - x).length();
-                if d.is_finite() && best.is_none_or(|(b, _)| d < b) {
-                    best = Some((d, (u, v)));
+        if self.stations.get().is_none() {
+            let [ru, rv] = self.range;
+            let (us, vs) = (stations(&self.cn.u, ru), stations(&self.cn.v, rv));
+            let mut points = Vec::new();
+            for &u in &us {
+                for &v in &vs {
+                    if let Some((p, _, _)) = self.at(u, v)? {
+                        points.push(((u, v), p));
+                    }
                 }
+            }
+            // (a thread that got here first stored the same points)
+            let _ = self.stations.set(points);
+        }
+        let Some(points) = self.stations.get() else {
+            return Ok(None);
+        };
+        let mut best: Option<(f64, (f64, f64))> = None;
+        for &(uv, p) in points {
+            let d = (p - x).length();
+            if d.is_finite() && best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, uv));
             }
         }
         Ok(best.map(|(_, uv)| uv))
@@ -2389,6 +2405,40 @@ mod tests {
                 jet.p
             );
         }
+    }
+
+    /// The net point nearest a point among the stations (the knots and span middles) is looked
+    /// for on every piece of an edge ([`Net::foot`]'s fallback), where a thread's flank has
+    /// thousands of stations: they are enclosed once, on the first look, and held, so a
+    /// reach over a many-turn thread does not enclose the whole grid again on each piece of
+    /// each edge (#15715: a one-face Offset Faces of a thread's root ran for hours).
+    #[test]
+    fn the_stations_nearest_a_point_are_enclosed_once_and_held() {
+        let k = Kernel::default();
+        let n = net(&k, &quarter_cylinder());
+        assert!(n.stations.get().is_none());
+        // the middle of the arc at the top, then its start at the bottom
+        let top = core::f64::consts::SQRT_2;
+        let first = n
+            .nearest_on_knots(Vec3::new(top, top, 3.0))
+            .unwrap()
+            .unwrap();
+        assert!(
+            (first.0 - 0.5).abs() < 1e-9 && (first.1 - 1.0).abs() < 1e-9,
+            "{first:?}"
+        );
+        let held = n.stations.get().map(|s| (s.len(), s.as_ptr()));
+        assert_eq!(
+            held.map(|h| h.0),
+            Some(9),
+            "3 stations along the arc, 3 up the axis"
+        );
+        let second = n
+            .nearest_on_knots(Vec3::new(2.0, 0.0, 0.0))
+            .unwrap()
+            .unwrap();
+        assert!(second.0.abs() < 1e-9 && second.1.abs() < 1e-9, "{second:?}");
+        assert_eq!(n.stations.get().map(|s| (s.len(), s.as_ptr())), held);
     }
 
     /// A line along the normal through the bump's corner (u, v) = (1, 0), from 0.5 below it,

@@ -52,7 +52,10 @@ pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWrit
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
-pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
+pub use modelling::{
+    Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OneCurve, Primitive, RevolveSides, SpaceSeg, SplitTool, SweptCurve,
+    Taper, TrimKeep,
+};
 pub use planar::{Planar, PlanarRefused};
 pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};
 pub use profiles::{ProfileCurve, ProfileRefused, Profiles};
@@ -105,6 +108,11 @@ pub enum OpKind {
     Thicken,
     /// Faces moved along their normals ([`Modelling::offset_faces`]).
     OffsetFaces,
+    /// Faces tilted about a neutral plane ([`Modelling::draft`]).
+    Draft,
+    /// Faces and bodies split by a tool, and surface bodies trimmed ([`Modelling::split_body`],
+    /// [`Modelling::split_faces`], [`Modelling::trim_keep`]).
+    Split,
     /// A cell grid planned over a profile ([`CellGrid`]).
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
@@ -166,6 +174,8 @@ impl OpKind {
         OpKind::Shell,
         OpKind::Thicken,
         OpKind::OffsetFaces,
+        OpKind::Draft,
+        OpKind::Split,
         OpKind::CellGrid,
         OpKind::Exchange,
         OpKind::Develop,
@@ -203,6 +213,8 @@ impl OpKind {
             OpKind::Shell => "shell",
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
+            OpKind::Draft => "draft",
+            OpKind::Split => "split",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
             OpKind::Develop => "develop",
