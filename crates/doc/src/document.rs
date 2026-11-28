@@ -2410,6 +2410,12 @@ pub enum FeatureKind {
         /// Corner choices for these flanges, identified by their named source rims.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         corners: Vec<crate::CornerJoinParams>,
+        /// How far each bend is moved out past where `position` puts it, away from the panel it
+        /// stands on (toward it where negative); the panel grows by the same strip. None is no
+        /// offset. Walked last, so the inputs before it keep their names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
     },
     /// A corner shared by two bends, saved by their source-edge identities.
     SheetCornerJoin {

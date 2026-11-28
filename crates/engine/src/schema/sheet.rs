@@ -567,6 +567,10 @@ pub struct FlangeParams {
     /// face; below 90° the bend's end on that face). Default: inside.
     #[serde(default)]
     pub position: Option<FlangePosition>,
+    /// Edge: how far each bend moves out past where `position` starts it, away from the panel it
+    /// stands on, the panel growing by the strip between; negative moves it in. Default: 0.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
     /// Edge: the sheet metal body. Default: the sheet with an edge nearest the first point.
     #[serde(default)]
     pub body: Option<String>,

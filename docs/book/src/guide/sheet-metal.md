@@ -180,6 +180,16 @@ leans on out past it.
 {"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"angle":"120 deg","position":"tangent"}}
 ```
 
+An edge flange's `offset` (Bend Offset under Advanced in the Flange dialog) moves its bend that
+much further out than its position starts it, and the base grows by the strip between: with
+`outside` and an offset of 3 mm the bend starts 3 mm past the edge, the base is 3 mm longer and
+so is the flat. A negative offset moves the bend in. The offset is a length expression, so a
+parameter can drive it, and the further bends of `then` take the first one's offset.
+
+```json
+{"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"position":"outside","offset":"3 mm"}}
+```
+
 An edge flange takes its setback off its own edge only. Where that edge ends at an inside
 corner of the base (the base runs on past it, like the leg of an L), the rest of the base
 stays, and the rule's **bend relief** (`relief_width` and `relief_depth`; Relief Width and
