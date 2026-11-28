@@ -44,7 +44,9 @@
 //! - **Disappearing periodic seams.** Genuine support roots bound each SSI
 //!   component's active interval. A seam outside that interval emits a boundary
 //!   event; its branch is identified by an already mated opposite boundary,
-//!   rather than proximity to the old edge. Seam walks use explicit visited sets.
+//!   rather than proximity to the old edge. Seam walks use explicit visited sets. A
+//!   support root that is a limit root (`Solution::limit_root`) leaves the boundary
+//!   unresolved: it may be one of two crossings, the other unreported.
 //! - **Curved tangent crossings.** A local operation may create two intersection
 //!   branches beside an originally tangent edge. A plane/curved pair keeps the curved
 //!   face's side. Two curved faces require a proved unique physical component
@@ -4376,7 +4378,8 @@ impl OffsetGeometryCreation {
     }
 
     /// One reported root of a genuine boundary's displaced support on this SSI
-    /// component. Distinct curve parameters do not establish endpoint ownership.
+    /// component. Distinct curve parameters do not establish endpoint ownership. (Not
+    /// upstream) A limit root leaves it unresolved.
     fn unique_boundary_root<O: ClassObject + SolutionObject>(
         k: &Kernel,
         brep: &mut impl OffsetBrep<O>,
@@ -4409,6 +4412,12 @@ impl OffsetGeometryCreation {
                 if lo.min(hi) <= interval.min() && lo.max(hi) >= interval.max() {
                     return Ok(BoundaryRoot::Contains);
                 }
+                return Ok(BoundaryRoot::Unresolved);
+            }
+            // (not upstream) a limit root may be one of two crossings of a leaf whose
+            // certified pass stopped at its limit, the other unreported: it does not show
+            // the root unique
+            if solution.limit_root {
                 return Ok(BoundaryRoot::Unresolved);
             }
             let parameter = solution.start.param(0)?;

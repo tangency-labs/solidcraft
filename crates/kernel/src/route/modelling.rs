@@ -57,6 +57,25 @@ pub fn extrude_whole_sides(plane: &Plane, regions: &[Region2], start: f64, end: 
 }
 
 fn extruded(plane: &Plane, regions: &[Region2], start: f64, end: f64, sides: ExtrudeSides<'_>) -> Result<Vec<Body>> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run_each(
+        &crate::backend::Occt,
+        OpKind::Extrude,
+        |k| k.extrude(plane, regions, start, end, sides),
+        |bodies| {
+            let one_curve = match sides {
+                ExtrudeSides::AsDrawn => None,
+                ExtrudeSides::Whole(f) => Some(f),
+            };
+            let mut bodies = bodies.into_iter();
+            crate::build::extrusion_plans(plane, regions, start, end, one_curve, |x| {
+                let body = bodies.next().ok_or_else(|| crate::KernelError::Failed("fewer solids than regions".into()))?;
+                crate::smlib_sweeps::name_extrusion(body, plane, &x.pieces, Some(x.region), x.from, x.distance)
+            })
+        },
+    ) {
+        return made;
+    }
     match which(OpKind::Extrude) {
         Which::Solidcore => Solidcore.extrude(plane, regions, start, end, sides),
     }
@@ -125,6 +144,33 @@ pub fn revolve_whole_sides(
 }
 
 fn revolved(plane: &Plane, regions: &[Region2], origin: Vec2, dir: Vec2, angle: f64, whole: bool, sides: RevolveSides<'_>) -> Result<Vec<Body>> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run_each(
+        &crate::backend::Occt,
+        OpKind::Revolve,
+        |k| k.revolve(plane, regions, Axis2 { origin, dir }, angle, whole, sides),
+        |bodies| {
+            let one_curve = match sides {
+                RevolveSides::JoinFreeForm(f) => Some(f),
+                _ => None,
+            };
+            let plans = crate::build::revolution_plans_of(plane, regions, origin, dir, angle, one_curve)?;
+            if plans.len() != bodies.len() {
+                return Err(crate::KernelError::Failed("not one solid per region".into()));
+            }
+            plans
+                .iter()
+                .zip(bodies)
+                .map(|(x, body)| {
+                    let (_, o, k, turn) = crate::smlib_sweeps::revolution_curves(plane, &x.pieces, x.origin, x.axis, x.angle)?;
+                    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+                    crate::smlib_sweeps::name_revolution(body, plane, &x.pieces, v(o), v(k), turn)
+                })
+                .collect()
+        },
+    ) {
+        return made;
+    }
     match which(OpKind::Revolve) {
         Which::Solidcore => Solidcore.revolve(plane, regions, Axis2 { origin, dir }, angle, whole, sides),
     }
