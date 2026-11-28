@@ -263,6 +263,45 @@ fn a_distance_from_a_construction_line_toggles_to_a_diameter() {
     assert!(s.execute("sketch.toggle_diameter", &json!({"constraint": id2})).is_err());
 }
 
+/// #22916: a dimension to a construction line or an axis becomes a diameter when its text is
+/// placed across that line from what it measures, and stays a distance on the near side or
+/// without text; an ordinary line never does.
+#[test]
+fn text_placed_across_a_construction_line_or_axis_makes_a_diameter() {
+    let kind = |s: &Session, entities: serde_json::Value, at: Option<[f64; 2]>| {
+        let mut p = json!({"entities": entities});
+        if let Some(at) = at {
+            p["text_at"] = json!(at);
+        }
+        let mut scratch = s.scratch();
+        run(&mut scratch, "sketch.dimension", p)["type"].as_str().unwrap_or_default().to_string()
+    };
+    let mut s = new_sketch();
+    let cons = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 40]], "construction": true}))["curves"])[0].clone();
+    let plain = ids(&run(&mut s, "sketch.line", json!({"points": [[-30, 0], [-30, 40]]}))["curves"])[0].clone();
+    let edge = ids(&run(&mut s, "sketch.line", json!({"points": [[5, 50], [5, 80]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [5, 10], "id": "rim"}));
+    let (near, across) = (Some([8.0, 20.0]), Some([-6.0, 20.0]));
+    for (entities, at, diameter) in [
+        (json!(["rim", cons]), near, false),
+        (json!(["rim", cons]), across, true),
+        (json!([cons, "rim"]), across, true),
+        (json!(["rim", cons]), None, false),
+        (json!(["rim", {"axis": "Y"}]), near, false),
+        (json!(["rim", {"axis": "Y"}]), across, true),
+        (json!([cons, edge]), Some([-6.0, 60.0]), true),
+        (json!([edge, cons]), Some([-6.0, 60.0]), true),
+        (json!([cons, edge]), Some([9.0, 60.0]), false),
+        (json!(["rim", plain]), Some([-40.0, 20.0]), false),
+    ] {
+        let got = kind(&s, entities.clone(), at);
+        assert_eq!(got == "LinearDiameterDimension", diameter, "{entities} at {at:?}: {got}");
+    }
+    // Asked for plainly, it stays a distance wherever the text goes.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["rim", cons], "type": "distance", "text_at": [-6, 20]}));
+    assert_ne!(d["type"], "LinearDiameterDimension", "{d}");
+}
+
 #[test]
 fn glyphs_and_snaps() {
     let mut s = new_sketch();
