@@ -419,6 +419,67 @@ pub fn surface_distance_lower_bound(
     }
 }
 
+/// A certified lower bound of the distance from `p` to a clamped 3D B-spline curve.
+/// The curve is represented as a tensor-product patch constant in its second
+/// parameter: duplicating each homogeneous coefficient preserves the point
+/// set exactly, including rational weights. This reuses the surface bound's
+/// extraction, subdivision and rounding allowances. The same patch budget
+/// applies; subdivision in the redundant direction can limit its tightness.
+///
+/// # Errors
+/// Invalid spline dimensions or knot data, unsupported non-clamped curves,
+/// and the errors of [`surface_distance_lower_bound`].
+pub fn bspline_curve_distance_lower_bound(
+    k: &Kernel,
+    curve: &crate::nurbs::crv_basic::Curve,
+    p: Point3,
+    want: f64,
+) -> Result<f64> {
+    const OP: &str = "query::distance_bound::bspline_curve_distance_lower_bound";
+    let degree = curve.degree();
+    let points = curve.cpts();
+    let knots = curve.knots();
+    if degree == 0
+        || points.len() <= degree
+        || points
+            .len()
+            .checked_add(degree)
+            .and_then(|n| n.checked_add(1))
+            != Some(knots.len())
+        || knots.iter().any(|x| !x.is_finite())
+        || knots.windows(2).any(|pair| pair[0] > pair[1])
+    {
+        return Err(SolidError::invalid_input(OP, "invalid spline data"));
+    }
+    let (&lo, &hi) = knots
+        .first()
+        .zip(knots.last())
+        .ok_or_else(|| SolidError::invalid_input(OP, "empty knot vector"))?;
+    if lo >= hi
+        || !knots.iter().take(degree + 1).all(|x| *x == lo)
+        || !knots.iter().rev().take(degree + 1).all(|x| *x == hi)
+    {
+        return Err(SolidError::Unsupported {
+            operation: OP,
+            reason: "a curve without a clamped knot domain",
+        });
+    }
+    let net = points.iter().map(|point| vec![*point, *point]).collect();
+    let surface = crate::nurbs::srf_basic::Surface::new(
+        net,
+        degree,
+        1,
+        knots.to_vec(),
+        vec![0.0, 0.0, 1.0, 1.0],
+    )?;
+    // Preserve the curve's knots, rather than applying a surface constructor's
+    // knot fixup to the lifted representation.
+    let surface = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::from_nurb(
+        surface, true,
+    ));
+    surface_distance_lower_bound(k, &surface, None, p, want)
+}
+
 /// The pieces of `surf` over `uv_box` (as [`surface_distance_lower_bound`] takes it) about
 /// `p`: its NURBS form's Bézier patches restricted to the box, translated by `-p`, each
 /// with its coefficients' error (the form's against its definition, the extraction's and
@@ -1673,6 +1734,52 @@ mod tests {
         );
         assert!(matches!(
             surface_distance_lower_bound(&k, &off, None, p, 1.0),
+            Err(SolidError::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn curve_distance_bound_encloses_polynomial_and_rational_segments() {
+        use crate::nurbs::crv_basic::Curve;
+        use crate::nurbs::math::CPoint;
+        let k = Kernel::default();
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        for points in [
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(2.0, 0.0, 0.0, NOW),
+            ],
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, 1.0),
+                CPoint::new(4.0, 0.0, 0.0, 2.0),
+            ],
+        ] {
+            let curve = Curve::new(points, 1, knots.clone()).unwrap();
+            let p = Point3::new(1.0, 3.0, 0.0);
+            let lower = bspline_curve_distance_lower_bound(&k, &curve, p, 2.99).unwrap();
+            assert!(lower >= 2.99 && lower <= 3.0, "{lower}");
+            // A non-nearest endpoint has distance sqrt(10), while the true
+            // minimum is 3. The bound must not certify the endpoint.
+            let lower = bspline_curve_distance_lower_bound(&k, &curve, p, 10.0_f64.sqrt()).unwrap();
+            assert!(lower <= 3.0, "{lower}");
+        }
+    }
+
+    #[test]
+    fn curve_distance_bound_refuses_unclamped_knots() {
+        use crate::nurbs::crv_basic::Curve;
+        use crate::nurbs::math::CPoint;
+        let curve = Curve::new(
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(1.0, 0.0, 0.0, NOW),
+            ],
+            1,
+            vec![0.0, 1.0, 2.0, 3.0],
+        )
+        .unwrap();
+        assert!(matches!(
+            bspline_curve_distance_lower_bound(&Kernel::default(), &curve, Point3::ZERO, 0.0),
             Err(SolidError::Unsupported { .. })
         ));
     }
