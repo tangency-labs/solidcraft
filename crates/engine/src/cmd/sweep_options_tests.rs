@@ -582,7 +582,7 @@ fn a_closed_sweep_whose_inner_edge_lies_8e_6_to_1_2e_5_inside_the_corner_centres
             Ok(_) => {
                 let want = (2.0 * w) * (104.0 + 4.0 * PI);
                 let got = only_volume(&s);
-                if (got - want).abs() > 1e-9 * want {
+                if !((got - want).abs() <= 1e-9 * want) {
                     failed.push_str(&format!("delta={delta}: volume {got} vs {want}\n"));
                 }
             }

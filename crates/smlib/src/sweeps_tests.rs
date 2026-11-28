@@ -391,3 +391,29 @@ fn closed_sweep_corner_under_half_mm_keeps_base_on_axis() {
     };
     assert_close(got, want, 1e-9, "sub-0.5 mm closed sweep");
 }
+
+/// the open run `l1`, `a1`, `l2` of the rounded rectangle (a curve sweep along an open path),
+/// the inner edge `delta` mm inside the corner centre, `delta` from `1e-6` to `1.5e-5`. Only a
+/// closed path refuses a wall within tolerance of singular (the piece-by-piece sweep takes
+/// over there), so an open path still builds, with the Pappus volume: profile area `2 w`
+/// times the run's length `36 + pi + 16`.
+#[test]
+fn an_open_rounded_sweep_with_the_inner_edge_near_a_corner_centre_still_builds() {
+    let z = [0.0, 0.0, 1.0];
+    let path = vec![
+        Curve::Line { start: [-18.0, -10.0, 0.0], end: [18.0, -10.0, 0.0] },
+        Curve::Arc { center: [18.0, -8.0, 0.0], axis: z, reference: [0.0, -1.0, 0.0], radius: 2.0, start: 0.0, end: PI / 2.0 },
+        Curve::Line { start: [20.0, -8.0, 0.0], end: [20.0, 8.0, 0.0] },
+    ];
+    let mut failed = String::new();
+    for delta in [1e-6, 6e-6, 1e-5, 1.5e-5] {
+        let w = 2.0 - delta;
+        let profile = polygon(&[[-18.0, -10.0 - w, 0.0], [-18.0, -10.0 + w, 0.0], [-18.0, -10.0 + w, 1.0], [-18.0, -10.0 - w, 1.0]]);
+        let want = (2.0 * w) * (36.0 + PI + 16.0);
+        match Brep::sweep(&profile, &path, SweepFrame::Follow, true).map(|b| b.volume(1e-12)) {
+            Ok(Ok(got)) if (got - want).abs() <= 1e-9 * want => {}
+            other => failed.push_str(&format!("delta={delta}: {other:?} vs {want}\n")),
+        }
+    }
+    assert!(failed.is_empty(), "{failed}");
+}
