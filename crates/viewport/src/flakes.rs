@@ -145,10 +145,26 @@ impl FlakeLayer {
         let tilt = self.spread() * MAX_FLAKE_TILT * unit(hash(cell, 4)).sqrt();
         let (turn_sine, turn_cosine) = (TAU * unit(hash(cell, 5))).sin_cos();
         let (tilt_sine, tilt_cosine) = tilt.sin_cos();
-        let tangent = unit_direction(if n.z.abs() < 0.9 { Vec3::Z.cross(n) } else { Vec3::X.cross(n) })?;
+        let tangent = flake_tangent(n)?;
         let bitangent = n.cross(tangent);
         let normal = unit_direction(tangent * (tilt_sine * turn_cosine) + bitangent * (tilt_sine * turn_sine) + n * tilt_cosine)?;
         Ok(Some(Flake { normal, depth }))
+    }
+}
+
+/// A unit tangent of `n` that turns continuously with `n`. Each world axis is projected onto the
+/// tangent plane and weighted by its own length, so the sum has no switch between frames. The sum
+/// vanishes only at isolated normals; there one fixed cross product stands in.
+fn flake_tangent(n: Vec3) -> Result<Vec3, SurfaceError> {
+    let mut sum = Vec3::ZERO;
+    for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+        let projected = axis - n * axis.dot(n);
+        sum = sum + projected * projected.len();
+    }
+    match sum.normalized() {
+        Some(tangent) => Ok(tangent),
+        None if n.x.abs() < 0.9 => unit_direction(Vec3::X.cross(n)),
+        None => unit_direction(Vec3::Y.cross(n)),
     }
 }
 
@@ -282,6 +298,31 @@ mod tests {
                 assert_eq!(share, coverage);
             }
         }
+    }
+
+    #[test]
+    fn the_tilt_frame_turns_smoothly_across_the_old_frame_switch() {
+        // The former frame switched at |n.z| = 0.9 on this circle, flipping the tangent from +Y to -Y.
+        let steps = 3000;
+        let mut previous: Option<Vec3> = None;
+        for i in 0..=steps {
+            let t = std::f64::consts::PI * f64::from(i) / f64::from(steps);
+            let n = Vec3::new(t.sin(), 0.0, t.cos());
+            let tangent = flake_tangent(n).unwrap();
+            assert!((tangent.len() - 1.0).abs() < 1e-12 && tangent.dot(n).abs() < 1e-12, "step {i}: not a unit tangent");
+            if let Some(last) = previous {
+                assert!(tangent.dot(last) > 0.999, "step {i}: the tangent jumped");
+            }
+            previous = Some(tangent);
+        }
+    }
+
+    #[test]
+    fn the_tangent_is_finite_where_the_axis_projections_cancel() {
+        // (1, 1, 1) / sqrt(3): the three projections sum to zero.
+        let n = unit_direction(Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let tangent = flake_tangent(n).unwrap();
+        assert!((tangent.len() - 1.0).abs() < 1e-12 && tangent.dot(n).abs() < 1e-12);
     }
 
     #[test]

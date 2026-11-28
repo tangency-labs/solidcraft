@@ -8,6 +8,19 @@ struct FlakeRecord {
 };
 const MAX_FLAKE_TILT: f32 = 0.7853981633974483;
 // The integer cell hash of the CPU contract; cells wrap at the 65536-cell period.
+// A unit tangent of `n` that turns continuously with `n`: the axis projections, each weighted
+// by its own length, summed. It vanishes only at isolated normals, where one cross product stands in.
+fn flake_tangent(n: vec3<f32>) -> vec3<f32> {
+    let px=vec3<f32>(1.0,0.0,0.0)-n*n.x;
+    let py=vec3<f32>(0.0,1.0,0.0)-n*n.y;
+    let pz=vec3<f32>(0.0,0.0,1.0)-n*n.z;
+    let sum=px*length(px)+py*length(py)+pz*length(pz);
+    let size=length(sum);
+    if size>1.0e-6 { return sum/size; }
+    if abs(n.x)<0.9 { return unit(cross(vec3<f32>(1.0,0.0,0.0),n)); }
+    return unit(cross(vec3<f32>(0.0,1.0,0.0),n));
+}
+
 fn flake_hash(cell: vec3<u32>, salt: u32) -> u32 {
     let c=cell&vec3<u32>(65535u);
     var h=(c.x*0x8da6b343u)^(c.y*0xd8163841u)^(c.z*0xcb1ab31fu)^(salt*0x9e3779b9u);
@@ -60,7 +73,7 @@ fn on_flake(t: Triangle, point: vec3<f32>, n: vec3<f32>) -> Triangle {
         // The square root spreads the tilted normals evenly over their cone's disk.
         let tilt=layer.shape.z*MAX_FLAKE_TILT*sqrt(flake_unit(flake_hash(nearest,4u)));
         let turn=2.0*PI*flake_unit(flake_hash(nearest,5u));
-        let tangent=unit(select(cross(vec3<f32>(1.0,0.0,0.0),n),cross(vec3<f32>(0.0,0.0,1.0),n),abs(n.z)<0.9));
+        let tangent=flake_tangent(n);
         let bitangent=cross(n,tangent);
         normal=unit(tangent*(sin(tilt)*cos(turn))+bitangent*(sin(tilt)*sin(turn))+n*cos(tilt));
     }
