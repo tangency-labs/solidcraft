@@ -197,6 +197,12 @@ pub struct SetbackCorner {
     /// rails of the rounds beside it cross (`sm_SbSetBacks`'s `rvLeast`); a setback below it
     /// is too short.
     pub least: Vec<f64>,
+    /// Not the fork (#13649): a setback asked at the corner that overlaps on an edge
+    /// ([`SetbackTooLongWhy::Overlap`]): the largest that does not ([`overlap_largest`]).
+    /// The corner is made meanwhile at the rule's setbacks, each held to half its room (only
+    /// so that its vertices can be placed), and [`build_setback_fill`] refuses it once the far
+    /// corners' cuts on the rounds' rails are seen, naming the lesser bound.
+    pub asked_overlap: Option<f64>,
     /// Not the fork (solidcore#2343 (d)): beside a curved face, the spring curves the corner
     /// checked against its faces' other edges, one per face, at the setbacks it is built
     /// with (`corner_springs`, made again where the fill is kept, from the same vertices);
@@ -224,6 +230,7 @@ impl Default for SetbackCorner {
             overflows: false,
             room: Vec::new(),
             least: Vec::new(),
+            asked_overlap: None,
             springs: Vec::new(),
             fill: None,
             open: false,
@@ -364,8 +371,8 @@ fn ease_at(fills: &[SetBackFill], vertex: VertexId) -> f64 {
 
 /// Not the fork's (#3145): the setbacks asked at the made `corners` (their fills or their
 /// set setbacks, [`asked_at`]) that overlap on an edge, refused
-/// ([`SetbackTooLongWhy::Overlap`]) before the blends are traced, at every set-back corner,
-/// the Setback's and the N x N ones alike. On each edge at the corner the setback, its ease
+/// ([`SetbackTooLongWhy::Overlap`]) before the blends are traced, at every set-back corner
+/// but the Setback (below). On each edge at the corner the setback, its ease
 /// and the far end's claim (its fill's setback and ease, or the setback set on its corner; 0
 /// where it has none) must leave the edge some length: a setback at `length - ease - far`
 /// would leave the edge's round none, so that bound is open, and the refusal names the least
@@ -386,6 +393,12 @@ fn ease_at(fills: &[SetBackFill], vertex: VertexId) -> f64 {
 /// An edge at the corner with no curve is refused (a null pointer), never skipped. The first
 /// refused corner, with its vertex.
 ///
+/// Not at the Setback (#13649): a far corner may cut a round's rail short of the room, which
+/// is not known before the far corners are placed, so a Setback's overlap is decided by
+/// [`make_setback_topology`] and refused by [`build_setback_fill`], naming the lesser bound.
+/// The far claims it reads are the fills'; a far N x N corner's set setback that overlaps is
+/// refused here at that corner, by the same inequality.
+///
 /// # Errors
 /// Those of the topology queries and of the length brackets (a curve kind with no certified
 /// length, or a bracket that cannot be as narrow as asked, each named); `NullPointer` for an
@@ -400,46 +413,71 @@ pub fn overlapping_setbacks(
         let Some(vtx) = corner.filleted_vertex() else {
             continue;
         };
+        if corner.blend.is_some_and(BlendCorner::is_setback) {
+            continue;
+        }
         let d = asked_at(corners, fills, vtx);
         if !d.is_finite() || d <= 0.0 {
             continue;
         }
-        let ease = ease_at(fills, vtx);
-        let mut largest = BIG_DOUBLE;
-        // the largest setback certified to fit: from the length's lower side (#3184)
-        for e in vertex::edges(b, vtx, None)? {
-            let curve =
-                edge::evaluation_curve(b, e)?.ok_or_else(|| edge_without_curve(OP_TOPOLOGY, e))?;
-            // a bracket as wide as the corner's tolerance, as the Setback's room asks it
-            // (`set_backs`)
-            let length = curve.length_bound(k, &edge::interval(b, e)?, corner.approx_tol_3d)?;
-            let far = match edge::other_vertex(b, e, Some(vtx))?.filter(|&f| f != vtx) {
-                Some(f) => asked_at(corners, fills, f) + ease_at(fills, f),
-                None => 0.0,
-            };
-            // the fit margin: a thousand of the edge's tolerances (the bound is open)
-            let margin = 1000.0 * edge::tolerance(b, e)?;
-            largest = smin(largest, length.lower - ease - far - margin);
-        }
+        let largest = overlap_largest(k, b, corners, fills, vtx, corner.approx_tol_3d)?;
         // refused past what is certified to fit; built only where certified
         if d > largest {
-            let refusal = SetbackRefusal::no_room(
-                format!(
-                    "Fillet Error: a setback of {} reaches past an edge at its corner, or the far end's claim on it: a setback of at most {} fits",
-                    fmt_g(d),
-                    fmt_g(largest)
-                ),
-                None,
-            )
-            .typed(BlendRefusal::SetbackTooLong {
-                vertex: vtx,
-                largest,
-                why: SetbackTooLongWhy::Overlap,
-            });
-            return Ok(Some((vtx, refusal)));
+            return Ok(Some((vtx, overlap_refusal(vtx, d, largest))));
         }
     }
     Ok(None)
+}
+
+/// The largest setback asked at `vtx` that leaves every edge there some length past the far
+/// end's claim ([`overlapping_setbacks`]), certified: the least over the edges of
+/// `length - ease - far` less the fit margin, the length from its lower side, a bracket
+/// `tol` wide. `corners` give the far ends' set setbacks where they have no fill (none read
+/// where empty).
+fn overlap_largest(
+    k: &Kernel,
+    b: &Brep,
+    corners: &[FilletCorner],
+    fills: &[SetBackFill],
+    vtx: VertexId,
+    tol: f64,
+) -> Result<f64> {
+    let ease = ease_at(fills, vtx);
+    let mut largest = BIG_DOUBLE;
+    // the largest setback certified to fit: from the length's lower side (#3184)
+    for e in vertex::edges(b, vtx, None)? {
+        let curve =
+            edge::evaluation_curve(b, e)?.ok_or_else(|| edge_without_curve(OP_TOPOLOGY, e))?;
+        // a bracket as wide as the corner's tolerance, as the Setback's room asks it
+        // (`set_backs`)
+        let length = curve.length_bound(k, &edge::interval(b, e)?, tol)?;
+        let far = match edge::other_vertex(b, e, Some(vtx))?.filter(|&f| f != vtx) {
+            Some(f) => asked_at(corners, fills, f) + ease_at(fills, f),
+            None => 0.0,
+        };
+        // the fit margin: a thousand of the edge's tolerances (the bound is open)
+        let margin = 1000.0 * edge::tolerance(b, e)?;
+        largest = smin(largest, length.lower - ease - far - margin);
+    }
+    Ok(largest)
+}
+
+/// The refusal of a setback `d` asked at `vtx` that overlaps on an edge, naming `largest`
+/// ([`overlap_largest`], [`SetbackTooLongWhy::Overlap`]).
+fn overlap_refusal(vtx: VertexId, d: f64, largest: f64) -> SetbackRefusal {
+    SetbackRefusal::no_room(
+        format!(
+            "Fillet Error: a setback of {} reaches past an edge at its corner, or the far end's claim on it: a setback of at most {} fits",
+            fmt_g(d),
+            fmt_g(largest)
+        ),
+        None,
+    )
+    .typed(BlendRefusal::SetbackTooLong {
+        vertex: vtx,
+        largest,
+        why: SetbackTooLongWhy::Overlap,
+    })
 }
 
 /// `SmFilletExecutive::GetSetBackFill`: the first fill asked at `vertex`.
@@ -1022,6 +1060,8 @@ fn edge_blended(b: &Brep, e: EdgeId, solvers: &dyn BallSolvers) -> Result<bool> 
 struct SetBacks {
     /// `rvSetBacks`.
     setbacks: Vec<f64>,
+    /// Not the fork (#13649): the rule's setbacks, also where one is asked.
+    rule: Vec<f64>,
     /// `rvLeast`.
     least: Vec<f64>,
     /// `rvRoom`.
@@ -1083,6 +1123,7 @@ fn set_backs(
             Err(refusal) => return Ok(Err(refusal.reason)),
         }
     };
+    let rule = setbacks.clone();
     let asked = set_back_fill_of(fills, vtx);
     let mut room = vec![0.0; n];
     let mut fits = true;
@@ -1160,6 +1201,7 @@ fn set_backs(
     }
     Ok(Ok(SetBacks {
         setbacks,
+        rule,
         least,
         room,
         fits,
@@ -1447,6 +1489,7 @@ pub fn make_setback_topology(
     )?;
     let SetBacks {
         setbacks: mut sbs,
+        rule,
         least,
         room,
         fits,
@@ -1461,7 +1504,21 @@ pub fn make_setback_topology(
         }
     };
     let asked = set_back_fill_of(fills, vtx);
+    // An asked setback that overlaps on an edge (#13649; `overlapping_setbacks` leaves the
+    // Setback to this) is refused once the far corners' cuts on the rounds' rails are seen
+    // (build_setback_fill), naming the lesser bound. The corner is made meanwhile at the
+    // rule's setbacks, each held to half its room, only so that its vertices can be placed.
+    let mut asked_overlap = None;
     if let Some(a) = asked {
+        let over = overlap_largest(k, target, &[], fills, vtx, tol)?;
+        if a.setback > over {
+            asked_overlap = Some(over);
+            for ((s, &r), &w) in sbs.iter_mut().zip(&rule).zip(&room) {
+                *s = smin(r, 0.5 * w);
+            }
+        }
+    }
+    if let Some(a) = asked.filter(|_| asked_overlap.is_none()) {
         if !fits {
             return Ok(Err(setback_too_long(
                 a,
@@ -1489,7 +1546,8 @@ pub fn make_setback_topology(
         }
         corner.ease_dist = a.ease;
     }
-    sb.overflows = !fits;
+    sb.overflows = !fits && asked_overlap.is_none();
+    sb.asked_overlap = asked_overlap;
     sb.room.clone_from(&room);
     sb.least.clone_from(&least);
     // a G1 fill is taken only certified convex: the least scale of the setbacks at which it
@@ -1499,7 +1557,12 @@ pub fn make_setback_topology(
     // builds (or that none does, where that one does not fit with its ease). Beside a curved
     // face they grow with the real rounds instead (build_setback_fill). A corner left open
     // is not filled: its fill is not certified, nor its setbacks grown (the fork's ef57570).
-    if sb.fill_order == 1 && !sb.overflows && !curved && !asked.is_some_and(|a| a.open) {
+    if sb.fill_order == 1
+        && !sb.overflows
+        && asked_overlap.is_none()
+        && !curved
+        && !asked.is_some_and(|a| a.open)
+    {
         let mut most = vec![0.0; n];
         for (i, m) in most.iter_mut().enumerate() {
             *m = if asked.is_some() {
@@ -2902,11 +2965,37 @@ fn past_rails(asked: Option<SetBackFill>, vtx: VertexId, reach: f64) -> SetbackR
     )
 }
 
+/// The refusal of a setback `asked` at `vtx` that overlaps on an edge, `over` the largest
+/// that does not ([`SetbackCorner::asked_overlap`]), once the blends' ends are `gathered`
+/// (#13649): where a far corner cuts a round's rail so near the vertex that a setback at
+/// `over` with its ease is past that cut by more than `tol` (refused there,
+/// [`Gathered::PastRails`]), it names the rails' reach less the ease ([`past_rails`]), else
+/// `over` ([`overlap_refusal`]). Ends not gathered show no cut: `over`.
+fn overlap_or_past_rails(
+    asked: SetBackFill,
+    vtx: VertexId,
+    over: f64,
+    gathered: &Gathered,
+    tol: f64,
+) -> SetbackRefusal {
+    let reach = match gathered {
+        Gathered::Ends(_, _, reaches) => reaches.iter().fold(BIG_DOUBLE, |m, &r| smin(m, r)),
+        Gathered::PastRails { reach } => *reach,
+        Gathered::Refused(_) | Gathered::Unplaced => BIG_DOUBLE,
+    };
+    if over + asked.ease > reach + tol {
+        past_rails(Some(asked), vtx, reach)
+    } else {
+        overlap_refusal(vtx, asked.setback, over)
+    }
+}
+
 /// `SmBlendCorner::BuildSetBackFill` (the fork's 61547af, 1506e2f): the Setback's fill
 /// ([`fill_hole`](crate::blend::blend_setback::fill_hole)), from the blends' surfaces at their end sections, and from it the base
 /// points and the spring curves' halves. `Ok(Err(refusal))` where the fill is refused (its
 /// reason noted), where the setbacks reach past a far corner's cut on a round's rail
-/// ([`past_rails`]), where it stands past a face ([`containment`], certified) farther than the
+/// ([`past_rails`]), where the setback asked overlaps on an edge
+/// ([`overlap_or_past_rails`]), where it stands past a face ([`containment`], certified) farther than the
 /// corner's tolerance, or where the rule's setbacks overflowed. Beside a curved face
 /// (solidcore#2343, the fork's 37c9e1d) a fill refused as uncertified grows its setbacks
 /// with the real rounds (`grow_curved`, placing the setback vertices again through
@@ -2943,6 +3032,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             None,
         )));
     }
+    let asked_overlap = sb.asked_overlap;
     let n = all.len();
     if corner.vertices.len() != 3 * n || corner.edges.len() != 3 * n {
         return Err(bad_input(OP_FILL, CornerInput::TopologyMismatch, None));
@@ -2958,20 +3048,24 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     };
 
     // each blend at its end section
-    let (surfaces, sides, rail_reaches) =
-        match gather_ends(k, target, pseudo, corner, &*solvers, &planes.faces, tol)? {
-            Gathered::Ends(surfaces, sides, reaches) => (surfaces, sides, reaches),
-            Gathered::Refused(why) => return Ok(Err(SetbackRefusal::not_built(why))),
-            Gathered::Unplaced => {
-                return Err(SolidError::blend(
-                    OP_FILL,
-                    BlendFailure::EaseNotBuilt(EaseStop::SetbackVertexOffRail),
-                ))
-            }
-            Gathered::PastRails { reach } => {
-                return Ok(Err(past_rails(set_back_fill_of(fills, vtx), vtx, reach)))
-            }
-        };
+    let gathered = gather_ends(k, target, pseudo, corner, &*solvers, &planes.faces, tol)?;
+    if let Some(over) = asked_overlap {
+        let asked = set_back_fill_of(fills, vtx).ok_or_else(|| defect(OP_FILL, WHY_CHECKED))?;
+        return Ok(Err(overlap_or_past_rails(asked, vtx, over, &gathered, tol)));
+    }
+    let (surfaces, sides, rail_reaches) = match gathered {
+        Gathered::Ends(surfaces, sides, reaches) => (surfaces, sides, reaches),
+        Gathered::Refused(why) => return Ok(Err(SetbackRefusal::not_built(why))),
+        Gathered::Unplaced => {
+            return Err(SolidError::blend(
+                OP_FILL,
+                BlendFailure::EaseNotBuilt(EaseStop::SetbackVertexOffRail),
+            ))
+        }
+        Gathered::PastRails { reach } => {
+            return Ok(Err(past_rails(set_back_fill_of(fills, vtx), vtx, reach)))
+        }
+    };
     // A corner left open is the Setback's hole, not filled (the fork's ef57570). G1: its face
     // curves are the spring curves, in closed form whatever a fill's heights: no fill is made
     // (OpenSetBackSprings). G2: they come from the fill's least-energy interior, no closed
