@@ -13132,7 +13132,14 @@ mod tests {
         h.step(&json!({"click": {"world": [10, 0, 15]}})).unwrap();
         assert_eq!(h.app.session.isocurves.len(), 1, "{:?}", h.app.status);
         let sc = build_scene(&h.app);
-        let segments: usize = h.app.session.isocurve_lines(solidcraft_engine::doc::display_quality::current()).iter().flat_map(|l| l.iter()).map(|l| l.points.len() - 1).sum();
+        let segments: usize = h
+            .app
+            .session
+            .isocurve_lines(solidcraft_engine::doc::display_quality::current())
+            .iter()
+            .flat_map(|l| l.iter())
+            .map(|l| l.points.len() - 1)
+            .sum();
         assert!(segments > 16, "eight curves each way: {segments} segments");
         assert_eq!(accent(&sc.lines, &sc), segments, "every segment on the model, in the accent");
         assert_eq!(accent(&sc.overlay, &sc), 0, "none over the model");
