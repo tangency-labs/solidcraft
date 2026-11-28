@@ -8,8 +8,8 @@
 //! `macos-window-resize-jitter-fix` feature; and its `expect`s are warnings instead.
 
 use core::num::NonZeroU32;
-use egui::{Context, ViewportId, ViewportIdMap, ViewportIdSet};
 use egui::epaint;
+use egui::{Context, ViewportId, ViewportIdMap, ViewportIdSet};
 use egui_wgpu::capture::CaptureState;
 use egui_wgpu::{RenderState, RendererOptions, SurfaceConfig, SurfaceErrorAction, WgpuConfiguration};
 use std::sync::Arc;
