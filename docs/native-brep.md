@@ -201,8 +201,9 @@ right-handed, and an optional radial law, piecewise linear in the angle, for a
 taper or a run-out), the stations and one half angle per span that fix the
 net's parameter across the turns, and the map from the face's (u, v) to the
 definition's, and the net's distance from the definition as the kernel held it.
-The face's (u, v) are the net's. That distance is never taken as proof: the
-kernel certifies the bound again when it builds the face and keeps the larger. A STEP
+The face's (u, v) are the net's. That distance is never taken as proof. solidcore
+builds the face on its net and keeps the definition as the wall's label, which
+no evaluation reads, and writes it back with the net. A STEP
 writer, with no helicoid entity, writes the net as the face's B-spline surface,
 pcurves included. See docs/design/screw-surface-record.md.
 
