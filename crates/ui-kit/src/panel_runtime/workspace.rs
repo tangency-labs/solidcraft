@@ -3597,13 +3597,16 @@ impl WorkspacePanelHost {
             entry.is_some(),
             egui_rect(frame.layout.capacity),
         );
-        frame.menu_bounds = output.rect.map(logical_rect);
+        // Area's first pass only measures disabled rows. Publish popup input
+        // and occlusion after the menu becomes visible, as with host chrome.
+        frame.menu_bounds = if output.rows.iter().any(|(_, response)| response.enabled()) { output.rect.map(logical_rect) } else { None };
         self.menu_items.clear();
         for (item, response) in &output.rows {
+            if !response.enabled() {
+                continue;
+            }
             if let Some((_, target, _)) = bindings.iter().find(|(id, _, _)| *id == item.id) {
-                if response.enabled() {
-                    self.menu_items.push(response.id);
-                }
+                self.menu_items.push(response.id);
                 if let HostControlTarget::Shared { instance, action: HostSharedAction::Collapse } = target {
                     let expanded = layout.containing(instance).is_ok_and(|section| !section.collapsed);
                     ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(expanded));

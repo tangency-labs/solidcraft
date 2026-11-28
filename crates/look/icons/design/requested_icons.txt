@@ -222,6 +222,7 @@ measure	false
 merge_lines	false
 mesh_body	false
 mesh_export	false
+mesh_import	false
 mesh_reduce	false
 min_radius	false
 mirror	false

@@ -495,6 +495,26 @@ pub fn calculate_tight_bounding_box<'a>(
     Ok(face_bbox)
 }
 
+/// Whether [`calculate_tight_bounding_box_into`] of `f` could add nothing to its B-rep's
+/// tight box once that holds every vertex and every edge's tight box (or the edge's loose
+/// box lay inside it): so for a planar face with an edge that has a curve, whose own box
+/// is its vertices and those edge boxes alone. A face without such an edge is bounded by
+/// its surface over its domain, and a curved face by its surface too: both are `false`.
+/// It makes the same coordinate and surface checks first, so those refusals stay.
+///
+/// # Errors
+///
+/// Those of the checks, the face's edges and the planarity test.
+pub(crate) fn adds_nothing_to_brep_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<bool> {
+    check_face_coordinates(k, b, f, OP_TIGHT)?;
+    let surface = face_surface(b, f, OP_TIGHT)?.clone_for_evaluation()?;
+    let mut has_curve = false;
+    for e in face_edges(b, f)? {
+        has_curve |= b.edge(e)?.curve.is_some();
+    }
+    Ok(has_curve && surface_is_planar(k, b, f, &surface, EFF_ZERO)?)
+}
+
 /// [`calculate_tight_bounding_box`] into the caller's `face_bbox` (`rFaceBBox`), for
 /// callers that ignore the status: as upstream, the box of the vertices and edges is
 /// written before the surface's part is computed, so a failure there leaves that box;

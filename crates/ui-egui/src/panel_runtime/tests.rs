@@ -2556,7 +2556,9 @@ fn allocation_paired_resize_and_double_click_transfer_owned_exact_candidates_wit
             let release = interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at });
             let committed = fixture_commit(&mut service, &host, release.candidate.unwrap());
             assert_eq!(committed.sashes[0].bounds, preview.bounds);
-            let axis = |size: Size| if zone == Zone::Bottom { size.width } else { size.height };
+            let axis = |size: Size| {
+                if zone == Zone::Bottom { size.width } else { size.height }
+            };
             assert_eq!(
                 service.layout().sections.iter().map(|section| axis(section.size)).sum::<f32>(),
                 host.sections.iter().map(|section| axis(section.outer.size)).sum::<f32>()
@@ -10129,7 +10131,7 @@ fn exhausted_single_pass_sizing_and_collapsed_headers_publish_only_actual_footpr
         let card = sizing.layout.sections.iter().find(|card| card.instance == id("log-0")).unwrap();
         assert_eq!(sizing.layout.resolved.panels.len(), 1, "intended geometry survives invisible measurement");
         for regions in [&sizing.layout.painted, &sizing.layout.input, &sizing.layout.occlusion, &sizing.layout.reservations] {
-            assert!(!regions.iter().any(|bounds| egui_rect(*bounds).intersect(egui_rect(card.outer)).is_positive()));
+            assert!(!regions.iter().any(|bounds| { egui_rect(*bounds).intersect(egui_rect(card.outer)).is_positive() }));
         }
         assert!(sizing.controls.is_empty(), "no metadata-only controls from an invisible Area");
         let key = ControllerKey { instance: id("log-0"), owner: raw.content.runtime.instance_owner(&id("log-0")).unwrap() };

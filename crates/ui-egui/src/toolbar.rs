@@ -4648,39 +4648,50 @@ mod dropdown_tests {
         h.app.home.open = false;
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         let width = [600, 500, 400, 300, 220].into_iter().find(|width| {
-            h.call("ui.resize", json!({"width":width,"height":1000}));
+            h.call("ui.resize", json!({"width":width,"height":2400}));
             h.frames(3);
             crate::scenario::rect_of("panel:SKETCH:CREATE").is_none() && crate::scenario::rect_of("toolbar:overflow").is_some()
         });
-        assert!(width.is_some(), "the regression exercises Create folded into overflow");
+        assert!(width.is_some(), "Create is folded into overflow");
+        // The overflow opens beneath its compact button and covers the lower group labels.
+        // Drop on the exposed top of Finish instead, as a pointer user can.
+        let finish = crate::scenario::rect_of("button:sketch.finish").unwrap();
+        let to = finish.center_top() + vec2(0.0, Tokens::get().space_4);
+        let target_layer = h.ctx.layer_id_at(to).expect("the visible ribbon drop target has a layer");
+        let (commands, _) = crate::workspace::layout("SKETCH", "CREATE", &solidcraft_engine::command_specs()).unwrap();
+        let definitions = command_menu_items(&h.app, "SKETCH", "CREATE", &commands);
+        let family = definitions.iter().find(|item| item.enabled && !item.children.is_empty()).unwrap();
+        let command = family.children.iter().find(|item| item.enabled && item.draggable && item.children.is_empty()).unwrap().id.clone();
+        assert_ne!(crate::toolbar_custom::pinned_on(&h.app, "SKETCH", &command), Some("FINISH SKETCH"));
         let before = h.app.session.doc.to_json();
         h.step(&json!({"click":{"handle":"toolbar:overflow"}})).unwrap();
-        h.frames(3);
-        h.step(&json!({"click":{"handle":"menu:CREATE"}})).unwrap();
-        h.frames(3);
-        h.step(&json!({"move":{"handle":"dropdown:sketch.point"}})).unwrap();
-        h.frames(2);
-        let from = crate::scenario::handle_at("dropdown:sketch.point").unwrap();
-        let to = crate::scenario::handle_at("panel:SKETCH:FINISH SKETCH").unwrap();
+        // Enter Create, then its first family without leaving the pointer over an overlapping opener.
+        for key in ["Home", "ArrowRight", "Home", "ArrowRight"] {
+            h.step(&json!({"key":key})).unwrap();
+        }
+        h.frames(4);
+        let row_id = egui::Id::unique("dropdown_row").with(command.as_str());
+        let row = h.ctx.read_response(row_id).unwrap();
+        assert_eq!(row.interact_rect, row.rect, "the first command is fully exposed");
+        let from = row.rect.center();
+        assert_eq!(h.ctx.layer_id_at(from), Some(row.layer_id), "the command owns its pointer target");
+        h.frame_with(vec![egui::Event::PointerMoved(from)]);
         h.frame_with(crate::test_support::pointer(from, true));
         let start = from + vec2(0.0, -12.0);
         h.frame_with(vec![egui::Event::PointerMoved(start)]);
-        let payload = egui::DragAndDrop::payload::<ui_kit::ReorderPayload<String>>(&h.ctx)
-            .expect("dragging the shared overflow row starts its command payload");
-        assert_eq!((payload.id.as_str(), payload.from_menu), ("sketch.point", true));
-        for step in 1..=30 {
-            h.frame_with(vec![egui::Event::PointerMoved(start + (to - start) * (step as f32 / 30.0))]);
+        let payload = egui::DragAndDrop::payload::<ui_kit::ReorderPayload<String>>(&h.ctx).expect("overflow starts a command drag");
+        assert_eq!((payload.id.as_str(), payload.from_menu), (command.as_str(), true));
+        for step in 1..=20 {
+            h.frame_with(vec![egui::Event::PointerMoved(start + (to - start) * (step as f32 / 20.0))]);
         }
-        h.frames(3);
-        assert!(ribbon::dragging(&h.ctx), "the overflow payload survives reaching the toolbar");
-        let layer = h.ctx.layer_id_at(to);
+        assert_eq!(h.ctx.layer_id_at(to), Some(target_layer), "the ribbon drop target stays exposed rather than covered by a flipped flyout");
         h.frame_with(crate::test_support::pointer(to, false));
         h.frames(3);
-        assert!(
-            crate::toolbar_custom::pinned_on(&h.app, "SKETCH", "sketch.point").is_some(),
-            "from={from:?}, to={to:?}, target_layer={layer:?}, panels={:?}, status={:?}",
-            h.app.toolbar_custom.panels,
-            h.app.status
+        assert_eq!(
+            crate::toolbar_custom::pinned_on(&h.app, "SKETCH", &command),
+            Some("FINISH SKETCH"),
+            "{command} is pinned in the actual drop target, from={from:?}, to={to:?}, panels={:?}",
+            h.app.toolbar_custom.panels
         );
         assert_eq!(h.app.session.doc.to_json(), before, "dragging does not execute the command");
         assert!(h.app.tool.is_none());
@@ -7451,7 +7462,10 @@ mod persistent_ribbon_tests {
         let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
         assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "MESH"]);
         let (_, mesh, count) = lists.iter().find(|(p, _, _)| *p == "MESH").unwrap();
-        assert_eq!(mesh.iter().map(|c| c.id).collect::<Vec<_>>(), ["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"]);
+        assert_eq!(
+            mesh.iter().map(|c| c.id).collect::<Vec<_>>(),
+            ["mesh.reduce", "mesh.convert", "mesh.section_stack", "file.insert_mesh", "file.save_mesh"]
+        );
         assert_eq!(
             crate::toolbar_custom::buttons(&h.app, "SURFACE", "MESH", mesh, *count).iter().map(|c| c.id).collect::<Vec<_>>(),
             ["mesh.reduce", "mesh.convert"]
@@ -7470,7 +7484,7 @@ mod persistent_ribbon_tests {
         assert!(!create.iter().any(|c| c.id == "surface.thicken"));
         assert_eq!(*count, 4);
         let (_, convert, count) = lists.iter().find(|(p, _, _)| *p == "CONVERT").unwrap();
-        assert_eq!(convert.iter().map(|c| c.id).collect::<Vec<_>>(), ["surface.thicken", "mesh.convert", "mesh.reduce"]);
+        assert_eq!(convert.iter().map(|c| c.id).collect::<Vec<_>>(), ["surface.thicken", "mesh.convert", "mesh.reduce", "mesh.section_stack"]);
         assert_eq!(*count, 2);
         assert!(scenario::handle_at("button:surface.thicken").is_some());
         assert!(scenario::handle_at("button:mesh.convert").is_some());

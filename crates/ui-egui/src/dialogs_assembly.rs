@@ -163,6 +163,7 @@ const MOVES: &[&str] = &[
     "assembly.constraint.create",
     "assembly.constraint.edit",
     "occurrence.align",
+    "scan.align",
     "parts.insert",
     "parts.fastener",
 ];
@@ -181,7 +182,10 @@ pub enum Asm {
         name: String,
         hover: Hover,
     },
-    RigidGroup,
+    /// `whole_components`: each component picked whole, as As-Built keeps them (#23189).
+    RigidGroup {
+        whole_components: Vec<WholeComponent>,
+    },
     /// `focus`: the first value takes the keyboard (its text selected) on the next frame.
     Drive {
         joint: usize,
@@ -253,7 +257,7 @@ impl Searched {
     }
 }
 
-/// As-built: a component picked whole, by its Browser row or selected when the dialog opened.
+/// As-built, Rigid Group: a component picked whole, by its Browser row or selected when the dialog opened.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WholeComponent {
     /// The placement that was picked: the occurrence ids from the root.
@@ -399,7 +403,7 @@ impl Asm {
             Asm::Joint(j) if j.as_built => "AS-BUILT JOINT",
             Asm::Joint(_) => "JOINT",
             Asm::JointOrigin { .. } => "JOINT ORIGIN",
-            Asm::RigidGroup => "RIGID GROUP",
+            Asm::RigidGroup { .. } => "RIGID GROUP",
             Asm::Drive { .. } => "DRIVE JOINTS",
             Asm::MotionLink { .. } => "MOTION LINK",
             Asm::Coupling(f) => match f.command {
@@ -415,7 +419,7 @@ impl Asm {
     }
 
     pub fn previews(&self) -> bool {
-        matches!(self, Asm::Joint(_) | Asm::Drive { .. } | Asm::RigidGroup | Asm::Coupling(_) | Asm::Cam(_) | Asm::Constrain(_))
+        matches!(self, Asm::Joint(_) | Asm::Drive { .. } | Asm::RigidGroup { .. } | Asm::Coupling(_) | Asm::Cam(_) | Asm::Constrain(_))
     }
 }
 
@@ -446,7 +450,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![SelInput::new("Components", BODIES, true), SelInput::new("Position", SNAPS, false)],
         ),
         "joint.origin" => (Asm::JointOrigin { name: String::new(), frame: false, hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
-        "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
+        "joint.rigid_group" => (Asm::RigidGroup { whole_components: Vec::new() }, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
             let joint = picked_joint(app, true);
             (Asm::Drive { joint, values: current_values(s, joint), focus: true }, vec![])
@@ -1691,7 +1695,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Joint Origin1")).0;
             crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Export as a robot frame"), frame);
         }
-        Asm::RigidGroup => {}
+        Asm::RigidGroup { whole_components } => {
+            let picked = sel_items(inputs, 0);
+            whole_components.retain(|w| w.bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+        }
         Asm::Drive { joint, values, focus } => {
             let s = &app.session;
             let list = movable(s);
@@ -2730,24 +2737,36 @@ fn side_occurrence(s: &Session, pick: &Sel) -> Option<u64> {
     }
 }
 
-/// As-built: the component placed at `path` was picked whole, as these bodies. Kept while
-/// Components holds them all.
-pub(crate) fn picked_whole_component(d: &mut Dialog, path: &[u64], bodies: &[String]) {
-    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
-    let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
-    let whole = WholeComponent { path: path.to_vec(), bodies: bodies.to_vec() };
-    if f.as_built && held && !bodies.is_empty() && !f.whole_components.contains(&whole) {
-        f.whole_components.push(whole);
+/// The components picked whole in As-built and Rigid Group, the windows that count them so.
+fn whole_picks(k: &Asm) -> Option<&Vec<WholeComponent>> {
+    match k {
+        Asm::Joint(f) if f.as_built => Some(&f.whole_components),
+        Asm::RigidGroup { whole_components } => Some(whole_components),
+        _ => None,
     }
 }
 
-/// As-built: the row of a component inside one picked whole, or around one, adds that component
-/// as a side of its own, where a second click on a row otherwise takes its bodies out again.
+/// As-built, Rigid Group: the component placed at `path` was picked whole, as these bodies. Kept
+/// while Components holds them all.
+pub(crate) fn picked_whole_component(d: &mut Dialog, path: &[u64], bodies: &[String]) {
+    let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
+    let whole_components = match &mut d.kind {
+        Kind::Assembly(Asm::Joint(f)) if f.as_built => &mut f.whole_components,
+        Kind::Assembly(Asm::RigidGroup { whole_components }) => whole_components,
+        _ => return,
+    };
+    let whole = WholeComponent { path: path.to_vec(), bodies: bodies.to_vec() };
+    if held && !bodies.is_empty() && !whole_components.contains(&whole) {
+        whole_components.push(whole);
+    }
+}
+
+/// As-built, Rigid Group: the row of a component inside one picked whole, or around one, adds that
+/// component as one of its own, where a second click on a row otherwise takes its bodies out again.
 pub(crate) fn row_adds_nested_whole(d: &Dialog, path: &[u64]) -> bool {
-    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return false };
-    f.as_built
-        && f.whole_components.iter().any(|w| path.starts_with(&w.path) || w.path.starts_with(path))
-        && !f.whole_components.iter().any(|w| w.path == path)
+    let Kind::Assembly(k) = &d.kind else { return false };
+    whole_picks(k)
+        .is_some_and(|whole| whole.iter().any(|w| path.starts_with(&w.path) || w.path.starts_with(path)) && !whole.iter().any(|w| w.path == path))
 }
 
 /// As-built with fewer than two components in Components: they are still being picked.
@@ -2928,11 +2947,12 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             }
             cmd("joint.origin", p)
         }
-        Asm::RigidGroup => {
+        Asm::RigidGroup { whole_components } => {
             let items = sel_items(inputs, 0);
-            let occs = occurrences(s, items, &[]);
+            let occs = occurrences(s, items, whole_components);
             if occs.len() < 2 {
-                if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
+                // A component picked whole is one component, not bodies to separate.
+                if occs.len() == 1 && whole_components.is_empty() && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
                     return Err(solidcraft_ui_text::format(
                         "joint.rigid_group_one_component",
                         &[("count", &items.len().to_string()), ("command", solidcraft_ui_text::tr("cmd.component_from_bodies"))],
