@@ -544,13 +544,41 @@ pub fn are_same_curve<O: Copy + PartialEq>(
         return Ok(ivl1.are_same(ivl2));
     }
 
+    // return TRUE when DropPoint() succeeded and DropDist < dTol
+    Ok(midpoint_drop_distance(k, geometry, crv1, ivl1, crv2, ivl2, tol)?.is_some_and(|d| d < tol))
+}
+
+/// Not upstream (#18475): how many times the two curves' tolerances together a midpoint of a
+/// definition must lie from an incoming curve between the same two proto vertices for the
+/// two to be different edges ([`ProtoTopologyManager::is_same_edge_definition`]). The two arcs
+/// of the nearly aligned crossing holes are 850 reaches apart, the halves of a loop in
+/// `boolean.api_brep`'s `more0068` 33, and the two circles of a shaft's built-twice end chamfer
+/// 1.5 (one offset along their whole lengths, one edge).
+const TWO_BRANCHES_BEYOND_REACH: f64 = 10.0;
+
+/// The distance [`are_same_curve`] reads: the midpoint of the first curve's interval dropped
+/// onto the second curve (an intersecting drop within `tol`, guessed at the second interval's
+/// middle). `None` when the midpoint cannot be evaluated or the drop does not succeed.
+///
+/// # Errors
+///
+/// As [`are_same_curve`].
+fn midpoint_drop_distance<O: Copy + PartialEq>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    crv1: Option<O>,
+    ivl1: &Extent1d,
+    crv2: Option<O>,
+    ivl2: &Extent1d,
+    tol: f64,
+) -> Result<Option<f64>> {
     // locals
     let param1 = ivl1.mid();
     let guess = ivl2.mid();
 
     // Crv1 mid point
     let Some(mid_pt1) = eval_point_or_no(k, curve_of(geometry, crv1)?, param1)? else {
-        return Ok(false);
+        return Ok(None);
     };
 
     // Drop Crv1 mid point to Crv2 - get drop distance
@@ -563,9 +591,7 @@ pub fn are_same_curve<O: Copy + PartialEq>(
         Some(guess),
         SolverOperation::Intersect,
     ))?;
-
-    // return TRUE when DropPoint() succeeded and DropDist < dTol
-    Ok(dropped.is_some_and(|d| d.success && d.distance < tol))
+    Ok(dropped.and_then(|d| d.success.then_some(d.distance)))
 }
 
 /// Not upstream (#15718): whether two edge definitions on lines are one piece within
@@ -3710,7 +3736,72 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // when ED->SrcTopos are the same as the TgtInterval->MidPt->Objects
         let identical =
             mid_pc1.object() == Some(d.src_topo1) && mid_pc2.object() == Some(d.src_topo2);
+
+        // Not upstream (#18475): two curves of one face pair between the same two proto
+        // vertices are one edge unless they are plainly two branches. The capture distance above
+        // only says where to look (docs/booleans.md, "One edge or two"): where two equal holes
+        // cross with their axes 1e-5 apart, the walls meet in one loop that the second hole's
+        // seam cuts into two arcs with the same two ends, one over the top of the first hole and
+        // one under it, their midpoints 0.0085 apart on the first hole's far side. Taken for one
+        // edge, the lower arc made no edge, the arc kept had ends of one edge each, and a piece
+        // of the second hole's wall inside the first stayed in the result. A curve's midpoint
+        // that lies farther than `TWO_BRANCHES_BEYOND_REACH` times the two curves' tolerances
+        // (the stored definition's and the manager's, which the intersection curves are
+        // approximated to) together from the incoming curve, and outside both end proto
+        // vertices' balls, is another branch. Nearer, two curves of one loop are one edge as
+        // before: the end chamfer of a shaft, built twice, has its two circles 1.5e-5 apart
+        // along their whole lengths (a gap of 1.5 reaches), and splitting them into two edges
+        // changed the volume of the solid.
+        if identical && d.xsect_curve_3d != tgt_curve {
+            let reach = d.tolerance(k) + self.tolerance(k);
+            let gap = midpoint_drop_distance(
+                k,
+                geometry,
+                d.xsect_curve_3d,
+                &d.xsect_interval,
+                tgt_curve,
+                tgt_domain,
+                tol,
+            )?;
+            if gap.is_some_and(|g| g > TWO_BRANCHES_BEYOND_REACH * reach)
+                && !self.midpoint_in_end_ball(k, geometry, d, start, end)?
+            {
+                return Ok((false, false));
+            }
+        }
         Ok((true, identical))
+    }
+
+    /// Not upstream (#18475): whether the midpoint of the definition `d`'s interval lies
+    /// within the ball (tolerance) of one of its proto edge's end proto vertices `start`,
+    /// `end`. `false` for a midpoint that cannot be evaluated.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a missing curve or a deleted proto vertex.
+    fn midpoint_in_end_ball(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        d: &EdgeDefinition<O>,
+        start: Option<ProtoVertexId>,
+        end: Option<ProtoVertexId>,
+    ) -> Result<bool> {
+        let Some(mid) = eval_point_or_no(
+            k,
+            curve_of(geometry, d.xsect_curve_3d)?,
+            d.xsect_interval.mid(),
+        )?
+        else {
+            return Ok(false);
+        };
+        for pv in [start, end] {
+            let v = self.pv(pv)?;
+            if mid.distance(v.position()) <= v.tolerance(k) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     // ---- SmProtoVertex members that reach the manager -------------------------------
