@@ -2380,10 +2380,7 @@ fn the_hide_folder_options_are_rows_of_the_browser_menu() {
     );
     crate::browser::menu_action(&mut h.app, "hide-sketches-folder").unwrap();
     assert!(h.app.preferences.browser_hide_sketches_folder, "a click turns it on");
-    assert!(
-        crate::browser::menu_toggles(&h.app).contains(&("hide-sketches-folder", "prefs.browser_hide_sketches_folder", true)),
-        "ticked"
-    );
+    assert!(crate::browser::menu_toggles(&h.app).contains(&("hide-sketches-folder", "prefs.browser_hide_sketches_folder", true)), "ticked");
     crate::browser::menu_action(&mut h.app, "hide-sketches-folder").unwrap();
     assert!(!h.app.preferences.browser_hide_sketches_folder, "a second click turns it off");
     assert!(!h.app.preferences.browser_hide_construction_folder, "off by default");
@@ -2393,10 +2390,7 @@ fn the_hide_folder_options_are_rows_of_the_browser_menu() {
     );
     crate::browser::menu_action(&mut h.app, "hide-construction-folder").unwrap();
     assert!(h.app.preferences.browser_hide_construction_folder, "a click turns it on");
-    assert!(
-        crate::browser::menu_toggles(&h.app).contains(&("hide-construction-folder", "prefs.browser_hide_construction_folder", true)),
-        "ticked"
-    );
+    assert!(crate::browser::menu_toggles(&h.app).contains(&("hide-construction-folder", "prefs.browser_hide_construction_folder", true)), "ticked");
     crate::browser::menu_action(&mut h.app, "hide-construction-folder").unwrap();
     assert!(!h.app.preferences.browser_hide_construction_folder, "a second click turns it off");
 }
