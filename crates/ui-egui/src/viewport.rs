@@ -3643,10 +3643,16 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
 fn refresh_sketch_scene_with_key(app: &mut SolveApp, proj: &Proj, model_key: u64, ctx: Option<&egui::Context>) {
     refresh_wireframe(app, proj, model_key);
     let (sk, coarse) = sketch_scene_keys(app, proj, model_key);
+    let hold = &mut app.viewport.sketch_hold;
     if sk == app.viewport.sketch_key {
+        // Also when the camera has come back to the held scene's view: it is this view's own again,
+        // and the rest timer notes the move back.
+        if let Some(ctx) = ctx {
+            hold.rest.wait(sk, ctx.input(|i| i.time) * 1000.0);
+        }
+        hold.stale = false;
         return;
     }
-    let hold = &mut app.viewport.sketch_hold;
     if let Some(ctx) = ctx
         && coarse.is_some()
         && coarse == hold.coarse
@@ -22851,10 +22857,12 @@ mod grid_plane_tests {
         let ctx = egui::Context::default();
         let frame = |app: &mut SolveApp, time: f64| {
             let input = egui::RawInput { time: Some(time), ..Default::default() };
-            drop(ctx.run_ui(input, |ui| {
+            ctx.run_ui(input, |ui| {
                 let proj = projection(app, rect);
                 refresh_sketch_scene_with_key(app, &proj, scene_key(app), Some(ui.ctx()));
-            }));
+            })
+            .textures_delta
+            .clear();
             app.viewport.sketch_scenes_built
         };
         assert_eq!(frame(&mut app, 0.0), 1, "built for the first view");
@@ -22868,6 +22876,16 @@ mod grid_plane_tests {
         assert_eq!(frame(&mut app, 0.1), 1, "a view resting for less than a moment too");
         assert_eq!(frame(&mut app, 0.033 + REFINE_STILL_MS / 1000.0 + 0.01), 2, "the rested view has its own scene");
         assert!(!sketch_scene_held(&app));
+        let rested = app.cam;
+        app.viewport.sketch_hold.build_ms = 100.0;
+        app.cam.yaw += 0.1;
+        assert_eq!(frame(&mut app, 0.26), 2, "moving away keeps the slow scene");
+        assert!(sketch_scene_held(&app));
+        app.cam = rested;
+        assert_eq!(frame(&mut app, 0.28), 2, "back exactly at the held view, nothing to build");
+        assert!(!sketch_scene_held(&app), "the scene on screen is this view's own again");
+        let rest = &app.viewport.sketch_hold.rest;
+        assert_eq!((rest.camera, rest.moved_at), (app.viewport.sketch_key, 280.0), "the rest timer notes the move back");
         app.viewport.sketch_hold.build_ms = 100.0;
         app.cam.distance *= 0.5;
         assert_eq!(frame(&mut app, 0.5), 3, "zooming in past a step samples the curves finer at once");
