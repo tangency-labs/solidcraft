@@ -728,6 +728,10 @@ pub struct GnSystem<'a, T: GnScalar> {
     /// Equal setbacks measured at the current oriented normals, instead of fixed offsets
     /// or a radius prescribed along the leader.
     pub equal_setback: Option<f64>,
+    /// No ball: `r` are setbacks held at every station, each foot `F_i` a straight line of
+    /// length `r_i` from the leader `L`, in the plane square to it (#13710):
+    /// `G = [(|F_1 - L|^2 - r_1^2) / 2, (F_1 - L) . T, (|F_2 - L|^2 - r_2^2) / 2, (F_2 - L) . T]`.
+    pub setbacks: bool,
 }
 
 /// The Taylor coefficients `W[a][b]` (`a + b <= deg`) of a face's offset point
@@ -1104,7 +1108,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         // the offset point's own expansion (enclosures near a focal distance, #16652,
         // #19306): its constant offset d0
         let d0 = offset_d0(sys, rf, sidef);
-        let wt = if sys.equal_setback.is_none() && offset_near_focal(pf, d0) {
+        // (no offset point for equal setbacks or setbacks held at every station: no ball)
+        let wt = if sys.equal_setback.is_none() && !sys.setbacks && offset_near_focal(pf, d0) {
             Some(offset_taylor(pf, d0, top)?)
         } else {
             None
@@ -1194,7 +1199,7 @@ pub fn gn_evaluate_vn<T: GnScalar>(
             ));
         };
         nrm.times_into(&inv_len, tr, no);
-        if sys.equal_setback.is_some() {
+        if sys.equal_setback.is_some() || sys.setbacks {
             continue;
         }
         // the offset towards the ball: tau r_i s_i, tau = 1 + eps (r_i a series in sigma
@@ -1236,6 +1241,30 @@ pub fn gn_evaluate_vn<T: GnScalar>(
             inv_len.mul_into(&d, tr, &mut w);
             s.add_times_into(&nrm, &w, tr, vo);
         }
+    }
+    if sys.setbacks {
+        // each foot a straight line of its setback from the leader, square to its tangent;
+        // the station's point V is the leader's (no ball). No tau enters: the eps direction
+        // carries only what the feet carry (the Jacobian's dual direction, `gn_jacobian`).
+        let mut g = [
+            Ser::constant(T::of(0.0)),
+            Ser::constant(T::of(0.0)),
+            Ser::constant(T::of(0.0)),
+            Ser::constant(T::of(0.0)),
+        ];
+        for (f, (foot, &d)) in f_out.iter().zip(&sys.r).enumerate() {
+            let arm = foot.sub(&sys.leader, tr);
+            let reach = arm
+                .dot(&arm, tr)
+                .sub(&Ser::constant(T::of(d * d)), tr)
+                .scale(T::of(0.5), tr);
+            let square = arm.dot(&sys.tangent, tr);
+            if let Some([gr, gs]) = g.get_mut(2 * f..2 * f + 2) {
+                *gr = reach;
+                *gs = square;
+            }
+        }
+        return Ok((g, f_out, sys.leader.clone(), n_out));
     }
     if let Some(distance) = sys.equal_setback {
         let radius = equal_setback_radius(&n_out, sys.side, distance, tr)?;
@@ -1395,7 +1424,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
     pub fn evaluate(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<GnValuesVN<T>> {
         // With equal setbacks the two faces' offsets depend on both normals. The
         // per-face cache below assumes each offset is independent of the other foot.
-        if self.sys.equal_setback.is_some() {
+        if self.sys.equal_setback.is_some() || self.sys.setbacks {
             self.computed = self
                 .computed
                 .saturating_add(u64::from(tr.computed_mask().count_ones()));
@@ -1427,7 +1456,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
     ///
     /// As [`gn_evaluate_vn`].
     pub fn evaluate_g(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<&[Ser<T>; 4]> {
-        if self.sys.equal_setback.is_some() {
+        if self.sys.equal_setback.is_some() || self.sys.setbacks {
             self.computed = self
                 .computed
                 .saturating_add(u64::from(tr.computed_mask().count_ones()));
@@ -1458,7 +1487,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
         tr: Trunc,
         need_normal_sigma: bool,
     ) -> Result<()> {
-        if self.sys.equal_setback.is_some() {
+        if self.sys.equal_setback.is_some() || self.sys.setbacks {
             self.computed = self
                 .computed
                 .saturating_add(u64::from(tr.computed_mask().count_ones()));
@@ -1518,7 +1547,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
         x: &[Ser<T>; 4],
         tr: Trunc,
     ) -> Result<([VSer<T>; 2], VSer<T>, [VSer<T>; 2])> {
-        if self.sys.equal_setback.is_some() {
+        if self.sys.equal_setback.is_some() || self.sys.setbacks {
             self.computed = self
                 .computed
                 .saturating_add(u64::from(tr.computed_mask().count_ones()));
@@ -1951,6 +1980,7 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
     side: [f64; 2],
     law: Option<&Ser<T>>,
     equal_setback: Option<f64>,
+    setbacks: bool,
 ) -> Result<[T; 4]> {
     let zero = T::of(0.0);
     let one = T::of(1.0);
@@ -1970,7 +2000,7 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
             Some(l) => l.at(0, 0) * T::of(sidef),
             None => T::of(rf * sidef),
         };
-        let near = equal_setback.is_none() && offset_near_focal(pf, d0);
+        let near = equal_setback.is_none() && !setbacks && offset_near_focal(pf, d0);
         let scaled = |c: V3<T>| V3 {
             x: zero + mono0 * (c.x * sf),
             y: zero + mono0 * (c.y * sf),
@@ -1986,7 +2016,7 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
         };
         let nn = ((zero + nrm.x * nrm.x) + (zero + nrm.y * nrm.y)) + (zero + nrm.z * nrm.z);
         let inv_len = inv_sqrt_scalar(nn)?;
-        if equal_setback.is_some() {
+        if equal_setback.is_some() || setbacks {
             if let (Some(fo), Some(no)) = (f_out.get_mut(f), n_out.get_mut(f)) {
                 *fo = s;
                 *no = V3 {
@@ -2026,6 +2056,29 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
             *vo = vf;
         }
     }
+    let [l0, l1, l2] = &leader.a;
+    let [t0, t1, t2] = &tangent.a;
+    if setbacks {
+        // [`gn_evaluate_vn`]'s setbacks residual at `Trunc(0, 0)`: each foot's reach and
+        // squareness against the leader
+        let mut g = [zero; 4];
+        for (f, (foot, &d)) in f_out.iter().zip(&r).enumerate() {
+            let arm = V3 {
+                x: foot.x - l0.at(0, 0),
+                y: foot.y - l1.at(0, 0),
+                z: foot.z - l2.at(0, 0),
+            };
+            let aa = ((zero + arm.x * arm.x) + (zero + arm.y * arm.y)) + (zero + arm.z * arm.z);
+            let reach = (aa - T::of(d * d)) * T::of(0.5);
+            let square = ((zero + arm.x * t0.at(0, 0)) + (zero + arm.y * t1.at(0, 0)))
+                + (zero + arm.z * t2.at(0, 0));
+            if let Some([gr, gs]) = g.get_mut(2 * f..2 * f + 2) {
+                *gr = reach;
+                *gs = square;
+            }
+        }
+        return Ok(g);
+    }
     if let Some(distance) = equal_setback {
         if !(distance.is_finite() && distance > 0.0) {
             return Err(SolidError::invalid_input(
@@ -2058,8 +2111,6 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
         }
     }
     let [v0, v1] = v_out;
-    let [l0, l1, l2] = &leader.a;
-    let [t0, t1, t2] = &tangent.a;
     let tl = V3 {
         x: v0.x - l0.at(0, 0),
         y: v0.y - l1.at(0, 0),
@@ -2177,6 +2228,7 @@ pub(crate) fn gn_linearize_ref<T: GnScalar>(
     side: [f64; 2],
     law: Option<&Ser<T>>,
     equal_setback: Option<f64>,
+    setbacks: bool,
 ) -> Result<([T; 4], [[T; 4]; 4])> {
     let zero = T::of(0.0);
     let one = T::of(1.0);
@@ -2188,7 +2240,8 @@ pub(crate) fn gn_linearize_ref<T: GnScalar>(
     let d00 = d0_of(r[0], side[0]);
     let d01 = d0_of(r[1], side[1]);
     let has_law = law.is_some();
-    let eq = equal_setback.is_some();
+    // (no ball for either: the feet and normals only)
+    let eq = equal_setback.is_some() || setbacks;
     let wt0 = if !eq && offset_near_focal(p0, d00) {
         Some(offset_taylor(p0, d00, 1)?)
     } else {
@@ -2227,6 +2280,31 @@ pub(crate) fn gn_linearize_ref<T: GnScalar>(
     let mut jac = [[zero; 4]; 4];
     let tau_one = Dual::new(one, zero);
     for (j, ((s0, n0, mut v0), (s1, n1, mut v1))) in pairs.into_iter().enumerate() {
+        if setbacks {
+            // [`gn_evaluate_vn`]'s setbacks residual at `Trunc(0, 1)`
+            let mut g = [Dual::zero(); 4];
+            for (f, (foot, &d)) in [s0, s1].into_iter().zip(&r).enumerate() {
+                let arm = foot.sub(leader_d);
+                let reach = arm
+                    .dot(arm)
+                    .sub(Dual::new(T::of(d * d), zero))
+                    .scale(T::of(0.5));
+                let square = arm.dot(tangent_d);
+                if let Some([gr, gs]) = g.get_mut(2 * f..2 * f + 2) {
+                    *gr = reach;
+                    *gs = square;
+                }
+            }
+            if j == 0 {
+                residual = g.map(|gi| gi.c0);
+            }
+            for (row, gi) in jac.iter_mut().zip(g) {
+                if let Some(slot) = row.get_mut(j) {
+                    *slot = gi.c1;
+                }
+            }
+            continue;
+        }
         if let Some(distance) = equal_setback {
             let radius = equal_setback_radius_dual([n0, n1], side, distance)?;
             let offset = radius.mul(tau_one);
@@ -2259,8 +2337,9 @@ pub(crate) fn gn_jacobian_ref<T: GnScalar>(
     side: [f64; 2],
     law: Option<&Ser<T>>,
     equal_setback: Option<f64>,
+    setbacks: bool,
 ) -> Result<[[T; 4]; 4]> {
-    Ok(gn_linearize_ref(p, leader, tangent, r, side, law, equal_setback)?.1)
+    Ok(gn_linearize_ref(p, leader, tangent, r, side, law, equal_setback, setbacks)?.1)
 }
 
 /// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms and tau = 1: G along
@@ -2286,6 +2365,7 @@ fn gn_linearize<T: GnScalar>(
         sys.side,
         sys.law,
         sys.equal_setback,
+        sys.setbacks,
     )
 }
 
@@ -2427,6 +2507,8 @@ pub struct StationOptions<'a> {
     pub law: Option<&'a Ser<f64>>,
     /// Equal setbacks measured at the current station, instead of a leader law.
     pub equal_setback: Option<f64>,
+    /// No ball: the offsets are setbacks held at every station ([`GnSystem::setbacks`]).
+    pub setbacks: bool,
     /// `lTop`.
     pub top: usize,
     /// `pSides`.
@@ -2607,6 +2689,7 @@ fn solve_station_body(
 ) -> Result<(GnStation, StationCurves)> {
     let law = opts.law;
     let equal_setback = opts.equal_setback;
+    let setbacks = opts.setbacks;
     let sides = opts.sides.unwrap_or([0, 0, 0, 0]);
     if tr.s() > MAX_S {
         return Err(SolidError::blend(
@@ -2652,7 +2735,7 @@ fn solve_station_body(
         *steps += 1;
         let pp = partials_at(&x, 2)?;
         let [p0, p1] = &pp;
-        let (g, jac) = gn_linearize_ref([p0, p1], &l, &t, r, side, law, equal_setback)?;
+        let (g, jac) = gn_linearize_ref([p0, p1], &l, &t, r, side, law, equal_setback, setbacks)?;
         let mut b = [0.0_f64; 4];
         let mut res = 0.0_f64;
         for (bi, gi) in b.iter_mut().zip(&g) {
@@ -2697,6 +2780,7 @@ fn solve_station_body(
         hold: false,
         law,
         equal_setback,
+        setbacks,
     };
     let mut sx = x.map(Ser::constant);
     let jac = gn_jacobian_ref(
@@ -2707,6 +2791,7 @@ fn solve_station_body(
         side,
         law,
         equal_setback,
+        setbacks,
     )?;
     // (the coefficients of one total degree do not enter each other's: one evaluation
     // solves them all; G is computed only at that degree and below, and at the powers of
@@ -3392,6 +3477,7 @@ mod tests {
             hold,
             law: law.then_some(&law_ser),
             equal_setback: None,
+            setbacks: false,
         };
         let near = [
             offset_near_focal(p0, offset_d0(&sys, r[0], 1.0)),
@@ -3468,6 +3554,7 @@ mod tests {
                 hold: false,
                 law,
                 equal_setback,
+                setbacks: false,
             };
             let (point, _) = gn_evaluate(&sys, &sx, Trunc::new(0, 0).unwrap()).unwrap();
             let (residual, _) = gn_linearize(&sys, &sx).unwrap();
@@ -3792,6 +3879,7 @@ mod tests {
             hold: true,
             law: None,
             equal_setback: None,
+            setbacks: false,
         };
         let half = 1e-6;
         let mut xu = Ser::constant(Ivl::from(u));
@@ -3841,6 +3929,7 @@ mod tests {
             r: [f64; 2],
             law: bool,
             equal_setback: Option<f64>,
+            setbacks: bool,
         ) {
             let mut seed = 0x517c_c1b7_2722_0a95_u64;
             let mut next = move || {
@@ -3881,6 +3970,7 @@ mod tests {
                 hold: false,
                 law: law.then_some(&law_ser),
                 equal_setback,
+                setbacks,
             };
             let sx = [0.1, 0.2, 0.3, 0.4].map(|c| Ser::constant(mk(c)));
             // Point evaluation (Trunc(0, 0)): exact match with gn_evaluate.
@@ -3893,6 +3983,7 @@ mod tests {
                 sys.side,
                 sys.law,
                 sys.equal_setback,
+                sys.setbacks,
             )
             .unwrap();
             assert_eq!(g_pt, g_ref.each_ref().map(|gi| gi.at(0, 0)));
@@ -3922,6 +4013,7 @@ mod tests {
                 sys.side,
                 sys.law,
                 sys.equal_setback,
+                sys.setbacks,
             )
             .unwrap();
             assert_eq!(got_res, want_res);
@@ -3931,16 +4023,18 @@ mod tests {
             crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.004 * v])
         };
         let iv = |v: f64| Ivl::new(v - 1e-4, v + 1e-4);
-        for (r, law, eq) in [
-            ([0.5, 0.75], false, None),
-            ([8.0, 12.0], false, None),
-            ([0.5, 0.75], true, None),
-            ([8.0, 12.0], true, None),
-            ([0.5, 0.75], false, Some(0.4)),
+        for (r, law, eq, setbacks) in [
+            ([0.5, 0.75], false, None, false),
+            ([8.0, 12.0], false, None, false),
+            ([0.5, 0.75], true, None, false),
+            ([8.0, 12.0], true, None, false),
+            ([0.5, 0.75], false, Some(0.4), false),
+            ([0.5, 0.75], false, None, true),
+            ([8.0, 12.0], false, None, true),
         ] {
-            check_scalar(|v| v, r, law, eq);
-            check_scalar(iv, r, law, eq);
-            check_scalar(tm, r, law, eq);
+            check_scalar(|v| v, r, law, eq, setbacks);
+            check_scalar(iv, r, law, eq, setbacks);
+            check_scalar(tm, r, law, eq, setbacks);
         }
     }
 
@@ -4000,6 +4094,7 @@ mod tests {
                 hold: false,
                 law: None,
                 equal_setback: None,
+                setbacks: false,
             };
             let tr = Trunc::new(s, e).unwrap();
             let mut sx = [0.3, -0.2, 0.1, 0.4].map(|c| Ser::constant(mk(c)));

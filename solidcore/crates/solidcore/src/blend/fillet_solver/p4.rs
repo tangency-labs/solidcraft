@@ -2915,6 +2915,13 @@ fn c4_trace(
         if stat.is_err() && ops.solver().status == FilStatus::Unprocessed {
             ops.solver_mut().set_status(FilStatus::SurfTracingFailure);
         }
+        // (not upstream, #13710) a trace at the solver's own stations (a chamfer of
+        // setbacks) has no cusp to step past: its failure is its refusal, never a pass to
+        // recover from (whose recovery reads a centre line the failed trace never made)
+        let stat = match stat {
+            Err(e) if fi.traced_stations() => return Err(e),
+            stat => stat,
+        };
         let flushed = fi.take_flush_outcome();
         unmade.after_pass(flushed.unmade, flushed.made, stat);
         // Check all points, after the first one, to make sure
@@ -4436,15 +4443,21 @@ fn c6_compute_point_values(
         // tangent point, where the intersection curve ends or branches, takes the forward
         // step alone when it found one (`bFoundForw && bFoundBack && !bTangentPoint`).
         let tangent_point = point.point_type == IntersectionPointType::TangentPoint;
+        // the traced curve's point: the ball's centre, the middle of its two contacts; a
+        // chamfer of setbacks (#13710) has no ball, its traced curve is rail 0 (the point's
+        // `CrvPos`)
+        let setbacks =
+            ops.solver_type()? == crate::blend::fillet_solver::p1::FilletSolverType::Setbacks;
+        let traced = |a: Point3, b: Point3| if setbacks { a } else { (a + b) / 2.0 };
         let (step_pt_forw, step_pt_back) = match (forw_pts, back_pts) {
             (Some((f0, f1)), Some((b0, b1))) if !tangent_point => {
-                let fw = (f0 + f1) / 2.0;
-                let bk = (b0 + b1) / 2.0;
+                let fw = traced(f0, f1);
+                let bk = traced(b0, b1);
                 step *= 2.0; // 2.0 * dStep (multiplication commutes exactly)
                 (fw, bk)
             }
-            (Some((f0, f1)), _) => ((f0 + f1) / 2.0, point.crv_pos()),
-            (None, Some((b0, b1))) => (point.crv_pos(), (b0 + b1) / 2.0),
+            (Some((f0, f1)), _) => (traced(f0, f1), point.crv_pos()),
+            (None, Some((b0, b1))) => (point.crv_pos(), traced(b0, b1)),
             (None, None) => return Err(fail(SolverFailure::NeighbourPointsNotFound)),
         };
 
@@ -5250,9 +5263,19 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.synced(r)
     }
 
-    /// `ComputeUVVectors` (`super::p1::compute_uv_vectors`).
-    fn compute_uv_vectors(&mut self, _k: &Kernel, point: &mut TsectPnt) -> Result<()> {
-        super::p1::compute_uv_vectors(point)
+    /// `ComputeUVVectors` (`super::p1::compute_uv_vectors`); for a chamfer of setbacks
+    /// (#13710) each foot's own uv tangent from its station's implicit derivative
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::compute_uv_vectors`]).
+    fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()> {
+        if self.ops.setback_mut().is_none() {
+            return super::p1::compute_uv_vectors(point);
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.compute_uv_vectors(k, point),
+            None => super::p1::compute_uv_vectors(point),
+        };
+        self.synced(r)
     }
 
     /// `StepSolve` (the stub of this file), writing into `flags`, `next` and
@@ -5421,6 +5444,50 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.pre()?;
         let sur0 = Surface::from(offset_surface(&*self.ops, 0)?.surface.clone());
         let sur1 = Surface::from(offset_surface(&*self.ops, 1)?.surface.clone());
+        // (#13710) a chamfer of setbacks held at every station: the chord by its definition at
+        // the solver's stations, on its extended edge; it is built so or not at all (a ruled
+        // net between the traced rails would not hold the setbacks)
+        if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::Setbacks {
+            let setback = self
+                .ops
+                .setback_mut()
+                .ok_or_else(|| invalid("setbacks type without its solver"))?;
+            let leader = setback
+                .leader()?
+                .ok_or_else(|| invalid("a chamfer of setbacks' edge is a B-spline curve"))?;
+            let chamfer = self
+                .ops
+                .solver()
+                .chamfer
+                .filter(crate::surface::procedural_blend::chamfer::ChamferDefinition::is_setbacks)
+                .ok_or_else(|| invalid("a setbacks solver without its chamfer of setbacks"))?;
+            let solver = self.ops.solver();
+            if !matches!(
+                solver.fillet_surface_generator(),
+                Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear)
+            ) {
+                return Err(invalid(
+                    "a chamfer of setbacks is the linear section's chord",
+                ));
+            }
+            let approx_tol_3d = solver.approx_tol_3d;
+            let surface = crate::blend::fillet_standard_solver::p1::LinearCrossSectionFsg
+                .setback_surface(
+                    k,
+                    approx_tol_3d,
+                    &leader,
+                    center_line,
+                    [curve1, curve2],
+                    points,
+                    [&sur0, &sur1],
+                    [uv1, uv2],
+                    chamfer,
+                )?
+                .ok_or_else(|| {
+                    SolidError::surface(OP, crate::error::surface::SurfaceFailure::NetNotCertified)
+                })?;
+            return Ok((Some(surface), None));
+        }
         let radii = self.ops.constant_radii();
         // (a variable round between NURBS faces is its definition too, the fork's 0d43b4c;
         // read only where the circle generator may take it)
@@ -5559,6 +5626,76 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         let mate = eu::mate(pseudo.brep(), primary)?
             .ok_or_else(|| invalid("rail edge use without a mate"))?;
         pseudo.set_edgeuse_uv_curve(mate, Some(Curve::from(uv_curve)), true, true)
+    }
+
+    /// (#13710) A chamfer of setbacks' leader
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::station_leader`]); `None`
+    /// for every other solver.
+    fn station_leader(
+        &mut self,
+        k: &Kernel,
+    ) -> Result<Option<crate::intersect::surface_intersector::p4::StationLeader>> {
+        match self.ops.setback_mut() {
+            Some(setback) => setback.station_leader(k).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// (#13710) A chamfer of setbacks' given station
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::given_station`]); every
+    /// other solver has none.
+    fn given_station(
+        &mut self,
+        k: &Kernel,
+        point: &mut TsectPnt,
+        tol: f64,
+        domains: &[Extent2d; 2],
+    ) -> Result<()> {
+        if self.ops.setback_mut().is_none() {
+            return Err(invalid("the solver has no stations of its own"));
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.given_station(k, point, tol, domains),
+            None => Err(invalid("the solver has no stations of its own")),
+        };
+        self.synced(r)
+    }
+
+    /// (#13710) A chamfer of setbacks' edge parameter of a point
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::station_of_point`]);
+    /// every other solver has none.
+    fn station_of(&mut self, k: &Kernel, point: &TsectPnt) -> Result<f64> {
+        if self.ops.setback_mut().is_none() {
+            return Err(invalid("the solver has no stations of its own"));
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.station_of_point(k, point),
+            None => Err(invalid("the solver has no stations of its own")),
+        };
+        self.synced(r)
+    }
+
+    /// (#13710) A chamfer of setbacks' exact station
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::station_point`]); every
+    /// other solver has none.
+    fn station_point(
+        &mut self,
+        k: &Kernel,
+        s: f64,
+        guesses: [Point2; 2],
+        domains: &[Extent2d; 2],
+    ) -> Result<Option<TsectPnt>> {
+        if self.ops.setback_mut().is_none() {
+            return Err(invalid("the solver has no stations of its own"));
+        }
+        self.pre()?;
+        let r = match self.ops.setback_mut() {
+            Some(setback) => setback.station_point(k, s, guesses, domains),
+            None => Err(invalid("the solver has no stations of its own")),
+        };
+        self.synced(r)
     }
 }
 

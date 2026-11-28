@@ -16,6 +16,7 @@
 //! | `SurfaceIntersector::span_on_found_curve`, `SurfaceIntersector::reaches_found_curve_end`, `stop_at_found_curve_end` (crate/private) | the SolidCraft fork's `bSpanOnFoundCurve`, `bReachesFoundCurveEnd` lambdas of `TraceCurve` and its loop-top stop (WR-76) |
 //! | [`IntersectionCurve`]                                 | the curve, type and deviation out-params of both drivers |
 //! | [`IntersectorVirtuals`], [`do_point_intersection_with`], [`trace_curve_with`], [`do_law_intersection_with`] | the virtual calls of `DoPointIntersection` / `TraceCurve` / `DoLawIntersection` (`this->ComputePointValues(..)`, ..) on a derived intersector |
+//! | [`TraceStations`], [`StationTraceOptions`], [`StationLeader`], [`StationStep`], [`reverse_station_tangents`] | none (#13710): `DoLawIntersection` at a solver's own stations |
 //!
 //! Deviations:
 //! - **Points.** Points are arena ids ([`TsectId`]), as in parts 1 to 3: the start
@@ -78,6 +79,14 @@
 //!   appends curves, whose caches are built when first visited.
 //! - **Offset surfaces.** `DoLawIntersection` needs both surfaces to be
 //!   `SmOffsetSurface`s ([`SurfaceKind::OffsetSurface`], else `SM_ERR_NULL_POINTER`).
+//! - **A solver's own stations (#13710, not upstream).** [`do_law_intersection_with`] also
+//!   traces at the stations of a solver that has its own ([`TraceStations::Solver`]: a
+//!   chamfer of setbacks, whose stations stand at the edge's parameter s and have no
+//!   ball): the law's subdivision, neighbour split and flush, with two or more given points
+//!   at their own s (their feet kept), each station the solver's exact one at its s with its
+//!   exact tangents, spans split at the mean s, and optional extensions by the solver's
+//!   `StepSolve` (at most [`MAX_STATION_EXTENSION_STEPS`] steps). The law's trace is
+//!   unchanged.
 //! - **Unported callees.** `SmSurface::IsSingularity` of a surface that is not a plane
 //!   (`surface.surface_p5`) and the callees of `SmSurface::LocalSurfaceIntersect` and of
 //!   the global surface solve's leaf solve that are not ported yet (`surface.surface_p3`,
@@ -114,6 +123,7 @@ use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::error::blend::SolverFailure;
 use crate::error::intersect::IntersectFailure;
 use crate::error::{ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -245,6 +255,79 @@ pub struct LawIntersectionOptions<'a> {
     /// `pOptApproxTol3d`: the tolerance (`1e-3` when `None`).
     pub approx_tol_3d: Option<f64>,
 }
+
+/// The options of a trace at its solver's own stations ([`TraceStations::Solver`], not
+/// upstream, #13710).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct StationTraceOptions {
+    /// Also trace from the first given point backwards (as `bExtendBeforeStart`).
+    pub extend_before_start: bool,
+    /// Also trace on past the last given point (as `bExtendAfterEnd`).
+    pub extend_after_end: bool,
+    /// Replaces `this_approx_tol_3d` (`1e-3` when `None`, as for the law).
+    pub approx_tol_3d: Option<f64>,
+    /// Replaces `this_ang_tol_rad`.
+    pub ang_tol_rad: Option<f64>,
+}
+
+/// The stations of a [`do_law_intersection_with`] trace.
+#[derive(Debug)]
+pub enum TraceStations<'o, 'c> {
+    /// `DoLawIntersection`: two given points at the ends of the law's interval, each station
+    /// on the plane through the point curve at the law's parameter, its tangents a finite
+    /// difference.
+    Law(&'o LawIntersectionOptions<'c>, &'o mut FilletLaw),
+    /// (not upstream, #13710) The stations of the intersector's solver: two or more given
+    /// points at their own edge parameters, each station the solver's exact one at its s
+    /// with its exact tangents ([`IntersectorVirtuals::station_leader`]).
+    Solver(&'o StationTraceOptions),
+}
+
+/// The leader of a solver's own stations ([`IntersectorVirtuals::station_leader`]): the
+/// edge a chamfer of setbacks stands on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StationLeader {
+    /// The leader's interval: no station is stepped past it.
+    pub interval: Extent1d,
+    /// Whether the leader is closed: its stations run one period, from its seam round to it
+    /// (`seam_stations`), with no extension.
+    pub closed: bool,
+    /// The solver's stand-off from the leader (a chamfer of setbacks' larger setback): an
+    /// extension stops once foot 0 has moved [`STATION_EXTENSION_FACTOR`] times it, each
+    /// step asked at most this long.
+    pub stand_off: f64,
+}
+
+/// One extension step of a station trace ([`IntersectorVirtuals::station_step`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum StationStep {
+    /// The solver's station `point` (its tangents along increasing s), `step` along the
+    /// stepped point's tangent (the step asked, or shorter where `clipped`: the station is
+    /// then on a domain boundary).
+    Found {
+        /// The station.
+        point: Box<TsectPnt>,
+        /// The step taken.
+        step: f64,
+        /// Whether the step was clipped at a domain boundary.
+        clipped: bool,
+    },
+    /// The step leaves a domain at once: no station.
+    Boundary,
+    /// The step's solve finds no station.
+    NotFound,
+}
+
+/// An extension of a station trace stops once foot 0 has moved this many times the
+/// solver's stand-off ([`StationLeader::stand_off`]; the corner code's extension of a
+/// chamfer of setbacks is 7.5 of them).
+pub const STATION_EXTENSION_FACTOR: f64 = 5.0;
+
+/// The steps of one extension of a station trace: each step asked is the stand-off long
+/// but the last, and foot 0 moves at least about that far, so about
+/// [`STATION_EXTENSION_FACTOR`] of them reach the cap; the bound guards against steps that
+/// do not add up (a NaN, a solver that barely moves).
+pub const MAX_STATION_EXTENSION_STEPS: usize = 8;
 
 /// A tree node pair of the global surface solve in
 /// [`SurfaceIntersector::find_interior_curves`]: the boxes of both nodes and the UV
@@ -400,6 +483,56 @@ pub trait IntersectorVirtuals<'s> {
         self.intersector_mut().test_span_accuracy(k, point, next)
     }
 
+    /// (not upstream, #13710) The leader of the solver's own stations, the stations of
+    /// [`TraceStations::Solver`]; `None` (the default) where the intersector's stations are
+    /// not its solver's.
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn station_leader(&mut self, _k: &Kernel) -> Result<Option<StationLeader>> {
+        Ok(None)
+    }
+
+    /// (not upstream, #13710) The given point `point` as a station of the solver: its feet
+    /// as given, its edge parameter s in `user_doubles[0]` and `[1]`, its tangents the
+    /// station's exact ones along increasing s. A foot farther than `tol` from its station
+    /// at that s is refused, never moved. The default has no stations.
+    ///
+    /// # Errors
+    ///
+    /// The override's; [`SolidError::InvalidInput`] by default.
+    fn given_station(&mut self, _k: &Kernel, _point: &mut TsectPnt, _tol: f64) -> Result<()> {
+        Err(no_stations())
+    }
+
+    /// (not upstream, #13710) The solver's station at the edge parameter `s`, its feet
+    /// solved from `guesses`, its tangents along increasing s, s in `user_doubles[0]` and
+    /// `[1]`; `None` where it is not found. The default has no stations.
+    ///
+    /// # Errors
+    ///
+    /// The override's; [`SolidError::InvalidInput`] by default.
+    fn station_point(
+        &mut self,
+        _k: &Kernel,
+        _s: f64,
+        _guesses: [Point2; 2],
+    ) -> Result<Option<TsectPnt>> {
+        Err(no_stations())
+    }
+
+    /// (not upstream, #13710) One extension step of the solver's stations: `StepSolve`
+    /// from `from` (its tangents along the step) by `step`, the station at the s it finds.
+    /// The default has no stations.
+    ///
+    /// # Errors
+    ///
+    /// The override's; [`SolidError::InvalidInput`] by default.
+    fn station_step(&mut self, _k: &Kernel, _from: &TsectPnt, _step: f64) -> Result<StationStep> {
+        Err(no_stations())
+    }
+
     /// Not upstream (#21179): whether the traced point `next` is the through point
     /// `through` because the override's step landed on it, whatever the span's own test
     /// says. The default has no such steps.
@@ -410,6 +543,14 @@ pub trait IntersectorVirtuals<'s> {
     fn landed_on_through_point(&mut self, _next: TsectId, _through: TsectId) -> Result<bool> {
         Ok(false)
     }
+}
+
+/// The error of an intersector asked for stations its solver does not have.
+fn no_stations() -> SolidError {
+    SolidError::invalid_input(
+        OP_DLI,
+        "the intersector's solver has no stations of its own",
+    )
 }
 
 /// The basic `SmSurfaceIntersector` bodies.
@@ -951,104 +1092,72 @@ impl SurfaceIntersector<'_> {
         opts: &LawIntersectionOptions<'_>,
         law: &mut FilletLaw,
     ) -> Result<IntersectionCurve> {
-        do_law_intersection_with(self, k, points, opts, law)
+        do_law_intersection_with(self, k, points, TraceStations::Law(opts, law))
     }
 }
 
 /// [`SurfaceIntersector::do_law_intersection`] on the intersector of `v`, its virtual
 /// calls (`EvaluateLawPoint` and `ComputePointValuesDelta` through
-/// `ComputeLawPointValues`, `TestSpanAccuracy`, `FlushCurve`) dispatched to `v`.
+/// `ComputeLawPointValues`, `TestSpanAccuracy`, `FlushCurve`) dispatched to `v`, for
+/// [`TraceStations::Law`]; for [`TraceStations::Solver`] (not upstream, #13710) the same
+/// trace at the stations of `v`'s solver ([`IntersectorVirtuals::station_leader`]):
+///
+/// - **The given points** (two or more, `points`) are stations at their own edge
+///   parameters s ([`IntersectorVirtuals::given_station`]: their feet never move, a foot
+///   off its station is refused), which run strictly one way along the edge, up or down
+///   (`StationsNotMonotone` otherwise); each station's tangents are the solver's exact ones
+///   (no finite difference), along the trace.
+/// - **Extensions** before the first and after the last given point, when asked, step with
+///   the solver's `StepSolve` ([`IntersectorVirtuals::station_step`]) and stop at the first
+///   step on a domain boundary (a station outside a domain is not kept), at the leader's
+///   interval end, or once foot 0 has moved [`STATION_EXTENSION_FACTOR`] times the solver's
+///   stand-off; a step that finds neither a station nor a boundary is refused
+///   (`StationStepNotFound`), one that goes back too (`StationStepBackwards`).
+/// - **Spans** are split at the mean s ([`IntersectorVirtuals::station_point`]) until they
+///   pass the span test, as the law's at its mean parameter; no station from the first to
+///   the last given point may lie outside a surface's domain (the trace would clip before
+///   its last given point: `PointOutsideDomain`).
+/// - **A closed leader** (#13710, a whole rim) has no ends to extend past: its stations run one
+///   period of the edge, the given points at its seam taking either end of its interval
+///   (`seam_stations`), and no extension is stepped.
 ///
 /// # Errors
 ///
 /// As [`SurfaceIntersector::do_law_intersection`], with the errors of `v`'s
-/// overrides.
+/// overrides; for the solver's stations also `SM_ERR` with fewer than two points, the
+/// refusals above, `StationNotSolved` where a station is not found, and
+/// [`SolidError::InvalidInput`] where `v`'s solver has no stations.
 #[allow(clippy::too_many_lines)]
 pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     v: &mut V,
     k: &Kernel,
     points: &[TsectId],
-    opts: &LawIntersectionOptions<'_>,
-    law_curve: &mut FilletLaw,
+    stations: TraceStations<'_, '_>,
 ) -> Result<IntersectionCurve> {
-    let [first, last] = points else {
-        return Err(SolidError::intersect(
-            OP_DLI,
-            IntersectFailure::PointCountNotTaken {
-                given: points.len(),
-            },
-        ));
-    };
-    let (first, last) = (*first, *last);
-
-    // the point curve tolerance
-    v.intersector_mut().this_approx_tol_3d = opts.approx_tol_3d.unwrap_or(1.0e-3);
-
     let delta_step = 1.0e-8;
-
-    // the offset surfaces
-    if !is_offset_surface(v.intersector().surface(SrfIndex::First)) {
-        return Err(SolidError::intersect(
-            OP_DLI,
-            IntersectFailure::SurfaceNotOffset { surface: 0 },
-        ));
-    }
-    if !is_offset_surface(v.intersector().surface(SrfIndex::Second)) {
-        return Err(SolidError::intersect(
-            OP_DLI,
-            IntersectFailure::SurfaceNotOffset { surface: 1 },
-        ));
-    }
-
-    let normals = [
-        v.intersector().point(first)?.crv_deriv(),
-        v.intersector().point(last)?.crv_deriv(),
-    ];
-    let ivl = opts.point_curve_interval;
-    {
-        let p = v.intersector_mut().point_mut(first)?;
-        p.user_doubles[1] = ivl.min();
-        p.user_doubles[0] = p.user_doubles[1];
-    }
-    {
-        let p = v.intersector_mut().point_mut(last)?;
-        p.user_doubles[1] = ivl.max();
-        p.user_doubles[0] = p.user_doubles[1];
-    }
-
-    let law = LawPointOptions {
-        law_orient: opts.law_orient,
-        point_curve: opts.point_curve,
-        point_curve_interval: ivl,
-        normals,
-        average_normals: opts.use_normal_plane_averaging,
-        surface_orientations: opts.surface_orientations,
+    let (anchors, mut mode) = match stations {
+        TraceStations::Law(opts, law_curve) => {
+            let (first, last, law) = law_ends(v, k, points, opts, delta_step, law_curve)?;
+            (vec![first, last], SpanMode::Law { law, law_curve })
+        }
+        TraceStations::Solver(opts) => {
+            let (anchors, span) = station_anchors(v, k, points, opts)?;
+            (anchors, SpanMode::Stations(span))
+        }
     };
-
-    for (id, delta) in [(first, delta_step), (last, -delta_step)] {
-        let mut p = v.intersector().point(id)?.clone();
-        let r = compute_law_point_values_with(
-            v,
-            k,
-            p.user_doubles[1],
-            // (references to the point's own UV points upstream)
-            LawGuess::PointUvs,
-            delta,
-            &law,
-            law_curve,
-            false,
-            &mut p,
-        );
-        *v.intersector_mut().point_mut(id)? = p;
-        r?;
-    }
+    let first = *anchors
+        .first()
+        .ok_or_else(|| SolidError::invalid_input(OP_DLI, "no stations"))?;
+    let last = *anchors
+        .last()
+        .ok_or_else(|| SolidError::invalid_input(OP_DLI, "no stations"))?;
 
     v.intersector_mut().point_mut(first)?.curve_parameter = 0.0;
     let first_pos = v.intersector().point(first)?.crv_pos();
     let d = first_pos.distance(v.intersector().point(last)?.crv_pos());
     v.intersector_mut().point_mut(last)?.curve_parameter = d;
 
-    let mut stack = vec![last, first];
+    let mut stack: Vec<TsectId> = anchors.iter().rev().copied().collect();
     let mut curve_pnts = vec![first];
 
     while stack.len() > 1 {
@@ -1071,7 +1180,7 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             curr_param + curr_pos.distance(next_pos);
 
         // the new mid point
-        let new_tsp = split_span_with(v, k, curr, next, delta_step, &law, law_curve)?;
+        let new_tsp = mode.split(v, k, curr, next, delta_step)?;
 
         let acc = v.test_span_accuracy(k, curr, next, Some(new_tsp))?;
         if acc.found_good_point {
@@ -1122,7 +1231,7 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 }
             }
             if split {
-                let new_tsect = split_span_with(v, k, curr, next, delta_step, &law, law_curve)?;
+                let new_tsect = mode.split(v, k, curr, next, delta_step)?;
                 curve_pnts.insert(ip, new_tsect);
                 done = false;
             }
@@ -1150,6 +1259,585 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     let mut out = TsectCurves::default();
     v.flush_curve(k, &mut out)?;
     Ok(IntersectionCurve::from_single(out))
+}
+
+/// `DoLawIntersection`'s set-up of its two points `points`: the tolerance, the offset
+/// surfaces' check, the law parameters of the ends (the interval's) and the ends
+/// evaluated there ([`compute_law_point_values_with`], the first with a forward delta
+/// step, the last a backward one). Returns the ends and the law's point options.
+///
+/// # Errors
+///
+/// As [`do_law_intersection_with`]'s for the law.
+fn law_ends<'s, 'c, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    points: &[TsectId],
+    opts: &LawIntersectionOptions<'c>,
+    delta_step: f64,
+    law_curve: &mut FilletLaw,
+) -> Result<(TsectId, TsectId, LawPointOptions<'c>)> {
+    let [first, last] = points else {
+        return Err(SolidError::intersect(
+            OP_DLI,
+            IntersectFailure::PointCountNotTaken {
+                given: points.len(),
+            },
+        ));
+    };
+    let (first, last) = (*first, *last);
+
+    // the point curve tolerance
+    v.intersector_mut().this_approx_tol_3d = opts.approx_tol_3d.unwrap_or(1.0e-3);
+
+    // the offset surfaces
+    offset_surfaces_checked(v)?;
+
+    let normals = [
+        v.intersector().point(first)?.crv_deriv(),
+        v.intersector().point(last)?.crv_deriv(),
+    ];
+    let ivl = opts.point_curve_interval;
+    {
+        let p = v.intersector_mut().point_mut(first)?;
+        p.user_doubles[1] = ivl.min();
+        p.user_doubles[0] = p.user_doubles[1];
+    }
+    {
+        let p = v.intersector_mut().point_mut(last)?;
+        p.user_doubles[1] = ivl.max();
+        p.user_doubles[0] = p.user_doubles[1];
+    }
+
+    let law = LawPointOptions {
+        law_orient: opts.law_orient,
+        point_curve: opts.point_curve,
+        point_curve_interval: ivl,
+        normals,
+        average_normals: opts.use_normal_plane_averaging,
+        surface_orientations: opts.surface_orientations,
+    };
+
+    for (id, delta) in [(first, delta_step), (last, -delta_step)] {
+        let mut p = v.intersector().point(id)?.clone();
+        let r = compute_law_point_values_with(
+            v,
+            k,
+            p.user_doubles[1],
+            // (references to the point's own UV points upstream)
+            LawGuess::PointUvs,
+            delta,
+            &law,
+            law_curve,
+            false,
+            &mut p,
+        );
+        *v.intersector_mut().point_mut(id)? = p;
+        r?;
+    }
+    Ok((first, last, law))
+}
+
+/// `SM_CAST_PTR(SmOffsetSurface, ..)` of both surfaces of `v`'s intersector, as
+/// `DoLawIntersection` checks them (an offset surface at distance 0, a chamfer of
+/// setbacks' faces, passes: the check is of the kind).
+///
+/// # Errors
+///
+/// `SurfaceNotOffset` (`SM_ERR_NULL_POINTER`) for a surface that is not an offset surface.
+fn offset_surfaces_checked<'s, V: IntersectorVirtuals<'s> + ?Sized>(v: &V) -> Result<()> {
+    for (surface, index) in [(SrfIndex::First, 0), (SrfIndex::Second, 1)] {
+        if !is_offset_surface(v.intersector().surface(surface)) {
+            return Err(SolidError::intersect(
+                OP_DLI,
+                IntersectFailure::SurfaceNotOffset { surface: index },
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// How [`do_law_intersection_with`] splits a span: at the law's mean parameter on its
+/// plane, or at the mean s of the solver's stations.
+enum SpanMode<'c, 'l> {
+    /// The law's: [`split_span_with`].
+    Law {
+        /// The law's point options.
+        law: LawPointOptions<'c>,
+        /// The law.
+        law_curve: &'l mut FilletLaw,
+    },
+    /// The solver's stations: [`split_station_span`].
+    Stations(StationSpan),
+}
+
+impl SpanMode<'_, '_> {
+    /// The new point in the span from `curr` to `next`.
+    fn split<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+        &mut self,
+        v: &mut V,
+        k: &Kernel,
+        curr: TsectId,
+        next: TsectId,
+        delta_step: f64,
+    ) -> Result<TsectId> {
+        match self {
+            Self::Law { law, law_curve } => {
+                split_span_with(v, k, curr, next, delta_step, law, law_curve)
+            }
+            Self::Stations(span) => split_station_span(v, k, curr, next, span),
+        }
+    }
+}
+
+/// The run of a station trace's stations: their direction along the edge (`1` for s
+/// increasing, `-1` decreasing) and the s of the first and last given points.
+#[derive(Debug, Clone, Copy)]
+struct StationSpan {
+    /// The trace's direction in s.
+    sign: f64,
+    /// The s of the first and the last given point.
+    given: [f64; 2],
+}
+
+impl StationSpan {
+    /// Whether `s` is from the first to the last given point.
+    fn within_given(&self, s: f64) -> bool {
+        (s - self.given[0]) * self.sign >= 0.0 && (self.given[1] - s) * self.sign >= 0.0
+    }
+}
+
+/// `x > 0` (false for NaN).
+fn is_positive(x: f64) -> bool {
+    x > 0.0
+}
+
+/// Reverses a station's tangents: its curve tangent and both uv tangents (the solver's run
+/// along increasing s; a trace that runs the other way takes them reversed).
+pub fn reverse_station_tangents(point: &mut TsectPnt) {
+    *point.crv_deriv_mut() = -point.crv_deriv();
+    for s in [SrfIndex::First, SrfIndex::Second] {
+        *point.uv_deriv_mut(s) = -point.uv_deriv(s);
+    }
+}
+
+/// The station trace's anchors (not upstream, #13710): the extension before the first given
+/// point (in trace order), the given points as stations, and the extension after the last;
+/// with the trace's direction and given run (module docs of [`do_law_intersection_with`]).
+///
+/// # Errors
+///
+/// As [`do_law_intersection_with`]'s for the solver's stations.
+fn station_anchors<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    points: &[TsectId],
+    opts: &StationTraceOptions,
+) -> Result<(Vec<TsectId>, StationSpan)> {
+    let (true, Some(&first), Some(&last)) = (points.len() >= 2, points.first(), points.last())
+    else {
+        return Err(SolidError::intersect(
+            OP_DLI,
+            IntersectFailure::PointCountNotTaken {
+                given: points.len(),
+            },
+        ));
+    };
+    let base = v.intersector_mut();
+    base.this_approx_tol_3d = opts.approx_tol_3d.unwrap_or(1.0e-3);
+    if let Some(a) = opts.ang_tol_rad {
+        base.this_ang_tol_rad = a;
+    }
+    let tol = base.this_approx_tol_3d;
+    offset_surfaces_checked(v)?;
+    let leader = v.station_leader(k)?.ok_or_else(|| {
+        SolidError::invalid_input(OP_DLI, "the intersector's solver has no stations")
+    })?;
+
+    // the given points, each at its own s, its feet kept
+    let mut ss: Vec<f64> = Vec::new();
+    for &id in points {
+        let mut p = v.intersector().point(id)?.clone();
+        v.given_station(k, &mut p, tol)?;
+        ss.push(p.user_doubles[0]);
+        *v.intersector_mut().point_mut(id)? = p;
+    }
+    if leader.closed {
+        seam_stations(v, k, points, &leader, &mut ss)?;
+    }
+    let (Some(&s_first), Some(&s_second), Some(&s_last)) = (ss.first(), ss.get(1), ss.last())
+    else {
+        return Err(SolidError::invalid_input(OP_DLI, "fewer than two stations"));
+    };
+    let sign = if s_second > s_first { 1.0 } else { -1.0 };
+    for (index, pair) in ss.windows(2).enumerate() {
+        let [a, b] = pair else { continue };
+        if !is_positive((b - a) * sign) {
+            return Err(SolidError::blend_solver(
+                OP_DLI,
+                SolverFailure::StationsNotMonotone { index: index + 1 },
+            ));
+        }
+    }
+    let span = StationSpan {
+        sign,
+        given: [s_first, s_last],
+    };
+    for &id in points {
+        let p = v.intersector_mut().point_mut(id)?;
+        if sign < 0.0 {
+            reverse_station_tangents(p);
+        }
+        let p = p.clone();
+        station_in_domains(v, &p, &span)?;
+    }
+
+    // a closed leader has no ends to extend past: its stations run one period
+    let before = if opts.extend_before_start && !leader.closed {
+        extend_stations(v, k, first, -1.0, &leader, &span)?
+    } else {
+        Vec::new()
+    };
+    let after = if opts.extend_after_end && !leader.closed {
+        extend_stations(v, k, last, 1.0, &leader, &span)?
+    } else {
+        Vec::new()
+    };
+    let mut anchors: Vec<TsectId> = before.into_iter().rev().collect();
+    anchors.extend_from_slice(points);
+    anchors.extend(after);
+    Ok((anchors, span))
+}
+
+/// A closed leader's given points at its seam (#13710): the first and last given points of
+/// a closed edge both lie at its one vertex, the seam, where the edge's parameter is either
+/// end of its interval and the solver finds one of them for both. The stations run one
+/// period: the first takes the end the trace starts from and the last the other, up the
+/// edge unless the given points between them run down it (no point between: up, the edge's
+/// own direction), each re-solved there (the same feet, the tangents at that end). Given
+/// points not both at the seam are left as they are (a trace across the seam is not taken:
+/// `StationsNotMonotone` decides it).
+///
+/// # Errors
+///
+/// `StationNotSolved` where the station at an end is not found; those of the solver.
+fn seam_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    points: &[TsectId],
+    leader: &StationLeader,
+    ss: &mut [f64],
+) -> Result<()> {
+    let (lo, hi) = (leader.interval.min(), leader.interval.max());
+    let room = 1e-9 * (hi - lo).abs();
+    let at_seam = |s: f64| (s - lo).abs() <= room || (s - hi).abs() <= room;
+    let n = ss.len();
+    let (Some(&first), Some(&last), Some(&id_first), Some(&id_last)) =
+        (ss.first(), ss.last(), points.first(), points.last())
+    else {
+        return Ok(());
+    };
+    if n < 2 || !(at_seam(first) && at_seam(last)) {
+        return Ok(());
+    }
+    // the given points between, in order: their direction, else up the edge
+    let up = match (ss.get(1), n.checked_sub(2).and_then(|i| ss.get(i))) {
+        (Some(&a), Some(&b)) if n > 2 && a != b => a < b,
+        (Some(&a), _) if n > 2 => a > 0.5 * (lo + hi),
+        _ => true,
+    };
+    let (s0, s1) = if up { (lo, hi) } else { (hi, lo) };
+    for (id, s, slot) in [(id_first, s0, 0), (id_last, s1, n - 1)] {
+        let p = v.intersector().point(id)?.clone();
+        let mut guesses = [p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second)];
+        // the given point's uv tangents run along increasing s; the trace along it up the
+        // edge, against it down
+        let along = if up { 1.0 } else { -1.0 };
+        let arriving = slot != 0;
+        for (srf, guess) in [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(guesses.iter_mut())
+        {
+            *guess = seam_side(v, k, srf, *guess, p.uv_deriv(srf) * along, arriving)?;
+        }
+        let mut q = v.station_point(k, s, guesses)?.ok_or_else(|| {
+            SolidError::blend_solver(OP_DLI, SolverFailure::StationNotSolved { s })
+        })?;
+        q.point_type = p.point_type;
+        q.curve_parameter = p.curve_parameter;
+        *v.intersector_mut().point_mut(id)? = q;
+        if let Some(x) = ss.get_mut(slot) {
+            *x = s;
+        }
+    }
+    Ok(())
+}
+
+/// A seam station's foot `uv` on trace surface `srf` on the side of the surface's own seam
+/// its trace comes from: where the surface closes on itself in a parameter (its base's, an
+/// offset surface closing where its base does) and the foot is on the seam (either end of
+/// the base's natural range there), the end the foot's motion `tangent` (along the trace)
+/// leaves from at the first station and arrives at at the last (`arriving`). Elsewhere `uv`
+/// as it is. The one foot of a closed edge's seam lies on both ends of a closed support's
+/// range, and the trace round the period must start on one and end on the other, or the
+/// last span's middle is solved on the support continued past the first end.
+///
+/// # Errors
+///
+/// Those of the surface's domain and closure.
+fn seam_side<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &V,
+    k: &Kernel,
+    srf: SrfIndex,
+    uv: Point2,
+    tangent: Point2,
+    arriving: bool,
+) -> Result<Point2> {
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    let mut own = v.intersector().surface(srf);
+    while let SurfaceKind::OffsetSurface(o) = own.kind() {
+        own = o.base_surface();
+    }
+    let dom = own.natural_uv_domain_with_nurb(k)?;
+    let mut out = uv;
+    let length = tangent.x.hypot(tangent.y);
+    for (param, lo, hi, t) in [
+        (SurfParamType::U, dom.min().x, dom.max().x, tangent.x),
+        (SurfParamType::V, dom.min().y, dom.max().y, tangent.y),
+    ] {
+        let x = if param == SurfParamType::U {
+            out.x
+        } else {
+            out.y
+        };
+        let Some(end) = seam_end(x, [lo, hi], t, length, arriving) else {
+            continue;
+        };
+        if !own.is_closed(k, &dom, param, None, false)?.0 {
+            continue;
+        }
+        if param == SurfParamType::U {
+            out.x = end;
+        } else {
+            out.y = end;
+        }
+    }
+    Ok(out)
+}
+
+/// The end of the range `[lo, hi]` a foot at `x` on its seam takes ([`seam_side`]), its
+/// motion `t` in that parameter out of a uv tangent of length `length`: departing (`arriving`
+/// false) up the range from `lo`, arriving up it at `hi`, and the other way round for a
+/// motion down it. `None` for a foot off the seam, and for a motion across the seam within
+/// round-off of none (`|t|` at most `1e-9 length`): a foot that runs along a second seam the
+/// whole trace (a torus's tube seam) moves across it only by round-off, of either sign, and
+/// stays on the end it is on.
+fn seam_end(x: f64, [lo, hi]: [f64; 2], t: f64, length: f64, arriving: bool) -> Option<f64> {
+    let room = 1e-9 * (hi - lo).abs();
+    let on_seam = (x - lo).abs() <= room || (x - hi).abs() <= room;
+    // (a motion that is not a number moves it to neither end either)
+    if !on_seam || t.is_nan() || t.abs() <= 1e-9 * length {
+        return None;
+    }
+    Some(if (t > 0.0) == arriving { hi } else { lo })
+}
+
+/// The stations of the extension from the end station `end`, outwards (`outward` `1` after
+/// the last given point, `-1` before the first), in stepping order (module docs of
+/// [`do_law_intersection_with`]). A station outside a domain ends the extension, as a
+/// boundary does; the cap counts foot 0's distance moved.
+///
+/// # Errors
+///
+/// `StationStepNotFound`, `StationStepBackwards`, `StationNotSolved`; those of the steps.
+fn extend_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    end: TsectId,
+    outward: f64,
+    leader: &StationLeader,
+    span: &StationSpan,
+) -> Result<Vec<TsectId>> {
+    // the direction in s the steps go
+    let step_sign = span.sign * outward;
+    let end_s = if step_sign > 0.0 {
+        leader.interval.max()
+    } else {
+        leader.interval.min()
+    };
+    let mut from = v.intersector().point(end)?.clone();
+    // (the end's tangents run along the trace: the steps before it go back along them)
+    if outward < 0.0 {
+        reverse_station_tangents(&mut from);
+    }
+    let cap = STATION_EXTENSION_FACTOR * leader.stand_off;
+    let mut travelled = 0.0;
+    let mut out = Vec::new();
+    for _ in 0..MAX_STATION_EXTENSION_STEPS {
+        let s_from = from.user_doubles[0];
+        let step = leader.stand_off.min(cap - travelled);
+        // (a cap reached, or a start at or past the leader's end: nothing more to step)
+        if !is_positive(step - EFF_ZERO * cap) || !is_positive((end_s - s_from) * step_sign) {
+            break;
+        }
+        let (mut q, mut last) = match v.station_step(k, &from, step)? {
+            StationStep::Boundary => break,
+            StationStep::NotFound => {
+                return Err(SolidError::blend_solver(
+                    OP_DLI,
+                    SolverFailure::StationStepNotFound { s: s_from },
+                ))
+            }
+            StationStep::Found { point, clipped, .. } => (*point, clipped),
+        };
+        // the leader's end: the station there ends the extension
+        if (q.user_doubles[0] - end_s) * step_sign > 0.0 {
+            let guesses = [q.uv_pos(SrfIndex::First), q.uv_pos(SrfIndex::Second)];
+            q = v.station_point(k, end_s, guesses)?.ok_or_else(|| {
+                SolidError::blend_solver(OP_DLI, SolverFailure::StationNotSolved { s: end_s })
+            })?;
+            last = true;
+        }
+        if !is_positive((q.user_doubles[0] - s_from) * step_sign) {
+            return Err(SolidError::blend_solver(
+                OP_DLI,
+                SolverFailure::StationStepBackwards { s: s_from },
+            ));
+        }
+        // (a step `StepSolve` clipped whose boundary solve found nothing falls through to
+        // the interior solve still flagged clipped, and may land past the boundary: a
+        // station outside a domain ends the extension, never kept)
+        if outside_domains(v, &q).is_some() {
+            break;
+        }
+        // (the solver's tangents run along increasing s: the next step goes along the step)
+        if step_sign < 0.0 {
+            reverse_station_tangents(&mut q);
+        }
+        // (foot 0's distance moved, not the step asked)
+        travelled += from.crv_pos().distance(q.crv_pos());
+        from = q.clone();
+        // stored along the trace
+        if outward < 0.0 {
+            reverse_station_tangents(&mut q);
+        }
+        q.point_type = IntersectionPointType::Crossing;
+        out.push(v.intersector_mut().alloc_point(q));
+        if last {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// A station trace's new point in the span from `curr` to `next` (as [`split_span_with`]
+/// at the law's mean parameter): the solver's station at the mean s, its tangents along the
+/// trace, its curve parameter `curr`'s plus the chord.
+///
+/// Each foot's Newton is seeded at the foot's cubic Hermite prediction at the span's middle
+/// ([`hermite_uv`]: the ends' uv points and exact uv tangents), not at the mean of the ends'
+/// uv: across a curved edge's span the mean can lie nearer the setback circle's other
+/// crossing of the support (the mirror root, on the far side of the edge: on a round of
+/// radius 10 cut by a slanted plane, foot 1 at z 18.67 where its neighbours stand at 20.2),
+/// which the fold check does not tell apart. The seed is only a start: the solver decides
+/// each foot's branch at the station itself (a chamfer of setbacks' `SetbackFs::station`:
+/// re-solved from the edge once, else refused `SetbackFootMirrored`), since no bound from a
+/// span's chord and tangents separates the two roots.
+///
+/// # Errors
+///
+/// `StationNotSolved` where the solver finds no station there; `PointOutsideDomain` for a
+/// station from the first to the last given point outside a domain; those of the solver.
+fn split_station_span<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    curr: TsectId,
+    next: TsectId,
+    span: &StationSpan,
+) -> Result<TsectId> {
+    let c = v.intersector().point(curr)?.clone();
+    let n = v.intersector().point(next)?.clone();
+    let s = 0.5 * (c.user_doubles[0] + n.user_doubles[0]);
+    let chord = c.crv_pos().distance(n.crv_pos());
+    let guesses = [
+        hermite_uv(&c, &n, SrfIndex::First, chord, 0.5),
+        hermite_uv(&c, &n, SrfIndex::Second, chord, 0.5),
+    ];
+    let mut p = v
+        .station_point(k, s, guesses)?
+        .ok_or_else(|| SolidError::blend_solver(OP_DLI, SolverFailure::StationNotSolved { s }))?;
+    if span.sign < 0.0 {
+        reverse_station_tangents(&mut p);
+    }
+    p.point_type = IntersectionPointType::Crossing;
+    p.curve_parameter = c.curve_parameter + c.crv_pos().distance(p.crv_pos());
+    station_in_domains(v, &p, span)?;
+    Ok(v.intersector_mut().alloc_point(p))
+}
+
+/// Foot `srf`'s cubic Hermite prediction at the share `t` of the span from `c` to `n`: its
+/// uv points and uv tangents (per unit foot-0 chord, along the trace) over the parameter
+/// `t * chord`, `chord` foot 0's.
+fn hermite_uv(c: &TsectPnt, n: &TsectPnt, srf: SrfIndex, chord: f64, t: f64) -> Point2 {
+    let (t2, t3) = (t * t, t * t * t);
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = t3 - t2;
+    let (a, b) = (c.uv_pos(srf), n.uv_pos(srf));
+    let (ta, tb) = (c.uv_deriv(srf), n.uv_deriv(srf));
+    Point2::new(
+        h00 * a.x + h10 * chord * ta.x + h01 * b.x + h11 * chord * tb.x,
+        h00 * a.y + h10 * chord * ta.y + h01 * b.y + h11 * chord * tb.y,
+    )
+}
+
+/// A station from the first to the last given point lies in both surfaces' domains (within
+/// `FlushCurve`'s boundary tolerance): one outside would clip the trace before its last
+/// given point.
+///
+/// # Errors
+///
+/// `PointOutsideDomain` for a station outside a domain.
+fn station_in_domains<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &V,
+    p: &TsectPnt,
+    span: &StationSpan,
+) -> Result<()> {
+    if !span.within_given(p.user_doubles[0]) {
+        return Ok(());
+    }
+    match outside_domains(v, p) {
+        Some(surface) => Err(SolidError::intersect(
+            OP_DLI,
+            IntersectFailure::PointOutsideDomain { surface },
+        )),
+        None => Ok(()),
+    }
+}
+
+/// The first surface (0 or 1) whose domain the station `p` lies outside, within
+/// `FlushCurve`'s boundary tolerance; `None` inside both.
+fn outside_domains<'s, V: IntersectorVirtuals<'s> + ?Sized>(v: &V, p: &TsectPnt) -> Option<usize> {
+    let base = v.intersector();
+    for (index, (s, dom)) in [SrfIndex::First, SrfIndex::Second]
+        .into_iter()
+        .zip(base.uv_domains.iter())
+        .enumerate()
+    {
+        let size = dom
+            .min()
+            .x
+            .abs()
+            .max(dom.min().y.abs())
+            .max(dom.max().x.abs())
+            .max(dom.max().y.abs());
+        let tol = EFF_ZERO * (1.0 + size) * 100.0;
+        if !dom.contains_point(p.uv_pos(s), tol) {
+            return Some(index);
+        }
+    }
+    None
 }
 
 /// One `ComputeNextPoint` call of `TraceCurve`: updates `step` (the deviation and
@@ -2303,6 +2991,30 @@ mod tests {
     use super::*;
     use crate::surface::plane::Plane;
 
+    /// A closed leader's seam foot (#13710): on a seam, departing up the range it takes the
+    /// range's low end and arriving up it the high end, down it the other way; off the seam
+    /// it is left. A foot on a torus's tube seam all along (v on its seam, the trace round u)
+    /// moves in v by round-off of either sign, 1e-17 against a tangent of length 1: it stays
+    /// on the end it is on, so the two seam stations do not land on opposite ends there.
+    #[test]
+    fn a_seam_foot_takes_the_end_its_motion_leaves_or_reaches_and_round_off_moves_none() {
+        let range = [0.0, 1.0];
+        assert_eq!(seam_end(0.0, range, 1.0, 1.0, false), Some(0.0));
+        assert_eq!(seam_end(0.0, range, 1.0, 1.0, true), Some(1.0));
+        assert_eq!(seam_end(1.0, range, -1.0, 1.0, false), Some(1.0));
+        assert_eq!(seam_end(1.0, range, -1.0, 1.0, true), Some(0.0));
+        // off the seam
+        assert_eq!(seam_end(0.5, range, 1.0, 1.0, true), None);
+        // round-off across a second seam, of either sign, and none at all
+        for t in [1e-17, -1e-17, 0.0] {
+            assert_eq!(seam_end(0.0, range, t, 1.0, true), None, "{t}");
+            assert_eq!(seam_end(1.0, range, t, 1.0, false), None, "{t}");
+        }
+        // a real motion across a long tangent still counts
+        assert_eq!(seam_end(0.0, range, 1e-6, 100.0, true), Some(1.0));
+        assert_eq!(seam_end(0.0, range, f64::NAN, 1.0, true), None);
+    }
+
     fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
         Surface::from(Plane::new(
             Vec3::from_array(o),
@@ -2315,6 +3027,32 @@ mod tests {
 
     fn unit() -> Extent2d {
         Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0)
+    }
+
+    /// A station with foot `srf` at `uv`, its uv tangent `t`.
+    fn foot_at(srf: SrfIndex, uv: [f64; 2], t: [f64; 2]) -> TsectPnt {
+        let mut p = TsectPnt::new();
+        *p.uv_pos_mut(srf) = Point2::new(uv[0], uv[1]);
+        *p.uv_deriv_mut(srf) = Point2::new(t[0], t[1]);
+        p
+    }
+
+    /// A station split's seed on a quarter of the unit circle in uv, from A (1, 0) with
+    /// tangent (0, 1) to B (0, 1) with tangent (-1, 0), per unit foot-0 chord sqrt(2): the
+    /// cubic Hermite middle (A + B) / 2 + chord (tA - tB) / 8 = (0.5 + sqrt(2) / 8) (1, 1) =
+    /// (0.6768, 0.6768), 0.030 inside the arc's middle (sqrt(1/2), sqrt(1/2)), where the
+    /// mean of the ends, (0.5, 0.5), is 0.293 inside it.
+    #[test]
+    fn a_split_station_is_seeded_at_its_feet_s_hermite_middle() {
+        let srf = SrfIndex::Second;
+        let a = foot_at(srf, [1.0, 0.0], [0.0, 1.0]);
+        let b = foot_at(srf, [0.0, 1.0], [-1.0, 0.0]);
+        let mid = hermite_uv(&a, &b, srf, 2.0_f64.sqrt(), 0.5);
+        let want = 0.5 + 2.0_f64.sqrt() / 8.0;
+        assert!(
+            (mid.x - want).abs() < 1e-15 && (mid.y - want).abs() < 1e-15,
+            "{mid:?}"
+        );
     }
 
     /// A closed curve 7 long, traced along part of it and extended past its end by the

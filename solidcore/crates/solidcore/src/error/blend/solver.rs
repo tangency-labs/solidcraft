@@ -364,6 +364,35 @@ pub enum SolverFailure {
         /// The interval's index.
         index: usize,
     },
+    /// A chamfer of setbacks' foot `rail` at the station at the edge parameter `s` lies on
+    /// the far side of the other support, beyond the edge (the setback circle's other
+    /// crossing of the extended support), from its guess and from the edge's start into the
+    /// face, or as given: no foot on the wedge's side is found ([`ErrorKind::NotFound`]).
+    SetbackFootMirrored {
+        /// The rail whose foot is beyond the edge.
+        rail: usize,
+        /// The edge parameter of the station.
+        s: f64,
+    },
+    /// A point given to a chamfer of setbacks' station trace (a rail end) whose foot `rail`
+    /// is `moved` from the station's foot at the point's own edge parameter, more than the
+    /// trace's 3D tolerance: the given point is not on the chamfer, and a rail end is never
+    /// moved to make it so ([`ErrorKind::NotWithinTolerance`]).
+    SetbackFootOffStation {
+        /// The rail whose foot is off its station.
+        rail: usize,
+        /// The distance from the given foot to the station's.
+        moved: f64,
+    },
+    /// A chamfer of setbacks' trace point whose first foot is at no station of the edge:
+    /// neither the edge parameter the point carries nor the nearest-point drop of the foot on
+    /// the edge puts the foot its setback from the edge, square to it, within the 3D
+    /// tolerance (past the edge's polar line a foot's station is a farthest point of the
+    /// edge, which the drop does not find): an empty search ([`ErrorKind::NotFound`]).
+    SetbackStationNotFound {
+        /// The edge parameter the drop found.
+        s: f64,
+    },
     /// `count` short intervals of the rail's classification could not be squeezed out (no
     /// single side edge at both ends, no edge use on the rail's face, no guess on the edge,
     /// or wider than the edge's tolerance): a case the refinement does not handle
@@ -393,6 +422,44 @@ pub enum SolverFailure {
     SplitPointDoesNotDropOnRail {
         /// The trace's 3D approximation tolerance the dropping tolerances scale.
         tol: f64,
+    },
+    /// A station trace's solver finds no station at the edge parameter `s` (a foot's Newton
+    /// does not settle, or its motion is not finite): an empty search
+    /// ([`ErrorKind::NotFound`]).
+    StationNotSolved {
+        /// The edge parameter.
+        s: f64,
+    },
+    /// The middle station of a flushed span at the edge parameter `s` is not strictly
+    /// between its ends' `from` and `to` (two stations at one s, or an s that is not
+    /// finite): the span has no station between its ends ([`ErrorKind::Failed`]).
+    StationSpanEmpty {
+        /// The middle's edge parameter.
+        s: f64,
+        /// The span's first end's.
+        from: f64,
+        /// The span's last end's.
+        to: f64,
+    },
+    /// A station trace's extension step from the station at the edge parameter `s` found a
+    /// station that does not continue past it along the edge: the solver's step went back
+    /// ([`ErrorKind::Failed`]).
+    StationStepBackwards {
+        /// The edge parameter of the station stepped from.
+        s: f64,
+    },
+    /// A station trace's extension step from the station at the edge parameter `s` neither
+    /// found a station nor met a domain boundary: an empty search ([`ErrorKind::NotFound`]).
+    StationStepNotFound {
+        /// The edge parameter of the station stepped from.
+        s: f64,
+    },
+    /// A station trace's given points do not run strictly one way along the edge: the edge
+    /// parameter of given point `index` does not continue past the one before it in the
+    /// trace's direction. The caller's points ([`ErrorKind::InvalidInput`]).
+    StationsNotMonotone {
+        /// The given point's index.
+        index: usize,
     },
     /// The support edge's curve does not meet the fillet surface that ends it: an empty
     /// search ([`ErrorKind::NotFound`]).
@@ -555,12 +622,20 @@ impl SolverFailure {
             Self::RolloverCornerMissing => ErrorKind::InvalidInput,
             Self::RolloverHasNoFaceBeyond { .. } => ErrorKind::Unsupported,
             Self::RolloverIntervalNotAtEdge { .. } => ErrorKind::Unsupported,
+            Self::SetbackFootMirrored { .. } => ErrorKind::NotFound,
+            Self::SetbackFootOffStation { .. } => ErrorKind::NotWithinTolerance,
+            Self::SetbackStationNotFound { .. } => ErrorKind::NotFound,
             Self::ShortIntervalsNotRemoved { .. } => ErrorKind::Unsupported,
             Self::SideEdgeNotOnRailFace => ErrorKind::NotFound,
             Self::SideSurfaceMissesEndPlane => ErrorKind::NotFound,
             Self::SolverEdgeUseMissing { .. } => ErrorKind::InvalidInput,
             Self::SpineStationNotFound => ErrorKind::NotFound,
             Self::SplitPointDoesNotDropOnRail { .. } => ErrorKind::NotFound,
+            Self::StationNotSolved { .. } => ErrorKind::NotFound,
+            Self::StationSpanEmpty { .. } => ErrorKind::Failed,
+            Self::StationStepBackwards { .. } => ErrorKind::Failed,
+            Self::StationStepNotFound { .. } => ErrorKind::NotFound,
+            Self::StationsNotMonotone { .. } => ErrorKind::InvalidInput,
             Self::SupportCurveMissesSurface => ErrorKind::NotFound,
             Self::SupportEndOffCurve { .. } => ErrorKind::NotFound,
             Self::SupportIntersectionFailed => ErrorKind::Failed,
@@ -645,12 +720,20 @@ impl SolverFailure {
             Self::RolloverCornerMissing => SM_ERR_NULL_POINTER,
             Self::RolloverHasNoFaceBeyond { .. } => SM_ERR_NULL_POINTER,
             Self::RolloverIntervalNotAtEdge { .. } => SM_ERR,
+            Self::SetbackFootMirrored { .. } => SM_ERR,
+            Self::SetbackFootOffStation { .. } => SM_ERR,
+            Self::SetbackStationNotFound { .. } => SM_ERR,
             Self::ShortIntervalsNotRemoved { .. } => SM_ERR,
             Self::SideEdgeNotOnRailFace => SM_ERR_NULL_POINTER,
             Self::SideSurfaceMissesEndPlane => SM_ERR_NULL_POINTER,
             Self::SolverEdgeUseMissing { .. } => SM_ERR_NULL_POINTER,
             Self::SpineStationNotFound => SM_ERR,
             Self::SplitPointDoesNotDropOnRail { .. } => SM_ERR,
+            Self::StationNotSolved { .. } => SM_ERR,
+            Self::StationSpanEmpty { .. } => SM_ERR,
+            Self::StationStepBackwards { .. } => SM_ERR,
+            Self::StationStepNotFound { .. } => SM_ERR,
+            Self::StationsNotMonotone { .. } => SM_ERR,
             Self::SupportCurveMissesSurface => SM_ERR,
             Self::SupportEndOffCurve { .. } => SM_ERR,
             Self::SupportIntersectionFailed => SM_ERR,
@@ -900,6 +983,18 @@ impl core::fmt::Display for SolverFailure {
                 f,
                 "interval {index} of the roll-over rail's classification is not bounded by an edge"
             ),
+            Self::SetbackFootMirrored { rail, s } => write!(
+                f,
+                "the chamfer of setbacks' foot {rail} at s = {s} lies beyond the edge, not on the wedge's side of the other face"
+            ),
+            Self::SetbackFootOffStation { rail, moved } => write!(
+                f,
+                "the chamfer of setbacks' given point has foot {rail} {moved} from its station"
+            ),
+            Self::SetbackStationNotFound { s } => write!(
+                f,
+                "the chamfer of setbacks' trace point has its first foot at no station of the edge (the drop found s = {s})"
+            ),
             Self::ShortIntervalsNotRemoved { count } => write!(
                 f,
                 "{count} short intervals of the rail's classification could not be removed"
@@ -922,6 +1017,25 @@ impl core::fmt::Display for SolverFailure {
             Self::SplitPointDoesNotDropOnRail { tol } => write!(
                 f,
                 "the split point does not drop onto the rail at 1, 10 or 20 times {tol}"
+            ),
+            Self::StationNotSolved { s } => {
+                write!(f, "the station trace's solver finds no station at s = {s}")
+            }
+            Self::StationSpanEmpty { s, from, to } => write!(
+                f,
+                "the flushed span's middle station at s = {s} is not strictly between {from} and {to}"
+            ),
+            Self::StationStepBackwards { s } => write!(
+                f,
+                "the station trace's extension step from s = {s} went back along the edge"
+            ),
+            Self::StationStepNotFound { s } => write!(
+                f,
+                "the station trace's extension step from s = {s} finds no station and no boundary"
+            ),
+            Self::StationsNotMonotone { index } => write!(
+                f,
+                "the station trace's given point {index} does not continue along the edge past the one before it"
             ),
             Self::SupportCurveMissesSurface => {
                 f.write_str("the support edge's curve does not meet the fillet surface ending it")

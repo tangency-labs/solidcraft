@@ -544,7 +544,8 @@ pub fn evaluate_definition(
             *x = w.y;
         }
     }
-    let mut r = def.offsets;
+    let setbacks = def.chamfer.is_some_and(|c| c.is_setbacks());
+    let mut r = super::section::station_r(def.offsets, def.chamfer);
     let equal_setback = def
         .chamfer
         .and_then(crate::surface::procedural_blend::chamfer::ChamferDefinition::constant_setback);
@@ -651,6 +652,7 @@ pub fn evaluate_definition(
         let opts = StationOptions {
             law,
             equal_setback,
+            setbacks,
             top,
             sides: pinned.then_some(seeded),
             before,
@@ -667,6 +669,7 @@ pub fn evaluate_definition(
             let opts = StationOptions {
                 law,
                 equal_setback,
+                setbacks,
                 top,
                 sides: Some(sides),
                 before,

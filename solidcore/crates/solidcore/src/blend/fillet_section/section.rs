@@ -222,6 +222,19 @@ pub struct GnLawRound<'a> {
     pub range: Option<Extent1d>,
 }
 
+/// Not the fork's (#13710): a chamfer of setbacks traced by its solver
+/// ([`crate::blend::fillet_standard_solver::setback::SetbackFs`]), built at the solver's
+/// stations as a law's round is ([`GnLawRound`]): `leader` the extended edge, `points` the
+/// solver's stations (their s, the edge's parameter, in `user_doubles[0]`; their feet at
+/// `curve_parameter` on the uv curves, the trace's arc length, which is not s).
+#[derive(Clone, Copy, Debug)]
+pub struct GnSetbackTrace<'a> {
+    /// The extended edge, the stations' leader.
+    pub leader: &'a BSplineCurve,
+    /// The solver's stations.
+    pub points: &'a [TsectPnt],
+}
+
 /// What `Build` makes: the surface, and with a law and `bReplaceRails` the centre line it
 /// sets (the balls' centres at the stations, over t; 0d43b4c).
 type Built = (Surface, Option<BSplineCurve>);
@@ -290,6 +303,7 @@ fn solve_top(
     let opts = StationOptions {
         law: series.as_ref(),
         equal_setback: law.and_then(GnLaw::equal_setback),
+        setbacks: law.is_some_and(GnLaw::is_setbacks),
         top: n,
         sides,
         before,
@@ -306,9 +320,21 @@ pub(crate) fn section_law(
 ) -> Result<Option<GnLaw<'_>>> {
     match curve {
         Some(curve) => Ok(Some(GnLaw::of(curve)?)),
+        None if chamfer.is_some_and(|c| c.is_setbacks()) => Ok(Some(GnLaw::Setbacks)),
         None => Ok(chamfer
             .and_then(ChamferDefinition::constant_setback)
             .map(GnLaw::EqualSetback)),
+    }
+}
+
+/// The `r` a station of a definition is solved with: its offsets, or for a chamfer of
+/// setbacks held at every station ([`GnLaw::Setbacks`]) its setbacks (its offsets slot holds
+/// no ball's). Every station system built from a definition takes its `r` from here.
+#[must_use]
+pub(crate) fn station_r(offsets: [f64; 2], chamfer: Option<ChamferDefinition>) -> [f64; 2] {
+    match chamfer {
+        Some(c) if c.is_setbacks() => c.setbacks(),
+        _ => offsets,
     }
 }
 
@@ -1229,6 +1255,7 @@ impl GnSectionFsg {
             false,
             None,
             None,
+            None,
         )?
         .map(|(s, _)| s)
         .ok_or_else(no_surface_built)
@@ -1261,6 +1288,7 @@ impl GnSectionFsg {
             false,
             [0.0, 0.0],
             false,
+            None,
             None,
             None,
         )?
@@ -1299,6 +1327,7 @@ impl GnSectionFsg {
             replace_rails,
             [radius, radius],
             false,
+            None,
             None,
             None,
         )?
@@ -1344,6 +1373,7 @@ impl GnSectionFsg {
             [radius, radius],
             true,
             law,
+            None,
             None,
         )?;
         Ok(built.map(|(s, c)| {
@@ -1393,8 +1423,118 @@ impl GnSectionFsg {
             true,
             None,
             Some(chamfer),
+            None,
         )?;
         Ok(built.map(|(s, _)| s))
+    }
+
+    /// The chord (order 0) of a chamfer of setbacks held at every station (#13710): each
+    /// foot a straight line of its setback from `edge`, in the plane square to it
+    /// ([`GnLaw::Setbacks`]), built as [`Self::build_chord`] builds today's chamfer, the
+    /// stations solved from the uv curves (the rails need not be the feet yet: no solver
+    /// traces them) and the rails and uv curves replaced by the stations' feet. The leader
+    /// is `edge` itself. A support that is itself a blend by its definition is refused (its
+    /// net, not its definition, would be what the certificate encloses).
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a generator that is not the chord or a chamfer that is not one of
+    /// setbacks; `Unsupported` for a procedural support; those of `Build`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_setback_chord(
+        &mut self,
+        k: &Kernel,
+        edge: &BSplineCurve,
+        rails: [&mut BSplineCurve; 2],
+        tol: f64,
+        faces: [&Surface; 2],
+        uvs: [&mut BSplineCurve; 2],
+        chamfer: ChamferDefinition,
+    ) -> Result<Option<Surface>> {
+        let built = self.setback_chord(k, edge, rails, tol, faces, uvs, chamfer, None)?;
+        Ok(built.map(|(s, _)| s))
+    }
+
+    /// [`Self::build_setback_chord`] on the rails and uv curves its solver traced
+    /// ([`GnSetbackTrace`]: the stations at the solver's s on the extended edge, the leader;
+    /// the rails, uv curves and `center` over the trace's curve parameter, which is not s).
+    /// Built, the rails, the uv curves and `center` run over s: the stations' feet and the
+    /// leader's points.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::build_setback_chord`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_traced_setback_chord(
+        &mut self,
+        k: &Kernel,
+        trace: GnSetbackTrace<'_>,
+        center: &mut BSplineCurve,
+        rails: [&mut BSplineCurve; 2],
+        tol: f64,
+        faces: [&Surface; 2],
+        uvs: [&mut BSplineCurve; 2],
+        chamfer: ChamferDefinition,
+    ) -> Result<Option<Surface>> {
+        let built = self.setback_chord(k, center, rails, tol, faces, uvs, chamfer, Some(trace))?;
+        Ok(built.map(|(s, c)| {
+            if let Some(c) = c {
+                *center = c;
+            }
+            s
+        }))
+    }
+
+    /// The body of [`Self::build_setback_chord`] and [`Self::build_traced_setback_chord`].
+    #[allow(clippy::too_many_arguments)]
+    fn setback_chord(
+        &mut self,
+        k: &Kernel,
+        center: &BSplineCurve,
+        rails: [&mut BSplineCurve; 2],
+        tol: f64,
+        faces: [&Surface; 2],
+        uvs: [&mut BSplineCurve; 2],
+        chamfer: ChamferDefinition,
+        traced: Option<GnSetbackTrace<'_>>,
+    ) -> Result<Option<Built>> {
+        if self.order != 0 || !chamfer.is_setbacks() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a chamfer of setbacks is the chord, order 0, of setbacks",
+            ));
+        }
+        if faces
+            .iter()
+            .any(|f| matches!(f.kind(), SurfaceKind::ProceduralBlend(_)))
+        {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "a chamfer of setbacks on a blend by its definition is not built yet",
+            });
+        }
+        let built = self.build(
+            k,
+            center,
+            rails,
+            tol,
+            faces,
+            uvs,
+            true,
+            chamfer.setbacks(),
+            false,
+            None,
+            Some(chamfer),
+            traced,
+        )?;
+        let Some((surface, new_center)) = built else {
+            return Ok(None);
+        };
+        // its feet: first crossings of their supports, its stations not crossing
+        if let SurfaceKind::ProceduralBlend(pb) = surface.kind() {
+            super::setback_enclose::prove_setback_feet(k, pb)?;
+        }
+        Ok(Some((surface, new_center)))
     }
 
     /// `Build`: the G^n blend surface between the rails, its stations the knots of the
@@ -1419,6 +1559,7 @@ impl GnSectionFsg {
         feet_check: bool,
         law_round: Option<&GnLawRound<'_>>,
         chamfer: Option<ChamferDefinition>,
+        traced: Option<GnSetbackTrace<'_>>,
     ) -> Result<Option<Built>> {
         // a ball whose radius varies (the ball's circle only): its law r(t) and the curve
         // whose planes square to it at t hold the ball's centre (the solver's), t the
@@ -1431,7 +1572,16 @@ impl GnSectionFsg {
         }
         let gn_law = section_law(law_round.map(|l| l.law), chamfer)?;
         let gn_law = gn_law.as_ref();
-        let leader: &BSplineCurve = law_round.map_or(center, |l| l.leader);
+        // the stations' map: a law's round, or a traced chamfer of setbacks (#13710): the
+        // solver's stations at t (s) on the leader, the rails and uv curves over the trace's
+        // curve parameter
+        let map: Option<(&BSplineCurve, &[TsectPnt], Option<Extent1d>)> = match (law_round, traced)
+        {
+            (Some(l), _) => Some((l.leader, l.points, l.range)),
+            (None, Some(t)) => Some((t.leader, t.points, None)),
+            (None, None) => None,
+        };
+        let leader: &BSplineCurve = map.map_or(center, |m| m.0);
         let n = self.order;
         let exact_circle = n == 1 && self.arcs.is_exact_circle();
         // the chord (#2486): a chamfer, its sizes given
@@ -1452,11 +1602,11 @@ impl GnSectionFsg {
         let mut law_foot: Vec<bool> = Vec::new(); // and whether it is one of the solver's
         let mut law_cp: Vec<f64> = Vec::new(); // and then its parameter on the rails
         let (mut i_min, mut i_max) = (c_min, c_max);
-        if let Some(lr) = law_round {
+        if let Some((map_leader, map_points, map_range)) = map {
             // each solver's station: its t, and its feet as the solver's uv curves hold
             // them at its curve parameter (the rails' and uv curves' own, which is not t)
             let mut pts: Vec<(f64, [f64; 5])> = Vec::new();
-            for p in lr.points {
+            for p in map_points {
                 let cp = p.curve_parameter;
                 let w0 = uvs[0].evaluate_point(cp)?;
                 let w1 = uvs[1].evaluate_point(cp)?;
@@ -1482,7 +1632,7 @@ impl GnSectionFsg {
             }
             i_min = t_front;
             i_max = t_back;
-            if let Some(r) = lr.range {
+            if let Some(r) = map_range {
                 let inside = r.min() >= t_front && r.max() <= t_back && r.max() > r.min();
                 if !inside {
                     // "the round's range is not within its stations"
@@ -1495,7 +1645,7 @@ impl GnSectionFsg {
                 i_max = r.max();
             }
             let law_scale = smax(1.0, i_max - i_min);
-            let mut at: Vec<f64> = if lr.range.is_none() {
+            let mut at: Vec<f64> = if map_range.is_none() {
                 pts.iter().map(|p| p.0).collect()
             } else {
                 let mut at = vec![i_min, i_max];
@@ -1506,7 +1656,10 @@ impl GnSectionFsg {
                 }
                 at
             };
-            for c in [lr.leader, lr.law] {
+            for c in [Some(map_leader), law_round.map(|l| l.law)]
+                .into_iter()
+                .flatten()
+            {
                 for kn in c.knots(None)?.0 {
                     if kn > i_min + 1.0e-9 * law_scale && kn < i_max - 1.0e-9 * law_scale {
                         at.push(kn);
@@ -1550,7 +1703,7 @@ impl GnSectionFsg {
         // the equal area thumbweight is resolved per station, from its own wedge
         let equal_area = self.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA;
         for c in [center, &*rail1, &*rail2] {
-            if law_round.is_some() {
+            if map.is_some() {
                 break;
             }
             let (lo, hi) = interval(c);
@@ -1563,7 +1716,7 @@ impl GnSectionFsg {
             }
             ss.extend(c.knots(None)?.0);
         }
-        if law_round.is_none() {
+        if map.is_none() {
             ss.sort_by(f64::total_cmp);
             let mut unique: Vec<f64> = Vec::new();
             for &s in &ss {
@@ -1591,7 +1744,7 @@ impl GnSectionFsg {
         // round starts inside them, where the rails' own start may be past its ball's
         // fading to a point)
         let s_first = match law_cp.first() {
-            Some(&cp) if law_round.is_some() => cp,
+            Some(&cp) if map.is_some() => cp,
             _ => c_min,
         };
 
@@ -1600,7 +1753,12 @@ impl GnSectionFsg {
         let mut r = [0.0_f64; 2];
         let mut side = [0.0_f64; 2];
         {
-            let m = center.evaluate_point(s_first)?;
+            // (a chamfer of setbacks has no ball: its stations stand on the leader, at t)
+            let m = if traced.is_some() {
+                leader.evaluate_point(i_min)?
+            } else {
+                center.evaluate_point(s_first)?
+            };
             let law_r = match law_round {
                 Some(l) => l.law.evaluate_point(i_min)?.x,
                 None => 0.0,
@@ -1649,7 +1807,7 @@ impl GnSectionFsg {
         let mut stations: Vec<GnStation> = Vec::new();
         for (j, &s) in ss.iter().enumerate() {
             k.check_cancelled(OP_BUILD)?;
-            let seed = if law_round.is_some() {
+            let seed = if map.is_some() {
                 law_seeds.get(j).copied().ok_or_else(|| {
                     SolidError::blend(
                         OP,
@@ -1674,6 +1832,7 @@ impl GnSectionFsg {
             let opts = StationOptions {
                 law: series.as_ref(),
                 equal_setback: gn_law.and_then(GnLaw::equal_setback),
+                setbacks: gn_law.is_some_and(GnLaw::is_setbacks),
                 top: n,
                 sides: None,
                 before: false,
@@ -1697,10 +1856,10 @@ impl GnSectionFsg {
                 // builds otherwise (308cc40)
                 if feet_check {
                     // with a law, the solver's stations' feet are (0d43b4c)
-                    if law_round.is_some() && !law_foot.get(j).copied().unwrap_or(false) {
+                    if map.is_some() && !law_foot.get(j).copied().unwrap_or(false) {
                         continue;
                     }
-                    let at = if law_round.is_some() {
+                    let at = if map.is_some() {
                         law_cp.get(j).copied().unwrap_or(f64::NAN)
                     } else {
                         s
@@ -1900,7 +2059,7 @@ impl GnSectionFsg {
         // with a law the rails now run over t: the centre line too, the balls' centres at
         // the stations (0d43b4c)
         let mut new_center: Option<BSplineCurve> = None;
-        if replace_rails && law_round.is_some() {
+        if replace_rails && map.is_some() {
             let mut v = Vec::new();
             let mut d = Vec::new();
             let mut d_in = Vec::new();
@@ -2390,6 +2549,7 @@ impl GnSectionFsg {
         let opts = StationOptions {
             law: None,
             equal_setback: None,
+            setbacks: false,
             top: n,
             sides: None,
             before: false,
@@ -2934,6 +3094,266 @@ mod tests {
             2.0 * c,
         );
         (built, g)
+    }
+
+    /// The edge where a wall of radius 8 (0 to 10 high) stands on a plate z = 0, a quarter turn
+    /// of it the edge, and a
+    /// chamfer of setbacks `d1` on the plate and `d2` on the wall built on it, from rails and uv
+    /// curves off its feet (the plate's foot near radius `plate_foot`): the kernel, the
+    /// supports, the edge, the rails and uv curves after the build, and what it built.
+    #[allow(clippy::type_complexity)]
+    fn wall_on_plate_setbacks(
+        plate_foot: f64,
+        d1: f64,
+        d2: f64,
+        plate_knot: Option<f64>,
+    ) -> (
+        Kernel,
+        [Surface; 2],
+        BSplineCurve,
+        [BSplineCurve; 4],
+        Result<Option<Surface>>,
+    ) {
+        use crate::geom::vector3d::Point3;
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+        let quarter = |dim: u64, r: f64, z: f64, [ax, bx]: [f64; 2], [ay, by]: [f64; 2]| {
+            let p = |x: f64, y: f64| Point3::new(ax * x + bx, ay * y + by, z);
+            let w = 0.5_f64.sqrt();
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim,
+                degree: 2,
+                control_points: &[p(r, 0.0), p(r, r), p(0.0, r)],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[3, 3],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&[1.0, w, 1.0]),
+                trim: None,
+            })
+            .unwrap()
+        };
+        let surface = |du: usize, dv: usize, cps: &[Point3], weights: Option<&[f64]>| {
+            Surface::from(
+                BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                    u_degree: du,
+                    v_degree: dv,
+                    control_points: cps,
+                    form: BSplineSurfaceForm::Unspecified,
+                    u_multiplicities: &[du + 1, du + 1],
+                    v_multiplicities: &[dv + 1, dv + 1],
+                    u_knots: &[0.0, 1.0],
+                    v_knots: &[0.0, 1.0],
+                    knot_type: KnotType::Unspecified,
+                    weights,
+                    uv_domain: None,
+                })
+                .unwrap(),
+            )
+        };
+        let (wall, w, height) = (8.0, 20.0, 10.0);
+        // the plate, with a knot line at x = `plate_knot` if asked (its u stays x's linear map)
+        let plate = match plate_knot {
+            None => surface(
+                1,
+                1,
+                &[
+                    Point3::new(-w, -w, 0.0),
+                    Point3::new(-w, w, 0.0),
+                    Point3::new(w, -w, 0.0),
+                    Point3::new(w, w, 0.0),
+                ],
+                None,
+            ),
+            Some(x) => Surface::from(
+                BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                    u_degree: 1,
+                    v_degree: 1,
+                    control_points: &[
+                        Point3::new(-w, -w, 0.0),
+                        Point3::new(-w, w, 0.0),
+                        Point3::new(x, -w, 0.0),
+                        Point3::new(x, w, 0.0),
+                        Point3::new(w, -w, 0.0),
+                        Point3::new(w, w, 0.0),
+                    ],
+                    form: BSplineSurfaceForm::Unspecified,
+                    u_multiplicities: &[2, 1, 2],
+                    v_multiplicities: &[2, 2],
+                    u_knots: &[0.0, (x + w) / (2.0 * w), 1.0],
+                    v_knots: &[0.0, 1.0],
+                    knot_type: KnotType::Unspecified,
+                    weights: None,
+                    uv_domain: None,
+                })
+                .unwrap(),
+            ),
+        };
+        // the wall runs past the edge's ends, as a blend's supports do: three quarters of a
+        // turn from -90 to 180 degrees, the edge on the middle one (u = 1/3 + s/3 there)
+        let (mut cps, mut ws) = (Vec::new(), Vec::new());
+        let h = 0.5_f64.sqrt();
+        for (p, wi) in [
+            (0.0, -wall),
+            (wall, -wall),
+            (wall, 0.0),
+            (wall, wall),
+            (0.0, wall),
+            (-wall, wall),
+            (-wall, 0.0),
+        ]
+        .into_iter()
+        .zip([1.0, h, 1.0, h, 1.0, h, 1.0])
+        {
+            for z in [0.0, height] {
+                cps.push(Point3::new(p.0, p.1, z));
+                ws.push(wi);
+            }
+        }
+        let cylinder = Surface::from(
+            BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 2,
+                v_degree: 1,
+                control_points: &cps,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[3, 2, 2, 3],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&ws),
+                uv_domain: None,
+            })
+            .unwrap(),
+        );
+        let k = Kernel::default();
+        let id = [1.0, 0.0];
+        let mut edge = quarter(3, wall, 0.0, id, id);
+        edge.insert_knots(&[0.25, 0.5, 0.75]).unwrap();
+        // the rails and uv curves off the feet (as a tracer's first guess would be)
+        let off = 0.05;
+        let mut rail1 = quarter(3, plate_foot + off, 0.0, id, id);
+        let mut rail2 = quarter(3, wall, d2 + off, id, id);
+        let mut uv1 = quarter(2, plate_foot + off, 0.0, [0.5 / w, 0.5], [0.5 / w, 0.5]);
+        let mut uv2 = BSplineCurve::create_line_segment(
+            2,
+            Point3::new(1.0 / 3.0, (d2 + off) / height, 0.0),
+            Point3::new(2.0 / 3.0, (d2 + off) / height, 0.0),
+        )
+        .unwrap();
+        let chamfer = ChamferDefinition::of_setbacks(ChamferSize::Distances([d1, d2])).unwrap();
+        let tol = 1e-4;
+        let mut g = GnSectionFsg::chord();
+        let built = g.build_setback_chord(
+            &k,
+            &edge,
+            [&mut rail1, &mut rail2],
+            tol,
+            [&plate, &cylinder],
+            [&mut uv1, &mut uv2],
+            chamfer,
+        );
+        if let Ok(Some(_)) = &built {
+            assert!(g.certified_bound <= tol, "{}", g.certified_bound);
+        }
+        (k, [plate, cylinder], edge, [rail1, rail2, uv1, uv2], built)
+    }
+
+    /// A chamfer of setbacks held at every station on the edge where a quarter wall of radius 8
+    /// stands on a plate (z = 0), 2 on the plate and 1 on the wall: its feet are at radius 10
+    /// on the plate and at height 1 on the wall, all along, in closed form. Built from rails
+    /// and uv curves off the feet, the stations' feet replace them; the chord is certified
+    /// within the tolerance, its feet proved first crossings that do not cross, it
+    /// re-certifies, and its definition is the chord between the feet.
+    #[test]
+    fn a_chamfer_of_setbacks_is_built_on_its_feet_and_certified() {
+        use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+        let (wall, d1, d2, tol) = (8.0, 2.0, 1.0, 1e-4);
+        let (k, [plate, cylinder], edge, [mut rail1, mut rail2, mut uv1, mut uv2], built) =
+            wall_on_plate_setbacks(wall + d1, d1, d2, None);
+        let chamfer = ChamferDefinition::of_setbacks(ChamferSize::Distances([d1, d2])).unwrap();
+        let built = built.unwrap().expect("a chamfer of setbacks builds");
+        let SurfaceKind::ProceduralBlend(pb) = built.kind() else {
+            panic!("a blend by its definition: {:?}", built.kind());
+        };
+        assert!(pb.recertify(&k).unwrap() <= tol);
+        for s in [0.0, 0.1, 0.37, 0.5, 0.82, 1.0] {
+            let c = edge.evaluate_point(s).unwrap();
+            let out = Vec3::new(c.x, c.y, 0.0) * (1.0 / wall);
+            let feet = [out * (wall + d1), out * wall + Vec3::Z * d2];
+            for (rail, foot) in [&rail1, &rail2].into_iter().zip(feet) {
+                let q = rail.evaluate_point(s).unwrap();
+                assert!((q - foot).length() <= tol, "s {s}: {q:?} vs {foot:?}");
+            }
+            for t in [0.0, 0.3, 1.0] {
+                let p = pb.evaluate_definition(&k, s, t, 0, 0).unwrap()[0][0];
+                let want = feet[0] * (1.0 - t) + feet[1] * t;
+                assert!(
+                    (p - want).length() <= 1e-9,
+                    "s {s}, t {t}: {p:?} vs {want:?}"
+                );
+            }
+        }
+        // the chord is the chamfer it was asked: a chamfer of setbacks, 2 and 1
+        assert_eq!(pb.definition().chamfer, Some(chamfer));
+        // today's chamfer of offsets is refused by this build
+        let offsets = ChamferDefinition::new(ChamferSize::Distances([d1, d2]), 0.5 * PI).unwrap();
+        let mut g = GnSectionFsg::chord();
+        assert!(g
+            .build_setback_chord(
+                &k,
+                &edge,
+                [&mut rail1, &mut rail2],
+                tol,
+                [&plate, &cylinder],
+                [&mut uv1, &mut uv2],
+                offsets,
+            )
+            .is_err());
+    }
+
+    /// The same edge chamfered 9 into the plate (towards the wall's axis) and 1 on the wall:
+    /// the plate's foot lies past the edge's polar line, the axis 8 from it, so neighbouring
+    /// stations' planes cross inside the chamfer. Refused as not fitting, not built.
+    #[test]
+    fn a_chamfer_of_setbacks_past_the_axis_is_refused_as_crossing() {
+        use crate::blend::fillet_executive::p3::NoRoomReason;
+        use crate::error::blend::BlendFailure;
+        let (.., built) = wall_on_plate_setbacks(8.0 - 9.0, 9.0, 1.0, None);
+        let e = built.expect_err("refused, not built");
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::NoRoom(NoRoomReason::SetbacksCross)),
+            "{e:?}"
+        );
+    }
+
+    /// The same chamfer on a plate with a knot line at x = 5: the plate's foot (radius 10)
+    /// crosses it at 60 degrees, a station of the net, and the edge's projection (radius 8)
+    /// at acos(5/8), inside a span of the net. The proofs split there, and it builds on its
+    /// closed-form feet as on the plain plate.
+    #[test]
+    fn a_chamfer_of_setbacks_builds_where_the_edge_s_projection_crosses_a_knot_line() {
+        let (wall, d1, d2, tol) = (8.0, 2.0, 1.0, 1e-4);
+        let (k, _, edge, [rail1, rail2, ..], built) =
+            wall_on_plate_setbacks(wall + d1, d1, d2, Some(5.0));
+        let built = built.unwrap().expect("a chamfer of setbacks builds");
+        let SurfaceKind::ProceduralBlend(pb) = built.kind() else {
+            panic!("a blend by its definition: {:?}", built.kind());
+        };
+        assert!(pb.recertify(&k).unwrap() <= tol);
+        for s in [0.0, 0.2, 0.31, 0.37, 0.5, 1.0] {
+            let c = edge.evaluate_point(s).unwrap();
+            let out = Vec3::new(c.x, c.y, 0.0) * (1.0 / wall);
+            let feet = [out * (wall + d1), out * wall + Vec3::Z * d2];
+            for (rail, foot) in [&rail1, &rail2].into_iter().zip(feet) {
+                let q = rail.evaluate_point(s).unwrap();
+                assert!((q - foot).length() <= tol, "s {s}: {q:?} vs {foot:?}");
+            }
+        }
     }
 
     fn work_budget_case(knots: usize, tol: f64) {

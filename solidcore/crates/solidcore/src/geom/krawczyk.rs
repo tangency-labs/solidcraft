@@ -307,6 +307,54 @@ pub(crate) fn inverse_of_columns4(j: &[[f64; 4]; 4]) -> Option<[[f64; 4]; 4]> {
     inv.iter().flatten().all(|x| x.is_finite()).then_some(inv)
 }
 
+/// The inverse (rows) of a 5 × 5 matrix given by columns: Gauss-Jordan elimination with
+/// partial pivoting, a fixed number of steps; `None` where a pivot is 0 or a result is not
+/// finite. A preconditioner only: Krawczyk's test proves with any matrix.
+pub(crate) fn inverse_of_columns5(j: &[[f64; 5]; 5]) -> Option<[[f64; 5]; 5]> {
+    // [A | I], A by rows
+    let mut a = [[0.0_f64; 10]; 5];
+    for (r, row) in a.iter_mut().enumerate() {
+        for (c, col) in j.iter().enumerate() {
+            *row.get_mut(c)? = *col.get(r)?;
+        }
+        *row.get_mut(5 + r)? = 1.0;
+    }
+    for c in 0..5 {
+        // the pivot: the largest magnitude in column c at or below row c
+        let mut p = c;
+        for r in c..5 {
+            if a.get(r)?.get(c)?.abs() > a.get(p)?.get(c)?.abs() {
+                p = r;
+            }
+        }
+        let (row_c, row_p) = (*a.get(c)?, *a.get(p)?);
+        *a.get_mut(c)? = row_p;
+        *a.get_mut(p)? = row_c;
+        let pivot = *a.get(c)?.get(c)?;
+        if !(pivot.is_finite() && pivot != 0.0) {
+            return None;
+        }
+        let pivot_row = a.get(c)?.map(|x| x / pivot);
+        *a.get_mut(c)? = pivot_row;
+        for (r, row) in a.iter_mut().enumerate() {
+            if r == c {
+                continue;
+            }
+            let f = *row.get(c)?;
+            for (x, &pv) in row.iter_mut().zip(&pivot_row) {
+                *x -= f * pv;
+            }
+        }
+    }
+    let mut inv = [[0.0_f64; 5]; 5];
+    for (out, row) in inv.iter_mut().zip(&a) {
+        for (o, &x) in out.iter_mut().zip(row.iter().skip(5)) {
+            *o = x;
+        }
+    }
+    inv.iter().flatten().all(|x| x.is_finite()).then_some(inv)
+}
+
 /// The inverse (rows) of a 2 × 2 matrix given by columns.
 pub(crate) fn inverse_of_columns2(j: &[[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
     let [[a, c], [b, d]] = *j;

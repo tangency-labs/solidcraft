@@ -407,6 +407,20 @@ pub enum BlendFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// A Join of two chamfers of setbacks across a smooth seam, deferred until the roll-over
+    /// (#13710), whose blends do not stand off the section's faces by the same setbacks:
+    /// `native`, the setbacks of the blend native on the seam's side (on the face the two
+    /// share, then on the seam's face), against `other`, the other blend's (on the shared
+    /// face, then on its own face past the seam, the one its roll-over piece moves onto the
+    /// native's). The piece's section at V then lies apart from the native's, so the two do
+    /// not meet. Unsupported ([`ErrorKind::Unsupported`]): no construction joins them yet;
+    /// status `SM_ERR`.
+    DeferredJoinSetbacksDiffer {
+        /// The native blend's setbacks.
+        native: [f64; 2],
+        /// The other blend's setbacks.
+        other: [f64; 2],
+    },
     /// A curve or surface the ease of a round before a setback blends has no B-spline form
     /// (the fork's `SM_CAST_PTR(SmBSplineSurface/Curve, ..)`; [`EaseGeometry`] says which).
     /// A kind the ease does not build on ([`ErrorKind::Unsupported`]); status
@@ -1467,6 +1481,7 @@ impl BlendFailure {
             Self::CurveProjectionEmpty { .. } => SM_ERR,
             Self::CurveWithoutNet { .. } => SM_ERR,
             Self::Defect { .. } => SM_ERR,
+            Self::DeferredJoinSetbacksDiffer { .. } => SM_ERR,
             Self::EaseGeometryNotBSpline(_) => SM_ERR_NULL_POINTER,
             Self::EaseInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::EaseNotBuilt(_) => SM_ERR,
@@ -1644,6 +1659,7 @@ impl BlendFailure {
             Self::CurveProjectionEmpty { .. } => ErrorKind::NotFound,
             Self::CurveWithoutNet { .. } => ErrorKind::Unsupported,
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::DeferredJoinSetbacksDiffer { .. } => ErrorKind::Unsupported,
             Self::EaseGeometryNotBSpline(_) => ErrorKind::Unsupported,
             Self::EaseInputMissing(_) => ErrorKind::Missing,
             Self::EaseNotBuilt(stop) => stop.class(),
@@ -1834,6 +1850,7 @@ impl BlendFailure {
             Self::CurveProjectionEmpty { .. } => true,
             Self::CurveWithoutNet { .. } => true,
             Self::Defect { .. } => true,
+            Self::DeferredJoinSetbacksDiffer { .. } => true,
             Self::EaseGeometryNotBSpline(_) => true,
             Self::EaseInputMissing(_) => true,
             Self::EaseNotBuilt(_) => true,
@@ -2131,6 +2148,16 @@ impl core::fmt::Display for BlendFailure {
                 write!(f, " is a {kind} curve, which is not of a B-spline class")
             }
             Self::Defect { why } => write!(f, "{}: {why}", self.class()),
+            Self::DeferredJoinSetbacksDiffer { native, other } => write!(
+                f,
+                "{}: chamfers of setbacks meeting across a smooth seam need the same setbacks \
+                 on the faces they meet on: {} and {} against {} and {}",
+                self.class(),
+                native[0],
+                native[1],
+                other[0],
+                other[1]
+            ),
             Self::EaseGeometryNotBSpline(geometry) => {
                 write!(f, "{}: {}", self.class(), geometry.what())
             }

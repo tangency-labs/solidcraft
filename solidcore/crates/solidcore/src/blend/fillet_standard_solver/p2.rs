@@ -348,7 +348,11 @@ fn faceuse_opposite(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<bool
 /// `pEdgeuse->GetLoopuse()->GetFaceuse()->GetFace()->GetSurface()` as the base of an
 /// offset surface (the offset shares the face's surface, `m_pSurface(&rSurface)`: an
 /// exact copy, owner kept, without the copy constructor's knot fix-up).
-fn face_base(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface, SurfaceId)> {
+pub(super) fn face_base(
+    brep: &Brep,
+    eu: EdgeuseId,
+    op: &'static str,
+) -> Result<(Surface, SurfaceId)> {
     let f = edgeuse::face(brep, eu)?
         .ok_or_else(|| SolidError::invalid_input(op, "edge use without face"))?;
     let s = face::surface(brep, f)?
@@ -359,15 +363,15 @@ fn face_base(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface, S
 /// The edge-use part of the `SmConstantDistanceFS` and `SmVariableRadiusFS`
 /// constructors: the radial, the edge and its interval, the binormals at the middle of
 /// the edge and the face use normals (negated for opposite face uses).
-struct EdgeuseFrame {
-    radial: Option<EdgeuseId>,
-    bin_vec: Vec3,
-    bin_vec2: Vec3,
-    faceuse_normal: Vec3,
-    faceuse_normal2: Vec3,
+pub(super) struct EdgeuseFrame {
+    pub(super) radial: Option<EdgeuseId>,
+    pub(super) bin_vec: Vec3,
+    pub(super) bin_vec2: Vec3,
+    pub(super) faceuse_normal: Vec3,
+    pub(super) faceuse_normal2: Vec3,
 }
 
-fn edgeuse_frame(
+pub(super) fn edgeuse_frame(
     k: &Kernel,
     brep: &mut Brep,
     eu: EdgeuseId,
@@ -397,7 +401,11 @@ fn edgeuse_frame(
 }
 
 /// `new SmOffsetSurface(d, *pSurface)` with `SetAllowExtension(TRUE)`.
-fn extending_offset(k: &Kernel, d: f64, base: (Surface, SurfaceId)) -> Result<OffsetSurface> {
+pub(super) fn extending_offset(
+    k: &Kernel,
+    d: f64,
+    base: (Surface, SurfaceId),
+) -> Result<OffsetSurface> {
     let (s, id) = base;
     let mut off = OffsetSurface::new(k, d, s, id, SS_UNKNOWN)?;
     off.set_allow_extension(true);
@@ -406,7 +414,7 @@ fn extending_offset(k: &Kernel, d: f64, base: (Surface, SurfaceId)) -> Result<Of
 
 /// `m_pSurfaces[0..2]` of a solver as the constructors set them: two distinct
 /// `SmOffsetSurface` objects (keys 0 and 1).
-fn rail_slots(s0: OffsetSurface, s1: OffsetSurface) -> [Option<OffsetSurfaceSlot>; 2] {
+pub(super) fn rail_slots(s0: OffsetSurface, s1: OffsetSurface) -> [Option<OffsetSurfaceSlot>; 2] {
     [
         Some(OffsetSurfaceSlot {
             key: 0,
@@ -3664,6 +3672,167 @@ impl super::p1::LinearCrossSectionFsg {
             offsets,
             chamfer,
         )
+    }
+}
+
+impl super::p1::LinearCrossSectionFsg {
+    /// A chamfer of setbacks held at every station by its definition (not upstream, #13710):
+    /// the chord between the stations' feet, built from the rails and uv curves its solver
+    /// ([`super::setback::SetbackFs`]) traced, at the solver's stations (`points`: their s on
+    /// the edge in `user_doubles[0]`), with `leader` (the solver's extended edge, cut to
+    /// where the stations are) as the definition's leader
+    /// ([`GnSectionFsg::build_traced_setback_chord`]). The supports are the faces the trace
+    /// rolled on ([`rolled_on`]), extended (their parameters kept) past every side far enough
+    /// to hold every station's foot on it, and a margin of four times the larger setback
+    /// beyond, since a support that ends along the edge exactly where its feet do is not
+    /// proved (`setback_enclose::prove_setback_feet`): each support by the farthest any of
+    /// its feet lies from its domain (the foot's distance from the support at its uv
+    /// clamped into the domain, a chord, which the margin covers against the arc along a
+    /// curved continuation) plus the margin. The trace's extensions run their feet past the
+    /// faces by up to five setbacks of foot 0, and a foot on the other support may move
+    /// farther, so no fixed multiple of the setback holds them. A side that cannot be
+    /// extended is kept as it is. The rails, uv curves and centre line become the stations'
+    /// feet and the leader's points, over s. `None` where a face is not an offset surface.
+    ///
+    /// The build runs over increasing s; what a surface generator hands back runs along the
+    /// trace, from its first point to its last (`FlushCurve` builds every other generator's
+    /// curves over the trace's curve parameter): the geometry's start is the trace's, which
+    /// the corner code takes as the solver's start vertex (`examine_n_fix_fillet_geoms`
+    /// compares the surface's first row with the corner the geometry starts at), and a
+    /// reversed trace's geometry is reversed back whole (`c5_undo_reversal`). So where the
+    /// trace ran down the edge (its first point's s above its last's: an edge use against its
+    /// edge's curve, or a trace started from its end), the rails, the uv curves, the centre
+    /// line and the surface's u are reversed (each over its own interval; the definition's
+    /// map follows the surface's reversal) to run along it.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a chamfer that is not one of setbacks; those of the leader's cut,
+    /// the extensions (`Unported`, a cancel), the build (a chamfer that does not fit, a
+    /// net not certified, feet not proved) and the reversals.
+    #[allow(clippy::too_many_arguments)]
+    pub fn setback_surface(
+        &self,
+        k: &Kernel,
+        approx_tol_3d: f64,
+        leader: &BSplineCurve,
+        center_line: &mut BSplineCurve,
+        rails: [&mut BSplineCurve; 2],
+        points: &[TsectPnt],
+        surfaces: [&Surface; 2],
+        uv: [&mut BSplineCurve; 2],
+        chamfer: crate::surface::procedural_blend::chamfer::ChamferDefinition,
+    ) -> Result<Option<Surface>> {
+        use crate::blend::fillet_section::section::{rolled_on, GnSectionFsg, GnSetbackTrace};
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::surface::extend::Continuity;
+        use crate::surface::side::BoxSide;
+        use crate::surface::surface::SurfaceKind;
+        if !chamfer.is_setbacks() {
+            return Err(SolidError::invalid_input(
+                OP_LINEAR_DEF,
+                "a setback surface is a chamfer of setbacks",
+            ));
+        }
+        let [s1, s2] = surfaces;
+        let (SurfaceKind::OffsetSurface(o1), SurfaceKind::OffsetSurface(o2)) =
+            (s1.kind(), s2.kind())
+        else {
+            return Ok(None);
+        };
+        let [d1, d2] = chamfer.setbacks();
+        let margin = 4.0 * d1.max(d2);
+        let mut supports: Vec<Surface> = Vec::new();
+        for (rolled, srf) in [
+            (rolled_on(o1), SrfIndex::First),
+            (rolled_on(o2), SrfIndex::Second),
+        ] {
+            let base: &Surface = rolled.as_ref();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
+            let mut past = 0.0_f64;
+            for p in points {
+                let uv = p.uv_pos(srf);
+                let inside = Point2::new(
+                    uv.x.max(domain.min.x).min(domain.max.x),
+                    uv.y.max(domain.min.y).min(domain.max.y),
+                );
+                if inside != uv {
+                    let edge_of_domain = base.evaluate_point(k, inside)?;
+                    past = past.max(edge_of_domain.distance(p.srf_pos(srf)));
+                }
+            }
+            let reach = past + margin;
+            let extended = match base.extended_sides_keeping_parameters(
+                k,
+                &BoxSide::ALL,
+                Continuity::Natural,
+                reach,
+            ) {
+                Ok(e) => e.surface,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                // (a side that cannot be extended: the support as it is, which the proof
+                // refuses where a foot needs more of it)
+                Err(_) => base.clone(),
+            };
+            supports.push(extended);
+        }
+        let (Some(sup1), Some(sup2)) = (supports.first(), supports.get(1)) else {
+            return Ok(None);
+        };
+        // the leader cut to where the stations are (an unbounded line is held as a NURB far
+        // larger than the part, whose control points round coarsely), evaluated past its
+        // ends as itself
+        let mut cut_leader = leader.copy();
+        let (lo, hi) = points
+            .iter()
+            .filter_map(|p| p.user_doubles.first().copied())
+            .filter(|t| t.is_finite())
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| {
+                (lo.min(t), hi.max(t))
+            });
+        let whole = cut_leader.natural_interval();
+        if lo < hi {
+            let mut cut = Extent1d::from_min_max(lo.max(whole.min()), hi.min(whole.max()));
+            if cut.length() > 0.0 && cut != whole {
+                cut_leader.trim(
+                    k,
+                    &mut cut,
+                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                )?;
+            }
+        }
+        cut_leader.set_out_of_bounds_enabled(true);
+        let mut gn = GnSectionFsg::chord();
+        let [rail1, rail2] = rails;
+        let [uv1, uv2] = uv;
+        let built = gn.build_traced_setback_chord(
+            k,
+            GnSetbackTrace {
+                leader: &cut_leader,
+                points,
+            },
+            center_line,
+            [&mut *rail1, &mut *rail2],
+            approx_tol_3d,
+            [sup1, sup2],
+            [&mut *uv1, &mut *uv2],
+            chamfer,
+        )?;
+        let Some(mut surface) = built else {
+            return Ok(None);
+        };
+        // (handed back along the trace)
+        let s_of = |p: Option<&TsectPnt>| p.and_then(|p| p.user_doubles.first().copied());
+        if let (Some(first), Some(last)) = (s_of(points.first()), s_of(points.last())) {
+            if first > last {
+                for c in [rail1, rail2, uv1, uv2, center_line] {
+                    let ivl = c.natural_interval();
+                    c.reverse_parameterization(&ivl)?;
+                }
+                surface.reverse(k, SurfParamType::U)?;
+            }
+        }
+        Ok(Some(surface))
     }
 }
 

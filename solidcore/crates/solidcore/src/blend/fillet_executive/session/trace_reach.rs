@@ -230,10 +230,14 @@ pub(crate) fn extend_trace_to_its_rails(
 
     // the largest radius over the trace's length: the edge, and for a variable round (its
     // law growing on) as far past the ends as SmVariableRadiusFS::LoadInitialValues lets it run
-    let mut radius = smos_max(
-        offsets[0].offset_distance().abs(),
-        offsets[1].offset_distance().abs(),
-    );
+    // (a chamfer of setbacks, #13710, has offsets 0: its feet reach as far as its setbacks)
+    let mut stand_offs = [0.0; 2];
+    for (rail, (slot, offset)) in stand_offs.iter_mut().zip(&offsets).enumerate() {
+        *slot = base
+            .stand_off_from(rail, Some(offset.offset_distance()))?
+            .ok_or_else(|| SolidError::invalid_input(OP, "a stand-off without its offset"))?;
+    }
+    let mut radius = smos_max(stand_offs[0], stand_offs[1]);
     let factor = base.extension_factor();
     let edgeuses = [base.edgeuse(0)?, base.edgeuse(1)?];
     if let SolverObject::VariableRadius(vr) = &mut *solver {

@@ -283,7 +283,8 @@ pub enum IntersectFailure {
     /// with at its parameter. Class `failed`.
     PointClassNotInserted,
     /// The caller gave `given` points, a number the routine does not take (a law
-    /// intersection takes exactly two, a point intersection at least one).
+    /// intersection takes exactly two, a trace at a solver's stations at least two, a point
+    /// intersection at least one).
     /// [`ErrorKind::InvalidInput`].
     PointCountNotTaken {
         /// The number of points given.

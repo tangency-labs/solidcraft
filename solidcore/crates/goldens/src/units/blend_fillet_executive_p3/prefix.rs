@@ -130,6 +130,7 @@ fn snapshot(session: &FilletSession<'_>, parameters: &mut Vec<f64>) -> SolidResu
             SolverObject::ConstantDistance(s) => s.solver_type(),
             SolverObject::VariableRadius(s) => s.solver_type(),
             SolverObject::SurfaceSurface(s) => s.solver_type(),
+            SolverObject::Setback(s) => s.solver_type(),
         };
         state.extend([
             f64::from(solver_type as u32),

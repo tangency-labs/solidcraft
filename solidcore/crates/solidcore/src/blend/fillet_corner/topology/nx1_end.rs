@@ -173,6 +173,15 @@ pub fn find_surface_extension_dist_at_corner(
         SolverObject::VariableRadius(vr) => {
             ext_dist = variable_radius_at_vertex(target, fillet_edgeuse, vr, corner_vertex)?;
         }
+        // (#13710) a chamfer of setbacks: its larger setback, its size as a distance's
+        SolverObject::Setback(sb) => {
+            let base = &sb.curve_based.solver;
+            for rail in 0..2 {
+                if let Some(stand_off) = base.stand_off(rail)? {
+                    ext_dist = ext_dist.max(stand_off);
+                }
+            }
+        }
         // SE(SM_ERR): reported only
         SolverObject::SurfaceSurface(_) => {}
     }

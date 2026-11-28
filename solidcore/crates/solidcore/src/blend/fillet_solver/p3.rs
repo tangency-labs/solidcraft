@@ -454,7 +454,24 @@ impl FilletSolver {
 
             // branch on SolverType
             let solver_type = ops.solver_type()?;
-            if solver_type == FilletSolverType::ConstDist {
+            if solver_type == FilletSolverType::Setbacks {
+                // (#13710) a chamfer of setbacks: the foot on the boundary iso-line and its
+                // station solved together, the other foot at that station
+                let setback = ops
+                    .setback_mut()
+                    .ok_or_else(|| invalid("setbacks type without its solver"))?;
+                let domains = setback.trace_domains(k)?;
+                match setback.clipped_feet(k, si, surf_param, iso_param, uv, &domains)? {
+                    Some((feet, s)) => {
+                        uv = feet;
+                        out.found_good_point = true;
+                        *next.uv_pos_mut(SrfIndex::First) = uv[0];
+                        *next.uv_pos_mut(SrfIndex::Second) = uv[1];
+                        next.user_doubles[0] = s;
+                    }
+                    None => out.found_good_point = false,
+                }
+            } else if solver_type == FilletSolverType::ConstDist {
                 // Implicit radius at the boundary: the chord or setback of the
                 // crossing's two rails.
                 let stationwise = ops.solver().station_setback().is_some();

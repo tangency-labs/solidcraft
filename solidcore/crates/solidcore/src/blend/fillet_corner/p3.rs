@@ -354,6 +354,11 @@ pub struct FilletCorner {
     /// The fork's `m_pEndCap` (smlib 41a39ec, WR-697): an End at a smooth vertex's plane
     /// square to its edge there (`GetEndCapSurface`), set by its topology.
     pub end_cap: Option<Surface>,
+    /// Not upstream (#13710): a Join of two chamfers of setbacks at a smooth seam, whose
+    /// shared section lies in the vertex's station plane and which one blend reaches only
+    /// past its own face (`join::setback_seam_sides`): its vertices and edges are computed
+    /// after the rails' classification, once the roll-over pieces exist.
+    pub deferred_join: bool,
     /// Not upstream (solidcore-native): for each rail of an Nx1 end that ends inside the face
     /// it rolled onto ([`crate::blend::fillet_corner::topology::nx1_end::TurnedBack`]), the cap
     /// edge along the foot edge's continuation there (an `SM_FE_ON_EXTEND_EDGE` fillet edge).
@@ -644,7 +649,8 @@ fn no_mate(op: &'static str, eu: EdgeuseId) -> SolidError {
 /// this distance, so where the side faces meet at an angle `a` the shared section of a Join
 /// stands at most `2 size tan(a / 2)` off the blends
 /// (`blend_corner::join_within_xsect_tolerance_deg` derives it). `0` where it has no offset
-/// surface yet.
+/// surface yet. A chamfer of setbacks (#13710), whose offsets stand at 0, its larger
+/// setback ([`FilletSolver::stand_off`]).
 ///
 /// # Errors
 ///
@@ -652,8 +658,8 @@ fn no_mate(op: &'static str, eu: EdgeuseId) -> SolidError {
 fn round_size(solver: &FilletSolver) -> Result<f64> {
     let mut size = 0.0_f64;
     for rail in 0..2 {
-        if let Some(slot) = solver.surface(rail)? {
-            size = size.max(slot.surface.offset_distance().abs());
+        if let Some(stand_off) = solver.stand_off(rail)? {
+            size = size.max(stand_off);
         }
     }
     Ok(size)
@@ -740,6 +746,7 @@ impl FilletCorner {
             mixed: None,
             support_ball: None,
             end_cap: None,
+            deferred_join: false,
             turned_back_arcs: [None, None],
             roll_over: false,
             seam_short_of_rails: None,

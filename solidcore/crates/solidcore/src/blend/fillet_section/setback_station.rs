@@ -38,7 +38,9 @@
 //!   convex side of the edge never cross: a chamfer of 6 around a hole of radius 5 is not
 //!   refused by it.
 //! - **The foot.** Foot i is the first transversal crossing of support i's section with the
-//!   circle of radius `d_i` about the edge point, counted from the edge, with a proof that no
+//!   circle of radius `d_i` about the edge point, counted from the edge (read as from the
+//!   edge's projection on the support, since the edge lies on it only within tolerance), with
+//!   a proof that no
 //!   nearer root exists. A tangency, a double root, a section that never reaches `d_i`
 //!   (`|d k| ≥ 2` on a circle of curvature k), or a foot past the polar line does not fit:
 //!   the asked chamfer is too large there.
@@ -56,9 +58,10 @@
 //! cross-section (a rational net with unequal weights there is projective in t, not affine),
 //! and the net's s along the rails is the definition's s through the stored map.
 //!
-//! The certified enclosures of these systems over an s-span (Krawczyk's operator on the foot
-//! system with s as an interval, the first-crossing exclusion, the crossing condition by
-//! enclosure) are not here yet; the functions below are the point solves they start from.
+//! The certified enclosures of these systems over an s-span (Krawczyk's operator over Taylor
+//! models in s, the first-crossing proof, the crossing condition by enclosure, the chord's
+//! coupled system) are [`super::setback_enclose`]'s; the functions below are the point
+//! solves they start from.
 //! The tests check them against the closed form on a circle section of curvature k,
 //! `F = C + d (cos β t + sin β w)`, `β = asin(d k / 2)`.
 //!
@@ -95,6 +98,14 @@ pub struct SetbackFoot {
     /// `∂S/∂d`: the foot's motion per unit of setback at this station (the implicit function
     /// theorem on the foot's system).
     pub along: Vec3,
+    /// `∂(u, v)/∂s`: the foot's parameters' motion per unit of the edge's parameter at a
+    /// fixed setback (the implicit function theorem on the foot's system in s, no difference
+    /// quotient).
+    pub uv_per_s: Point2,
+    /// `∂S/∂s = S_u ∂u/∂s + S_v ∂v/∂s`: the foot's motion per unit of the edge's parameter.
+    /// At the root `∂S/∂s · C′ = |C′|² − (S − C) · C″` (the system's second row), positive
+    /// exactly where the foot is short of the edge's polar line (module docs).
+    pub per_s: Vec3,
 }
 
 /// The feet of a chord at one station, and the equal setback that puts them `chord` apart.
@@ -142,14 +153,24 @@ pub fn setback_tangent(
         return Ok(None);
     }
     let t = b * (1.0 / length);
-    let side = t.dot(into);
-    Ok(if !side.is_finite() || side == 0.0 {
-        None
-    } else if side > 0.0 {
-        Some(t)
-    } else {
-        Some(-t)
+    Ok(match on_wedge_side(t, into) {
+        None => None,
+        Some(true) => Some(t),
+        Some(false) => Some(-t),
     })
+}
+
+/// Whether `arm` (a direction from the edge, or a foot less the edge point) points to the side
+/// of `into` (a vector from the edge into the wedge across the support, the other support's
+/// normal oriented to the wedge's interior): `arm · into > 0`. `None` where that product is
+/// zero or not finite. The one branch test of a chamfer of setbacks: [`setback_tangent`]
+/// picks the tangent into the face by it, and a station's solved foot must pass it against
+/// that tangent (the setback's circle crosses the extended support twice, once into the face
+/// and once beyond the edge, two setbacks apart).
+#[must_use]
+pub fn on_wedge_side(arm: Vec3, into: Vec3) -> Option<bool> {
+    let side = arm.dot(into);
+    (side.is_finite() && side != 0.0).then_some(side > 0.0)
 }
 
 /// The (u, v) of `C + d t` on the support to first order, Newton's start for the foot at
@@ -229,8 +250,16 @@ pub fn setback_foot(
 
 /// The foot at `uv`, the root of the foot's system for setback `d`, with its motion in d:
 /// `∂(u, v)/∂d = J⁻¹ (d, 0)` (the system's partial in d is `(−d, 0)`), so
-/// `∂S/∂d = S_u ∂u/∂d + S_v ∂v/∂d`.
-fn foot_at(
+/// `∂S/∂d = S_u ∂u/∂d + S_v ∂v/∂d`; and in the edge's parameter s:
+/// `∂(u, v)/∂s = J⁻¹ ((S − C) · C′, |C′|² − (S − C) · C″)` (the system's partial in s is
+/// `(−(S − C) · C′, (S − C) · C″ − |C′|²)`; its first entry vanishes at the root), so
+/// `∂S/∂s = S_u ∂u/∂s + S_v ∂v/∂s`. `None` where the system is singular at `uv` or the point
+/// or `∂S/∂d` is not finite (a `∂S/∂s` that is not finite is the caller's to judge).
+///
+/// # Errors
+///
+/// Those of the support's evaluation.
+pub(crate) fn foot_at(
     k: &Kernel,
     support: &Surface,
     edge: &EdgeJet,
@@ -245,11 +274,17 @@ fn foot_at(
     };
     let [du, dv] = times(&inverse, [d, 0.0]);
     let along = su * du + sv * dv;
+    let [us, vs] = times(
+        &inverse,
+        [g.dot(edge.d1), edge.d1.dot(edge.d1) - g.dot(edge.d2)],
+    );
     let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
     Ok((finite(s) && finite(along)).then_some(SetbackFoot {
         uv,
         point: s,
         along,
+        uv_per_s: Point2::new(us, vs),
+        per_s: su * us + sv * vs,
     }))
 }
 
@@ -464,6 +499,84 @@ mod tests {
                 assert!((g.dot(foot.along) / d - 1.0).abs() < 1e-10, "{foot:?}");
                 assert!(foot.along.dot(e.d1).abs() < 1e-10, "{foot:?}");
             }
+        }
+    }
+
+    /// The hemisphere rim's stations as the Gn station system solves them in its setbacks
+    /// mode ([`GnSystem::setbacks`](super::super::station::GnSystem::setbacks), the system
+    /// the definition, the certificate and recertify solve): the flat foot is `(3/5) C(s)` and
+    /// the ball's `(4.9/5) C(s) + (3 sqrt(11) / 10) z`, so each foot's s-series is
+    /// a fixed multiple of the leader's own (to order 4), whatever the leader's parametrisation.
+    #[test]
+    fn the_station_system_s_setbacks_mode_gives_the_rim_s_feet_and_their_series() {
+        use crate::blend::fillet_section::series::Trunc;
+        use crate::blend::fillet_section::station::{
+            gn_solve_station_with, leader_series, StationOptions,
+        };
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        let k = Kernel::default();
+        let (fl, bl) = (flat(), ball(&k));
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            R,
+            10.0,
+            80.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let (lo, hi) = (
+            leader.natural_interval().min(),
+            leader.natural_interval().max(),
+        );
+        let height = 3.0 * 11.0_f64.sqrt() / 10.0;
+        // (the series hold order 5 in s; the leader's tangent takes one more)
+        let order = 4;
+        let tr = Trunc::new(order, 0).unwrap();
+        for frac in [0.2, 0.5, 0.8] {
+            let s = lo + frac * (hi - lo);
+            let c = leader.evaluate_point(s).unwrap();
+            let out = Vec3::new(c.x, c.y, 0.0) * (1.0 / R);
+            let feet = [out * 3.0, out * 4.9 + Vec3::Z * height];
+            // seeds near the feet, not on them
+            let [a, b] = [uv_of(&k, &fl, feet[0]), uv_of(&k, &bl, feet[1])];
+            let seed = [a.x + 1e-3, a.y - 1e-3, b.x + 1e-3, b.y + 1e-3];
+            let opts = StationOptions {
+                setbacks: true,
+                ..StationOptions::default()
+            };
+            let (st, _) = gn_solve_station_with(
+                &k,
+                [&fl, &bl],
+                &leader,
+                s,
+                seed,
+                [2.0, 1.0],
+                [1.0, 1.0],
+                tr,
+                1e-12,
+                opts,
+            );
+            let st = st.unwrap().0;
+            let (l, _) = leader_series(&leader, s, tr).unwrap();
+            for (foot, (scale, lift)) in st.f.iter().zip([(0.6, 0.0), (0.98, height)]) {
+                for i in 0..=order {
+                    for (j, (fj, lj)) in foot.a.iter().zip(&l.a).enumerate() {
+                        let lc = lj.at(i, 0);
+                        let want = scale * lc + if i == 0 && j == 2 { lift } else { 0.0 };
+                        let got = fj.at(i, 0);
+                        assert!(
+                            (got - want).abs() <= 1e-9 * (1.0 + lc.abs()),
+                            "s {s}, order {i}, coordinate {j}: {got} vs {want}"
+                        );
+                    }
+                }
+            }
+            // the station's point is the edge's (no ball)
+            let [vx, vy, vz] = st.v.a.each_ref().map(|c| c.at(0, 0));
+            assert!(close(Point3::new(vx, vy, vz), c, 1e-12), "{:?}", st.v);
         }
     }
 

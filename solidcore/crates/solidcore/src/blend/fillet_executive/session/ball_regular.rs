@@ -191,6 +191,7 @@ pub(crate) fn ops_of(solver: &mut SolverObject) -> &mut dyn FilletSolverOps {
         SolverObject::VariableRadius(s) => s.as_mut(),
         SolverObject::ConstantDistance(s) => s.as_mut(),
         SolverObject::SurfaceSurface(s) => s.as_mut(),
+        SolverObject::Setback(s) => s.as_mut(),
     }
 }
 
@@ -199,7 +200,9 @@ fn constant_radii(solver: &SolverObject) -> Option<[f64; 2]> {
     match solver {
         SolverObject::ConstantRadius(s) => Some(s.fillet_radii),
         SolverObject::SurfaceSurface(s) => Some(s.base.fillet_radii),
-        SolverObject::VariableRadius(_) | SolverObject::ConstantDistance(_) => None,
+        SolverObject::VariableRadius(_)
+        | SolverObject::ConstantDistance(_)
+        | SolverObject::Setback(_) => None,
     }
 }
 
@@ -262,7 +265,9 @@ pub fn set_ball_radius(solver: &mut SolverObject, radius: f64) -> Result<bool> {
     let (radii, base): (&mut [f64; 2], &mut FilletSolver) = match solver {
         SolverObject::ConstantRadius(s) => (&mut s.fillet_radii, &mut s.solver),
         SolverObject::SurfaceSurface(s) => (&mut s.base.fillet_radii, &mut s.base.solver),
-        SolverObject::VariableRadius(_) | SolverObject::ConstantDistance(_) => return Ok(false),
+        SolverObject::VariableRadius(_)
+        | SolverObject::ConstantDistance(_)
+        | SolverObject::Setback(_) => return Ok(false),
     };
     *radii = [radius, radius];
     let orientations = base.orientations;

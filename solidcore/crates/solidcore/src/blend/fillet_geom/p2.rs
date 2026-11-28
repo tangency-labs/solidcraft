@@ -610,6 +610,14 @@ fn solver_surface<'s>(
     }
 }
 
+/// Not upstream (#13710): `fs`'s stand-off from rail `i`'s face
+/// ([`FilletSolver::stand_off_from`]), `offset` the signed distance of the rail's offset
+/// surface ([`solver_surface`]): `|offset|`, or a chamfer of setbacks' setback.
+fn stand_off(fs: &FilletSolver, i: usize, offset: f64, op: &'static str) -> Result<f64> {
+    fs.stand_off_from(i, Some(offset))?
+        .ok_or_else(|| missing_set_up(op, FilletSetUp::SolverOffsetSurface))
+}
+
 /// A step of the routine `op` that cannot fail unless the kernel broke its own contract: a
 /// reviewed [`BlendFailure::Defect`] whose `why` says why (the reasons are the `const`s at
 /// the end of this file), keeping upstream's `SM_ERR`; its origin is the call's file and line
@@ -2937,7 +2945,9 @@ impl FilletBrep {
         let mut past_end = false;
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
         for ((slot, end), (fs, index)) in uv.iter_mut().zip(ends.iter_mut()).zip(pairs) {
-            let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
+            // (#13710) a chamfer of setbacks' feet stand its setback along this face
+            let offset = solver_surface(fs, index, OP)?.offset_distance();
+            let offset_distance = stand_off(fs, index, offset, OP)?;
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
             let ivl = edge::interval(target, e)?;
@@ -3230,7 +3240,14 @@ impl FilletBrep {
             .approximate_length(k, &ivl, 5, false)?
             .0;
         if let Some(off_srf) = solvers.offset_surface(self, first, 0)? {
-            let rad = off_srf.offset_distance().abs();
+            // (#13710) a chamfer of setbacks' rail 0 stands its first setback off the edge
+            let offset = off_srf.offset_distance();
+            let rad = stand_off(
+                solvers.solver(RailSolvers::geom_solver(self, first)?)?,
+                0,
+                offset,
+                OP,
+            )?;
             if side_edge_length > rad / 2.0 {
                 let mut frac = rad / side_edge_length;
                 if !from_start {
@@ -3887,7 +3904,9 @@ impl FilletBrep {
         }
 
         // Determine if we need to step off the edge to avoid convergence problems
-        let stepoff_dist = solver_surface(fs1, 0, OP)?.offset_distance().abs();
+        // (#13710) a chamfer of setbacks steps off by its first setback
+        let offset = solver_surface(fs1, 0, OP)?.offset_distance();
+        let stepoff_dist = stand_off(fs1, 0, offset, OP)?;
         let mut curve_stepoff_dist = stepoff_dist;
         let curve_len = curve.approximate_length(k, &ivl, 10, false)?.0;
         let max_stepoff_dist = curve_len * 0.15;
@@ -4101,6 +4120,9 @@ impl FilletBrep {
         let at_cliff = owner
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
+        // (#13710) a Join of chamfers of setbacks at a smooth seam: its section's ends are
+        // those of the blend whose own faces are the section's two (`join::setback_seam_sides`)
+        let deferred = owner.deferred_join;
         let cp_vertex = owner
             .filleted_vertex()
             .ok_or_else(|| missing_set_up(OP, FilletSetUp::CornerVertex))?;
@@ -4152,6 +4174,16 @@ impl FilletBrep {
                     .ok_or_else(|| defect(OP, SHORT_EVALUATION))?;
             }
 
+            // (#13710) a deferred Join's tangent roll-over piece keeps the rail ends its trace
+            // through the shared section's plane set (on its own offsets, the face beyond:
+            // `Recovery::set_deferred_join_ends`); the solver's offsets here are not its own
+            if deferred
+                && self.geom(g)?.fillet_geom_type()
+                    == crate::blend::fillet_geom::p1::FilletGeomType::TangentRollover
+            {
+                continue;
+            }
+
             // the ball's feet at the vertex, on each of the blend's faces
             let mut uvs = [Point2::new(0.0, 0.0); 2];
             // (#21940) the solver's rail on the face whose seam ends inside the band
@@ -4161,7 +4193,8 @@ impl FilletBrep {
                 let side_eu = solver_edgeuse(fs, ii, OP)?;
                 let on_seam_face = seam_face.is_some() && eu1::face(target, side_eu)? == seam_face;
                 let offset = solver_surface(fs, ii, OP)?;
-                let distance = offset.offset_distance().abs();
+                // (#13710) a chamfer of setbacks' foot stands its setback along this face
+                let distance = stand_off(fs, ii, offset.offset_distance(), OP)?;
                 let base = offset.base_surface().clone();
                 let b = evaluate_binormal(
                     k,
@@ -4278,6 +4311,26 @@ impl FilletBrep {
                 domain1.add_point(uv0);
                 domain2.add_point(uv1);
             }
+            // (#13710) at a deferred Join the blend not native on a side has its foot there
+            // off its own face (`join::setback_seam_sides` defers only then, having found
+            // that foot over the trace's domains): that rail (its face not one of the
+            // section's two) is solved over the trace's domain, which a support trimmed to
+            // its face does not hold otherwise. Every other rail keeps its natural domain,
+            // its foot on its own face, so a wider one cannot reach its mirror root
+            if deferred {
+                let fs = solvers.solver(sid)?;
+                let wide = fs.trace_domains(k)?;
+                for (rail, (domain, wide)) in [&mut domain1, &mut domain2]
+                    .into_iter()
+                    .zip(wide)
+                    .enumerate()
+                {
+                    let face = eu1::face(target, solver_edgeuse(fs, rail, OP)?)?;
+                    if face != Some(first_face) && face != Some(other_face) {
+                        *domain = wide;
+                    }
+                }
+            }
             // (#21940) the blend's rails never cross the seam that ends inside the band: its rail
             // ends' feet on that face keep their names in the domain (`c1_collect_points`). Set
             // each time the section is solved, so a corner rebuilt without such a seam (another
@@ -4352,7 +4405,7 @@ impl FilletBrep {
             // puts the section's end there when only the other blend rolls over); a blend
             // still on its own face there has its feet on that face's surface, not the face
             // beyond's
-            let first = if !any_rolled {
+            let first = if !any_rolled && !deferred {
                 (gg == 0).then_some(usize::from(eu1::face(target, eu)? != Some(first_face)))
             } else if ends.is_some() {
                 None
@@ -4391,7 +4444,7 @@ impl FilletBrep {
         if let Some((uv_first, p_first, uv_other, p_other)) = ends {
             self.set_processed(v, uv_first, p_first)?;
             self.set_processed(mate, uv_other, p_other)?;
-        } else if any_rolled {
+        } else if any_rolled || deferred {
             // no blend of the join rolls on the two faces its shared section ends on
             return Err(SolidError::blend(
                 OP,

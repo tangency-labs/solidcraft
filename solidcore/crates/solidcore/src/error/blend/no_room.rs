@@ -68,6 +68,9 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::RailPastAxis => ErrorKind::RailPastAxis,
         R::RailRunsPastFaceIntoMaterial => ErrorKind::RunsIntoMaterial,
         R::RoundIntoMaterial => ErrorKind::RunsIntoMaterial,
+        // a chamfer of setbacks too large where its foot's section touches the setback's circle
+        R::SetbackFootTangent => ErrorKind::BallDoesNotFit,
+        R::SetbacksCross => ErrorKind::BallsFold,
         R::StripBelowResolution => ErrorKind::StripBelowResolution,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
     }

@@ -462,6 +462,7 @@ fn system_tm<'a>(
     side: [f64; 2],
     law: Option<&'a Ser<Ft>>,
     equal_setback: Option<f64>,
+    setbacks: bool,
 ) -> GnSystem<'a, Ft> {
     let [p0, p1] = p;
     GnSystem {
@@ -473,6 +474,7 @@ fn system_tm<'a>(
         hold: false,
         law,
         equal_setback,
+        setbacks,
     }
 }
 
@@ -522,6 +524,7 @@ pub fn gn_enclose_tm(
         return Ok(None);
     }
     let equal_setback = law.and_then(GnLaw::equal_setback);
+    let setbacks = law.is_some_and(GnLaw::is_setbacks);
     let law_r = match law {
         Some(law @ GnLaw::Curve { .. }) => Some(tm_try!(law_series_tm(law, mid, delta, order_s))),
         _ => None,
@@ -567,6 +570,7 @@ pub fn gn_enclose_tm(
         side,
         law_r,
         equal_setback,
+        setbacks,
     ));
     let jm = jac0.map(|row| row.map(|j| j.c.first().map_or(f64::NAN, |c| c.mid())));
     let y = tm_try!(inverse4(&jm));
@@ -619,6 +623,7 @@ pub fn gn_enclose_tm(
             side,
             law_r,
             equal_setback,
+            setbacks,
         ));
         let (_, cr, q) = contraction_ranges(&y, &jac);
         let contracts = q < 1.0;
@@ -672,6 +677,7 @@ pub fn gn_enclose_tm(
         side,
         law_r,
         equal_setback,
+        setbacks,
     ));
     let (cm, cr, q) = contraction_ranges(&y, &jk);
     // 1 - q rounded down: the quotient rounded up is then at least the exact one
@@ -679,7 +685,16 @@ pub fn gn_enclose_tm(
     if !(gap.is_finite() && gap > 0.0) {
         return Ok(None);
     }
-    let sysk = system_tm(&pk, &leader, &tangent, r, side, law_r, equal_setback);
+    let sysk = system_tm(
+        &pk,
+        &leader,
+        &tangent,
+        r,
+        side,
+        law_r,
+        equal_setback,
+        setbacks,
+    );
     let mut sx = x0.map(Ser::constant);
     // each order's G takes the lower orders' series as the last one left them: they are
     // kept, and only the coefficients x's new ones reach are computed (bit for bit a
