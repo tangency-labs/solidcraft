@@ -459,6 +459,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "angle: expr; ",
             "direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); ",
             "pivot?: point ref (only with direction_only; vertex, sketch point, construction point); ",
+            "through_axis?: bool (default false: the base turns about the axis where it is; true: the base is first brought onto the axis, so the plane goes through it even when it is off the base; not with direction_only); ",
             "name?",
         )),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face)).begins_edit()
@@ -1598,17 +1599,7 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     if ps.iter().all(|p| p.region.holes.is_empty()) && !gaps.iter().any(|g| *g) {
         return ProfileSel::All;
     }
-    // Each profile has the profiles directly inside it as holes, so the number of holes around a
-    // point of a profile's material is its nesting depth.
-    let material: Vec<_> = ps
-        .iter()
-        .zip(&gaps)
-        .filter(|(p, gap)| {
-            let probe = p.region.interior_point();
-            !**gap && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
-        })
-        .map(|(p, _)| p)
-        .collect();
+    let material = material_profiles(&ps, &gaps);
     let all = solidcraft_sketch::without_text_counters(&ss.sketch, ps.clone());
     if material.iter().map(|p| &p.outer_curves).eq(all.iter().map(|p| &p.outer_curves)) {
         return ProfileSel::All;
@@ -1626,6 +1617,23 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
         Ok(found) if found.len() == material.len() && material.iter().all(|p| !p.outer_curves.is_empty()) => sel,
         _ => ProfileSel::All,
     }
+}
+
+/// The material among a sketch's profiles, by even-odd nesting: a loop inside an outline is its
+/// hole, a loop inside that hole material again. Each profile has the profiles directly inside it
+/// as holes, so the number of holes around a point of a profile's material is its nesting depth.
+/// A profile marked in `gaps` ([`solidcraft_sketch::enclosed_gaps`]) is never material; one past
+/// the end of `gaps` is not a gap.
+pub(super) fn material_profiles<'a>(ps: &'a [solidcraft_sketch::Profile], gaps: &[bool]) -> Vec<&'a solidcraft_sketch::Profile> {
+    ps.iter()
+        .enumerate()
+        .filter(|(i, p)| {
+            let probe = p.region.interior_point();
+            !gaps.get(*i).copied().unwrap_or(false)
+                && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
+        })
+        .map(|(_, p)| p)
+        .collect()
 }
 
 /// The matrix taking a point of the active component's frame into the frame `b`'s geometry is
@@ -4666,6 +4674,13 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
         None => None,
     };
+    if p.get("through_axis").is_some_and(|v| !v.is_boolean() && !v.is_null()) {
+        return Err(bad(cmd, "`through_axis` must be true or false"));
+    }
+    let through_axis = crate::params::bool_(p, "through_axis").unwrap_or(false);
+    if through_axis && direction_only {
+        return Err(bad(cmd, "`through_axis` and `direction_only` exclude each other: pick one"));
+    }
     let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(base),
         axis_origin: axis_origin.clone(),
@@ -4674,6 +4689,7 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         line: line.clone(),
         direction_only,
         pivot: pivot.clone(),
+        through_axis,
     };
     // No reference plane, with a body edge as the axis: a flat face that meets the edge, so the
     // plane goes through the edge and the angle is measured from that face (#20233).

@@ -215,7 +215,9 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     crate::shared::run(root)?;
     crate::ui_containers::run(root)?;
     crate::mesh_decisions::run(root)?;
-    crate::app_geometry::run(root, &[])?;
+    // The same base as the path-picked checks (#22688): a fork clone's `origin/main` may be weeks old.
+    let base: Vec<&str> = o.base.as_deref().map(|b| vec!["--base", b]).unwrap_or_default();
+    crate::app_geometry::run(root, &base)?;
     let mut c = crate::cargo();
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     crate::run(c, "cargo clippy -D warnings")?;

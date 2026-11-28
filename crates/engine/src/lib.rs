@@ -94,6 +94,7 @@ pub use cmd::find_command;
 pub use cmd::motion::AutomaticExplode;
 pub use cmd::normalize_command_id;
 pub use cmd::resolve_design_links;
+pub use cmd::scan_align::preview_align as preview_scan_align;
 pub use cmd::settings::MAX_PROFILE_NAME;
 pub use cmd::settings::profile_name;
 pub use cmd::shown_scope;
@@ -3125,6 +3126,12 @@ impl Session {
         self.visibility_revision += 1;
     }
 
+    /// Revision of the document and its evaluated model within this session. Selecting or
+    /// hiding an item redraws the view without changing either input.
+    pub fn model_revision(&self) -> u64 {
+        self.revision.wrapping_sub(self.visibility_revision)
+    }
+
     /// Show the sketch a live frame changed, leaving the features after it as they were last
     /// evaluated (marked stale); a full `refresh` when the model cannot show it that way.
     fn refresh_live(&mut self, edit: LiveEdit) {
@@ -4588,7 +4595,8 @@ impl Session {
         Ok((self, replies))
     }
 
-    /// Measure one or two selections (see `inspect.measure` with `items`); errors come back as
+    /// Measure one or two selections, or three or more round ones for their spacing (see
+    /// `inspect.measure` with `items`); errors come back as
     /// `{"error": …}`.
     pub fn measure_items(&self, items: &[Sel]) -> Value {
         let v = serde_json::to_value(items).unwrap_or(Value::Null);

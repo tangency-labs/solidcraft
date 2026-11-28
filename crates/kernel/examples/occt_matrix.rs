@@ -18,7 +18,7 @@
 use std::f64::consts::PI;
 use std::time::Instant;
 
-use solidcore_record::Vec3;
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_kernel::foreign::{self, Kernel};
 use solidcraft_kernel::{Body, BoolOp, Result};
 
@@ -48,6 +48,16 @@ fn v(x: f64, y: f64, z: f64) -> Vec3 {
 
 fn some(b: Result<Body>) -> Result<Option<Body>> {
     b.map(Some)
+}
+
+/// The one body of a profile operation.
+fn one(b: Result<Vec<Body>>) -> Result<Option<Body>> {
+    let mut b = b?;
+    Ok(if b.len() == 1 { b.pop() } else { None })
+}
+
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop2 {
+    Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)])
 }
 
 fn cube(lo: f64, hi: f64) -> Result<Body> {
@@ -143,6 +153,66 @@ fn cases() -> Vec<Case> {
             op: "torus",
             name: "minor above major",
             build: || some(solidcraft_kernel::torus(v(0.0, 0.0, 0.0), 1.0, 2.0)),
+            answer: Answer::Refused,
+        },
+        Case {
+            op: "extrude",
+            name: "a 4×3 rectangle, 5 up",
+            build: || one(solidcraft_kernel::extrude(&Plane::XY, &[Region2 { outer: rect(0.0, 0.0, 4.0, 3.0), holes: vec![] }], 0.0, 5.0)),
+            answer: Answer::Solid { volume: 60.0, area: Some(94.0) },
+        },
+        Case {
+            op: "extrude",
+            name: "a 10 plate with an r 2 hole, 3 thick, from -1",
+            build: || {
+                let r = Region2 { outer: rect(0.0, 0.0, 10.0, 10.0), holes: vec![Loop2::circle(Vec2::new(5.0, 5.0), 2.0)] };
+                one(solidcraft_kernel::extrude(&Plane::XY, &[r], -1.0, 2.0))
+            },
+            answer: Answer::Solid { volume: 300.0 - 12.0 * PI, area: Some(2.0 * (100.0 - 4.0 * PI) + 120.0 + 12.0 * PI) },
+        },
+        Case {
+            op: "extrude",
+            name: "an r 3 disc on a tilted plane, 4 long, whole sides",
+            build: || {
+                let pl = Plane { origin: v(1.0, 2.0, 3.0), x: v(0.6, 0.8, 0.0), y: v(0.0, 0.0, 1.0) };
+                let r = Region2 { outer: Loop2::circle(Vec2::new(1.0, 2.0), 3.0), holes: vec![] };
+                one(solidcraft_kernel::extrude_whole_sides(&pl, &[r], 0.0, 4.0, &|_, _| true))
+            },
+            answer: Answer::Solid { volume: 36.0 * PI, area: Some(18.0 * PI + 24.0 * PI) },
+        },
+        Case {
+            op: "extrude",
+            name: "zero distance",
+            build: || one(solidcraft_kernel::extrude(&Plane::XY, &[Region2 { outer: rect(0.0, 0.0, 1.0, 1.0), holes: vec![] }], 1.0, 1.0)),
+            answer: Answer::Refused,
+        },
+        Case {
+            op: "revolve",
+            name: "a 2×3 rectangle 2 off the axis, a full turn",
+            build: || {
+                let r = Region2 { outer: rect(2.0, 0.0, 4.0, 3.0), holes: vec![] };
+                one(solidcraft_kernel::revolve_whole(&Plane::XZ, &[r], Vec2::ZERO, Vec2::new(0.0, 1.0), 2.0 * PI))
+            },
+            // Pappus: the section 6 about its centroid at 3; the walls 2π·4·3 and 2π·2·3, the
+            // two rings π(16 − 4).
+            answer: Answer::Solid { volume: 36.0 * PI, area: Some(24.0 * PI + 12.0 * PI + 24.0 * PI) },
+        },
+        Case {
+            op: "revolve",
+            name: "an r 2, 5 tall rectangle on the axis, a quarter turn",
+            build: || {
+                let r = Region2 { outer: rect(0.0, 0.0, 2.0, 5.0), holes: vec![] };
+                one(solidcraft_kernel::revolve(&Plane::XZ, &[r], Vec2::ZERO, Vec2::new(0.0, 1.0), PI / 2.0))
+            },
+            answer: Answer::Solid { volume: 5.0 * PI, area: Some(2.0 * PI + 20.0 + 5.0 * PI) },
+        },
+        Case {
+            op: "revolve",
+            name: "a zero turn",
+            build: || {
+                let r = Region2 { outer: rect(2.0, 0.0, 4.0, 3.0), holes: vec![] };
+                one(solidcraft_kernel::revolve(&Plane::XZ, &[r], Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0))
+            },
             answer: Answer::Refused,
         },
         Case {
@@ -341,7 +411,7 @@ fn main() {
     let mut summary = String::from(
         "\n| op | cases | solidcore pass | occt pass / fail / unsupported | occt looser than solidcore (any / above 1e-12) |\n|---|---|---|---|---|\n",
     );
-    for op in ["box", "cylinder", "sphere", "torus", "boolean", "fillet"] {
+    for op in ["box", "cylinder", "sphere", "torus", "extrude", "revolve", "boolean", "fillet"] {
         let of: Vec<&serde_json::Value> = rows.iter().filter(|r| r["op"] == op).collect();
         let count = |k: &str, v: &str| of.iter().filter(|r| r[k]["verdict"] == v).count();
         // Looser: larger than solidcore's beyond the last bits (1e-15), and also above 1e-12.
