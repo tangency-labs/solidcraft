@@ -52,6 +52,7 @@ pub mod frame;
 pub mod frame_cope;
 pub mod frame_corners;
 pub mod frame_layout;
+pub mod frame_library;
 mod frame_multi_trim;
 mod frame_plate;
 pub mod gpu_plan;

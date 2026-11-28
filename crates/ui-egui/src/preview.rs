@@ -819,6 +819,7 @@ pub(crate) fn colors(app: &SolveApp) -> Colors {
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     crate::control_joint_drive::expire(app);
+    crate::dialogs_frame::save_requested(app);
     if app.control_joint_drive.active() || !crate::ui_kit::numeric_preview_ready(ctx) {
         return;
     }

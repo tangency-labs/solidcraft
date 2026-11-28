@@ -2,7 +2,7 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates,
+members and their profiles, the profile library, corner cuts, the weld gap, end caps, mounting plates, bolted end plates,
 attached gusset plates, trimming or extending to members, planes and faces, and retained round-tube
 copes with printable DXF templates. Welds and the cut list follow.
 
@@ -11,10 +11,11 @@ copes with printable DXF templates. Welds and the cut list follow.
 1. **Sketch the frame**: lines and circular arcs in a sketch, or a 3D sketch for a frame that leaves one plane
    (`sketch.options sketch_3d: true`, then `sketch.line3d` and `sketch.arc3d`). Drive the sizes with parameters as
    usual; members follow.
-2. **Choose a profile**: a standard steel size by name (`{"size": "RSC 203x89"}`, below), a
-   built-in one from its dimensions (below), or your own drawn in a sketch
-   (a vendor's extrusion: insert their DXF with `sketch.insert_dxf`). A profile sketch's origin is
-   the point that sits on each line, and its x and y are the profile's.
+2. **Choose a profile**: a profile of the design's profile library (below), a standard steel size
+   by name (`{"size": "RSC 203x89"}`, below), a built-in one from its dimensions, or your own drawn
+   in a sketch (a vendor's extrusion: insert their DXF with `sketch.insert_dxf`). A profile sketch's
+   origin is the point that sits on each line, and its x and y are the profile's. Set up the
+   sections you use once in the library and pick them by name.
 3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per selected
    line or arc. Enable **One Continuous Member** to make a connected tangent line–arc–line run
    into one tube. Select its segments in path order. Repeat for another physical member.
@@ -24,6 +25,7 @@ copes with printable DXF templates. Welds and the cut list follow.
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
 {"command": "frame.member", "params": {"sketch": "Frame", "lines": ["l5", "l6"], "profile_sketch": "45x45 section", "anchor": "bottom_left", "angle": "90 deg"}}
+{"command": "frame.member", "params": {"sketch": "Frame", "lines": ["l7"], "library": "L50x50x5", "point": "heel_inside"}}
 ```
 
 A run drawn as several lines end to end makes one member per line. To make it one member at its
@@ -138,8 +140,18 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
   gap). A new Frame Member and the command both start on None.
-- **Anchor**, **Angle**, **Mirror** and **Up Axis** place the section on each line, as below.
-  **Name** names the members (default: after the profile).
+- **Type** (shown once the design's profile library has a profile): **Built-in** for the Profile
+  and dimension rows, or a top-level library category (RHS, Channel, …; profiles without a category
+  are under **Uncategorised**). A **Group** row follows for each level of subcategories (**All**
+  keeps the whole category), then **Size** lists the profiles in the chosen category in natural
+  order (`50x25x2.0 RHS` before `100x50x3.0 RHS`). Choosing a category picks its first size.
+- **Save to Library**: press it to show **Save as** and **Category**, then again to add the
+  built-in profile (or the picked section) to the library and switch to it. Save as names it (default: after the profile, with
+  ` (2)`… if the library has that name already); Category files it, `/` between levels
+  (`Steel/RHS`; default: the profile's kind, or Custom for a sketch section).
+- **Point**, **Angle**, **Mirror** and **Up Axis** place the section on each line, as below. Point lists the
+  profile's placement points; with a library profile the first choice is its default point. **Name** names
+  the members (default: after the profile).
 - **Offset A** and **Offset B** move the section from its anchor by a length, along the
   section's own axes as drawn (A across its width, B across its height; they turn with **Angle**,
   so they are not the world's X and Y): Anchor **Bottom Middle** with Offset B `50 mm` puts a
@@ -194,6 +206,63 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
   the sketch; untick it for a built-in profile).
+
+## The profile library
+
+A design keeps a library of the frame profiles its members are made from (`frame_profiles` in the
+design file). Each library profile has a name, unique ignoring case, and up to three category
+levels it is filed under (`["Steel", "SHS"]`). Its section is a built-in profile, its dimensions
+expressions over the design's parameters, or a section copied from a sketch (the entry keeps the
+copy, so later edits to that sketch don't change it). It also holds its own placement points, the
+point its members sit on by default, and stock data: material, description and stock length.
+
+Members made from a library profile (`frame.member` with `library`) are named after it and follow
+every edit to it: change its dimensions, or a parameter they use, and the members are rebuilt.
+
+```json
+{"command": "frame.library.add", "params": {"name": "SHS 40x40x3", "category": ["Steel", "SHS"], "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": "tube_wall"}, "stock_length": "6 m"}}
+{"command": "frame.library.add", "params": {"name": "45 extrusion", "profile_sketch": "45x45 section", "points": [{"name": "slot_centre", "sketch_point": "p4"}], "default_point": "slot_centre"}}
+{"command": "frame.library.edit", "params": {"id": "SHS 40x40x3", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 4}}}
+```
+
+- `frame.library.list`: every library profile with its section, every placement point, its area,
+  stock length in mm and the features that use it.
+- `frame.library.add` `{name, category?, profile | profile_sketch (+ profiles?), points?,
+  default_point?, material?, description?, stock_length?}`. A named point is `{name, at: [x, y]}`
+  in the profile's own mm, or `{name, sketch_point}` for a point of the `profile_sketch`. Names
+  use letters, digits, `_` and `-`, and can't be one of the points every profile has.
+- `frame.library.edit` `{id, name?, …the same keys}`: keys left out keep their values; empty text
+  clears `default_point`, `material`, `description` or `stock_length`.
+- `frame.library.remove` `{id}`: refused while members use the profile.
+- `frame.library.replace` `{from, to}`: moves every member made from one library profile to
+  another (then the first can be removed).
+
+`id` takes a library profile's id (`lp1`) or its name. Ids are never reused in a design.
+
+## Placement points
+
+A placement point is a named point of a profile that can sit on a member's line. Every profile has
+`origin`, `center`, `centroid` and the corners and edge middles of its bounding box (`top_left`,
+`bottom`…, the `anchor` values). Each built-in kind adds its own; inside corners are where the
+faces meet before any rounding, so they stay put when a radius changes:
+
+| Kind | Its own placement points |
+|---|---|
+| `rect_tube` | `inner_top_left`, `inner_top`, `inner_top_right`, `inner_left`, `inner_right`, `inner_bottom_left`, `inner_bottom`, `inner_bottom_right` (the inside faces); `wall_top`, `wall_left`, `wall_right`, `wall_bottom` (mid-wall) |
+| `round_tube` | `inner_top`, `inner_left`, `inner_right`, `inner_bottom`; `wall_top`, `wall_left`, `wall_right`, `wall_bottom` |
+| `angle` | `heel`, `heel_inside`, `toe_x`, `toe_y` (each leg's tip, mid-thickness), `leg_x_inside`, `leg_y_inside` (the middle of each leg's inside face) |
+| `channel` | `web_back`, `web_back_top`, `web_back_bottom`, `web_inside`, `web_inside_top`, `web_inside_bottom`, `web_mid`, `flange_tip_top`, `flange_tip_bottom` |
+| `i_beam` | `flange_top_inside`, `flange_bottom_inside`, `flange_top_mid`, `flange_bottom_mid`, `web_left`, `web_right`, `flange_tip_top_left`, `flange_tip_top_right`, `flange_tip_bottom_left`, `flange_tip_bottom_right` |
+| `bar`, `round_bar` | none |
+
+A library profile adds the points it names. `frame.profile.points` `{profile | library}` lists a
+profile's points with their positions.
+
+`frame.member`'s `point` names the point that sits on each line. Without it, a library profile's
+members sit on its default point, unless `anchor` is given; other members sit on their `anchor`.
+A mirrored profile's bounding-box points are those of the mirrored outline (its `top_left` is still
+at the top left); the points its kind generates or its entry names move with the material (an
+angle's `heel` stays the heel).
 
 ## Corners
 
@@ -549,7 +618,8 @@ placement axes, expressions and hole-pattern limits.
   The section starts with the orientation below and rotates through each bend, carrying that
   orientation into subsequent straights and bends in other planes. A bend whose axis crosses
   the anchored section is refused. This models nominal geometry, not tube deformation or springback.
-- `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them. A profile sketch's
+- `profile` (a built-in profile), `profile_sketch` (a sketch) or `library` (a library profile, by
+  id or name), one of them. A profile sketch's
   section is its material as nested loops alternate (an outline is material, a loop inside it a
   hole, a loop inside that material again), so two circles make a tube; pick other regions with
   `profiles` as `solid.extrude` takes them. Like `solid.extrude`, only what was drawn counts:
@@ -557,9 +627,10 @@ placement axes, expressions and hole-pattern limits.
 - `anchor`: the profile point on the line: `origin` (the default: a built-in profile's centre, a
   profile sketch's origin), `center` (of its bounding box), `centroid`, or a corner or edge middle
   of its bounding box (`bottom_left`, `top`…).
+- `point`: a placement point by name, used instead of `anchor` (see Placement points).
 - `locate`: `[x, y]`, the profile point on the line in mm from the built-in profile's own origin (a
   bar's or an angle's bottom-left corner, the middle of a channel's web back, the centre of the
-  others; a profile sketch's origin). It takes precedence over `anchor`. A bounding-box anchor moves
+  others; a profile sketch's origin). It takes precedence over `anchor`; a named `point` takes precedence over it. A bounding-box anchor moves
   with the section when its size changes; a located point does not, so a member stays attached at
   the same point of its section (`[0, 0]` keeps an angle's heel on the line whatever its leg
   lengths). Edit Feature keeps it.

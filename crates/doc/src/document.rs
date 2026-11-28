@@ -1802,6 +1802,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Gap")]
         gap: Option<Expr>,
+        /// The placement point that sits on the line, by name (`heel_inside`, a point the library
+        /// profile names...): when given, it is used instead of `anchor`. None with a library
+        /// profile: the entry's default point.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        point: Option<String>,
         /// How far the profile turns about the line (see `frame::member_axes`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Rotation")]
@@ -5124,6 +5129,9 @@ pub struct Document {
     /// Plastic rules.
     #[serde(default, skip_serializing_if = "crate::plastic::PlasticSettings::is_empty")]
     pub plastic: crate::plastic::PlasticSettings,
+    /// The profile library frame members are made from (#4003).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frame_profiles: Vec<crate::frame_library::LibraryProfile>,
     /// Components that are standard parts (by component id): what to rebuild them from.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub parts: std::collections::BTreeMap<u64, StandardPart>,
@@ -5542,6 +5550,7 @@ impl Document {
             assembly: Default::default(),
             sheet: Default::default(),
             plastic: Default::default(),
+            frame_profiles: Vec::new(),
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),

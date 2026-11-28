@@ -190,6 +190,7 @@ pub(crate) use file_library::uses_file as file_library_uses_file;
 pub mod frame;
 mod frame_end_cap;
 mod frame_gusset;
+mod frame_library;
 mod frame_rotate_member;
 pub(crate) mod inspect;
 mod interference;
@@ -678,6 +679,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
+    v.extend(frame_library::COMMANDS.iter());
     v.extend(frame_gusset::COMMANDS.iter());
     v.extend(frame_rotate_member::COMMANDS.iter());
     v.extend(weld::COMMANDS.iter());

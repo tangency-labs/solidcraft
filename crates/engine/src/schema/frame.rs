@@ -895,6 +895,52 @@ impl JsonSchema for MemberNames {
     }
 }
 
+/// A library profile's id or name as `frame.member` reads `library`: text that isn't blank. Whether
+/// the library has it is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LibraryKey(pub String);
+
+impl<'de> Deserialize<'de> for LibraryKey {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(k) if !k.trim().is_empty() => Ok(LibraryKey(k)),
+            _ => Err(D::Error::custom(whole("`library` must be a library profile's id or name"))),
+        }
+    }
+}
+
+impl JsonSchema for LibraryKey {
+    fn schema_name() -> Cow<'static, str> {
+        "LibraryKey".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A library profile's id (`lp1`) or name.", "type": "string", "pattern": not_blank_pattern()})
+    }
+}
+
+/// A placement point's name as `frame.member` reads `point`: 1…96 bytes once trimmed. Whether the
+/// profile has it is checked when the member is built.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointName(pub String);
+
+impl<'de> Deserialize<'de> for PointName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(n) if !n.trim().is_empty() && n.trim().len() <= solidcraft_doc::frame_library::MAX_LIBRARY_NAME => Ok(PointName(n)),
+            _ => Err(D::Error::custom(whole("`point` must be a placement point's name (frame.profile.points lists them)"))),
+        }
+    }
+}
+
+impl JsonSchema for PointName {
+    fn schema_name() -> Cow<'static, str> {
+        "PointName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A placement point's name: `heel_inside`, `web_back`, a point a library profile names…", "type": "string", "pattern": not_blank_pattern()})
+    }
+}
+
 /// `angle` as `frame.member` reads it: a number of degrees or an expression, with its message. Whether
 /// the expression evaluates as an angle is the handler's to check.
 #[derive(Clone, Debug, PartialEq)]
@@ -987,6 +1033,10 @@ pub struct MemberGroupParams {
     /// The profile's rotation about each line. Default: zero.
     #[serde(default)]
     pub angle: Option<MemberAngle>,
+    /// The placement point that sits on each of the group's lines, by name (as `frame.member`'s
+    /// `point`).
+    #[serde(default)]
+    pub point: Option<PointName>,
     /// Mirror the section before turning it. Default: false.
     #[serde(default)]
     pub mirror: Option<bool>,
@@ -1007,7 +1057,7 @@ impl<'de> Deserialize<'de> for MemberGroups {
             Some(groups) if !groups.is_empty() && groups.len() <= MAX_MEMBERS && groups.iter().all(Value::is_object) => groups,
             _ => {
                 return Err(D::Error::custom(whole(format!(
-                    "`groups` must list 1…{MAX_MEMBERS} groups, each {{lines, anchor?, locate?, angle?, mirror?, body_name?}}"
+                    "`groups` must list 1…{MAX_MEMBERS} groups, each {{lines, anchor?, locate?, point?, angle?, mirror?, body_name?}}"
                 ))));
             }
         };
@@ -1138,17 +1188,20 @@ impl JsonSchema for NextPair {
 /// `sketch` or `pairs` (or both), and one of `profile` and `profile_sketch`, not both, as the
 /// schema says; the type leaves them to the handler's messages.
 fn member_required(schema: &mut Schema) {
-    let only = |key: &str, other: &str| json!({"required": [key], "not": {"required": [other]}});
     schema.insert(
         "allOf".into(),
         json!([
             {"anyOf": [{"required": ["sketch"]}, {"required": ["pairs"]}]},
-            {"anyOf": [only("profile", "profile_sketch"), only("profile_sketch", "profile")]},
+            {"anyOf": [
+                {"required": ["profile"], "not": {"anyOf": [{"required": ["profile_sketch"]}, {"required": ["library"]}]}},
+                {"required": ["profile_sketch"], "not": {"anyOf": [{"required": ["profile"]}, {"required": ["library"]}]}},
+                {"required": ["library"], "not": {"anyOf": [{"required": ["profile"]}, {"required": ["profile_sketch"]}]}}
+            ]},
             // With groups, placement keys live inside each group, never beside them.
             {"anyOf": [
                 {"properties": {"groups": {"type": "null"}}},
                 {"required": ["sketch"], "properties": {
-                    "lines": {"type": "null"}, "anchor": {"type": "null"}, "locate": {"type": "null"}, "angle": {"type": "null"},
+                    "lines": {"type": "null"}, "anchor": {"type": "null"}, "locate": {"type": "null"}, "point": {"type": "null"}, "angle": {"type": "null"},
                     "mirror": {"type": "null"}, "body_name": {"type": "null"}, "continuous": {"type": "null"}
                 }}
             ]},
@@ -1208,6 +1261,11 @@ pub struct FrameMemberKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub profile_sketch: Option<SketchRef>,
+    /// The section as a profile of the design's profile library, by id or name: editing the
+    /// library profile changes the members. Give it, `profile` or `profile_sketch`, one of them.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "LibraryKey")]
+    pub library: Option<LibraryKey>,
     /// With `profile_sketch`: which of its profiles are the section, as `solid.extrude` takes
     /// them. Default: its material, nested loops alternating, so two circles make a tube. Not
     /// used with `profile`.
@@ -1253,6 +1311,11 @@ pub struct FrameMemberKeys {
     /// where they overlap take none. A corner's own `gap` takes precedence. Default: 0.
     #[serde(default)]
     pub gap: Option<MemberGap>,
+    /// The placement point that sits on each line, by name, used instead of `anchor`
+    /// (`frame.profile.points` lists a profile's). Default: a library profile's default point, else
+    /// `anchor`.
+    #[serde(default)]
+    pub point: Option<PointName>,
     /// How far the profile turns about the line, a number of degrees or an expression. Default:
     /// 0, which puts its y as near world up as the line allows (a vertical member's x along
     /// world X).
@@ -1302,16 +1365,16 @@ impl<'de> Deserialize<'de> for FrameMemberParams {
             }
 
             // A key counts as given when it is there, `null` included, as the handler tests it.
-            match (keys.contains_key("profile"), keys.contains_key("profile_sketch")) {
-                // A built-in profile: the sketch's profile picks are never read.
-                (true, false) => {
+            match (keys.contains_key("profile"), keys.contains_key("profile_sketch"), keys.contains_key("library")) {
+                // A built-in or library profile: the sketch's profile picks are never read.
+                (true, false, false) | (false, false, true) => {
                     keys.remove("profiles");
                     keys.remove("exact_regions");
                 }
-                (false, true) => {}
-                // Both or neither: the handler refuses before it reads any of them.
+                (false, true, false) => {}
+                // More than one or none: the handler refuses before it reads any of them.
                 _ => {
-                    for key in ["profile", "profile_sketch", "profiles", "exact_regions"] {
+                    for key in ["profile", "profile_sketch", "library", "profiles", "exact_regions"] {
                         keys.remove(key);
                     }
                 }
