@@ -10,6 +10,7 @@
 //! the caller can bound where the piece comes near.
 
 use super::CurveEval;
+use crate::math::det;
 use crate::math::Vec3;
 use std::f64::consts::{PI, TAU};
 
@@ -53,7 +54,10 @@ pub fn angle_crossing(
     let off = |at: f64| -> Option<(f64, Vec3)> {
         let point = curve.point(at)?;
         let radial = point - origin;
-        Some((wrap(radial.dot(y).atan2(radial.dot(x)) - theta), point))
+        Some((
+            wrap(det::atan2(radial.dot(y), radial.dot(x)) - theta),
+            point,
+        ))
     };
     let ((off_start, at_start), (off_end, at_end)) = (off(start)?, off(end)?);
     if off_start == 0.0 {

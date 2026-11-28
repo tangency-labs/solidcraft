@@ -3195,6 +3195,7 @@ fn drop_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// The face-orientation repair's final status 1 (upstream `TRUE`) comes back as
     /// [`OrientSheetNote::Reoriented`] on the success path, and a caller that stops on it
@@ -4271,7 +4272,7 @@ mod tests {
         for i in 0..360 {
             let a = f64::from(i).to_radians();
             for (r, z) in [(rs.0, 0.0), (0.5 * (rs.0 + rs.1), 0.5 * h), (rs.1, h)] {
-                let p = Point3::new(r * a.cos(), r * a.sin(), z);
+                let p = Point3::new(r * det::cos(a), r * det::sin(a), z);
                 assert!(bx.contains_point(p, 0.0), "{p:?} outside {bx:?}");
             }
         }

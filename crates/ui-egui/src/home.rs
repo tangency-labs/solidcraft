@@ -795,7 +795,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !app.help.about
         && !app.crashes.open
         && !app.help.menu
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && app.issue_report.draft.is_none()
         // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
         // question up, and does not close the page behind it.
@@ -813,7 +813,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && app.issue_report.draft.is_none()
         && !crate::documents::active_is_blank(app)
     {
@@ -1029,17 +1029,9 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     } else {
         friendly_path(path).into()
     };
-    let mut menu = vec![start_page::MenuEntry {
-        label: app.tr_label("Remove from list").into(),
-        icon: "delete".into(),
-        chosen: FileAction::ForgetRecent(index),
-    }];
+    let mut menu = vec![(crate::ui_kit::Item::action("forget", app.tr_label("Remove from list"), "delete"), FileAction::ForgetRecent(index))];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry {
-            label: app.tr_label("Show in folder").into(),
-            icon: "folder".into(),
-            chosen: FileAction::ShowInFolder(index),
-        });
+        menu.push((crate::ui_kit::Item::action("folder", app.tr_label("Show in folder"), "folder"), FileAction::ShowInFolder(index)));
     }
     let mut kind = recent_kind(app, path);
     let mut security = None;

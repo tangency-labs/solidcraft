@@ -142,6 +142,7 @@ use crate::geom::tol::{
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{min2, EFF_ZERO};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
@@ -682,7 +683,7 @@ pub fn approx_circ_arc(
     let rs = match arc.start {
         None => {
             let dd = as_ * (PI / 180.0);
-            translate_sum2_pts(cen, rad * dd.cos(), x, rad * dd.sin(), y)
+            translate_sum2_pts(cen, rad * det::cos(dd), x, rad * det::sin(dd), y)
         }
         Some(p) => p,
     };
@@ -692,7 +693,7 @@ pub fn approx_circ_arc(
                 rs
             } else {
                 let dd = ae * (PI / 180.0);
-                translate_sum2_pts(cen, rad * dd.cos(), x, rad * dd.sin(), y)
+                translate_sum2_pts(cen, rad * det::cos(dd), x, rad * det::sin(dd), y)
             }
         }
         Some(p) => p,
@@ -3738,7 +3739,7 @@ mod tests {
         let dropped = crv_trim(original.nurb.as_ref().unwrap(), from, to).unwrap();
         let at = trimmed.evaluate_point(end).unwrap();
         for c in dropped.cpts() {
-            let gap = (c.x - at.x).hypot(c.y - at.y);
+            let gap = det::hypot(c.x - at.x, c.y - at.y);
             assert!(
                 gap <= bound,
                 "{label}: dropped control point {gap:e} from the end"
@@ -3805,7 +3806,7 @@ mod tests {
                 assert_eq!(uv.knots(), other.knots(), "{label}");
                 assert_eq!(uv.cpts().len(), other.cpts().len(), "{label}");
                 for (p, q) in uv.cpts().iter().zip(other.cpts()) {
-                    let gap = (p.x - q.x).hypot(p.y - q.y);
+                    let gap = det::hypot(p.x - q.x, p.y - q.y);
                     assert!(gap <= 8.0 * f64::EPSILON, "{label}: control point {gap:e}");
                 }
             }
@@ -3823,7 +3824,7 @@ mod tests {
                 assert_eq!(uv.knots(), other.knots(), "{label}");
                 let (mut gap, mut scale) = (0.0_f64, 0.0_f64);
                 for (p, q) in uv.cpts().iter().zip(other.cpts()) {
-                    gap = gap.max((p.x - q.x).hypot(p.y - q.y));
+                    gap = gap.max(det::hypot(p.x - q.x, p.y - q.y));
                     scale = scale.max(p.x.abs()).max(p.y.abs());
                 }
                 let bound = gap + 64.0 * f64::EPSILON * scale;

@@ -379,7 +379,7 @@ impl JsonSchema for CoilAxis {
         let reference = generator.subschema_for::<RevolveAxis>();
         let point = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, a flat end face (`{face: [x, y, z]}`: the coil starts at its centre and grows along its outward normal), or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
             "anyOf": [{
                 "type": "object",
                 "properties": {
@@ -759,9 +759,9 @@ keyword_param!(
     /// `solid.coil`'s `section`.
     CoilSectionParam,
     "section",
-    &["circular", "circle", "square"],
-    "circular or square",
-    "The shape swept along the helix: circular (the default; circle is an alias) or square. Any case."
+    &["circular", "circle", "square", "triangle", "triangular"],
+    "circular, square or triangle",
+    "The shape swept along the helix: circular (the default; circle is an alias), square, or triangle (triangular is an alias): an equilateral triangle pointing at the axis, for a thread-like groove or thread. Any case."
 );
 keyword_param!(
     /// `solid.coil`'s `section_position`.

@@ -19,6 +19,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::interval_vector::{cross as cross_ivl, dot as dot_ivl, norm as norm_ivl};
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Vec3, PI};
 use crate::nurbs::math::UNIT;
 use crate::query::tangent_edge::face_use_normal;
@@ -133,9 +134,10 @@ pub fn turn_at(k: &Kernel, b: &Brep, e: EdgeId, f: EdgeId, v: VertexId) -> Resul
         return Ok(None);
     };
     let arrives = arrives * -1.0;
-    Ok(Some(
-        arrives.cross(leaves).length().atan2(arrives.dot(leaves)),
-    ))
+    Ok(Some(det::atan2(
+        arrives.cross(leaves).length(),
+        arrives.dot(leaves),
+    )))
 }
 
 /// Whether edge `e` is convex at its end `v` (its faces meet at less than 180 degrees inside
@@ -212,7 +214,7 @@ pub fn convex_at(
     // a dot product of at most 0 or |na x nc| > tan(smooth) (na . nc) is proved (the tangent
     // within 2 ulps, and the product one rounding: 8 u more)
     let (c, d) = (norm_ivl(cross_ivl(na, nc)), dot_ivl(na, nc));
-    let parted = d.hi <= 0.0 || c.lo > smooth.tan() * (1.0 + 8.0 * UNIT) * d.hi;
+    let parted = d.hi <= 0.0 || c.lo > det::tan(smooth) * (1.0 + 8.0 * UNIT) * d.hi;
     if !parted {
         return Ok(None);
     }
@@ -289,4 +291,52 @@ pub fn turn_to_parallel(axis: Vec3, normal: Vec3, line: Vec3) -> Result<SquareTu
         normal_along_axis,
         line_off_axis,
     })
+}
+
+/// Whether two 3D directions agree within cosine threshold `min_cos` (`a·b >= min_cos`, or
+/// `|a·b| >= min_cos` when `unsigned` is true).
+#[must_use]
+pub fn directions_aligned(a: Vec3, b: Vec3, min_cos: f64, unsigned: bool) -> bool {
+    let d = a.dot(b);
+    let score = if unsigned { d.abs() } else { d };
+    score >= min_cos
+}
+
+/// How far a frame's origin and Z axis moved between two column-major 4×4 transforms:
+/// `(origin_shift_mm, z_angle_deg)`.
+#[must_use]
+pub fn frame_z_deviation(before: &[[f64; 4]; 4], after: &[[f64; 4]; 4]) -> (f64, f64) {
+    let [_, _, [bz0, bz1, bz2, _], [bt0, bt1, bt2, _]] = *before;
+    let [_, _, [az0, az1, az2, _], [at0, at1, at2, _]] = *after;
+    let shift = Vec3::new(at0 - bt0, at1 - bt1, at2 - bt2).length();
+    let bz = Vec3::new(bz0, bz1, bz2);
+    let az = Vec3::new(az0, az1, az2);
+    let angle_deg = bz.cross(az).length().atan2(bz.dot(az)).to_degrees();
+    (shift, angle_deg)
+}
+
+/// How far two rigid column-major 4×4 transforms differ: `(translation_mm, rotation_deg)`.
+#[must_use]
+pub fn rigid_pose_delta(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> (f64, f64) {
+    let [[ax0, ax1, ax2, _], [ay0, ay1, ay2, _], [az0, az1, az2, _], [at0, at1, at2, _]] = *a;
+    let [[bx0, bx1, bx2, _], [by0, by1, by2, _], [bz0, bz1, bz2, _], [bt0, bt1, bt2, _]] = *b;
+    let t = Vec3::new(at0 - bt0, at1 - bt1, at2 - bt2).length();
+    let ax = Vec3::new(ax0, ax1, ax2);
+    let ay = Vec3::new(ay0, ay1, ay2);
+    let az = Vec3::new(az0, az1, az2);
+    let bx = Vec3::new(bx0, bx1, bx2);
+    let by = Vec3::new(by0, by1, by2);
+    let bz = Vec3::new(bz0, bz1, bz2);
+    let c00 = ax.dot(bx);
+    let c11 = ay.dot(by);
+    let c22 = az.dot(bz);
+    let c12 = ay.dot(bz);
+    let c21 = az.dot(by);
+    let c20 = az.dot(bx);
+    let c02 = ax.dot(bz);
+    let c01 = ax.dot(by);
+    let c10 = ay.dot(bx);
+    let sin2 = Vec3::new(c12 - c21, c20 - c02, c01 - c10).length();
+    let angle_deg = sin2.atan2(c00 + c11 + c22 - 1.0).to_degrees();
+    (t, angle_deg)
 }

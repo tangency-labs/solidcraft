@@ -448,7 +448,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
     .wide()
-    .reset_scroll(d.reset_scroll);
+    // A reset asked for while drawing (a view switch, a parameter chosen in a Used by list) is
+    // kept for the next frame's panel; this frame's is used up here.
+    .reset_scroll(std::mem::take(&mut d.reset_scroll));
     // Expanded Key controls use the available body height; the shared body scrolls the rest.
     // A manually resized height still takes precedence below.
     let panel = if d.redesign.compact.is_some() { panel } else { panel.body_rows(16.0) };
@@ -503,7 +505,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| apply_live_checkbox(ui, &mut live_choice, held_status.as_deref()),
         );
         resize = SIZE.edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
-        d.reset_scroll = false;
     });
     if live_choice != live {
         app.preferences.parameters_apply_live = live_choice;
@@ -815,7 +816,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 Some(response)
             }
             redesign::MEASURES => Some(ui_kit::text(ui, &r.measures, ui_kit::Text::MonoCell)),
-            redesign::USED => Some(redesign::used_by(self.app, ui, r)),
+            redesign::USED => Some(redesign::used_by(self.app, ui, self.d, r)),
             ACTIONS => Some(redesign::row_menu(self.app, ui, self.d, r, self.rows)),
             _ => None,
         }
@@ -1409,7 +1410,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     let comment_id = ui.make_persistent_id("pnew_comment");
     let focused_id = ui.memory(|m| [name_id, expr_id, comment_id].into_iter().find(|id| m.has_focus(*id) || m.had_focus_last_frame(*id)));
     let mut row_ids = vec![name_id, expr_id, comment_id];
-    let menu_was_open = egui::Popup::is_any_open(ui.ctx());
+    let menu_was_open = egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx());
     let mut submit = false;
     let mut left = false;
     let mut discard = false;
@@ -1490,7 +1491,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
     // Losing a cell's focus is not leaving the draft: a click or Tab into another cell
     // must keep its values and geometry (#4461). The unit menu and comment overlay belong to the draft too.
     let left_row = !menu_was_open
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && (clicked_outside || (left && !ui.memory(|m| row_ids.iter().any(|id| m.has_focus(*id))) && !clicked.is_some_and(inside_row)));
     let abandoned = d.new_name.trim().is_empty() && clicked_outside;
     if discard || abandoned {
@@ -1829,6 +1830,44 @@ mod tests {
         h.step(&json!({"click":{"handle":"param:users:width"}})).unwrap();
         h.frames(2);
         assert!(crate::scenario::rect_of("param:reader:width:double_width").is_some());
+    }
+
+    /// The Used by list follows a reading parameter, selects every reading feature at once, and
+    /// names the uses it cannot select (#20879).
+    #[test]
+    fn used_by_follows_a_parameter_selects_all_and_names_other_uses() {
+        let mut h = redesign_model();
+        h.app.run("parameters.add", json!({"name":"w","expression":"10 mm"})).unwrap();
+        h.app.run("parameters.add", json!({"name":"depth","expression":"w * 2"})).unwrap();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Outline"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[40,0],"radius":2})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":["c1"],"type":"radius","value":"w"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let block = h.app.run("solid.box", json!({"length":"w","width":10,"height":5})).unwrap()["feature"].as_u64().unwrap();
+        h.app.start("parameters.change");
+        h.frames(4);
+        let open = |h: &mut crate::scenario::Harness| {
+            h.step(&json!({"click":{"handle":"param:users:w"}})).unwrap();
+            h.frames(2);
+        };
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"param:readers:w:all"}})).unwrap();
+        h.frames(2);
+        let selected = h.app.session.selection.clone();
+        for id in [sketch, block] {
+            assert!(selected.contains(&solidcraft_engine::Sel::Feature { id }), "{selected:?}");
+        }
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"param:reader:w:depth"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.params.as_ref().map(|d| d.filter.as_str()), Some("depth"));
+        assert_eq!(h.app.session.selection, selected, "a parameter reader filters, it doesn't select");
+
+        // A use the list cannot select is still named: a component's quantity reads `span`.
+        h.app.run("parameters.add", json!({"name":"span","expression":"1","unit":"m"})).unwrap();
+        h.app.run("component.create", json!({"name":"Cable","virtual":true,"bom_quantity":"2 * span"})).unwrap();
+        let users = h.app.session.execute("parameters.users", &json!({"name":"span"})).unwrap();
+        assert_eq!(redesign::other_uses(&users), vec!["Cable".to_string()]);
     }
 
     #[test]

@@ -35,6 +35,7 @@ use super::spline::{EvalSurface, Nurbs};
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
 use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::crv_deviation::{certified_distance, norm_up};
@@ -181,7 +182,7 @@ pub fn radial_order(
                 "a radial face's inward direction is undefined".into(),
             ));
         }
-        let angle = y.atan2(x);
+        let angle = det::atan2(y, x);
         let angle = if angle < 0.0 {
             angle + std::f64::consts::TAU
         } else {
@@ -1505,12 +1506,12 @@ impl On {
                     return Ok(self.meridian(axes, &c, *radius, curve, [t0, t1]));
                 }
                 let sign = turn.signum();
-                let u0 = c.x.dot(axes.y).atan2(c.x.dot(axes.x));
+                let u0 = det::atan2(c.x.dot(axes.y), c.x.dot(axes.x));
                 let h = axes.local(c.o)[2];
                 let v = match &self.surface {
-                    SurfaceEval::Sphere { .. } => h.atan2(*radius),
+                    SurfaceEval::Sphere { .. } => det::atan2(h, *radius),
                     SurfaceEval::Torus { major, tube, .. } => {
-                        (h.atan2(radius - major) - tube).rem_euclid(std::f64::consts::TAU)
+                        (det::atan2(h, radius - major) - tube).rem_euclid(std::f64::consts::TAU)
                     }
                     _ => h,
                 };
@@ -1523,7 +1524,7 @@ impl On {
                 // Along a ruling: u where the line is, v its height.
                 let [a, b, _] = axes.local(at(0.5 * (t0 + t1))?);
                 let height = |t: f64| at(t).map(|p| axes.local(p)[2]);
-                let u = b.atan2(a);
+                let u = det::atan2(b, a);
                 Some(segment([u, height(t0)?], [u, height(t1)?]))
             }
             (SurfaceEval::Eval(..), _) => {
@@ -1569,7 +1570,7 @@ impl On {
         let tm = 0.5 * (t0 + t1);
         let m = curve.point(tm)?;
         let [mx, my, _] = axes.local(m);
-        let u0 = my.atan2(mx);
+        let u0 = det::atan2(my, mx);
         let radial = (axes.x * mx + axes.y * my).normalized()?;
         // The circle's centre: the sphere's, or the torus's ring at that azimuth.
         let centre = axes.o + radial * ring.0;
@@ -1578,7 +1579,7 @@ impl On {
         }
         let s = c.z.dot(radial.cross(axes.z)).signum();
         let d = m - centre;
-        let vm = d.dot(axes.z).atan2(d.dot(radial)) - tube;
+        let vm = det::atan2(d.dot(axes.z), d.dot(radial)) - tube;
         let alpha = vm - s * tm;
         Some(Curve2::Spline {
             knots: vec![t0, t0, t1, t1],

@@ -17,6 +17,9 @@ pub enum Needs {
     /// Moving the pointer to the other edge of the screen during an orbit drag: Wayland and the
     /// browser don't let an app move the pointer.
     CursorWarp,
+    /// The window buttons the app draws in its own title bar: macOS draws its own (the app's
+    /// `CUSTOM_TITLEBAR` is off there), and the browser window has none of the app's.
+    OwnWindowButtons,
 }
 
 /// The system the app was built for.
@@ -77,6 +80,10 @@ pub fn available(needs: Needs, facts: Facts) -> bool {
             Os::Linux => facts.window_system != Some("wayland"),
             Os::Windows | Os::Mac | Os::Other => true,
         },
+        Needs::OwnWindowButtons => match facts.os {
+            Os::Mac | Os::Browser => false,
+            Os::Windows | Os::Linux | Os::Other => true,
+        },
     }
 }
 
@@ -115,6 +122,18 @@ mod tests {
         assert!(wrap(facts(Os::Linux, None, false)), "an unknown window system keeps the option");
         assert!(!wrap(facts(Os::Browser, None, true)));
         assert!(!wrap(facts(Os::Browser, None, false)));
+    }
+
+    #[test]
+    fn the_window_buttons_option_is_offered_only_where_the_app_draws_them() {
+        let buttons = |f| available(Needs::OwnWindowButtons, f);
+        assert!(buttons(facts(Os::Windows, None, false)));
+        assert!(!buttons(facts(Os::Mac, None, false)), "macOS draws its own window buttons");
+        assert!(buttons(facts(Os::Linux, Some("x11"), false)));
+        assert!(buttons(facts(Os::Linux, Some("wayland"), false)));
+        assert!(buttons(facts(Os::Linux, None, false)));
+        assert!(!buttons(facts(Os::Browser, None, true)), "the browser window has none of the app's buttons");
+        assert!(!buttons(facts(Os::Browser, None, false)));
     }
 
     #[test]

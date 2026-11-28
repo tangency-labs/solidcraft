@@ -127,6 +127,7 @@
 //!   wrapped as a `Surface` (without owner).
 
 use crate::error::nurbs::BSplineFailure;
+use crate::surface::surface_point_solve::cell_index::CellIndex;
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -458,12 +459,40 @@ pub struct BSplineSurface {
 /// too. Every `&mut` access detaches a shared cell first (copy on write), so an edit of
 /// one never reaches the other.
 #[derive(Debug, Default)]
-pub(crate) struct NurbSlot(Arc<OnceLock<Surface>>);
+pub(crate) struct NurbSlot(Arc<NurbData>);
+
+/// What a [`NurbSlot`] holds: the NURB and the cell index built from it (the index is
+/// not part of the NURB and an edit drops it).
+#[derive(Default)]
+pub(crate) struct NurbData {
+    value: OnceLock<Surface>,
+    cells: OnceLock<Option<Box<CellIndex>>>,
+}
+
+// Surface diagnostics describe the NURB itself, regardless of whether a query has built the index.
+impl std::fmt::Debug for NurbData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.value, f)
+    }
+}
+
+// A detached editing copy starts with an empty index.
+impl Clone for NurbData {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            cells: OnceLock::new(),
+        }
+    }
+}
+
+/// A [`NurbSlot`]'s cell, as a cache keeps it ([`NurbSlot::cell`]).
+pub(crate) type NurbCell = Arc<NurbData>;
 
 impl NurbSlot {
     /// No NURB (`NULL`).
     pub(crate) fn none() -> Self {
-        Self(Arc::new(OnceLock::new()))
+        Self::default()
     }
 
     /// The same cell (for an evaluation copy that stands for the same surface object).
@@ -471,29 +500,60 @@ impl NurbSlot {
         Self(Arc::clone(&self.0))
     }
 
+    /// Whether `cell` is this slot's own cell ([`NurbSlot::cell`]).
+    pub(crate) fn is_cell(&self, cell: &NurbCell) -> bool {
+        Arc::ptr_eq(&self.0, cell)
+    }
+
+    /// The cell itself, for a cache that keeps what was read from the NURB it holds: while
+    /// the cache holds it, every edit through a slot sharing it detaches first
+    /// ([`Arc::make_mut`]), so the NURB in the cell is never changed, only filled once.
+    pub(crate) fn cell(&self) -> NurbCell {
+        Arc::clone(&self.0)
+    }
+
     /// The NURB, if any.
     pub(crate) fn as_ref(&self) -> Option<&Surface> {
-        self.0.get()
+        self.0.value.get()
     }
 
     /// The NURB, mutable, if any (detaches a shared cell first).
     pub(crate) fn as_mut(&mut self) -> Option<&mut Surface> {
-        Arc::make_mut(&mut self.0).get_mut()
+        self.for_edit().value.get_mut()
+    }
+
+    fn for_edit(&mut self) -> &mut NurbData {
+        let data = Arc::make_mut(&mut self.0);
+        data.cells.take();
+        data
+    }
+
+    /// Bounds and spacing from this NURB only. Concurrent first readers may build
+    /// independently; both observe the same immutable net and share the stored result.
+    pub(crate) fn cell_index(
+        &self,
+        build: impl FnOnce() -> Result<Option<CellIndex>>,
+    ) -> Result<Option<&CellIndex>> {
+        if let Some(index) = self.0.cells.get() {
+            return Ok(index.as_deref());
+        }
+        let index = build()?.map(Box::new);
+        Ok(self.0.cells.get_or_init(|| index).as_deref())
     }
 
     /// Whether there is no NURB.
     pub(crate) fn is_none(&self) -> bool {
-        self.0.get().is_none()
+        self.0.value.get().is_none()
     }
 
     /// Whether there is a NURB.
     pub(crate) fn is_some(&self) -> bool {
-        self.0.get().is_some()
+        self.0.value.get().is_some()
     }
 
     /// Takes the NURB out, leaving none (detaches a shared cell first).
     pub(crate) fn take(&mut self) -> Option<Surface> {
-        Arc::make_mut(&mut self.0).take()
+        self.for_edit().value.take()
     }
 
     /// Detaches a shared cell, so that what is made through this surface from now on
@@ -505,13 +565,16 @@ impl NurbSlot {
     /// Stores `made` when there is no NURB yet (the first fill wins, as upstream's
     /// `GetOrCreateGwNurbPointer` makes once) and returns the stored NURB.
     pub(crate) fn fill(&self, made: Surface) -> &Surface {
-        self.0.get_or_init(|| made)
+        self.0.value.get_or_init(|| made)
     }
 }
 
 impl From<Option<Surface>> for NurbSlot {
     fn from(nurb: Option<Surface>) -> Self {
-        Self(Arc::new(nurb.map_or_else(OnceLock::new, OnceLock::from)))
+        Self(Arc::new(NurbData {
+            value: nurb.map_or_else(OnceLock::new, OnceLock::from),
+            cells: OnceLock::new(),
+        }))
     }
 }
 

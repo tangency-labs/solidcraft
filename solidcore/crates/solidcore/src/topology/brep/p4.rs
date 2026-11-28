@@ -1577,6 +1577,63 @@ fn delete_wire_edge(
 }
 
 /// The shell traversals of the wire branch of [`delete_edge`], under `lock`.
+/// Creates a new shell in `shell`'s region and transfers `v2`'s connected component of
+/// `shell` (both wire edge uses and face uses) into it, rebuilding cached `Shell::faces`.
+#[allow(clippy::too_many_arguments)]
+fn transfer_wire_split_component(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut DeleteEnv<'_>,
+    marks: &mut super::p3::DeletionMarks<'_>,
+    lock: &MarkLock,
+    shell: ShellId,
+    v2: VertexId,
+) -> Result<()> {
+    let new_shell = b.add_shell_record(Shell::default())?;
+    let region = shell_region(b, shell)?;
+    region_post_insert(b, region, new_shell)?;
+    let mut edgeuses2 = Vec::new();
+    let mut faceuses2 = Vec::new();
+    marks.with_marks(env.records, env.key_of, |marks| {
+        topology_traverser::shell_traversal_with_marks(
+            k,
+            b,
+            marks,
+            v2,
+            shell,
+            Some(&mut edgeuses2),
+            Some(&mut faceuses2),
+            lock,
+        )
+    })?;
+    if faceuses2.is_empty() {
+        // NewShell is a wireShell - set first edge and ShellType (an empty
+        // edge-use list keeps the NULL head; upstream only asserts)
+        if let Some(&first) = edgeuses2.first() {
+            set_shell_head(b, new_shell, ShellMembers::Edgeuse(first), None)?;
+        }
+        b.shell_mut(new_shell)?.shell_type = ShellType::Wire;
+    } else {
+        // the first face is set later by shell_move_faceuses
+        b.shell_mut(new_shell)?.shell_type = ShellType::Faceuse;
+    }
+    for &x in &edgeuses2 {
+        if eu1::is_shell_edgeuse(b, x)? {
+            b.edgeuse_mut(x)?.owner = EdgeuseOwner::Shell(Some(new_shell));
+        }
+    }
+    // transfer faceuses from the old shell to the new shell in one pass and rebuild
+    // both cached `Shell::faces` lists from their authoritative face-use members
+    shell::shell_move_faceuses(b, shell, new_shell, &faceuses2)?;
+    for s in [shell, new_shell] {
+        if let Some(faces) = crate::topology::integrity::derived_shell_faces(b, s) {
+            b.shell_mut(s)?.faces = faces;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn wire_split_shell(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1589,37 +1646,71 @@ fn wire_split_shell(
     eu_mate: EdgeuseId,
     body: Option<ObjectRef>,
 ) -> Result<()> {
-    // Not upstream: whether the shell still joins `v1` to `v2`, asked first with a walk
-    // that ends at `v2` (`shell_traversal_to_vertices`). When it does, and the shell's
-    // head is not one of the edge uses going away, the whole walk below would change
-    // nothing: no shell splits, the head stays, and its marks are this call's own (with a
-    // body identity they are the caller's records, which keep the whole walk). Deleting
-    // the wire edges left by the faces a union deletes walked the whole shell for each.
-    if body.is_none() {
-        let head = shell_head(b, shell)?;
-        if head != Some(EntityRef::Edgeuse(eu)) && head != Some(EntityRef::Edgeuse(eu_mate)) {
-            let mut asked = std::collections::BTreeSet::from([v2]);
-            topology_traverser::shell_traversal_to_vertices(
-                k,
-                b,
-                &mut Marks::default(),
-                v1,
-                shell,
-                &mut asked,
-                lock,
-            )?;
-            if asked.is_empty() {
-                delete_edgeuse(k, b, env, eu)?;
-                delete_edgeuse(k, b, env, eu_mate)?;
-                return Ok(());
-            }
-        }
-    }
+    let head = shell_head(b, shell)?;
+    let head_deleted =
+        head == Some(EntityRef::Edgeuse(eu)) || head == Some(EntityRef::Edgeuse(eu_mate));
+
     let mut indexed = body.is_none().then(Marks::default);
     let mut marks = match indexed.as_mut() {
         Some(marks) => super::p3::DeletionMarks::Indexed(marks),
         None => super::p3::DeletionMarks::Retained,
     };
+
+    // Fast path when marks are call-local (`body.is_none()`) and the shell head is not
+    // the deleted edge: a bidirectional BFS between `v1` and `v2` settles connectivity in
+    // O(local_hops) when they stay connected, or O(min(|C(v1)|, |C(v2)|)) when split,
+    // instead of traversing the entire shell on every wire deletion.
+    if body.is_none() && !head_deleted {
+        match topology_traverser::shell_wire_split_check(k, b, v1, v2, shell, lock)? {
+            topology_traverser::WireSplitCheck::Connected => {
+                delete_edgeuse(k, b, env, eu)?;
+                delete_edgeuse(k, b, env, eu_mate)?;
+                return Ok(());
+            }
+            topology_traverser::WireSplitCheck::Split {
+                v1_exhausted,
+                v1_has_faceuse,
+                v1_first_edgeuse,
+            } => {
+                transfer_wire_split_component(k, b, env, &mut marks, lock, shell, v2)?;
+                let shell_keeps_faceuses = v1_has_faceuse
+                    || (!v1_exhausted
+                        && matches!(
+                            &b.shell(shell)?.members,
+                            ShellMembers::Faceuses(list) if !list.is_empty()
+                        ));
+                if !shell_keeps_faceuses {
+                    let first = if v1_first_edgeuse.is_some() {
+                        v1_first_edgeuse
+                    } else {
+                        let mut edgeuses1 = Vec::new();
+                        marks.with_marks(env.records, env.key_of, |marks| {
+                            topology_traverser::shell_traversal_with_marks(
+                                k,
+                                b,
+                                marks,
+                                v1,
+                                shell,
+                                Some(&mut edgeuses1),
+                                None,
+                                lock,
+                            )
+                        })?;
+                        edgeuses1.first().copied()
+                    };
+                    if let Some(first) = first {
+                        set_shell_head(b, shell, ShellMembers::Edgeuse(first), None)?;
+                    }
+                    b.shell_mut(shell)?.shell_type = ShellType::Wire;
+                }
+                delete_edgeuse(k, b, env, eu)?;
+                delete_edgeuse(k, b, env, eu_mate)?;
+                return Ok(());
+            }
+            topology_traverser::WireSplitCheck::Fallback => {}
+        }
+    }
+
     let mut edgeuses1 = Vec::new();
     let mut faceuses1 = Vec::new();
     marks.with_marks(env.records, env.key_of, |marks| {
@@ -1638,47 +1729,7 @@ fn wire_split_shell(
         marks.is_marked(k, Entity::Vertex(v2), lock.mark_type())
     });
     if split_shell {
-        let new_shell = b.add_shell_record(Shell::default())?;
-        let region = shell_region(b, shell)?;
-        region_post_insert(b, region, new_shell)?;
-        let mut edgeuses2 = Vec::new();
-        let mut faceuses2 = Vec::new();
-        marks.with_marks(env.records, env.key_of, |marks| {
-            topology_traverser::shell_traversal_with_marks(
-                k,
-                b,
-                marks,
-                v2,
-                shell,
-                Some(&mut edgeuses2),
-                Some(&mut faceuses2),
-                lock,
-            )
-        })?;
-        if faceuses2.is_empty() {
-            // NewShell is a wireShell - set first edge and ShellType (an empty
-            // edge-use list keeps the NULL head; upstream only asserts)
-            if let Some(&first) = edgeuses2.first() {
-                set_shell_head(b, new_shell, ShellMembers::Edgeuse(first), None)?;
-            }
-            b.shell_mut(new_shell)?.shell_type = ShellType::Wire;
-        } else {
-            // the first face is set later by PostInsert(pFU)
-            b.shell_mut(new_shell)?.shell_type = ShellType::Faceuse;
-        }
-        for &x in &edgeuses2 {
-            if eu1::is_shell_edgeuse(b, x)? {
-                b.edgeuse_mut(x)?.owner = EdgeuseOwner::Shell(Some(new_shell));
-            }
-        }
-        // transfer faceuses from the old shell to the new shell in one pass and rebuild
-        // both cached `Shell::faces` lists from their authoritative face-use members
-        shell::shell_move_faceuses(b, shell, new_shell, &faceuses2)?;
-        for s in [shell, new_shell] {
-            if let Some(faces) = crate::topology::integrity::derived_shell_faces(b, s) {
-                b.shell_mut(s)?.faces = faces;
-            }
-        }
+        transfer_wire_split_component(k, b, env, &mut marks, lock, shell, v2)?;
     }
     // when pShell points to a deleted edgeuse (wireshell case) or is a wireshell
     // after a shell split, ensure it has a valid first edge
@@ -1935,6 +1986,7 @@ pub(crate) fn stitch_one_solid_with_identity(
         None,
         &mut callback,
         Some(outside),
+        false,
     )
 }
 
@@ -1959,6 +2011,34 @@ pub(crate) fn stitch_faces_with_context<'a>(
         identity,
         edits,
         &mut callback,
+    )
+}
+
+/// [`stitch_faces_with_context`] with per-entity candidate splitting enabled
+/// (`Stitch::per_entity_candidate_split`): when `faces` restricts the stitch to newly
+/// merged faces, T-junction vertices on either the target or the candidate faces still
+/// split the mating lamina edges after earlier non-candidate entities are visited.
+pub(crate) fn stitch_faces_splitting_candidates_with_context<'a>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    faces: Option<&[Option<FaceId>]>,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'a>>,
+    edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
+) -> Result<StitchOutcome> {
+    let mut callback = DefaultStitchCallback::new();
+    stitch_faces_configured(
+        k,
+        b,
+        xsect_tol_3d,
+        faces,
+        allow_spine_edges,
+        identity,
+        edits,
+        &mut callback,
+        None,
+        true,
     )
 }
 
@@ -1991,6 +2071,7 @@ pub(crate) fn stitch_faces_with_callback<'a, C: StitchCallback>(
         edits,
         callback,
         None,
+        false,
     )
 }
 
@@ -2007,6 +2088,7 @@ fn stitch_faces_configured<'a, C: StitchCallback>(
     mut edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
     callback: &mut C,
     outside: Option<FaceuseId>,
+    per_entity_candidate_split: bool,
 ) -> Result<StitchOutcome> {
     // lock brep bounding box, until goes out of scope
     let mut lockit = LockBrepBox::new(k, b)?;
@@ -2024,6 +2106,7 @@ fn stitch_faces_configured<'a, C: StitchCallback>(
     stitch.squeeze_small_edges = true;
     stitch.making_manifold_solid = !allow_spine_edges;
     stitch.remove_laminar_slivers = true;
+    stitch.per_entity_candidate_split = per_entity_candidate_split;
 
     let mut lists = None;
     if let Some(faces) = faces {
