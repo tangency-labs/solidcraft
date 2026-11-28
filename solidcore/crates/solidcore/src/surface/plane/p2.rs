@@ -2047,10 +2047,11 @@ mod tests {
         assert!(defers(&rows));
     }
 
-    /// #22808: multi-span degree-1 translated spline extrusion (such as a wall extended during
-    /// `local_operation` face offset): the exact isocurve is extracted in both UV orders,
-    /// both strictly inside a span and at an interior knot, while non-monotone heights
-    /// still defer to general SSI.
+    /// #22808: multi-span degree-1 translated closed spline extrusion (such as a periodic
+    /// spline wall extended during `local_operation` face offset): the exact isocurve and
+    /// both UV curves are extracted in both UV orders, both strictly inside a span and at an
+    /// interior knot, while non-monotone heights and open multi-span surfaces defer to
+    /// general SSI.
     #[test]
     fn multi_span_translated_spline_rows_give_one_section_in_either_parameter_direction() {
         use crate::nurbs::math::CPoint;
@@ -2058,22 +2059,31 @@ mod tests {
 
         let k = Kernel::default();
         let plane = rect();
-        let row = |z, shift| {
-            [(-1.0, shift), (0.0, 1.0 + shift), (1.0, shift)]
-                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
-                .to_vec()
+        let closed_row = |z, shift| {
+            [
+                (1.0, shift),
+                (0.0, 1.0 + shift),
+                (-1.0, shift),
+                (1.0, shift),
+            ]
+            .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+            .to_vec()
         };
-        let multi_rows = vec![row(-2.0, 0.0), row(0.0, 0.5), row(4.0, 1.5)];
+        let multi_rows = vec![
+            closed_row(-2.0, 0.0),
+            closed_row(0.0, 0.5),
+            closed_row(4.0, 1.5),
+        ];
         let mut multi = BSplineSurface::from_data(
             2,
-            2,
+            3,
             1,
             2,
             4,
-            5,
+            6,
             &multi_rows,
             &[0.0, 0.0, 1.0, 3.0, 3.0],
-            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            &[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
         )
         .unwrap();
         let lifted_dom = Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0);
@@ -2085,6 +2095,25 @@ mod tests {
             &lifted_dom,
         );
         lifted.make_nurb().unwrap();
+        let check_uvs =
+            |sec: &SurfaceIntersection, surf: &BSplineSurface, pl: &Plane, expected_z: f64| {
+                assert_eq!(sec.curve_types, [TsectCurveType::Crossing]);
+                let c = &sec.curves_3d[0];
+                let uv_s = sec.surface1_uv_curves[0].as_ref().unwrap();
+                let uv_p = sec.surface2_uv_curves[0].as_ref().unwrap();
+                let iv = c.natural_interval();
+                for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    let s = iv.evaluate(t);
+                    let p3 = c.evaluate_point(&k, s).unwrap();
+                    assert!((p3.z - expected_z).abs() < 1e-12, "z={}", p3.z);
+                    let uvs = uv_s.evaluate_point(&k, s).unwrap();
+                    let lifted_s = surf.evaluate_point(Point2::new(uvs.x, uvs.y)).unwrap();
+                    assert!(lifted_s.distance(p3) < 1e-12);
+                    let uvp = uv_p.evaluate_point(&k, s).unwrap();
+                    let lifted_p = pl.evaluate_point(Point2::new(uvp.x, uvp.y));
+                    assert!(lifted_p.distance(p3) < 1e-12);
+                }
+            };
         for swap in [false, true] {
             if swap {
                 multi.swap_uv().unwrap();
@@ -2094,18 +2123,7 @@ mod tests {
             let section = spline_section::intersect(&k, &multi, &dom, &lifted, &lifted_dom, 1e-6)
                 .unwrap()
                 .unwrap();
-            assert_eq!(section.curve_types, [TsectCurveType::Crossing]);
-            let c = &section.curves_3d[0];
-            let iv = c.natural_interval();
-            for t in [0.0, 0.5, 1.0] {
-                let expected = Vec3::new(2.0 * t - 1.0, 1.0 + 2.0 * t * (1.0 - t), 2.0);
-                assert!(
-                    c.evaluate_point(&k, iv.evaluate(t))
-                        .unwrap()
-                        .distance(expected)
-                        < 1e-12
-                );
-            }
+            check_uvs(&section, &multi, &lifted, 2.0);
             // Exactly at the interior knot (z = 0 lies on row 1).
             let at_knot = spline_section::intersect(
                 &k,
@@ -2117,31 +2135,24 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-            assert_eq!(at_knot.curve_types, [TsectCurveType::Crossing]);
-            let c0 = &at_knot.curves_3d[0];
-            let iv0 = c0.natural_interval();
-            for t in [0.0, 0.5, 1.0] {
-                let expected = Vec3::new(2.0 * t - 1.0, 0.5 + 2.0 * t * (1.0 - t), 0.0);
-                assert!(
-                    c0.evaluate_point(&k, iv0.evaluate(t))
-                        .unwrap()
-                        .distance(expected)
-                        < 1e-12
-                );
-            }
+            check_uvs(&at_knot, &multi, &plane, 0.0);
         }
         // Non-monotone multi-span heights (plane crosses twice) must defer.
-        let folded_rows = vec![row(-1.0, 0.0), row(2.0, 0.5), row(-1.0, 1.0)];
+        let folded_rows = vec![
+            closed_row(-1.0, 0.0),
+            closed_row(2.0, 0.5),
+            closed_row(-1.0, 1.0),
+        ];
         let folded = BSplineSurface::from_data(
             2,
-            2,
+            3,
             1,
             2,
             4,
-            5,
+            6,
             &folded_rows,
             &[0.0, 0.0, 1.0, 2.0, 2.0],
-            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            &[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
         )
         .unwrap();
         assert!(spline_section::intersect(
@@ -2150,6 +2161,34 @@ mod tests {
             &folded.natural_uv_domain(),
             &plane,
             &plane.natural_uv_domain(),
+            1e-6,
+        )
+        .unwrap()
+        .is_none());
+        // Open multi-span translated extrusions must defer to general SSI.
+        let open_row = |z, shift| {
+            [(-1.0, shift), (0.0, 1.0 + shift), (1.0, shift)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        };
+        let open_multi = BSplineSurface::from_data(
+            2,
+            2,
+            1,
+            2,
+            4,
+            5,
+            &[open_row(-2.0, 0.0), open_row(0.0, 0.5), open_row(4.0, 1.5)],
+            &[0.0, 0.0, 1.0, 3.0, 3.0],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        assert!(spline_section::intersect(
+            &k,
+            &open_multi,
+            &open_multi.natural_uv_domain(),
+            &lifted,
+            &lifted_dom,
             1e-6,
         )
         .unwrap()

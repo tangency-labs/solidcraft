@@ -5,14 +5,18 @@
 
 use super::p2::ClipPurpose;
 use super::Plane;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::Result;
 use crate::geom::expansion as exact;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
+use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::nurbs::srf_basic::Direction;
 use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType};
 
 fn height(plane: &Plane, p: CPoint) -> Option<Vec<f64>> {
@@ -26,7 +30,7 @@ fn height(plane: &Plane, p: CPoint) -> Option<Vec<f64>> {
     Some(exact::add(&xy, &component(p.z, o.z, n.z)?))
 }
 
-fn iso_parameter(spline: &BSplineSurface, plane: &Plane) -> Option<(SurfParamType, f64)> {
+fn iso_parameter(spline: &BSplineSurface, plane: &Plane) -> Option<(SurfParamType, f64, bool)> {
     let net = spline.gw_nurb()?;
     let (direction, knots, rows, last) = match (net.p(), net.n(), net.q(), net.m()) {
         (1, rows, degree, last) if rows >= 1 && degree > 1 => {
@@ -37,6 +41,20 @@ fn iso_parameter(spline: &BSplineSurface, plane: &Plane) -> Option<(SurfParamTyp
         }
         _ => return None,
     };
+    let multi_span = rows > 1;
+    // Multi-span degree-1 translated extrusions arise when extending a spline wall.
+    // Restrict the multi-span fast path to closed profiles (e.g. periodic spline loops)
+    // so open extended extrusions stay on the general surface intersector.
+    if multi_span {
+        let profile_dir = if direction == SurfParamType::U {
+            Direction::V
+        } else {
+            Direction::U
+        };
+        if !net.is_closed(profile_dir) {
+            return None;
+        }
+    }
     // A clamped degree-1 knot vector with `rows + 1` control rows has length `rows + 3`:
     // `[k_0, k_0, k_1, ..., k_{rows-1}, k_rows, k_rows]`, with strictly increasing spans.
     if knots.len() != rows.checked_add(3)? {
@@ -64,7 +82,7 @@ fn iso_parameter(spline: &BSplineSurface, plane: &Plane) -> Option<(SurfParamTyp
     let displacement = |p: CPoint, q: CPoint| {
         [(p.x, q.x), (p.y, q.y), (p.z, q.z)].map(|(x, y)| exact::sub(&[y], &[x]))
     };
-    let mut heights: Vec<Vec<f64>> = Vec::with_capacity(rows + 1);
+    let mut heights: Vec<Vec<f64>> = Vec::new();
     for row in 0..=rows {
         heights.push(height(plane, at(row, 0)?)?);
     }
@@ -113,15 +131,61 @@ fn iso_parameter(spline: &BSplineSurface, plane: &Plane) -> Option<(SurfParamTyp
         let k0 = *span_knots.get(row)?;
         let k1 = *span_knots.get(row + 1)?;
         if sa == 0 {
-            return (k0 > lo && k0 < hi).then_some((direction, k0));
+            return (k0 > lo && k0 < hi).then_some((direction, k0, multi_span));
         }
         if sa * sb == -1 {
             let fraction = exact::to_f64(a) / exact::to_f64(&exact::sub(a, b));
             let t = (k1 - k0).mul_add(fraction, k0);
-            return (t > k0 && t < k1).then_some((direction, t));
+            return (t > k0 && t < k1).then_some((direction, t, multi_span));
         }
     }
     None
+}
+
+fn section_uv_curves(
+    plane: &Plane,
+    direction: SurfParamType,
+    t: f64,
+    curve: &Curve,
+) -> Result<Option<(Curve, Curve)>> {
+    let ivl = curve.natural_interval();
+    let (s0, s1) = (ivl.min(), ivl.max());
+    if !(s0 < s1 && s0.is_finite() && s1.is_finite()) {
+        return Ok(None);
+    }
+    let (p0, p1) = if direction == SurfParamType::U {
+        (CPoint::new(t, s0, NOZ, NOW), CPoint::new(t, s1, NOZ, NOW))
+    } else {
+        (CPoint::new(s0, t, NOZ, NOW), CPoint::new(s1, t, NOZ, NOW))
+    };
+    let spline_uv = Curve::from(BSplineCurve::from_nurb(
+        NurbCurve::new(vec![p0, p1], 1, vec![s0, s0, s1, s1])?,
+        2,
+        false,
+    ));
+    let CurveKind::BSpline(bsp) = curve.kind() else {
+        return Ok(None);
+    };
+    let Some(nurb) = bsp.gw_nurb() else {
+        return Ok(None);
+    };
+    let mut uv_pw = Vec::new();
+    for &pt in nurb.cpts() {
+        if (pt.w != NOW && pt.w != 1.0) || pt.z == NOZ {
+            return Ok(None);
+        }
+        let uv = plane.project_point_to_uv_domain(Point3::new(pt.x, pt.y, pt.z));
+        if !(uv.x.is_finite() && uv.y.is_finite()) {
+            return Ok(None);
+        }
+        uv_pw.push(CPoint::new(uv.x, uv.y, NOZ, NOW));
+    }
+    let plane_uv = Curve::from(BSplineCurve::from_nurb(
+        NurbCurve::new(uv_pw, nurb.degree(), nurb.knots().to_vec())?,
+        2,
+        false,
+    ));
+    Ok(Some((spline_uv, plane_uv)))
 }
 
 pub(crate) fn intersect(
@@ -132,7 +196,7 @@ pub(crate) fn intersect(
     plane_domain: &Extent2d,
     tolerance: f64,
 ) -> Result<Option<SurfaceIntersection>> {
-    let Some((direction, t)) = iso_parameter(spline, plane) else {
+    let Some((direction, t, multi_span)) = iso_parameter(spline, plane) else {
         return Ok(None);
     };
     let interval = if direction == SurfParamType::U {
@@ -180,11 +244,23 @@ pub(crate) fn intersect(
         } else {
             TsectCurveType::Crossing
         };
+        let (uv1, uv2) = if multi_span {
+            if kind == TsectCurveType::Touching {
+                return Ok(None);
+            }
+            let Some((spline_uv, plane_uv)) = section_uv_curves(plane, direction, t, &curve)?
+            else {
+                return Ok(None);
+            };
+            (Some(spline_uv), Some(plane_uv))
+        } else {
+            (None, None)
+        };
         result.curves_3d.push(curve);
         result.curve_types.push(kind);
         result.deviations.push(bound);
-        result.surface1_uv_curves.push(None);
-        result.surface2_uv_curves.push(None);
+        result.surface1_uv_curves.push(uv1);
+        result.surface2_uv_curves.push(uv2);
     }
     Ok(Some(result))
 }

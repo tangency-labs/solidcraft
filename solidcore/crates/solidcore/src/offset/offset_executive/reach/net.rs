@@ -1074,12 +1074,21 @@ impl Net {
         (finite(pt) && finite(su) && finite(sv)).then_some((pt, su, sv))
     }
 
+    /// Whether the net closes in at least one parameter direction (e.g. a periodic spline
+    /// wall or closed fillet loop).
+    pub(super) fn is_closed(&self) -> bool {
+        let [u, v] = self.closed;
+        u || v
+    }
+
     /// The point and partials at `(u, v)`, as floating point numbers (for Newton's
     /// steps), past a u side on the homogeneous lines ([`Form::Lines`]); `None` where
     /// [`Net::jet`] encloses nothing there.
     fn at(&self, u: f64, v: f64) -> Result<Option<(Vec3, Vec3, Vec3)>> {
-        if let Some(hit) = self.at_fast(u, v) {
-            return Ok(Some(hit));
+        if self.is_closed() {
+            if let Some(hit) = self.at_fast(u, v) {
+                return Ok(Some(hit));
+            }
         }
         Ok(self
             .jet_as(Ivl::from(u), Ivl::from(v), Form::Lines, None)?
@@ -1718,21 +1727,23 @@ fn solve_line_root(
     // in `interval_maximum`'s heap can carry a warm start from the opposite side of the
     // loop and converge to a far crossing. When `|tau|` jumps far past the carried root's,
     // also try Newton from the nearest point on the net and keep the nearer crossing.
-    if let (Some([_, _, tau_g]), Some([_, _, tau_r])) = (carried, root) {
-        if tau_r.abs() > tau_g.abs() * 2.0 + 1e-3 {
-            let near_uv = if net.offset.is_some() {
-                net.foot(mx0, None)?.map(|[a, b]| (a, b))
-            } else {
-                net.nearest_on_grid(mx0)?
-            };
-            if let Some((a, b)) = near_uv {
-                if let Some((p, _, _)) = net.at(a, b)? {
-                    if let Some(near) =
-                        newton([a, b, (p - mx0).dot(mu)], &at, &inverse_of_columns3)?
-                    {
-                        let [_, _, tau_n] = near;
-                        if tau_n.abs() < tau_r.abs() {
-                            root = Some(near);
+    if net.is_closed() {
+        if let (Some([_, _, tau_g]), Some([_, _, tau_r])) = (carried, root) {
+            if tau_r.abs() > tau_g.abs() * 2.0 + 1e-3 {
+                let near_uv = if net.offset.is_some() {
+                    net.foot(mx0, None)?.map(|[a, b]| (a, b))
+                } else {
+                    net.nearest_on_grid(mx0)?
+                };
+                if let Some((a, b)) = near_uv {
+                    if let Some((p, _, _)) = net.at(a, b)? {
+                        if let Some(near) =
+                            newton([a, b, (p - mx0).dot(mu)], &at, &inverse_of_columns3)?
+                        {
+                            let [_, _, tau_n] = near;
+                            if tau_n.abs() < tau_r.abs() {
+                                root = Some(near);
+                            }
                         }
                     }
                 }
@@ -1791,10 +1802,7 @@ pub(super) fn line_meets(
     let Some([a, b, tau]) = krawczyk(root, c, &value, &jacobian)? else {
         return Ok(None);
     };
-    if net.continues.iter().any(|&flag| flag) && net.jet_as_built(a, b, mx0)?.is_none() {
-        return Ok(None);
-    }
-    Ok(Some(tau))
+    Ok(net.jet_as_built(a, b, mx0)?.map(|_| tau))
 }
 
 /// [`line_meets`] over a parameter piece `[t0, t1]` using a first-order linear predictor

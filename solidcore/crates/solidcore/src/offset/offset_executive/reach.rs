@@ -1855,9 +1855,10 @@ fn trace_quadric_piece(
 /// The certified upper bound of the reach over a piece where a plane `(o, ν)` and a bare
 /// net meet in the edge's normal sections ([`local_extension_reach`]): the plane's trace
 /// `x0(s) + τ u(s)` there meets the net (or its extension) at a `τ` proved for every section
-/// of the piece by linear-predictor Krawczyk ([`net::line_meets_piece`]), `√(|x0 − p|² + τ²)`
-/// from the edge point; the same solve certifies the midpoint root to steer the halving.
-/// `guess` carries Newton's last root from piece to piece.
+/// of the piece (by linear-predictor Krawczyk [`net::line_meets_piece`] on closed nets, and
+/// [`net::line_meets`] on open nets), `√(|x0 − p|² + τ²)` from the edge point; the same at
+/// the middle is the value that steers the halving. `guess` carries Newton's last root from
+/// piece to piece.
 fn plane_net_piece(
     over: (Dv, Dv),
     mid: (Dv, Dv),
@@ -1879,38 +1880,54 @@ fn plane_net_piece(
             mean_value(a.z, m.z, dt),
         ]
     };
-    let values = |a: Dv| [a.x.v, a.y.v, a.z.v];
-    let derivs = |a: Dv| [a.x.d, a.y.d, a.z.d];
     let numbers = |a: Dv| Vec3::new(a.x.v.mid(), a.y.v.mid(), a.z.v.mid());
-    let deriv_numbers = |a: Dv| Vec3::new(a.x.d.mid(), a.y.d.mid(), a.z.d.mid());
-    let u_over = centred(line.u, mline.u);
-    let piece = net::LinePiece {
-        x0_mid: values(mline.x0),
-        u_mid: values(mline.u),
-        x0_over: centred(line.x0, mline.x0),
-        dx0_over: derivs(line.x0),
-        u_over,
-        du_over: derivs(line.u),
-        mid_x0: numbers(mline.x0),
-        mid_u: numbers(mline.u),
-        mid_dx0: deriv_numbers(mline.x0),
-        mid_du: deriv_numbers(mline.u),
-        dt,
-    };
+    let values = |a: Dv| [a.x.v, a.y.v, a.z.v];
     // `|x0 + τ u − p|² = |x0 − p|² + τ² |u|²` (`u` across the foot), `|u|` enclosed about 1
     let reach = |foot2: Ivl, tau: Ivl, u: [Ivl; 3]| {
         let along = round_up(tau.mag() * net::length_bound(u));
         round_up(sqrt(round_up(foot2.hi.max(0.0) + round_up(along * along))))
     };
-    let Ok(Some((tau, tau_mid))) = net::line_meets_piece(net, &piece, guess) else {
-        return PieceBound::Unknown;
-    };
-    let upper = reach(mean_value(line.foot2, mline.foot2, dt), tau, u_over);
-    // a meeting at the middle, from its own box: its distance only steers the halving (it
-    // need not be the nearest meeting there, nor rounded down)
-    let lower = match tau_mid {
-        Some(tau) => sqrt(mline.foot2.v.lo.max(0.0) + tau.mig() * tau.mig()),
-        None => 0.0,
+    let (upper, lower) = if net.is_closed() {
+        let derivs = |a: Dv| [a.x.d, a.y.d, a.z.d];
+        let deriv_numbers = |a: Dv| Vec3::new(a.x.d.mid(), a.y.d.mid(), a.z.d.mid());
+        let u_over = centred(line.u, mline.u);
+        let piece = net::LinePiece {
+            x0_mid: values(mline.x0),
+            u_mid: values(mline.u),
+            x0_over: centred(line.x0, mline.x0),
+            dx0_over: derivs(line.x0),
+            u_over,
+            du_over: derivs(line.u),
+            mid_x0: numbers(mline.x0),
+            mid_u: numbers(mline.u),
+            mid_dx0: deriv_numbers(mline.x0),
+            mid_du: deriv_numbers(mline.u),
+            dt,
+        };
+        let Ok(Some((tau, tau_mid))) = net::line_meets_piece(net, &piece, guess) else {
+            return PieceBound::Unknown;
+        };
+        let upper = reach(mean_value(line.foot2, mline.foot2, dt), tau, u_over);
+        let lower = match tau_mid {
+            Some(tau) => sqrt(mline.foot2.v.lo.max(0.0) + tau.mig() * tau.mig()),
+            None => 0.0,
+        };
+        (upper, lower)
+    } else {
+        let at_middle = (numbers(mline.x0), numbers(mline.u));
+        let piece = (centred(line.x0, mline.x0), centred(line.u, mline.u));
+        let Ok(Some(tau)) = net::line_meets(net, piece, at_middle, guess) else {
+            return PieceBound::Unknown;
+        };
+        let upper = reach(mean_value(line.foot2, mline.foot2, dt), tau, piece.1);
+        // a meeting at the middle, from its own box: its distance only steers the halving (it
+        // need not be the nearest meeting there, nor rounded down)
+        let lower =
+            match net::line_meets(net, (values(mline.x0), values(mline.u)), at_middle, guess) {
+                Ok(Some(tau)) => sqrt(mline.foot2.v.lo.max(0.0) + tau.mig() * tau.mig()),
+                _ => 0.0,
+            };
+        (upper, lower)
     };
     if upper.is_finite() {
         PieceBound::Value {
@@ -6234,13 +6251,29 @@ mod tests {
         .unwrap();
         assert!(bounds(&b, r_bottom.reach, 2.0), "{}", r_bottom.reach);
 
-        // Verify direct piece count on the curved bottom arc stays tiny (well below
-        // MAX_INTERVALS = 16,384) and the second call with the same `EdgeBounds` evaluates
-        // zero pieces.
-        let Some(Exact::Net(net)) = exact_class(&k, &net_surf, b.tolerance()).unwrap() else {
-            panic!("a bare net");
+        // Verify direct piece count on a closed curved bare net (a seamed cylinder's side
+        // meeting its vertically moved bottom cap) stays tiny (well below MAX_INTERVALS =
+        // 16,384) via linear-predictor Krawczyk and the second call with the same `EdgeBounds`
+        // evaluates zero pieces.
+        let (cb, side, caps, _, _) = seamed_cylinder(&mut k, 2.0);
+        let cbottom = caps
+            .into_iter()
+            .find(|&f| {
+                let Some(SurfaceKind::Plane(p)) =
+                    cb.face(f).unwrap().surface.as_ref().map(Surface::kind)
+                else {
+                    return false;
+                };
+                p.position().origin().z.abs() < 1e-6
+            })
+            .unwrap();
+        let closed_net_surf = bare_net(&k, &cb, side);
+        let Some(Exact::Net(net)) = exact_class(&k, &closed_net_surf, cb.tolerance()).unwrap()
+        else {
+            panic!("a closed bare net");
         };
-        let arc = edge_between(&b, bottom, round);
+        assert!(net.is_closed(), "seamed cylinder bare net must be closed");
+        let arc = edge_between(&cb, cbottom, side);
         let plane = Tangent {
             point: Vec3::new(0.0, 0.0, -2.0),
             normal: Vec3::Z,
@@ -6254,23 +6287,25 @@ mod tests {
             calls.set(calls.get() + 1);
             Ok(plane_net_piece(over, mid, dt, plane, &net, &guess))
         };
-        let pair = EdgeQuantity::Meeting(Some(bottom.min(round)), Some(bottom.max(round)));
+        let pair = EdgeQuantity::Meeting(Some(cbottom.min(side)), Some(cbottom.max(side)));
         let mut cache = EdgeBounds::default();
         let (reach, apart, _) =
-            edge_interval_maximum(&b, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
+            edge_interval_maximum(&cb, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
                 .unwrap()
                 .unwrap();
         let first_calls = calls.get();
         assert!(
-            reach >= 2.0 - b.tolerance() && reach <= 2.0 + 1e-3 && !apart,
+            reach >= 2.0 - cb.tolerance() && reach <= 2.0 + 1e-3 && !apart,
             "{reach}"
         );
+        // Full 360° closed cylinder edge (4× a quarter-turn fillet): linear predictor keeps
+        // piece count bounded well below 2048 (vs >60k under box-wrapping explosion).
         assert!(
-            first_calls < 256,
-            "linear-predictor plane_net_piece should converge in < 256 pieces at 1e-3 tol, took {first_calls}"
+            first_calls < 2048,
+            "linear-predictor plane_net_piece should converge in < 2048 pieces on a full 360° edge at 1e-3 tol, took {first_calls}"
         );
         let (cached_reach, _, _) =
-            edge_interval_maximum(&b, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
+            edge_interval_maximum(&cb, arc, &piece, 1e-3, &mut cache, pair, Some(&surfaces))
                 .unwrap()
                 .unwrap();
         assert_eq!(cached_reach.to_bits(), reach.to_bits());
