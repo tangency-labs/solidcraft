@@ -146,11 +146,7 @@ const STEP_NAMES: OptionSpec = OptionSpec {
 };
 
 /// Write leaf parts and assemblies as linked `.sc` files (see `file.insert_step`'s `split_to_files`).
-const SPLIT_TO_FILES: OptionSpec = OptionSpec {
-    param: "split_to_files",
-    label: "Save as separate files",
-    kind: OptionKind::Bool { default: false },
-};
+const SPLIT_TO_FILES: OptionSpec = OptionSpec { param: "split_to_files", label: "Save as separate files", kind: OptionKind::Bool { default: false } };
 
 /// Destination folder for [`SPLIT_TO_FILES`] (empty: the STEP file's directory).
 const SPLIT_FOLDER: OptionSpec = OptionSpec {

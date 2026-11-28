@@ -1324,17 +1324,10 @@ fn split_to_files_writes_leaves_once_and_nested_assemblies() {
     let out = dir.join("parts");
     std::fs::create_dir_all(&out).unwrap();
     let mut s = Session::default();
-    let r = run(
-        &mut s,
-        "file.insert_step",
-        json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy(), "overwrite": true}),
-    );
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy(), "overwrite": true}));
     let files = r["split_files"].as_array().expect("split_files");
-    let names: Vec<String> = files
-        .iter()
-        .filter_map(|f| f.as_str())
-        .map(|p| std::path::Path::new(p).file_stem().unwrap().to_string_lossy().into_owned())
-        .collect();
+    let names: Vec<String> =
+        files.iter().filter_map(|f| f.as_str()).map(|p| std::path::Path::new(p).file_stem().unwrap().to_string_lossy().into_owned()).collect();
     for n in ["Base", "Beam", "Pin", "Arm", "rig"] {
         assert!(names.iter().any(|x| x == n), "{n} in {names:?}; {r}");
     }
@@ -1364,10 +1357,8 @@ fn split_to_files_refuses_flatten_and_existing_files_without_overwrite() {
     let out = dir.join("once");
     std::fs::create_dir_all(&out).unwrap();
     run(&mut s, "file.insert_step", json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy(), "overwrite": true}));
-    let err = s
-        .execute("file.insert_step", &json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy()}))
-        .unwrap_err()
-        .to_string();
+    let err =
+        s.execute("file.insert_step", &json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy()})).unwrap_err().to_string();
     assert!(err.contains("already exists") || err.contains("overwrite"), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1379,10 +1370,7 @@ fn split_to_files_keeps_a_multi_body_part_as_one_file() {
     let b = box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(5.0, 5.0, 5.0)).unwrap();
     let products = vec![ExportProduct {
         name: "Block".into(),
-        bodies: vec![
-            ExportBody { name: "A".into(), body: &a, color: None },
-            ExportBody { name: "B".into(), body: &b, color: None },
-        ],
+        bodies: vec![ExportBody { name: "A".into(), body: &a, color: None }, ExportBody { name: "B".into(), body: &b, color: None }],
         children: Vec::new(),
     }];
     let text = step_export_products(&products, 0, &StepHeader::default()).unwrap();

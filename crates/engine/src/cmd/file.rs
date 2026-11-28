@@ -573,17 +573,7 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
         None | Some(Value::Null) => solidcraft_io::StepReader::default(),
         Some(v) => v.as_str().and_then(solidcraft_io::StepReader::parse).ok_or_else(|| bad(cmd, READER_MESSAGE))?,
     };
-    Ok(StepOptions {
-        y_up,
-        names,
-        folder,
-        history,
-        flatten: false,
-        reader,
-        split_to_files: false,
-        split_folder: None,
-        split_name: None,
-    })
+    Ok(StepOptions { y_up, names, folder, history, flatten: false, reader, split_to_files: false, split_folder: None, split_name: None })
 }
 
 /// The warning, logged, for a STEP file that may need more memory than the machine can spare,

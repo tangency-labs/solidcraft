@@ -149,10 +149,7 @@ fn unique_path(folder: &Path, stem: &str, overwrite: bool, reserved: &HashSet<St
         }
         let path = folder.join(&name);
         if path.exists() && !overwrite {
-            return Err(bad(
-                CMD,
-                format!("{} already exists; pass overwrite: true to replace it, or choose another folder", path.display()),
-            ));
+            return Err(bad(CMD, format!("{} already exists; pass overwrite: true to replace it, or choose another folder", path.display())));
         }
         return Ok(path);
     }
@@ -162,17 +159,9 @@ fn unique_path(folder: &Path, stem: &str, overwrite: bool, reserved: &HashSet<St
 fn save_leaf(source: &Session, component: u64, out: &Path) -> Result<()> {
     let name = source.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_else(|| "Part".into());
     // Prefer the ownership map; a single-part import may leave it empty and rely on the feature's component.
-    let mut body_names: Vec<String> =
-        source.doc.body_components.iter().filter(|(_, c)| **c == component).map(|(n, _)| n.clone()).collect();
+    let mut body_names: Vec<String> = source.doc.body_components.iter().filter(|(_, c)| **c == component).map(|(n, _)| n.clone()).collect();
     if body_names.is_empty() {
-        body_names = source
-            .model
-            .state()
-            .bodies
-            .iter()
-            .filter(|b| source.doc.model_body_component(b) == component)
-            .map(|b| b.name.clone())
-            .collect();
+        body_names = source.model.state().bodies.iter().filter(|b| source.doc.model_body_component(b) == component).map(|b| b.name.clone()).collect();
     }
     if body_names.is_empty() {
         // An empty leaf (product with no solids): still write a named empty design so assemblies can link it.
@@ -193,23 +182,13 @@ fn save_leaf(source: &Session, component: u64, out: &Path) -> Result<()> {
         };
         locals.push((bname.clone(), local));
     }
-    let export: Vec<ExportBody<'_>> =
-        locals.iter().map(|(n, b)| ExportBody { name: n.clone(), body: b, color: None }).collect();
+    let export: Vec<ExportBody<'_>> = locals.iter().map(|(n, b)| ExportBody { name: n.clone(), body: b, color: None }).collect();
     let header = StepHeader { file_name: format!("{name}.step"), ..Default::default() };
     let step = step_export_bodies(&export, &header).map_err(|e| EngineError::Other(format!("split: {e}")))?;
     let mut part = Session::new(Document::new(&name));
     let sf = solidcraft_io::step_import_feature(step.as_bytes(), &format!("{name}.step")).map_err(|e| EngineError::Other(format!("split: {e}")))?;
     let layers: Vec<Option<String>> = sf.import.bodies.iter().map(|b| b.layer.clone()).collect();
-    let _ = import::add_in_component(
-        &mut part,
-        sf.kind,
-        &name,
-        sf.body_names,
-        &sf.invisible,
-        &layers,
-        &name,
-        import::Tree::Step(&sf.import),
-    )?;
+    let _ = import::add_in_component(&mut part, sf.kind, &name, sf.body_names, &sf.invisible, &layers, &name, import::Tree::Step(&sf.import))?;
     part.execute("file.save_as", &json!({"path": out.to_string_lossy(), "overwrite": true}))?;
     Ok(())
 }
@@ -290,20 +269,7 @@ pub(super) fn read_overwrite(p: &Value, cmd: &str) -> Result<bool> {
 /// `component.insert_design`'s `matrix`: row-major 3×4 whose rows are the document Mat's columns
 /// (translation from the last row).
 fn matrix_param(m: &Mat) -> Value {
-    json!([
-        m[0][0],
-        m[1][0],
-        m[2][0],
-        m[3][0],
-        m[0][1],
-        m[1][1],
-        m[2][1],
-        m[3][1],
-        m[0][2],
-        m[1][2],
-        m[2][2],
-        m[3][2],
-    ])
+    json!([m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1], m[3][1], m[0][2], m[1][2], m[2][2], m[3][2],])
 }
 
 /// Enrich a command reply with the files written by a split.
