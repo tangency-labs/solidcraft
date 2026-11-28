@@ -1060,7 +1060,9 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
         // A point on another copy of a part: a joint's origin there.
         Sel::PlacedSketchPoint { .. } => a & selection::SNAP_POINTS != 0,
-        Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
+        Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::SketchPattern { .. } | Sel::Occurrence { .. } => {
+            false
+        }
     }
 }
 
@@ -4128,6 +4130,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         }
         Sel::ExternalSketchPoint { sketch, id } | Sel::PlacedSketchPoint { sketch, id, .. } => external_point(*sketch, id),
         Sel::SketchConstraint { id } => solidcraft_ui_text::format("dialog.selection_constraint", &[("id", id)]),
+        Sel::SketchPattern { id } => crate::sketch_pattern_tree::active_label(s, id),
         Sel::Profile { sketch, index } => solidcraft_ui_text::format(
             "dialog.selection_profile",
             &[("sketch", &sketch_name(*sketch)), ("number", &index.saturating_add(1).to_string())],

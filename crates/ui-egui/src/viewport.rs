@@ -6435,7 +6435,12 @@ pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
             let at = crate::selection::line_midpoint(sk, sk.curve_index(id)?)?;
             Hit::SketchMidpoint { sketch, id: id.clone(), at }
         }
-        Sel::Body { .. } | Sel::Feature { .. } | Sel::Occurrence { .. } | Sel::SketchConstraint { .. } | Sel::Drawing { .. } => return None,
+        Sel::Body { .. }
+        | Sel::Feature { .. }
+        | Sel::Occurrence { .. }
+        | Sel::SketchConstraint { .. }
+        | Sel::SketchPattern { .. }
+        | Sel::Drawing { .. } => return None,
     })
 }
 
@@ -7093,6 +7098,10 @@ fn hash_sel(sel: &Sel, h: &mut impl Hasher) {
             cloud.hash(h);
             index.hash(h);
             hash_vec3(*point, h);
+        }
+        Sel::SketchPattern { id } => {
+            19u8.hash(h);
+            id.hash(h);
         }
     }
 }

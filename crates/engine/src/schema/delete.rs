@@ -134,6 +134,7 @@ impl JsonSchema for SelectionItems {
                 item("external_sketch_curve", &[("sketch", &count), ("id", &text)], &[]),
                 item("external_sketch_point", &[("sketch", &count), ("id", &text)], &[]),
                 item("sketch_constraint", &[("id", &text)], &[]),
+                item("sketch_pattern", &[("id", &text)], &[]),
                 item("profile", &[("sketch", &count), ("index", &count)], &[]),
                 item("plane", &[("name", &text)], &[]),
                 item("construction_point", &[("name", &text)], &[]),

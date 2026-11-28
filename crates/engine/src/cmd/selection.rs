@@ -23,7 +23,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.get", "Get S
     .output(output_schema_for::<SelectionGetResult>)
     .params(
     "detail?: bool (default true: resolve each item's geometry) → {count, items: [{kind (= type: body|face|edge|vertex|feature|sketch_curve|\
-     sketch_point|sketch_midpoint|sketch_constraint|profile|plane|axis|construction_point|occurrence…), the selection's own fields as select.set takes them (body, index, point, \
+     sketch_point|sketch_midpoint|sketch_constraint|sketch_pattern|profile|plane|axis|construction_point|occurrence…), the selection's own fields as select.set takes them (body, index, point, \
      id, sketch, path…), and with detail: face: name (persistent face name), name_exact, surface ({type: plane|cylinder|cone|sphere|torus|\
      other, normal/point, origin/axis/radius…}), area_mm2, planar; edge: name (persistent edge name), curve (line|circle|arc|other), \
      length_mm, start, end, center/axis/radius for round edges; body: volume_mm3, feature, visible; any body item: component {id, name} \
@@ -158,6 +158,7 @@ impl<'a> Context<'a> {
                 self.sketch_entity(Some(*sketch), id, Entity::Point, v);
             }
             Sel::SketchConstraint { id } => self.sketch_entity(None, id, Entity::Constraint, v),
+            Sel::SketchPattern { id } => self.sketch_entity(None, id, Entity::Pattern, v),
             Sel::Profile { sketch, .. } => {
                 if let Some(ss) = self.st.sketch(*sketch) {
                     v.insert("sketch".into(), json!(ss.feature));
@@ -223,6 +224,7 @@ impl<'a> Context<'a> {
             Entity::Curve | Entity::Midpoint => sketch_of(self.s, &self.st, sketch, |sk| sk.curve_index(id).is_some()),
             Entity::Point => sketch_of(self.s, &self.st, sketch, |sk| sk.point_index(id).is_some()),
             Entity::Constraint => sketch_of(self.s, &self.st, sketch, |sk| sk.constraints.iter().any(|c| c.id == id)),
+            Entity::Pattern => sketch_of(self.s, &self.st, sketch, |sk| sk.patterns.iter().any(|p| p.id == id)),
         };
         let Some(ss) = found else { return };
         v.insert("sketch".into(), json!(ss.feature));
@@ -260,6 +262,15 @@ impl<'a> Context<'a> {
                     }
                 }
             }
+            Entity::Pattern => {
+                if let Some(p) = sk.patterns.iter().find(|p| p.id == id) {
+                    let kind = match p.kind {
+                        solidcraft_sketch::SketchPatternKind::Rectangular { .. } => "rectangular_pattern",
+                        solidcraft_sketch::SketchPatternKind::Circular { .. } => "circular_pattern",
+                    };
+                    v.insert("entity".into(), json!(kind));
+                }
+            }
         }
     }
 }
@@ -270,6 +281,7 @@ enum Entity {
     Point,
     Midpoint,
     Constraint,
+    Pattern,
 }
 
 /// The point a note anchors to when the caller names none: where the selection points, the
@@ -313,7 +325,7 @@ fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
         Sel::ExternalSketchCurve { sketch, id } => sketch_curve_point(s, Some(*sketch), id),
         // An occurrence: where it is placed in the world.
         Sel::Occurrence { path } => s.occurrence_placement(path).ok().map(|p| solidcraft_doc::apply_point(&p.world, Vec3::ZERO)),
-        Sel::Feature { .. } | Sel::SketchConstraint { .. } | Sel::Profile { .. } | Sel::Drawing { .. } => None,
+        Sel::Feature { .. } | Sel::SketchConstraint { .. } | Sel::SketchPattern { .. } | Sel::Profile { .. } | Sel::Drawing { .. } => None,
     }
 }
 

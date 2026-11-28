@@ -1,0 +1,21 @@
+[
+  {"note":"#12081: a rectangular pattern with a count of 1 has no copies. Its Browser row still selects it, Delete removes it, the other pattern and the source stay, and undo brings it back."},
+  {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
+  {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[10,5],[15,5]],"ids":["source"]}}},
+  {"call":"engine.execute","params":{"command":"sketch.pattern.rectangular","params":{"entities":["source"],"count":1,"spacing":20}}},
+  {"call":"engine.execute","params":{"command":"sketch.pattern.rectangular","params":{"entities":["source"],"count":2,"spacing":20}}},
+  {"expect":{"errors":0,"sketch_curves":{"own":2},"selection":0}},
+  {"click":{"handle":"browser:sketch-pattern:1:pat1"}},
+  {"expect":{"selection":1}},
+  {"key":"Delete"},
+  {"expect":{"errors":0,"sketch_curves":{"own":2},"selection":0}},
+  {"click":{"handle":"browser:sketch-pattern:1:pat2"}},
+  {"expect":{"selection":1}},
+  {"key":"Delete"},
+  {"expect":{"errors":0,"sketch_curves":{"own":1},"selection":0}},
+  {"call":"engine.execute","params":{"command":"edit.undo","params":{}}},
+  {"call":"engine.execute","params":{"command":"edit.undo","params":{}}},
+  {"expect":{"errors":0,"sketch_curves":{"own":2}}},
+  {"click":{"handle":"browser:sketch-pattern:1:pat1"}},
+  {"expect":{"selection":1}}
+]

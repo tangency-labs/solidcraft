@@ -400,7 +400,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
-        .params("entities: [curve, point or constraint ids]; preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
+        .params("entities: [curve, point, constraint or sketch pattern ids]; a pattern goes with its copies, its sources stay; preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
     CommandSpec::new("sketch.detach_point", "Detach Sketch Point", crate::checked!("sketch.detach_point", detach_point))
         .icon("c_coincident")
         .enabled(in_sketch)
@@ -5477,6 +5477,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         let mut curves = Vec::new();
         let mut points = Vec::new();
         let mut cons = Vec::new();
+        let mut patterns = Vec::new();
         // 3D constraints and curves (#10608) go after the loop, so a curve and its own
         // constraint can be deleted together.
         let (mut wire_cons, mut wires) = (Vec::new(), Vec::new());
@@ -5497,6 +5498,14 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
+            } else if let Some(pattern) = sk.patterns.iter().find(|pattern| &pattern.id == id) {
+                // A pattern goes with its copies and their relations; its sources stay (#12081).
+                patterns.push(id.clone());
+                for instance in &pattern.instances {
+                    curves.extend(instance.curves.iter().filter_map(|c| sk.curve_index(c)));
+                    points.extend(instance.points.iter().filter_map(|(_, q)| sk.point_index(q)));
+                    cons.extend(instance.constraints.iter().cloned());
+                }
             } else {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
@@ -5531,6 +5540,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             sk.refresh_offsets()?;
         }
         sk.constraints.retain(|c| !cons.contains(&c.id));
+        sk.patterns.retain(|pattern| !patterns.contains(&pattern.id));
         let (kept, broken) =
             if preserve { super::sketch_links::omit_removed(sk, &pieces, &curves, &points, cmd)? } else { (Default::default(), Vec::new()) };
         let pids: Vec<String> = points.iter().filter_map(|q| sk.points.get(*q).map(|x| x.id.clone())).collect();
