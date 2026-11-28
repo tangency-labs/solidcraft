@@ -372,6 +372,10 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         if count(schema, "maxItems").is_some_and(|max| items.len() > max) {
             return Err(bad(field, "has too many items"));
         }
+        let mut seen = std::collections::BTreeSet::new();
+        if schema.get("uniqueItems") == Some(&Value::Bool(true)) && !items.iter().all(|item| seen.insert(item.to_string())) {
+            return Err(bad(field, "has repeated items"));
+        }
         if let Some(item) = schema.get("items") {
             let item_schemas: Vec<_> = schemas.iter().filter_map(|schema| schema.get("items")).collect();
             let conditions = if matches!(conditions, Conditions::Ignore) { Conditions::Ignore } else { Conditions::Schemas(&item_schemas) };

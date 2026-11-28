@@ -93,6 +93,15 @@ struct Edit {
     sheet: Option<SheetText>,
     /// Only after a refused unknown name: a one-click, explicit variable definition.
     create_variable: Option<VariableOffer>,
+    /// Which opening of the box or window this is, new each time one opens (a refused value
+    /// keeps it): where it was dragged belongs to this opening only (#22388).
+    opened: u64,
+}
+
+/// A new [`Edit::opened`].
+fn next_opened() -> u64 {
+    static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Clone, Debug)]
@@ -343,6 +352,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -387,6 +397,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -655,6 +666,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     true
@@ -761,6 +773,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
     true
@@ -790,6 +803,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
             params: Default::default(),
             sheet: Some(target),
             create_variable: None,
+            opened: next_opened(),
         })
     });
 }
@@ -1377,6 +1391,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             params: Default::default(),
             sheet: None,
             create_variable: None,
+            opened: next_opened(),
         })
     });
 }
@@ -1531,24 +1546,21 @@ const EDIT_HEIGHT: f32 = 80.0;
 /// The room the box leaves at the view's right and bottom edges.
 const EDIT_MARGIN: f32 = 6.0;
 
-/// Where the value box opens: beside the text, or beside the pointer while a value is typed
-/// first. `size` is the box's (at least as wide as its field and [`EDIT_HEIGHT`] tall).
+/// Where the value box opens: beside `at`, its text or, while a value is typed first, the
+/// pointer. `size` is the box's (at least as wide as its field and [`EDIT_HEIGHT`] tall).
 ///
 /// Beside the pointer the box keeps [`EDIT_GAP`] from it on at least one axis, so it never
 /// covers the square around the pointer a click picks in (#11057). It opens below and right of
 /// the pointer; where the view has no room there it tries left, then above, then above and left.
 /// Where no corner fits it keeps the gap on one axis and slides along the other, and it only
 /// gives up the gap when the view is too small for the box on either side.
-fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::Vec2) -> Pos2 {
+fn edit_anchor(at: Pos2, drawable: Option<egui::Rect>, size: egui::Vec2) -> Pos2 {
     let (w, h) = (size.x, size.y);
     let Some(rect) = drawable else {
-        return if live { at + vec2(EDIT_GAP, EDIT_GAP) } else { at - vec2(45.0, 11.0) };
+        return at + vec2(EDIT_GAP, EDIT_GAP);
     };
     let clamp_x = |x: f32| x.clamp(rect.left(), (rect.right() - w - EDIT_MARGIN).max(rect.left()));
     let clamp_y = |y: f32| y.clamp(rect.top(), (rect.bottom() - h - EDIT_MARGIN).max(rect.top()));
-    if !live {
-        return Pos2::new(clamp_x(at.x - 45.0), clamp_y(at.y - 11.0));
-    }
     let fits_x = |x: f32| x >= rect.left() && x + w <= rect.right() - EDIT_MARGIN;
     let fits_y = |y: f32| y >= rect.top() && y + h <= rect.bottom() - EDIT_MARGIN;
     let (right, left) = (at.x + EDIT_GAP, at.x - EDIT_GAP - w);
@@ -1566,6 +1578,70 @@ fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::V
         return Pos2::new(x, clamp_y(below));
     }
     Pos2::new(clamp_x(right), clamp_y(below))
+}
+
+/// How far the dimension value box or window was dragged. Kept only while it stays open, so the
+/// next opens beside its own dimension.
+fn moved_id() -> egui::Id {
+    egui::Id::unique("sc_dim_box_moved")
+}
+
+pub(crate) fn moved(ctx: &egui::Context) -> egui::Vec2 {
+    let frame = ctx.cumulative_frame_nr();
+    let open = ctx.data(|d| d.get_temp::<u64>(moved_id().with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
+    if !open {
+        ctx.data_mut(|d| d.insert_temp(moved_id(), egui::Vec2::ZERO));
+        return egui::Vec2::ZERO;
+    }
+    ctx.data(|d| d.get_temp::<egui::Vec2>(moved_id())).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
+}
+
+/// The box or window open now is opening `opened` ([`Edit::opened`]): where another opening was
+/// dragged is forgotten, even when it closed only the frame before (#22388).
+pub(crate) fn own_moved(ctx: &egui::Context, opened: u64) {
+    let owner = moved_id().with("opened");
+    if ctx.data(|d| d.get_temp::<u64>(owner)) != Some(opened) {
+        ctx.data_mut(|d| {
+            d.insert_temp(owner, opened);
+            d.insert_temp(moved_id(), egui::Vec2::ZERO);
+        });
+    }
+}
+
+fn set_moved(ctx: &egui::Context, by: egui::Vec2) {
+    if by.is_finite() {
+        ctx.data_mut(|d| d.insert_temp(moved_id(), by));
+    }
+}
+
+pub(crate) fn note_shown(ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(moved_id().with("shown"), frame));
+}
+
+pub(crate) fn kept_in(pos: Pos2, size: egui::Vec2, drawable: Option<egui::Rect>) -> Pos2 {
+    let Some(rect) = drawable else { return pos };
+    let x = pos.x.clamp(rect.left(), (rect.right() - size.x - EDIT_MARGIN).max(rect.left()));
+    let y = pos.y.clamp(rect.top(), (rect.bottom() - size.y - EDIT_MARGIN).max(rect.top()));
+    if x.is_finite() && y.is_finite() { Pos2::new(x, y) } else { rect.min }
+}
+
+/// Lets `band`, a dimension's name line, drag its box or window. Registered over the name, so a
+/// press there drags rather than selects it. Returns this frame's move and whether the pointer
+/// is on it (the value field then keeps the keyboard).
+pub(crate) fn grip(ui: &egui::Ui, band: Rect) -> (egui::Vec2, bool) {
+    let response = ui.interact(band, ui.scope_id().with("sc_dim_grip"), egui::Sense::click_and_drag());
+    let held = response.is_pointer_button_down_on() || response.clicked() || response.drag_stopped();
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        let by = response.drag_delta();
+        set_moved(ui.ctx(), moved(ui.ctx()) + by);
+        return (by, true);
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    (egui::Vec2::ZERO, held)
 }
 
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
@@ -1609,7 +1685,15 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     // taller box flipped above the pointer still ends short of it.
     let drawn = ctx.memory(|m| m.area_rect(egui::Id::unique("sc_dim_edit_area"))).map(|r| r.size()).filter(|s| s.is_finite());
     let size = drawn.map_or(vec2(popup_width, EDIT_HEIGHT), |s| s.max(vec2(popup_width, EDIT_HEIGHT)));
-    let anchor = edit_anchor(at, e.live.is_some(), drawable, size);
+    let opens = edit_anchor(at, drawable, size);
+    own_moved(ctx, e.opened);
+    let anchor = if e.live.is_some() {
+        set_moved(ctx, egui::Vec2::ZERO);
+        opens
+    } else {
+        kept_in(opens + moved(ctx), size, drawable)
+    };
+    note_shown(ctx);
     // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
     Container::new(ctx, Surface::Canvas).area(egui::Id::unique("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(
         ctx,
@@ -1618,16 +1702,25 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             Container::show_backing(ui, frame, |ui| {
                 crate::ui_kit::scope(ui, |ui| {
                     ui.set_max_width(popup_width);
-                    if e.sheet.is_some() {
-                        crate::ui_kit::text(ui, &e.param, crate::ui_kit::Text::Inline);
+                    let name_line = |ui: &mut egui::Ui| {
+                        if e.sheet.is_some() {
+                            crate::ui_kit::text(ui, &e.param, crate::ui_kit::Text::Inline)
+                        } else {
+                            crate::ui_kit::text(
+                                ui,
+                                &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]),
+                                crate::ui_kit::Text::Inline,
+                            )
+                            .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"))
+                        }
+                    };
+                    let held = if e.live.is_none() {
+                        let band = ui.horizontal(|ui| name_line(ui).rect).inner;
+                        grip(ui, band.with_max_x(band.left().max(ui.max_rect().right()))).1
                     } else {
-                        crate::ui_kit::text(
-                            ui,
-                            &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]),
-                            crate::ui_kit::Text::Inline,
-                        )
-                        .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
-                    }
+                        name_line(ui);
+                        false
+                    };
                     if !e.owned {
                         // The whole value is selected before the field reads its state, every frame
                         // until the person takes it over, so typing replaces it (#11204). Only on the
@@ -1645,6 +1738,9 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         e.owned = focused && ui.input(|i| i.events.iter().any(|ev| matches!(ev, egui::Event::Key { pressed: true, .. })));
                     }
                     let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, "", false);
+                    if held {
+                        r.request_focus();
+                    }
                     // A press into the field puts the caret where it landed; not the press that placed
                     // or pinned the value, which began before the box sat there.
                     let settled = e.shown == Some(anchor);
@@ -1924,13 +2020,11 @@ mod tests {
         use egui::pos2;
         let view = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
         let size = vec2(220.0, 80.0);
-        let a = edit_anchor(pos2(300.0, 200.0), true, Some(view), size);
+        let a = edit_anchor(pos2(300.0, 200.0), Some(view), size);
         assert_eq!(a, pos2(330.0, 230.0), "30 px below and right of the pointer");
         // Its right and bottom edges stop 30 px short of the pointer.
-        let a = edit_anchor(pos2(960.0, 560.0), true, Some(view), size);
+        let a = edit_anchor(pos2(960.0, 560.0), Some(view), size);
         assert_eq!((a.x + 220.0, a.y + 80.0), (930.0, 530.0), "left of and above the pointer");
-        // Editing an existing dimension still opens where its text is.
-        assert_eq!(edit_anchor(pos2(300.0, 200.0), false, Some(view), size), pos2(255.0, 189.0));
     }
 
     /// #11057: wherever the pointer is and whatever the box's size, the box stays inside the view
@@ -1950,16 +2044,16 @@ mod tests {
         // A tall box (a wrapped error line) near the bottom: above the pointer by its real height.
         let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
         let tall = vec2(228.0, 130.0);
-        let a = edit_anchor(pos2(300.0, 560.0), true, Some(view), tall);
+        let a = edit_anchor(pos2(300.0, 560.0), Some(view), tall);
         assert_eq!(a.y + tall.y, 530.0, "the bottom edge stops 30 px above the pointer");
         // A view too short for the box above or below the pointer but wide enough beside it.
         let short = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 120.0));
-        let a = edit_anchor(pos2(500.0, 60.0), true, Some(short), vec2(220.0, 80.0));
+        let a = edit_anchor(pos2(500.0, 60.0), Some(short), vec2(220.0, 80.0));
         assert_eq!(a.x, 530.0, "beside the pointer, right of it");
         assert!(clear(a, vec2(220.0, 80.0), pos2(500.0, 60.0)));
         // A view too narrow for the box beside the pointer but tall enough below it.
         let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(260.0, 600.0));
-        let a = edit_anchor(pos2(130.0, 100.0), true, Some(narrow), vec2(220.0, 80.0));
+        let a = edit_anchor(pos2(130.0, 100.0), Some(narrow), vec2(220.0, 80.0));
         assert_eq!(a.y, 130.0, "below the pointer, slid sideways into the view");
         assert!(clear(a, vec2(220.0, 80.0), pos2(130.0, 100.0)));
         // A sweep of pointers over views of several sizes and offsets, and boxes of several sizes.
@@ -1975,7 +2069,7 @@ mod tests {
                 for i in 0..=20 {
                     for j in 0..=20 {
                         let p = pos2(view.left() + view.width() * i as f32 / 20.0, view.top() + view.height() * j as f32 / 20.0);
-                        let a = edit_anchor(p, true, Some(view), size);
+                        let a = edit_anchor(p, Some(view), size);
                         let r = Rect::from_min_size(a, size);
                         let room = view.width() >= size.x + EDIT_MARGIN && view.height() >= size.y + EDIT_MARGIN;
                         if room {
@@ -1997,7 +2091,7 @@ mod tests {
             }
         }
         // A view or pointer that is not a number does not panic.
-        let _ = edit_anchor(pos2(f32::NAN, f32::INFINITY), true, Some(view), vec2(220.0, 80.0));
+        let _ = edit_anchor(pos2(f32::NAN, f32::INFINITY), Some(view), vec2(220.0, 80.0));
     }
 
     #[test]

@@ -233,6 +233,13 @@ fn case(name: &str) -> Case {
                 Expect::About(12.0 * (2.0 * (44.0 + 24.0) + 16.0 * PI), 1e-4),
             )
         }
+        // The same rectangle with a 2 x 1 hole in its middle round the same path: each loop sweeps
+        // a tube closing on itself, the hole's taken from the outline's. Pappus: (12 - 2) L.
+        "sweep_a_ring_round_a_closed_path" => {
+            let Op::Sweep(mut profile, path, frame, cap) = case("sweep_round_a_closed_path").op else { panic!() };
+            profile.extend(polygon(&[[0.0, -21.0, -0.5], [0.0, -21.0, 0.5], [0.0, -19.0, 0.5], [0.0, -19.0, -0.5]]));
+            c(Op::Sweep(profile, path, frame, cap), Expect::About(10.0 * (2.0 * (44.0 + 24.0) + 16.0 * PI), 1e-9))
+        }
         // The frustum of a square pyramid: side 20 to 10 over 10.
         "loft_two_squares" => {
             c(Op::Loft(vec![square(0.0, 0.0, 20.0, 0.0), square(5.0, 5.0, 10.0, 10.0)], 1, true), Expect::Volume(frustum(400.0, 100.0, 10.0)))
@@ -400,6 +407,7 @@ cases!(
     sweep_circle_along_an_arc,
     sweep_along_a_bent_path,
     sweep_round_a_closed_path,
+    sweep_a_ring_round_a_closed_path,
     loft_two_squares,
     loft_two_circles,
     loft_to_point_pyramid,

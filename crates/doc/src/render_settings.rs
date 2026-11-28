@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_render::{BackendId, RenderFormat, RenderLimits, RenderMode};
-use solidcraft_viewport::{Camera, UpAxis};
+use solidcraft_viewport::{Camera, UpAxis, ViewFrame};
 
 pub use crate::render_job::{CpuJob, GpuJob, RenderJob, SkyEnvironment};
 use crate::{DocError, Result};
@@ -63,6 +63,8 @@ struct SavedCamera {
     fov: f64,
     #[serde(default)]
     up: UpAxis,
+    #[serde(default, deserialize_with = "solidcraft_viewport::frame_or_none")]
+    frame: Option<ViewFrame>,
 }
 
 impl Default for RenderSetup {
