@@ -105,6 +105,10 @@ fn span_of(k0: u32, p: u32, n: u32, t: f32) -> u32 {
 // D3D12's older shader compiler (FXC) must unroll a loop that writes an array inside a struct
 // (or a two-dimensional one) by a counter, and it cannot unroll loops whose trip count is only
 // known at run time, so such a loop fails to compile there ("unable to unroll loop").
+//
+// Their callers hold them in `var`, never `let`: older NVIDIA Vulkan drivers (a Kepler GeForce
+// GT 730 on 456.71) misread an array value indexed by a loop counter, and the points came out
+// millimetres off (#18685); the same array held in a variable is read right.
 
 // The non-zero basis functions of degree p on span `span` (The NURBS Book A2.2).
 fn basis_funs(k0: u32, span: u32, p: u32, t: f32) -> array<f32, W> {
@@ -139,7 +143,7 @@ fn basis_ders(k0: u32, span: u32, p: u32, t: f32) -> array<f32, W> {
     if (p == 0u) {
         return d;
     }
-    let lower = basis_funs(k0, span, p - 1u, t);
+    var lower = basis_funs(k0, span, p - 1u, t);
     var r = 0u;
     while (r <= p) {
         var x = 0.0;
@@ -186,10 +190,10 @@ fn nurbs(s: Surface, u_in: f32, v_in: f32) -> Derivs {
     let v = wrap_closed(s.knots_v, s.pv, s.nv, v_in, (s.closed & 2u) != 0u);
     let su = span_of(s.knots_u, s.pu, s.nu, u);
     let sv = span_of(s.knots_v, s.pv, s.nv, v);
-    let bu0 = basis_funs(s.knots_u, su, s.pu, u);
-    let bu1 = basis_ders(s.knots_u, su, s.pu, u);
-    let bv0 = basis_funs(s.knots_v, sv, s.pv, v);
-    let bv1 = basis_ders(s.knots_v, sv, s.pv, v);
+    var bu0 = basis_funs(s.knots_u, su, s.pu, u);
+    var bu1 = basis_ders(s.knots_u, su, s.pu, u);
+    var bv0 = basis_funs(s.knots_v, sv, s.pv, v);
+    var bv1 = basis_ders(s.knots_v, sv, s.pv, v);
     var a = vec4<f32>(0.0);
     var au = vec4<f32>(0.0);
     var av = vec4<f32>(0.0);
@@ -229,8 +233,8 @@ fn revolved(s: Surface, u: f32, v: f32) -> Derivs {
     }
     // The profile curve: a one-row B-spline.
     let span = span_of(s.knots_u, s.pu, s.nu, t);
-    let b0 = basis_funs(s.knots_u, span, s.pu, t);
-    let b1 = basis_ders(s.knots_u, span, s.pu, t);
+    var b0 = basis_funs(s.knots_u, span, s.pu, t);
+    var b1 = basis_ders(s.knots_u, span, s.pu, t);
     var c = vec4<f32>(0.0);
     var dc = vec4<f32>(0.0);
     var i = 0u;
