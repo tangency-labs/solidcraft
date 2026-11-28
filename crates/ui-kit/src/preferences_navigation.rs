@@ -1,19 +1,37 @@
 //! Compact navigation preference compositions and explanatory figures.
+use super::metrics::dimension;
 pub use super::preferences_figure_data::{paint_orbit_centre, paint_orbit_cursor, paint_orbit_origin};
 pub use super::preferences_figure_ops::{NavigatorAxis, paint_navigation_axes, paint_navigation_custom};
-use super::{metrics::dimension, text::paint_text};
-use crate::BackingTooltipExt as _;
-use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Rect, Sense, Stroke, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 
 /// One mouse silhouette beside the actual mapping selector and binding legend.
 /// The figure is descriptive content, not an icon asset or an application viewport.
 pub fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, String)], mapping: impl FnOnce(&mut Ui)) {
-    let keys: Vec<Vec<&str>> = bindings.iter().map(|(keys, _)| keys.iter().map(String::as_str).collect()).collect();
-    let rows: Vec<(&[&str], &str)> = bindings.iter().zip(&keys).map(|((_, action), keys)| (keys.as_slice(), action.as_str())).collect();
+    let legend = |ui: &mut Ui| {
+        // Registry identities only: this legend omits the opt-in table headers.
+        let columns = [("input", 1.5), ("action", 1.0)].map(|(id, weight)| super::Column::new(id, weight).flex());
+        super::table_fitted(ui, "mouse_mapping", &columns, "", |ui, table| {
+            for (index, (keys, action)) in bindings.iter().enumerate() {
+                let chord = keys.join(" + ");
+                if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[action, &chord]) {
+                    continue;
+                }
+                if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
+                    super::settings_search::reveal(ui);
+                }
+                super::settings_search::push_passthrough(ui);
+                table.row(ui, &index.to_string(), false, |row| {
+                    row.cell(|ui| super::shortcut_binding(ui, &keys.join("+"), "", false));
+                    row.cell(|ui| super::text(ui, action, super::Text::Cell));
+                });
+                super::settings_search::pop_passthrough(ui);
+            }
+        });
+    };
     if super::settings_search::suppress_chrome(ui) {
         mapping(ui);
-        super::settings_bindings(ui, &rows);
+        legend(ui);
         return;
     }
     let t = Tokens::get();
@@ -29,126 +47,12 @@ pub fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, String)], m
         let (figure, _) = ui.allocate_exact_size(vec2(figure_size.x.min(available), figure_size.y), Sense::hover());
         let content = ui.allocate_ui_with_layout(vec2(content_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            super::settings_bindings(ui, &rows);
+            legend(ui);
         });
         let centre_y = if beside { content.response.rect.center().y } else { figure.center().y };
         let figure = Rect::from_center_size(pos2(figure.center().x, centre_y), figure.size());
         super::preferences_figure_ops::paint_mouse(&ui.painter_at(figure), figure);
     });
-}
-
-fn axis_columns(rect: Rect) -> [Rect; 5] {
-    let t = Tokens::get();
-    let gap = t.space_8;
-    let available = (rect.width() - gap * 4.0).max(0.0);
-    // The final column retains physical-motion reassignment, a real preference not shown
-    // in the board. The illustration column absorbs narrow-window pressure first.
-    let label = t.form_label_width + t.space_6;
-    let invert = t.form_label_width;
-    let speed = t.space_24 * 2.0 + t.space_16;
-    let source = t.form_label_width + t.space_24 + t.space_16;
-    let live = t.form_label_width * 2.0 + t.space_24 + t.space_6;
-    let widths = [label, (available - label - invert - speed - source).clamp(0.0, live), invert, speed];
-    let mut x = rect.left();
-    std::array::from_fn(|index| {
-        let width = widths.get(index).copied().unwrap_or((rect.right() - x).max(0.0));
-        let column = Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height()));
-        x += width + gap;
-        column
-    })
-}
-
-/// The host's column names for the axis table ([`settings_axis_header`], [`settings_axis_row`]).
-pub struct AxisColumns<'a> {
-    pub axis: &'a str,
-    pub live_input: &'a str,
-    pub speed: &'a str,
-    pub source: &'a str,
-}
-
-pub fn settings_axis_header(ui: &mut Ui, columns: &AxisColumns<'_>) {
-    if super::settings_search::suppress_chrome(ui) {
-        return;
-    }
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), Sense::hover());
-    if rect.width() < t.form_label_width * 5.0 + t.space_24 * 5.0 {
-        let half = rect.width() * 0.5;
-        for (index, label) in [columns.axis, columns.live_input].into_iter().enumerate() {
-            let cell = Rect::from_min_size(rect.min + vec2(half * index as f32, 0.0), vec2(half, rect.height()));
-            paint_text(ui, cell, &label.to_uppercase(), crate::type_face::semibold(t.font_small), t.form_dim, false);
-        }
-        return;
-    }
-    for (column, label) in axis_columns(rect).into_iter().zip([columns.axis, columns.live_input, "", columns.speed, columns.source]) {
-        paint_text(ui, column, &label.to_uppercase(), crate::type_face::semibold(t.font_small), t.form_dim, false);
-    }
-}
-
-/// One table row combines measured input with the actual invert, gain, and motion controls.
-pub fn settings_axis_row(
-    ui: &mut Ui,
-    columns: &AxisColumns<'_>,
-    name: &str,
-    value: f32,
-    dead_zone: [f32; 2],
-    invert: impl FnOnce(&mut Ui),
-    speed: impl FnOnce(&mut Ui),
-    source: impl FnOnce(&mut Ui),
-) {
-    let t = Tokens::get();
-    let narrow = ui.available_width() < t.form_label_width * 5.0 + t.space_24 * 5.0;
-    let line = t.control_height + t.space_4;
-    // A narrow row stacks the real controls instead of clipping its final source dropdown.
-    let height = if narrow { line * 4.0 + t.space_8 * 3.0 } else { line };
-    super::settings_form(ui, 0.0, |ui| {
-        super::layout::sized_row(ui, name, height, |ui| {
-            // The row already owns these bounds; its centered cursor is not the top edge.
-            let rect = ui.max_rect();
-            solidcraft_ui_registry::publish_rect(&format!("prefs:axis:{name}"), rect);
-            t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
-            if narrow {
-                let label_rect = Rect::from_min_size(rect.min, vec2(rect.width() * 0.5, line));
-                paint_text(ui, label_rect, name, FontId::proportional(t.font_label), t.form_ink, false);
-                let live_rect = Rect::from_min_max(pos2(label_rect.right() + t.space_8, rect.center().y), pos2(rect.right(), rect.center().y));
-                let live_rect =
-                    Rect::from_center_size(pos2(live_rect.center().x, label_rect.center().y), vec2(live_rect.width().max(0.0), t.space_14));
-                live_axis_bar_in(ui, live_rect, value, dead_zone);
-                let cell = |index: f32| Rect::from_min_size(pos2(rect.left(), rect.top() + (line + t.space_8) * index), vec2(rect.width(), line));
-                axis_control(ui, cell(1.0), "invert", name, invert);
-                let label_width = super::ContentWidth::label(ui, columns.speed).max(super::ContentWidth::label(ui, columns.source));
-                axis_control(ui, cell(2.0), "speed", name, |ui| {
-                    super::settings_form(ui, label_width, |ui| super::row(ui, columns.speed, speed));
-                });
-                axis_control(ui, cell(3.0), "source", name, |ui| {
-                    super::settings_form(ui, label_width, |ui| super::row(ui, columns.source, source));
-                });
-            } else {
-                let [label_rect, live_rect, invert_rect, speed_rect, source_rect] = axis_columns(rect);
-                paint_text(ui, label_rect, name, FontId::proportional(t.font_label), t.form_ink, false);
-                ui.interact(label_rect, ui.scope_id().with("axis_name"), Sense::hover()).backing_on_hover_text(name);
-                let live_rect = Rect::from_center_size(live_rect.center(), vec2(live_rect.width(), t.space_14));
-                live_axis_bar_in(ui, live_rect, value, dead_zone);
-                axis_control(ui, invert_rect, "invert", name, invert);
-                axis_control(ui, speed_rect, "speed", name, speed);
-                axis_control(ui, source_rect, "source", name, source);
-            }
-        });
-    });
-}
-fn axis_control(ui: &mut Ui, rect: Rect, id: &str, label: &str, add: impl FnOnce(&mut Ui)) {
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .id_salt(id)
-            .max_rect(rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center))
-            .ui_stack_info(egui::UiStackInfo::default().with_tag_value(super::layout::LABEL, label.to_owned())),
-        |ui| {
-            ui.set_clip_rect(ui.clip_rect().intersect(rect));
-            ui.spacing_mut().text_edit_width = rect.width();
-            add(ui);
-        },
-    );
 }
 
 /// Paint a calibrated live-input bar into an existing table cell or gallery slot.
