@@ -102,6 +102,13 @@ pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &
     imp::variable(body, edge_at, start, spline)
 }
 
+/// The edges at `edges`, one tangent chain, rounded with the radius `spline` (checked by the
+/// caller) along the whole chain from its end nearest `start`
+/// ([`crate::fillet_variable_spline_chain`]).
+pub(crate) fn fillet_variable_chain(body: &Body, edges: &[Vec3], start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+    imp::variable_chain(body, edges, start, spline)
+}
+
 /// The edges `picks` select, in the body's edge order, as a blend resolves them, and per edge
 /// whether a pick passes it over (a seam or a smooth join: never a blend's edge), for a caller
 /// that selects edges to blend ([`crate::tangent_chain`]).
@@ -431,6 +438,18 @@ mod imp {
             b.fillet_variable(at, tol, [start.x, start.y, start.z], spline.degree, &spline.knots, &spline.radii)
         })
         .map_err(|e| crate::blend::with_continuation(e, next))
+    }
+
+    pub(super) fn variable_chain(body: &Body, edges: &[Vec3], start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+        body.require_brep("fillet")?;
+        if !start.is_finite() {
+            return Err(KernelError::Invalid("the start point must be finite".into()));
+        }
+        let picked = resolve(body, edges)?;
+        let tol = pick_tolerance(body);
+        run(body, "variable fillet", &picked.edges, |b| {
+            b.fillet_variable_chain(&picked.points, tol, [start.x, start.y, start.z], spline.degree, &spline.knots, &spline.radii)
+        })
     }
 
     /// `op` on `body` in SMLib, tagged as operand 0, checked, decoded, with its history.

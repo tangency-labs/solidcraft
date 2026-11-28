@@ -3179,6 +3179,107 @@ fn an_intersection_answered_empty_while_a_vertex_lies_in_the_other_operand_is_re
     }
 }
 
+/// A cylinder of radius `r` and height `h` about +Z from base centre `base`, its seam turned
+/// `seam_deg` about its axis (SolidCraft's cylinders put the seam where the sketch put it).
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
+fn cylinder_with_seam(base: [f64; 3], r: f64, h: f64, seam_deg: f64) -> Body {
+    let c = solidcore_ops::make_cylinder([0.0, 0.0, 0.0], r, h).unwrap();
+    let (s, co) = seam_deg.to_radians().sin_cos();
+    c.transform(&[
+        [co, s, 0.0, 0.0],
+        [-s, co, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [base[0], base[1], base[2], 1.0],
+    ])
+    .unwrap();
+    c
+}
+
+/// #22582: a point in the plane of a cylinder's cap, on a line along x or y that touches the
+/// rim circle, is at distance sqrt(a^2 + r^2) > r from the axis (`a` its offset along the
+/// line from the touching point): outside. The classifier's first ray runs along that line,
+/// grazing the rim, and its sector answer was a rounding error: inside at some seam angles.
+#[test]
+fn a_point_in_a_cylinder_cap_plane_whose_ray_grazes_the_rim_is_outside() {
+    all_fixes();
+    let mut wrong = Vec::new();
+    // the issue's scales: 0.05 and 1 failed, 40 did not
+    for scale in [0.05, 1.0, 40.0] {
+        let ([cx, cy, z0], r, h) = (
+            [10.0 * scale, 22.5 * scale, 30.0 * scale],
+            2.5 * scale,
+            5.0 * scale,
+        );
+        let mut points = Vec::new();
+        for z in [z0, z0 + h] {
+            for a in [0.5 * scale, 1.5 * scale, 3.0 * scale] {
+                // rays along +x and -x touch the rim at (cx, cy +- r); along +y and -y at (cx +- r, cy)
+                points.extend([
+                    [cx - a, cy + r, z],
+                    [cx + a, cy + r, z],
+                    [cx - a, cy - r, z],
+                    [cx + a, cy - r, z],
+                    [cx + r, cy - a, z],
+                    [cx - r, cy + a, z],
+                ]);
+            }
+        }
+        // every 5 degrees at scale 1; at the other scales, the seams that failed at scale 1
+        let seams: Vec<u16> = if scale == 1.0 {
+            (0..3600).step_by(50).chain([175, 200, 351, 425]).collect()
+        } else {
+            vec![0, 175, 200, 351, 425, 900]
+        };
+        for tenth in seams {
+            let seam = f64::from(tenth) / 10.0;
+            let c = cylinder_with_seam([cx, cy, z0], r, h, seam);
+            for (p, l) in points.iter().zip(c.locate_points(&points).unwrap()) {
+                if l != Ok(solidcore_ops::PointLocation::Outside) {
+                    wrong.push((scale, seam, *p, l));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{} not outside: {wrong:?}", wrong.len());
+}
+
+/// #22582's intersect: box A spans x 7.5..12.5, y 25..30, z 10..30; cylinder B (r 2.5, z
+/// 30..35, axis through (10, 22.5)) stands on A's top plane, where its rim touches A only at
+/// (10, 25, 30) (its other points on that plane are at y < 25). They share one point, so the
+/// intersection is empty, in either order. It was refused as "an intersection was missed":
+/// A's corner (7.5, 25, 30), 3.54 from B's axis, was classified inside B.
+#[test]
+fn a_box_and_a_cylinder_touching_at_a_rim_point_intersect_to_nothing() {
+    all_fixes();
+    for scale in [0.05, 1.0, 40.0] {
+        for seam in [0.0, 35.13, 90.0, 215.13] {
+            let a = || {
+                make_box(
+                    [7.5 * scale, 25.0 * scale, 10.0 * scale],
+                    [5.0 * scale, 5.0 * scale, 20.0 * scale],
+                )
+                .unwrap()
+            };
+            let b = || {
+                cylinder_with_seam(
+                    [10.0 * scale, 22.5 * scale, 30.0 * scale],
+                    2.5 * scale,
+                    5.0 * scale,
+                    seam,
+                )
+            };
+            for (x, y) in [(a(), b()), (b(), a())] {
+                let r = boolean(x, y, BooleanOp::Intersect);
+                assert!(
+                    matches!(r, Ok(None)),
+                    "scale {scale}, seam {seam}: {:?}",
+                    r.map(|r| r.is_some())
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn a_refused_empty_cut_names_a_vertex_of_the_body_outside_the_tool() {
     all_fixes();
@@ -5682,6 +5783,48 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
             );
         }
     }
+}
+
+#[test]
+fn make_other_faces_handles_many_disjoint_touching_and_nested_solids() {
+    all_fixes();
+    // Primary: 12 apart unit cubes plus one small cube inside what will become a cavity of `other`.
+    let mut primary_parts = Vec::new();
+    for i in 0..12 {
+        primary_parts.push(make_box([f64::from(i) * 3.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    // Small primary cube centered at (100, 5, 5) — will lie strictly inside `other`'s outer hollow box.
+    primary_parts.push(make_box([99.5, 4.5, 4.5], [1.0, 1.0, 1.0]).unwrap());
+    let primary = union_all(primary_parts).unwrap();
+
+    // Other: 12 apart unit cubes (disjoint from primary), 4 boxes overlapping primary cubes 0..4,
+    // and a hollow box [95..105, 0..10, 0..10] with cavity [97..103, 2..8, 2..8] enclosing primary's
+    // small cube at (100, 5, 5).
+    let mut other_parts = Vec::new();
+    for i in 0..12 {
+        other_parts.push(make_box([f64::from(i) * 3.0, 5.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    for i in 0..4 {
+        other_parts.push(make_box([f64::from(i) * 3.0 + 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    let outer = make_box([95.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+    let inner = make_box([97.0, 2.0, 2.0], [6.0, 6.0, 6.0]).unwrap();
+    let hollow = boolean(outer, inner, BooleanOp::Subtract).unwrap().unwrap();
+    other_parts.push(hollow);
+    let other = union_all(other_parts).unwrap();
+
+    let joined = boolean(primary, other, BooleanOp::Union).unwrap().unwrap();
+    let report = joined.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // Expected volume:
+    // - 8 untouched primary cubes: 8.0
+    // - 4 overlapped pairs (each 1.5 x 1 x 1): 6.0
+    // - 12 disjoint other cubes: 12.0
+    // - hollow shell (10^3 - 6^3 = 784) + enclosed small primary cube (1.0): 785.0
+    let expected = 8.0 + 6.0 + 12.0 + 784.0 + 1.0;
+    let got = volume(&joined);
+    assert!(near(got, expected), "got {got}, expected {expected}");
+    assert_eq!(joined.solid_count().unwrap(), 8 + 4 + 12 + 2);
 }
 
 /// Build a closed faceted UV sphere (`nlat` bands × `2*nlat` longitudes, so `2*nlat^2` planar

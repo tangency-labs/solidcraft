@@ -213,6 +213,7 @@ pub use blend::scale_fit_note;
 pub use blend::smooth_picks;
 pub use blend::tangent_chain;
 pub use blend::tangent_chain_beyond_points;
+pub use blend::tangent_chain_closes;
 pub use blend::tangent_chain_edges;
 pub use blend::with_fit_note;
 pub use blend::without_fit_note;
@@ -224,6 +225,7 @@ pub use blend_variable::fillet_tapered;
 pub use blend_variable::fillet_variable;
 pub use blend_variable::fillet_variable_points;
 pub use blend_variable::fillet_variable_spline;
+pub use blend_variable::fillet_variable_spline_chain;
 pub use blend_variable::taper;
 pub use body::Body;
 pub use body::COLOUR_NAME_MAX;
@@ -571,6 +573,7 @@ pub use route::trim_keep;
 #[cfg(feature = "solidcore-profile")]
 pub use solidcraft_smlib::profiled;
 pub use splitface::SplitTool;
+pub use splitface::face_split_extended;
 pub use splitface::face_split_if_on_face;
 pub use splitface::has_cap_at;
 pub use splitface::split_at_facing_side;
@@ -625,12 +628,14 @@ pub use step_out::step_export_products;
 pub use surface_extend::ExtendLimit;
 pub use surface_extend::ExtendMode;
 pub use surface_extend::ExtendOptions;
+pub use surface_extend::LAW_ANGLE_LIMIT;
 pub use surface_extend::extend_surface;
 pub use surface_kind::AxialPiece;
 pub use surface_kind::EdgeCircle;
 pub use surface_kind::FaceSurface;
 pub use surface_kind::axial_face_section;
 pub use surface_kind::edge_circle;
+pub use surface_kind::extended_levels;
 pub use surface_kind::face_edge_indices;
 pub use surface_kind::face_surface;
 pub use surface_kind::same_face_record_surface;
@@ -716,6 +721,9 @@ pub use validity::validity;
 pub enum KernelError {
     #[error("invalid input: {0}")]
     Invalid(String),
+    /// A stored B-rep number failed the coordinate ceiling check.
+    #[error("invalid input: {cause}", cause = solidcore_record::brep::Invalid(BREP_COORDINATE_CEILING))]
+    CoordinateCeiling,
     #[error("the operation failed: {0}")]
     Failed(String),
     /// A blend or other size too large for the geometry around it (a smaller size may work);
@@ -742,6 +750,8 @@ pub enum KernelError {
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+const BREP_COORDINATE_CEILING: &str = "non-finite or excessive coordinate";
 
 /// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
 /// the kernel does not depend on solidcore, so the number is repeated here.

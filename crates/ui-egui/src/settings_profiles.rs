@@ -810,43 +810,47 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
     let edited = active.as_ref().is_some_and(|name| app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name)));
     let current = active.clone().unwrap_or_else(|| app.tr_label("None").to_string());
     let names = app.settings_profiles.names();
-    let mut apply = None;
-    let mut save = false;
-    let label = app.tr("prefs.structure.profile");
-    let changed_hint = app.tr("prefs.structure.profile_edited");
-    let menu = ui
+    let response = ui
         .push_id("profile_sidebar", |ui| {
-            ui_kit::Menu::button_with(
-                ui,
-                |ui, _| ui_kit::settings_profile_button(ui, label, &current, edited, changed_hint),
-                |ui| {
-                    for name in &names {
-                        if ui_kit::list_picker(ui, name, name, active.as_ref() == Some(name)).clicked() {
-                            apply = Some(name.clone());
-                        }
-                    }
-                    if active.is_some() && ui_kit::button(ui, app.tr("prefs.profile_save"), ui_kit::Button::Normal).clicked() {
-                        save = true;
-                        apply = None;
-                        ui.close();
-                    }
-                    if ui_kit::button(ui, app.tr("prefs.profiles"), ui_kit::Button::Normal).clicked() {
-                        prefs::open_profiles(app);
-                        ui.close();
-                    }
-                },
-            )
+            ui_kit::settings_profile_button(ui, app.tr("prefs.structure.profile"), &current, edited, app.tr("prefs.structure.profile_edited"))
         })
         .inner;
-    if menu.inner.is_some() && ui.ctx().input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-        // The standard menu has handled Escape; the Preferences footer must not also cancel.
-        menu.response.request_focus();
+    crate::scenario::publish_target("prefs:profile", response.rect);
+    if !response.clicked() && !ui_kit::Menu::response_is_open(&response) {
+        return;
     }
-    crate::scenario::publish_target("prefs:profile", menu.response.rect);
-    if let Some(name) = apply {
-        act(app, "settings.profile.apply", json!({"name":name}), "prefs.profile_applied");
-    } else if save && let Some(name) = active {
-        act(app, "settings.profile.save", json!({"name":name}), "prefs.profile_saved");
+    let mut items = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let mut item = ui_kit::Item::action(&format!("apply:{index}"), name, "settings_profile");
+            item.checked = Some(active.as_ref() == Some(name));
+            item.radio = true;
+            item
+        })
+        .collect::<Vec<_>>();
+    if active.is_some() {
+        items.push(ui_kit::Item::sep());
+        items.push(ui_kit::Item::action("save", app.tr("prefs.profile_save"), "save"));
+    }
+    items.push(ui_kit::Item::action("profiles", app.tr("prefs.profiles"), "settings"));
+    let menu = ui_kit::Menu::button_items_output(&response, &items);
+    if menu.open {
+        crate::ui_kit::settings_search::note_key_sink(ui.ctx());
+    }
+    if menu.close {
+        response.request_focus();
+    }
+    if let Some(item) = menu.picked {
+        if let Some(name) = item.id.strip_prefix("apply:").and_then(|index| index.parse::<usize>().ok()).and_then(|index| names.get(index)) {
+            act(app, "settings.profile.apply", json!({"name":name}), "prefs.profile_applied");
+        } else if item.id == "save" {
+            if let Some(name) = active {
+                act(app, "settings.profile.save", json!({"name":name}), "prefs.profile_saved");
+            }
+        } else if item.id == "profiles" {
+            prefs::open_profiles(app);
+        }
     }
 }
 

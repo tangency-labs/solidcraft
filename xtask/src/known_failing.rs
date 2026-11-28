@@ -4,14 +4,15 @@
 //! failing on any failed test. It fails on a test that failed
 //! and is not listed, and on a listed test that passed (fixed: its line comes off in the same
 //! pull request); a listed test that did not run (a pull request tests only the packages it
-//! touches) is neither. The list has the kernel rig's format (`kernel_cases::known_failing`):
+//! touches) is neither. A process that fails to start or aborts on any attempt is a regression
+//! regardless of the list. The list has the kernel rig's format (`kernel_cases::known_failing`):
 //! one test a line, `<test> <why it fails today>`, sorted, with `<test>` nextest's
 //! `<binary id>::<test name>` (`solidcraft-kernel::tests::...`, or
 //! `solidcraft-cli::action_matrix::action_matrix_sample` for an integration test binary).
 //!
 //! A flaky test goes on `tests/QUARANTINED_TESTS` (`--quarantine FILE`) instead:
 //! `<test> <issue> <date added> [why]`. It still runs and is reported (in the log and the job
-//! summary), but its failure never fails the gate, so it cannot fail a merge-queue batch. One
+//! summary), but an ordinary test failure does not fail the gate. One
 //! that passes is reported too, so it can be released. `cargo xtask lists` requires the issue
 //! and fails an entry older than 14 days.
 
@@ -42,8 +43,16 @@ pub fn run(root: &Path, rest: &[&str]) -> Result<(), String> {
     if reports.is_empty() {
         return Err("known-failing: give the nextest junit report with --junit FILE or DIR".into());
     }
+    grade_reports(&reports, &list, &quarantine)
+}
+
+pub(crate) fn grade_report(root: &Path, report: &Path) -> Result<(), String> {
+    grade_reports(&[report.to_path_buf()], &root.join(LIST), &root.join(QUARANTINE))
+}
+
+fn grade_reports(reports: &[PathBuf], list: &Path, quarantine: &Path) -> Result<(), String> {
     let mut files = Vec::new();
-    for path in &reports {
+    for path in reports {
         xml_files(path, &mut files)?;
     }
     if files.is_empty() {
@@ -57,7 +66,7 @@ pub fn run(root: &Path, rest: &[&str]) -> Result<(), String> {
         let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
         add(&mut outcomes, &text).map_err(|e| format!("{}: {e}", file.display()))?;
     }
-    let qtext = std::fs::read_to_string(&quarantine).map_err(|e| format!("{}: {e}", quarantine.display()))?;
+    let qtext = std::fs::read_to_string(quarantine).map_err(|e| format!("{}: {e}", quarantine.display()))?;
     let quarantined = parse_quarantine(&qtext).map_err(|e| format!("{}: {e}", quarantine.display()))?;
     let report = quarantine_report(&quarantined, &outcomes);
     if !report.is_empty() {
@@ -70,7 +79,7 @@ pub fn run(root: &Path, rest: &[&str]) -> Result<(), String> {
         }
     }
     outcomes.retain(|test, _| !quarantined.iter().any(|q| q.test == *test));
-    let text = std::fs::read_to_string(&list).map_err(|e| format!("{}: {e}", list.display()))?;
+    let text = std::fs::read_to_string(list).map_err(|e| format!("{}: {e}", list.display()))?;
     println!("{}", grade(&text, &outcomes).map_err(|e| format!("{}: {e}", list.display()))?);
     Ok(())
 }
@@ -183,14 +192,21 @@ fn xml_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
+struct TestCase {
+    id: String,
+    failed: bool,
+    skipped: bool,
+    exit_70: bool,
+    retry_exit_70: Option<bool>,
+}
+
 /// Every test a junit report ran, as `<suite>::<test case>` with whether it failed (a `failure`
 /// or `error` in its case). A skipped case did not run and is left out; a case that passed on a
-/// retry (nextest's `flakyFailure`) passed.
+/// retry passed. Reject failed launches and aborts on every attempt before allowlisting.
 fn junit_outcomes(xml: &str) -> Result<Vec<(String, bool)>, String> {
     let mut reader = Reader::from_str(xml);
     let mut suite: Option<String> = None;
-    // The open test case: its id, whether it failed, whether it was skipped.
-    let mut case: Option<(String, bool, bool)> = None;
+    let mut case: Option<TestCase> = None;
     let mut out = Vec::new();
     loop {
         let event = reader.read_event().map_err(|e| format!("not a junit report: {e}"))?;
@@ -205,27 +221,52 @@ fn junit_outcomes(xml: &str) -> Result<Vec<(String, bool)>, String> {
                     if empty {
                         out.push((id, false));
                     } else {
-                        case = Some((id, false, false));
+                        case = Some(TestCase { id, failed: false, skipped: false, exit_70: false, retry_exit_70: None });
                     }
                 }
                 b"failure" | b"error" => {
-                    if let Some(c) = case.as_mut() {
-                        c.1 = true;
+                    if let Some(case) = case.as_mut() {
+                        case.failed = true;
+                        case.exit_70 = check_process_failure(&e, &case.id)?;
+                    }
+                }
+                b"rerunFailure" | b"rerunError" | b"flakyFailure" | b"flakyError" => {
+                    if let Some(case) = case.as_mut() {
+                        let exit_70 = check_process_failure(&e, &case.id)?;
+                        case.retry_exit_70 = (!empty).then_some(exit_70);
+                    }
+                }
+                b"system-err" if !empty => {
+                    if let Some(case) = &case
+                        && case.retry_exit_70.unwrap_or(case.exit_70)
+                    {
+                        // Nextest's Unix double-spawn helper reports an exec failure as a
+                        // normal nonzero exit. Check its diagnostic to distinguish that
+                        // result from a test that exits with the same code.
+                        let stderr = reader.read_text(e.name()).map_err(|e| format!("not a junit report: {e}"))?;
+                        if stderr.trim_ascii_start().starts_with(b"error: [double-spawn] failed to exec ") {
+                            return Err(format!("REGRESSION, nextest could not launch the test process: {}", case.id));
+                        }
                     }
                 }
                 b"skipped" => {
-                    if let Some(c) = case.as_mut() {
-                        c.2 = true;
+                    if let Some(case) = case.as_mut() {
+                        case.skipped = true;
                     }
                 }
                 _ => {}
             },
             Event::End(e) => match e.name().as_ref() {
                 b"testcase" => {
-                    if let Some((id, failed, skipped)) = case.take()
-                        && !skipped
+                    if let Some(case) = case.take()
+                        && !case.skipped
                     {
-                        out.push((id, failed));
+                        out.push((case.id, case.failed));
+                    }
+                }
+                b"rerunFailure" | b"rerunError" | b"flakyFailure" | b"flakyError" => {
+                    if let Some(case) = case.as_mut() {
+                        case.retry_exit_70 = None;
                     }
                 }
                 b"testsuite" => suite = None,
@@ -236,6 +277,18 @@ fn junit_outcomes(xml: &str) -> Result<Vec<(String, bool)>, String> {
         }
     }
     Ok(out)
+}
+
+/// A launch failure or process abort is independent of the expected result of the named test.
+/// Return whether the exit status needs the double-spawn diagnostic check.
+fn check_process_failure(e: &BytesStart, test: &str) -> Result<bool, String> {
+    let kind = e.try_get_attribute("type").map_err(|err| format!("{test}: invalid junit failure type: {err}"))?;
+    match kind.as_ref().map(|a| a.value.as_ref()) {
+        Some(b"execution failure") => Err(format!("REGRESSION, nextest could not launch the test process: {test}")),
+        Some(b"test abort" | b"test abort (leaked handles)") => Err(format!("REGRESSION, test process aborted: {test}")),
+        Some(b"test failure with exit code 70" | b"test failure with exit code 70 (leaked handles)") => Ok(true),
+        _ => Ok(false),
+    }
 }
 
 fn attribute(e: &BytesStart, name: &str) -> Result<String, String> {
@@ -337,6 +390,154 @@ mod tests {
         let err = grade(&shorter, &outcomes(REPORT)).unwrap_err();
         assert!(err.contains("REGRESSION, failed and not on the known-failing list: solidcraft-kernel::tests::fails"), "{err}");
         assert!(!err.contains("FIXED"), "{err}");
+    }
+
+    // Nextest attributes a start failure to the selected test even when its
+    // binary never ran that test. A normal failure can be listed in the same run.
+    fn grade_startup_report(outcome: &str, errors: u32, failures: u32) -> Result<String, String> {
+        let list = "probe::known_failure synthetic assertion failure\nprobe::startup::selected synthetic known failure\n";
+        let report = format!(
+            r#"<testsuites name="nextest-run" tests="2" failures="{total_failures}" errors="{errors}">
+                <testsuite name="probe" tests="1" failures="1" errors="0">
+                    <testcase name="known_failure"><failure type="test failure with exit code 101"/></testcase>
+                </testsuite>
+                <testsuite name="probe::startup" tests="1" failures="{failures}" errors="{errors}">
+                    <testcase name="selected">{outcome}</testcase>
+                </testsuite>
+            </testsuites>"#,
+            total_failures = failures + 1,
+        );
+        let mut all = BTreeMap::new();
+        add(&mut all, &report)?;
+        grade(list, &all)
+    }
+
+    #[test]
+    fn the_gate_rejects_a_listed_binary_execution_failure() {
+        let error = grade_startup_report(
+            r#"<error message="error spawning child process" type="execution failure"/>
+                <system-out>(process failed to start)</system-out>
+                <system-err>(process failed to start)</system-err>"#,
+            1,
+            0,
+        )
+        .expect_err("failure to start a test binary must fail the gate");
+        assert!(error.contains("probe::startup"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_a_listed_binary_abort() {
+        let error = grade_startup_report(r#"<failure message="process aborted with signal 6 (SIGABRT)" type="test abort"/>"#, 0, 1)
+            .expect_err("a test binary abort must fail the gate");
+        assert!(error.contains("probe::startup"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_a_listed_binary_abort_with_leaked_handles() {
+        let error = grade_startup_report(r#"<failure type="test abort (leaked handles)"/>"#, 0, 1)
+            .expect_err("a test binary abort with leaked handles must fail the gate");
+        assert!(error.contains("test process aborted: probe::startup::selected"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_a_listed_double_spawn_failure() {
+        let error = grade_startup_report(
+            r#"<failure type="test failure with exit code 70"/>
+                <system-err>error: [double-spawn] failed to exec `&quot;startup&quot; &quot;--exact&quot; &quot;selected&quot; &quot;--nocapture&quot;`, current_dir: `/probe`
+
+Caused by:
+  No such file or directory (os error 2)
+</system-err>"#,
+            0,
+            1,
+        )
+        .expect_err("double-spawn failing to start a test binary must fail the gate");
+        assert!(error.contains("probe::startup"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_a_listed_double_spawn_failure_with_leaked_handles() {
+        let error = grade_startup_report(
+            r#"<failure type="test failure with exit code 70 (leaked handles)"/>
+                <system-err>error: [double-spawn] failed to exec `&quot;startup&quot;`, current_dir: `/probe`</system-err>"#,
+            0,
+            1,
+        )
+        .expect_err("double-spawn failing to start a test binary must fail the gate even with leaked handles");
+        assert!(error.contains("could not launch the test process: probe::startup::selected"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_a_binary_abort_before_a_passing_retry() {
+        let error =
+            grade_startup_report(r#"<flakyFailure type="test abort"/>"#, 0, 0).expect_err("a binary abort before a passing retry must fail the gate");
+        assert!(error.contains("test process aborted: probe::startup::selected"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_a_binary_execution_failure_before_a_passing_retry() {
+        let error = grade_startup_report(r#"<flakyError type="execution failure"/>"#, 0, 0)
+            .expect_err("failure to start a test binary before a passing retry must fail the gate");
+        assert!(error.contains("could not launch the test process: probe::startup::selected"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_double_spawn_failure_before_a_passing_retry() {
+        let error = grade_startup_report(
+            r#"<flakyFailure type="test failure with exit code 70">
+                <system-err>error: [double-spawn] failed to exec `&quot;startup&quot;`, current_dir: `/probe`</system-err>
+            </flakyFailure>"#,
+            0,
+            0,
+        )
+        .expect_err("double-spawn failing to start a test binary before a passing retry must fail the gate");
+        assert!(error.contains("could not launch the test process: probe::startup::selected"), "{error}");
+    }
+
+    #[test]
+    fn the_gate_rejects_a_listed_test_that_fails_to_start_on_retry() {
+        let initial_failure = r#"<failure type="test failure with exit code 101"/>"#;
+        for retry in [
+            r#"<rerunError message="error spawning child process" type="execution failure"/>"#,
+            r#"<rerunFailure type="test failure with exit code 70">
+                <system-err>error: [double-spawn] failed to exec `&quot;startup&quot;`, current_dir: `/probe`
+
+Caused by:
+  No such file or directory (os error 2)
+</system-err>
+            </rerunFailure>"#,
+        ] {
+            let outcome = format!("{initial_failure}{retry}");
+            let error = grade_startup_report(&outcome, 0, 1).expect_err("failure to start a test binary on retry must fail the gate");
+            assert!(error.contains("probe::startup"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_gate_accepts_a_listed_test_that_exits_with_code_70() {
+        assert!(
+            grade_startup_report(
+                r#"<failure type="test failure with exit code 70"/>
+                    <system-out>running 1 test
+</system-out>"#,
+                0,
+                1,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_gate_accepts_a_listed_test_that_exits_with_code_70_and_leaks_handles() {
+        assert!(
+            grade_startup_report(
+                r#"<failure type="test failure with exit code 70 (leaked handles)"/>
+                    <system-err>the test itself reported a failure</system-err>"#,
+                0,
+                1,
+            )
+            .is_ok()
+        );
     }
 
     #[test]

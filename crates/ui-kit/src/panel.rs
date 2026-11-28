@@ -268,12 +268,11 @@ pub fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str, names:
     {
         let mut more_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_more").max_rect(more_rect));
         let ui = &mut more_ui;
-        super::Menu::text(ui, "…", |ui| {
-            if super::MenuItem::new(names.remove, names.remove_label, "").show(ui).clicked() {
-                action = Some(InspectorAction::Remove);
-                ui.close();
-            }
-        });
+        let more = super::text_button(ui, "\u{2026}", true);
+        let items = [super::Item::action(names.remove, names.remove_label, "")];
+        if super::Menu::button_items(&more, &items).is_some() {
+            action = Some(InspectorAction::Remove);
+        }
     }
     let badge_width = ui.painter().layout_no_wrap(kind.to_owned(), crate::type_face::semibold(t.font_small), t.form_ink).size().x + t.space_16;
     let badge = egui::Rect::from_center_size(
@@ -652,15 +651,12 @@ impl<'a> Panel<'a> {
                     .interact(grip_rect, ui.scope_id().with("workspace_grip"), egui::Sense::click_and_drag())
                     .on_hover_cursor(egui::CursorIcon::Grab);
                 solidcraft_ui_registry::publish_target(&format!("{}:grip", options.id), grip.rect);
-                super::Menu::context(&grip, |ui| {
-                    let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
-                    let item = super::MenuItem::new(options.move_command, label, "").show(ui);
-                    solidcraft_ui_registry::publish_target(&format!("{}:move_side", options.id), item.rect);
-                    if item.clicked() {
-                        move_side = Some(target);
-                        ui.close();
-                    }
-                });
+                let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
+                let mut item = super::Item::action(options.move_command, label, "");
+                item.aliases.push(format!("{}:move_side", options.id));
+                if super::Menu::context_items(&grip, &[item]).is_some() {
+                    move_side = Some(target);
+                }
                 header(ui, &options);
                 solidcraft_ui_registry::publish_rect(&format!("{}:header", options.id), band);
                 if grip.dragged() {

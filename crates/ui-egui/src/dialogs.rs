@@ -199,9 +199,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, through_axis, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
             direction_only: bool = false => *direction_only,
+            // A new plane starts with it on (#6180), see `start`.
+            through_axis: bool = false => *through_axis,
         } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
         TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
@@ -792,6 +794,16 @@ pub struct Dialog {
     pub(crate) new_sketch: bool,
     /// Its handle drags, for Undo and Redo while it is open (#22838).
     pub(crate) drag_undo: crate::dialog_drag_undo::DragUndo,
+    /// Which opening of a dialog this is, new each time one opens: where it and its value box
+    /// were dragged belongs to this opening only, so the next opens docked even on the very
+    /// next frame (#22388).
+    pub(crate) opened: u64,
+}
+
+/// A new [`Dialog::opened`].
+fn next_opened() -> u64 {
+    static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Clone, Debug)]
@@ -900,6 +912,37 @@ impl Applying {
 impl Drop for Applying {
     fn drop(&mut self) {
         self.progress.cancel();
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The display quality another window in the process sets between this thread's window
+    /// setting up its frame and adopting a result ([`other_window_draws_at`]).
+    static OTHER_WINDOW_QUALITY: std::cell::Cell<Option<solidcraft_engine::doc::display_quality::DisplayQuality>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Until the returned guard is dropped, another window in the process sets the process-wide
+/// display quality to `quality` in each of this thread's frames, after the frame's own setup and
+/// before OK's result is adopted and the viewport keys and draws its scenes: what the other tests'
+/// windows do on a busy test run.
+#[cfg(test)]
+pub(crate) fn other_window_draws_at(quality: solidcraft_engine::doc::display_quality::DisplayQuality) -> impl Drop {
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            OTHER_WINDOW_QUALITY.with(|q| q.set(None));
+        }
+    }
+    OTHER_WINDOW_QUALITY.with(|q| q.set(Some(quality)));
+    Restore
+}
+
+#[cfg(test)]
+pub(crate) fn another_window_sets_quality() {
+    if let Some(quality) = OTHER_WINDOW_QUALITY.with(std::cell::Cell::get) {
+        solidcraft_engine::doc::display_quality::set_current(quality);
     }
 }
 
@@ -1093,6 +1136,7 @@ impl Dialog {
             auto: None,
             new_sketch: false,
             drag_undo: Default::default(),
+            opened: next_opened(),
         }
     }
 
@@ -1427,7 +1471,7 @@ impl Dialog {
                     at: None,
                     refs: Default::default(),
                 },
-                vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Axis", AXIS_PICKS, false)],
+                vec![SelInput::new("Profile", PROFILES | PLANES, false), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine {
@@ -1641,6 +1685,9 @@ impl Dialog {
                 }
                 _ => None,
             });
+            if *cmd == "solid.coil" && d.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. })) {
+                *at = None;
+            }
         }
         // With nothing pre-selected, a single profile in the sketch being used is taken (#684:
         // not one a feature already builds from).
@@ -1745,8 +1792,11 @@ impl Dialog {
             return;
         }
         self.started_from_sketch = Some(sketch);
+        // With no profile picked, what the field holds is the default taken with no sketch left
+        // open, which can be a later sketch's: the one just edited comes first (#23342).
+        let picked = s.selection.iter().any(|x| matches!(x, Sel::Profile { .. }));
         if let Some(inp) = self.inputs.first_mut()
-            && inp.items.is_empty()
+            && (inp.items.is_empty() || (!picked && inp.items.iter().all(|x| matches!(x, Sel::Profile { .. }))))
         {
             inp.items = single_profile(s, sketch);
             self.advance();
@@ -2134,7 +2184,10 @@ impl Dialog {
         if inp.rejects(&sel) {
             return None;
         }
-        (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel).filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel))
+        let coil = matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        (inp.accept != AXIS_PICKS || if coil { coil_takes_as_axis(s, &sel) } else { takes_as_axis(s, &sel) })
+            .then_some(sel)
+            .filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel))
     }
 
     /// A round edge where a 3D point is wanted stands for its centre: a construction point's
@@ -2158,6 +2211,17 @@ impl Dialog {
         } else {
             Sel::Vertex { body: body.clone(), point: centre }
         })
+    }
+
+    /// Whether a click that would take `face` into the active input takes a profile behind it
+    /// instead: an input taking profiles takes the closed region of a shown sketch under the
+    /// pointer even where a body's face hides it, as where a sketch on a plane runs through a
+    /// part. Before, only a click right beside the sketch's lines reached it there. A face that
+    /// is Extrude's automatic To Object stays the target; Select Other still offers the face.
+    pub(crate) fn profile_behind(&self, s: &Session, face: &Hit, picked: &Sel) -> bool {
+        self.active_input().is_some_and(|i| i.accept & selection::PROFILES != 0)
+            && matches!((face, picked), (Hit::Face { .. }, Sel::Face { .. }))
+            && self.extrude_target(s, face).is_none()
     }
 
     /// With automatic To Object enabled and profiles picked, a face or vertex off their plane,
@@ -2309,8 +2373,19 @@ impl Dialog {
         if !crate::dialogs_assembly::alignment_accepts(s, self, &sel) || self.take_extrude_target(s, &sel) {
             return;
         }
+        // A new placement plane replaces the saved direction; the Direction field can override it afterward.
+        if self.active == 0 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }) && matches!(sel, Sel::Plane { .. }) {
+            self.extra.remove("base");
+            self.extra.remove("axis");
+            if let Kind::Primitive { at, .. } = &mut self.kind {
+                *at = None;
+            }
+        }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
+        }
+        if self.active == 1 {
+            coil_diameter_from_pick(s, &mut self.kind, &sel);
         }
         crate::dialogs_cell_grid::input_touched(&self.kind, &mut self.extra, self.active);
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
@@ -2488,6 +2563,17 @@ impl Dialog {
         if accepted {
             self.awaiting_pick = false;
             self.pick_refused = None;
+        }
+        if accepted
+            && self.active == 0
+            && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. })
+            && self.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. }))
+        {
+            self.extra.remove("base");
+            self.extra.remove("axis");
+            if let Kind::Primitive { at, .. } = &mut self.kind {
+                *at = None;
+            }
         }
         self.sync_thread(s);
         self.sync_material(s);
@@ -5413,7 +5499,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let drag_key = side.dialog_offset_key();
-    let moved = crate::frame::dock_offset(ctx, drag_key);
+    let moved = crate::frame::dock_offset_of(ctx, drag_key, d.opened);
     let docked = egui::pos2(side.anchor_x(placement), top);
     let drag_bounds = crate::shell::tool_drag_rect(app, vp);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -5768,8 +5854,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Adopt the complete transaction. Never rerun a Boolean on the window thread.
     let finished = if cancel { None } else { app.applying.as_mut().and_then(Applying::finished) };
     // Preferences received after this frame's renderer setup take effect next frame.
-    // Keep the result ready until the viewport will consume the prepared quality.
-    let finished = if finished.is_some() && solidcraft_engine::doc::display_quality::current() != display_quality(app) {
+    // Keep the result ready until the viewport will consume the prepared quality: the quality
+    // this window set up this frame, never the process-wide level, which another window in the
+    // process can set at any time (each test's window does, every frame).
+    #[cfg(test)]
+    another_window_sets_quality();
+    let finished = if finished.is_some() && crate::prefs::drawn_quality(app) != display_quality(app) {
         if let Some(job) = app.applying.as_mut() {
             job.ready = finished;
         }
@@ -6694,7 +6784,9 @@ fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
 
 /// The world plane of an origin plane or a construction plane by name, where it is shown.
 pub(crate) fn plane_by_name(s: &Session, name: &str) -> Option<solidcore_record::Plane> {
-    if let Some(p) = solidcore_record::Plane::named(name) {
+    // A legacy construction plane can share an origin alias such as Top. The selected
+    // feature keeps its own plane; aliases are only a fallback when no feature has the name.
+    if let Some(p) = solidcore_record::Plane::named(name).filter(|_| s.doc.find_feature(name).is_none()) {
         return Some(p);
     }
     let st = crate::open_meshing::session_world(s);
@@ -7981,7 +8073,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { direction_only, .. } => {
+        Kind::AnglePlane { direction_only, through_axis, .. } => {
             // With no plane picked, a body edge as the axis is enough: the command measures the
             // angle from a flat face along the edge (#20233).
             let edge_only = sels(d, 0).is_empty() && matches!(sels(d, 1).first(), Some(Sel::Edge { .. }));
@@ -7998,6 +8090,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = json!({"axis": axis, "direction_only": direction_only});
             if !edge_only {
                 p["base"] = plane_arg(app, sels(d, 0).first())?;
+            }
+            // Sent only when it applies: direction only wins, as in the dense form (#6180).
+            if *through_axis && !*direction_only && !edge_only {
+                p["through_axis"] = json!(true);
             }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
@@ -8274,6 +8370,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 common["designation"] = json!(designation.trim());
             }
             crate::dialogs_thread::put_params(&mut common, length, options, &d.inputs);
+            if options.tip != crate::dialogs_thread::sent_tip(options, &app.session.doc) {
+                common["tip"] = json!(crate::dialogs_thread::sent_tip(options, &app.session.doc));
+            }
             let mut seen = std::collections::BTreeSet::new();
             let mut faces = Vec::new();
             for pick in sels(d, 0) {
@@ -8596,6 +8695,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 {
                     p.insert("references".into(), json!(references));
                 }
+            }
+            if *cmd == "solid.coil" {
+                crate::primitive_placement::plane_params(s, sels(d, 0).first(), d.extra.get("axis"), &mut p)?;
             }
             // A refilled reference already carries its saved axis and base. A new pick
             // clears the saved axis and supplies its own origin.
@@ -9068,6 +9170,49 @@ pub(crate) fn takes_as_axis(s: &Session, sel: &Sel) -> bool {
     }
 }
 
+/// What the Coil's Axis takes: any axis, and a flat end face, which starts the coil at the face's
+/// centre along its outward normal (`construct::coil_end_face`).
+pub(crate) fn coil_takes_as_axis(s: &Session, sel: &Sel) -> bool {
+    takes_as_axis(s, sel) || coil_end_face(s, sel).is_some()
+}
+
+/// A flat face picked as a Coil's start: its centre, outward normal and the diameter of its round
+/// outline when it has one. `None` for any other pick.
+fn coil_end_face(s: &Session, sel: &Sel) -> Option<(Vec3, Vec3, Option<f64>)> {
+    let Sel::Face { body, index, point } = sel else { return None };
+    planar_face(s, body, *index)?;
+    let st = crate::open_meshing::session_world(s);
+    solidcraft_engine::kernel::guard("coil end face", || Ok(solidcraft_engine::doc::construct::coil_end_face(&st, *point, &None).ok().flatten()))
+        .ok()
+        .flatten()
+}
+
+/// A circular edge, a cylinder face or a round end face picked as a Coil's axis sets its Diameter
+/// field to the circle's, which can be typed over afterwards.
+fn coil_diameter_from_pick(s: &Session, kind: &mut Kind, sel: &Sel) {
+    let Kind::Primitive { cmd: "solid.coil", fields, .. } = kind else { return };
+    let diameter = match sel {
+        Sel::Edge { body, index, .. } => edge_circle(s, body, *index).map(|(_, _, r)| 2.0 * r),
+        Sel::Face { body, index, .. } => coil_end_face(s, sel).and_then(|(_, _, d)| d).or_else(|| {
+            let st = crate::open_meshing::session_world(s);
+            let b = st.body(body)?;
+            match solidcraft_engine::kernel::guard("coil face diameter", || Ok(solidcraft_engine::kernel::face_surface(&b.body, *index)))
+                .ok()
+                .flatten()?
+            {
+                solidcraft_engine::kernel::FaceSurface::Cylinder { radius, .. } => Some(2.0 * radius),
+                _ => None,
+            }
+        }),
+        _ => None,
+    };
+    if let Some(d) = diameter.filter(|d| d.is_finite() && *d > 0.0)
+        && let Some(field) = fields.iter_mut().find(|(key, _)| *key == "diameter")
+    {
+        field.1 = crate::length_input::model(&s.doc, d);
+    }
+}
+
 /// A sketch curve picked as a revolve axis.
 ///
 /// The highlight and the angle handle follow [`axis_of`] (the sketch the pick names, or the
@@ -9122,6 +9267,9 @@ fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Re
             let at = solidcraft_kernel::affine::apply_point(&inverse, (*point).into());
             Ok(json!({"type":"placed_edge", "body":source, "path":path, "at":at, "name":name}))
         }
+        Sel::Face { body, index, point } if round_axis(&app.session, sel).is_none() && coil_end_face(&app.session, sel).is_some() => {
+            Ok(clicked_face_ref(app, body, *index, *point))
+        }
         Sel::SketchCurve { id, .. } => {
             let owner = picks_sketch(app, std::slice::from_ref(sel), None);
             let state = crate::open_meshing::session_world(&app.session);
@@ -9138,6 +9286,9 @@ fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Re
 
 /// Preview a picked Coil model edge with the same world direction as evaluation.
 pub(crate) fn coil_axis_preview(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
+    if let Some((centre, normal, _)) = coil_end_face(&app.session, sel) {
+        return Some((centre, normal));
+    }
     let (origin, dir) = axis_of(app, sel)?;
     let dir = match sel {
         Sel::Edge { body, .. } if !is_mesh_body(&app.session, body) => solidcraft_engine::doc::construct::canonical_dir(dir),
@@ -9199,10 +9350,14 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
         ProfileSel::SidedCurves { .. } => {
             solidcraft_engine::doc::profile_selection_indices_lenient(ss, sel).map(|(found, _)| found).unwrap_or_default()
         }
-        ProfileSel::Curves { loops } => loops
+        ProfileSel::Curves { loops, sides } => loops
             .iter()
-            .filter_map(|l| {
-                solidcraft_engine::doc::profile_selection_indices(ss, &ProfileSel::Curves { loops: vec![l.clone()] }).ok()?.first().copied()
+            .enumerate()
+            .filter_map(|(k, l)| {
+                // Each loop with its own saved sides, which pick its region when a change made a
+                // twin bounded by the same curves (#23291).
+                let sides = if sides.len() == loops.len() { sides.get(k).cloned().into_iter().collect() } else { Vec::new() };
+                solidcraft_engine::doc::profile_selection_indices(ss, &ProfileSel::Curves { loops: vec![l.clone()], sides }).ok()?.first().copied()
             })
             .collect(),
         ProfileSel::Points { points } => points.iter().filter_map(|q| solidcraft_engine::doc::sketch::profile_at_point(ps, *q)).collect(),
@@ -9820,6 +9975,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 wall2: thin.as_ref().and_then(|t| t.thickness2.as_deref().map(str::to_string)).unwrap_or_else(|| length_default(s, "1")),
             };
             d.extra.insert("convention".into(), json!(extent.convention));
+            if extent.extend_to_face {
+                d.extra.insert("extend_to_face".into(), json!(true));
+            }
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);
@@ -10379,8 +10537,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if *reversed {
                 d.extra.insert("reversed".into(), json!(true));
             }
-            if *section == solidcraft_engine::doc::CoilSection::Square {
-                d.extra.insert("section".into(), json!("square"));
+            match section {
+                solidcraft_engine::doc::CoilSection::Square => {
+                    d.extra.insert("section".into(), json!("square"));
+                }
+                solidcraft_engine::doc::CoilSection::Triangle => {
+                    d.extra.insert("section".into(), json!("triangle"));
+                }
+                solidcraft_engine::doc::CoilSection::Circular => {}
             }
             match position {
                 ..0 => d.extra.insert("section_position".into(), json!("inside")),

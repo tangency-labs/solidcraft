@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use super::*;
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface};
+use solidcore_record::brep::{Curve as BCurve, Curve2, Frame, Surface as BSurface};
 
 /// The box's corner `c`: bit 0 is x (10 mm), bit 1 y (20 mm), bit 2 z (30 mm).
 fn corner(c: usize) -> [f64; 3] {
@@ -87,6 +87,108 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     origins.sort_unstable();
     assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
+}
+
+/// Each record edge is named by the origin it was added with (the box's `8 * low + high`
+/// corner), each once.
+#[test]
+fn every_edge_of_the_box_is_named_by_its_origin() {
+    let (solid, _) = assembled_box().unwrap();
+    let mut origins: Vec<u64> = solid.edge_origin.iter().map(|o| o.expect("an edge added, not made")).collect();
+    origins.sort_unstable();
+    let mut want: Vec<u64> = FACES
+        .iter()
+        .flat_map(|(c, _, _)| (0..4).map(move |k| (c[k].min(c[(k + 1) % 4]), c[k].max(c[(k + 1) % 4]))))
+        .map(|(a, z)| a as u64 * 8 + z as u64)
+        .collect();
+    want.sort_unstable();
+    want.dedup();
+    assert_eq!(origins, want);
+}
+
+/// The box with its top face (corners 4, 5, 7, 6 at z = 30) on a spline patch 40 mm square about
+/// the face's centre c = (5, 10, 30), turned 30° about z and quadratic in u, its middle row of
+/// control points 1 mm on along â: `p = c + s(u) â + 40 (v - 1/2) b̂`,
+/// `s(u) = 40 u - 20 + 2 u (1 - u)`. No edge of the face runs along a line of its parameters,
+/// no straight edge is a straight line in them, and there is no kernel to fit a pcurve. Where
+/// `given`, each top use's pcurve is given as the straight (u, v) line between its ends (`off`
+/// from them in u), which lies off its edge by at most a quarter of the 1 mm bulge.
+fn box_with_spline_top(given: bool, off: f64) -> R<Solid> {
+    let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let (a, b) = ([cos, sin], [-sin, cos]);
+    let c = [5.0, 10.0];
+    // u where s(u) = t: the root in [0, 1] of -2u² + 42u - (20 + t).
+    let u_of = |t: f64| (42.0 - (42.0f64 * 42.0 - 8.0 * (20.0 + t)).sqrt()) / 4.0;
+    let uv = |p: [f64; 3]| {
+        let d = [p[0] - c[0], p[1] - c[1]];
+        [u_of(d[0] * a[0] + d[1] * a[1]) + off, 0.5 + (d[0] * b[0] + d[1] * b[1]) / 40.0]
+    };
+    let at = |s: f64, v: f64| [c[0] + s * a[0] + 40.0 * (v - 0.5) * b[0], c[1] + s * a[1] + 40.0 * (v - 0.5) * b[1], 30.0];
+    let mut asm = Assembly::new(1e-6, None);
+    let mut vertices = Vec::new();
+    for c in 0..8 {
+        vertices.push(asm.add_vertex(corner(c))?);
+    }
+    let mut edges: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut faces = Vec::new();
+    for (f, (corners, u_axis, v_axis)) in FACES.into_iter().enumerate() {
+        let (mut uses, mut pcurves) = (Vec::new(), Vec::new());
+        for k in 0..4 {
+            let (i, j) = (corners[k], corners[(k + 1) % 4]);
+            let key = (i.min(j), i.max(j));
+            let (p, q) = (corner(key.0), corner(key.1));
+            let e = match edges.get(&key) {
+                Some(e) => *e,
+                None => {
+                    let (e, _) = asm.add_edge(
+                        key.0 as u64 * 8 + key.1 as u64,
+                        BCurve::Line { start: p, end: q },
+                        [0.0, 1.0],
+                        [vertices[key.0], vertices[key.1]],
+                    )?;
+                    edges.insert(key, e);
+                    e
+                }
+            };
+            uses.push((e, i == key.0));
+            pcurves.push(Some(Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![uv(p), uv(q)] }));
+        }
+        let face = if f == 1 {
+            // Control rows at s = -20, 1 (the quadratic's middle: s(1/2) = 1/2 = (-20 + 2·1 + 20) / 4), 20.
+            let surface = BSurface::Spline {
+                u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                v_knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![vec![at(-20.0, 0.0), at(-20.0, 1.0)], vec![at(1.0, 0.0), at(1.0, 1.0)], vec![at(20.0, 0.0), at(20.0, 1.0)]],
+            };
+            if given {
+                asm.add_face_with_pcurves(f as u64, surface, vec![Bound::Edges(uses)], Some(0), true, vec![pcurves])?
+            } else {
+                asm.add_face(f as u64, surface, vec![Bound::Edges(uses)], Some(0), true)?
+            }
+        } else {
+            asm.add_face(f as u64, BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis }, vec![Bound::Edges(uses)], Some(0), true)?
+        };
+        faces.push((face, true));
+    }
+    asm.finish(0, "box".into(), vec![faces], Kind::Solid)
+}
+
+/// A spline face's pcurves given by its producer are its record's where the face has none in
+/// closed form and no kernel is there to fit them, and without them the face is refused. Each
+/// edge's tolerance covers its given pcurve's gap, up to a quarter of the 1 mm bulge (as a file's
+/// pcurves are covered). Given off their edges by 0.1 in u (4 mm, past the 1 mm an edge's
+/// tolerance may grow to), the record's check refuses them.
+#[test]
+fn a_spline_face_takes_the_pcurves_its_producer_gives() {
+    assert!(box_with_spline_top(false, 0.0).is_err(), "no pcurves on the top without a kernel to fit them");
+    let solid = box_with_spline_top(true, 0.0).unwrap();
+    let brep = &solid.brep;
+    assert_eq!((brep.faces.len(), brep.edges.len(), brep.vertices.len()), (6, 12, 8));
+    let top = solid.face_origin.iter().position(|o| *o == 1).unwrap();
+    assert!(matches!(brep.faces[top].surface, BSurface::Spline { .. }));
+    let worst = brep.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+    assert!(worst <= 0.25 * 1.5 + 1e-6, "the most tolerance an edge takes, {worst} mm");
+    assert!(box_with_spline_top(true, 0.1).is_err(), "pcurves off their edges");
 }
 
 /// The top face's cubic edge lies off its plane only between the 16 even gap samples (#11652).
