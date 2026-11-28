@@ -27,11 +27,12 @@ use std::sync::OnceLock;
 use occt_capi::{Boolean, Shape};
 use solidcore_ops::sweep::Curve;
 use solidcore_record::brep::Brep;
-use solidcore_record::{Plane, Region2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec3};
 use solidcraft_kernel_api::{
     Axis2, Backend, BackendError, BackendId, BoolOp, ChamferSide, Exported, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides,
-    Support, Taper,
+    SplitTool, Support, Taper, TrimKeep,
 };
+use solidcraft_kernel_api::{Helix, PathSpan, PointPath, RailFit, SweepOptions};
 
 use crate::body::Body;
 
@@ -270,12 +271,32 @@ impl Modelling for Occt {
         body.fillet_nearest(&points, radius).map_err(failed)
     }
 
+    fn fillet_removing(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _turn: FilletTurn) -> Result<(Shape, Vec<Vec3>), BackendError> {
+        unsupported("a fillet that removes overflowing picks")
+    }
+
+    fn fillet_each(&self, _body: &Shape, _edges: &[Vec3], _radii: &[f64], _turn: FilletTurn) -> Result<Shape, BackendError> {
+        unsupported("a fillet of several radii")
+    }
+
+    fn fillet_setback(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _setbacks: &[(Vec3, f64)]) -> Result<Shape, BackendError> {
+        unsupported("a setback fillet")
+    }
+
     fn chamfer(&self, body: &Shape, edges: &[Vec3], distance: f64) -> Result<Shape, BackendError> {
         if edges.is_empty() || edges.len() > 1000 || !(distance > 1e-6 && distance < 1e6) || edges.iter().any(|p| !finite(&xyz(*p))) {
             return unsupported("a chamfer solidcore refuses");
         }
         let points: Vec<[f64; 3]> = edges.iter().map(|p| xyz(*p)).collect();
         body.chamfer_nearest(&points, distance).map_err(failed)
+    }
+
+    fn chamfer_carrying_face(&self, _body: &Shape, _edges: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
+        unsupported("a chamfer")
+    }
+
+    fn chamfer_sides_carrying_face(&self, _body: &Shape, _edges: &[Vec3], _d1: f64, _side: ChamferSide, _flip: bool) -> Result<Shape, BackendError> {
+        unsupported("a chamfer")
     }
 
     fn chamfer_sides(&self, _body: &Shape, _edges: &[Vec3], _d1: f64, _side: ChamferSide, _flip: bool) -> Result<Shape, BackendError> {
@@ -305,6 +326,54 @@ impl Modelling for Occt {
         }
         let points: Vec<[f64; 3]> = at.iter().map(|p| xyz(*p)).collect();
         body.offset_faces_nearest(&points, distance).map_err(failed)
+    }
+
+    fn draft(&self, _body: &Shape, _faces: &[Vec3], _neutral: &Plane, _pull: Vec3, _angle: f64) -> Result<Shape, BackendError> {
+        unsupported("a draft")
+    }
+
+    fn split_faces(&self, _body: &Shape, _faces: &[usize], _tool: &SplitTool<'_, Shape>) -> Result<(Shape, Vec<usize>), BackendError> {
+        unsupported("a face split")
+    }
+
+    fn split_body(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>) -> Result<Vec<Shape>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn split_body_by_faces(&self, _body: &Shape, _sheet: &Shape, _face: usize, _faces: &[usize]) -> Result<Vec<Shape>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn split_body_by_sheet_where_it_cuts(&self, _body: &Shape, _sheet: &Shape, _face: usize) -> Result<Option<Vec<Shape>>, BackendError> {
+        unsupported("a body split")
+    }
+
+    fn trim_keep(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>, _keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
+        unsupported("a trim")
+    }
+
+    fn sweep(&self, _plane: &Plane, _region: &Region2, _path: &[PathSpan], _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_points(&self, _plane: &Plane, _region: &Region2, _path: &PointPath, _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_helix(&self, _plane: &Plane, _region: &Region2, _helix: &Helix<'_>) -> Result<Shape, BackendError> {
+        unsupported("a helical sweep")
+    }
+
+    fn loft(&self, _sections: &[(Plane, Loop2)], _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_regions(&self, _sections: &[(Plane, Region2)]) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_to_point(&self, _plane: &Plane, _section: &Loop2, _apex: Vec3, _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft to a point")
     }
 }
 

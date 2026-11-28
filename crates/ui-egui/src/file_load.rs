@@ -2314,6 +2314,7 @@ mod tests {
                 disabled: false,
                 groups: Default::default(),
                 entries: vec![entry],
+                declarations: Default::default(),
                 ribbon_groups: Vec::new(),
                 images: Default::default(),
                 swatches: Default::default(),
