@@ -68,6 +68,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The build job keeps target/ on a Blacksmith sticky disk that main's pushes write, as ci.yml's
+  # build jobs do (WARM_TARGET there); change it to start the disk afresh.
+  WARM_TARGET: target-v1
+  SCCACHE_IDLE_TIMEOUT: "0"
 
 jobs:
   plan:
@@ -171,9 +175,22 @@ jobs:
           key: ${{ github.repository }}-sccache-kernel-rig
           path: /home/runner/.cache/sccache
           commit: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && 'on-change' || 'false' }}
+      # target/ from main's last rig build; scripts/ci/warm_target.py marks what changed since its
+      # tree, so Cargo rebuilds only those crates and what depends on them.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-kernel-rig
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: kernel-rig
+          cache-targets: "false"
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
       - name: Set up compiler cache
         id: sccache
@@ -195,6 +212,9 @@ jobs:
       # Every registry command is used by a case or listed in tests/kernel-cases/EXEMPT.
       - name: Every command has a case
         run: target/debug/xtask kernel-cases --coverage --cli target/release/solidcraft-cli
+      - name: Seal the build directory
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
       # A coverage-only run (the registry or the cases changed, no area selected) runs no shard.
       - name: Pack the binaries
         if: needs.plan.outputs.shards != '[]'

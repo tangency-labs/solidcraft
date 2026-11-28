@@ -1869,7 +1869,7 @@ pub fn export_with_parts_noted(
 }
 
 /// Most threads an export meshes its bodies on, as many as the model cache encodes them on.
-const EXPORT_THREADS: usize = 16;
+pub(crate) const EXPORT_THREADS: usize = 16;
 
 /// Keep each triangle's source index through welding so its face and colour follow it.
 type TaggedTriangles = (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>);
@@ -2880,10 +2880,10 @@ mod tests {
     fn notes_say_short_only_for_a_face_under_the_angle() {
         let spec = solidcraft_kernel::MeshSpec::chord(0.01);
         assert!(mesh_notes(&solidcraft_kernel::PlanStats::default(), &spec).is_empty());
-        let unshaped = |face: usize, smallest_angle: f64| solidcraft_kernel::services::tess::Unshaped {
+        let unshaped = |face: usize, smallest_angle: f64| solidcraft_kernel::Unshaped {
             face,
             smallest_angle,
-            limits: vec![solidcraft_kernel::services::tess::ShapeLimit::Rounds],
+            limits: vec![solidcraft_kernel::ShapeLimit::Rounds],
         };
         let stats = solidcraft_kernel::PlanStats { unshaped: vec![unshaped(3, 18.5), unshaped(7, 27.25)], ..Default::default() };
         let notes = mesh_notes(&stats, &spec);

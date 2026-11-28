@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&DRAWING_BOUNDS_CONTRACT)
         .output(output_schema_for::<DrawingBoundsResult>)
-        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); dpi?: SVG only, the dots per inch its pixels are read at, 1 to 10000 (default 96); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); dpi?: SVG only, the dots per inch its pixels are read at, 1 to 10000 (default 96); fit?: bool (also work out the smallest Simplify distance, mm on the drawing to 0.01, at which `sketch.insert_svg`/`_dxf` would add it to a sketch without running out of points or curves — `auto_simplify`: 0 when it fits as drawn, left out when no distance up to the cap does; the window's Auto figures); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
         .noundo()
@@ -329,11 +329,68 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
     // Only an SVG names a sheet, and only when it says how big its sheet is.
     let dpi = dpi_of(p, cmd, svg)?;
     let sheet = svg.then(|| solidcraft_io::svg_sheet_at(&text, dpi)).flatten().map(drawing_box);
-    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, edges: geom.len(), param_warnings: Vec::new() })
+    // The window's Auto figure: what it takes to fit a sketch, worked out here on the same read.
+    let auto_simplify = if bool_(p, "fit").unwrap_or(false) {
+        let span = (bounds.1.x - bounds.0.x).max(bounds.1.y - bounds.0.y);
+        fit_simplify(&geom, span)
+    } else {
+        None
+    };
+    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, edges: geom.len(), auto_simplify, param_warnings: Vec::new() })
 }
 
 /// The most a drawing may be simplified by, in mm: `simplify` is brought inside this.
 const MAX_SIMPLIFY_MM: f64 = 100.0;
+
+/// The join tolerance the insert commands use when the caller gives none, in mm of the drawing's
+/// place.
+const DEFAULT_TOLERANCE_MM: f64 = 1e-4;
+
+/// The smallest Simplify distance (mm on the drawing, to 0.01) at which the insert would add
+/// `geom` to a sketch on a scratch model: `Some(0.0)` when it fits as drawn, `None` when no
+/// distance up to the cap (a hundredth of its span, and [`MAX_SIMPLIFY_MM`]) does. Counted as
+/// `sketch.insert_svg` adds it, so a drawing whose curves the sketch cannot take as drawn (a
+/// field of splines the simplify distance leaves as drawn) says none fits rather than guessing.
+fn fit_simplify(geom: &[Geom2], span: f64) -> Option<f64> {
+    let cap = MAX_SIMPLIFY_MM.min(span * 0.01);
+    if !(cap > 0.0 && cap.is_finite()) {
+        return None;
+    }
+    let fits = |d: f64| {
+        // As drawn is a borrow: a drawing too large for the sketch is refused before it is
+        // copied, which is the common case for a window that asks.
+        let cut: std::borrow::Cow<[Geom2]> =
+            if d > 0.0 { std::borrow::Cow::Owned(simplify_lines(geom, d, DEFAULT_TOLERANCE_MM).0) } else { std::borrow::Cow::Borrowed(geom) };
+        if cut.len() > solidcraft_sketch::limits::max_points() {
+            return false;
+        }
+        let mut sk = Sketch::new();
+        add_geometry(&mut sk, cut.as_ref(), &|q: Vec2| q, 1.0, DEFAULT_TOLERANCE_MM).is_ok()
+    };
+    if fits(0.0) {
+        return Some(0.0);
+    }
+    if !fits(cap) {
+        return None;
+    }
+    // Bisect for the smallest distance that fits, on the 0.01 mm the window's box steps in.
+    let (mut no, mut yes) = (0.0_f64, cap);
+    for _ in 0..40 {
+        if yes - no <= 0.005 {
+            break;
+        }
+        let mid = ((no + yes) / 2.0 * 100.0).ceil() / 100.0;
+        if mid <= no || mid >= yes {
+            break;
+        }
+        if fits(mid) {
+            yes = mid;
+        } else {
+            no = mid;
+        }
+    }
+    Some(if cap >= 0.01 { (yes * 100.0).ceil() / 100.0 } else { yes })
+}
 
 /// Why a drawing was not simplified as far as asked (a run too complex for the work budget):
 /// it is inserted as drawn, never coarser than the tolerance allows.
@@ -1370,6 +1427,45 @@ EOF
         assert_eq!(curves(100.0), at_clamp, "a distance past the clamp is the clamp");
         assert_eq!(curves(500.0), at_clamp, "a distance past the command's own clamp is the clamp");
         assert!(at_clamp > 1, "most of the outline still comes in: {at_clamp}");
+    }
+
+    /// A drawing the sketch takes as drawn needs no Simplify distance; a dense one gets the
+    /// smallest distance at which the insert fits, and nothing below it does; more circles than a
+    /// sketch takes, which Simplify leaves as drawn, get none.
+    #[test]
+    fn bounds_fit_finds_the_smallest_distance_that_fits() {
+        let mut s = Session::default();
+        // As drawn: a rectangle.
+        let square = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"#;
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": square, "fit": true})).unwrap();
+        assert_eq!(b["auto_simplify"], json!(0.0), "{b}");
+        // A dense half circle: at the auto distance the insert fits, below it the sketch refuses.
+        let n = 40_000;
+        let mut path = String::from("M 10 0");
+        for k in 1..=n {
+            let a = std::f64::consts::PI * k as f64 / n as f64;
+            path.push_str(&format!(" L {:.6} {:.6}", 10.0 * a.cos(), 10.0 * a.sin()));
+        }
+        let dense =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20mm\" height=\"10mm\" viewBox=\"-10 0 20 10\"><path d=\"{path}\"/></svg>");
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": dense, "fit": true})).unwrap();
+        let auto = b["auto_simplify"].as_f64().unwrap_or_else(|| panic!("a distance fits: {b}"));
+        assert!(auto > 0.0 && auto <= super::MAX_SIMPLIFY_MM && (auto * 100.0).fract().abs() < 1e-9, "on the 0.01 grid: {auto}");
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let fit = s.execute("sketch.insert_svg", &json!({"text": dense, "simplify": auto}));
+        assert!(fit.unwrap()["curves"].as_u64().unwrap() > 0, "the auto distance fits");
+        let mut below = Session::default();
+        below.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let too_dense = below.execute("sketch.insert_svg", &json!({"text": dense, "simplify": (auto - 0.02).max(0.0)}));
+        assert!(too_dense.is_err(), "nothing below it fits: {too_dense:?}");
+        // Circles stay as drawn, so no distance fits more of them than a sketch takes.
+        let mut circles = String::new();
+        for k in 0..25_000 {
+            circles.push_str(&format!("<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"0.1\"/>", (k % 100) as f64 * 0.2, (k / 100) as f64 * 0.2));
+        }
+        let many = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20mm\" height=\"10mm\" viewBox=\"0 0 20 10\">{circles}</svg>");
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": many, "fit": true})).unwrap();
+        assert!(b.get("auto_simplify").is_none(), "no distance fits circles that stay as drawn: {b}");
     }
 
     /// `simplify` is measured on the drawing as drawn, so the window's preview (imported at

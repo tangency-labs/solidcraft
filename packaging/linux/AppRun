@@ -22,12 +22,15 @@
 # The same step puts `solidcraft-cli` on PATH: a small wrapper script in ~/.local/bin that starts this
 # AppImage in command-line mode (SOLIDCRAFT_APPIMAGE_CLI=1 makes AppRun run the bundled
 # solidcraft-cli), so MCP clients and shells find it by name. It is rewritten when the AppImage
-# moves, and a file there that this script did not write is never touched. The same opt-outs apply.
+# runs from a new place; while the AppImage it names is gone it prints one line saying so (exit 127).
+# A file there that this script did not write is never touched. The same opt-outs apply.
 
 set -u
 
 APPDIR="$(dirname "$(readlink -f "$0")")"
 DESK_ID=io.tangencylabs.solidcraft
+# The hidden entry that handles solidcraft:// links (Workshop links, docs/workshop-links.md).
+HANDLER_ID=io.tangencylabs.solidcraft.workshop-links
 CLI_MARKER="# solidcraft-cli wrapper written by the SolidCraft AppImage"
 # Marks a .desktop entry this script wrote. An entry without it is the user's
 # (hand-edited, or written by an older release) and is never overwritten (#9679).
@@ -46,13 +49,51 @@ install_cli() {
   fi
   mkdir -p "$bin" 2>/dev/null || return 0
   tmp="$bin/.solidcraft-cli.tmp.$$"
-  printf '#!/bin/sh\n%s\nSOLIDCRAFT_APPIMAGE_CLI=1 exec "%s" "$@"\n' "$CLI_MARKER" "$1" >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+  # The AppImage can be moved or deleted after this is written: then the wrapper says so in one
+  # line instead of the shell's "exec: ...: not found". Running the AppImage from its new place
+  # rewrites the wrapper with that path (integrate, on every launch). The $ in the single-quoted
+  # text are the wrapper's own, expanded when it runs.
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\n%s\napp="%s"\nif [ ! -f "$app" ]; then\n  echo "solidcraft-cli: the SolidCraft AppImage this command starts is no longer at $app; open SolidCraft once from where it is now to update this command, or delete $0" >&2\n  exit 127\nfi\nSOLIDCRAFT_APPIMAGE_CLI=1 exec "$app" "$@"\n' "$CLI_MARKER" "$1" >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
   chmod 755 "$tmp" 2>/dev/null
   if cmp -s "$tmp" "$wrapper" 2>/dev/null; then
     rm -f "$tmp"
   else
     mv -f "$tmp" "$wrapper" 2>/dev/null || rm -f "$tmp"
   fi
+}
+
+# Write the desktop entry $1 (an id) from the AppImage's entry $2, with Exec= this AppImage and
+# the arguments $3. Uses $apps, $appimage and $icons from integrate. 1: it could not be written,
+# and integration stops there.
+write_entry() {
+  target="$apps/$1.desktop"
+  if [ ! -f "$target" ] || grep -q "^$DESK_MARKER\$" "$target" 2>/dev/null; then
+    tmp="$apps/.$1.tmp.$$"
+    esc="$(printf '%s' "$appimage" | sed 's/[\\&|]/\\&/g')"
+    icon_png="$icons/256x256/apps/$DESK_ID.png"
+    if [ -f "$icon_png" ]; then
+      icon_esc="$(printf '%s' "$icon_png" | sed 's/[\\&|]/\\&/g')"
+      icon_sed="s|^Icon=.*|Icon=$icon_esc|"
+    else
+      icon_sed='s|^Icon=.*|Icon='"$DESK_ID"'|'
+    fi
+    if { sed -e "s|^Exec=.*|Exec=\"$esc\" $3|" -e '/^TryExec=/d' -e "$icon_sed" "$2" 2>/dev/null; printf '%s\n' "$DESK_MARKER"; } >"$tmp"; then
+      if cmp -s "$tmp" "$target"; then
+        rm -f "$tmp"
+      else
+        if mv -f "$tmp" "$target" 2>/dev/null; then
+          command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
+        else
+          rm -f "$tmp"
+        fi
+      fi
+    else
+      rm -f "$tmp"
+      return 1
+    fi
+  fi
+  return 0
 }
 
 integrate() {
@@ -76,6 +117,7 @@ integrate() {
   [ -e "$data/solidcraft/no-desktop-integration" ] && return 0
   install_cli "$appimage" "$home"
   src_desktop="$APPDIR/usr/share/applications/$DESK_ID.desktop"
+  src_handler="$APPDIR/usr/share/applications/$HANDLER_ID.desktop"
   [ -f "$src_desktop" ] || return 0
 
   apps="$data/applications"
@@ -83,11 +125,12 @@ integrate() {
   # DESKTOPINTEGRATION set; treat that like appimaged: no entry from here, and drop the one
   # this script wrote earlier (it would otherwise come back after the launcher's is removed).
   if [ -n "${DESKTOPINTEGRATION:-}" ]; then
-    mine="$apps/$DESK_ID.desktop"
-    if [ -f "$mine" ] && grep -q '^Exec="' "$mine"; then
-      rm -f "$mine"
-      command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
-    fi
+    for mine in "$apps/$DESK_ID.desktop" "$apps/$HANDLER_ID.desktop"; do
+      if [ -f "$mine" ] && grep -q '^Exec="' "$mine"; then
+        rm -f "$mine"
+        command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
+      fi
+    done
     return 0
   fi
   # appimaged integrates AppImages itself (appimagekit_<hash>-<name>.desktop, Exec= this file):
@@ -97,11 +140,12 @@ integrate() {
     if ! { [ -f "$other" ] && grep -qF "$appimage" "$other" 2>/dev/null; }; then
       continue
     fi
-    mine="$apps/$DESK_ID.desktop"
-    if [ -f "$mine" ] && grep -q '^Exec="' "$mine"; then
-      rm -f "$mine"
-      command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
-    fi
+    for mine in "$apps/$DESK_ID.desktop" "$apps/$HANDLER_ID.desktop"; do
+      if [ -f "$mine" ] && grep -q '^Exec="' "$mine"; then
+        rm -f "$mine"
+        command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
+      fi
+    done
     return 0
   done
 
@@ -131,31 +175,11 @@ integrate() {
   # marker is the user's (hand-edited, or written by an older release) and is
   # left alone for good, so it can never trigger such a rewrite.
   mkdir -p "$apps" 2>/dev/null || return 0
-  target="$apps/$DESK_ID.desktop"
-  if [ ! -f "$target" ] || grep -q "^$DESK_MARKER\$" "$target" 2>/dev/null; then
-    tmp="$apps/.$DESK_ID.tmp.$$"
-    esc="$(printf '%s' "$appimage" | sed 's/[\\&|]/\\&/g')"
-    icon_png="$icons/256x256/apps/$DESK_ID.png"
-    if [ -f "$icon_png" ]; then
-      icon_esc="$(printf '%s' "$icon_png" | sed 's/[\\&|]/\\&/g')"
-      icon_sed="s|^Icon=.*|Icon=$icon_esc|"
-    else
-      icon_sed='s|^Icon=.*|Icon='"$DESK_ID"'|'
-    fi
-    if { sed -e "s|^Exec=.*|Exec=\"$esc\" %F|" -e '/^TryExec=/d' -e "$icon_sed" "$src_desktop" 2>/dev/null; printf '%s\n' "$DESK_MARKER"; } >"$tmp"; then
-      if cmp -s "$tmp" "$target"; then
-        rm -f "$tmp"
-      else
-        if mv -f "$tmp" "$target" 2>/dev/null; then
-          command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
-        else
-          rm -f "$tmp"
-        fi
-      fi
-    else
-      rm -f "$tmp"
-      return 0
-    fi
+  write_entry "$DESK_ID" "$src_desktop" '%F' || return 0
+  # solidcraft:// links: a hidden entry of its own, so the visible one above opens files exactly
+  # as it always has. The link is the one argument the app reads after --open-url.
+  if [ -f "$src_handler" ]; then
+    write_entry "$HANDLER_ID" "$src_handler" '--open-url %u' || return 0
   fi
 
   # An entry and icons that an earlier AppImage installed under an old id would show a second
