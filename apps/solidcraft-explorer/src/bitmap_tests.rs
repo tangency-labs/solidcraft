@@ -40,6 +40,11 @@ fn a_picture_fits_its_box_with_its_proportions() {
     assert_eq!(fit(240, 150, 32), Some((32, 20)));
     assert_eq!(fit(150, 240, 32), Some((20, 32)));
     assert_eq!(fit(1, 4096, 16), Some((1, 16)));
+    // Halves round up: 7 x 5 / 10 is 3.5, and 150 x 100 / 240 is 62.5.
+    assert_eq!(fit(10, 7, 5), Some((5, 4)));
+    assert_eq!(fit(7, 10, 5), Some((4, 5)));
+    assert_eq!(fit(240, 150, 100), Some((100, 63)));
+    assert_eq!(fit(1, 100, 99), Some((1, 99)));
     assert_eq!(fit(0, 150, 32), None);
     assert_eq!(fit(240, 0, 32), None);
     assert_eq!(fit(240, 150, 0), None);
@@ -86,6 +91,10 @@ fn scaling_averages_in_premultiplied_alpha() {
 fn scaling_never_enlarges_and_checks_its_input() {
     let quad = quadrants();
     assert_eq!(scale(&quad, 4, 4, 5, 4), None);
+    assert_eq!(scale(&quad, 4, 4, 4, 5), None);
+    let (red, blue) = ([255, 0, 0, 255], [0, 0, 255, 255]);
+    assert_eq!(scale(&quad, 4, 4, 4, 2), Some([red, red, blue, blue, blue, blue, red, red].concat()), "one side kept");
+    assert_eq!(scale(&[quad.as_slice(), &[0; 4]].concat(), 4, 4, 2, 2), None, "a pixel too many");
     assert_eq!(scale(&quad, 4, 4, 0, 1), None);
     assert_eq!(scale(&quad[..60], 4, 4, 2, 2), None);
 }
@@ -247,4 +256,24 @@ fn the_decoder_stops_at_its_allocation_limit() {
     assert_eq!(decode(&at_limit, 2048, 1024).map(|rgba| rgba.len()), Some(DECODE_LIMIT));
     let over = encode(2048, 1025, ColorType::Rgba, BitDepth::Eight, &vec![0; 2048 * 1025 * 4], None);
     assert_eq!(decode(&over, 2048, 1025), None);
+}
+
+#[test]
+fn scaling_weights_each_pixel_by_the_area_it_covers() {
+    // 3 x 3 to 2 x 2: each output pixel covers 1.5 x 1.5 source pixels, so the corner pixel counts
+    // 1, the edge pixels 0.5 and the centre 0.25. The expected values come from the formula of
+    // SPEC section 4.3 worked in exact fractions.
+    let source = [
+        [0, 0, 0, 255],
+        [0, 0, 0, 255],
+        [200, 0, 0, 255],
+        [255, 0, 0, 255],
+        [0, 0, 0, 255],
+        [0, 90, 0, 51],
+        [0, 0, 0, 255],
+        [30, 60, 90, 255],
+        [0, 0, 0, 0],
+    ]
+    .concat();
+    assert_eq!(scale(&source, 3, 3, 2, 2), Some(vec![57, 0, 0, 255, 108, 5, 0, 210, 63, 13, 20, 255, 18, 46, 53, 96]));
 }
