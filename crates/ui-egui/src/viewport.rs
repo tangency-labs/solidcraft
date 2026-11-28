@@ -543,6 +543,8 @@ pub struct ViewportState {
     pub(crate) joint_motions: Option<joint_motions::DragMotions>,
     /// A free part being dragged to a new place (#2804).
     pub(crate) occurrence_drag: Option<crate::occurrence_drag::Drag>,
+    /// A free part pressed with the right button, turning once the pointer moves.
+    pub(crate) occurrence_turn: Option<crate::occurrence_rotate::Turn>,
     /// Extrude by pulling a face or profile.
     pub(crate) drag_extrude: crate::drag_extrude::State,
     /// The plane the grid was last drawn on while Preferences ▸ Grid follows the view is on
@@ -9062,6 +9064,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !flat {
         app.flat_view.fitted = false;
     }
+    // A right-button press on a free part turns it, before the camera can take the drag.
+    if !flat {
+        crate::occurrence_rotate::track(app, ui, rect);
+    }
     let input =
         if flat { crate::dialogs_sheet::navigate(app, ui, rect, &resp) } else { crate::navigation::handle(app, ui, rect, &resp, NavCaps::MODEL) };
     // The face under a still pointer keeps its highlight while the view moves under it
@@ -11564,6 +11570,7 @@ impl QuietMotion {
             || crate::joint_drag::active(app)
             || crate::joint_handles::active(app)
             || crate::occurrence_drag::active(app)
+            || crate::occurrence_rotate::active(app)
             || crate::frame::dock_dragging(ui.ctx())
             || !ui.is_enabled()
             || ui.input(|i| i.pointer.any_down() || i.pointer.any_released() || i.pointer.any_pressed());

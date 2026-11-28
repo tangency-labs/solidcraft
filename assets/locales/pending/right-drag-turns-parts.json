@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.right_drag_turns_parts": "Right drag turns parts",
+    "prefs.right_drag_turns_parts_tip": "A right drag that starts on a free part in an assembly turns the part about its centre instead of moving the view. Off: the right drag moves the view everywhere"
+  },
+  "ar": {
+    "prefs.right_drag_turns_parts": "السحب بالزر الأيمن يدير الأجزاء",
+    "prefs.right_drag_turns_parts_tip": "السحب بالزر الأيمن الذي يبدأ على جزء حر في تجميع يدير الجزء حول مركزه بدلًا من تحريك العرض. عند الإيقاف: يحرّك السحب بالزر الأيمن العرض في كل مكان"
+  },
+  "he": {
+    "prefs.right_drag_turns_parts": "גרירה ימנית מסובבת חלקים",
+    "prefs.right_drag_turns_parts_tip": "גרירה בלחצן הימני שמתחילה על חלק חופשי במכלול מסובבת את החלק סביב מרכזו במקום להזיז את התצוגה. כבוי: גרירה ימנית מזיזה את התצוגה בכל מקום"
+  },
+  "ja": {
+    "prefs.right_drag_turns_parts": "右ドラッグで部品を回転",
+    "prefs.right_drag_turns_parts_tip": "アセンブリ内の固定されていない部品上で始めた右ドラッグは、ビューを動かさずに部品をその中心で回転させます。オフ: 右ドラッグはどこでもビューを動かします"
+  },
+  "vi": {
+    "prefs.right_drag_turns_parts": "Kéo chuột phải xoay chi tiết",
+    "prefs.right_drag_turns_parts_tip": "Kéo chuột phải bắt đầu trên một chi tiết tự do trong lắp ráp sẽ xoay chi tiết quanh tâm của nó thay vì di chuyển khung nhìn. Tắt: kéo chuột phải di chuyển khung nhìn ở mọi nơi"
+  },
+  "zh": {
+    "prefs.right_drag_turns_parts": "右键拖动旋转零件",
+    "prefs.right_drag_turns_parts_tip": "在装配体中从自由零件上开始的右键拖动会绕零件中心旋转零件，而不是移动视图。关闭：右键拖动在任何地方都移动视图"
+  }
+}

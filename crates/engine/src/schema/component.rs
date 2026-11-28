@@ -1581,8 +1581,15 @@ fn occurrence_or_component_required(schema: &mut Schema) {
 
 fn drag_schema(schema: &mut Schema) {
     schema.insert("anyOf".into(), json!([{"required": ["occurrence"]}, {"required": ["path"]}]));
-    require(schema, "at");
-    require(schema, "point");
+    // A move by `at` and `point`, or a turn by `rotate`: one or the other.
+    schema.insert(
+        "allOf".into(),
+        json!([
+            {"anyOf": [{"required": ["at", "point"]}, {"required": ["rotate"]}]},
+            {"not": {"required": ["rotate", "at"]}},
+            {"not": {"required": ["rotate", "point"]}}
+        ]),
+    );
 }
 
 fn move_schema(schema: &mut Schema) {
@@ -2120,10 +2127,38 @@ pub struct DragKeys {
     #[serde(default, deserialize_with = "point_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point3")]
     pub point: Option<Point3>,
+    /// Turn the placement instead of moving it by `point - at` (the viewport's right-button
+    /// drag): by `angle` radians about the world line through `origin` along `axis`. Not with
+    /// `at` and `point`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<DragRotate>,
     /// Reply `continuous`, for a drag that goes on over several calls (the viewport's). It
     /// changes nothing else. Default: `false`.
     #[serde(default)]
     pub continuous: Option<bool>,
+}
+
+/// The turn a drag made, as its reply gives it back.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DragTurned {
+    /// A point on the line turned about, in world coordinates (mm).
+    pub origin: [f64; 3],
+    /// The line's direction, in world coordinates.
+    pub axis: [f64; 3],
+    /// How far it turned, in radians (right-handed about `axis`).
+    pub angle: f64,
+}
+
+/// `occurrence.drag`'s `rotate`: a turn about a world line.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DragRotate {
+    /// A point on the line turned about, in world coordinates (mm).
+    pub origin: Point3,
+    /// The line's direction, in world coordinates (any nonzero length).
+    pub axis: Point3,
+    /// How far to turn, in radians (right-handed about `axis`).
+    pub angle: f64,
 }
 
 /// `occurrence.drag`'s parameters: [`DragKeys`], read as the handler reads them: `path` stands
@@ -2139,11 +2174,15 @@ impl<'de> Deserialize<'de> for DragParams {
                 return Err(D::Error::custom(whole("give `occurrence` or `path` (1..64 occurrence ids)")));
             }
             read_stages::<DragKeys, D::Error>(&value, &[&["occurrence", "path"]])?;
-            if value.get("at").is_none() || value.get("point").is_none() {
+            if value.get("rotate").is_some() {
+                if value.get("at").is_some() || value.get("point").is_some() {
+                    return Err(D::Error::custom(whole("give either `rotate` or `at` and `point`, not both")));
+                }
+            } else if value.get("at").is_none() || value.get("point").is_none() {
                 return Err(D::Error::custom(whole("`at` and `point` must both be given")));
             }
         }
-        staged(&value, &[&["at"], &["point"]]).map(DragParams)
+        staged(&value, &[&["at"], &["point"], &["rotate"]]).map(DragParams)
     }
 }
 
@@ -2158,8 +2197,11 @@ pub struct DragResult {
     pub path: Vec<u64>,
     /// The occurrences moved: it first, then those a chain of joints carries with it.
     pub moved: Vec<u64>,
-    /// How far they moved, `point - at` (mm).
+    /// How far they moved, `point - at` (mm); zero for a turn.
     pub translate: [f64; 3],
+    /// The turn given as `rotate`, when the call turned the placement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<DragTurned>,
     /// What the call gave as `continuous`.
     pub continuous: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

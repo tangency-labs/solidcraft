@@ -75,7 +75,7 @@ fn schemas_and_the_key_check_agree() {
             "translate",
         ],
     );
-    assert_keys(input_schema_for::<DragParams>(), &["at", "continuous", "occurrence", "path", "point"]);
+    assert_keys(input_schema_for::<DragParams>(), &["at", "continuous", "occurrence", "path", "point", "rotate"]);
     assert_keys(input_schema_for::<OccurrencePropertiesParams>(), &["about", "descendants", "occurrence", "path"]);
     assert_keys(input_schema_for::<MoveBodiesParams>(), &["bodies", "component", "component_path", "from_path"]);
     assert_keys(input_schema_for::<MoveSketchesParams>(), &["component", "sketches"]);

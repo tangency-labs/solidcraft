@@ -27,6 +27,10 @@ fn origin(s: &Session, path: &[u64]) -> [f64; 3] {
     [w[3][0], w[3][1], w[3][2]]
 }
 
+fn arr(v: solidcore_record::Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
 fn near(a: [f64; 3], b: [f64; 3]) {
     assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9), "{a:?} != {b:?}");
 }
@@ -83,6 +87,68 @@ fn ungrounded_designs_stay_ungrounded_through_new_parts_and_reopening() {
     }
     let (_, again) = part(&mut s, "C", [0.0, 0.0, 0.0]);
     assert!(grounded(&s, again));
+}
+
+#[test]
+fn rotate_turns_a_free_part_about_a_world_line_and_refuses_bad_turns() {
+    let mut s = Session::default();
+    let (_, first) = part(&mut s, "A", [0.0, 0.0, 0.0]);
+    let (_, b) = part(&mut s, "B", [20.0, 0.0, 0.0]);
+    // A quarter turn about the vertical line through B's centre (25, 5, 5): its origin (0, 0, 0)
+    // is 25 mm left of and 5 mm in front of that line, and goes to 5 mm right and 25 mm behind.
+    let turn = json!({"origin": [25, 5, 5], "axis": [0, 0, 1], "angle": std::f64::consts::FRAC_PI_2});
+    let r = run(&mut s, "occurrence.drag", json!({"occurrence": b, "rotate": turn, "continuous": true}));
+    assert_eq!(r["moved"], json!([b]));
+    assert_eq!(r["translate"], json!([0.0, 0.0, 0.0]));
+    assert_eq!(r["rotate"]["origin"], json!([25.0, 5.0, 5.0]));
+    near(origin(&s, &[b]), [30.0, -20.0, 0.0]);
+    // The centre stays where it was.
+    let w = s.occurrence_placement(&[b]).unwrap().world;
+    near(arr(solidcraft_doc::apply_point(&w, solidcore_record::Vec3::new(25.0, 5.0, 5.0))), [25.0, 5.0, 5.0]);
+    // Turning back puts it back.
+    let back = json!({"origin": [25, 5, 5], "axis": [0, 0, 1], "angle": -std::f64::consts::FRAC_PI_2});
+    run(&mut s, "occurrence.drag", json!({"occurrence": b, "rotate": back}));
+    near(origin(&s, &[b]), [0.0, 0.0, 0.0]);
+    // Grounded A, and turns that aren't, are refused.
+    assert!(s.execute("occurrence.drag", &json!({"occurrence": first, "rotate": turn})).is_err());
+    for bad in [
+        json!({"occurrence": b, "rotate": {"origin": [0, 0, 0], "axis": [0, 0, 0], "angle": 1}}),
+        json!({"occurrence": b, "rotate": {"origin": [0, 0, 0], "axis": [0, 0, 1]}}),
+        json!({"occurrence": b, "rotate": {"origin": [0, 0, 0], "axis": [0, 0, 1], "angle": 1, "spin": 2}}),
+        json!({"occurrence": b, "rotate": [0, 0, 1]}),
+        json!({"occurrence": b, "rotate": turn, "at": [0, 0, 0], "point": [1, 0, 0]}),
+    ] {
+        assert!(s.execute("occurrence.drag", &bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn rotate_in_a_turned_subassembly_turns_about_the_world_line() {
+    let mut s = Session::default();
+    part(&mut s, "Ground", [0.0, 0.0, 0.0]);
+    // A subassembly turned a quarter about X, holding free part P.
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let sub = run(&mut s, "component.create", json!({"name": "Sub"}));
+    let sub_occ = sub["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": sub_occ, "axis": [1, 0, 0], "angle": std::f64::consts::FRAC_PI_2, "move_grounded": true}));
+    run(&mut s, "component.activate", json!({"component": sub["component"]}));
+    let p = run(&mut s, "component.create", json!({"name": "P"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    let p_occ = p["occurrence"].as_u64().unwrap();
+    let path = vec![sub_occ, p_occ];
+    let world_of = |s: &Session, local: [f64; 3]| -> [f64; 3] {
+        let w = s.occurrence_placement(&path).unwrap().world;
+        arr(solidcraft_doc::apply_point(&w, solidcore_record::Vec3::new(local[0], local[1], local[2])))
+    };
+    let centre = world_of(&s, [25.0, 5.0, 5.0]);
+    let corner = world_of(&s, [20.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": sub["component"]}));
+    let turn = json!({"origin": centre, "axis": [0, 0, 1], "angle": std::f64::consts::PI});
+    run(&mut s, "occurrence.drag", json!({"path": path, "rotate": turn}));
+    // A half turn about the world vertical through the centre: the centre stays, and the corner
+    // goes to the other side of it in world X and Y, its height unchanged.
+    near(world_of(&s, [25.0, 5.0, 5.0]), centre);
+    near(world_of(&s, [20.0, 0.0, 0.0]), [2.0 * centre[0] - corner[0], 2.0 * centre[1] - corner[1], corner[2]]);
 }
 
 #[test]

@@ -171,6 +171,7 @@ pub mod mesh_units;
 pub mod messages;
 pub(crate) mod motion;
 pub mod occurrence_drag;
+pub mod occurrence_rotate;
 #[cfg(test)]
 mod pattern_arrow_tests;
 #[cfg(test)]

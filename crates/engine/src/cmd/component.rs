@@ -294,8 +294,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DRAG_CONTRACT)
         .output(output_schema_for::<DragResult>)
         .params(
-        "occurrence or path: exact placement; at: [x,y,z] world point on it; point: [x,y,z] where it goes. Moves the placement by \
-         point - at (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
+        "occurrence or path: exact placement; at: [x,y,z] world point on it; point: [x,y,z] where it goes; or instead of at/point \
+         rotate: {origin: [x,y,z], axis: [x,y,z], angle: radians}, a turn about that world line. Moves the placement by \
+         point - at, or turns it, (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
          moves stay pending. Shared definitions move in all placements. Grounded parts and parts joints hold to something fixed are refused (joint.reach moves those)",
     ),
     CommandSpec::new("occurrence.align", "Align Occurrence", crate::checked!("occurrence.align", align::align)).begins_edit()

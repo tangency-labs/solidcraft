@@ -5,11 +5,14 @@
 //! fixed moves as one, so its joints stay as they are.
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::{mat_inverse, mat_mul};
+use solidcraft_geom::prelude::*;
 
 use super::{move_vector, occurrence, occurrence_path, translation, valid_position};
 use crate::params::bad;
-use crate::schema::component::DragResult;
+use crate::schema::Point3;
+use crate::schema::component::{DragResult, DragRotate, DragTurned};
 use crate::{EngineError, Result, Session};
 
 #[cfg(test)]
@@ -115,13 +118,22 @@ pub(super) fn drag(s: &mut Session, p: &Value) -> Result<Value> {
         s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
         path
     };
-    if p.get("at").is_none() || p.get("point").is_none() {
-        return Err(bad(cmd, "`at` and `point` must both be given"));
-    }
-    let at = move_vector(p, "at", Default::default(), true, cmd)?;
-    let point = move_vector(p, "point", Default::default(), true, cmd)?;
-    let t = point - at;
-    let world_move = translation(t);
+    // A move by `point - at`, or a turn about a world line (`rotate`, the right-button drag).
+    let (world_move, t, turn) = if let Some(r) = p.get("rotate") {
+        if p.get("at").is_some() || p.get("point").is_some() {
+            return Err(bad(cmd, "give either `rotate` or `at` and `point`, not both"));
+        }
+        let turn = rotation(r, cmd)?;
+        (solidcraft_doc::rigid(Vec3::ZERO, turn.origin.0, turn.axis.0, turn.angle), Vec3::ZERO, Some(turn))
+    } else {
+        if p.get("at").is_none() || p.get("point").is_none() {
+            return Err(bad(cmd, "`at` and `point` must both be given"));
+        }
+        let at = move_vector(p, "at", Default::default(), true, cmd)?;
+        let point = move_vector(p, "point", Default::default(), true, cmd)?;
+        let t = point - at;
+        (translation(t), t, None)
+    };
     let group = s.drag_group(&path).map_err(|e| bad(cmd, e.to_string()))?;
     let dragged = s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
     let inverse = mat_inverse(&dragged.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
@@ -166,7 +178,37 @@ pub(super) fn drag(s: &mut Session, p: &Value) -> Result<Value> {
         path,
         moved,
         translate: [t.x, t.y, t.z],
+        rotate: turn.map(|r| DragTurned {
+            origin: [r.origin.0.x, r.origin.0.y, r.origin.0.z],
+            axis: [r.axis.0.x, r.axis.0.y, r.axis.0.z],
+            angle: r.angle,
+        }),
         continuous,
         param_warnings: Vec::new(),
     })
+}
+
+/// `rotate` as `occurrence.drag` reads it: `{origin, axis, angle}`, a finite point, a nonzero
+/// finite axis and a finite angle in radians.
+fn rotation(r: &Value, cmd: &str) -> Result<DragRotate> {
+    let Some(keys) = r.as_object() else {
+        return Err(bad(cmd, "rotate must be {origin: [x,y,z], axis: [x,y,z], angle: radians}"));
+    };
+    if let Some(k) = keys.keys().find(|k| !matches!(k.as_str(), "origin" | "axis" | "angle")) {
+        return Err(bad(cmd, format!("rotate: unknown key `{k}` (origin, axis, angle)")));
+    }
+    if keys.get("origin").is_none() || keys.get("axis").is_none() {
+        return Err(bad(cmd, "rotate needs origin and axis"));
+    }
+    let origin = move_vector(r, "origin", Vec3::ZERO, true, cmd)?;
+    let axis = move_vector(r, "axis", Vec3::Z, false, cmd)?;
+    if [axis.x, axis.y, axis.z].iter().all(|c| *c == 0.0) {
+        return Err(bad(cmd, "rotate: axis must have a finite nonzero length"));
+    }
+    let angle = r
+        .get("angle")
+        .and_then(Value::as_f64)
+        .filter(|a| a.is_finite())
+        .ok_or_else(|| bad(cmd, "rotate: angle must be a finite number of radians"))?;
+    Ok(DragRotate { origin: Point3(origin), axis: Point3(axis), angle })
 }

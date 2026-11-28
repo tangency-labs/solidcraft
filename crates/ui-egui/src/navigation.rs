@@ -1126,7 +1126,8 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // longer be a click: a Magic Mouse moves the pointer a fraction of a point as it is clicked (#5517).
     // On that frame the drag catches up with the whole way from the press, so none of it is lost.
     let (right_drag, travel) = ui.input(|i| {
-        let drag = secondary_down && !i.pointer.could_any_button_be_click();
+        // A press on a free part turns the part instead (`occurrence_rotate`).
+        let drag = secondary_down && !i.pointer.could_any_button_be_click() && !crate::occurrence_rotate::holds(app);
         (drag, i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from))
     });
     // A side button the user mapped to a drag in Preferences works the same way: it navigates once

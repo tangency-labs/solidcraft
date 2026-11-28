@@ -487,6 +487,10 @@ fn track(app: &mut SolveApp, ctx: &egui::Context) {
         app.gesture.used = false;
         app.gesture.press = (app.gesture.wheel.is_none() && app.viewport.mouse.is_some()).then_some(pos);
     }
+    // A press on a free part turns the part (`occurrence_rotate`): no ring for it.
+    if crate::occurrence_rotate::holds(app) {
+        app.gesture.press = None;
+    }
     // Held and moved far enough: the ring opens where the button went down, whatever the pointer
     // carries (a tool or a dialog in progress included).
     if let Some(at) = app.gesture.press

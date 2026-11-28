@@ -101,6 +101,9 @@ macro_rules! navigation_preferences {
             radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
             /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
             right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
+            /// A right drag that starts on a free part in an assembly turns the part about its centre
+            /// instead of navigating. Off by default: the right drag navigates everywhere, as before.
+            right_drag_turns_parts: bool = false, PAGE_NAVIGATION => check_id_help("prefs.right_drag_turns_parts", "prefs.right_drag_turns_parts_tip");
             /// A key that, held when a mouse orbit drag starts, makes that drag roll the view about
             /// the line of sight through the orbit point instead, as far as the pointer goes around
             /// that point, like a dial (#22691). `none` (default), `alt` or `ctrl`; while it is the same
