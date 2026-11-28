@@ -5522,3 +5522,150 @@ fn a_draft_past_where_a_short_walls_sides_meet_ends_the_wall_in_a_point() {
     assert_eq!([b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()], [1, 6, 12, 8]);
     assert!(b.validity().is_empty(), "{:?}", b.validity());
 }
+
+// ---- Emboss and deboss on any body whose target face is a cylinder or plane patch ----
+
+/// A cylinder r = 10, h = 20 named `Sleeve` with `n` 1 x 1 pockets (5 faces each) cut 3 mm into its top.
+fn crowded_cylinder(n: usize) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Sleeve"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pockets"}));
+    for i in 0..n {
+        let (x, y) = (-4.5 + 3.0 * (i % 4) as f64, -3.0 + 3.0 * (i / 4) as f64);
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [x, y], "p1": [x + 1.0, y + 1.0]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 3, "direction": "negative", "operation": "cut"}));
+    s
+}
+
+fn badge_sketch(s: &mut Session, name: &str, rects: &[([f64; 2], [f64; 2])]) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 10, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": name}));
+    for (p0, p1) in rects {
+        run(s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+    }
+    run(s, "sketch.finish", json!({}));
+}
+
+/// Emboss (or deboss) `Badge` on the wall at +Y of `Sleeve`, check the volume change against the
+/// wrapped area times (rr^2 - r^2) / 2r, then undo, redo and a save and reload.
+fn check_wrapped_badge(mut s: Session, area: f64) {
+    let before = exact_cylinder_volume(&s);
+    for (mode, rr) in [("emboss", 11.0_f64), ("deboss", 9.0)] {
+        let want = area * (rr * rr - 100.0).abs() / 20.0;
+        let sign = if mode == "emboss" { 1.0 } else { -1.0 };
+        run(
+            &mut s,
+            "solid.emboss",
+            json!({"sketch": "Badge", "profiles": "all", "face": [0, 10, 7.5], "depth": 1, "mode": mode, "targets": ["Sleeve"]}),
+        );
+        let now = exact_cylinder_volume(&s);
+        assert!((now - before - sign * want).abs() < 0.02, "{mode}: {} vs {}", now - before, sign * want);
+        assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+        assert!(s.model.state().body("Sleeve").unwrap().body.validity().is_empty());
+        let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+        loaded.refresh();
+        assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{mode}: {:?}", loaded.model.results);
+        assert!((exact_cylinder_volume(&loaded) - now).abs() < 1e-6, "{mode}: reload");
+        run(&mut s, "edit.undo", json!({}));
+        assert!((exact_cylinder_volume(&s) - before).abs() < 1e-6, "{mode}: undo");
+        run(&mut s, "edit.redo", json!({}));
+        assert!((exact_cylinder_volume(&s) - now).abs() < 1e-6, "{mode}: redo");
+        run(&mut s, "edit.undo", json!({}));
+    }
+}
+
+#[test]
+fn emboss_and_deboss_wrap_onto_a_cylinder_of_fifty_or_more_faces() {
+    let mut s = crowded_cylinder(12);
+    assert!(s.model.state().body("Sleeve").unwrap().body.face_count() >= 50);
+    badge_sketch(&mut s, "Badge", &[([-2.0, 5.0], [2.0, 10.0])]);
+    check_wrapped_badge(s, 20.0);
+}
+
+#[test]
+fn emboss_and_deboss_merge_profiles_that_touch() {
+    // Two 2 x 5 rectangles sharing an edge are one 4 x 5 badge.
+    let mut s = cylinder_badge();
+    badge_sketch(&mut s, "Pair", &[([-2.0, 5.0], [0.0, 10.0]), ([0.0, 5.0], [2.0, 10.0])]);
+    for (mode, rr) in [("emboss", 11.0_f64), ("deboss", 9.0)] {
+        let mut t = s.scratch();
+        let before = exact_cylinder_volume(&t);
+        run(
+            &mut t,
+            "solid.emboss",
+            json!({"sketch": "Pair", "profiles": "all", "face": [0, 10, 7.5], "depth": 1, "mode": mode, "targets": ["Sleeve"]}),
+        );
+        let want = 20.0 * (rr * rr - 100.0).abs() / 20.0;
+        assert!(((exact_cylinder_volume(&t) - before).abs() - want).abs() < 0.02, "{mode}: {}", exact_cylinder_volume(&t) - before);
+        assert_eq!(t.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+        let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&t.doc.to_json()).unwrap().into(), ..Default::default() };
+        loaded.refresh();
+        assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{mode}: {:?}", loaded.model.results);
+    }
+    // A line splitting one rectangle in two touches too.
+    let mut crowded = crowded_cylinder(12);
+    badge_sketch(&mut crowded, "Badge", &[([-2.0, 5.0], [0.0, 10.0]), ([0.0, 5.0], [2.0, 10.0])]);
+    check_wrapped_badge(crowded, 20.0);
+}
+
+#[test]
+fn emboss_and_deboss_onto_a_plane_of_a_crowded_body_merge_touching_profiles() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pockets"}));
+    for i in 0..12 {
+        let (x, y) = (3.0 + 8.0 * (i % 4) as f64, 3.0 + 8.0 * (i / 4) as f64);
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [x, y], "p1": [x + 1.0, y + 1.0]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 3, "direction": "negative", "operation": "cut"}));
+    assert!(s.model.state().body("Plate").unwrap().body.face_count() >= 50);
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pair"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5.5, 14], "p1": [7.5, 18]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [7.5, 14], "p1": [9.5, 18]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    for (mode, sign) in [("emboss", 1.0), ("deboss", -1.0)] {
+        run(&mut s, "solid.emboss", json!({"sketch": "Pair", "profiles": "all", "face": [6, 15, 10], "depth": 1, "mode": mode}));
+        // 4 x 4 mm touching pair, 1 mm: 16 mm3.
+        let v = volume(&mut s);
+        assert!((v - before - sign * 16.0).abs() < 1e-4, "{mode}: {}", v - before);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((volume(&mut s) - before).abs() < 1e-6, "{mode}: undo");
+    }
+}
+
+#[test]
+fn emboss_and_deboss_wrap_onto_a_cylinder_with_a_flat_a_step_or_a_stepped_bore() {
+    // Three bodies: a flat cut on the far side, a smaller cylinder joined on top, and
+    // a sleeve whose bore steps twice. The wall under the badge is whole in each.
+    let mut flat = Session::default();
+    run(&mut flat, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Sleeve"}));
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Flat"}));
+    run(&mut flat, "sketch.rectangle.two_point", json!({"p0": [8, -12], "p1": [12, 12]}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.extrude", json!({"distance": 30, "operation": "cut"}));
+    badge_sketch(&mut flat, "Badge", &[([-2.0, 5.0], [2.0, 10.0])]);
+    check_wrapped_badge(flat, 20.0);
+
+    let mut step = cylinder_badge();
+    run(&mut step, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Step"}));
+    run(&mut step, "sketch.circle.center", json!({"center": [0, 0], "radius": 9}));
+    run(&mut step, "sketch.finish", json!({}));
+    run(&mut step, "solid.extrude", json!({"distance": 5, "operation": "join"}));
+    check_wrapped_badge(step, 20.0);
+
+    let mut bore = Session::default();
+    run(&mut bore, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Sleeve"}));
+    run(&mut bore, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Bore"}));
+    run(&mut bore, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+    run(&mut bore, "sketch.finish", json!({}));
+    run(&mut bore, "solid.extrude", json!({"distance": 6, "direction": "negative", "operation": "cut"}));
+    run(&mut bore, "sketch.create", json!({"plane": {"origin": [0, 0, 14], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Bore2"}));
+    run(&mut bore, "sketch.circle.center", json!({"center": [0, 0], "radius": 3}));
+    run(&mut bore, "sketch.finish", json!({}));
+    run(&mut bore, "solid.extrude", json!({"distance": 6, "direction": "negative", "operation": "cut"}));
+    badge_sketch(&mut bore, "Badge", &[([-2.0, 5.0], [2.0, 10.0])]);
+    check_wrapped_badge(bore, 20.0);
+}
