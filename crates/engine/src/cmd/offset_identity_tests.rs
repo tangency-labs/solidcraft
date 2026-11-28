@@ -35,6 +35,28 @@ fn healthy(session: &Session) {
 }
 
 #[test]
+fn a_pick_of_an_offset_loop_and_a_drawn_loop_saves_sides_for_the_drawn_loop() {
+    // The region inside the offset and the band between it and the rectangle, picked together:
+    // the offset's loop is saved by its roles alone, the rectangle's loop also by its sides, so
+    // it still names its region when a change makes a twin of it (#23291).
+    let (mut session, sketch, _, _) = rounded_offset(2.);
+    let count = session.model.state().sketch(sketch).unwrap().profiles.len();
+    assert_eq!(count, 2);
+    let extrusion =
+        run(&mut session, "solid.extrude", json!({"sketch":sketch,"profiles":[0, 1],"distance":2,"name":"Both"}))["feature"].as_u64().unwrap();
+    healthy(&session);
+    let Some(FeatureKind::Extrude { profiles: ProfileSel::Curves { loops, sides }, .. }) = session.doc.feature(extrusion).map(|f| &f.kind) else {
+        panic!("saved as {:?}", session.doc.feature(extrusion).map(|f| &f.kind));
+    };
+    assert_eq!((loops.len(), sides.len()), (2, 2), "one list of sides per loop: {sides:?}");
+    assert_eq!(sides.iter().filter(|sided| sided.is_empty()).count(), 1, "the offset loop has no sides: {sides:?}");
+    let saved = session.doc.to_json();
+    let reopened = Session::new(Document::from_json(&saved).unwrap());
+    healthy(&reopened);
+    assert_eq!(reopened.doc.to_json(), saved);
+}
+
+#[test]
 fn legacy_offset_capture_persists_reserved_curves_without_a_transient_association() {
     let (session, sketch, radius, _) = rounded_offset(2.);
     let mut document = (*session.doc).clone();

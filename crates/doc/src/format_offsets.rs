@@ -87,14 +87,18 @@ fn validate_sided_reference(value: &Value) -> Result<()> {
 }
 
 /// Validate the sides saved with a curve pick (`curves` with `sides`, #23291): one list per loop,
-/// each as a `sided_curves` loop is written.
+/// empty for a loop saved by its curves alone, the others as a `sided_curves` loop is written.
 fn validate_curve_sides(value: &Value, sides: &Value) -> Result<()> {
     let loops = value.get("loops").and_then(Value::as_array).ok_or_else(invalid)?;
     let sides = sides.as_array().ok_or_else(invalid)?;
     if sides.len() != loops.len() || sides.len() > 128 {
         return Err(invalid());
     }
-    validate_sided_reference(&serde_json::json!({"type": "sided_curves", "loops": sides}))
+    let sided: Vec<&Value> = sides.iter().filter(|loop_sides| loop_sides.as_array().is_none_or(|curves| !curves.is_empty())).collect();
+    if sided.is_empty() {
+        return Ok(());
+    }
+    validate_sided_reference(&serde_json::json!({"type": "sided_curves", "loops": sided}))
 }
 
 fn validate_whole_reference(value: &Value) -> Result<()> {
@@ -395,6 +399,24 @@ mod tests {
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_ok());
         aggregate.push(json!({"outer":["one more"],"holes":[]}));
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_err());
+    }
+
+    #[test]
+    fn curve_pick_sides_are_one_list_per_loop_and_a_loop_may_have_none() {
+        let pick = |sides: Value| json!({"features":[{"type":"extrude","profiles":{"type":"curves","loops":[["c1"],["l1","l2"]],"sides":sides}}]});
+        assert!(validate_raw(&pick(json!([[{"curve":"c1","side":"inside"}],[{"curve":"l1","side":"left"},{"curve":"l2","side":"right"}]]))).is_ok());
+        // A loop of offset curves, or one whose sides can't be told, is read by its curves alone
+        // (#23291).
+        assert!(validate_raw(&pick(json!([[{"curve":"c1","side":"inside"}],[]]))).is_ok());
+        for bad in [
+            json!([[{"curve":"c1","side":"inside"}]]),
+            json!([[{"curve":"c1","side":"up"}],[]]),
+            json!([[{"curve":"c1","side":"inside"},{"curve":"c1","side":"outside"}],[]]),
+            json!([[], 3]),
+            json!("inside"),
+        ] {
+            assert!(validate_raw(&pick(bad.clone())).is_err(), "accepted {bad}");
+        }
     }
 
     #[test]

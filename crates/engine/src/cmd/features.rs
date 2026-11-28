@@ -819,7 +819,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 // caller IDs. Saved graph-span multisets retain their legacy meaning.
                 // Reserved offset roles never use this ordinary normalization.
                 let mut normalized = loops.clone();
-                let mut any_dynamic = false;
+                let mut dynamic_loops = Vec::with_capacity(normalized.len());
                 let reserved = ss
                     .sketch
                     .offsets
@@ -829,7 +829,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                     .collect::<std::collections::BTreeSet<_>>();
                 for curves in &mut normalized {
                     let dynamic = curves.iter().any(|curve| reserved.contains(curve.as_str()));
-                    any_dynamic |= dynamic;
+                    dynamic_loops.push(dynamic);
                     if !dynamic {
                         let mut seen = std::collections::BTreeSet::new();
                         curves.retain(|curve| seen.insert(curve.clone()));
@@ -841,11 +841,10 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 // The side of each curve the named profiles lie on, so the pick still names them
                 // when a change makes a twin bounded by the same curves (#23291). Offset roles are
                 // renamed by their offset, so loops with them keep their curves alone.
-                if !any_dynamic
-                    && found.len() == count
+                if found.len() == count
                     && let ProfileSel::Curves { sides, .. } = &mut selection
                 {
-                    *sides = solidcraft_doc::picked_sides(ss, &found);
+                    *sides = solidcraft_doc::picked_sides(ss, &found, &dynamic_loops);
                 }
                 *sel = selection;
                 continue;

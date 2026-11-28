@@ -571,20 +571,23 @@ fn sided_capture(ss: &SolvedSketch, picked: &[usize]) -> Option<ProfileSel> {
 }
 
 /// The side of each curve every picked profile lies on, one loop per profile, for a pick saved by
-/// its curves ([`ProfileSel::Curves`]'s `sides`, #23291); empty when a profile has a free
-/// curve or a piece of its outline lies on two curves, so the pick is saved by its curves alone.
-pub fn picked_sides(ss: &SolvedSketch, picked: &[usize]) -> Vec<Vec<SidedCurve>> {
-    if picked.is_empty() || picked.len() > MAX_SELECTIONS {
+/// its curves ([`ProfileSel::Curves`]'s `sides`, #23291). A loop is left empty when `skip` says
+/// so (its curves are offset roles, which their offset renames), when its profile has a free
+/// curve, or when a piece of its outline lies on two curves; that loop is then saved by its
+/// curves alone. Empty when no loop has sides.
+pub fn picked_sides(ss: &SolvedSketch, picked: &[usize], skip: &[bool]) -> Vec<Vec<SidedCurve>> {
+    if picked.is_empty() || picked.len() > MAX_SELECTIONS || skip.len() != picked.len() {
         return Vec::new();
     }
-    picked
+    let sides: Vec<Vec<SidedCurve>> = picked
         .iter()
-        .map(|index| {
-            let sides = curve_sides(&ss.sketch, ss.profiles.get(*index)?)?;
-            Some(sides.into_iter().map(|(curve, side)| SidedCurve { curve, side }).collect::<Vec<_>>())
+        .zip(skip)
+        .map(|(index, skip)| {
+            let found = if *skip { None } else { ss.profiles.get(*index).and_then(|profile| curve_sides(&ss.sketch, profile)) };
+            found.map(|sides| sides.into_iter().map(|(curve, side)| SidedCurve { curve, side }).collect()).unwrap_or_default()
         })
-        .collect::<Option<Vec<_>>>()
-        .unwrap_or_default()
+        .collect();
+    if sides.iter().all(Vec::is_empty) { Vec::new() } else { sides }
 }
 
 /// The sides saved for loop `k` of a curve pick, when the pick saved one per loop.
@@ -739,6 +742,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
     }
     let mut associations = Vec::new();
     let mut loops = Vec::new();
+    let mut offset_loops = Vec::new();
     let picked = checked.clone();
     for index in checked {
         let curves = &ss.profiles.get(index).ok_or_else(|| DocError::Invalid("profile index changed during capture".into()))?.outer_curves;
@@ -760,6 +764,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
                 .find(|topology| topology.id == id)
                 .ok_or_else(|| DocError::Unknown(format!("offset association {id}")))?;
             loops.push(offset.roles.iter().map(|role| role.output.clone()).collect());
+            offset_loops.push(true);
             associations.push(id);
         } else {
             if ss.profiles.iter().filter(|profile| same_ids(curves, &profile.outer_curves)).count() != 1 {
@@ -767,6 +772,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
                 return Ok(sided_capture(ss, &picked).unwrap_or_else(|| ProfileSel::Indices { indices: indices.to_vec() }));
             }
             loops.push(curves.clone());
+            offset_loops.push(false);
         }
     }
     if associations.len() > MAX_SELECTIONS {
@@ -777,7 +783,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
     }
     // Loops of offset associations keep their saved form alone: their roles are renamed by the
     // offset, so sides saved against today's names could name other curves later.
-    let sides = if associations.is_empty() { picked_sides(ss, &picked) } else { Vec::new() };
+    let sides = picked_sides(ss, &picked, &offset_loops);
     Ok(ProfileSel::Curves { loops, sides })
 }
 
