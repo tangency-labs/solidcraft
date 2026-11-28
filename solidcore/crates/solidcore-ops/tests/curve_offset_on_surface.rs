@@ -11,7 +11,7 @@
     clippy::disallowed_methods // the test's own sampling and radii, not ops computing geometry
 )]
 
-use solidcore_ops::curve::{circle, offset_on_surface, OffsetSide};
+use solidcore_ops::curve::{circle, offset_on_surface, offset_on_surface_over, OffsetSide};
 use solidcore_ops::sweep::{loft, Curve as Sweep};
 use solidcore_ops::Error;
 use solidcore_record::brep::{Brep, Curve, Natural};
@@ -111,6 +111,39 @@ fn a_line_on_a_flat_sheet_offsets_to_the_parallel_line() {
                 "{p:?}"
             );
         }
+    }
+}
+
+/// A part of a bounded curve: inside its parameter domain it is offset; past the domain's end
+/// it is refused rather than evaluated at the clamped end.
+#[test]
+fn a_part_past_a_bounded_curves_domain_is_refused() {
+    let flat = flat();
+    // A straight polyline along y = 5, its parameter 0 to 2 (x = 2, 10, 18).
+    let poly = Curve::Polyline {
+        points: vec![[2.0, 5.0, 0.0], [10.0, 5.0, 0.0], [18.0, 5.0, 0.0]],
+    };
+    let o =
+        offset_on_surface_over(&poly, [0.25, 1.75], &flat, 3.0, OffsetSide::Left, 1e-6).unwrap();
+    let pts = points_of(&o.curve, 8);
+    // Parameter 0.25 is x = 4, 1.75 is x = 16; the offset is 3 across the sheet.
+    for p in &pts {
+        assert!(
+            ((p[1] - 5.0).abs() - 3.0).abs() <= 1e-6 && p[2].abs() <= 1e-9,
+            "{p:?}"
+        );
+    }
+    let xs = [pts[0][0], pts[8][0]];
+    assert!(
+        (xs[0].min(xs[1]) - 4.0).abs() <= 1e-6 && (xs[0].max(xs[1]) - 16.0).abs() <= 1e-6,
+        "{xs:?}"
+    );
+    for range in [[1.0, 2.5], [-0.5, 1.0], [1.0, 1.0], [f64::NAN, 1.0]] {
+        assert_eq!(
+            offset_on_surface_over(&poly, range, &flat, 3.0, OffsetSide::Left, 1e-6).err(),
+            Some(Error::Argument),
+            "{range:?}"
+        );
     }
 }
 

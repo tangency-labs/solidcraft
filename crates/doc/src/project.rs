@@ -843,7 +843,9 @@ pub fn face_offset(st: &ModelState, src: &LinkSource) -> Result<(LinkSource, f64
                 return Err(DocError::Invalid(format!("the edge must be an edge of the face, on {}, not of {of}", target.name)));
             }
             let r = crate::kernel::offset_on_face(&target.body, face, crate::kernel::OffsetFrom::Edge(*e), *distance, q, tol)?;
-            (LinkSource::Edge { body: target.name.clone(), at: *e }, r)
+            // The edge's point moved onto it, as an edge link's is: the link follows the edge.
+            let at = r.edge_at.unwrap_or(*e);
+            (LinkSource::Edge { body: target.name.clone(), at }, r)
         }
         LinkSource::SketchCurve { sketch, curve } => {
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;

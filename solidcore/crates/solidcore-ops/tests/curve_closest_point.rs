@@ -10,7 +10,7 @@
     clippy::float_arithmetic
 )]
 
-use solidcore_ops::curve::{circle, closest_point, curve_comb, cv_curve};
+use solidcore_ops::curve::{circle, closest_point, closest_point_over, curve_comb, cv_curve};
 use solidcore_ops::measure::point_distance;
 use solidcore_ops::Error;
 use solidcore_record::brep::{Curve, Frame};
@@ -68,6 +68,54 @@ fn a_line_record_is_nearest_at_the_foot_or_its_end() {
         .unwrap();
     assert!(near(past.point, [10.0, 0.0, 0.0]), "{past:?}");
     assert!((past.parameter - 1.0).abs() < 1e-8, "{past:?}");
+}
+
+/// A part of a curve (an edge's interval): the line from the origin to (10, 0, 0) over [0.5, 1]
+/// is nearest (4, 3, 0) at its end (5, 0, 0), √10 away; the quarter [0, π/2] of the circle of
+/// radius 10 is nearest (12, 16, 0) at (6, 8, 0) inside it and (0, −20, 3) at its end (10, 0, 0),
+/// √509 away. Ranges no edge of the curve has are refused.
+#[test]
+fn a_part_of_a_curve_is_nearest_inside_it_or_at_its_end() {
+    let line = Curve::Line {
+        start: [0.0; 3],
+        end: [10.0, 0.0, 0.0],
+    };
+    let r = closest_point_over(&line, [0.5, 1.0], [4.0, 3.0, 0.0], TOL)
+        .unwrap()
+        .unwrap();
+    assert!(near(r.point, [5.0, 0.0, 0.0]), "{r:?}");
+    // √10
+    assert!((r.distance - 3.162_277_660_168_379_5).abs() < 1e-9, "{r:?}");
+    let c = Curve::Circle {
+        frame: Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        radius: 10.0,
+    };
+    let quarter = [0.0, std::f64::consts::FRAC_PI_2];
+    let r = closest_point_over(&c, quarter, [12.0, 16.0, 0.0], TOL)
+        .unwrap()
+        .unwrap();
+    assert!(near(r.point, [6.0, 8.0, 0.0]), "{r:?}");
+    let r = closest_point_over(&c, quarter, [0.0, -20.0, 3.0], TOL)
+        .unwrap()
+        .unwrap();
+    assert!(near(r.point, [10.0, 0.0, 0.0]), "{r:?}");
+    // √509
+    assert!((r.distance - 22.561_028_345_356_956).abs() < 1e-9, "{r:?}");
+    for (curve, range) in [
+        (&c, [0.0, 7.0]),
+        (&line, [1.0, 1.0]),
+        (&line, [f64::NAN, 1.0]),
+    ] {
+        assert_eq!(
+            closest_point_over(curve, range, [1.0, 1.0, 0.0], TOL).err(),
+            Some(Error::Argument),
+            "{range:?}"
+        );
+    }
 }
 
 /// A Circle record of radius 10 about the origin: from (12, 16, 0) nearest at (6, 8, 0), 10

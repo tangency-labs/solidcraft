@@ -231,6 +231,59 @@ fn offset_of_a_curve_lying_on_the_face_goes_to_the_picked_side() {
     }
 }
 
+/// A strip 128 × 0.2 whose top edge is split at x = 2: the point (2, 0) on the bottom edge is
+/// 0.2 from the split's vertex but on the bottom edge itself, so the bottom edge is the source.
+/// Offset 0.05 into the strip: the line y = 0.05, 128 long (not y = 0.15 from the top piece).
+#[test]
+fn the_edge_picked_is_the_one_the_point_lies_on_not_a_near_vertex() {
+    let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(128.0, 0.0), Vec2::new(128.0, 0.2), Vec2::new(2.0, 0.2), Vec2::new(0.0, 0.2)]);
+    let body = patch_region(&Plane::XY, &Region2 { outer, holes: vec![] }).unwrap();
+    let r = offset_on_face(&body, 0, OffsetFrom::Edge(Vec3::new(2.0, 0.0, 0.0)), 0.05, Vec3::new(64.0, 0.1, 0.0), TOL).unwrap();
+    assert_eq!(r.curves.len(), 1, "{r:?}");
+    assert!(points(&r.curves[0], 64).iter().all(|p| (p.y - 0.05).abs() < 1e-9 && p.z.abs() < 1e-9), "{r:?}");
+    assert!((length(&r.curves[0]) - 128.0).abs() < 1e-6, "{}", length(&r.curves[0]));
+    // The edge's point the link keeps: the pick itself, on the bottom edge.
+    assert!(r.edge_at.is_some_and(|p| p.dist(Vec3::new(2.0, 0.0, 0.0)) < 1e-9), "{:?}", r.edge_at);
+}
+
+/// The side of a curve is the side the point is on however near it: on the strip the line
+/// x = 20 by 12.5 toward a point 0.01 to its right is the line x = 32.5.
+#[test]
+fn a_side_point_near_the_curve_still_picks_its_side() {
+    let body = plane_strip();
+    let line = (brep::Curve::Line { start: [20.0, 0.0, 0.0], end: [20.0, 0.0, 30.0] }, [0.0, 1.0]);
+    for (toward, x) in [(Vec3::new(20.01, 0.0, 15.0), 32.5), (Vec3::new(19.99, 0.0, 15.0), 7.5)] {
+        let r = offset_on_face(&body, 0, OffsetFrom::Curves(std::slice::from_ref(&line)), 12.5, toward, TOL).unwrap();
+        assert!(points(&r.curves[0], 16).iter().all(|p| (p.x - x).abs() < 1e-9), "{toward:?} {r:?}");
+    }
+}
+
+/// A plate 1000 × 20 with a notch over x in [495, 505] down to y = 0.1, above the bottom edge's
+/// middle: the bottom edge by 5 is the line y = 5 cut by the notch, x in [0, 495] and [505, 1000]
+/// (990 long), not refused for want of room at the edge's middle.
+#[test]
+fn an_edge_with_a_notch_at_its_middle_offsets_either_side_of_it() {
+    let outer = Loop2::polygon(&[
+        Vec2::new(0.0, 0.0),
+        Vec2::new(1000.0, 0.0),
+        Vec2::new(1000.0, 20.0),
+        Vec2::new(505.0, 20.0),
+        Vec2::new(505.0, 0.1),
+        Vec2::new(495.0, 0.1),
+        Vec2::new(495.0, 20.0),
+        Vec2::new(0.0, 20.0),
+    ]);
+    let body = patch_region(&Plane::XY, &Region2 { outer, holes: vec![] }).unwrap();
+    let r = offset_on_face(&body, 0, OffsetFrom::Edge(Vec3::new(500.0, 0.0, 0.0)), 5.0, Vec3::new(200.0, 10.0, 0.0), TOL).unwrap();
+    assert!(r.clipped, "{r:?}");
+    assert_eq!(r.curves.len(), 2, "{r:?}");
+    for c in &r.curves {
+        assert!(points(c, 64).iter().all(|p| (p.y - 5.0).abs() < 1e-9 && !(495.0 + 1e-2..505.0 - 1e-2).contains(&p.x)), "{c:?}");
+    }
+    let total: f64 = r.curves.iter().map(length).sum();
+    assert!((total - 990.0).abs() < 1e-2, "{total}");
+}
+
 #[test]
 fn offset_curve_refusals() {
     let body = plane_strip();

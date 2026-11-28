@@ -38,7 +38,7 @@ use solidcore::nurbs::knots::{clamped_uniform, MAX_DEGREE};
 use solidcore::nurbs::math::{MatrixType, RealMatrix};
 use solidcore::query::continuity;
 use solidcore::{Point3, SolidError, Vec3};
-use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural};
+use solidcore_record::brep::{check_curve, check_interval, Budget, Curve, Invalid, Natural};
 
 use crate::body::REGULAR_RATIO;
 use crate::continuity::{tooth, CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH};
@@ -819,13 +819,34 @@ fn own_range(curve: &Curve) -> Option<[f64; 2]> {
 /// finite and positive, or a curve the record or the kernel's constructors refuse; the kernel's
 /// status otherwise (a traced intersection curve, which has no constructor yet).
 pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Option<CurvePoint>> {
-    if !coord_ok(&p) || !tolerance.is_finite() || tolerance <= 0.0 {
-        return Err(Error::Argument);
-    }
     if check_curve(curve, &mut Budget::input()).is_err() {
         return Err(Error::Argument);
     }
     let range = own_range(curve).ok_or(Error::Argument)?;
+    closest_point_over(curve, range, p, tolerance)
+}
+
+/// [`closest_point`] over a part of the curve, `range` of the record's parameter (an edge's
+/// interval on its curve): the point of that part nearest `p`, an end of it where the nearest
+/// point of the whole curve lies outside it.
+///
+/// # Errors
+/// As [`closest_point`]; [`Error::Argument`] also for a range that is not an edge interval of
+/// the record ([`check_interval`]).
+pub fn closest_point_over(
+    curve: &Curve,
+    range: [f64; 2],
+    p: [f64; 3],
+    tolerance: f64,
+) -> Result<Option<CurvePoint>> {
+    if !coord_ok(&p) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    if check_curve(curve, &mut Budget::input()).is_err()
+        || check_interval(&range, curve.natural()).is_err()
+    {
+        return Err(Error::Argument);
+    }
     let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
     run("curve::closest_point", |k| {
         let made = match from_parameters(k, &record, range) {
@@ -2915,7 +2936,10 @@ pub fn offset_on_surface(
 /// edge's interval on its curve). The offset's own parameter runs over the same range.
 ///
 /// # Errors
-/// As [`offset_on_surface`]; [`Error::Argument`] also for a range not finite and increasing.
+/// As [`offset_on_surface`]; [`Error::Argument`] also for a range that is not an edge interval
+/// of the record ([`check_interval`]): not finite and increasing, outside a bounded curve's
+/// parameter domain (a polyline's or spline's), or more than one turn of a circle or ellipse. A
+/// line's parameter is unbounded.
 pub fn offset_on_surface_over(
     curve: &Curve,
     range: [f64; 2],
@@ -2934,8 +2958,7 @@ pub fn offset_on_surface_over(
     {
         return Err(Error::Argument);
     }
-    let [lo, hi] = range;
-    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+    if check_interval(&range, curve.natural()).is_err() {
         return Err(Error::Argument);
     }
     let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;

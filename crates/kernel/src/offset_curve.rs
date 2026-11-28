@@ -24,7 +24,6 @@ use solidcore_ops::curve::OffsetSide;
 use solidcore_record::Vec3;
 use solidcore_record::brep;
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::iso::FaceTrims;
@@ -32,6 +31,8 @@ use crate::{KernelError, Result};
 
 /// Points along a curve the source and the offset are read at.
 const SAMPLES: usize = 128;
+/// The points along an edge (less one) that vote on which side of it the face is.
+const SIDE_VOTES: usize = 32;
 /// Bisection steps that find where the offset crosses the face's boundary.
 const EDGE_STEPS: usize = 48;
 
@@ -54,6 +55,9 @@ pub struct FaceOffset {
     pub deviation: f64,
     /// The offset was cut where it left the face's boundary.
     pub clipped: bool,
+    /// From an edge: the edge's point nearest the point asked, where the link finds the edge
+    /// again next time (so it follows the edge as the model changes).
+    pub edge_at: Option<Vec3>,
 }
 
 /// One source curve on its range, and the side to offset to.
@@ -78,10 +82,12 @@ pub fn offset_on_face(body: &Body, face: usize, from: OffsetFrom<'_>, distance: 
     let sheet = crate::surfaces::face_sheet(body, face)?;
     let size = body.size().max(1e-9);
     let on = OnFace { trims: &trims, accept: size * 1e-6 + 1e-6, eps: trims.widths(size * 1e-6 + 1e-7) };
+    let mut edge_at = None;
     let sources = match from {
         OffsetFrom::Edge(at) => {
-            let mut s = edge_source(body, face, at, size)?;
+            let (mut s, on_edge) = edge_source(body, face, at, size)?;
             s.side = on.edge_side(&s, sheet.record(), (size * 1e-3).min(0.5 * distance))?;
+            edge_at = Some(on_edge);
             vec![s]
         }
         OffsetFrom::Curves(curves) => {
@@ -91,13 +97,13 @@ pub fn offset_on_face(body: &Body, face: usize, from: OffsetFrom<'_>, distance: 
             let mut out = Vec::new();
             for (curve, range) in curves {
                 on.check_on_face(curve, *range)?;
-                let side = curve_side(curve, *range, sheet.record(), toward, distance, size)?;
+                let side = curve_side(curve, *range, sheet.record(), toward, distance, size, on.accept)?;
                 out.push(Source { curve: curve.clone(), range: *range, side });
             }
             out
         }
     };
-    let mut out = FaceOffset { curves: Vec::new(), deviation: 0.0, clipped: false };
+    let mut out = FaceOffset { curves: Vec::new(), deviation: 0.0, clipped: false, edge_at };
     for s in sources {
         let offset = |range: [f64; 2]| solidcore_ops::curve::offset_on_surface_over(&s.curve, range, sheet.record(), distance, s.side, tolerance);
         let offsets = match offset(s.range) {
@@ -188,48 +194,46 @@ fn refused(e: solidcore_ops::Error) -> KernelError {
     }
 }
 
-/// The face's edge nearest `at` (its nearest of 33 points along each), on its interval, with the
-/// side the face lies on: the face is to the left of its loop's direction about the surface's own
-/// normal, so to the left of the edge's curve where the loop runs along it, else to the right.
-fn edge_source(body: &Body, face: usize, at: Vec3, size: f64) -> Result<Source> {
+/// The face's edge nearest `at` (each edge's closest point to it over its whole interval, the
+/// kernel's), on its interval, with the side the face lies on: the face is to the left of its
+/// loop's direction about the surface's own normal, so to the left of the edge's curve where the
+/// loop runs along it, else to the right. Also that closest point, where the link keeps the edge.
+fn edge_source(body: &Body, face: usize, at: Vec3, size: f64) -> Result<(Source, Vec3)> {
     let r = body.record();
     let f = r.faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
-    let mut best: Option<(f64, &brep::Edge, bool)> = None;
+    let mut best: Option<(f64, [f64; 3], &brep::Edge, bool)> = None;
     for wire in &f.loops {
         let brep::Loop::Edges { edges } = wire else { continue };
         for use_ in edges {
             let edge = r.edges.get(use_.edge as usize).ok_or_else(|| KernelError::Invalid("offset curve: a loop names a missing edge".into()))?;
-            let Ok(c) = CurveEval::new(edge.parameters()) else { continue };
-            let [a, b] = edge.interval;
-            for k in 0..=32 {
-                let Some(p) = c.point(a + (b - a) * f64::from(k) / 32.0) else { continue };
-                let d = p.dist(at);
-                if best.is_none_or(|(bd, _, _)| d < bd) {
-                    best = Some((d, edge, use_.forward));
-                }
+            let Ok(Some(c)) = solidcore_ops::curve::closest_point_over(edge.parameters(), edge.interval, at.into(), size * 1e-9) else { continue };
+            if best.is_none_or(|(bd, ..)| c.distance < bd) {
+                best = Some((c.distance, c.point, edge, use_.forward));
             }
         }
     }
-    let (d, edge, forward) = best.ok_or_else(|| KernelError::Invalid("offset curve: the face has no edges".into()))?;
+    let (d, p, edge, forward) = best.ok_or_else(|| KernelError::Invalid("offset curve: the face has no edges".into()))?;
     if d > size * 0.05 {
         return Err(KernelError::Invalid("offset curve: the edge point is not on an edge of the face".into()));
     }
-    Ok(Source { curve: edge.parameters().clone(), range: edge.interval, side: if forward { OffsetSide::Left } else { OffsetSide::Right } })
+    let side = if forward { OffsetSide::Left } else { OffsetSide::Right };
+    Ok((Source { curve: edge.parameters().clone(), range: edge.interval, side }, Vec3::from(p)))
 }
 
 /// The side of a curve on the face `toward` lies on: an offset by a small step to the left, and
-/// whether its nearest point to `toward` is nearer than the curve's.
-fn curve_side(curve: &brep::Curve, range: [f64; 2], sheet: &brep::Brep, toward: Vec3, distance: f64, size: f64) -> Result<OffsetSide> {
-    let step = (size * 1e-3).min(0.5 * distance);
-    let nearest = |c: &brep::Curve, [a, b]: [f64; 2]| -> Option<f64> {
-        let e = CurveEval::new(c).ok()?;
-        (0..=SAMPLES).filter_map(|k| e.point(a + (b - a) * k as f64 / SAMPLES as f64)).map(|p| p.dist(toward)).reduce(f64::min)
+/// whether its nearest point to `toward` is nearer than the curve's (each the kernel's closest
+/// point). A point within `on` (the face's own tolerance) of the curve lies on it; the step is
+/// less than the point's distance, so a point near the curve still has its side.
+fn curve_side(curve: &brep::Curve, range: [f64; 2], sheet: &brep::Brep, toward: Vec3, distance: f64, size: f64, on: f64) -> Result<OffsetSide> {
+    let nearest = |c: &brep::Curve, r: [f64; 2]| -> Option<f64> {
+        solidcore_ops::curve::closest_point_over(c, r, toward.into(), size * 1e-9).ok().flatten().map(|p| p.distance)
     };
     let here = nearest(curve, range).ok_or_else(|| KernelError::Failed("offset curve: the curve does not evaluate".into()))?;
     let on_curve = || KernelError::Invalid("offset curve: the side point lies on the curve; pick a point on the side to offset to".into());
-    if here <= step {
+    if here <= on {
         return Err(on_curve());
     }
+    let step = (size * 1e-3).min(0.5 * distance).min(0.5 * here);
     for (probe, toward_is) in [(OffsetSide::Left, [OffsetSide::Left, OffsetSide::Right]), (OffsetSide::Right, [OffsetSide::Right, OffsetSide::Left])]
     {
         let Ok(o) = solidcore_ops::curve::offset_on_surface_over(curve, range, sheet, step, probe, step * 1e-2) else { continue };
@@ -262,21 +266,27 @@ struct OnFace<'a> {
 }
 
 impl OnFace<'_> {
-    /// The side of an edge the face is on: the side (the loop's guess first) whose offset by a
-    /// small `step` along the middle half of the edge lies in the face at its middle.
+    /// The side of an edge the face is on: the side whose offset by a small `step` along the
+    /// whole edge lies in the face at more of [`SIDE_VOTES`] points spread along it inside its
+    /// ends (the loop's guess on a tie), so a narrow place on the edge (a notch near it) does not
+    /// decide; the boundary cut then keeps the parts where the offset fits.
     fn edge_side(&self, s: &Source, sheet: &brep::Brep, step: f64) -> Result<OffsetSide> {
-        let [a, b] = s.range;
-        let middle = [a + 0.25 * (b - a), b - 0.25 * (b - a)];
         let other = match s.side {
             OffsetSide::Left => OffsetSide::Right,
             OffsetSide::Right => OffsetSide::Left,
         };
-        for side in [s.side, other] {
-            let Ok(o) = solidcore_ops::curve::offset_on_surface_over(&s.curve, middle, sheet, step, side, step * 1e-2) else { continue };
-            let Some([lo, hi]) = curve_range(&o.curve) else { continue };
-            let Some(p) = CurveEval::new(&o.curve).ok().and_then(|e| e.point(0.5 * (lo + hi))) else { continue };
-            if self.inside(p) {
-                return Ok(side);
+        let votes = |side: OffsetSide, range: [f64; 2]| -> usize {
+            let Ok(o) = solidcore_ops::curve::offset_on_surface_over(&s.curve, range, sheet, step, side, step * 1e-2) else { return 0 };
+            let Some([lo, hi]) = curve_range(&o.curve) else { return 0 };
+            let Ok(e) = CurveEval::new(&o.curve) else { return 0 };
+            (1..SIDE_VOTES).filter(|&k| e.point(lo + (hi - lo) * k as f64 / SIDE_VOTES as f64).is_some_and(|p| self.inside(p))).count()
+        };
+        // The whole edge; where its offset leaves the surface on both sides, its middle half.
+        let [a, b] = s.range;
+        for range in [s.range, [a + 0.25 * (b - a), b - 0.25 * (b - a)]] {
+            let (guess, against) = (votes(s.side, range), votes(other, range));
+            if guess > 0 || against > 0 {
+                return Ok(if against > guess { other } else { s.side });
             }
         }
         Err(KernelError::Invalid("offset curve: the face lies on neither side of the edge".into()))

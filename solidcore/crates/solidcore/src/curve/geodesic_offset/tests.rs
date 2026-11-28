@@ -190,6 +190,101 @@ fn an_offset_past_the_curves_radius_folds_and_is_refused() {
     assert!(e.to_string().contains("folds over itself"), "{e}");
 }
 
+/// On a cylinder of radius 1 the helix `(cos θ, sin θ, θ/2 − 1)`, θ in [π + 0.2, 3π/2 + 0.2],
+/// offset `π√5` along the wall: unrolled, the helix runs along (1, 1/2) in (θ, z) and the offset
+/// moves it by (−π, 2π) square to that, so the offset is the helix
+/// `(−cos θ, −sin θ, θ/2 − 1 + 2π)` on the far side of the cylinder. It does not fold, though its direction in space there runs
+/// against the source's (dot product −3/4 of their unscaled tangents).
+#[test]
+fn a_helix_round_a_cylinder_offsets_to_the_far_side_without_folding() {
+    let mut k = Kernel::default();
+    let b = create_cylinder(&mut k, Point3::ZERO, 1.0, 10.0).unwrap();
+    let (s, dom) = face_of(&b, |s, d| {
+        s.drop_point::<NoObject>(
+            &k,
+            Vec3::new(1.0, 0.0, 5.0),
+            d,
+            &DropPointOptions::default(),
+        )
+        .is_ok_and(|f| f.success && f.gap <= 1e-9)
+    });
+    let (pi, quarter) = (std::f64::consts::PI, std::f64::consts::FRAC_PI_2);
+    let lo = pi + 0.2;
+    let helix = through(65, |t| {
+        let th = lo + quarter * t;
+        Vec3::new(th.cos(), th.sin(), th / 2.0 - 1.0)
+    });
+    let ivl = helix.natural_interval();
+    let d = pi * 5f64.sqrt();
+    // The side going down leaves the wall below z = 0; the side going up is the closed form.
+    let both: Vec<_> = [Side::Left, Side::Right]
+        .into_iter()
+        .map(|side| geodesic_offset(&k, &s, &dom, &helix, &ivl, d, side, 1e-5))
+        .collect();
+    let up: Vec<&GeodesicOffset> = both.iter().filter_map(|r| r.as_ref().ok()).collect();
+    assert_eq!(up.len(), 1, "{both:?}");
+    let tau = std::f64::consts::TAU;
+    for p in along(&k, &up[0].curve) {
+        assert!((p.x.hypot(p.y) - 1.0).abs() <= 1e-5, "{p:?}");
+        // the offset point's own angle θ' = θ − π, so z = (θ' + π)/2 − 1 + 2π
+        let th = p.y.atan2(p.x);
+        assert!((0.2 - 1e-5..=quarter + 0.2 + 1e-5).contains(&th), "{p:?}");
+        assert!((p.z - ((th + pi) / 2.0 - 1.0 + tau)).abs() <= 1e-5, "{p:?}");
+    }
+}
+
+/// A geodesic that starts on a periodic surface's seam and runs out of the parameter box there
+/// reads the spans across the seam: the helix `(cos θ, sin θ, θ/2 − 2)`, θ in [2π − 0.5, 2π],
+/// offset `0.2√5` toward smaller θ is the same helix moved by (−0.2, 0.4) in (θ, z), so
+/// `z = θ'/2 − 1.5` at its own angle θ' in [2π − 0.7, 2π − 0.2]. Its last station lies on the
+/// seam (parameter 0) and its geodesic runs back across it. The other side's geodesics cross
+/// the seam on their way.
+#[test]
+fn a_geodesic_from_the_seam_reads_the_spans_across_it() {
+    let mut k = Kernel::default();
+    let b = create_cylinder(&mut k, Point3::ZERO, 1.0, 10.0).unwrap();
+    let (s, dom) = face_of(&b, |s, d| {
+        s.drop_point::<NoObject>(
+            &k,
+            Vec3::new(1.0, 0.0, 5.0),
+            d,
+            &DropPointOptions::default(),
+        )
+        .is_ok_and(|f| f.success && f.gap <= 1e-9)
+    });
+    let tau = std::f64::consts::TAU;
+    let helix = through(65, |t| {
+        let th = tau - 0.5 + 0.5 * t;
+        Vec3::new(th.cos(), th.sin(), th / 2.0 - 2.0)
+    });
+    let ivl = helix.natural_interval();
+    // back: θ' = θ − 0.2 in [2π − 0.7, 2π − 0.2], z = θ'/2 − 1.5; on: θ' = θ + 0.2 in
+    // [2π − 0.3, 2π + 0.2] (across the seam), z = θ'/2 − 2.5
+    let fits = |o: &GeodesicOffset, lo: f64, rise: f64| {
+        along(&k, &o.curve).iter().all(|p| {
+            // the angle taken within half a turn of the range's middle
+            let mid = lo + 0.25;
+            let th = mid + (p.y.atan2(p.x) - mid + 0.5 * tau).rem_euclid(tau) - 0.5 * tau;
+            (p.x.hypot(p.y) - 1.0).abs() <= 1e-5
+                && (lo - 1e-5..=lo + 0.5 + 1e-5).contains(&th)
+                && (p.z - (th / 2.0 + rise)).abs() <= 1e-5
+        })
+    };
+    let offsets: Vec<GeodesicOffset> = [Side::Left, Side::Right]
+        .into_iter()
+        .map(|side| geodesic_offset(&k, &s, &dom, &helix, &ivl, 0.2 * 5f64.sqrt(), side, 1e-5))
+        .collect::<Result<_>>()
+        .unwrap();
+    let back = offsets.iter().filter(|o| fits(o, tau - 0.7, -1.5)).count();
+    let on = offsets.iter().filter(|o| fits(o, tau - 0.3, -2.5)).count();
+    assert_eq!((back, on), (1, 1));
+    // a helix on a cylinder is smooth on both sides of the seam: the first stations do, as on
+    // a span (no step reads across the seam)
+    for o in &offsets {
+        assert!(o.stations == 17 && o.worst <= 1e-5, "{o:?}");
+    }
+}
+
 #[test]
 fn an_offset_off_the_surface_and_bad_inputs_are_refused() {
     let mut k = Kernel::default();

@@ -41,8 +41,13 @@ fn offset_curve(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(v.as_f64().filter(|t| t.is_finite() && *t > 0.0).ok_or_else(|| bad(cmd, "`tolerance` must be a number of mm more than 0"))?),
     };
     let src = LinkSource::FaceOffset { body, at, from: Box::new(from), distance, tolerance };
-    // The kernel's report (deviation, cut by the boundary), and its refusal word for word.
-    let (_, _, report) = solidcraft_doc::project::face_offset(&s.model.state(), &src).map_err(|e| bad(cmd, e.to_string()))?;
+    // The kernel's report (deviation, cut by the boundary), and its refusal word for word, from
+    // the model the link resolves against: the one before the active sketch.
+    let st = match super::sketch_store::active(s) {
+        Some(id) => s.model.state_before(id),
+        None => s.model.state(),
+    };
+    let (_, _, report) = solidcraft_doc::project::face_offset(&st, &src).map_err(|e| bad(cmd, e.to_string()))?;
     let made = one_link(s, cmd, LinkKind::Include, src)?;
     serde_json::to_value(OffsetCurveResult { made, deviation: report.deviation, clipped: report.clipped, created: None, param_warnings: Vec::new() })
         .map_err(|e| bad(cmd, e.to_string()))

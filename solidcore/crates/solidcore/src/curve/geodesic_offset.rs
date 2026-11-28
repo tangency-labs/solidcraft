@@ -14,10 +14,16 @@
 //!   fundamental form; each derivative read on the spans the geodesic runs into, as a rational
 //!   sphere's quarters differ at their knots), integrated by the classical fourth-order
 //!   Runge-Kutta rule from
-//!   `(u, v)` and the parameter direction of `w`. The step count doubles from 16 until two
+//!   `(u, v)` and the parameter direction of `w`, each step cut where it meets one of the
+//!   surface's knot lines (its seam included) so that every step reads one span, where the
+//!   equation is smooth (a rational circle's second derivatives jump at its quarters). The
+//!   step count doubles from 16 until two
 //!   successive end points lie within a tenth of the tolerance of each other (at most
 //!   [`MAX_STEPS`]). A geodesic crosses a periodic surface's seam; one leaving the surface's
 //!   parameter box elsewhere is refused.
+//! - Where neighbouring ends run back against the curve's direction carried along the
+//!   geodesics to them (the offset's own direction there), the offset folds over itself and is
+//!   refused.
 //! - The offset is the cubic B-spline interpolating the geodesics' end points at the stations'
 //!   own parameters. It is measured at the middle of every span: the geodesic shot from the
 //!   curve there against the spline's point there. While the worst is past the tolerance the
@@ -52,6 +58,12 @@ pub const MAX_STATIONS: usize = 1025;
 const FIRST_STATIONS: usize = 17;
 /// The steps the integration starts from.
 const FIRST_STEPS: usize = 16;
+/// The most steps, cuts at knot lines included, per step asked.
+const MAX_CUTS: usize = 8;
+/// The Newton corrections of a step's length to land on a knot line.
+const NEWTON_CUTS: usize = 3;
+/// A knot line this small a fraction of a step from either end is not cut at.
+const CUT_MARGIN: f64 = 1e-9;
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -117,11 +129,19 @@ pub fn geodesic_offset(
             0.0
         })
     };
+    // the knot lines (a surface with none to read is integrated without cuts)
+    let knots = |along: SurfParamType| -> Vec<f64> {
+        surface
+            .knots_with_nurb(k, along, None)
+            .map(|(knots, _)| knots)
+            .unwrap_or_default()
+    };
     let shoot = Shoot {
         k,
         surface,
         domain,
         periods: (period(SurfParamType::U)?, period(SurfParamType::V)?),
+        knots: (knots(SurfParamType::U), knots(SurfParamType::V)),
         curve,
         distance,
         side,
@@ -145,7 +165,9 @@ pub fn geodesic_offset(
             tangents.push(tangent);
         }
         // Past the curve's radius of curvature on the surface the geodesics cross and the ends
-        // run back against the curve: the offset folds over itself.
+        // run back against the curve's direction carried to them: the offset folds over itself.
+        // (Each chord against the carried tangents at its own ends, in the tangent planes there:
+        // on a curved surface the source's tangent can point anywhere at the far end.)
         let back = ends
             .windows(2)
             .zip(tangents.windows(2))
@@ -188,6 +210,36 @@ pub fn geodesic_offset(
     }
 }
 
+/// The fraction of the way from `x0` to `x1` (up to `reach` times the way, past a sliver at
+/// `x0`) where the first of `knots` lies, and its value there: on a periodic parameter
+/// (`period` more than 0) the knots' copies a whole period on count too.
+fn knot_on_way(x0: f64, x1: f64, reach: f64, knots: &[f64], period: f64) -> Option<(f64, f64)> {
+    let dx = x1 - x0;
+    if dx == 0.0 || !dx.is_finite() {
+        return None;
+    }
+    let far = x0 + reach * dx;
+    let (lo, hi) = (x0.min(far), x0.max(far));
+    let mut best: Option<(f64, f64)> = None;
+    for &kn in knots {
+        let (first, last) = if period > 0.0 {
+            (((lo - kn) / period).floor(), ((hi - kn) / period).ceil())
+        } else {
+            (0.0, 0.0)
+        };
+        let mut m = first;
+        while m <= last && m - first < 8.0 {
+            let at = kn + m * period;
+            let f = (at - x0) / dx;
+            if f > CUT_MARGIN && f <= reach && best.is_none_or(|(b, _)| f < b) {
+                best = Some((f, at));
+            }
+            m += 1.0;
+        }
+    }
+    best
+}
+
 /// One offset's geodesics: what each shot needs.
 struct Shoot<'a> {
     k: &'a Kernel,
@@ -195,6 +247,8 @@ struct Shoot<'a> {
     domain: &'a Extent2d,
     /// The surface's period along u and v over `domain` (0: not periodic).
     periods: (f64, f64),
+    /// The surface's distinct knots along u and v, its ends included.
+    knots: (Vec<f64>, Vec<f64>),
     curve: &'a Curve,
     distance: f64,
     side: Side,
@@ -232,6 +286,22 @@ impl Shoot<'_> {
     /// a knot a surface's derivatives differ from one span to the next, as a rational
     /// circle's quarters do).
     fn derivs(&self, uv: Point2, (a, b): (f64, f64)) -> Result<Derivs> {
+        // On a periodic surface's seam, moving out of the box: read the spans across the seam
+        // (past the box's end there is no span to read).
+        let across = |x: f64, d: f64, lo: f64, hi: f64, period: f64| {
+            if period > 0.0 && d < 0.0 && x <= lo {
+                x + period
+            } else if period > 0.0 && d > 0.0 && x >= hi {
+                x - period
+            } else {
+                x
+            }
+        };
+        let (ui, vi) = (self.domain.u_interval(), self.domain.v_interval());
+        let uv = Point2::new(
+            across(uv.x, a, ui.min(), ui.max(), self.periods.0),
+            across(uv.y, b, vi.min(), vi.max(), self.periods.1),
+        );
         let side = |d: f64| {
             if d < 0.0 {
                 crate::nurbs::knots::Side::Right
@@ -279,10 +349,17 @@ impl Shoot<'_> {
         Ok(((g * wu - f * wv) / det, (e * wv - f * wu) / det))
     }
 
-    /// The geodesic equation's right-hand side at state `(u, v, a, b)`: `(a, b, a', b')`.
-    fn rate(&self, s: [f64; 4]) -> Result<[f64; 4]> {
+    /// The geodesic equation's right-hand side at state `(u, v, a, b)`: `(a, b, a', b')`, for a
+    /// step from state `from`. A step lives in one span (it is cut at knot lines): a stage
+    /// rounded past a knot line from `from` is read on the line, on `from`'s side.
+    fn rate(&self, s: [f64; 4], from: [f64; 4]) -> Result<[f64; 4]> {
         let [u, v, a, b] = s;
-        let d = self.derivs(self.inside(Point2::new(u, v))?, (a, b))?;
+        let read = |x: f64, x0: f64, velocity: f64, knots: &[f64], period: f64| {
+            knot_on_way(x0, x, 1.0, knots, period).map_or((x, velocity), |(_, at)| (at, x0 - x))
+        };
+        let (ue, ua) = read(u, from[0], a, &self.knots.0, self.periods.0);
+        let (ve, vb) = read(v, from[1], b, &self.knots.1, self.periods.1);
+        let d = self.derivs(self.inside(Point2::new(ue, ve))?, (ua, vb))?;
         let q = d.suu * (a * a) + d.suv * (2.0 * a * b) + d.svv * (b * b);
         // [E F; F G] (a', b') = -(S_u . Q, S_v . Q)
         let (e, f, g) = (d.su.dot(d.su), d.su.dot(d.sv), d.sv.dot(d.sv));
@@ -296,8 +373,8 @@ impl Shoot<'_> {
     }
 
     /// The end of the geodesic of length `distance` from state `start` in `steps` equal steps of
-    /// the classical Runge-Kutta rule.
-    fn integrate(&self, start: [f64; 4], steps: usize) -> Result<Point2> {
+    /// the classical Runge-Kutta rule, and its parameter direction there.
+    fn integrate(&self, start: [f64; 4], steps: usize) -> Result<(Point2, (f64, f64))> {
         #[allow(clippy::cast_precision_loss)] // at most MAX_STEPS
         let h = self.distance / steps as f64;
         let add = |s: [f64; 4], r: [f64; 4], f: f64| {
@@ -307,25 +384,88 @@ impl Shoot<'_> {
             }
             out
         };
-        let mut s = start;
-        for _ in 0..steps {
-            let k1 = self.rate(s)?;
-            let k2 = self.rate(add(s, k1, 0.5 * h))?;
-            let k3 = self.rate(add(s, k2, 0.5 * h))?;
-            let k4 = self.rate(add(s, k3, h))?;
+        let step = |s: [f64; 4], h: f64| -> Result<[f64; 4]> {
+            let k1 = self.rate(s, s)?;
+            let k2 = self.rate(add(s, k1, 0.5 * h), s)?;
+            let k3 = self.rate(add(s, k2, 0.5 * h), s)?;
+            let k4 = self.rate(add(s, k3, h), s)?;
             let mut next = s;
             for (((x, a), (b, c)), d) in next.iter_mut().zip(k1).zip(k2.into_iter().zip(k3)).zip(k4)
             {
                 *x += h / 6.0 * (a + 2.0 * b + 2.0 * c + d);
             }
-            s = next;
+            Ok(next)
+        };
+        // A step across a knot line (where the surface's second derivatives jump, as at a
+        // rational circle's quarters and a periodic surface's seam) is cut there and the state
+        // put on the line itself, so every step reads the derivatives of one span only: the
+        // rule's order holds only where the geodesic equation is smooth over the step. A knot
+        // just past a step's end (up to half a step on) is reached in one longer step, so no
+        // step ends a rounding's width short of a knot and reads the span behind it.
+        let mut s = start;
+        let mut left = self.distance;
+        let most = steps.saturating_mul(MAX_CUTS);
+        for _ in 0..most {
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // stops on NaN too
+            if !(left > CUT_MARGIN * h) {
+                break;
+            }
+            let hh = h.min(left);
+            let next = step(s, hh)?;
+            if let Some((f, axis, at)) = self.first_knot(s, next, (left / hh).min(1.5)) {
+                // where the step meets the knot: Newton's rule on the parameter along the
+                // geodesic, its rate the state's own (du/ds, dv/ds)
+                let mut cut = (f * hh).min(left);
+                let mut part = step(s, cut)?;
+                for _ in 0..NEWTON_CUTS {
+                    let (Some(x), Some(rate)) = (part.get(axis), part.get(axis + 2)) else {
+                        break;
+                    };
+                    let fix = (at - x) / rate;
+                    if !fix.is_finite() || fix == 0.0 {
+                        break;
+                    }
+                    cut = (cut + fix).clamp(0.0, left);
+                    part = step(s, cut)?;
+                }
+                s = part;
+                if let Some(x) = s.get_mut(axis) {
+                    *x = at;
+                }
+                left -= cut;
+            } else {
+                s = next;
+                left -= hh;
+            }
         }
-        let [u, v, _, _] = s;
-        self.inside(Point2::new(u, v))
+        if left > CUT_MARGIN * h {
+            s = step(s, left)?;
+        }
+        let [u, v, a, b] = s;
+        Ok((self.inside(Point2::new(u, v))?, (a, b)))
+    }
+
+    /// The fraction of the way from state `s` to state `next` (by the parameters, linearly, up
+    /// to `reach` times the way) where the first knot line after `s` lies, if any, with its
+    /// parameter (0: u, 1: v) and its value on the way (a periodic surface's knot a whole
+    /// period on as needed).
+    fn first_knot(&self, s: [f64; 4], next: [f64; 4], reach: f64) -> Option<(f64, usize, f64)> {
+        let [u0, v0, _, _] = s;
+        let [u1, v1, _, _] = next;
+        let u = knot_on_way(u0, u1, reach, &self.knots.0, self.periods.0).map(|(f, at)| (f, 0, at));
+        let v = knot_on_way(v0, v1, reach, &self.knots.1, self.periods.1).map(|(f, at)| (f, 1, at));
+        match (u, v) {
+            (Some(a), Some(b)) => Some(if b.0 < a.0 { b } else { a }),
+            (a, b) => a.or(b),
+        }
     }
 
     /// The end of the geodesic of length `distance` leaving the curve at its parameter `t`,
-    /// square to it, to the side asked, and the curve's unit tangent in the surface there.
+    /// square to it, to the side asked, and the curve's unit tangent in the surface carried
+    /// along the geodesic to that end (the offset's own direction there, in the tangent plane at
+    /// the end). The tangent leaves as `w x n` to the left (`-(w x n)` to the right) of the
+    /// geodesic's direction `w`; carried along a geodesic it keeps that angle to the geodesic's
+    /// direction, so at the end it is the same expression in the end's `w` and `n`.
     fn end_at(&self, t: f64) -> Result<(Point3, Vec3)> {
         let k = self.k;
         let c = self.curve.evaluate(k, t, 1, false, true)?;
@@ -360,12 +500,26 @@ impl Shoot<'_> {
         let (a, b) = Self::parameter_direction(&d, w)?;
         let start = [uv.x, uv.y, a, b];
         let mut steps = FIRST_STEPS;
-        let mut last = self.derivs(self.integrate(start, steps)?, (0.0, 0.0))?.p;
+        let mut last = self.derivs(self.integrate(start, steps)?.0, (0.0, 0.0))?.p;
         while steps < MAX_STEPS {
             steps *= 2;
-            let next = self.derivs(self.integrate(start, steps)?, (0.0, 0.0))?.p;
+            let (end, (a, b)) = self.integrate(start, steps)?;
+            // read on the spans the geodesic arrives from
+            let d = self.derivs(end, (-a, -b))?;
+            let next = d.p;
             if next.distance(last) <= self.settle {
-                return Ok((next, along));
+                let n =
+                    d.su.cross(d.sv)
+                        .unitize()
+                        .map_err(|_| invalid("a surface singular on the offset's way"))?;
+                let w = d.su * a + d.sv * b;
+                let carried = match self.side {
+                    Side::Left => w.cross(n),
+                    Side::Right => n.cross(w),
+                }
+                .unitize()
+                .map_err(|_| invalid("a surface singular on the offset's way"))?;
+                return Ok((next, carried));
             }
             last = next;
         }

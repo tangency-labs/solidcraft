@@ -100,6 +100,27 @@ fn offset_curve_on_a_plate_from_an_edge_and_from_a_sketch_line() {
 }
 
 #[test]
+fn offset_curve_in_an_earlier_sketch_reports_the_model_before_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rect"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.patch", json!({"sketch": "Rect", "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Offsets"}));
+    run(&mut s, "sketch.finish", json!({}));
+    // A later feature removes the plate: the earlier sketch still sees it, and so does the report.
+    run(&mut s, "solid.remove", json!({"bodies": ["Plate"]}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Offsets", "restore_marker": false}));
+    let r = run(&mut s, "surface.offset_curve", json!({"face": [20, 15, 0], "body": "Plate", "from": {"edge": [20, 0, 0]}, "distance": 7}));
+    // The bottom edge 7 in: y = 7 across the plate, 40 long, not cut by the plate's sides.
+    assert_eq!(r["clipped"], false, "{r}");
+    assert!(r["deviation"].as_f64().unwrap() < 1e-9, "{r}");
+    let p = &wire_points(&s, &r, 4)[0];
+    assert!(p.iter().all(|q| (q.y - 7.0).abs() < 1e-9 && q.z.abs() < 1e-9), "{p:?}");
+    assert!((length(p) - 40.0).abs() < 1e-9);
+}
+
+#[test]
 fn offset_curve_up_a_cylinder_is_its_circle() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 6, "height": 20}));
