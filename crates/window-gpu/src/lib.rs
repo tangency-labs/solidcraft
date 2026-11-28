@@ -12,6 +12,7 @@ pub use egui_wgpu;
 pub use egui_wgpu::wgpu;
 
 pub mod painter;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod runner;
 
 /// The [`FrameCompositor`] the painter hands whole frames to, kept in egui's renderer's callback
