@@ -16,7 +16,7 @@ fn field(source: Source, key: &str) -> Part {
 }
 
 fn text(cap_mm: f64, align: HAlign, fit: Fit, parts: Vec<Part>) -> CellKind {
-    CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit, image: None })
+    CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit, image: None, mass_unit: None })
 }
 
 fn sheet_layout(profile: &DrawingBorderProfile, size: PaperSize, orientation: Orientation) -> SheetLayout {
@@ -776,4 +776,44 @@ fn a_cell_with_the_old_smallest_room_still_holds_a_symbol() {
     let room = cell.value_box.size();
     assert!((room.x - 15.4).abs() < 1e-9 && (room.y - 7.35).abs() < 1e-9, "{room:?}");
     assert_eq!(cell.symbol_mm, Some(2.5));
+}
+
+#[test]
+fn mass_unit_round_trips_and_invalid_values_are_refused() {
+    let base = serde_json::to_value(default_block()).unwrap();
+    let mass_at = "/cells/8/kind/text";
+    assert!(base.pointer(mass_at).unwrap().get("mass_unit").is_none(), "omitted when None");
+
+    for (raw, expected) in [("kg", MassUnit::Kg), ("g", MassUnit::G), ("auto", MassUnit::Auto), ("both", MassUnit::Both)] {
+        let mut v = base.clone();
+        v.pointer_mut(mass_at).unwrap()["mass_unit"] = json!(raw);
+        let parsed: TitleBlock = serde_json::from_value(v).unwrap();
+        parsed.validate().unwrap();
+        let text = text_of(&parsed.cells[8]);
+        assert_eq!((text.mass_unit, text.mass_unit()), (Some(expected), expected));
+        let saved = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(saved.pointer(mass_at).unwrap()["mass_unit"], json!(raw));
+    }
+
+    let mut nulled = base.clone();
+    nulled.pointer_mut(mass_at).unwrap()["mass_unit"] = serde_json::Value::Null;
+    let parsed_null: TitleBlock = serde_json::from_value(nulled).unwrap();
+    assert_eq!((text_of(&parsed_null.cells[8]).mass_unit, text_of(&parsed_null.cells[8]).mass_unit()), (None, MassUnit::Kg));
+    assert_eq!(serde_json::to_value(&parsed_null).unwrap(), base);
+
+    for bad in [json!("KG"), json!("lb"), json!(""), json!(42), json!(true), json!([]), json!({}), json!({"kg": {}})] {
+        let mut v = base.clone();
+        v.pointer_mut(mass_at).unwrap()["mass_unit"] = bad.clone();
+        assert!(serde_json::from_value::<TitleBlock>(v).is_err(), "{bad}");
+    }
+
+    for (at, bad) in [("/cells/8", json!("g")), ("/cells/11", json!("g")), ("/cells/11/kind", json!({"projection_symbol": {"mass_unit": "g"}}))] {
+        let mut v = base.clone();
+        if at.ends_with("/kind") {
+            *v.pointer_mut(at).unwrap() = bad.clone();
+        } else {
+            v.pointer_mut(at).unwrap()["mass_unit"] = bad.clone();
+        }
+        assert!(serde_json::from_value::<TitleBlock>(v).is_err(), "{at}: {bad}");
+    }
 }

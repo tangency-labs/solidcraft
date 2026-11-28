@@ -584,6 +584,7 @@ fn set2(m: &mut [[Ivl; 3]; 3], i: usize, j: usize, x: Ivl) {
 pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
     // each decision a call of this scope (feature `profile`; nothing without it)
     crate::profile::profile_scope!(k, "mass::enclosure::volume_sign");
+    k.work_counters.add_volume_sign_decision();
     volume_sign_within(k, b, CELL_BUDGET)
 }
 

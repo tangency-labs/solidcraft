@@ -292,6 +292,19 @@ fn a_circle_on_its_form_keeps_it_and_a_moved_form_is_refused() {
     near(at(&k, &c, ivl.max()), [1.0, 4.0, 0.0], 1e-15 * 8.0);
     assert!(conic_on_form(&k, &circle, &quarter_form([1.0, 2.0, 1e-9], 2.0)).is_err());
     assert!(conic_on_form(&k, &circle, &quarter_form([1.0, 2.0, 0.0], 2.0 + 1e-9)).is_err());
+    // #23062: a reader that drops a label its form is not proved on is told so, not refused
+    let moved = quarter_form([1.0, 2.0, 0.0], 2.0 + 1e-9);
+    assert!(conic_on_form_if_proved(&k, &circle, &moved)
+        .unwrap()
+        .is_none());
+    let on = quarter_form([1.0, 2.0, 0.0], 2.0);
+    assert!(conic_on_form_if_proved(&k, &circle, &on).unwrap().is_some());
+    // what is not about the form being off the conic is still refused
+    let line = Record::Line {
+        start: [0.0; 3],
+        end: [1.0, 0.0, 0.0],
+    };
+    assert!(conic_on_form_if_proved(&k, &line, &on).is_err());
 }
 
 /// A pcurve's knots go affinely onto its edge's kernel interval; its points are the record's.

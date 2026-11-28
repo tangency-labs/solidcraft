@@ -2242,7 +2242,7 @@ pub fn paint_view_chips(painter: &Painter, rect: Rect, labels: &[&str]) -> f32 {
         }
         let chip = Rect::from_center_size(pos2(right - width * 0.5, rect.center().y), vec2(width, 18.0));
         painter.rect_filled(chip, t.radius_sm, t.chip);
-        painter.with_clip_rect(chip).galley(chip.center() - galley.size() * 0.5, galley, t.text);
+        painter.with_clip_rect(chip).galley(crate::text::centred_in(painter, &galley, chip.center()), galley, t.text);
         right -= width + t.space_6;
     }
     rect.right() - right
@@ -3704,7 +3704,8 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 actions.extend(rename_field(ui, field, rename, &h));
             }
             None => {
-                ui.painter().with_clip_rect(clip).galley(pos2(text_x, tr.center().y - text_size.y / 2.0), g, ink);
+                let rise = egui::galley_cap_ink_rise(ui.painter(), &g);
+                ui.painter().with_clip_rect(clip).galley(pos2(text_x, tr.center().y - text_size.y / 2.0 - rise), g, ink);
             }
         }
         if dot > 0.0 && tab.dirty {
