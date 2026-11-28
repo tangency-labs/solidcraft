@@ -1645,6 +1645,101 @@ fn a_two_tangent_circle_whose_pair_lost_a_curve_to_undo_asks_for_it_again() {
     assert_eq!(circles(&h), 1);
 }
 
+/// A sketch on XY with the slanted lines `a`, `b` and `gone` (drawn last), so none is held
+/// horizontal or vertical, and the constraint tool `tool` started. With `undo`, `gone` is picked
+/// first (clicked in the tool, or with `preselect` selected before the tool starts) and the Undo
+/// button (it runs `edit.undo` and leaves the tool on) takes it away. Then `a` and `b` are clicked.
+/// Returns the harness and how many constraints the clicks made.
+fn constraint_after_undo(tool: &str, undo: bool, preselect: bool) -> (crate::scenario::Harness, usize) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[60,20]],"ids":["a"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,40],[50,70]],"ids":["b"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[70,0],[90,60]],"ids":["gone"]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let count = |h: &crate::scenario::Harness| h.app.session.model.state().sketch(sid).unwrap().sketch.constraints.len();
+    if undo && preselect {
+        h.app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": "gone"}]})).unwrap();
+    }
+    h.step(&json!({"start":tool})).unwrap();
+    if undo {
+        if !preselect {
+            h.step(&json!({"click":{"world":[80, 30, 0]}})).unwrap();
+        }
+        assert_eq!(h.app.tool.as_ref().map(|t| t.picks.clone()), Some(vec!["gone".to_string()]), "{tool}: `gone` is picked");
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("gone").is_none(), "{tool}: Undo took the line");
+    }
+    let before = count(&h);
+    h.step(&json!({"click":{"world":[30, 10, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[25, 55, 0]}})).unwrap();
+    let made = count(&h).saturating_sub(before);
+    (h, made)
+}
+
+/// The constraint tools that pick two entities no longer keep a pick whose line the Undo button
+/// took away (#23602): picked in the tool or preselected before it started, the lost pick is
+/// dropped, so the next two clicks make one constraint and say nothing wrong. Without the Undo
+/// the same clicks make one constraint as before.
+#[test]
+fn a_constraint_tool_whose_pick_lost_its_line_to_undo_takes_the_next_two_picks() {
+    let mut failed = Vec::new();
+    for tool in ["sketch.constraint.parallel", "sketch.constraint.perpendicular"] {
+        for (undo, preselect) in [(false, false), (true, false), (true, true)] {
+            let (h, made) = constraint_after_undo(tool, undo, preselect);
+            let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+            if error.is_some() || made != 1 {
+                failed.push(format!("{tool} (undo {undo}, preselected {preselect}): {made} made, {error:?}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Horizontal keeps its first point until the second is picked. The Undo button took that point
+/// away: the point is dropped, so the next two point clicks make one Horizontal (#23602).
+#[test]
+fn a_horizontal_whose_first_point_was_undone_takes_the_next_two_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let point = |h: &mut crate::scenario::Harness, at: [i32; 2]| {
+        h.app.run("sketch.point", json!({"point": at})).unwrap()["point"].as_str().unwrap().to_string()
+    };
+    let a = point(&mut h, [5, 5]);
+    let b = point(&mut h, [40, 25]);
+    let gone = point(&mut h, [20, 40]);
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let horizontals = |h: &crate::scenario::Harness| {
+        let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        sk.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::HorizontalPoints { .. })).count()
+    };
+    h.step(&json!({"start":"sketch.constraint.horizontal"})).unwrap();
+    h.step(&json!({"click":{"world":[20, 40, 0]}})).unwrap();
+    assert_eq!(h.app.tool.as_ref().map(|t| t.point_picks.clone()), Some(vec![json!(gone)]), "the point is picked");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.resolve_point(&gone).is_none(), "Undo took the point");
+    h.step(&json!({"click":{"world":[5, 5, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 25, 0]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert_eq!(horizontals(&h), 1, "one Horizontal between {a} and {b}");
+}
+
+/// A right-click still ends the Parallel tool after the Undo button took its only pick away: the
+/// tool does not apply on a right-click, so nothing is kept on for one.
+#[test]
+fn a_parallel_whose_pick_lost_its_line_to_undo_ends_on_a_right_click() {
+    let mut h = picked_then_undone("sketch.constraint.parallel", &[[30, 60, 0]]);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.picks.len()), Some(0), "the lost pick is dropped");
+    h.step(&json!({"click":{"world":[30, 30, 0]},"button":"right"})).unwrap();
+    assert!(h.app.tool.is_none(), "the right-click ends the tool");
+}
+
 /// The Sketch Constrainer applies on a right-click. Its only pick taken away by the Undo button, the
 /// right-click keeps the tool on; the next pick and right-click apply to the line that stands.
 #[test]
