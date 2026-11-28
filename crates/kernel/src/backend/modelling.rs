@@ -2,7 +2,9 @@
 //! interface existed.
 
 use solidcore_record::{Plane, Region2, Vec3};
-use solidcraft_kernel_api::{Axis2, BoolOp, ChamferSide, ExtrudeSides, FilletTurn, Modelling, Primitive, RevolveSides, Taper};
+use solidcraft_kernel_api::{Axis2, BoolOp, ChamferSide, ExtrudeSides, FilletTurn, Modelling, Primitive, RevolveSides, Taper, TrimKeep};
+
+use crate::SplitTool;
 
 use super::Solidcore;
 use crate::Result;
@@ -51,8 +53,28 @@ impl Modelling for Solidcore {
         crate::blend::fillet_turning(body, edges, radius, turn)
     }
 
+    fn fillet_removing(&self, body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+        crate::blend::fillet_removing(body, edges, radius, turn)
+    }
+
+    fn fillet_each(&self, body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
+        crate::blend::fillet_each(body, edges, radii, turn)
+    }
+
+    fn fillet_setback(&self, body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
+        crate::blend::fillet_setback(body, edges, radius, setbacks)
+    }
+
     fn chamfer(&self, body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
         crate::blend::chamfer(body, edges, distance)
+    }
+
+    fn chamfer_carrying_face(&self, body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+        crate::blend::chamfer_carrying_face(body, edges, distance)
+    }
+
+    fn chamfer_sides_carrying_face(&self, body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+        crate::blend::chamfer_sides_carrying_face(body, edges, d1, side, flip)
     }
 
     fn chamfer_sides(&self, body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
@@ -69,5 +91,29 @@ impl Modelling for Solidcore {
 
     fn offset_faces(&self, body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         crate::polyhedron::offset_faces(body, at, distance)
+    }
+
+    fn draft(&self, body: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
+        crate::polyhedron::draft(body, faces, neutral, pull, angle)
+    }
+
+    fn split_faces(&self, body: &Body, faces: &[usize], tool: &SplitTool<'_>) -> Result<(Body, Vec<usize>)> {
+        crate::splitface::split_faces_with_map(body, faces, tool)
+    }
+
+    fn split_body(&self, body: &Body, tool: &SplitTool<'_>) -> Result<Vec<Body>> {
+        crate::splitface::split_body(body, tool)
+    }
+
+    fn split_body_by_faces(&self, body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Result<Vec<Body>> {
+        crate::splitface::split_body_by_faces(body, sheet, face, faces)
+    }
+
+    fn split_body_by_sheet_where_it_cuts(&self, body: &Body, sheet: &Body, face: usize) -> Result<Option<Vec<Body>>> {
+        crate::splitface::split_body_by_sheet_where_it_cuts(body, sheet, face)
+    }
+
+    fn trim_keep(&self, body: &Body, tool: &SplitTool<'_>, keep: TrimKeep<'_>) -> Result<Body> {
+        crate::surface_trim::trim_keep(body, tool, keep)
     }
 }
