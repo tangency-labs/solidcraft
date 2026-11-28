@@ -253,6 +253,13 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 
 /// The fillet of each edge at its own radius (`radii` in `edges`' order), in one blend.
 pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Fillet, &[body], |k, f| match f {
+        [fb] => k.fillet_each(fb, edges, radii, turn).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("a fillet takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the fillet is empty".into())));
+    }
     match which(OpKind::Fillet) {
         Which::Solidcore => Solidcore.fillet_each(body, edges, radii, turn),
     }

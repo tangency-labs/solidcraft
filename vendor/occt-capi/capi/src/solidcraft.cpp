@@ -88,6 +88,25 @@ API uint32_t occt_fillet_nearest(uint32_t h, const void* points, size_t count, d
   });
 }
 
+// Constant-radius fillets, the edge nearest each point (count * 3 doubles) at its own radius
+// (count doubles). Two points nearest one edge are refused.
+API uint32_t occt_fillet_each(uint32_t h, const void* points, const void* radii, size_t count) {
+  return guard_handle([&]() -> uint32_t {
+    const TopoDS_Shape shape = get_shape(h);
+    const ShapeMap chosen = nearest(shape, TopAbs_EDGE, points, count);
+    if (static_cast<size_t>(chosen.Extent()) != count) throw std::invalid_argument("two picks are nearest one edge");
+    BRepFilletAPI_MakeFillet maker(shape);
+    for (int e = 1; e <= chosen.Extent(); ++e) {
+      const double r = read_unaligned<double>(radii, static_cast<size_t>(e - 1));
+      if (!(r > 0.0) || !std::isfinite(r)) throw std::invalid_argument("a radius must be above 0");
+      maker.Add(r, TopoDS::Edge(chosen(e)));
+    }
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("fillet failed");
+    return put_shape(maker.Shape());
+  });
+}
+
 // Equal-distance chamfer of the edges nearest each point (count * 3 doubles).
 API uint32_t occt_chamfer_nearest(uint32_t h, const void* points, size_t count, double distance) {
   return guard_handle([&]() -> uint32_t {

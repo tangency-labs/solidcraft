@@ -152,7 +152,7 @@ impl Backend for Occt {
             OpKind::Box | OpKind::Cylinder | OpKind::Sphere | OpKind::Torus | OpKind::Boolean => Support::Yes,
             OpKind::Extrude => Support::Some("straight extrusions; not tapered, not the material of overlapping regions".into()),
             OpKind::Revolve => Support::Yes,
-            OpKind::Fillet => Support::Some("constant radius with mitred turns".into()),
+            OpKind::Fillet => Support::Some("constant radii (one for each edge) with mitred turns".into()),
             OpKind::Chamfer => Support::Some("equal chamfers".into()),
             OpKind::Shell => Support::Some("open at one face or more".into()),
             OpKind::Thicken => Support::Yes,
@@ -293,8 +293,19 @@ impl Modelling for Occt {
         self.fillet(body, edges, radius, turn).map(|s| (s, Vec::new()))
     }
 
-    fn fillet_each(&self, _body: &Shape, _edges: &[Vec3], _radii: &[f64], _turn: FilletTurn) -> Result<Shape, BackendError> {
-        unsupported("a fillet of several radii")
+    fn fillet_each(&self, body: &Shape, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Shape, BackendError> {
+        if turn != FilletTurn::Mitre {
+            return unsupported("swept fillet turns");
+        }
+        if edges.is_empty()
+            || edges.len() != radii.len()
+            || radii.iter().any(|r| !(*r > 0.0) || !r.is_finite())
+            || edges.iter().any(|p| !finite(&xyz(*p)))
+        {
+            return unsupported("a fillet solidcore refuses");
+        }
+        let points: Vec<[f64; 3]> = edges.iter().map(|p| xyz(*p)).collect();
+        body.fillet_each(&points, radii).map_err(failed)
     }
 
     fn fillet_setback(&self, _body: &Shape, _edges: &[Vec3], _radius: f64, _setbacks: &[(Vec3, f64)]) -> Result<Shape, BackendError> {
@@ -894,6 +905,17 @@ mod tests {
         // The four top edges, mitred (the matrix's closed form).
         let top = vec![v(5.0, 0.0, 10.0), v(10.0, 5.0, 10.0), v(5.0, 10.0, 10.0), v(0.0, 5.0, 10.0)];
         same_solid("the top edges rounded, mitred", 1000.0 - 4.0 * (10.0 * (1.0 - PI / 4.0) - 2.0 * (5.0 / 6.0 - PI / 4.0)), removing(top, 1.0));
+    }
+
+    #[test]
+    fn rounds_of_several_radii_match_solidcore() {
+        use std::f64::consts::PI;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let off = |r: f64| 10.0 * r * r * (1.0 - PI / 4.0);
+        // Two edges apart (top front, bottom back), r 1 and r 2: each its own section along 10.
+        same_solid("two edges apart, r 1 and r 2", 1000.0 - off(1.0) - off(2.0), || {
+            crate::route::fillet_each(&cube()?, &[v(5.0, 0.0, 10.0), v(5.0, 10.0, 0.0)], &[1.0, 2.0], FilletTurn::Mitre)
+        });
     }
 
     #[test]
