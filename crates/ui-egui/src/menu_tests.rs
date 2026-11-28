@@ -3154,7 +3154,8 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
 
     // Each is read beside the window, as a file picked under Browse… is (#11593).
     act(&mut h.app, &Target::InsertDesign, &names[0]);
-    assert!(h.app.file_load.busy(), "the design is read off the window thread");
+    // Its parameters first (it has none, so no dialog asks), then the design itself.
+    assert!(h.app.link_parameters_reading.is_some() || h.app.file_load.busy(), "the design is read off the window thread");
     h.settle();
     assert_eq!(linked(&h.app, "bracket.solidcraft"), 1);
     assert!(h.app.status.as_ref().is_none_or(|(s, _, _)| !s.contains("unsaved")), "{:?}", h.app.status);

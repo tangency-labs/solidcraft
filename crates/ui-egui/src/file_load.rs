@@ -742,7 +742,13 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params))
             }
         };
+        // Run here, the request has ended: a dialog's draft waiting for it hears how.
+        let outcome = match &r {
+            Ok(_) => Outcome::Done,
+            Err(e) => Outcome::Failed(e.clone()),
+        };
         request.answer(r);
+        crate::link_parameters_dialog::insert_ended(app, request.serial, &outcome);
         Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]

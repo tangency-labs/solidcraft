@@ -443,6 +443,10 @@ struct Finished {
 /// without it fades out without saying how. One never seen under way (done within the app's
 /// wait, between two frames) had no row, and is not listed either.
 pub(crate) fn ended(app: &mut SolveApp, key: &str, outcome: Outcome) {
+    // An Insert Design draft waiting for this file operation comes back unless it was done.
+    if let Some(serial) = key.strip_prefix("file:").and_then(|s| s.parse::<u64>().ok()) {
+        crate::link_parameters_dialog::insert_ended(app, serial, &outcome);
+    }
     let Some(label) = app.operations.labels.iter().rev().find(|(k, _)| k == key).map(|(_, label)| label.clone()) else { return };
     record(&mut app.operations, key, label, outcome);
 }

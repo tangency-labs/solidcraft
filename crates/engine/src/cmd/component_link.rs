@@ -23,15 +23,20 @@ use super::design_link::{
 };
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
-    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDeviation, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, MovedOccurrence, RelinkParams,
-    RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, DesignParametersParams, DesignParametersResult, ExtractParams,
+    ExtractResult, InsertDesignParams, InsertDesignResult, JointDeviation, JointDiagnostic, LinkFailure, LinkInfo, LinkParametersParams,
+    LinkParametersResult, LinkSource, LinksParams, LinksResult, MovedOccurrence, RelinkParams, RelinkResult, ReplaceWithLinkParams,
+    ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 #[path = "component_extract.rs"]
 mod extract;
+
+#[path = "component_link_parameters.rs"]
+mod parameters;
+pub(crate) use parameters::{drive_links, follow_command, forget_kept, mark_links_reconciled, reading_links_in, take_drive_report};
 
 #[cfg(test)]
 #[path = "component_relink_tests.rs"]
@@ -46,6 +51,8 @@ const EXTRACT_CONTRACT: TypedContract<ExtractParams> = TypedContract::new();
 const COPIES_CONTRACT: TypedContract<CopiesParams> = TypedContract::new();
 const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedContract::new();
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
+const LINK_PARAMETERS_CONTRACT: TypedContract<LinkParametersParams> = TypedContract::new();
+const DESIGN_PARAMETERS_CONTRACT: TypedContract<DesignParametersParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design)).begins_edit()
@@ -61,7 +68,10 @@ pub static COMMANDS: &[CommandSpec] = &[
          axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
          matrix?: [12 or 16 numbers] (row-major 3x4 or 4x4, its translation column numbers or length expressions) or to_matrix?: [12 or 16 numbers]; \
          tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); \
-         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file and configuration when available",
+         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file, configuration and parameters when available; \
+         parameters?: {name: expression} — user parameters of the design to set, each an expression over this design's parameters; by_name?: bool \
+         (default false) — also set each of its user parameters named as one of this design's to it; keep?: [names] — ones by_name leaves at the \
+         design's own value (see component.link_parameters)",
     ),
     CommandSpec::new("component.update_links", "Update Links", crate::checked!("component.update_links", update_links))
         .icon("update")
@@ -113,6 +123,32 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
+    ),
+    CommandSpec::new("component.link_parameters", "Link Parameters", crate::checked!("component.link_parameters", parameters::link_parameters))
+        .icon("chain")
+        .contract(&LINK_PARAMETERS_CONTRACT)
+        .output(output_schema_for::<LinkParametersResult>)
+        .params(
+        "component: id or name of a linked component; set?: {name: expression or null} — sets user parameters of its design, each an \
+         expression over this design's parameters (null gives one back to the design); by_name?: bool — also sets each of its user \
+         parameters named as one of this design's user parameters to it (set wins); keep?: [names] — replaces the list of its parameters \
+         that by_name leaves at their own value ([] keeps none; a name can't be both kept and in set); the linked bodies are worked out \
+         again with them; they are worked out again whenever an expression changes value (a value edit never takes in a newer version of \
+         the file: Update Links does); update?: bool (default false) — a file changed since this design read it is taken in with these \
+         settings, as Update Links does, in the same step (refused without it); without set, by_name or keep, lists them → component, feature, parameters ({name: {expression, \
+         value}}: value in mm or degrees), by_name, keep, geometry_changed, warnings",
+    ),
+    CommandSpec::new("component.design_parameters", "Design Parameters", crate::checked!("component.design_parameters", parameters::design_parameters))
+        .icon("chain")
+        .noundo()
+        .contract(&DESIGN_PARAMETERS_CONTRACT)
+        .output(output_schema_for::<DesignParametersResult>)
+        .params(
+        "path: a .sc design, or component: id or name of a linked component → the design's number user parameters that a link can set \
+         (parameters: [{name, expression, unit, value (mm or degrees), display_value, comment?, here?}]: here is the value this design \
+         would give it by name, absent when this design has no user parameter of that name and kind; values as the design saved them, \
+         before a configuration row); with component, also what the link passes now: by_name, set ({name: expression}), keep, and \
+         changed (true: the file changed since this design read it); reads the file, changes nothing",
     ),
     CommandSpec::new("component.links", "List Links", crate::checked!("component.links", list_links))
         .icon("chain")
@@ -244,6 +280,10 @@ fn link_file_problem(doc: &Document, comp: u64, link: &DesignLink, from: Option<
     // reader, which gives STEP text, not those records.
     if records && link.step_names.is_some() {
         return Some("its STEP file was read into B-rep records, which reading the file again does not give back".into());
+    }
+    // Bodies made with passed values are not the ones the file gives when it is read as it is.
+    if parameters::drives(link) {
+        return Some("this design passes it parameter values, which reading the file again does not apply".into());
     }
     let file = resolve(from, &link.path);
     if let Some(problem) = link_presence(&file, from) {
@@ -2279,6 +2319,12 @@ fn inherit_faces(
 /// Apply properties after evaluation has resolved body-name collisions. Last inherited
 /// values are kept independently for material and appearance, so overriding one does not
 /// stop updates of the other. Session::execute makes this part of the command's undo step.
+/// The cosmetic thread records of linked bodies, by body, as an Import feature keeps them
+/// (`link_threads`): none at all when no body has one.
+fn linked_threads(sources: &[SourceProperties]) -> Vec<Vec<solidcraft_doc::ThreadInfo>> {
+    if sources.iter().any(|source| !source.threads.is_empty()) { sources.iter().map(|source| source.threads.clone()).collect() } else { Vec::new() }
+}
+
 fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperties]) -> Result<bool> {
     if !s.doc.links.contains_key(&component) {
         return Ok(false);
@@ -2302,11 +2348,7 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     };
     let mut inherited = link.inherited.clone();
     inherited.resize(sources.len(), LinkedBodyProperties::default());
-    let threads = if sources.iter().any(|source| !source.threads.is_empty()) {
-        sources.iter().map(|source| source.threads.clone()).collect()
-    } else {
-        Vec::new()
-    };
+    let threads = linked_threads(sources);
     if let Some(feature) = s.doc_mut().feature_mut(link.feature)
         && feature.link_threads != threads
     {
@@ -2480,6 +2522,8 @@ fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let selection = configuration_key(p, None, cmd)?;
+    // What the new link passes its design; a reused link must pass the same.
+    let drive = parameters::requested(cmd, p)?;
     // The design to link: a file, or the design the caller holds in memory (one open in this
     // session that has no file yet, #16829).
     let (given, held) = match (p.get("path"), p.get("document")) {
@@ -2494,6 +2538,11 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         }
         (None, None) => return Err(bad(cmd, "`path` or `document` is required")),
     };
+    // Values are passed to a design by its file: one held in memory has none to drive.
+    let passes = parameters::drives(&drive) || !drive.parameters_kept.is_empty();
+    if held.is_some() && passes {
+        return Err(bad(cmd, "`parameters`, `by_name` and `keep` need a design saved in a file: give `path`"));
+    }
     let importer = match given {
         Some(given) => insert_importer(s, p, given)?,
         None => None,
@@ -2510,6 +2559,10 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) if importer.is_none() => return Err(bad(cmd, "`options` applies to a file an importer plugin reads")),
         Some(_) => return Err(bad(cmd, "`options` must be an object")),
     };
+    // Only a design has parameters to set: what an importer reads is taken as it is.
+    if importer.is_some() && passes {
+        return Err(bad(cmd, "`parameters`, `by_name` and `keep` apply to a design; a file an importer reads has no parameters"));
+    }
     let (transform, expressed) = placement_transform(s, p, cmd)?;
     let source = match (given, held) {
         (Some(given), None) => {
@@ -2548,6 +2601,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
                     .iter()
                     .find(|(_, link)| {
                         selected_configuration(link) == configuration
+                            && parameters::same_drive(link, &drive)
                             && link_target(&resolve(s.path.as_deref(), &link.path)) == target
                             && link.importer.as_ref().map(|i| (&i.format, linked_options(&i.options)))
                                 == importer.as_ref().map(|i| (&i.id, linked_options(&options)))
@@ -2599,18 +2653,35 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => (None, None),
     };
-    let design_bytes = produced.as_ref().map_or(bytes.as_slice(), |(design, _)| design.as_slice());
-    let ((design_name, mut sf, faces, metadata, properties, meshes), (images, image_warnings)) =
-        design_bodies(&source, design_bytes, configuration, s.validation())?;
-    if let Some((_, notes)) = produced {
-        // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
-        if let Some(file) = source.file() {
-            remember_read(file, None, digest(bytes.as_slice()), &sf, &faces, &properties, &metadata, &meshes);
-        }
-        sf.warnings.extend(notes);
-    }
-    sf.warnings.extend(image_warnings);
     let read = DesignLink::file_digest(&bytes);
+    let (linked, (images, image_warnings), applied, units) = match (&source, produced) {
+        // What the importer wrote is the design the bodies come from; it is passed no values.
+        (_, Some((design, notes))) => {
+            let (mut linked, images) = design_bodies(&source, &design, configuration, s.validation())?;
+            // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
+            if let Some(file) = source.file() {
+                remember_read(file, None, digest(bytes.as_slice()), &linked.1, &linked.2, &linked.4, &linked.3, &linked.5);
+            }
+            linked.1.warnings.extend(notes);
+            (linked, images, Default::default(), Default::default())
+        }
+        (Source::File(file), None) => {
+            let link = DesignLink {
+                path: file.to_string_lossy().into_owned(),
+                configuration: configuration.map(|c| c.row),
+                configuration_identity: configuration.and_then(|c| c.identity),
+                file_sha256: Some(read.clone()),
+                ..drive.clone()
+            };
+            parameters::link_bodies_with_images(s, &link, file, &bytes, configuration, true)?
+        }
+        (Source::Session { .. }, None) => {
+            let (linked, images) = design_bodies(&source, &bytes, configuration, s.validation())?;
+            (linked, images, Default::default(), Default::default())
+        }
+    };
+    let (design_name, mut sf, faces, metadata, properties, meshes) = linked;
+    sf.warnings.extend(image_warnings);
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
     // Clipboard insertion uses reuse even for the first paste, which must stay movable.
@@ -2646,20 +2717,20 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Source::File(file) => (stored(s.path.as_deref(), file), file.to_string_lossy().into_owned()),
         Source::Session { .. } => (String::new(), String::new()),
     };
-    s.doc_mut().links.insert(
-        comp,
-        DesignLink {
-            path: link_path,
-            feature: id,
-            configuration: configuration.map(|c| c.row),
-            configuration_identity: configuration.and_then(|c| c.identity),
-            inherited: Vec::new(),
-            inherited_metadata: metadata,
-            file_sha256: Some(read),
-            step_names: None,
-            importer: record,
-        },
-    );
+    let link = DesignLink {
+        path: link_path,
+        feature: id,
+        configuration: configuration.map(|c| c.row),
+        configuration_identity: configuration.and_then(|c| c.identity),
+        inherited_metadata: metadata,
+        file_sha256: Some(read),
+        importer: record,
+        parameter_values: applied,
+        parameter_units: units,
+        ..drive
+    };
+    let passed = parameters::listed(&link);
+    s.doc_mut().links.insert(comp, link);
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
@@ -2678,6 +2749,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         created_bodies: bodies.clone(),
         bodies,
         warnings: sf.warnings,
+        parameters: passed,
     };
     reply(cmd, InsertDesignResult { inserted, param_warnings: Vec::new() })
 }
@@ -3083,6 +3155,11 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let TargetLink::Native { comp, cname, link, old, file, canonical, flat, .. } = target else { continue };
         let read_key = (canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string));
         let Some(Ok((bytes, _, bytes_hash))) = file_reads.get(&read_key) else { continue };
+        // A link that passes values is read with them in its turn (phase 3): a source evaluated
+        // here, or kept from an earlier read, is the file as it is.
+        if parameters::drives(link) {
+            continue;
+        }
         // A link that has not recorded the properties it inherited (made before they were) is read again.
         let kept_faces = s
             .doc
@@ -3327,8 +3404,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             TargetLink::Native { comp, cname, link, old, file, canonical, flat, before } => {
                 solidcraft_doc::progress::item(Some((&cname, slot, count)));
                 let read_key = (canonical.clone(), file.extension().map(std::ffi::OsStr::to_os_string));
-                let (sha256, bytes_hash) = match file_reads.get(&read_key) {
-                    Some(Ok((_, sha256, bytes_hash))) => (sha256.clone(), *bytes_hash),
+                let (bytes, sha256, bytes_hash) = match file_reads.get(&read_key) {
+                    Some(Ok((bytes, sha256, bytes_hash))) => (bytes.clone(), sha256.clone(), *bytes_hash),
                     Some(Err(e)) if go_on => {
                         failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
                         link_warnings[slot].push(format!("{cname} keeps its bodies: {e}"));
@@ -3346,6 +3423,41 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                 };
                 let same_bytes = link.file_sha256.as_deref() == Some(sha256.as_str());
+                // A design whose link passes values is read with them. A linked STEP file takes
+                // no parameters, nor does a design whose link passes none: those take the source
+                // read ahead.
+                if parameters::drives(&link) {
+                    let (linked, applied, units) = match parameters::link_bodies(s, &link, &file, &bytes, selected_configuration(&link), false) {
+                        Ok(read) => read,
+                        Err(e) if go_on => {
+                            let error = e.to_string();
+                            failed.push(LinkFailure { component: comp, name: cname.clone(), error: error.clone() });
+                            link_warnings[slot].push(format!("{cname} keeps its bodies: {error}"));
+                            continue;
+                        }
+                        Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
+                    };
+                    if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+                        if !same_bytes {
+                            kept.file_sha256 = Some(sha256);
+                        }
+                        kept.parameter_values = applied;
+                        kept.parameter_units = units;
+                    }
+                    let mut ctx = ApplyContext {
+                        s,
+                        link_warnings: &mut link_warnings,
+                        kept_imports: &mut kept_imports,
+                        rebind_queue: &mut rebind_queue,
+                        tie_queue: &mut tie_queue,
+                        realigned_features: &mut realigned_features,
+                        post_entries: &mut post_entries,
+                        read_components: &mut read_components,
+                        needs_first_refresh: &mut needs_first_refresh,
+                    };
+                    apply_evaluated_link(&mut ctx, slot, comp, cname, &link, &old, &file, before, EvaluatedLink::from_linked(linked))?;
+                    continue;
+                }
                 if let Some((known, properties, metadata)) = native_cached[slot].take() {
                     if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
                         kept.file_sha256 = Some(sha256);
@@ -3504,6 +3616,23 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     }
     crate::plugin::record_link_reads(s, &read_components);
     reply(cmd, UpdateLinksResult { updated, unchanged, warnings, failed, param_warnings: Vec::new() })
+}
+
+/// `comp`'s linked design as it was last read (its bodies) and as its file is now, read before
+/// anything in the design changes: for a command that reads one link with the values it passes.
+fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(ImportSource, PathBuf, Vec<u8>), String> {
+    let Some(FeatureKind::Import { step: old, records, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
+        return Err(format!("its linked bodies (feature {}) are gone; break the link or insert the design again", link.feature));
+    };
+    link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
+    let file = resolve(s.path.as_deref(), &link.path);
+    if link.importer.is_some()
+        && let Some(why) = importer_file_refusal(s, &file)
+    {
+        return Err(why);
+    }
+    let bytes = read_link(&file, s.path.as_deref(), link.importer.is_some()).map_err(|e| e.to_string())?;
+    Ok(((old.clone(), records.clone()), file, bytes))
 }
 
 /// What an Import feature's bodies are made from: its STEP text and its records.
@@ -3931,8 +4060,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let ((source_name, sf, faces, metadata, properties, meshes), _) =
-        design_bodies(&Source::File(file.clone()), &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
+    let ((source_name, sf, faces, metadata, properties, meshes), applied, units) =
+        parameters::link_bodies(s, &link, &file, &bytes, configuration, false).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
     let source_names = sf.body_names.clone();
     let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind))
@@ -4005,6 +4134,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             file_sha256: Some(read),
             configuration: configuration.map(|c| c.row),
             configuration_identity: configuration.and_then(|c| c.identity),
+            parameter_values: applied,
+            parameter_units: units,
             inherited,
             ..link.clone()
         },
@@ -4506,7 +4637,20 @@ fn relink_placement(
     let old_mesh_feature = link_mesh_feature(s, comp, link.feature).map(|(id, _)| id);
     let old_solid_bodies = linked_body_entries(s, link.feature);
     let old_mesh_bodies = old_mesh_feature.map(|id| linked_body_entries(s, id)).unwrap_or_default();
-    let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
+    // The placement takes the values its link passed with it: a design that takes them is
+    // driven as before, and one that can't is refused (nothing changes).
+    let made = insert_design(
+        s,
+        &json!({
+            "path": given,
+            "parent": parent,
+            "reuse": true,
+            "configuration": configuration.map(|c| c.row),
+            "parameters": link.parameters,
+            "by_name": link.parameters_by_name,
+            "keep": link.parameters_kept,
+        }),
+    )?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
     if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));
@@ -4809,34 +4953,51 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
         }
     }
 
+    // What each link passes to its design (`component.link_parameters`).
+    type Passed = (std::collections::BTreeMap<String, crate::schema::component_link::LinkedParameter>, bool, Vec<String>);
+    let mut passed: std::collections::HashMap<u64, Passed> =
+        s.doc.links.iter().map(|(c, l)| (*c, (parameters::listed(l), l.parameters_by_name, l.parameters_kept.iter().cloned().collect()))).collect();
+    let mut passed = |c: u64| passed.remove(&c).unwrap_or_default();
     let mut observations = Vec::new();
     let links: Vec<LinkInfo> = entries
         .into_iter()
         .map(|entry| match entry {
-            ListEntry::Empty { c, name, configuration } => LinkInfo::Looked {
-                component: c,
-                configuration,
-                importer: None,
-                name,
-                path: String::new(),
-                file: String::new(),
-                found: None,
-                changed: None,
-                state: None,
-                reason: None,
-            },
-            ListEntry::ImporterNotAllowed { c, name, configuration, importer, path, shown, reason } => LinkInfo::Looked {
-                component: c,
-                configuration,
-                importer,
-                name,
-                path,
-                file: shown,
-                found: None,
-                changed: None,
-                state: Some(LinkState::NotAllowed),
-                reason: Some(reason),
-            },
+            ListEntry::Empty { c, name, configuration } => {
+                let (parameters, parameters_by_name, parameters_kept) = passed(c);
+                LinkInfo::Looked {
+                    component: c,
+                    configuration,
+                    parameters,
+                    parameters_by_name,
+                    parameters_kept,
+                    importer: None,
+                    name,
+                    path: String::new(),
+                    file: String::new(),
+                    found: None,
+                    changed: None,
+                    state: None,
+                    reason: None,
+                }
+            }
+            ListEntry::ImporterNotAllowed { c, name, configuration, importer, path, shown, reason } => {
+                let (parameters, parameters_by_name, parameters_kept) = passed(c);
+                LinkInfo::Looked {
+                    component: c,
+                    configuration,
+                    parameters,
+                    parameters_by_name,
+                    parameters_kept,
+                    importer,
+                    name,
+                    path,
+                    file: shown,
+                    found: None,
+                    changed: None,
+                    state: Some(LinkState::NotAllowed),
+                    reason: Some(reason),
+                }
+            }
             ListEntry::Network { c, name, configuration, importer, path, shown, host } => LinkInfo::Network {
                 component: c,
                 configuration,
@@ -4878,7 +5039,22 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     Some((state, reason)) => (Some(state), Some(reason)),
                     None => (None, None),
                 };
-                LinkInfo::Looked { component: c, configuration, importer, name, path, file: shown, found, changed, state, reason }
+                let (parameters, parameters_by_name, parameters_kept) = passed(c);
+                LinkInfo::Looked {
+                    component: c,
+                    configuration,
+                    parameters,
+                    parameters_by_name,
+                    parameters_kept,
+                    importer,
+                    name,
+                    path,
+                    file: shown,
+                    found,
+                    changed,
+                    state,
+                    reason,
+                }
             }
         })
         .collect();

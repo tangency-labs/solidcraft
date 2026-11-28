@@ -4,8 +4,9 @@ use serde_json::{Value, json};
 use solidcraft_doc::DesignLink;
 
 use super::{
-    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, ExtractParams, ExtractResult, InsertDesignParams, InsertDesignResult, LinksParams,
-    LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignParametersParams, ExtractParams, ExtractResult, InsertDesignParams,
+    InsertDesignResult, LinkParametersParams, LinksParams, LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult,
+    UpdateLinksParams, UpdateLinksResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -18,13 +19,16 @@ fn schemas_and_the_key_check_agree() {
         &[
             "angle",
             "axis",
+            "by_name",
             "configuration",
             "document",
             "format",
+            "keep",
             "matrix",
             "name",
             "options",
             "origin",
+            "parameters",
             "parent",
             "path",
             "reuse",
@@ -37,6 +41,8 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "names", "occurrence", "path"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
+    assert_keys(input_schema_for::<LinkParametersParams>(), &["by_name", "component", "keep", "set", "update"]);
+    assert_keys(input_schema_for::<DesignParametersParams>(), &["component", "path"]);
     assert_keys(input_schema_for::<ExtractParams>(), &["component", "path"]);
     assert_keys(input_schema_for::<CopiesParams>(), &["component"]);
     assert_keys(input_schema_for::<ReplaceWithLinkParams>(), &["component", "components", "path", "with"]);

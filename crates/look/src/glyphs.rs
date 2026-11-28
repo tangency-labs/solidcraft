@@ -59,7 +59,7 @@ pub fn paint_glyph(ui: &Ui, c: Caption, maximized: bool, at: egui::Pos2, s: Stro
     }
 }
 
-/// [`Glyphs::badge`]: the `lock` or `pin` status badge in `r`.
+/// [`Glyphs::badge`]: the `lock`, `pin` or `link` status badge in `r`.
 pub fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
     let s = Stroke::new(1.3, c);
     match name {
@@ -83,6 +83,15 @@ pub fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
             let head = pos2(r.center().x + 2.0, r.top() + 4.0);
             p.circle_filled(head, 3.2, c);
             p.line_segment([head, pos2(r.left() + 1.5, r.bottom() - 1.0)], Stroke::new(1.6, c));
+        }
+        // Two links of a chain, side by side and overlapping: a linked component that takes
+        // values from its design.
+        "link" => {
+            let (cy, cx) = (r.center().y, r.center().x);
+            let left = Rect::from_min_max(pos2(r.left() + 0.5, cy - 2.5), pos2(cx + 1.5, cy + 2.5));
+            let right = Rect::from_min_max(pos2(cx - 1.5, cy - 2.5), pos2(r.right() - 0.5, cy + 2.5));
+            p.rect_stroke(left, 2.5, s, egui::StrokeKind::Middle);
+            p.rect_stroke(right, 2.5, s, egui::StrokeKind::Middle);
         }
         _ => {}
     }

@@ -814,6 +814,8 @@ fn run_package(
         session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
         if changed_by(session, &host.session) {
             session.accept_computed(host.session)?;
+            // A design the plugin opened is not driven afterwards with the caller's authority.
+            crate::cmd::mark_links_reconciled(session);
         } else {
             session.plugin_state.link_changes = host.session.plugin_state.link_changes;
             std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
@@ -1084,9 +1086,23 @@ impl PluginHost for SolidCraftHost {
         let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
-        // Even implicit font and linked-design reads have no authority from a command grant.
+        // Even implicit font and linked-design reads have no authority from a command grant. The
+        // linked designs an edit drives are read from the folders the user let this plugin read,
+        // and only those (`cmd::reading_links_in`), and they follow the edit here
+        // (`Session::follow_links`): the command runs inside `plugin.run`, whose own follow-up
+        // would read them with the caller's authority.
+        let undoable = crate::find_command(name).is_some_and(|c| c.undoable);
+        let reads = &self.file_read_folders;
         let ui_caller = s.plugin_state.ui_caller.clone();
-        let reply = solidcraft_io::vfs::scoped(Some(scope), || s.execute(name, params));
+        let reply = solidcraft_io::vfs::scoped(Some(scope), || {
+            crate::cmd::reading_links_in(reads, || {
+                let mut reply = s.execute(name, params)?;
+                if undoable && !std::sync::Arc::ptr_eq(&before, &s.doc) {
+                    s.follow_links(&mut reply)?;
+                }
+                Ok::<Value, crate::EngineError>(reply)
+            })
+        });
         // Replacing the design clears ambient callers. This component still owns its
         // active transaction and may populate its panels for the newly opened design.
         s.plugin_state.ui_caller = ui_caller;

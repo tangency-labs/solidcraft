@@ -363,6 +363,7 @@ impl Harness {
         // its placement window opens: wait for it (as a person would).
         let began = std::time::Instant::now();
         while (!self.app.file_load.idle()
+            || self.app.link_parameters_reading.is_some()
             || self.app.saving.is_some()
             || self.app.insert_read.is_some()
             || crate::open_meshing::active(&self.app)

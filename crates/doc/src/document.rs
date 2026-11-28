@@ -5053,6 +5053,31 @@ pub struct DesignLink {
     /// before it was kept have none and are taken as up to date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_sha256: Option<String>,
+    /// User parameters of the linked design that this design sets, by name: each an expression
+    /// over this design's parameters (`component.link_parameters`). The linked bodies are the
+    /// design's with these values, worked out again when one of the expressions changes value.
+    /// Empty: the design's own values.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub parameters: std::collections::BTreeMap<String, String>,
+    /// Also set every user parameter of the linked design that has the name of one of this
+    /// design's user parameters to that parameter (one of [`Self::parameters`] wins over it).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parameters_by_name: bool,
+    /// User parameters of the linked design that keep their own value although this design has
+    /// one with the same name: [`Self::parameters_by_name`] leaves them out. A name in
+    /// [`Self::parameters`] is never kept.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub parameters_kept: std::collections::BTreeSet<String>,
+    /// The value each of [`Self::parameters`] last gave the linked design, as text in that
+    /// parameter's own unit (`157 mm`, `30 deg`): the linked bodies are the design's with these.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub parameter_values: std::collections::BTreeMap<String, String>,
+    /// The linked design's number user parameters, by name, with each one's unit, as this design
+    /// last read them with the file it took bodies from: what a link that sets parameters by name
+    /// matches this design's parameters against, so a match is found (and the link keeps its
+    /// bodies, saying why) even when the file is gone or has changed since.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub parameter_units: std::collections::BTreeMap<String, String>,
     /// The importer that read the source, when it is an importer (a plugin's or another built-in
     /// reader) and not Insert Design's own reader or the STEP reader `step_names` marks. Update
     /// Links asks the same importer to read the file again. Absent for designs and STEP sources.
@@ -6710,6 +6735,12 @@ impl Document {
         }
         for p in &self.params {
             used.extend(expr::references(&p.expr));
+        }
+        // What a link passes to its design by expression (`width = d1`).
+        for link in self.links.values() {
+            for e in link.parameters.values() {
+                used.extend(expr::references(e));
+            }
         }
         used
     }

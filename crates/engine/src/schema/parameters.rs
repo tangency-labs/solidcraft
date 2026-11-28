@@ -545,6 +545,14 @@ pub struct ParamRename {
 pub struct ParamChanged {
     #[serde(flatten)]
     pub body: ParamChangedBody,
+    /// The linked components whose bodies were worked out again because a parameter their
+    /// link sets changed value (`component.link_parameters`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked: Vec<String>,
+    /// Linked components that kept their bodies, and why (their file is gone, or changed since
+    /// the last Update Links).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link_warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -764,6 +772,8 @@ pub enum ParameterUser {
     Canvas { canvas: u64, name: String, input: String },
     /// An occurrence moved by an expression (`input` names the axis, e.g. `translate y`).
     Occurrence { occurrence: u64, name: String, input: String },
+    /// The expression a linked component gives its design's parameter `parameter`.
+    Link { component: u64, name: String, parameter: String },
 }
 
 impl From<ParamUser> for ParameterUser {
@@ -778,6 +788,7 @@ impl From<ParamUser> for ParameterUser {
             ParamUser::Rule { kind, name, field } => ParameterUser::Rule { kind, name, field },
             ParamUser::Canvas { canvas, name, input } => ParameterUser::Canvas { canvas, name, input },
             ParamUser::Occurrence { occurrence, name, input } => ParameterUser::Occurrence { occurrence, name, input },
+            ParamUser::Link { component, name, parameter } => ParameterUser::Link { component, name, parameter },
         }
     }
 }

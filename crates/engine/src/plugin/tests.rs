@@ -1468,6 +1468,157 @@ mod native {
         assert!(f.run(&mut s).is_err());
         assert_eq!(s.doc.to_json(), before);
     }
+    /// A component whose entry runs `calls` (each a command id and its JSON arguments) in order,
+    /// built from the shared fixture.
+    fn commands_component(calls: &[(&str, String)]) -> Vec<u8> {
+        let template = component_template();
+        let (code, data) = ("      call $box\n      call $box\n", r#"(data (;2;) (i32.const 2048) "file.export")"#);
+        assert!(template.contains(code) && template.contains(data));
+        // Each command's id and arguments in their own slots of the core module's memory, below
+        // its heap (4096).
+        assert!(calls.len() <= 4 && calls.iter().all(|(id, args)| id.len() <= 64 && args.len() <= 448));
+        let quoted = |s: &str| s.replace('\\', "\\5c").replace('"', "\\22");
+        let (mut run, mut strings) = (String::new(), String::new());
+        for (i, (id, args)) in calls.iter().enumerate() {
+            let (at_id, at_args) = (2048 + i * 512, 2048 + i * 512 + 64);
+            run.push_str(&format!(
+                "      i32.const {at_id} i32.const {} i32.const {at_args} i32.const {} i32.const 0 call $run\n",
+                id.len(),
+                args.len()
+            ));
+            strings.push_str(&format!(r#"(data (i32.const {at_id}) "{}") (data (i32.const {at_args}) "{}") "#, quoted(id), quoted(args)));
+        }
+        wat::parse_str(template.replacen(code, &run, 1).replacen(data, &strings, 1)).unwrap()
+    }
+    /// A plugin's edit of several steps drives the linked designs it changes, reading them only
+    /// from the folders the user let the plugin read: with that grant the plate follows the
+    /// post's last height in the plugin's one undo step; without it the plate keeps its bodies,
+    /// and `plugin.run`'s own follow-up never reads it with the caller's authority (review of PR
+    /// #1: a real component, where the test before it imitated `plugin.run`'s nesting).
+    #[test]
+    fn a_plugin_edit_drives_linked_designs_only_from_the_folders_it_may_read() {
+        let f = Fixture::new("call $box");
+        let designs = f.0.join("designs");
+        std::fs::create_dir_all(&designs).unwrap();
+        let part = designs.join("plate.sc");
+        let mut plate = Session::default();
+        plate.execute("parameters.add", &json!({"name":"h","expression":"5 mm"})).unwrap();
+        plate.execute("solid.box", &json!({"length":10,"width":20,"height":"h","body_name":"Plate"})).unwrap();
+        plate.execute("file.save", &json!({"path":part})).unwrap();
+        // A post whose height the plate's `h` follows.
+        let linking = || {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":10,"width":10,"height":12,"corner":[50,0,0],"body_name":"Post"})).unwrap();
+            let post = s.doc.features[0].id;
+            let height = s.doc.features[0].param_names[2].clone();
+            s.execute("component.insert_design", &json!({"path":part,"name":"Plate","parameters":{"h":height}})).unwrap();
+            (s, post)
+        };
+        let post = linking().1;
+        // The component sets the post's height to 7, then to 9: two commands in one run.
+        let edit = |h: u32| format!(r#"{{"feature":{post},"set":{{"height":{h}}}}}"#);
+        let component = commands_component(&[("timeline.edit", edit(7)), ("timeline.edit", edit(9))]);
+        std::fs::write(f.0.join("sample/plugin.wasm"), component).unwrap();
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["timeline.edit"]);
+        m["runtime"]["limits"]["deadline_ms"] = json!(30_000);
+        m["runtime"]["permissions"] = json!({"files":[{"name":"designs","read":true,"write":false}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let approval = read_package(&f.path()).unwrap().approval;
+        let volumes = |s: &Session| {
+            let feature = s.doc.links.values().next().unwrap().feature;
+            let bodies = &s.world_state().unwrap().bodies;
+            let volume = |linked: bool| -> f64 {
+                bodies.iter().filter(|b| (b.feature == feature) == linked).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum()
+            };
+            (volume(false).round(), volume(true).round())
+        };
+        for granted in [false, true] {
+            let (mut s, _) = linking();
+            if granted {
+                s.plugin_state.file_grants.push(FileGrant { name: "designs".into(), folder: designs.clone(), read: true, write: false });
+                let folders = s.plugin_state.file_grants.clone();
+                s.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some(approval.clone()), folders, ..Default::default() });
+            }
+            assert_eq!(volumes(&s), (1200.0, 2400.0));
+            let undo = s.undo.len();
+            let reply = f.run(&mut s).unwrap();
+            if granted {
+                assert_eq!(volumes(&s), (900.0, 1800.0), "the plate follows the post's last height: {reply}");
+                assert_eq!(s.doc.links.values().next().unwrap().parameter_values.get("h").map(String::as_str), Some("9 mm"));
+            } else {
+                assert_eq!(volumes(&s), (900.0, 2400.0), "the plate is never read: it keeps its bodies: {reply}");
+                assert!(reply.to_string().contains("Plate keeps its bodies"), "the run says so: {reply}");
+            }
+            assert_eq!(s.undo.len(), undo + 1, "granted={granted}: one undo step");
+            s.execute("edit.undo", &json!({})).unwrap();
+            assert_eq!(volumes(&s), (1200.0, 2400.0), "granted={granted}: one undo takes the plugin's edit and the drive back");
+            assert_eq!(solidcraft_io::vfs::current_scope(), None);
+        }
+    }
+    /// A design a plugin opens whose link wants other values than it was saved with (its file was
+    /// gone when they changed) is not driven once the plugin is done: `plugin.run`'s follow-up
+    /// would read the linked file, outside the plugin's grants, with the caller's authority
+    /// (review of PR #1, loop 2: `doc.open` is not undoable, so the plugin's own scope never
+    /// followed it). The design keeps the bodies it was saved with until an edit of the caller's
+    /// changes what its link is passed.
+    #[test]
+    fn a_design_a_plugin_opens_is_not_driven_with_the_callers_authority() {
+        let f = Fixture::new("call $box");
+        let (designs, private) = (f.0.join("designs"), f.0.join("private"));
+        std::fs::create_dir_all(&designs).unwrap();
+        std::fs::create_dir_all(&private).unwrap();
+        let part = private.join("plate.sc");
+        let mut plate = Session::default();
+        plate.execute("parameters.add", &json!({"name":"h","expression":"5 mm"})).unwrap();
+        plate.execute("solid.box", &json!({"length":10,"width":20,"height":"h","body_name":"Plate"})).unwrap();
+        plate.execute("file.save", &json!({"path":part})).unwrap();
+        let design = designs.join("assembly.sc");
+        let mut assembly = Session::default();
+        assembly.execute("parameters.add", &json!({"name":"t","expression":"5 mm"})).unwrap();
+        assembly.execute("component.insert_design", &json!({"path":part,"name":"Plate","parameters":{"h":"t"}})).unwrap();
+        // `t` changes while the plate's file is away: the link keeps its 5 mm bodies.
+        std::fs::rename(&part, private.join("away.sc")).unwrap();
+        assembly.execute("parameters.change", &json!({"name":"t","expression":"8 mm"})).unwrap();
+        assembly.execute("file.save", &json!({"path":design})).unwrap();
+        std::fs::rename(private.join("away.sc"), &part).unwrap();
+
+        std::fs::write(f.0.join("sample/plugin.wasm"), commands_component(&[("doc.open", json!({"path":design}).to_string())])).unwrap();
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["doc.open"]);
+        m["runtime"]["limits"]["deadline_ms"] = json!(30_000);
+        m["runtime"]["permissions"] = json!({"command_groups":["doc"],"files":[{"name":"designs","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.file_grants.push(FileGrant { name: "designs".into(), folder: designs.clone(), read: true, write: true });
+        let grants = Grants {
+            package_hash: Some(read_package(&f.path()).unwrap().approval),
+            command_groups: BTreeSet::from(["doc".to_string()]),
+            folders: s.plugin_state.file_grants.clone(),
+            ..Default::default()
+        };
+        s.plugin_state.grants.insert("sample".into(), grants);
+        let plate_of = |s: &Session| {
+            let link = s.doc.links.values().next().unwrap();
+            let volume: f64 = s
+                .world_state()
+                .unwrap()
+                .bodies
+                .iter()
+                .filter(|b| b.feature == link.feature)
+                .map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume)
+                .sum();
+            (volume.round(), link.parameter_values.get("h").cloned())
+        };
+        let reply = f.run(&mut s).unwrap();
+        assert_eq!(s.doc.links.len(), 1, "the plugin opened the design: {reply}");
+        assert_eq!(plate_of(&s), (1000.0, Some("5 mm".to_string())), "the plate is not read after the plugin: {reply}");
+        // The caller's own edit of what the link is passed drives it, with the caller's authority.
+        s.execute("parameters.change", &json!({"name":"t","expression":"9 mm"})).unwrap();
+        assert_eq!(plate_of(&s), (1800.0, Some("9 mm".to_string())));
+        assert_eq!(solidcraft_io::vfs::current_scope(), None);
+    }
+
     #[test]
     fn approved_fuel_runs_without_changing_other_plugins_default_limit() {
         let f = Fixture::new("call $box");

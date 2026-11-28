@@ -496,6 +496,25 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
                     .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
                     .min(solidcraft_theme::Tokens::get().form_card_width);
+                // What the links pass to their designs, and what the last edit could not pass: above the
+                // table, which takes the rest of the window.
+                // (a component's name may hold letters beyond ASCII: both sides fold the same way)
+                let wanted = d.filter.to_lowercase();
+                let passed: Vec<String> = crate::link_parameters_dialog::passed(app)
+                    .into_iter()
+                    .filter(|l| wanted.is_empty() || l.to_lowercase().contains(&wanted))
+                    .collect();
+                let refused = app.link_warnings.clone();
+                if !passed.is_empty() || !refused.is_empty() {
+                    ui_kit::section_count(ui, "linked", solidcraft_ui_text::tr("ui.link_parameters.passed"), true, Some(passed.len()), |ui| {
+                        for line in &passed {
+                            ui_kit::text(ui, line, ui_kit::Text::MonoNote("link_passed"));
+                        }
+                        for why in &refused {
+                            ui_kit::text(ui, why, ui_kit::Text::Error("link_refused"));
+                        }
+                    });
+                }
                 let mut sections = sections(&visible, d.sort);
                 redesign::follow_selection(app, &mut d, &mut sections);
                 table(app, ui, &mut d, &sections, name_floor, &all);

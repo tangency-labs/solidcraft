@@ -19,7 +19,11 @@ JSON data rather than app-specific WIT types. Both crates are Shared crates;
 `cargo xtask layers` forbids direct and indirect SolidCraft dependencies.
 
 SolidCraft's adapter lives in `crates/engine` and uses the same command surface
-as MCP. Entries appear as `plugin_id.function`; `plugin.list` and
+as MCP. A plugin's edit that changes what a linked design is passed (`component.link_parameters`)
+drives that design within the same undo step, reading it only from the folders the user let the
+plugin read; outside them the link keeps its bodies and the run's reply says so. A design the plugin
+opens keeps the bodies it was saved with: the run never drives its links afterwards with the caller's
+authority, and a later edit that changes what a link is passed drives it as usual. Entries appear as `plugin_id.function`; `plugin.list` and
 `engine.describe` expose their declared inputs. Selection and target inputs
 are lists. Entries may declare named menu or ribbon slots; each app decides
 which slots exist and draws forms from the input schemas. Plugins ship no UI
