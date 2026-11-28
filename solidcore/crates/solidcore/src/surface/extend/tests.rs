@@ -1074,6 +1074,84 @@ fn ruled_on_a_polynomial_row_is_the_elevated_tangent_line() {
     assert!(((end.x - 1.0) * n - d).abs() < 1e-8, "{end:?}");
 }
 
+/// #13714's sheet (goldens `offset.offset_executive_p1` / `extend_bilinear_huge`), about 1
+/// across, stored rational with every weight 1 as the goldens harness builds it and stored
+/// polynomial, extended Ruled by the case's `5e8` on every side as the offset executive
+/// extends a face's surface (keeping its parameters). Every side extends, the result is the
+/// bilinear closed form over the new domain, and each side's reach at the face's middle is
+/// the distance asked (its isos are straight); neither check uses the extension's own
+/// measure. The points' rounding is bounded coordinate by coordinate, and a leg coordinate
+/// computed exactly (`x` along a v row, equal weights) is no larger than it is. Bounded at
+/// the largest coordinate's size instead, the sides extended after the first two were
+/// bounded by the grown net's size (`3e16` at its corners) times `p e / h`: the polynomial
+/// sheet was refused `NotExact` naming `2.5e8`, the rational one naming `61035`.
+#[test]
+fn a_huge_sheet_extends_ruled_on_every_side_rational_or_not() {
+    let p = [
+        [0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0625],
+        [1.0, 1.0, 0.1875],
+    ];
+    let closed = |u: f64, v: f64| {
+        let w = [(1.0 - u) * (1.0 - v), (1.0 - u) * v, u * (1.0 - v), u * v];
+        let c = |i: usize| w.iter().zip(&p).map(|(w, q)| w * q[i]).sum::<f64>();
+        Vec3::new(c(0), c(1), c(2))
+    };
+    let d = 5e8;
+    for rational in [false, true] {
+        let s = spline(
+            &[
+                vec![
+                    [p[0][0], p[0][1], p[0][2], 1.0],
+                    [p[1][0], p[1][1], p[1][2], 1.0],
+                ],
+                vec![
+                    [p[2][0], p[2][1], p[2][2], 1.0],
+                    [p[3][0], p[3][1], p[3][2], 1.0],
+                ],
+            ],
+            1,
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+            &[0.0, 0.0, 1.0, 1.0],
+            rational,
+        );
+        let e = s
+            .extended_sides_keeping_parameters(&k(), &BoxSide::ALL, Continuity::Ruled, d)
+            .unwrap_or_else(|e| panic!("rational {rational}: {e:?}"));
+        assert!(
+            e.sides
+                .iter()
+                .all(|s| matches!(s, SideExtension::Extended(_))),
+            "rational {rational}: {:?}",
+            e.sides
+        );
+        let nd = dom(&e.surface);
+        for (a, b) in [(0.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.5, 0.5), (0.03, 0.97)] {
+            let uv = nd.evaluate(a, b);
+            let got = e.surface.evaluate_point(&k(), uv).unwrap();
+            let want = closed(uv.x, uv.y);
+            assert!(
+                got.distance(want) <= 1e-12 * want.length().max(1.0),
+                "rational {rational} {uv:?}: {got:?} vs {want:?}"
+            );
+        }
+        let across = [
+            closed(nd.min().x, 0.5).distance(closed(0.0, 0.5)),
+            closed(nd.max().x, 0.5).distance(closed(1.0, 0.5)),
+            closed(0.5, nd.min().y).distance(closed(0.5, 0.0)),
+            closed(0.5, nd.max().y).distance(closed(0.5, 1.0)),
+        ];
+        for l in across {
+            assert!(
+                (l - d).abs() <= 1e-9 * d,
+                "rational {rational}: across {l} vs {d}"
+            );
+        }
+    }
+}
+
 #[test]
 fn ruled_with_end_weight_ratios_that_differ_is_c1_straight_and_reaches_any_distance() {
     // a rational row pair whose last two weights differ in ratio (1 and 2 on the two rows):
