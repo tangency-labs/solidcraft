@@ -1147,6 +1147,31 @@ fn semantic_click(h: &mut Harness, owners: &[ContentOwner], at: Pos2, modifiers:
 }
 
 #[test]
+fn named_standard_views_pick_origin_planes_for_create_sketch() {
+    for (label, plane) in [("Top", "XY"), ("Front", "XZ"), ("Right", "YZ")] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.set_origin_shown(false);
+        h.app.tree.expanded.insert("namedviews".into());
+        h.app.start("sketch.create");
+        h.frames(4);
+        let at = semantic_at(ContentOwner::BROWSER, label);
+        h.step(&json!({"click":[at.x, at.y]})).unwrap();
+        h.frames(4);
+        if let Some(d) = &h.app.dialog {
+            assert_eq!(d.inputs[0].items, [Sel::Plane { name: plane.into() }]);
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(4);
+        }
+        assert!(h.app.session.active_sketch.is_some(), "{label} did not start a sketch");
+        let feature = h.app.session.doc.features.last().unwrap();
+        let saved = serde_json::to_value(&feature.kind).unwrap();
+        // The sketch must use the origin plane, rather than merely changing the camera.
+        assert!(saved.to_string().contains(&format!("{plane:?}")), "{saved}");
+    }
+}
+
+#[test]
 fn history_bodies_and_origin_work_with_browser_hidden() {
     let mut h = Harness::new();
     three_bodies(&mut h);
