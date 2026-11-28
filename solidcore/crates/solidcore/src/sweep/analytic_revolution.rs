@@ -209,9 +209,18 @@ fn same_boundary(expected: &[(f64, bool)], actual: &[(f64, bool)]) -> bool {
 }
 
 /// The unit direction from the axis to `point`, `None` within `tol` of the axis.
+///
+/// `axis` is a unit vector. The offset from the foot of `point` on the axis keeps what
+/// along the axis the foot's rounding leaves (tangency-labs/solidcore#3389): about `1e-16`
+/// of the base's and the point's size, which near the axis is a large part of the offset
+/// (`4e-13` of a `1.1e-3` offset at coordinates near 5). The surface's `x` then leans
+/// along the axis, its frame leans off the turn, and the circle a pole sweeps is written
+/// off its own plane, so the solid's record is refused. The offset is taken square to the
+/// axis before it is measured.
 fn radial(base_pt: Point3, axis: Vec3, point: Point3, tol: f64) -> Option<Vec3> {
     let foot = base_pt + axis * line_closest_point(base_pt, axis, point);
     let offset = point - foot;
+    let offset = offset - axis * offset.dot(axis);
     let length = offset.length();
     (length > tol).then(|| offset / length)
 }
@@ -1040,6 +1049,25 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// tangency-labs/solidcore#3389: a point 1.1e-3 off an axis at 30 degrees to x, at
+    /// coordinates near 5, gives a radial direction square to the axis, not one leaning
+    /// 4e-13 along it.
+    #[test]
+    fn the_radial_direction_of_a_point_near_a_slanted_axis_is_square_to_it() {
+        let axis = Vec3::new(0.8660254037844387, 0.5, 0.0).unitize().unwrap();
+        let near = Point3::new(4.330677018922193, 2.499047372055837, 0.0);
+        let far = Point3::new(-0.7, 1.3, 2.9);
+        for point in [near, far, near + Vec3::new(0.0, 0.0, 1e-3)] {
+            let x = radial(Vec3::ZERO, axis, point, 1e-6).unwrap();
+            assert!(
+                x.dot(axis).abs() <= f64::EPSILON,
+                "{point:?}: {:e}",
+                x.dot(axis)
+            );
+            assert!((x.length() - 1.0).abs() <= f64::EPSILON, "{point:?}: {x:?}");
         }
     }
 }

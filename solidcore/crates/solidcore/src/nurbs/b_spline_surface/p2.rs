@@ -77,6 +77,14 @@
 //!   its flag was retired): four arcs of one centre and radius that close a loop get
 //!   their whole sphere, where upstream refuses anything but three ("only works for 3
 //!   now").
+//! - **Sweep circle frames** (WR-22730, tangency-labs/solidcore#3389).
+//!   `CreateSurfOfRevolution` takes a control point's sweep radius vector as the point less
+//!   its foot `origin + t axis`, which keeps what along the axis the foot's rounding leaves:
+//!   about `1e-16` of the distance from `origin`, a large part of the radius for a point
+//!   near the axis and far from `origin` (`4e-13` of a `1.1e-3` radius `5` from it). The
+//!   circle's frame then leans off the axis and its control points leave the plane of the
+//!   turn. The port takes the vector square to the axis before measuring it; where the
+//!   foot leaves nothing along the axis the surface is unchanged bit for bit.
 //! - **Edit notifications.** `SetCanonical`'s `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`
 //!   (`this`, `SM_NO_GET_OWNER(this)` = null) need the wrapping [`Surface`]'s identity,
 //!   so the B-spline sends them through a caller hook
@@ -1130,6 +1138,8 @@ impl BSplineSurface {
             let t = x_vec.dot(axis_dir);
             let center = origin + t * axis_dir;
             x_vec = pnt - center;
+            // Not upstream (WR-22730): square to the axis, see the module notes
+            x_vec -= axis_dir * x_vec.dot(axis_dir);
             let radius = x_vec.length();
 
             // when radius is zero - make all controlPoints for this sweep circle the same
@@ -2559,6 +2569,51 @@ mod tests {
                 && e.upstream_status() == Some(1006)
                 && e.nurbs_failure() == Some(&NurbsFailure::BSpline(BSplineFailure::NoNurbsForm))
         ));
+    }
+
+    /// WR-22730 (tangency-labs/solidcore#3389): a line `1.1e-3` off an axis at 30 degrees
+    /// to x whose base point is `5` away along it sweeps circles whose control points stay
+    /// square to the axis, where the foot's rounding tilted them by `4e-13`.
+    #[test]
+    fn revolution_near_a_slanted_axis_far_from_its_base_stays_square_to_it() {
+        let axis = Vec3::new(0.8660254037844387, 0.5, 0.0);
+        // the revolve of tangency-labs/solidcore#3389: the base point is 5 along the axis
+        let base = Point3::new(4.330127018922194, 2.5, 0.0);
+        let start = Point3::new(5.499999999987182e-4, -9.526279441618435e-4, 0.0);
+        let line = BSplineCurve::create_line_segment(3, start, start + Vec3::new(0.0, 0.0, 1.0))
+            .expect("line");
+        let s = BSplineSurface::create_surf_of_revolution(
+            &Kernel::default(),
+            &line,
+            base,
+            axis,
+            360.0,
+            false,
+            None,
+        )
+        .expect("rev");
+        // the sweep circles run along u (degree 2), one for each generator control point
+        assert_eq!(s.degree(SurfParamType::U), 2);
+        let (nu, nv, _) = s.control_points().expect("control points");
+        let point = |i, j| {
+            s.control_point(ControlPointForm::EuclideanRational, i, j)
+                .expect("cp")
+                .0
+        };
+        for j in 0..nv {
+            let first = point(0, j);
+            for i in 1..nu {
+                let p = point(i, j);
+                let off = (p - first).dot(axis);
+                let size = (p - Point3::ZERO)
+                    .length()
+                    .max((first - Point3::ZERO).length());
+                assert!(
+                    off.abs() <= 4.0 * f64::EPSILON * size,
+                    "circle {j} point {i}: {off:e}"
+                );
+            }
+        }
     }
 
     #[test]
