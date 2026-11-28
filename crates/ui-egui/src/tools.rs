@@ -101,6 +101,9 @@ pub struct Tool {
     pub hover: Option<(Vec2, Option<String>)>,
     /// Picked entity ids.
     pub picks: Vec<String>,
+    /// Whether dropping the picks whose curve is gone (the Undo button) emptied the pick list and
+    /// nothing was picked since: a right-click on the view then keeps the tool on.
+    pub picks_dropped: bool,
     /// Horizontal/Vertical point references, or the Dimension tool's midpoint snaps.
     pub point_picks: Vec<Value>,
     /// Inline dimension boxes for the shape being drawn, the point count they were made for,
@@ -133,6 +136,10 @@ pub struct Tool {
     /// has Radius and Sweep boxes and a centre cross. Kept in step with the preference while the
     /// tool runs; off, the tool shows only the pointer's coordinates, as before.
     pub arc_modes: bool,
+    /// The 2-Point and Center Rectangle draw a rectangle that can be turned (#21467): its sides
+    /// held parallel and perpendicular with only the bottom one horizontal. Set with the tool's own
+    /// Fixed/Can turn switch; a rectangle tool starts at the choice last made.
+    pub rotatable: bool,
     /// True when the constraint/dimension tool was entered from a valid preselection: once that
     /// single operation commits, the tool unselects itself (`app.tool = None`).
     pub preselected: bool,
@@ -187,6 +194,7 @@ impl Tool {
             pts: Vec::new(),
             hover: None,
             picks: Vec::new(),
+            picks_dropped: false,
             point_picks: Vec::new(),
             dims: Vec::new(),
             dim_history: Vec::new(),
@@ -198,6 +206,7 @@ impl Tool {
             line_type: 3,
             classic: false,
             arc_modes: false,
+            rotatable: crate::sketch_dims::last_rectangle_rotatable(),
             preselected: false,
             finished: false,
         })
@@ -266,11 +275,13 @@ fn snap_stands(app: &SolveApp, id: &str, at: Vec2) -> Option<bool> {
     Some(crate::sketch_line_arc::chain_point(&ss.sketch, id, at).is_some())
 }
 
-/// A stored click as a shape sends it: a snap whose point or curve the Undo button took away
+/// A stored click as a tool sends it: a snap whose point or curve the Undo button took away
 /// after the click (it leaves the tool on) goes as the place clicked, so the command does not
-/// refuse click after click (#21835), as the Line's chain re-checks its point (#10016). It is
-/// checked when the shape is sent, so a Redo that brings the curve back brings the snap back.
-fn standing(app: &SolveApp, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
+/// refuse click after click (#21835, #22766), as the Line's chain re-checks its point (#10016).
+/// The shapes and the point-by-point tools send their clicks through it; Tangent Arc and Blend
+/// Curve, which need the point itself, use it to see that a stored click went stale. It is
+/// checked when the clicks are sent, so a Redo that brings the curve back brings the snap back.
+pub(crate) fn standing(app: &SolveApp, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
     match &p.1 {
         Some(id) if snap_stands(app, id, p.0) == Some(false) => (p.0, None),
         _ => p.clone(),
@@ -940,8 +951,12 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
     let params = match t.cmd {
         // A corner or centre clicked on a curve, a midpoint or a crossing stays there, as a
         // line's end does (#18756).
-        "sketch.rectangle.two_point" => json!({"p0": held(app, &p[0]), "p1": held(app, &p[1])}),
-        "sketch.rectangle.center" => json!({"center": held(app, &p[0]), "corner": held(app, &p[1])}),
+        "sketch.rectangle.two_point" => {
+            json!({"p0": held(app, &p[0]), "p1": held(app, &p[1]), "rotatable": t.rotatable})
+        }
+        "sketch.rectangle.center" => {
+            json!({"center": held(app, &p[0]), "corner": held(app, &p[1]), "rotatable": t.rotatable})
+        }
         "sketch.rectangle.rounded" => {
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "radius": crate::sketch_dims::rounded_radius_value(app, t, p[0].0, p[1].0)})
         }

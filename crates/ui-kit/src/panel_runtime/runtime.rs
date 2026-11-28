@@ -49,7 +49,7 @@ impl ContentOwner {
     pub fn validate(&self) -> PanelResult<()> {
         match self {
             Self::Application => Ok(()),
-            Self::Workspace(id) => valid_id(&id.0),
+            Self::Workspace(id) => valid_workspace_id(&id.0),
             Self::Document(id) => valid_id(&id.0),
             Self::Window(id) => valid_id(&id.0),
         }
@@ -67,7 +67,7 @@ pub struct RuntimeEnvironment {
 }
 impl RuntimeEnvironment {
     pub fn validate(&self) -> PanelResult<()> {
-        valid_id(&self.workspace.0)?;
+        valid_workspace_id(&self.workspace.0)?;
         valid_id(&self.window.0)?;
         valid_id(&self.viewport.0)?;
         if let Some(doc) = &self.document {

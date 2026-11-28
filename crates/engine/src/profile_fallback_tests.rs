@@ -329,3 +329,49 @@ fn twin_regions_picked_by_index_follow_a_change_of_the_regions() {
     let built = volume(&twin_regions("3.45 mm", &TWIN_PICKS[1..]));
     assert!((changed - built).abs() < 1e-3, "{changed} after the change, {built} built so (before {before})");
 }
+
+/// A fixed circle `c1` (radius 10) cut in half by a fixed line `l1`, and a circle `c2` of radius
+/// `r2` with its centre fixed at (3, 10). On r2 = 2 mm `c2` cuts `c1` but not `l1`: only the right
+/// half touches it, so the curves around the right half (`c1`, `l1`, `c2`) name it alone.
+fn half_and_bite(r2: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "r2", "expression": r2}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "s"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "c1", "fixed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -15], [0, 15]]}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "l1", "fixed": true}));
+    run(&mut s, "sketch.circle.center", json!({"center": [3, 10], "radius": 2}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c2"], "type": "diameter", "value": "2*r2"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "c2.center", "fixed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// #23291: the right half, picked by a point or by its index, is saved by its curves and the side
+/// of each it lies on. On r2 = 4 mm `c2` crosses `l1` too, so both halves are bounded by `c1`,
+/// `l1` and `c2`; the extrude still builds the right half (the one right of `l1`), as an extrude
+/// made on 4 mm does, where it failed with "2 profiles of s are bounded by exactly the curves".
+#[test]
+fn a_region_a_change_makes_a_twin_of_another_keeps_building() {
+    let built = {
+        let mut s = half_and_bite("4 mm");
+        run(&mut s, "solid.extrude", json!({"sketch": "s", "profiles": [{"point": [5, 0]}], "distance": 2, "name": "E"}));
+        volume(&s)
+    };
+    for by_index in [false, true] {
+        let mut s = half_and_bite("2 mm");
+        let profiles = if by_index { json!(indices_at(&s, &[[5.0, 0.0]])) } else { json!([{"point": [5, 0]}]) };
+        run(&mut s, "solid.extrude", json!({"sketch": "s", "profiles": profiles, "distance": 2, "name": "E"}));
+        assert_eq!(result(&s, "E").0, None);
+        let saved = serde_json::to_value(&s.doc.find_feature("E").unwrap().kind).unwrap().to_string();
+        assert!(saved.contains("\"curves\"") && saved.contains("\"sides\""), "saved by its curves and their sides: {saved}");
+        assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc, "the saved pick reopens");
+        let before = volume(&s);
+        run(&mut s, "parameters.change", json!({"name": "r2", "expression": "4 mm"}));
+        assert_eq!(result(&s, "E").0, None, "by index: {by_index}");
+        let changed = volume(&s);
+        assert!((changed - built).abs() < 1e-3, "by index: {by_index}: {changed} after the change, {built} built so (before {before})");
+        assert!(changed < before, "the bite grew into the right half: {before} to {changed}");
+    }
+}

@@ -203,13 +203,28 @@ impl Writer {
 
     /// The bytes `entries` more optional parts may hold together ([`Writer::room`]).
     pub fn space(&self, entries: usize, budget: usize) -> usize {
+        self.file_space(entries, budget).min(self.expanded_space(entries))
+    }
+
+    /// The compressed bytes `entries` more optional parts may add and still keep the container
+    /// file within `budget` (#18815).
+    pub fn file_space(&self, entries: usize, budget: usize) -> usize {
         if self.names.len().saturating_add(entries) > self.limits.max_entries {
             return 0;
         }
         // The bytes written so far, plus what the open compressed part may still hold back.
         let written = self.zip.get_ref().map_or(usize::MAX, |c| c.get_ref().len()).saturating_add(1 << 20);
         let directory = self.names.len().saturating_add(entries).saturating_mul(256).saturating_add(65_536);
-        budget.saturating_sub(written.saturating_add(directory)).min((self.open_expanded_limit)().saturating_sub(self.expanded))
+        budget.saturating_sub(written.saturating_add(directory))
+    }
+
+    /// The uncompressed bytes `entries` more optional parts may add and still keep the container's
+    /// expanded contents within the reader's opening budget (#18815).
+    pub fn expanded_space(&self, entries: usize) -> usize {
+        if self.names.len().saturating_add(entries) > self.limits.max_entries {
+            return 0;
+        }
+        (self.open_expanded_limit)().saturating_sub(self.expanded)
     }
 
     /// Add a payload as a blob, `blobs/<sha256>.<extension>`, and say its name, for the JSON that

@@ -123,7 +123,7 @@ pub fn settings_state_badge(ui: &mut Ui, label: &str, tone: SettingsBadgeTone) -
     if clipped {
         super::text::paint_text(ui, rect.shrink2(vec2(t.space_8.min(width / 2.0), 0.0)), label, crate::type_face::semibold(t.font_small), ink, false);
     } else {
-        ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
+        ui.painter().galley(crate::text::centred_in(ui.painter(), &galley, rect.center()), galley, ink);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     if clipped { response.backing_on_hover_text(label) } else { response }

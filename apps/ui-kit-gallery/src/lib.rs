@@ -19,7 +19,7 @@ pub use theme_panel::ThemeEditor;
 /// The kit's English messages, for the components that read their text through
 /// `solidcraft_ui_text` (button names, empty states, tooltips).
 static ENGLISH: solidcraft_ui_text::Catalog =
-    solidcraft_ui_text::Catalog::new("en", "English", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/en.json")));
+    solidcraft_ui_text::Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/gallery-en.json")));
 
 /// Install what the kit draws with, once per process before the first frame: SolidCraft's look
 /// (icon set, glyphs, built-in themes) and the English messages.

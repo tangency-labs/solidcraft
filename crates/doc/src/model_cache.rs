@@ -63,6 +63,248 @@ fn same_marking(a: &ThreadInfo, b: &ThreadInfo) -> bool {
         && numbers(a).iter().zip(numbers(b).iter()).all(|(x, y)| x.to_bits() == y.to_bits())
 }
 
+/// Walks a `Serialize` value without formatting text, recording the ordinal positions of every
+/// `-0.0` float (`to_bits() == (-0.0).to_bits()`). Combined with `PartialEq`, two values with
+/// `a == b` and identical negative-zero positions are identical to the bit (`==` rejects `NaN`
+/// and distinguishes every other float value).
+#[derive(Default)]
+struct NegZeroPositions {
+    seen: usize,
+    neg_zeros: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct NegZeroErr;
+
+impl std::fmt::Display for NegZeroErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("serialize")
+    }
+}
+
+impl std::error::Error for NegZeroErr {}
+
+impl serde::ser::Error for NegZeroErr {
+    fn custom<T: std::fmt::Display>(_msg: T) -> Self {
+        Self
+    }
+}
+
+impl serde::Serializer for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    type SerializeSeq = Self;
+    type SerializeTuple = Self;
+    type SerializeTupleStruct = Self;
+    type SerializeTupleVariant = Self;
+    type SerializeMap = Self;
+    type SerializeStruct = Self;
+    type SerializeStructVariant = Self;
+
+    fn serialize_bool(self, _v: bool) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i8(self, _v: i8) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i16(self, _v: i16) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i32(self, _v: i32) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i64(self, _v: i64) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_i128(self, _v: i128) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u8(self, _v: u8) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u16(self, _v: u16) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u32(self, _v: u32) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u64(self, _v: u64) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_u128(self, _v: u128) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_f32(self, v: f32) -> std::result::Result<(), NegZeroErr> {
+        if v.to_bits() == (-0.0_f32).to_bits() {
+            self.neg_zeros.push(self.seen);
+        }
+        self.seen += 1;
+        Ok(())
+    }
+    fn serialize_f64(self, v: f64) -> std::result::Result<(), NegZeroErr> {
+        if v.to_bits() == (-0.0_f64).to_bits() {
+            self.neg_zeros.push(self.seen);
+        }
+        self.seen += 1;
+        Ok(())
+    }
+    fn serialize_char(self, _v: char) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_str(self, _v: &str) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_bytes(self, _v: &[u8]) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_none(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_some<T: ?Sized + serde::Serialize>(self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(self)
+    }
+    fn serialize_unit(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_unit_struct(self, _name: &'static str) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_unit_variant(self, _name: &'static str, _variant_index: u32, _variant: &'static str) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+    fn serialize_newtype_struct<T: ?Sized + serde::Serialize>(self, _name: &'static str, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(self)
+    }
+    fn serialize_newtype_variant<T: ?Sized + serde::Serialize>(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        value: &T,
+    ) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(self)
+    }
+    fn serialize_seq(self, _len: Option<usize>) -> std::result::Result<Self::SerializeSeq, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_tuple(self, _len: usize) -> std::result::Result<Self::SerializeTuple, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> std::result::Result<Self::SerializeTupleStruct, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_tuple_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeTupleVariant, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_map(self, _len: Option<usize>) -> std::result::Result<Self::SerializeMap, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_struct(self, _name: &'static str, _len: usize) -> std::result::Result<Self::SerializeStruct, NegZeroErr> {
+        Ok(self)
+    }
+    fn serialize_struct_variant(
+        self,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
+    ) -> std::result::Result<Self::SerializeStructVariant, NegZeroErr> {
+        Ok(self)
+    }
+}
+
+impl serde::ser::SerializeSeq for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_element<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeTuple for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_element<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeTupleStruct for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeTupleVariant for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeMap for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_key<T: ?Sized + serde::Serialize>(&mut self, key: &T) -> std::result::Result<(), NegZeroErr> {
+        key.serialize(&mut **self)
+    }
+    fn serialize_value<T: ?Sized + serde::Serialize>(&mut self, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeStruct for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, _key: &'static str, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeStructVariant for &mut NegZeroPositions {
+    type Ok = ();
+    type Error = NegZeroErr;
+    fn serialize_field<T: ?Sized + serde::Serialize>(&mut self, _key: &'static str, value: &T) -> std::result::Result<(), NegZeroErr> {
+        value.serialize(&mut **self)
+    }
+    fn end(self) -> std::result::Result<(), NegZeroErr> {
+        Ok(())
+    }
+}
+
+fn neg_zero_positions<T: serde::Serialize>(value: &T) -> Option<Vec<usize>> {
+    let mut visitor = NegZeroPositions::default();
+    value.serialize(&mut visitor).ok()?;
+    Some(visitor.neg_zeros)
+}
+
 fn hex(v: u64) -> String {
     format!("{v:016x}")
 }
@@ -160,6 +402,11 @@ fn runs(indices: &[usize]) -> Vec<[usize; 2]> {
     out
 }
 
+struct CachedSurfaceSheet {
+    index: usize,
+    neg_zeros: Option<Vec<usize>>,
+}
+
 #[derive(Default)]
 struct Writer {
     bodies: Vec<Body>,
@@ -174,6 +421,10 @@ struct Writer {
     /// large to keep).
     surface_sheets: Vec<Json>,
     surface_sheet_index: HashMap<String, usize>,
+    /// The state written last and the places of its surface sheets (with cached `-0.0` float
+    /// positions once compared): a state mostly keeps the sheets of the one before it, which are
+    /// found again without writing them as text.
+    last_surface_sheets: Option<(Arc<ModelState>, Vec<CachedSurfaceSheet>)>,
     /// Tap markings (cosmetic threads) by their record, as the sheets: every state lists the
     /// markings of all the features before it, so writing them with each state grew with the
     /// square of the features (400 marked cylinders: 34 of a 37 MB manifest, past its limit).
@@ -359,8 +610,43 @@ impl Writer {
         Some(self.sketches.len() - 1)
     }
 
-    fn surface_sheet(&mut self, sheet: &crate::SurfaceSheet) -> Option<usize> {
-        shared(&mut self.surface_sheets, &mut self.surface_sheet_index, sheet)
+    /// The places of `st`'s surface sheets among the written ones. A sheet at the same place in
+    /// the state written last that is identical to the bit is that one (no text built); any other
+    /// is keyed by its text.
+    fn surface_sheets(&mut self, st: &Arc<ModelState>) -> Option<Vec<usize>> {
+        let mut out = Vec::with_capacity(st.surface_sheets.len());
+        let mut next_last = Vec::with_capacity(st.surface_sheets.len());
+        for (i, sheet) in st.surface_sheets.iter().enumerate() {
+            let mut matched = None;
+            if let Some((prev_state, prev_entries)) = self.last_surface_sheets.as_mut()
+                && let Some(prev_sheet) = prev_state.surface_sheets.get(i)
+                && let Some(prev_entry) = prev_entries.get_mut(i)
+                && prev_sheet == sheet
+            {
+                let b_nz = match &mut prev_entry.neg_zeros {
+                    Some(nz) => Some(nz.as_slice()),
+                    None => {
+                        prev_entry.neg_zeros = neg_zero_positions(prev_sheet);
+                        prev_entry.neg_zeros.as_deref()
+                    }
+                };
+                if let (Some(b_nz), Some(s_nz)) = (b_nz, neg_zero_positions(sheet))
+                    && b_nz == s_nz.as_slice()
+                {
+                    matched = Some((prev_entry.index, s_nz));
+                }
+            }
+            if let Some((at, s_nz)) = matched {
+                out.push(at);
+                next_last.push(CachedSurfaceSheet { index: at, neg_zeros: Some(s_nz) });
+                continue;
+            }
+            let at = shared(&mut self.surface_sheets, &mut self.surface_sheet_index, sheet)?;
+            out.push(at);
+            next_last.push(CachedSurfaceSheet { index: at, neg_zeros: None });
+        }
+        self.last_surface_sheets = Some((st.clone(), next_last));
+        Some(out)
     }
 
     /// The places of `st`'s markings among the written ones. A marking at the same place in the
@@ -396,16 +682,26 @@ impl Writer {
         }
         let bodies = st.bodies.iter().map(|b| self.model_body(b)).collect::<Option<Vec<_>>>()?;
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
-        let surface_sheets = st.surface_sheets.iter().map(|s| self.surface_sheet(s)).collect::<Option<Vec<_>>>()?;
+        let surface_sheets = self.surface_sheets(st)?;
         let threads = self.threads(st)?;
         // Shape identity is process-local. Persist the decision in each timeline state,
         // then restore its shared shape from that state's body after decoding the cache.
+        let body_by_name: HashMap<&str, &ModelBody> = if st.frame_members.is_empty() {
+            HashMap::new()
+        } else {
+            let mut map = HashMap::with_capacity(st.bodies.len());
+            for b in &st.bodies {
+                map.entry(b.name.as_str()).or_insert(b);
+            }
+            map
+        };
         let members = st
             .frame_members
             .iter()
             .map(|m| {
                 let mut record = serde_json::to_value(m).ok()?;
-                record["unmodified"] = json!(st.body(&m.body).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body)));
+                record["unmodified"] =
+                    json!(body_by_name.get(m.body.as_str()).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body)));
                 Some(record)
             })
             .collect::<Option<Vec<_>>>()?;
@@ -428,9 +724,11 @@ impl Writer {
 }
 
 impl Model {
-    /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation without an
-    /// error and `doc` keeps no names saved before format 14. Works out
-    /// the face names not asked for yet (a saved model keeps them as worked out).
+    /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation with at least
+    /// one valid non-skipped feature (when any feature has an error) and `doc` keeps no names
+    /// saved before format 14. Failing features are left out of the cached states so opening
+    /// re-evaluates only them and reproduces their exact errors (#18815). Works out the face names
+    /// not asked for yet (a saved model keeps them as worked out).
     ///
     /// An import whose SMLib check of its parts is still running is saved with what the check
     /// found: this waits for it ([`Self::saved_now`] does not). `None` when the check healed a
@@ -454,8 +752,8 @@ impl Model {
     }
 
     /// Why [`Self::saved_if_checked`] would leave the model cache out for `doc`, if it cannot
-    /// save one right now (`None` when the model is ready to save or a feature has an error,
-    /// which the caller names specifically).
+    /// save one right now (`None` when the model is ready to save or when every non-skipped
+    /// feature has an error, which the caller names specifically).
     pub fn cache_skip_reason(&self, doc: &Document) -> Option<&'static str> {
         if self.checking_imports() {
             return Some("an imported file's parts were still being checked (a save once the check ends keeps it)");
@@ -466,7 +764,7 @@ impl Model {
         if self.checking_features() {
             return Some("a feature's geometry check was still running (a save once it ends keeps it)");
         }
-        if self.results.iter().any(|r| r.error.is_some()) {
+        if self.results.iter().any(|r| r.error.is_some()) && !self.results.iter().any(|r| !r.skipped && r.error.is_none()) {
             return None;
         }
         if !self.is_current(doc) {
@@ -476,9 +774,10 @@ impl Model {
             return Some("the design still uses legacy face or edge names");
         }
         if self.results.iter().any(|r| {
-            r.import_report.as_ref().is_some_and(|report| {
-                !report.checks.is_empty() && report.checks.heals().is_some_and(|h| self.import_digests.heal_digest(r.id) != Some(h.digest()))
-            })
+            r.error.is_none()
+                && r.import_report.as_ref().is_some_and(|report| {
+                    !report.checks.is_empty() && report.checks.heals().is_some_and(|h| self.import_digests.heal_digest(r.id) != Some(h.digest()))
+                })
         }) {
             return Some("an imported file's parts were healed after evaluation (a save once it updates keeps it)");
         }
@@ -490,9 +789,10 @@ impl Model {
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
         // Nor while the SMLib checks of features still run ([`Model::set_background_checks`]): a
         // model kept before they pass would open with results no check has passed.
+        let has_errors = self.results.iter().any(|r| r.error.is_some());
         if self.results.is_empty()
             || self.checking_features()
-            || self.results.iter().any(|r| r.error.is_some())
+            || (has_errors && !self.results.iter().any(|r| !r.skipped && r.error.is_none()))
             || !self.is_current(doc)
             || has_legacy_names(doc)
         {
@@ -503,6 +803,18 @@ impl Model {
             let mut features = Vec::with_capacity(self.results.len());
             let mut pending = Vec::new();
             for (k, (feature, r)) in doc.features.iter().zip(&self.results).enumerate() {
+                if r.error.is_some() {
+                    // Omit failing features' states so opening re-evaluates them and reproduces
+                    // their exact errors while reusing all valid features (#18815).
+                    features.push(json!({
+                        "id": r.id,
+                        "fingerprint": hex(r.fingerprint),
+                        "ms": r.ms,
+                        "skipped": r.skipped,
+                        "errored": true,
+                    }));
+                    continue;
+                }
                 if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
                     pending.push((k, self.import_digests.heal_digest(feature.id), report.clone()));
                 }
@@ -626,11 +938,10 @@ impl SavedModel {
                 .collect();
             names.push(Arc::new(Names { faces: Arc::new(faces), info }));
         }
-        let mut sketches = Vec::new();
-        for s in list("sketches")? {
+        let sketches: Vec<Arc<SolvedSketch>> = kernel::map_on_threads(list("sketches")?, 16, |s: &Json| -> Result<Arc<SolvedSketch>> {
             let sketch: solidcraft_sketch::Sketch = serde_json::from_value(parse(s.get("sketch"))?).map_err(|_| bad("saved model: sketch"))?;
             let plane: Plane = serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?;
-            sketches.push(Arc::new(SolvedSketch {
+            Ok(Arc::new(SolvedSketch {
                 feature: s.get("feature").and_then(Json::as_u64).ok_or_else(|| bad("saved model: sketch"))?,
                 name: text(s.get("name"))?,
                 plane,
@@ -639,8 +950,11 @@ impl SavedModel {
                 profiles_3d: solidcraft_sketch::find_planar_3d_profiles(&sketch, plane),
                 ends: solidcraft_sketch::loose_ends(&sketch),
                 sketch,
-            }));
-        }
+            }))
+        })
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|| Err(bad("saved model: sketch"))))
+        .collect::<Result<Vec<_>>>()?;
         let mut model_bodies = Vec::new();
         for r in list("model_bodies")? {
             let body = bodies.get(index(r.get("body"), bodies.len())?).cloned().ok_or_else(|| bad("saved model: body"))?;
@@ -809,6 +1123,9 @@ impl SavedModel {
         }
         // Each state is independent of the others once the records they share are read: built
         // on threads (a 5,484-feature design spent 3.5 s building them one after another).
+        // All states of a loaded model share one `OriginFrames` cache (as evaluated states do),
+        // so joint origin resolution on one state is reused across the timeline.
+        let origin_frames = OriginFrames::default();
         let built = kernel::map_on_threads(records, 16, |s: &Json| -> Result<ModelState> {
             // Runs of consecutive indices, each within the list it indexes.
             let ids = |key: &str, len: usize| -> Result<Vec<usize>> {
@@ -836,7 +1153,8 @@ impl SavedModel {
             }
             let mut st = ModelState {
                 frame_bodies: Default::default(),
-                origin_frames: Default::default(),
+                dogbones: Default::default(),
+                origin_frames: origin_frames.clone(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
                 // A world state's alone: a model's own state has none.
@@ -958,7 +1276,10 @@ impl SavedModel {
     pub fn final_state(&self) -> Result<Arc<ModelState>> {
         let states = self.states()?;
         let features = self.records.get("features").and_then(Json::as_array).ok_or_else(|| bad("saved model: features"))?;
-        let last = features.iter().rev().find(|f| f.get("skipped").and_then(Json::as_bool) == Some(false));
+        let last = features
+            .iter()
+            .rev()
+            .find(|f| f.get("skipped").and_then(Json::as_bool) == Some(false) && f.get("errored").and_then(Json::as_bool) != Some(true));
         match last {
             Some(f) => f
                 .get("state")
@@ -1020,7 +1341,13 @@ impl SavedModel {
         let mut ms = vec![0.0f64; states.len()];
         let mut last = None;
         for f in features.iter().filter(|f| f.get("skipped").and_then(Json::as_bool) == Some(false)) {
-            let s = at(f.get("state"), states.len())?;
+            let Some(state_val) = f.get("state") else {
+                if f.get("errored").and_then(Json::as_bool) == Some(true) {
+                    continue;
+                }
+                return None;
+            };
+            let s = at(Some(state_val), states.len())?;
             if let Some(t) = ms.get_mut(s) {
                 *t += f.get("ms").and_then(Json::as_f64).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
             }
@@ -1127,7 +1454,11 @@ impl SavedModel {
         }
         let mut out_features = Vec::with_capacity(features.len());
         for f in features {
-            let state = new(&new_state, at(f.get("state"), states.len())?);
+            let state = match f.get("state") {
+                Some(v) => new(&new_state, at(Some(v), states.len())?),
+                None if f.get("errored").and_then(Json::as_bool) == Some(true) => None,
+                None => return None,
+            };
             let mut f = f.clone();
             let o = f.as_object_mut()?;
             match state {
@@ -1233,9 +1564,12 @@ impl Model {
             }
         }
         let marker = doc.marker.unwrap_or(usize::MAX);
+        let constructions = super::construction_indices(doc);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
-        let mut before = Arc::new(ModelState::default());
+        let origin_frames = states.first().map(|s| s.origin_frames.clone()).unwrap_or_default();
+        let empty = Arc::new(ModelState { origin_frames, ..ModelState::default() });
+        let mut before = empty.clone();
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
         let mut prev = 0;
@@ -1244,21 +1578,38 @@ impl Model {
         let mut prepared_states = std::collections::HashSet::new();
         // The pose-only features saved at the pose `doc` gives them: their results stand.
         let mut poses = HashMap::new();
-        let mut step_doc_owned = super::init_capture_step_doc(doc, &vals);
+        let mut stepper = super::CaptureStepper::new(doc, &vals);
         let mut resolved_joints = std::collections::BTreeMap::new();
+        // Populate the evaluation cache in pass 1 while every state is kept and unposed, avoiding
+        // a second full timeline/capture-step walk when `unkept == 0 && !posed`.
+        let mut pass1_cache = Some(EvalCache::default());
+        let component_digests = super::ComponentDigests::of(doc);
+        let mut pass1_component_keys = HashMap::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
-            let eval_doc = step_doc_owned.as_ref().unwrap_or(doc);
+            if let Some(s) = stepper.as_mut() {
+                s.flush_for_feature(f, &before);
+            }
+            let eval_doc = stepper.as_ref().map_or(doc, super::CaptureStepper::doc);
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
+            prev =
+                if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before), &constructions) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
-            // A file without room for every state keeps some features without one (#3220).
+            // A file without room for every state keeps some features without one (#3220), and
+            // failing features are saved without a state so opening re-evaluates them (#18815).
+            let errored = match r.get("errored") {
+                None => false,
+                Some(v) => v.as_bool().ok_or_else(|| bad("saved model: errored"))?,
+            };
             let state = r.get("state").map(|s| index(Some(s), states.len())).transpose()?;
+            if errored && state.is_some() {
+                return Err(bad("saved model: errored"));
+            }
             if let Some(at) = state
                 && prepared_states.insert(at)
             {
@@ -1303,6 +1654,7 @@ impl Model {
                 stale: false,
                 fingerprint: prev,
                 unkept: state.is_none(),
+                unkept_error: errored,
                 state: state.unwrap_or_else(|| before.clone()),
             };
             // A model saved before rebuildable ordinary members were recorded (#4003) needs
@@ -1314,12 +1666,44 @@ impl Model {
             {
                 return Err(bad("saved model: frame members"));
             }
+            if result.unkept || (!result.skipped && pose_only(f) && !poses.contains_key(&f.id)) {
+                pass1_cache = None;
+            }
             if !result.skipped {
-                exact = !result.unkept;
-                let changed = super::bodies_changed(&before, &result.state);
+                if !pose_only(f)
+                    && let Some(cache) = pass1_cache.as_mut()
+                {
+                    let reached = cache_adopted_result(
+                        cache,
+                        eval_doc,
+                        &vals,
+                        f,
+                        &result,
+                        ctx,
+                        shared,
+                        &before,
+                        &import_digests,
+                        &constructions,
+                        &component_digests,
+                    );
+                    pass1_component_keys.insert(f.id, reached);
+                }
+                // An errored feature leaves `before` unchanged, so `exact` stays intact for
+                // verifying fingerprints and pose-only features after it (#18815).
+                if !result.unkept {
+                    exact = true;
+                } else if !result.unkept_error {
+                    exact = false;
+                }
+                let prev_state = before;
                 before = result.state.clone();
-                if result.error.is_none() && i < marker && !f.suppressed {
-                    super::advance_capture_step(&mut step_doc_owned, &mut resolved_joints, &vals, f, &before, changed);
+                if result.error.is_none()
+                    && !result.unkept_error
+                    && i < marker
+                    && !f.suppressed
+                    && let Some(s) = stepper.as_mut()
+                {
+                    s.advance(&mut resolved_joints, &vals, f, &prev_state, &before);
                 }
             }
             results.push(result);
@@ -1329,10 +1713,16 @@ impl Model {
         for (f, r) in doc.features.iter().zip(results.iter_mut()).filter(|(_, r)| !r.skipped && !r.unkept) {
             r.warning = crate::eval::with_retained_notes(doc, r.warning.take(), f, &r.state);
         }
-        let resolved_occurrences = step_doc_owned.map(|d| d.occurrences.into_iter().map(|o| (o.id, o.transform)).collect()).unwrap_or_default();
+        let resolved_occurrences = stepper.map(|s| s.into_resolved_occurrences(&before)).unwrap_or_default();
+        let unkept = results.iter().filter(|r| r.unkept).count();
+        // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
+        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
+        // One saved with the pose `doc` gives it is `doc`'s result as it is.
+        let posed = doc.features.iter().zip(&results).any(|(f, r)| !r.skipped && pose_only(f) && !poses.contains_key(&f.id));
         let mut model = Model {
             results,
             param_errors,
+            empty,
             import_digests,
             context: ctx,
             frame_bodies,
@@ -1340,15 +1730,11 @@ impl Model {
             heal_off: !heal,
             resolved_occurrences,
             resolved_joints,
+            poses,
             ..Model::default()
         };
-        let unkept = model.results.iter().filter(|r| r.unkept).count();
-        // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
-        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
-        // One saved with the pose `doc` gives it is `doc`'s result as it is.
-        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f) && !poses.contains_key(&f.id));
-        model.poses = poses;
         if unkept > 0 || posed {
+            drop(pass1_cache);
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
             model.evaluate(doc);
@@ -1358,65 +1744,137 @@ impl Model {
                 model.results.len(),
                 model.last_recomputed
             );
-        }
-        // Each result where an evaluation would have put it, so an edit undone (or set back)
-        // finds it again rather than evaluating the feature anew.
-        let mut before = Arc::new(ModelState::default());
-        let mut cache_step_doc = super::init_capture_step_doc(doc, &vals);
-        let mut cache_joints = std::collections::BTreeMap::new();
-        let component_digests = super::ComponentDigests::of(doc);
-        if let Ok(mut cache) = model.cache.lock() {
-            for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
-                let eval_doc = cache_step_doc.as_ref().unwrap_or(doc);
-                // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
-                // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
-                if pose_only(f) {
-                    let changed = super::bodies_changed(&before, &r.state);
+            // Each result where an evaluation would have put it, so an edit undone (or set back)
+            // finds it again rather than evaluating the feature anew.
+            let mut before = model.empty.clone();
+            let mut cache_stepper = super::CaptureStepper::new(doc, &vals);
+            let mut cache_joints = std::collections::BTreeMap::new();
+            if let Ok(mut cache) = model.cache.lock() {
+                for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
+                    if let Some(s) = cache_stepper.as_mut() {
+                        s.flush_for_feature(f, &before);
+                    }
+                    let eval_doc = cache_stepper.as_ref().map_or(doc, super::CaptureStepper::doc);
+                    // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
+                    // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
+                    if !pose_only(f) {
+                        let reached = cache_adopted_result(
+                            &mut cache,
+                            eval_doc,
+                            &vals,
+                            f,
+                            r,
+                            ctx,
+                            shared,
+                            &before,
+                            &model.import_digests,
+                            &constructions,
+                            &component_digests,
+                        );
+                        model.component_keys.insert(f.id, reached);
+                    }
+                    let prev_state = before;
                     before = r.state.clone();
-                    if i < marker && !f.suppressed {
-                        super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
+                    if i < marker
+                        && !f.suppressed
+                        && let Some(s) = cache_stepper.as_mut()
+                    {
+                        s.advance(&mut cache_joints, &vals, f, &prev_state, &before);
                     }
-                    continue;
-                }
-                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests, &component_digests);
-                model.component_keys.insert(f.id, key.reached);
-                let whole = CachedEval {
-                    error: None,
-                    error_code: None,
-                    warning: crate::eval::without_retained_notes(r.warning.clone()),
-                    import_report: r.import_report.clone(),
-                    repair: r.repair.clone(),
-                    lost_projections: None,
-                    ms: r.ms,
-                    state: r.state.clone(),
-                };
-                // And what it changed, by what it read, as an evaluation keeps it: the first edit
-                // after opening then evaluates only the features that read what the edit changed,
-                // as every later edit does, not every feature after the edit. Features that name
-                // their pieces as later features pick them are left out, as is any feature whose
-                // bodies were not stamped with this key (saved by a version that keyed them
-                // otherwise, or stamped by the whole model): `stamp` would work their names out
-                // afresh, with no lineage to work them from. It is evaluated again instead.
-                if let Some((k, read)) = &key.reads
-                    && !f.shell_piece_order
-                    && let Some(change) = r.state.change_from(&before, f, read)
-                {
-                    // A change that holds whatever the bodies it did not read was stamped with the
-                    // key without them; one saved before that key, with the other.
-                    let relative = key.relative.filter(|_| change.relative().is_some());
-                    if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
-                        let bytes = change.retained_bytes();
-                        cache.changes.put(k, whole.with(change), bytes, r.ms);
-                    }
-                }
-                cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
-                let changed = super::bodies_changed(&before, &r.state);
-                before = r.state.clone();
-                if i < marker && !f.suppressed {
-                    super::advance_capture_step(&mut cache_step_doc, &mut cache_joints, &vals, f, &before, changed);
                 }
             }
+        } else if let Some(cache) = pass1_cache {
+            model.cache = Arc::new(std::sync::Mutex::new(cache));
+            model.component_keys = pass1_component_keys;
         }
         Ok(model)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cache_adopted_result(
+    cache: &mut EvalCache,
+    eval_doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    r: &FeatureResult,
+    ctx: u64,
+    shared: u64,
+    before: &ModelState,
+    import_digests: &ImportDigests,
+    constructions: &[usize],
+    component_digests: &super::ComponentDigests,
+) -> u64 {
+    let key = EvalKey::new(eval_doc, vals, f, r.fingerprint, ctx, shared, before, import_digests, constructions, component_digests);
+    let whole = CachedEval {
+        error: None,
+        error_code: None,
+        warning: crate::eval::without_retained_notes(r.warning.clone()),
+        import_report: r.import_report.clone(),
+        repair: r.repair.clone(),
+        lost_projections: None,
+        ms: r.ms,
+        state: r.state.clone(),
+    };
+    // And what it changed, by what it read, as an evaluation keeps it: the first edit
+    // after opening then evaluates only the features that read what the edit changed,
+    // as every later edit does, not every feature after the edit. Features that name
+    // their pieces as later features pick them are left out, as is any feature whose
+    // bodies were not stamped with this key (saved by a version that keyed them
+    // otherwise, or stamped by the whole model): `stamp` would work their names out
+    // afresh, with no lineage to work them from. It is evaluated again instead.
+    if let Some((k, read)) = &key.reads
+        && !f.shell_piece_order
+        && let Some(change) = r.state.change_from(before, f, read)
+    {
+        // A change that holds whatever the bodies it did not read was stamped with the
+        // key without them; one saved before that key, with the other.
+        let relative = key.relative.filter(|_| change.relative().is_some());
+        if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
+            let bytes = change.retained_bytes();
+            cache.changes.put(k, whole.with(change), bytes, r.ms);
+        }
+    }
+    cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
+    key.reached
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::Sketch;
+
+    #[test]
+    fn surface_sheet_writer_distinguishes_signed_zero() {
+        let mut doc = Document::new("signed zero sheet");
+        let mut sk = Sketch::new();
+        let p = [Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)].map(|q| sk.add_point(q, None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        doc.add_feature(FeatureKind::SheetBase { sketch: crate::SketchId(sketch), profiles: ProfileSel::All, rule: None, flip: false }, None)
+            .unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let base_sheet = model.state().surface_sheets.first().cloned().expect("base sheet");
+
+        let mut sheet_pos = base_sheet.clone();
+        sheet_pos.flat.shift.x = 0.0;
+        let mut sheet_neg = base_sheet;
+        sheet_neg.flat.shift.x = -0.0;
+        assert_eq!(sheet_pos, sheet_neg, "PartialEq treats 0.0 and -0.0 as equal");
+        assert_ne!(neg_zero_positions(&sheet_pos), neg_zero_positions(&sheet_neg));
+
+        let st_pos = Arc::new(ModelState { surface_sheets: vec![sheet_pos], ..ModelState::default() });
+        let st_neg = Arc::new(ModelState { surface_sheets: vec![sheet_neg.clone()], ..ModelState::default() });
+        let st_neg_again = Arc::new(ModelState { surface_sheets: vec![sheet_neg], ..ModelState::default() });
+
+        let mut w = Writer::default();
+        assert_eq!(w.surface_sheets(&st_pos), Some(vec![0]));
+        assert_eq!(w.surface_sheets(&st_neg), Some(vec![1]), "-0.0 sheet must not reuse +0.0 index");
+        assert_eq!(w.surface_sheets(&st_neg_again), Some(vec![1]), "bit-identical -0.0 sheet must reuse its index");
+        assert_eq!(w.surface_sheets.len(), 2);
     }
 }

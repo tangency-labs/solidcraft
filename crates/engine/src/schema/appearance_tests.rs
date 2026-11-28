@@ -19,7 +19,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AppearanceChainParams>(), &["target"]);
     assert_keys(input_schema_for::<AppearanceLibraryParams>(), &[]);
     assert_keys(input_schema_for::<AppearanceFavoriteParams>(), &["favorite", "look"]);
-    assert_keys(input_schema_for::<AppearanceListParams>(), &["body"]);
+    assert_keys(input_schema_for::<AppearanceListParams>(), &["active_only", "body"]);
     assert_keys(input_schema_for::<AppearancePaintParams>(), &["appearance", "color", "done", "name", "opacity", "pbr"]);
     assert_keys(input_schema_for::<AppearancePasteParams>(), &["bodies", "body", "components", "faces"]);
     assert_keys(input_schema_for::<AppearancePickUpParams>(), &["target"]);
@@ -103,6 +103,9 @@ fn replies_match_the_output_schema() {
     let all = run("appearance.list", json!({}));
     assert!(all.get("param_warnings").is_none() && all.get("body").is_none(), "{all}");
     matches(output_schema_for::<AppearanceListResult>(), "appearance.list", &all);
+    let active = run("appearance.list", json!({"active_only": true}));
+    assert!(active.get("param_warnings").is_none() && active.get("body").is_none(), "{active}");
+    matches(output_schema_for::<AppearanceListResult>(), "appearance.list", &active);
     let one = run("appearance.list", json!({"body": body}));
     assert_eq!(one["body"]["faces"].as_array().map(Vec::len), Some(1), "{one}");
     matches(output_schema_for::<AppearanceListResult>(), "appearance.list", &one);
@@ -138,7 +141,7 @@ fn the_target_is_read_as_the_chain_reads_it() {
     let reads = |p: Value| serde_json::from_value::<ChainTarget>(p.clone()).ok();
     for (p, want) in [
         (json!({"body": "Box1"}), ChainTarget::Body("Box1".into())),
-        (json!({"body": "Box1", "face": 2}), ChainTarget::Face { body: "Box1".into(), face: 2 }),
+        (json!({"body": "Box1", "face": 2}), ChainTarget::Face { body: "Box1".into(), face: json!(2) }),
         (json!({"component": "K:2"}), ChainTarget::Component("K:2".into())),
         (json!({"component": 7}), ChainTarget::Component("7".into())),
     ] {
@@ -154,8 +157,8 @@ fn the_target_is_read_as_the_chain_reads_it() {
         (json!({"body": "Box1", "component": "C"}), "target must be {body}, {body, face}, or {component}"),
         (json!({"body": ""}), "target name must have 1..4096 bytes"),
         (json!({"body": 5}), "target name must have 1..4096 bytes"),
-        (json!({"body": "Box1", "face": -1}), "face must be a zero-based unsigned index"),
-        (json!({"body": "Box1", "face": 1.5}), "face must be a zero-based unsigned index"),
+        (json!({"body": "Box1", "face": -1}), "face must be a zero-based unsigned index or a face name"),
+        (json!({"body": "Box1", "face": 1.5}), "face must be a zero-based unsigned index or a face name"),
         (json!({"component": -1}), "component must be a name or unsigned id"),
         (json!({"component": null}), "component must be a name or unsigned id"),
     ] {
@@ -235,7 +238,7 @@ fn chain_refusals_name_the_chain() {
             (json!({"target": {}}), "target must be {body}, {body, face}, or {component}"),
             (json!({"target": {"body": "Plain", "component": "Part"}}), "target must be {body}, {body, face}, or {component}"),
             (json!({"target": {"body": ""}}), "target name must have 1..4096 bytes"),
-            (json!({"target": {"body": "Plain", "face": -1}}), "face must be a zero-based unsigned index"),
+            (json!({"target": {"body": "Plain", "face": -1}}), "face must be a zero-based unsigned index or a face name"),
         ] {
             assert_eq!(error(p.clone(), level), bad_params("appearance.chain", message), "{p} {level:?}");
         }
@@ -404,7 +407,7 @@ fn copy_refusals_stay_the_chains_below_strict() {
     };
     for (target, message) in [
         (json!([]), "give one target object"),
-        (json!({"body": "Box1", "face": "front"}), "face must be a zero-based unsigned index"),
+        (json!({"body": "Box1", "face": true}), "face must be a zero-based unsigned index or a face name"),
         (json!({"body": "Box1", "other": 1}), "target must be {body}, {body, face}, or {component}"),
     ] {
         let p = json!({"target": target});

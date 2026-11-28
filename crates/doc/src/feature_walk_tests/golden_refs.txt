@@ -3,6 +3,8 @@ frame_end_cap
   remap_refs: ends[0].member.feature, ends[0].plane.base.base.feature
 frame_member_turn
   remap_refs: member.feature
+dogbone
+  remap_bodies: body
 frame_gusset
   remap_refs: supports[0].member.feature, supports[0].plane.base.base.feature, supports[1].plane.base.base.feature
 body_transfer
@@ -115,6 +117,8 @@ scale
   remap_bodies: bodies[0]
 offset_face
   remap_bodies: body
+transform_face
+  remap_bodies: body
 delete_face
   remap_bodies: body
 bounding_solid
@@ -163,6 +167,12 @@ sheet_contour
   sketches: [1]
   remap_refs: sketch
 sheet_flange
+  remap_bodies: body
+sheet_flange_with_corners
+  remap_refs: corners[0].covered, corners[0].covering, corners[1].covering
+  remap_bodies: body
+sheet_corner_join
+  remap_refs: covered, covering
   remap_bodies: body
 sheet_hem
   remap_bodies: body
@@ -248,6 +258,8 @@ surface_match
   remap_bodies: body
 surface_fair
   remap_bodies: body
+surface_morph
+  remap_bodies: base, body, control
 unstitch
   remap_bodies: body
 reverse_normal
@@ -261,6 +273,8 @@ surface_extend_to_plane
   remap_bodies: body
 surface_extend_to_face
   remap_bodies: body, up_to.face.body
+surface_extend_law
+  remap_bodies: body
 surface_ruled
   remap_bodies: body
 surface_trim

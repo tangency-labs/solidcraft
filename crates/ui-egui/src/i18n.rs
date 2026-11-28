@@ -118,8 +118,8 @@ pub trait LocaleNames {
     fn given_name(self, text: &str) -> String;
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
     /// another component, a feature's request to reselect a reference it lost, an open Stitch
-    /// result and a profile pick with too many curves are translated where they are shown. Other
-    /// text is returned unchanged.
+    /// result, a profile pick with too many curves and a pattern's coordinate range refusal are
+    /// translated where they are shown. Other text is returned unchanged.
     fn diagnostic(self, text: &str) -> String;
     /// Translate generated browser names and labels, preserving custom names otherwise.
     fn dynamic(self, text: &str) -> String;
@@ -177,6 +177,12 @@ impl LocaleNames for Locale {
         // the feature or command in front.
         if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
             return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
+        }
+        for id in ["diagnostic.pattern_circular_coordinate_range", "diagnostic.pattern_spacing_coordinate_range"] {
+            let english = Locale::new(&ENGLISH).text(id);
+            if let Some((before, after)) = text.split_once(english) {
+                return format!("{before}{}{after}", self.text(id));
+            }
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -533,6 +539,17 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn navigation_held_key_ships_in_the_packed_runtime_catalogs() {
+        // Read the app's packed catalogs directly: the kit's test catalog must not
+        // make a missing production message pass this regression.
+        let id = "prefs.navigation.held_key";
+        assert_eq!(ENGLISH.messages().get(id).map(String::as_str), Some("Held key"), "shipped English: {id}");
+        for catalog in [&ARABIC, &GERMAN, &HEBREW, &JAPANESE, &KOREAN, &VIETNAMESE, &CHINESE] {
+            assert!(catalog.messages().get(id).is_some_and(|text| !text.trim().is_empty()), "{}: {id}", catalog.id);
+        }
+    }
 
     /// Strings a pull request adds under `assets/locales/pending/` work before they are folded
     /// into the catalogs (the build merges them in).
@@ -968,6 +985,10 @@ mod tests {
         for source in [
             include_str!("toolbar.rs"),
             include_str!("prefs.rs"),
+            include_str!("prefs/navigation.rs"),
+            include_str!("prefs/mouse3d.rs"),
+            include_str!("mouse_gesture.rs"),
+            include_str!("../../ui-kit/src/preferences_navigation.rs"),
             include_str!("documents.rs"),
             include_str!("dialogs.rs"),
             include_str!("browser.rs"),
@@ -1771,7 +1792,7 @@ mod tests {
 
     /// The kit functions that translate a label or text for display or announcement, read off
     /// `crates/ui-egui/src/ui_kit/`. Not here: the painters that expect an already translated
-    /// string (`caption`, `summary_row`, `list_row`, `panel::header`, `empty_box`, `checkbox`,
+    /// string (`caption`, `list_row`, `panel::header`, `empty_box`, `checkbox`,
     /// `tool_choices`), `segmented` (it measures its options with `tr_label` but paints the raw
     /// option, so a catalog entry could not translate it — a wiring gap of its own) and the
     /// measurement helpers (`metrics::label_width`, `ContentWidth::*`). The `hint` arguments of

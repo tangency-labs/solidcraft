@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: fusion seam</title>
+  <path d="M6 20L44 20L44 32L6 32Z" fill="#b8c3cf"/>
+  <path d="M6 20L44 20L44 32L6 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 32L58 32L58 44L6 44Z" fill="#b8c3cf"/>
+  <path d="M6 32L58 32L58 44L6 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M44 32L44 22L54 32Z" fill="#328bd3"/>
+  <path d="M44 32L44 22L54 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 32A6 5 0 1 0 30 32A6 5 0 1 0 18 32Z" fill="#328bd3"/>
+  <path d="M18 32A6 5 0 1 0 30 32A6 5 0 1 0 18 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

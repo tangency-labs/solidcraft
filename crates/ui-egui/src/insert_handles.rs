@@ -204,6 +204,8 @@ mod tests {
             middle: Some((40.0, 25.0)),
             align: Align::Middle,
             simplify: 0.0,
+            auto: false,
+            auto_value: None,
         }
     }
 

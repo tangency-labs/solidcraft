@@ -25,6 +25,7 @@ mod parallel;
 mod params;
 mod pending;
 mod plugin_examples;
+mod python;
 mod render_assets;
 mod rustfmt;
 mod shared;
@@ -32,6 +33,7 @@ mod skills;
 mod solidcore_paths;
 mod test;
 mod test_nextest;
+mod typescript;
 mod ui_containers;
 mod web_offline;
 mod web_offline_test;
@@ -60,6 +62,8 @@ commands:
                   and build them for wasm32-unknown-unknown; --run also wraps each as a component
                   and runs solidcraft-cli plugin test --require-cases on its package
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
+  python          the Python client's generated bindings in python/src/solidcraft/_generated/ [--cli PATH] [--out DIR]
+  typescript      the TypeScript client's generated bindings in typescript/src/generated/ [--cli PATH] [--out DIR]
   i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
@@ -137,10 +141,11 @@ commands:
                   geometry: fails on a function outside display, export, previews and mesh bodies
                   that uses a mesh and xtask/mesh-decisions/ does not list, and on a listed one
                   that no longer does (the list only shrinks)
-  app-geometry [--print]
+  app-geometry [--print] [--base REF]
                   check that apps compute no geometry: fails on a function in crates/doc, engine,
                   ui-egui, io, kernel or geom that does vector maths, solves or mesh queries, is
-                  new since the base (git merge-base HEAD origin/main, else HEAD~1) and
+                  new since the base (git merge-base HEAD REF with --base, which ci --base passes
+                  on, else git merge-base HEAD origin/main, else HEAD~1) and
                   xtask/app-geometry.txt does not list; reports unlisted sites from main and warns
                   on stale lines; prints the listed count per crate. --print writes the sites
                   found, in the list's format
@@ -194,6 +199,8 @@ fn main() -> ExitCode {
         Some("icons") => icons::run(&root()),
         Some("app-icons") => app_icons::run(&root()),
         Some("features") => features::run(&root()),
+        Some("python") => python::run(&root(), &rest),
+        Some("typescript") => typescript::run(&root(), &rest),
         Some("i18n") => i18n::run(&root(), &rest),
         Some("kernel-cases") => kernel_cases::run(&rest),
         Some("known-failing") => known_failing::run(&root(), &rest),

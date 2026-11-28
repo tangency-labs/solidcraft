@@ -134,6 +134,33 @@ impl RecordCell {
         }
     }
 
+    /// Hashable keys implied by [`RecordCell::same`], without materializing a lazy move:
+    /// - `ready`: the `Arc<Brep>` address for a ready record or an already-materialized lazy move,
+    ///   so a materialized `Moved` record and the `Ready` record sharing its `Arc<Brep>` collide.
+    /// - `moved`: a hash of `(source_ptr, motion)` for a `Moved` record, so two distinct `Moved`
+    ///   wrappers sharing a source record and rigid motion collide.
+    pub(crate) fn shape_keys(&self) -> (Option<usize>, Option<u64>) {
+        match self {
+            RecordCell::Ready(r) => (Some(std::sync::Arc::as_ptr(r) as usize), None),
+            RecordCell::Moved(m) => {
+                use std::hash::{Hash, Hasher};
+                let ready = m.made.get().map(|r| std::sync::Arc::as_ptr(r) as usize);
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                (std::sync::Arc::as_ptr(&m.source) as usize).hash(&mut h);
+                let canon = |x: f64| if x == 0.0 { 0.0f64.to_bits() } else { x.to_bits() };
+                for row in m.motion.rotation {
+                    for v in row {
+                        canon(v).hash(&mut h);
+                    }
+                }
+                for v in m.motion.translation {
+                    canon(v).hash(&mut h);
+                }
+                (ready, Some(h.finish()))
+            }
+        }
+    }
+
     /// Whether the record is moved lazily and not moved yet.
     pub(crate) fn lazy(&self) -> Option<&LazyMove> {
         match self {
@@ -232,6 +259,14 @@ pub struct Body {
 
 /// A body's record as solidcore-ops' body, with the order of its entities ([`Body::ops_body`]).
 pub(crate) type OpsForm = std::sync::Arc<(solidcore_ops::Body, solidcore_ops::Order)>;
+
+/// Which kernel forms (`smlib`, `ops`) a [`Body`] held at a point in time, returned by
+/// [`Body::kernel_forms_snapshot`] and consumed by [`Body::release_kernel_forms_since`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KernelFormMask {
+    smlib: bool,
+    ops: bool,
+}
 
 /// A body's kernel forms ([`Body::kernel_forms`]) without the body: what lets them go once the
 /// body is only kept somewhere to find its result again. It keeps neither the body nor its forms.
@@ -463,6 +498,10 @@ pub struct Paint {
     /// The body colour's name in the file it came from (a STEP `COLOUR_RGB` name), if it had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The presentation layer the body is exported on (a STEP `PRESENTATION_LAYER_ASSIGNMENT`):
+    /// the browser folder it sits in, as a path (`Frame/Rails`), if it sits in one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
 }
 
 /// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity, and
@@ -583,7 +622,12 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
 /// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
 /// in open shells.
 fn solid_record(record: Brep) -> Result<Brep> {
-    solidcore_ops::record_check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
+    // The record validator exposes its reason as a static string. Identify the
+    // ceiling check here so pattern evaluation can give advice for that failure.
+    solidcore_ops::record_check::validate_built(&record).map_err(|e| match e.0 {
+        crate::BREP_COORDINATE_CEILING => KernelError::CoordinateCeiling,
+        _ => KernelError::Invalid(e.to_string()),
+    })?;
     if record.faces.is_empty() {
         return Err(KernelError::Failed("empty result".into()));
     }
@@ -707,7 +751,7 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } | S::Sweep { .. } => SurfaceKind::Freeform,
         }
     }
 }
@@ -882,6 +926,22 @@ impl Body {
         self.ops.release();
     }
 
+    /// Snapshot of which kernel forms (`smlib`, `ops`) this body currently holds, for pairing with
+    /// [`Body::release_kernel_forms_since`] to release only transient forms created during a query.
+    pub fn kernel_forms_snapshot(&self) -> KernelFormMask {
+        KernelFormMask { smlib: self.smlib.holds(), ops: self.ops.holds() }
+    }
+
+    /// Releases whichever kernel forms were not already held when `before` was taken.
+    pub fn release_kernel_forms_since(&self, before: KernelFormMask) {
+        if !before.smlib {
+            self.smlib.release();
+        }
+        if !before.ops {
+            self.ops.release();
+        }
+    }
+
     /// The body's kernel forms, to let go later without keeping the body ([`KernelForms`]).
     pub fn kernel_forms(&self) -> KernelForms {
         KernelForms { smlib: std::sync::Arc::downgrade(&self.smlib), ops: std::sync::Arc::downgrade(&self.ops) }
@@ -892,6 +952,13 @@ impl Body {
     #[doc(hidden)]
     pub fn holds_kernel_form(&self) -> bool {
         self.smlib.holds() || self.ops.holds()
+    }
+
+    /// For tests: whether this body is a lazily placed copy whose moved B-rep record has not yet
+    /// been materialized.
+    #[doc(hidden)]
+    pub fn has_pending_lazy_record(&self) -> bool {
+        self.record.pending()
     }
 
     /// Why SMLib refuses the body, if it does: the body is sent into SMLib as an operation
@@ -974,6 +1041,17 @@ impl Body {
     /// operands (see [`crate::history`]); `None` when the operation does not report one.
     pub fn history(&self) -> Option<&crate::history::History> {
         self.history.as_deref()
+    }
+
+    /// The identity step over this body, shared by its unchanged and rigidly moved copies.
+    fn kept_identity(&self) -> std::sync::Arc<crate::history::History> {
+        self.placing.identity.get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self))).clone()
+    }
+
+    /// A proved no-op: keep the geometry with identity history over this step's input.
+    /// The preceding fillet's rounds refer to its own input, not to this one.
+    pub(crate) fn unchanged_step(&self) -> Body {
+        Body { history: Some(self.kept_identity()), rounds: None, ..self.clone() }
     }
 
     /// Attach the history of the operation that made this body from `operands`, after checking
@@ -1555,7 +1633,10 @@ impl Body {
             let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
             let source = self.record.lazy().map_or_else(|| self.record.arc().clone(), |m| m.source().clone());
             let moves = crate::placement::Rigid::of_matrix(&identity).and_then(|id| crate::placement::moved(&source, &id)).is_some();
-            let blended = source.faces.iter().any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }));
+            let blended = source
+                .faces
+                .iter()
+                .any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. } | solidcore_record::brep::Surface::Sweep { .. }));
             match (moves, blended) {
                 (false, _) => Movable::No,
                 (true, true) => Movable::Exactly,
@@ -1577,6 +1658,11 @@ impl Body {
             None => (self.record.arc().clone(), matrix),
         };
         let motion = crate::placement::Rigid::of_matrix(&matrix).filter(|m| movable.by(m))?;
+        // Past the ceiling the copy is moved now, so `validate_built` refuses it. A lazy record
+        // would store the vertex before that check. `source` is the unmoved record.
+        if !crate::placement::within_coordinate_ceiling(&source, &motion) {
+            return None;
+        }
         Some(Body {
             record: RecordCell::Moved(std::sync::Arc::new(LazyMove::new(source, motion, matrix))),
             placing: self.placing.clone(),
@@ -1595,12 +1681,7 @@ impl Body {
             face_sources: None,
             regularization_protected: self.regularization_protected,
             // A move keeps every face and edge where it was: one history for every placement.
-            history: Some(
-                self.placing
-                    .identity
-                    .get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self)))
-                    .clone(),
-            ),
+            history: Some(self.kept_identity()),
             display_of,
             meshes: None,
             unchecked: None,
@@ -1612,6 +1693,20 @@ impl Body {
     /// share it.
     pub fn solid_id(&self) -> usize {
         self.record.key()
+    }
+
+    /// Hashable keys implied by [`Body::same_shape`], without materializing a lazy move: any two
+    /// bodies for which `a.same_shape(b)` is true share at least one key (`ready` or `moved`).
+    pub fn shape_keys(&self) -> (Option<usize>, Option<u64>) {
+        self.record.shape_keys()
+    }
+
+    /// Clone this body with a ready record sharing its materialized `Arc<Brep>` (tests).
+    #[doc(hidden)]
+    pub fn into_ready_for_tests(&self) -> Body {
+        let mut out = self.clone();
+        out.record = RecordCell::Ready(self.record.arc().clone());
+        out
     }
 
     pub fn with_split_lines(mut self, s: Option<std::sync::Arc<Vec<Vec<Vec3>>>>) -> Body {
@@ -1629,14 +1724,15 @@ impl Body {
         self.paint.as_deref()
     }
 
-    /// The same body with opacity, face colours and colour names for export (`None`, or opaque
-    /// with no face colours and no name, clears them).
+    /// The same body with opacity, face colours, colour names and layer for export (`None`, or
+    /// opaque with no face colours, no name and no layer, clears them).
     pub fn with_paint(mut self, p: Option<Paint>) -> Body {
         let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
         self.paint = p
             .map(|mut p| {
                 p.opacity = clean(p.opacity);
                 p.name = p.name.as_deref().and_then(colour_name);
+                p.layer = p.layer.as_deref().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string);
                 p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
                 for f in &mut p.faces {
                     f.color = f.color.map(|x| x.clamp(0.0, 1.0));
@@ -1645,8 +1741,8 @@ impl Body {
                 }
                 p
             })
-            // An opaque body colour's name is kept with it: the paint holds it.
-            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some())
+            // An opaque body colour's name is kept with it: the paint holds it, as it holds a layer.
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some() || p.layer.is_some())
             .map(std::sync::Arc::new);
         self.regularization_protected |= self.paint().is_some_and(|paint| !paint.faces.is_empty());
         self
@@ -2532,6 +2628,50 @@ impl Body {
         body.rim_edges(order, faces).map_err(|e| ops_failure("rim edges", e))
     }
 
+    /// How far face `face` strays across the direction `direction`, when the kernel proves a
+    /// bound ([`solidcore_ops::Body::face_straying`]): within the zone tolerance the face runs
+    /// straight along it. `None` where no bound is proved.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the faces or a direction that is not finite;
+    /// [`KernelError::Failed`] for a mesh body and the kernel's failure.
+    pub fn face_straying(&self, face: usize, direction: [f64; 3]) -> Result<Option<f64>> {
+        let form = self.exact_form("face straying")?;
+        let (body, order) = &*form;
+        body.face_straying(order, face, direction).map_err(|e| ops_failure("face straying", e))
+    }
+
+    /// The half width of face `face`'s plane band for the zone tolerance `zone`
+    /// ([`solidcore_ops::Body::face_run`]): a unit direction `d` with `|n · d|` within it, `n` the
+    /// plane's unit normal, is one the face runs straight along within the zone. `None` for a face
+    /// the kernel gives no plane band.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the faces; [`KernelError::Failed`] for a mesh
+    /// body and the kernel's failure.
+    pub fn face_plane_band(&self, face: usize, zone: f64) -> Result<Option<f64>> {
+        let form = self.exact_form("face plane band")?;
+        let (body, order) = &*form;
+        match body.face_run(order, face, zone).map_err(|e| ops_failure("face plane band", e))? {
+            solidcore_ops::measure::FaceRun::Plane { slope, .. } => Ok(Some(slope)),
+            _ => Ok(None),
+        }
+    }
+
+    /// The unit direction into face `face` from the middle of its edge `edge`, square to the edge
+    /// in the face's tangent plane ([`solidcore_ops::Body::edge_inward`]): which side is into
+    /// the face comes from its loop, so a face that is not convex is read as a convex one is.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the edges or faces, or an edge that does not
+    /// bound the face; [`KernelError::Failed`] for a mesh body, a seam of the face and the
+    /// kernel's failure.
+    pub fn edge_inward(&self, edge: usize, face: usize) -> Result<[f64; 3]> {
+        let form = self.exact_form("direction into a face")?;
+        let (body, order) = &*form;
+        body.edge_inward(order, edge, face).map_err(|e| ops_failure("direction into a face", e))
+    }
+
     /// The closest points of `p` and faces `faces` (as trimmed) and edges `edges` (over their
     /// intervals), by the kernel's minimum-distance solve on the exact geometry
     /// ([`solidcore_ops::Body::closest_to_point`]). `None` where the solve finds no points.
@@ -2933,9 +3073,31 @@ fn record_outline(record: &Brep) -> Aabb3 {
 
 /// solidcore-ops' error of a query: an argument it refuses is the caller's input, anything else
 /// the kernel's failure.
+/// The direction faces `faces` (each a body and a record face index of it; several bodies may
+/// take part) all run straight along within the zone tolerance, proved
+/// ([`solidcore_ops::measure::straight_direction`]); [`solidcore_ops::measure::Straight`] says
+/// which faces gave it, or why there is none.
+///
+/// # Errors
+/// [`KernelError::Invalid`] for an index past a body's faces; [`KernelError::Failed`] for a mesh
+/// body and the kernel's failure.
+pub fn straight_direction(faces: &[(&Body, usize)]) -> Result<solidcore_ops::measure::Straight> {
+    let forms = faces.iter().map(|(b, _)| b.exact_form("straight direction")).collect::<Result<Vec<_>>>()?;
+    let reads: Vec<(&solidcore_ops::Body, &solidcore_ops::Order, usize)> = forms
+        .iter()
+        .zip(faces)
+        .map(|(form, &(_, face))| {
+            let (body, order) = &**form;
+            (body, order, face)
+        })
+        .collect();
+    solidcore_ops::measure::straight_direction(&reads).map_err(|e| ops_failure("straight direction", e))
+}
+
 fn ops_failure(what: &str, e: solidcore_ops::Error) -> KernelError {
     match e {
         solidcore_ops::Error::Argument => KernelError::Invalid(format!("{what}: {e}")),
+        solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("{what}: {message}")),
         e => KernelError::Failed(format!("{what}: {e}")),
     }
 }

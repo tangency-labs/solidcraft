@@ -297,6 +297,29 @@ fn record_body(r: &Brep) -> Result<(Body, bool)> {
     Ok((Body::from_record(r.clone())?, true))
 }
 
+/// Morph `target` by mapping `base`'s face `base_face` onto `control`'s face `control_face`
+/// through [`solidcore_ops::morph::morph_by_surface`].
+pub fn morph_surface(
+    target: &Body,
+    base: &Body,
+    base_face: usize,
+    control: &Body,
+    control_face: usize,
+    options: &solidcore_ops::morph::MorphOptions,
+) -> Result<Body> {
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("morph"));
+    }
+    target.require_brep("Morph")?;
+    base.require_brep("Morph base surface")?;
+    control.require_brep("Morph target surface")?;
+    let record = crate::guard("Morph", || {
+        solidcore_ops::morph::morph_by_surface(target.record(), base.record(), base_face, control.record(), control_face, options)
+            .map_err(|e| KernelError::Failed(format!("Morph: {e}")))
+    })?;
+    Body::from_record(record)
+}
+
 /// `body` with the history `h` over operands of `counts` faces and edges when its order is the
 /// record's, else with none.
 fn with_history(body: Body, same_order: bool, h: History, counts: &[(usize, usize)]) -> Result<Body> {
@@ -2765,6 +2788,111 @@ mod tests {
         let two = copy_faces(&b, &[Vec3::new(5.0, 5.0, 10.0), Vec3::new(5.0, 0.0, 5.0)]).unwrap();
         let v = measure(&thicken(&two, 1.0, false).unwrap()).unwrap().volume;
         assert!(rel(v, 210.0) < 1e-9, "{v}");
+    }
+
+    /// A small round patch of a sphere shell's face, cut by a cylinder about a radial line,
+    /// thickened by 0.03 (#23077: across the face's seam the wall merge's topology test left
+    /// an offset face on a surface turned the whole way round under its old domain, and the
+    /// export refused its trims as off the spline's knot range). The cap: polar angles 0 to
+    /// 0.5 between radii `outer` − 1 and `outer`, revolved a whole turn about Z, so its seam
+    /// lies in the XZ plane at x > 0. The patch: the outer face within a = 2.655 of the radial
+    /// line at polar angle 0.25, in the seam's plane (two faces, across the seam) and turned 1
+    /// rad about Z (one face, off it). The same case thickened out is a kernel case
+    /// (`shell/23077-thicken-sphere-patch-across-its-seam*`); this one goes through
+    /// SolidCraft's export, where the refusal was met.
+    ///
+    /// Thicken offsets the face along its normals, radially, and closes its sides along them:
+    /// thickened from radius R0 to R1 the slab is the cone of half angle α (sin α = a/R, the
+    /// patch's rim) between them, 2π(1 − cos α)(R1³ − R0³)/3, with R0, R1 = R, R + t out and
+    /// R ∓ t/2 half each way. Inside the rim, the slab within r < a of the line is
+    /// 2π/3·[ρ³ − (ρ² − r²)^(3/2)] from R0 to R1, wherever the seam runs (the issue's off-seam
+    /// slices, 0.178217758, 0.411164981 and 0.060449535 between radii 0, 1.375, 2.5 and 2.625
+    /// on the R 52.5 face, are these).
+    ///
+    /// The bound, from the input's tolerance τ (the patch's largest edge tolerance), never the
+    /// result's: the measure integrates to 10⁻⁸ relative. A rim within τ of both the sphere
+    /// and the cylinder r (normals at 90° − α_r, sin α_r = r/R) lies at most
+    /// τ(1 + sin α_r)/cos α_r from the exact circle along the sphere; the walls carry it out
+    /// radially, by at most R1/R, and the walls are at most 2πr·t·R1/R across, so the volume
+    /// moves by at most 2πr·t·(R1/R)²·τ(1 + sin α_r)/cos α_r. The result's own edge
+    /// tolerances stay within τ·R1/R, the offset of the input's.
+    fn thicken_a_sphere_patch_across_its_seam(outer: f64) {
+        use crate::profiles::{ProfileCurve, revolve_curves};
+        use std::f64::consts::{PI, TAU};
+        let (a, t, top, inner) = (2.655, 0.03, 0.5f64, outer - 1.0);
+        let arc = |r: f64| ProfileCurve::Arc { center: [0.0; 3], axis: [0.0, 1.0, 0.0], reference: [0.0, 0.0, 1.0], radius: r, start: 0.0, end: top };
+        let at = |r: f64| [r * top.sin(), 0.0, r * top.cos()];
+        // 1 − (1 − x)^(3/2) without cancellation.
+        let shell = |x: f64| -(1.5 * (-x).ln_1p()).exp_m1();
+        let tau = |b: &Body| b.record().edges.iter().map(|e| e.tolerance).fold(b.record().tolerance, f64::max);
+        let profile = [
+            ProfileCurve::Line { start: [0.0, 0.0, inner], end: [0.0, 0.0, outer] },
+            arc(outer),
+            ProfileCurve::Line { start: at(outer), end: at(inner) },
+            arc(inner),
+        ];
+        let cap = revolve_curves(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, false, None).unwrap();
+        let face = (0..cap.face_count())
+            .find(|f| measure(&crate::offset_surface(&cap, &[*f], 0.0, 0.01).unwrap()).unwrap().bbox.max.z > outer - 0.1)
+            .unwrap();
+        let sheet = crate::offset_surface(&cap, &[face], 0.0, 0.01).unwrap();
+        // The slab from R0 to R1 (its cone, and within r of the line), and the bound above.
+        let cone = |r0: f64, r1: f64| {
+            let s = a / outer;
+            2.0 * PI * s * s / (1.0 + (1.0 - s * s).sqrt()) * (r1.powi(3) - r0.powi(3)) / 3.0
+        };
+        let within = |r: f64, r0: f64, r1: f64| 2.0 * PI / 3.0 * (r1.powi(3) * shell((r / r1).powi(2)) - r0.powi(3) * shell((r / r0).powi(2)));
+        let bound = |v: f64, r: f64, r1: f64, tau: f64| {
+            let s = r / outer;
+            1e-8 * v + 2.0 * PI * r * t * (r1 / outer).powi(2) * tau * (1.0 + s) / (1.0 - s * s).sqrt()
+        };
+        for (turn, counts, what) in [(0.0f64, [2, 3, 6, 8, 4], "across the seam"), (1.0, [1, 1, 3, 3, 2], "off the seam")] {
+            let what = format!("R {outer}, {what}");
+            let dir = Vec3::new(0.25f64.sin() * turn.cos(), 0.25f64.sin() * turn.sin(), 0.25f64.cos());
+            let tube = |r: f64| cylinder(dir * (outer - 20.0), dir, r, 40.0).unwrap();
+            let patch = crate::boolean(&sheet, &tube(a), crate::BoolOp::Intersect).unwrap().unwrap();
+            assert_eq!([patch.face_count(), patch.edge_count()], [counts[0], counts[1]], "{what}: the patch");
+            let tau0 = tau(&patch);
+            eprintln!("{what}: τ = {tau0}");
+            let mut sides = vec![(t, false, outer, outer + t)];
+            if turn == 0.0 {
+                sides.push((t, true, outer - t / 2.0, outer + t / 2.0));
+            }
+            for (thickness, symmetric, r0, r1) in sides {
+                let what = format!("{what}, symmetric {symmetric}");
+                let slab = thicken(&patch, thickness, symmetric).unwrap_or_else(|e| panic!("{what}: {e}"));
+                assert!(!slab.is_surface() && slab.validity().is_empty(), "{what}: {:?}", slab.validity());
+                assert_eq!([slab.face_count(), slab.edge_count(), slab.vertex_count()], [counts[2], counts[3], counts[4]], "{what}");
+                assert!(tau(&slab) <= tau0 * r1 / outer, "{what}: the slab's tolerance {} past {tau0}", tau(&slab));
+                let (v, want) = (measure(&slab).unwrap().volume, cone(r0, r1));
+                let room = bound(want, a, r1, tau0);
+                eprintln!("{what}: {v} vs {want}: off by {:e}, bound {room:e}", (v - want).abs());
+                assert!((v - want).abs() <= room, "{what}: {v} vs {want}");
+                if symmetric || turn != 0.0 {
+                    continue;
+                }
+                // The slab across the seam, cut within 1.375, 2.5 and 2.625 of the line.
+                for r in [1.375, 2.5, 2.625] {
+                    let core = crate::boolean(&slab, &tube(r), crate::BoolOp::Intersect).unwrap().unwrap();
+                    assert!(core.validity().is_empty(), "{what}, within {r}: {:?}", core.validity());
+                    let (v, want) = (measure(&core).unwrap().volume, within(r, r0, r1));
+                    let room = bound(want, r, r1, tau0);
+                    eprintln!("{what}, within {r}: {v} vs {want}: off by {:e}, bound {room:e}", (v - want).abs());
+                    assert!((v - want).abs() <= room, "{what}, within {r}: {v} vs {want}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn thicken_a_sphere_patch_across_its_faces_seam() {
+        thicken_a_sphere_patch_across_its_seam(52.5);
+    }
+
+    /// The face of the cap below, R 50 (#23077 found it refused the same way).
+    #[test]
+    fn thicken_a_sphere_patch_across_the_seam_of_the_face_below() {
+        thicken_a_sphere_patch_across_its_seam(50.0);
     }
 
     #[test]

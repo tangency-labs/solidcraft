@@ -604,7 +604,8 @@ fn ls_extruded_up_and_down_from_one_grid_join() {
 }
 
 /// This process's CPU time (all threads) and peak resident memory, where the system says
-/// (Linux: /proc/self); `None` elsewhere.
+/// (Linux: /proc/self); `None` elsewhere. Both are the whole process's: a test that bounds its
+/// own work by them runs alone in a child process ([`in_own_process`]).
 fn cpu_and_peak_memory() -> Option<(std::time::Duration, u64)> {
     let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
     // utime and stime, in clock ticks (100 a second on Linux), after the command's name.
@@ -615,24 +616,94 @@ fn cpu_and_peak_memory() -> Option<(std::time::Duration, u64)> {
     Some((std::time::Duration::from_millis(ticks * 10), kb * 1024))
 }
 
+/// Set in the child process that [`in_own_process`] runs a test in.
+const OWN_PROCESS: &str = "SOLIDCRAFT_TEST_OWN_PROCESS";
+/// The child's line on stdout when its measurement has started ([`OwnProcess::measuring`]).
+const MEASURING: &str = "own process: measuring";
+
+/// A test running alone in a child process of this test binary.
+struct OwnProcess;
+
+impl OwnProcess {
+    /// Says the measurement has started and waits until the parent has run its neighbour, so the
+    /// neighbour's memory goes up inside every measurement.
+    fn measuring(&self) {
+        println!("{MEASURING}");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+    }
+}
+
+/// `Some` in a child process of this test binary that runs `test` alone. Otherwise runs that
+/// child, fails unless it passed, and returns `None`. A test that bounds its own work by the
+/// whole process's peak memory or CPU time measures only that work there: under `cargo test`
+/// every other test in the binary runs in the same process, and one raised the peak by over a
+/// gigabyte. Once the child says it is measuring, this process (where the other tests
+/// run) writes more memory than any such bound before the child goes on: a measurement that is
+/// not the child's own fails every time.
+fn in_own_process(test: &str) -> Option<OwnProcess> {
+    use std::io::{BufRead, Read, Write};
+    if std::env::var_os(OWN_PROCESS).is_some() {
+        return Some(OwnProcess);
+    }
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture", "--test-threads=1"])
+        .env(OWN_PROCESS, "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let errors = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+    let mut stdin = child.stdin.take();
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let (mut text, mut line, mut neighbour) = (String::new(), String::new(), None);
+    while stdout.read_line(&mut line).unwrap_or(0) > 0 {
+        // libtest's "test <name> ... " can open the line.
+        if line.trim_end().ends_with(MEASURING) {
+            // The other tests in this process: 1.1 GiB written page by page, held until the child exits.
+            neighbour = Some(std::hint::black_box(vec![1u8; (1 << 30) + (100 << 20)]));
+            if let Some(mut stdin) = stdin.take() {
+                let _ = stdin.write_all(b"go\n");
+            }
+        }
+        text.push_str(&line);
+        line.clear();
+    }
+    drop(stdin);
+    let status = child.wait().unwrap();
+    drop(neighbour);
+    text.push_str(&errors.join().unwrap());
+    // `--exact` matches nothing (and passes) if the name is wrong: the child must have run it.
+    assert!(status.success() && text.contains(MEASURING) && text.contains("1 passed"), "{test} in its own process:\n{text}");
+    None
+}
+
 /// Press/pull on the sensor enclosure's lid top: joining the pulled face's prism imprints the
 /// contact (#825), and boxing the lid's faces by dividing their curved edges down to the
 /// contact tolerance ran away (over 24 GB and many minutes). It takes about 9 s of CPU here and
 /// no memory beyond the design's. The budgets are work, not wall time, which a loaded runner
-/// stretches (61-87 s for the same work on CI).
+/// stretches (61-87 s for the same work on CI). The test runs in its own process, so the
+/// budgets are its own work's, not other tests'.
 #[test]
 fn press_pull_on_the_enclosure_lid_is_prompt() {
+    let Some(own) = in_own_process("boolean_regression_tests::press_pull_on_the_enclosure_lid_is_prompt") else { return };
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../examples/acceptance/sensor_enclosure.json")).unwrap();
     s.run_script(&script).unwrap();
     let total = |s: &Session| -> f64 { s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum() };
     let before = total(&s);
     let start = cpu_and_peak_memory();
+    own.measuring();
     s.execute("solid.press_pull", &json!({"face": [-12.0, 27.4, 23.0], "distance": 5.0})).unwrap();
     if let (Some((cpu0, peak0)), Some((cpu1, peak1))) = (start, cpu_and_peak_memory()) {
         let grew = peak1.saturating_sub(peak0);
         assert!(grew < 1 << 30, "the press/pull grew the peak memory by {} MB", grew >> 20);
-        // Other tests in this process (cargo test) count too, so the bound is generous.
         assert!(cpu1 - cpu0 < std::time::Duration::from_secs(300), "the press/pull took {:?} of CPU", cpu1 - cpu0);
     }
     assert!(total(&s) > before, "{before} -> {}", total(&s));
@@ -1689,7 +1760,7 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
             &json!({"sketch": "Sketch1", "profiles": [{"point": [50, 10]}], "distance": 10, "operation": "join", "name": "Extrude2"}),
         )
         .unwrap();
-    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart)), "{join}");
+    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart) && w.contains("(New Body makes it a body of its own)")), "{join}");
     assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), join["warning"].as_str());
     assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Body1"]);
     assert!((volume(&s, "Body1") - 8000.0).abs() < 1e-6, "{}", volume(&s, "Body1"));
@@ -2165,6 +2236,26 @@ fn fins_meeting_at_the_axis_join_into_their_hub() {
     assert!((v - 4624.24).abs() < 0.05, "{v}");
 }
 
+/// #22146, second case: Pipe1, a 5 mm pipe along lines and arcs, and Pipe2 joined to it. Each pipe
+/// builds alone with its volume (Pappus), and the join must give one valid body of both volumes:
+/// the pipes touch without overlapping. The join failed SMLib's check on a torus face of Pipe1 read
+/// back through the flat arrays ("SmSurfOfRevolution::Test #3 Midpoint").
+#[test]
+fn a_pipe_joined_to_a_pipe_of_lines_and_arcs_builds_one_body_of_both_volumes() {
+    let s = replay(include_str!("../../../examples/regressions/pipe_join_second_case.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1"], "Pipe2 joins Pipe1's body");
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // Pipe1 10170.259935237927 and Pipe2 1002.8772940460799 mm^3, touching
+    let want = 11173.137229284;
+    let v = volume(&s, "Body1");
+    assert!((v - want).abs() <= 1e-9 * want, "volume {v}, the two pipes' {want}");
+}
+
 /// #17004: a body whose 2 mm round has two pieces swept 0.45 degrees (plane-to-cone rounds kept as
 /// surfaces of revolution) could not be read back into the kernel, so every later operation on it
 /// failed with "an exact net's NURBS form is not a surface of revolution's parametrisation". The
@@ -2226,6 +2317,23 @@ fn a_fillet_of_a_tangent_chain_ends_at_a_slight_bend() {
     let (area, c) = ((1.0 - std::f64::consts::FRAC_PI_4) * r * r, r * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI)));
     let want = area * (sweep * (49.0 + c) + handle);
     assert!((removed - want).abs() < 1e-4, "removed {removed}, expected {want}");
+}
+
+/// #17356: the 2 mm fillet of the outer top edges, after the inner top edges were rounded, was
+/// refused as cutting the part in pieces. The ray classifying a point beside the new round crosses
+/// the inner round's face twice within one leaf of its search tree, and only the far crossing was found.
+#[test]
+fn outer_top_fillet_after_the_inner_round_builds_one_closed_body() {
+    let s = replay(include_str!("../../../examples/regressions/fillet_outer_top_after_inner_round.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // a recorded volume: the rim is seven tapered lobes, and its round has no closed form
+    let (got, want) = (volume(&s, "Body1"), 323_074.223_6);
+    assert!((got - want).abs() < 1e-6 * want, "volume {got}, want {want}");
 }
 
 /// A section of #15701: an arch (a seven-point fit spline) on the plane x = `x`, offset 1 mm to
@@ -2571,4 +2679,69 @@ fn a_hole_in_a_notched_cross_cut_large_half_torus_is_cut() {
     let want = half_torus - cross - holes - notch;
     let got = volume(&s, "Part");
     assert!((got - want).abs() < 5e-5, "volume {got}, want {want} (notch {notch}, cross {cross}, holes {holes})");
+}
+
+/// A through-all cut whose joints are rounded to 9 decimals, the straight edge lying on
+/// the tube's end face. Those literals are the rounded input, not a stand-in for `SQRT_2`.
+/// The same notch with √2 at full precision builds the same solid. Tube R 10, r 9, height 12
+/// (z from −6 to 6). The volume is the issue's integral of the notch through the wall; the
+/// uncut tube, 228π, is not that volume.
+#[test]
+#[allow(clippy::approx_constant)]
+fn rounded_profile_joints_cut_through_coincident_end_face() {
+    let notch = |which: &str, inner: f64, outer: f64| {
+        let mut s = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.circle.center", json!({"center": [0, 0], "radius": 10})),
+            ("sketch.circle.center", json!({"center": [0, 0], "radius": 9})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": 12, "direction": "symmetric"})),
+            ("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [0, 0, -1], "y_dir": [0, 1, 0]}})),
+            ("sketch.arc.center_point", json!({"center": [5.5, 0], "start": [5.0, inner], "end": [5.0, -inner], "clockwise": false})),
+            ("sketch.arc.center_point", json!({"center": [4.5, outer], "start": [5.0, inner], "end": [6, outer], "clockwise": false})),
+            ("sketch.arc.center_point", json!({"center": [4.5, -outer], "start": [5.0, -inner], "end": [6, -outer], "clockwise": true})),
+            ("sketch.line", json!({"points": [[6, outer], [6, -outer]], "infer": false})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"through_all": true, "operation": "cut", "direction": "negative"})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{which} {command}: {e}"));
+        }
+        let body = s.model.state().body("Body1").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{which}: {:?}", body.validity());
+        volume(&s, "Body1")
+    };
+    let u = notch("unrounded", 2.0_f64.sqrt(), 2.0 * 2.0_f64.sqrt());
+    println!("unrounded coincident-end-face notch: {u:.12} mm³");
+    assert!((u - 710.5969315245).abs() < 1e-3, "unrounded volume {u:.12}");
+    let rounded = notch("rounded", 1.414213562, 2.828427125);
+    assert!((rounded - u).abs() < 1e-6, "rounded {rounded:.12} vs unrounded {u:.12}");
+}
+
+/// #23062: the upper half of a torus (centre circle Ø1000, tube Ø1) with both edges of its flat
+/// face rounded with 0.05, and a Ø0.1 notch 0.25 deep centred on the flat face's outer rim at +Y.
+/// The cut was refused by the check's test 11 ("Bad SpeedPt") on a UV trim of the outer round:
+/// the round's two parameters have very different lengths on the surface, and the trim, read in
+/// raw (u, v), slowed to 3.5e-4 against a tolerance of 4.4e-4; on the surface its slowest speed
+/// is 0.97. The notch is cut into one valid body. Its volume against the analytic one is
+/// solidcore's kernel case `booleans/23062-notch-through-thin-round-on-large-half-torus`.
+#[test]
+fn a_notch_through_a_thin_round_on_a_large_half_torus_is_cut() {
+    let s = replay(
+        &json!({"commands": [
+            {"command": "solid.torus", "params": {"center": [0.0, 0.0, 0.0], "major": 500.0, "minor": 0.5, "operation": "new", "body_name": "Part"}},
+            {"command": "solid.box", "params": {"length": 1003.0, "width": 1003.0, "height": 1.5, "corner": [-501.5, -501.5, -1.5], "operation": "cut", "targets": ["Part"]}},
+            {"command": "solid.fillet", "params": {"edges": [[0.0, -499.5, 0.0], [0.0, -500.5, 0.0]], "radius": 0.05}},
+            {"command": "solid.cylinder", "params": {"radius": 0.05, "height": 0.25, "base": [0.0, 500.5, 0.0], "axis": "Z", "operation": "cut", "targets": ["Part"]}}
+        ]})
+        .to_string(),
+    );
+    let bodies = &s.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    let body = &bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}, {} shells", body.validity(), body.shell_count());
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+    let class = |x: f64, y: f64, z: f64| body.classify_point(solidcore_record::Vec3::new(x, y, z)).unwrap();
+    assert_eq!(class(0.0, 500.46, 0.05), Outside, "the notch");
+    assert_eq!(class(0.0, 500.38, 0.05), Inside, "beside the notch");
 }

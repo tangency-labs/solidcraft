@@ -145,6 +145,8 @@
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               install -Dm644 assets/platforms/linux/io.tangencylabs.solidcraft.desktop \
                 $out/share/applications/io.tangencylabs.solidcraft.desktop
+              install -Dm644 assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop \
+                $out/share/applications/io.tangencylabs.solidcraft.workshop-links.desktop
               install -Dm644 assets/platforms/linux/io.tangencylabs.solidcraft.mime.xml \
                 $out/share/mime/packages/io.tangencylabs.solidcraft.xml
               for size in 16 24 32 48 64 128 256 512; do

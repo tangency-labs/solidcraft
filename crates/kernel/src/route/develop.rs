@@ -9,7 +9,9 @@ use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::OpKind;
 use solidcraft_kernel_api::develop::Develop;
 
-pub use solidcraft_kernel_api::develop::{BeadAgainst, BeadRefusal, ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal};
+pub use solidcraft_kernel_api::develop::{
+    BeadAgainst, BeadRefusal, ContourRefusal, CornerTailRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
+};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
@@ -63,6 +65,28 @@ pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> 
 /// The kernel's refusal, as its kind.
 pub fn offset_contour(segs: &[Seg2], depth: f64, thickness: f64, flip: bool, smooth: f64) -> Result<Vec<Seg2>, ContourRefusal> {
     kernel().offset_contour(segs, depth, thickness, flip, smooth)
+}
+
+/// Replaces a previous setback beyond a shared flange edge. See [`Develop::retarget_corner_tail`].
+///
+/// # Errors
+/// The kernel could not restore or trim the contour unambiguously.
+pub fn retarget_corner_tail(
+    region: &Region2,
+    edge: [Vec2; 2],
+    anchor_origin: Vec2,
+    anchor_direction: Vec2,
+    bend_length: f64,
+    old_cut: f64,
+    new_cut: f64,
+) -> Result<Region2, CornerTailRefusal> {
+    kernel().retarget_corner_tail(region, edge, anchor_origin, anchor_direction, bend_length, old_cut, new_cut)
+}
+
+/// Sets a straight flange side back, preserving holes. See [`Develop::set_back_past`].
+#[must_use]
+pub fn set_back_past(region: &Region2, from: Vec2, direction: Vec2, rise: f64, height: f64, into: Vec2, by: f64) -> Option<Region2> {
+    kernel().set_back_past(region, from, direction, rise, height, into, by)
 }
 
 /// Where the flat is cut at one end of a bend's zone that a tear relief parts: along the zone's

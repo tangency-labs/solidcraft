@@ -15,6 +15,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::mass::integrator::properties::{brep_volume_default, no_unsure_region};
+use crate::math::det;
 use crate::math::{Vec2, Vec3};
 use crate::primitive::api_trim_ops::create_planar_faces;
 use crate::primitive::primitive_creation::Boolean2d;
@@ -167,7 +168,7 @@ fn extrude_one(k: &mut Kernel, frame: &Frame, region: &Region2, height: f64) -> 
             } => {
                 // The analytic support and its form share the first increasing-angle meridian.
                 let first = start + sweep.min(0.);
-                let radial = x * first.cos() + y * first.sin();
+                let radial = x * det::cos(first) + y * det::sin(first);
                 let mut placement = Axis2Placement::IDENTITY;
                 placement.set_step_canonical(to_world(frame, center, 0.), normal, radial)?;
                 let mut cylinder = Cone::new_cylinder_bounded(

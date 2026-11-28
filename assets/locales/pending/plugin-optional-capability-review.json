@@ -1,0 +1,34 @@
+{
+  "en": {
+    "plugin_install.optional_capability_supported": "Optional capability: {capability} (supported by this app)",
+    "plugin_install.optional_capability_unavailable": "Optional capability: {capability} (not supported by this app; may be enabled by a later version)"
+  },
+  "ar": {
+    "plugin_install.optional_capability_supported": "إمكانية اختيارية: {capability} (يدعمها هذا التطبيق)",
+    "plugin_install.optional_capability_unavailable": "إمكانية اختيارية: {capability} (لا يدعمها هذا التطبيق؛ قد يفعّلها إصدار لاحق)"
+  },
+  "de": {
+    "plugin_install.optional_capability_supported": "Optionale Funktion: {capability} (von dieser App unterstützt)",
+    "plugin_install.optional_capability_unavailable": "Optionale Funktion: {capability} (von dieser App nicht unterstützt; kann in einer späteren Version aktiviert werden)"
+  },
+  "he": {
+    "plugin_install.optional_capability_supported": "יכולת אופציונלית: {capability} (נתמכת ביישום זה)",
+    "plugin_install.optional_capability_unavailable": "יכולת אופציונלית: {capability} (אינה נתמכת ביישום זה; עשויה להיות מופעלת בגרסה עתידית)"
+  },
+  "ja": {
+    "plugin_install.optional_capability_supported": "オプション機能: {capability} (このアプリでサポートされています)",
+    "plugin_install.optional_capability_unavailable": "オプション機能: {capability} (このアプリでは未対応です。後のバージョンで有効になる可能性があります)"
+  },
+  "ko": {
+    "plugin_install.optional_capability_supported": "선택적 기능: {capability} (이 앱에서 지원함)",
+    "plugin_install.optional_capability_unavailable": "선택적 기능: {capability} (이 앱에서 지원하지 않음; 이후 버전에서 활성화될 수 있음)"
+  },
+  "vi": {
+    "plugin_install.optional_capability_supported": "Khả năng tùy chọn: {capability} (được ứng dụng này hỗ trợ)",
+    "plugin_install.optional_capability_unavailable": "Khả năng tùy chọn: {capability} (ứng dụng này chưa hỗ trợ; phiên bản sau có thể bật)"
+  },
+  "zh": {
+    "plugin_install.optional_capability_supported": "可选功能：{capability}（此应用支持）",
+    "plugin_install.optional_capability_unavailable": "可选功能：{capability}（此应用不支持；后续版本可能启用）"
+  }
+}

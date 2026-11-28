@@ -93,6 +93,18 @@ pub enum TangentEdges {
     Show,
 }
 
+/// Which of the bodies its design places a view draws (#22107): every one (the default, whatever the
+/// browser shows), or only those the design shows, as the browser's eyes leave them: a body's own,
+/// its placements', its folders' and groups'. Its own `source`, `hide` and `hide_bodies` apply on top
+/// of either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Shows {
+    #[default]
+    All,
+    Design,
+}
+
 /// Which state of its assembly a view draws (#13048): as the design places its parts (the default),
 /// or one of the design's exploded views, by its id. The design is never changed: the view draws a
 /// copy. An id the design no longer has draws a placeholder, never refuses the file.
@@ -210,6 +222,10 @@ pub struct ViewOverrides {
     /// them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hide_bodies: Option<HiddenBodies>,
+    /// Which bodies it draws, every one or only those the design shows: every one when no view of
+    /// its chain sets it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shows: Option<Shows>,
     /// The ISO 128 line group its lines are drawn in: its sheet's, then its drawing's, when no view
     /// of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]

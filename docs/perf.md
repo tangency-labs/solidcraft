@@ -95,9 +95,20 @@ The insert now takes `simplify`, the Simplify box of the Insert SVG/DXF window: 
 of the drawing as it is drawn (the same at any size factor, so the window's preview at scale 1
 and the confirmed insert retain the same edges), within which runs of lines that meet end to end
 are followed by fewer lines (Douglas-Peucker, each removed vertex no further than that from the
-outline kept; arcs, circles, splines and text stay as drawn). It is off by default, 0 — it moves the outline by up to its value — and the
-window starts it at a two-hundredth of the drawing's size when the file has more edges than the
-largest sketch takes, showing it so it can be lowered to 0.
+outline kept; arcs, circles, splines and text stay as drawn). It is off by default, 0 — it moves
+the outline by up to its value.
+
+A dense drawing's Simplify row opens on **Auto**: the smallest distance at which `sketch.insert_svg`
+actually adds the drawing to a sketch, worked out by `sketch.drawing_bounds`' `fit` on the read the
+window already does. It tries the insert on a scratch sketch at the cap (a hundredth of the
+drawing's span), doubles down to a distance that fits, then bisects to 0.01 mm, so the answer is
+the distance asked for, not a guess from the drawing's size: a distance no distance can fit (more
+splines or circles than a sketch takes, which Simplify leaves as drawn) leaves Auto unavailable
+instead. Auto owns the number; turning it off keeps it and lets it be lowered by hand. Reading and
+fitting cost a 55 mm, 900,000-edge drawing 373–402 ms (`drawing_bounds`, `profiling`, three runs),
+against 155–195 ms to read it without the fit; a 1,000,000-edge one 700 ms against 486–494 ms —
+all of it beside the window, in the operations panel's row, so nothing of it is on the window
+thread.
 
 `sketch.insert_svg` through `solidcraft-cli run`, `profiling` build, a quiet machine (load 17),
 three runs each, medians:
@@ -900,8 +911,12 @@ Nothing drawn changed: each state painted the same number of shapes before and a
 772 and 408), and a test compares a frame drawn from the kept list with the frame that built it
 (the same handles at the same points, the same shapes).
 
-What remains inside the bar is one pass over the steps (about 40 ns each) and, with the groups
-on, the grouping worked out again at every frame.
+What remains inside the bar is one pass over the steps (about 40 ns each). With "Fold the
+History bar into groups" on, the grouping plan (`entries`, `folders`, `view`, `within`) and its
+per-feature marks are now cached across frames in egui context memory keyed by document/session
+state, grouping preference, scope, marker and fold revision (`Folds::revision`), with viewport
+hover (`from_view`) resolved in O(1) without rebuilding either cache; steady-state frames and
+viewport hover changes no longer recompute grouping or rebuild the results table.
 
 ## A picked Move feature: each body's faces measured once (2026-11-13)
 
@@ -931,8 +946,14 @@ the control channel with `SOLIDCRAFT_PROFILE_FRAMES=1`. Inside one build of the 
 | 25 pointer moves across the model, the feature picked | 28 s | no frame over 50 ms |
 | the pointer onto the first items of the feature's menu | 1.9 s | no frame over 50 ms |
 
-What is left: the first measurement of the moved bodies, once for each body's geometry (the
-1.6 s above), and again for the bodies a later edit of the Move makes.
+First hover and edits of a non-copy rigid `Move` feature now avoid calling `Body::faces` on the
+UI thread whenever the evaluated rigid motion alone proves whether every face moved (zero move,
+pure translation, screw motion, or off-axis rotation outside the body's `outline_bounds`),
+emitting face points in a single mesh pass per body and lazily consulting `faces_at` only if a
+later feature renamed a face or a rotation axis passes directly through a body (in which case
+only the post-move body is measured, recovering pre-move centroids/normals by the inverse rigid
+matrix). Selecting multiple faces on one body (such as a picked Move feature) also batches their
+highlight triangles and hidden outlines into a single mesh/edge pass per body.
 
 # Recompute performance
 
@@ -1269,9 +1290,13 @@ through the control channel (`ui.drag`), frame times taken as the gaps between f
 | A ring, 40 steps: frame time, median and 90th percentile | 26 and 80 ms | 11 and 31 ms |
 | An arrow moved slowly (1 px a frame), 120 steps: frame time, median and 90th percentile | 8 and 78 ms | 9 and 30 ms |
 
-What is left of a frame of the drag is mostly the highlight, built again when what is under the
-pointer changes (about 16 ms with these bodies picked in the dialog). `a_move_drawn_as_a_layer_looks_as_it_did_built_where_it_lands`
-renders the preview both ways.
+During a Move dialog triad drag drawn as a preview `MovingLayer`, pointer picking and hover
+re-evaluation are now suppressed by `viewport_drag_layer::holds_pointer` unless the user enables
+`move_drag_highlights`, eliminating per-frame raycasts and highlight rebuilds whenever the
+pointer crosses faces behind the dragged triad. When the highlight does rebuild with Move bodies
+picked, `build_highlight` uses O(1) `HashSet` lookups for replaced/live/deduplicated bodies and
+passes the rigid carry transform directly to `moved_body_outline` without cloning meshes.
+`a_move_drawn_as_a_layer_looks_as_it_did_built_where_it_lands` renders the preview both ways.
 
 ## Placement-only model reuse
 

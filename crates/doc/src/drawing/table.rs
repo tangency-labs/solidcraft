@@ -58,7 +58,8 @@ pub enum Kind {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PartsList {
-    /// The component listed (0: the design).
+    /// The component listed (0: the design). Absent in a template, until its design is chosen.
+    #[serde(default = "unbound", skip_serializing_if = "is_unbound")]
     pub of: SheetComponent,
     #[serde(default, rename = "levels")]
     pub view: View,
@@ -70,6 +71,14 @@ pub struct PartsList {
     pub purchased_contents: bool,
     #[serde(default)]
     pub mass: MassFormat,
+}
+
+fn unbound() -> SheetComponent {
+    SheetComponent::UNBOUND
+}
+
+fn is_unbound(of: &SheetComponent) -> bool {
+    *of == SheetComponent::UNBOUND
 }
 
 /// How a parts list shows a mass.
@@ -250,7 +259,8 @@ impl Drawing {
         t.table.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
         if let Kind::PartsList(list) = &t.kind {
             let named = || format!("it lists source {}, which the drawing doesn't have", ids::encode(list.of.source));
-            require(self.sources.iter().any(|s| s.id == list.of.source), named)?;
+            let unbound = self.sources.is_empty() && list.of == SheetComponent::UNBOUND;
+            require(unbound || self.sources.iter().any(|s| s.id == list.of.source), named)?;
             require(list.mass.decimals <= MAX_MASS_DECIMALS, || format!("a mass shows at most {MAX_MASS_DECIMALS} decimals"))?;
         } else {
             require(t.table.filter.ballooned.is_none(), || "only a parts list has rows a balloon reads".to_string())?;

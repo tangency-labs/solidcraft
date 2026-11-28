@@ -60,6 +60,8 @@ impl Walk for crate::document::Operation {}
 impl Walk for crate::hardware_catalog::HardwareKind {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}
+impl Walk for crate::MorphMapMode {}
+impl Walk for crate::MorphProjection {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::PatternDistance {}
 impl Walk for crate::document::CellGridMode {}
@@ -69,6 +71,8 @@ impl Walk for solidcore_record::cell_grid::Clip {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
 impl Walk for crate::document::FilletTurn {}
+impl Walk for crate::dogbone::DogboneStyle {}
+impl Walk for crate::dogbone::DogboneSide {}
 impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
@@ -650,6 +654,29 @@ impl Walk for crate::document::ScaleAbout {
         if let crate::document::ScaleAbout::Pick { at } = self {
             f(Geo::Construct(at))
         }
+    }
+}
+
+/// An extrude's To / From Object reference walks as a construction reference does, so a rename
+/// or a copy of the plane or point it names follows it.
+impl Walk for crate::document::ObjectRef {
+    fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
+        self.0.walk_exprs(f)
+    }
+    fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
+        self.0.walk_exprs_mut(f)
+    }
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        self.0.walk_feature_refs(f, 0)
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        self.0.walk_feature_refs_mut(f, 0)
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        f(Geo::Construct(&self.0))
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        f(Geo::Construct(&mut self.0))
     }
 }
 

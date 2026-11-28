@@ -563,7 +563,7 @@ fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2, s
             continue;
         }
         // Each pasted dimension gets its own parameter, with the same expression.
-        let param = c.param.as_ref().map(|(e, u)| doc.new_model_param(e, u));
+        let param = c.param.as_ref().map(|(e, u)| doc.new_model_param(e, u)).transpose()?;
         let id = sk.add_constraint(kind, param)?;
         if let Some(nc) = sk.constraints.last_mut() {
             nc.driven = c.driven;

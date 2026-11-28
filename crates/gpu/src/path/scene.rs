@@ -1,6 +1,8 @@
-//! Original median-split BVH. World geometry is rebased around the camera target for f32.
+//! Sixteen-bin SAH BVH and immutable scene upload packing. World geometry is rebased around the camera target for f32.
 #[path = "planar_patches.rs"]
 mod planar_patches;
+use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
@@ -19,6 +21,8 @@ pub(super) struct Triangle {
     pub transmission: Option<Transmission>,
     pub medium: u32,
     pub scalar_face: bool,
+    /// The paint flake layer's table entry + 1, zero without flakes.
+    pub flakes: u32,
 }
 type MediumEdge = (usize, usize, i32);
 // The material header word reserves the high two bits for model lanes and wavelength sampling.
@@ -58,7 +62,7 @@ impl Triangle {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct Node {
     lo: [f32; 3],
     hi: [f32; 3],
@@ -66,8 +70,300 @@ struct Node {
     count: u32,
 }
 
+/// Distinct paint flake layers one job can shade; the shader's parameter table holds this many.
+pub(super) const MAX_FLAKE_LAYERS: usize = 64;
+
+/// Bytes of the shader's paint flake table: four vec4s per layer.
+pub(super) const FLAKE_PARAMETER_BYTES: usize = MAX_FLAKE_LAYERS * 64;
+
+/// The shader's paint flake table. Positions reach the shader relative to `origin`, so each
+/// layer also carries `origin` in its own cells: the whole cells modulo the pattern period
+/// and the fraction, so the GPU finds the same world cells as the CPU.
+pub(super) fn flake_parameters(layers: &[solidcraft_viewport::flakes::FlakeLayer], origin: Vec3) -> Result<Vec<u8>> {
+    use solidcraft_viewport::flakes::FLAKE_PERIOD;
+    if layers.len() > MAX_FLAKE_LAYERS {
+        return Err(invalid("at most 64 distinct paint flake layers are supported"));
+    }
+    let mut bytes = reserved(FLAKE_PARAMETER_BYTES)?;
+    for layer in layers {
+        let q = origin / layer.size_mm();
+        if !q.is_finite() || q.x.abs().max(q.y.abs()).max(q.z.abs()) > 1.0e12 {
+            return Err(invalid("the camera target is beyond the paint flake pattern's reach"));
+        }
+        let whole = Vec3::new(q.x.floor(), q.y.floor(), q.z.floor());
+        let fraction = q - whole;
+        vector(&mut bytes, Vec3::new(layer.coverage(), 1.0 / layer.size_mm(), layer.spread()), layer.depth() as f32);
+        vector(&mut bytes, layer.color(), layer.metallic() as f32);
+        vector(&mut bytes, Vec3::new(layer.roughness(), fraction.x, fraction.y), fraction.z as f32);
+        for value in [whole.x, whole.y, whole.z] {
+            bytes.extend_from_slice(&((value as i64).rem_euclid(FLAKE_PERIOD) as u32).to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+    }
+    bytes.resize(FLAKE_PARAMETER_BYTES, 0);
+    Ok(bytes)
+}
+
+const HASH_CHUNK_ITEMS: usize = 8192;
+
+/// Exact immutable preparation identity for GPU geometry, BVH and optical certificates.
+///
+/// Keyed on every captured mesh/appearance/optical field read by [`flatten_with_media`],
+/// the exact `f64` rebase origin (`camera.target`), and `nested_media`, so a cache hit
+/// is guaranteed bit-for-bit identical to a fresh build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct PreparedKey {
+    scene_hash: [u8; 32],
+    origin_bits: [u64; 3],
+    nested_media: bool,
+}
+
+fn hash_vec3(hasher: &mut Sha256, v: Vec3) {
+    hasher.update(v.x.to_bits().to_le_bytes());
+    hasher.update(v.y.to_bits().to_le_bytes());
+    hasher.update(v.z.to_bits().to_le_bytes());
+}
+
+fn hash_option_f64(hasher: &mut Sha256, value: Option<f64>) {
+    match value {
+        None => hasher.update([0u8]),
+        Some(v) => {
+            hasher.update([1u8]);
+            hasher.update(v.to_bits().to_le_bytes());
+        }
+    }
+}
+
+fn hash_option_surface(hasher: &mut Sha256, surface: Option<OpaqueSurface>) {
+    match surface {
+        None => hasher.update([0u8]),
+        Some(s) => {
+            hasher.update([1u8]);
+            hash_vec3(hasher, s.base_color());
+            hasher.update(s.metallic().to_bits().to_le_bytes());
+            hasher.update(s.roughness().to_bits().to_le_bytes());
+            hasher.update(s.dielectric_ior().to_bits().to_le_bytes());
+            hasher.update([u8::from(s.metal_energy_compensation())]);
+            match s.clear_coat() {
+                None => hasher.update([0u8]),
+                Some(coat) => {
+                    hasher.update([1u8]);
+                    hasher.update(coat.weight().to_bits().to_le_bytes());
+                    hasher.update(coat.roughness().to_bits().to_le_bytes());
+                    hasher.update(coat.ior().to_bits().to_le_bytes());
+                }
+            }
+            match s.flakes() {
+                None => hasher.update([0u8]),
+                Some(flake) => {
+                    hasher.update([1u8]);
+                    hash_vec3(hasher, flake.color());
+                    for value in [flake.coverage(), flake.size_mm(), flake.spread(), flake.depth(), flake.metallic(), flake.roughness()] {
+                        hasher.update(value.to_bits().to_le_bytes());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn hash_option_transmission(hasher: &mut Sha256, transmission: Option<Transmission>) {
+    match transmission {
+        None => hasher.update([0u8]),
+        Some(t) => {
+            hasher.update([1u8]);
+            hash_vec3(hasher, t.extinction());
+            hash_option_f64(hasher, t.thin_wall_thickness_mm());
+            hasher.update([u8::from(t.shadow_transmission())]);
+            match t.model() {
+                None => hasher.update([0u8]),
+                Some(model) => {
+                    hasher.update([1u8]);
+                    hasher.update(model.roughness.to_bits().to_le_bytes());
+                    match model.dispersion {
+                        None => hasher.update([0u8]),
+                        Some(d) => {
+                            hasher.update([1u8]);
+                            hasher.update(d.abbe_number.to_bits().to_le_bytes());
+                        }
+                    }
+                    match model.thin_film {
+                        None => hasher.update([0u8]),
+                        Some(f) => {
+                            hasher.update([1u8]);
+                            hasher.update(f.ior.to_bits().to_le_bytes());
+                            hasher.update(f.thickness_nm.to_bits().to_le_bytes());
+                        }
+                    }
+                }
+            }
+            match t.subsurface() {
+                None => hasher.update([0u8]),
+                Some(s) => {
+                    hasher.update([1u8]);
+                    hasher.update(s.scattering_per_mm.to_bits().to_le_bytes());
+                    hasher.update(s.anisotropy.to_bits().to_le_bytes());
+                }
+            }
+        }
+    }
+}
+
+fn hash_vec3_chunk(chunk: &[Vec3]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 24 * 64];
+    for group in chunk.chunks(64) {
+        let bytes = group.len() * 24;
+        for (slot, v) in buf.as_chunks_mut::<24>().0.iter_mut().zip(group) {
+            slot[0..8].copy_from_slice(&v.x.to_bits().to_le_bytes());
+            slot[8..16].copy_from_slice(&v.y.to_bits().to_le_bytes());
+            slot[16..24].copy_from_slice(&v.z.to_bits().to_le_bytes());
+        }
+        if let Some(slice) = buf.get(..bytes) {
+            hasher.update(slice);
+        }
+    }
+    hasher.finalize().into()
+}
+
+fn hash_tri_chunk(chunk: &[[u32; 3]]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 12 * 128];
+    for group in chunk.chunks(128) {
+        let bytes = group.len() * 12;
+        for (slot, t) in buf.as_chunks_mut::<12>().0.iter_mut().zip(group) {
+            slot[0..4].copy_from_slice(&t[0].to_le_bytes());
+            slot[4..8].copy_from_slice(&t[1].to_le_bytes());
+            slot[8..12].copy_from_slice(&t[2].to_le_bytes());
+        }
+        if let Some(slice) = buf.get(..bytes) {
+            hasher.update(slice);
+        }
+    }
+    hasher.finalize().into()
+}
+
+fn hash_u32_chunk(chunk: &[u32]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 4 * 256];
+    for group in chunk.chunks(256) {
+        let bytes = group.len() * 4;
+        for (slot, v) in buf.as_chunks_mut::<4>().0.iter_mut().zip(group) {
+            slot.copy_from_slice(&v.to_le_bytes());
+        }
+        if let Some(slice) = buf.get(..bytes) {
+            hasher.update(slice);
+        }
+    }
+    hasher.finalize().into()
+}
+
+fn hash_slice_parallel<T: Sync>(hasher: &mut Sha256, slice: &[T], cancel: &CancelToken, chunk_hash: fn(&[T]) -> [u8; 32]) -> Result<()> {
+    cancel.check()?;
+    hasher.update((slice.len() as u64).to_le_bytes());
+    if slice.len() <= HASH_CHUNK_ITEMS {
+        hasher.update(chunk_hash(slice));
+        return Ok(());
+    }
+    let digests: Vec<[u8; 32]> = slice
+        .par_chunks(HASH_CHUNK_ITEMS)
+        .map(|chunk| {
+            cancel.check()?;
+            Ok(chunk_hash(chunk))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for digest in digests {
+        hasher.update(digest);
+    }
+    Ok(())
+}
+
+impl PreparedKey {
+    pub(super) fn from_scene(scene: &ProductScene, origin: Vec3, nested_media: bool, cancel: &CancelToken) -> Result<Self> {
+        cancel.check()?;
+        let mut hasher = Sha256::new();
+        hasher.update((scene.meshes.len() as u64).to_le_bytes());
+        for body in &scene.meshes {
+            cancel.check()?;
+            hasher.update((body.name.len() as u64).to_le_bytes());
+            hasher.update(body.name.as_bytes());
+            hasher.update(body.color);
+            hasher.update(body.opacity.to_bits().to_le_bytes());
+            hash_option_surface(&mut hasher, body.surface);
+            hash_option_transmission(&mut hasher, body.transmission);
+            hasher.update((body.faces.len() as u64).to_le_bytes());
+            for (index, face) in body.faces.iter().enumerate() {
+                if index.is_multiple_of(1024) {
+                    cancel.check()?;
+                }
+                hasher.update(face.face.to_le_bytes());
+                hasher.update(face.color);
+                hasher.update(face.opacity.to_bits().to_le_bytes());
+                hash_option_surface(&mut hasher, face.surface);
+                hash_option_transmission(&mut hasher, face.transmission);
+            }
+            let mesh = &body.mesh;
+            hash_slice_parallel(&mut hasher, &mesh.positions, cancel, hash_vec3_chunk)?;
+            hash_slice_parallel(&mut hasher, &mesh.normals, cancel, hash_vec3_chunk)?;
+            hash_slice_parallel(&mut hasher, &mesh.triangles, cancel, hash_tri_chunk)?;
+            hash_slice_parallel(&mut hasher, &mesh.tri_face, cancel, hash_u32_chunk)?;
+        }
+        Ok(Self { scene_hash: hasher.finalize().into(), origin_bits: [origin.x.to_bits(), origin.y.to_bits(), origin.z.to_bits()], nested_media })
+    }
+}
+
+/// Bounded single-entry cache for one immutable prepared scene.
+///
+/// Eviction returns the displaced value so callers can drop device buffers
+/// outside any mutex guard.
+pub(super) struct PreparedSceneCache<T> {
+    entry: Option<(PreparedKey, T)>,
+}
+
+impl<T> Default for PreparedSceneCache<T> {
+    fn default() -> Self {
+        Self { entry: None }
+    }
+}
+
+impl<T> PreparedSceneCache<T> {
+    /// Non-mutating lookup for read-only preflight validation.
+    pub(super) fn peek(&self, key: &PreparedKey) -> Option<&T> {
+        self.entry.as_ref().filter(|(cached, _)| cached == key).map(|(_, value)| value)
+    }
+
+    /// Look up for execution: clones on hit, or detaches any mismatched entry
+    /// so the caller can drop its resources before preparing the next scene.
+    pub(super) fn lookup_or_take_mismatch(&mut self, key: &PreparedKey) -> (Option<T>, Option<T>)
+    where
+        T: Clone,
+    {
+        if let Some((_, value)) = self.entry.as_ref().filter(|(cached, _)| cached == key) {
+            return (Some(value.clone()), None);
+        }
+        (None, self.take())
+    }
+
+    /// Replace the single cached slot, returning any displaced entry for drop outside the lock.
+    pub(super) fn replace(&mut self, key: PreparedKey, value: T) -> Option<T> {
+        self.entry.replace((key, value)).map(|(_, previous)| previous)
+    }
+
+    /// Evict the cached entry, returning it for drop outside the lock.
+    pub(super) fn take(&mut self) -> Option<T> {
+        self.entry.take().map(|(_, previous)| previous)
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.entry.is_none()
+    }
+}
+
 pub(super) struct Upload {
     pub geometry: Vec<u8>,
+    /// Distinct paint flake layers, indexed by each triangle's `flakes` entry - 1.
+    pub flakes: Vec<solidcraft_viewport::flakes::FlakeLayer>,
     pub nodes: Vec<u8>,
     pub epsilon: f32,
     pub active_glass_model: bool,
@@ -110,6 +406,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
     let mut media_bounds = reserved::<super::media_hierarchy::Region>(solidcraft_render::job::MAX_GPU_DIELECTRICS)?;
     let mut optical_lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let mut optical_hi = -optical_lo;
+    let mut flake_layers = Vec::new();
     for (body_index, body) in scene.meshes.iter().enumerate() {
         cancel.check()?;
         let body_start = triangles.len();
@@ -201,6 +498,23 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             if transmission.is_some() && surface.metallic() != 0.0 {
                 return Err(invalid("transmission requires a nonmetallic surface"));
             }
+            if transmission.is_some() && surface.has_flakes() {
+                return Err(invalid("paint flakes and transmission cannot share a surface"));
+            }
+            let flakes = match surface.flakes() {
+                None => 0,
+                Some(layer) => {
+                    let index = match flake_layers.iter().position(|known| *known == layer) {
+                        Some(index) => index,
+                        None if flake_layers.len() < MAX_FLAKE_LAYERS => {
+                            flake_layers.push(layer);
+                            flake_layers.len() - 1
+                        }
+                        None => return Err(invalid("at most 64 distinct paint flake layers are supported")),
+                    };
+                    index as u32 + 1
+                }
+            };
             triangles.push(Triangle {
                 p,
                 indices: global_indices,
@@ -208,6 +522,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 transmission,
                 medium: body_index as u32 + 1,
                 scalar_face: look.is_some(),
+                flakes,
             });
         }
         if authored_optical && !triangles[body_start..].iter().any(|t| t.transmission.is_some()) {
@@ -256,9 +571,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
         vertex_offset = vertex_offset.checked_add(mesh.positions.len() as u32).ok_or_else(|| invalid("vertex offset overflow"))?;
     }
     let parents = super::media_hierarchy::parents(&media_bounds, &triangles, nested, cancel)?;
-    let mut nodes = reserved(triangles.len().saturating_mul(2).max(1))?;
-    nodes.push(Node::default());
-    build(&mut triangles, 0, &mut nodes, 0, 0, cancel)?;
+    let nodes = build_bvh(&mut triangles, cancel)?;
     let mut representatives = std::collections::BTreeMap::new();
     for (index, t) in triangles.iter().enumerate() {
         if t.transmission.is_some_and(|m| m.thin_wall_thickness_mm().is_none()) {
@@ -312,7 +625,8 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 scatter.map_or(0.0, |s| s.scattering_per_mm),
                 scatter.map_or(0.0, |s| s.anisotropy),
                 (u32::from(scene.meshes.get(t.medium.saturating_sub(1) as usize).is_some_and(|body| body.name.starts_with("__render_stage__/")))
-                    | (u32::from(t.scalar_face) << 1)) as f64,
+                    | (u32::from(t.scalar_face) << 1)
+                    | (t.flakes << 2)) as f64,
             ),
             parent_triangle as f32,
         );
@@ -379,7 +693,15 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
     } else {
         None
     };
-    Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5), active_glass_model, photon_guide, photon_bounds })
+    Ok(Upload {
+        geometry,
+        flakes: flake_layers,
+        nodes: node_bytes,
+        epsilon: (extent * 1e-7).max(1e-5),
+        active_glass_model,
+        photon_guide,
+        photon_bounds,
+    })
 }
 
 fn uploaded_optical_positions(source: [Vec3; 3]) -> Result<[Vec3; 3]> {
@@ -601,6 +923,11 @@ fn medium_root(parents: &mut [usize], mut index: usize) -> Result<usize> {
 // The shader's traversal stack holds 32 nodes and needs at most depth + 1.
 const MAX_BVH_DEPTH: usize = 30;
 const SAH_BINS: usize = 16;
+// Subtrees at or above this size split left/right builds across Rayon workers.
+const PARALLEL_BVH_THRESHOLD: usize = 4096;
+// Slices at or above this size parallelize SAH centroid bounds and 16-bin histograms.
+const PARALLEL_BIN_THRESHOLD: usize = 16_384;
+const PARALLEL_BIN_CHUNK: usize = 4096;
 type Bounds = ([f32; 3], [f32; 3]);
 const EMPTY_BOUNDS: Bounds = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
 
@@ -611,6 +938,13 @@ fn grow(bounds: &mut Bounds, t: &Triangle) {
             bounds.1[axis] = bounds.1[axis].max(value);
         }
     }
+}
+
+#[inline]
+fn triangle_bounds(t: &Triangle) -> Bounds {
+    let mut bounds = EMPTY_BOUNDS;
+    grow(&mut bounds, t);
+    bounds
 }
 
 fn merge(bounds: &mut Bounds, other: &Bounds) {
@@ -635,49 +969,39 @@ fn median_levels(mut count: usize) -> usize {
     levels
 }
 
-// Binned surface-area heuristic over triangle centres. A split is accepted only
-// if a median split of its larger side still fits MAX_BVH_DEPTH, so the median
-// fallback always remains available. Returns the left count after partitioning.
-fn sah_split(triangles: &mut [Triangle], depth: usize) -> Option<usize> {
-    let mut centre_lo = [f64::INFINITY; 3];
-    let mut centre_hi = [f64::NEG_INFINITY; 3];
-    for t in triangles.iter() {
-        for axis in 0..3 {
-            centre_lo[axis] = centre_lo[axis].min(t.centre(axis));
-            centre_hi[axis] = centre_hi[axis].max(t.centre(axis));
-        }
-    }
-    let bin = |t: &Triangle, axis: usize| {
-        let scaled = (t.centre(axis) - centre_lo[axis]) / (centre_hi[axis] - centre_lo[axis]) * SAH_BINS as f64;
-        (scaled as usize).min(SAH_BINS - 1)
-    };
+#[inline]
+fn sah_bin(centre: f64, lo: f64, hi: f64) -> usize {
+    let scaled = (centre - lo) / (hi - lo) * SAH_BINS as f64;
+    (scaled as usize).min(SAH_BINS - 1)
+}
+
+fn sah_best_split(
+    centre_lo: [f64; 3],
+    centre_hi: [f64; 3],
+    counts: &[[usize; SAH_BINS]; 3],
+    boxes: &[[Bounds; SAH_BINS]; 3],
+    depth: usize,
+) -> Option<(usize, usize)> {
     let mut best: Option<(f64, usize, usize)> = None;
     for axis in 0..3 {
         if centre_hi[axis] - centre_lo[axis] <= 0.0 {
             continue;
-        }
-        let mut counts = [0usize; SAH_BINS];
-        let mut boxes = [EMPTY_BOUNDS; SAH_BINS];
-        for t in triangles.iter() {
-            let b = bin(t, axis);
-            counts[b] += 1;
-            grow(&mut boxes[b], t);
         }
         let mut right_area = [0.0; SAH_BINS];
         let mut right_count = [0usize; SAH_BINS];
         let mut accumulated = EMPTY_BOUNDS;
         let mut count = 0;
         for b in (1..SAH_BINS).rev() {
-            merge(&mut accumulated, &boxes[b]);
-            count += counts[b];
+            merge(&mut accumulated, &boxes[axis][b]);
+            count += counts[axis][b];
             right_area[b] = half_area(&accumulated);
             right_count[b] = count;
         }
         accumulated = EMPTY_BOUNDS;
         count = 0;
         for b in 1..SAH_BINS {
-            merge(&mut accumulated, &boxes[b - 1]);
-            count += counts[b - 1];
+            merge(&mut accumulated, &boxes[axis][b - 1]);
+            count += counts[axis][b - 1];
             let right = right_count[b];
             if count == 0 || right == 0 || depth + 1 + median_levels(count.max(right)) > MAX_BVH_DEPTH {
                 continue;
@@ -688,15 +1012,231 @@ fn sah_split(triangles: &mut [Triangle], depth: usize) -> Option<usize> {
             }
         }
     }
-    let (_, axis, split) = best?;
+    best.map(|(_, axis, split)| (axis, split))
+}
+
+// Binned surface-area heuristic over triangle centres. A split is accepted only
+// if a median split of its larger side still fits MAX_BVH_DEPTH, so the median
+// fallback always remains available. Returns the left count after partitioning.
+fn sah_split(triangles: &mut [Triangle], depth: usize) -> Option<usize> {
+    let mut centre_lo = [f64::INFINITY; 3];
+    let mut centre_hi = [f64::NEG_INFINITY; 3];
+    for t in triangles.iter() {
+        for axis in 0..3 {
+            let c = t.centre(axis);
+            centre_lo[axis] = centre_lo[axis].min(c);
+            centre_hi[axis] = centre_hi[axis].max(c);
+        }
+    }
+    let active = [0, 1, 2].map(|axis| centre_hi[axis] - centre_lo[axis] > 0.0);
+    if active == [false; 3] {
+        return None;
+    }
+    let mut counts = [[0usize; SAH_BINS]; 3];
+    let mut boxes = [[EMPTY_BOUNDS; SAH_BINS]; 3];
+    for t in triangles.iter() {
+        let tri_bounds = triangle_bounds(t);
+        for axis in 0..3 {
+            if active[axis] {
+                let b = sah_bin(t.centre(axis), centre_lo[axis], centre_hi[axis]);
+                counts[axis][b] += 1;
+                merge(&mut boxes[axis][b], &tri_bounds);
+            }
+        }
+    }
+    let (axis, split) = sah_best_split(centre_lo, centre_hi, &counts, &boxes, depth)?;
     let mut middle = 0;
     for i in 0..triangles.len() {
-        if bin(&triangles[i], axis) < split {
+        if sah_bin(triangles[i].centre(axis), centre_lo[axis], centre_hi[axis]) < split {
             triangles.swap(i, middle);
             middle += 1;
         }
     }
     Some(middle)
+}
+
+fn sah_split_parallel(triangles: &mut [Triangle], depth: usize, cancel: &CancelToken) -> Result<Option<usize>> {
+    if triangles.len() < PARALLEL_BIN_THRESHOLD {
+        return Ok(sah_split(triangles, depth));
+    }
+    let (centre_lo, centre_hi) = triangles
+        .par_chunks(PARALLEL_BIN_CHUNK)
+        .try_fold(
+            || ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+            |(mut lo, mut hi), chunk| -> Result<([f64; 3], [f64; 3])> {
+                cancel.check()?;
+                for t in chunk {
+                    for axis in 0..3 {
+                        let c = t.centre(axis);
+                        lo[axis] = lo[axis].min(c);
+                        hi[axis] = hi[axis].max(c);
+                    }
+                }
+                Ok((lo, hi))
+            },
+        )
+        .try_reduce(
+            || ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+            |(mut lo, mut hi), (other_lo, other_hi)| {
+                for ((dst_lo, src_lo), (dst_hi, src_hi)) in lo.iter_mut().zip(other_lo).zip(hi.iter_mut().zip(other_hi)) {
+                    *dst_lo = dst_lo.min(src_lo);
+                    *dst_hi = dst_hi.max(src_hi);
+                }
+                Ok((lo, hi))
+            },
+        )?;
+    let active = [0, 1, 2].map(|axis| centre_hi[axis] - centre_lo[axis] > 0.0);
+    if active == [false; 3] {
+        return Ok(None);
+    }
+    let (counts, boxes) = triangles
+        .par_chunks(PARALLEL_BIN_CHUNK)
+        .try_fold(
+            || ([[0usize; SAH_BINS]; 3], [[EMPTY_BOUNDS; SAH_BINS]; 3]),
+            |(mut counts, mut boxes), chunk| -> Result<([[usize; SAH_BINS]; 3], [[Bounds; SAH_BINS]; 3])> {
+                cancel.check()?;
+                for t in chunk {
+                    let tri_bounds = triangle_bounds(t);
+                    for axis in 0..3 {
+                        if active[axis] {
+                            let b = sah_bin(t.centre(axis), centre_lo[axis], centre_hi[axis]);
+                            counts[axis][b] += 1;
+                            merge(&mut boxes[axis][b], &tri_bounds);
+                        }
+                    }
+                }
+                Ok((counts, boxes))
+            },
+        )
+        .try_reduce(
+            || ([[0usize; SAH_BINS]; 3], [[EMPTY_BOUNDS; SAH_BINS]; 3]),
+            |(mut counts, mut boxes), (other_counts, other_boxes)| {
+                for (((is_active, dst_counts), src_counts), (dst_boxes, src_boxes)) in
+                    active.into_iter().zip(&mut counts).zip(&other_counts).zip(boxes.iter_mut().zip(&other_boxes))
+                {
+                    if is_active {
+                        for ((dc, &sc), (db, sb)) in dst_counts.iter_mut().zip(src_counts).zip(dst_boxes.iter_mut().zip(src_boxes)) {
+                            *dc += sc;
+                            merge(db, sb);
+                        }
+                    }
+                }
+                Ok((counts, boxes))
+            },
+        )?;
+    let Some((axis, split)) = sah_best_split(centre_lo, centre_hi, &counts, &boxes, depth) else {
+        return Ok(None);
+    };
+    let mut middle = 0;
+    for i in 0..triangles.len() {
+        if i.is_multiple_of(4096) {
+            cancel.check()?;
+        }
+        if sah_bin(triangles[i].centre(axis), centre_lo[axis], centre_hi[axis]) < split {
+            triangles.swap(i, middle);
+            middle += 1;
+        }
+    }
+    Ok(Some(middle))
+}
+
+enum Subtree {
+    Flat(Vec<Node>),
+    Split { lo: [f32; 3], hi: [f32; 3], left: Box<Subtree>, right: Box<Subtree> },
+}
+
+impl Subtree {
+    fn node_count(&self) -> usize {
+        match self {
+            Self::Flat(nodes) => nodes.len(),
+            Self::Split { left, right, .. } => 1 + left.node_count() + right.node_count(),
+        }
+    }
+}
+
+fn build_subtree(triangles: &mut [Triangle], offset: usize, depth: usize, cancel: &CancelToken) -> Result<Subtree> {
+    cancel.check()?;
+    if triangles.len() < PARALLEL_BVH_THRESHOLD {
+        let mut nodes = reserved(triangles.len().saturating_mul(2).max(1))?;
+        nodes.push(Node::default());
+        build(triangles, offset, &mut nodes, 0, depth, cancel)?;
+        return Ok(Subtree::Flat(nodes));
+    }
+    let mut bounds = EMPTY_BOUNDS;
+    for (i, t) in triangles.iter().enumerate() {
+        if i.is_multiple_of(4096) {
+            cancel.check()?;
+        }
+        grow(&mut bounds, t);
+    }
+    let (lo, hi) = bounds;
+    let middle = match sah_split_parallel(triangles, depth, cancel)? {
+        Some(middle) => middle,
+        None => {
+            let axis = (0..3).max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b]))).unwrap_or(0);
+            let middle = triangles.len() / 2;
+            triangles.select_nth_unstable_by(middle, |a, b| a.centre(axis).total_cmp(&b.centre(axis)));
+            middle
+        }
+    };
+    let (left, right) = triangles.split_at_mut(middle);
+    let (left_res, right_res) =
+        rayon::join(|| build_subtree(left, offset, depth + 1, cancel), || build_subtree(right, offset + middle, depth + 1, cancel));
+    Ok(Subtree::Split { lo, hi, left: Box::new(left_res?), right: Box::new(right_res?) })
+}
+
+fn flatten_subtree(subtree: Subtree, nodes: &mut Vec<Node>, index: usize) -> Result<()> {
+    match subtree {
+        Subtree::Split { lo, hi, left, right } => {
+            let first = nodes.len();
+            let first_u32 = u32::try_from(first).map_err(|_| invalid("BVH node index overflow"))?;
+            nodes.push(Node::default());
+            nodes.push(Node::default());
+            *nodes.get_mut(index).ok_or_else(|| invalid("missing BVH node"))? = Node { lo, hi, first: first_u32, count: 0 };
+            flatten_subtree(*left, nodes, first)?;
+            flatten_subtree(*right, nodes, first + 1)?;
+            Ok(())
+        }
+        Subtree::Flat(sub_nodes) => {
+            let mut iter = sub_nodes.into_iter();
+            let Some(mut root) = iter.next() else {
+                return Err(invalid("missing BVH subtree root"));
+            };
+            if root.count == 0 && root.first != u32::MAX {
+                let desc_start = nodes.len();
+                let shift = u32::try_from(desc_start.checked_sub(1).ok_or_else(|| invalid("BVH node index underflow"))?)
+                    .map_err(|_| invalid("BVH node index overflow"))?;
+                root.first = root.first.checked_add(shift).ok_or_else(|| invalid("BVH node index overflow"))?;
+                *nodes.get_mut(index).ok_or_else(|| invalid("missing BVH node"))? = root;
+                for mut node in iter {
+                    if node.count == 0 && node.first != u32::MAX {
+                        node.first = node.first.checked_add(shift).ok_or_else(|| invalid("BVH node index overflow"))?;
+                    }
+                    nodes.push(node);
+                }
+            } else {
+                *nodes.get_mut(index).ok_or_else(|| invalid("missing BVH node"))? = root;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Build the 16-bin SAH BVH, parallelizing upper levels with Rayon while
+/// producing the exact bit-for-bit identical node array and triangle order
+/// as sequential [`build`].
+fn build_bvh(triangles: &mut [Triangle], cancel: &CancelToken) -> Result<Vec<Node>> {
+    if triangles.len() < PARALLEL_BVH_THRESHOLD {
+        let mut nodes = reserved(triangles.len().saturating_mul(2).max(1))?;
+        nodes.push(Node::default());
+        build(triangles, 0, &mut nodes, 0, 0, cancel)?;
+        return Ok(nodes);
+    }
+    let subtree = build_subtree(triangles, 0, 0, cancel)?;
+    let mut nodes = reserved(subtree.node_count())?;
+    nodes.push(Node::default());
+    flatten_subtree(subtree, &mut nodes, 0)?;
+    Ok(nodes)
 }
 
 fn build(triangles: &mut [Triangle], offset: usize, nodes: &mut Vec<Node>, index: usize, depth: usize, cancel: &CancelToken) -> Result<()> {

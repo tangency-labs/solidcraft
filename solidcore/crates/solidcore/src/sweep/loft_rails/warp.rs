@@ -12,6 +12,7 @@
 
 use super::{invalid, wire_point, Plain};
 use crate::error::Result;
+use crate::math::det;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 
@@ -65,7 +66,7 @@ pub(super) fn warp_station(
         bt += (*q - q_mid) * t;
     }
     let det = ss * tt - st * st;
-    if det <= 1e-10 * (ss + tt).powi(2).max(1e-300) {
+    if det <= 1e-10 * det::powi(ss + tt, 2).max(1e-300) {
         return Err(invalid(
             "the guide rails meet the loft along one line: three or more rails have to surround it",
         ));
@@ -108,15 +109,15 @@ pub(super) fn warp_station(
         })
         .sum::<f64>()
         / n;
-    let c2 = width.max(tiny).powi(2);
+    let c2 = det::powi(width.max(tiny), 2);
     // A point beside a smooth joint takes the field's first-order part about the joint, a
     // linear map, so the joint's three points stay in line and the station stays tangent there:
     // the field itself would bend them and crease the loft (#12188).
     let anchors = tangent_anchors(station, &moved, tiny);
     let phi = |x: Point3, centre: Point3, anchor: Option<Point3>| match anchor {
-        None => 1.0 / (x.distance(centre).powi(2) + c2).sqrt(),
+        None => 1.0 / (det::powi(x.distance(centre), 2) + c2).sqrt(),
         Some(a) => {
-            let r2 = a.distance(centre).powi(2) + c2;
+            let r2 = det::powi(a.distance(centre), 2) + c2;
             (1.0 - (a - centre).dot(x - a) / r2) / r2.sqrt()
         }
     };

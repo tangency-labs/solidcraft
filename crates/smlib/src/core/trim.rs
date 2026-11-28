@@ -11,11 +11,9 @@
 //! plane, a trimmed one its trim), given back its analytic kind, the new face and each of its
 //! sides taking the attributes of the face and side they continue.
 
-use solidcore::query::api_queries::face_internal_point;
-
 use super::Body;
 use super::blend::refused;
-use super::call::ops_as;
+use super::call::{ops_as, ops_on};
 use crate::trim::Continuation;
 use crate::{Error, Result};
 
@@ -153,10 +151,12 @@ fn extend_error(call: &'static str, e: solidcore_ops::Error, detail: Option<Stri
 }
 
 /// A point inside each face, in the body's face order (`smlib_brep_face_points`:
-/// `SmFace::CalculateAnInternalPoint`).
+/// `SmFace::CalculateAnInternalPoint`, [`Body::face_internal_points`]).
 pub(crate) fn face_points(body: &Body) -> Result<Vec<[f64; 3]>> {
-    super::with_body("smlib_brep_face_points", body, |k, b| {
-        let faces = b.face_list().to_vec();
-        faces.into_iter().map(|f| face_internal_point(k, b, f).map(|p| [p.x, p.y, p.z])).collect()
-    })
+    if body.kernel_left_unfinished() {
+        return Err(Error::Internal("smlib_brep_face_points: the body was left unfinished by an earlier panic".to_owned()));
+    }
+    let order = body.own_order();
+    // A query on a body itself is not stopped by a cancelled token (as before with `with_body`).
+    crate::stop::unstoppable(|| ops_on("smlib_brep_face_points", &[("brep", body)], || body.face_internal_points(&order)))
 }

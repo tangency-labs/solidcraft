@@ -520,6 +520,34 @@ fn sketch_panel_finish_row_follows_dialog_buttons() {
     }
 }
 
+/// Cancel Sketch (#19961) sits beside Finish Sketch, left of it as Cancel sits left of OK in every
+/// dialog footer, and follows Dialog buttons with it; the footer keeps its two rows and no row
+/// covers another or the options.
+#[test]
+fn sketch_panel_cancel_sits_beside_finish_and_follows_dialog_buttons() {
+    for (placement, on_top) in [("top", true), ("bottom", false)] {
+        let mut h = fixture();
+        h.call("ui.prefs", json!({"dialog_buttons": placement}));
+        h.settle();
+        let rect = |name: &str| scenario::rect_of(name).unwrap_or_else(|| panic!("{placement}: no {name}"));
+        let (finish, look, slice, cancel) =
+            (rect("sketch_palette:finish"), rect("sketch_palette:look_at"), rect("sketch_palette:slice"), rect("sketch_palette:cancel"));
+        let first = rect("sketch_palette:toggle:show_constraints");
+        assert_eq!((cancel.top(), cancel.bottom()), (finish.top(), finish.bottom()), "{placement}: Cancel shares Finish's row");
+        assert!(cancel.right() <= finish.left(), "{placement}: Cancel {cancel:?} left of Finish {finish:?}");
+        assert!((cancel.width() - finish.width()).abs() < 1.0, "{placement}: equal halves {cancel:?} {finish:?}");
+        assert!(finish.bottom() <= look.top(), "{placement}: rows {finish:?} {look:?}");
+        assert!(look.right() <= slice.left() && (slice.top(), slice.bottom()) == (look.top(), look.bottom()), "{placement}: Look At | Slice");
+        if on_top {
+            assert!(look.bottom() <= first.top(), "top: Look At {look:?} above the first option {first:?}");
+        } else {
+            let palette = h.app.viewport.palette_rect.unwrap();
+            assert!(first.bottom() <= finish.top(), "bottom: options {first:?} above Finish {finish:?}");
+            assert!(look.bottom() <= palette.bottom(), "bottom: Look At {look:?} inside the panel {palette:?}");
+        }
+    }
+}
+
 #[test]
 fn picked_list_removes_one_item_and_field_still_activates_input() {
     let mut h = fixture();

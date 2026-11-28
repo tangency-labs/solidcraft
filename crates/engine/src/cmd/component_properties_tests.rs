@@ -1085,6 +1085,38 @@ fn parallel_component_properties_matches_sequential_bit_for_bit() {
     assert_eq!(par, seq, "parallel component.properties must match sequential output bit-for-bit");
 }
 
+/// Edge Lines (#21975): one body, an overlay label on a plate, is drawn without its edge lines
+/// while the plate keeps its own. The setting is saved, follows a rename, is undone in one step
+/// and is refused for a body that isn't there.
+#[test]
+fn a_body_hides_its_edge_lines_and_the_others_keep_theirs() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 2, "center": [0, 0, 1], "body_name": "Plate", "operation": "new"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 24, "height": 0.1, "center": [0, 0, 2.05], "body_name": "Label", "operation": "new"}));
+    let out = run(&mut s, "body.edge_lines", json!({"body": "Label", "show": false}));
+    assert_eq!(out, json!({"bodies": ["Label"], "show": false}));
+    assert_eq!(s.doc.edgeless_bodies.iter().collect::<Vec<_>>(), ["Label"], "the plate keeps its edge lines");
+    let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert!(reopened.edgeless_bodies.contains("Label"), "saved in the design");
+    run(&mut s, "body.rename", json!({"body": "Label", "name": "Badge"}));
+    assert_eq!(s.doc.edgeless_bodies.iter().collect::<Vec<_>>(), ["Badge"], "follows the rename");
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.edgeless_bodies.is_empty(), "one undo puts the edges back");
+    run(&mut s, "body.edge_lines", json!({"bodies": ["Plate", "Label"], "show": false}));
+    run(&mut s, "body.edge_lines", json!({"bodies": ["Plate", "Label"]}));
+    assert!(s.doc.edgeless_bodies.is_empty(), "show defaults to true");
+    for bad in [
+        json!({}),
+        json!({"body": "Nope", "show": false}),
+        json!({"body": "Plate", "bodies": ["Plate"]}),
+        json!({"bodies": []}),
+        json!({"body": "Plate", "show": "no"}),
+    ] {
+        assert!(s.execute("body.edge_lines", &bad).is_err(), "{bad}");
+    }
+}
+
 /// #12721: an occurrence's properties name where it sits, in its parent and in the world, as the
 /// 3×4 matrix `occurrence.move` takes. A move that is still pending is included.
 #[test]

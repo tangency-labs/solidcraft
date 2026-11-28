@@ -372,6 +372,34 @@ fn a_variant_with_its_own_key_leaves_the_family_key_alone() {
     assert_eq!(tool(&h), Some("sketch.rectangle.three_point"), "a variant without a key comes back on R");
 }
 
+/// #22247: after a Two-Tangent Circle from the menu, C started that tool again, though the menu
+/// lists C next to Center-Diameter Circle. With the option in the Sketch Palette's Feature Options
+/// on, C starts the listed tool; off (the default), the variant used last still comes back on C.
+#[test]
+fn a_shape_shortcut_can_start_the_tool_listed_next_to_it() {
+    for listed in [false, true] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        h.app.start("sketch.circle.two_tangent");
+        h.settle();
+        if listed {
+            // A mode of the shape tools: it shows in the palette while one runs, not in Preferences.
+            let at = crate::scenario::handle_at("sketch_palette:toggle:shortcut_starts_listed_tool").expect("the circle tools show the option");
+            h.call("ui.click", json!({"x": at.x, "y": at.y}));
+            h.settle();
+            assert!(h.app.preferences.shortcut_starts_listed_tool, "the click turns it on");
+        }
+        press(&mut h, "Escape");
+        press(&mut h, "C");
+        let expected = if listed { "sketch.circle.center" } else { "sketch.circle.two_tangent" };
+        assert_eq!(tool(&h), Some(expected), "listed = {listed}");
+        press(&mut h, "Escape");
+        // The tool C started is the one the menu's main button remembers next, as for any start.
+        assert_eq!(h.app.preferences.sketch_variants.resolve("sketch.circle.center"), expected);
+    }
+}
+
 /// #2459: with Preferences › Sketch asking for it, a tool's shortcut pressed again before the
 /// first point steps through its family's modes and wraps round; a held key's repeats and a shape
 /// already begun keep the tool.
@@ -408,6 +436,26 @@ fn a_tools_shortcut_pressed_again_cycles_its_modes() {
     press(&mut h, "R");
     assert_eq!(tool(&h), Some("sketch.rectangle.two_point"));
     assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(1), "the placed corner is kept");
+}
+
+/// #22673: with a feature after the sketch, editing it rolls the timeline back. Starting
+/// Extrude finishes that edit and used to clear the selection, so the profile you had
+/// picked was gone and Extrude opened on nothing. The picked profile is what Extrude uses.
+#[test]
+fn extrude_keeps_the_profile_selected_while_the_sketch_was_edited() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[30,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"5 mm","operation":"new"})).unwrap();
+    h.app.run("sketch.edit", json!({"sketch":"Base"})).unwrap();
+    h.app.session.selection = vec![Sel::Profile { sketch, index: 1 }];
+    h.app.start("solid.extrude");
+    h.settle();
+    assert!(h.app.session.active_sketch.is_none(), "Extrude finishes the sketch");
+    let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
+    assert_eq!(items, vec![Sel::Profile { sketch, index: 1 }]);
 }
 
 #[test]

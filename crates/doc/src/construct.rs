@@ -870,11 +870,80 @@ pub fn model_axis(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
 }
 
 /// Coil's model axis. Keep the index of a named edge even when its pick is on a shared vertex.
+/// A flat end face starts the coil at its centre, growing along its outward normal
+/// ([`coil_end_face`]); other faces and edges give their axis as [`model_axis`] does.
 pub fn coil_model_axis(st: &ModelState, geo: &GeoRef) -> Result<(Vec3, Vec3)> {
+    if let GeoRef::Face { at, name } = geo
+        && let Some((centre, normal, _)) = coil_end_face(st, *at, name)?
+    {
+        return Ok((centre, normal));
+    }
     let GeoRef::Edge { at, name: Some(name) } = geo else { return model_axis(st, geo) };
     let (body, hit) = named_edge(st, *at, name).ok_or_else(|| DocError::reselect(name))?;
     let points = indexed_edge_points(body, hit.edge).ok_or_else(|| DocError::reselect(name))?;
     oriented_axis(line_of_edge(body, hit.edge, &points)?)
+}
+
+/// A Coil started on a flat face: the face's centre, its outward normal and the diameter of the
+/// largest whole circle among its edges (a cylinder's end, a boss's top). The centre is that
+/// circle's centre, or the face's area centroid when no edge of it is a whole circle. `None` when
+/// the face is not flat.
+pub fn coil_end_face(st: &ModelState, at: Vec3, name: &Option<String>) -> Result<Option<(Vec3, Vec3, Option<f64>)>> {
+    let (b, fi, _) = face_of(st, at, name)?;
+    let Some(FaceSurface::Plane { normal, .. }) = kernel::face_surface(&b.body, fi) else { return Ok(None) };
+    let circle = kernel::face_edge_indices(&b.body, fi)
+        .into_iter()
+        .filter_map(|edge| kernel::edge_circle(&b.body, edge))
+        .filter(|c| c.angle >= std::f64::consts::TAU - 1e-9 && c.radius > 0.0 && c.center.is_finite())
+        .max_by(|a, b| a.radius.total_cmp(&b.radius));
+    let centre = match circle {
+        Some(c) => c.center,
+        None => {
+            let tol = (b.body.size() * 2e-3).max(1e-3);
+            let faces = b.body.faces(tol).map_err(|e| bad(format!("the face has no centre: {e}")))?;
+            faces
+                .into_iter()
+                .find(|f| f.index == fi && f.area > 0.0 && f.centroid.is_finite())
+                .map(|f| f.centroid)
+                .ok_or_else(|| bad("the face has no centre"))?
+        }
+    };
+    Ok(Some((centre, *normal, circle.map(|c| 2.0 * c.radius))))
+}
+
+/// The diameter a Coil's picked edge or face gives it when the coil has no `diameter` of its own:
+/// a circular edge's, a cylinder face's, or a flat end face's largest whole circle
+/// ([`coil_end_face`]). `None` for any other pick.
+pub fn coil_model_diameter(st: &ModelState, geo: &GeoRef) -> Result<Option<f64>> {
+    match geo {
+        GeoRef::Edge { at, name: Some(name) } => {
+            let (body, hit) = named_edge(st, *at, name).ok_or_else(|| DocError::reselect(name))?;
+            Ok(kernel::edge_circle(&body.body, hit.edge).map(|c| 2.0 * c.radius))
+        }
+        GeoRef::Edge { at, name } => {
+            let (b, i, _) = edge_pick(st, *at, name)?;
+            Ok(kernel::edge_circle(&b.body, i).map(|c| 2.0 * c.radius))
+        }
+        GeoRef::Face { at, name } => {
+            if let Some((_, _, d)) = coil_end_face(st, *at, name)? {
+                return Ok(d);
+            }
+            let (b, fi, _) = face_of(st, *at, name)?;
+            Ok(match kernel::face_surface(&b.body, fi) {
+                Some(FaceSurface::Cylinder { radius, .. }) => Some(2.0 * radius),
+                _ => None,
+            })
+        }
+        _ => Ok(None),
+    }
+}
+
+/// [`coil_model_diameter`] for an edge picked on a placed component (its size is the same in
+/// any placement).
+pub fn coil_placed_edge_diameter(doc: &Document, st: &ModelState, geo: &GeoRef) -> Result<Option<f64>> {
+    let GeoRef::PlacedEdge { body, path, at, name, .. } = geo else { return Ok(None) };
+    let (body, _, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name)?;
+    Ok(kernel::edge_circle(&body.body, hit.edge).map(|c| 2.0 * c.radius))
 }
 
 fn oriented_axis((origin, direction): (Vec3, Vec3)) -> Result<(Vec3, Vec3)> {
@@ -966,6 +1035,15 @@ pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
+/// The plane of a verified planar B-rep face at `at` (rejects curved faces and mesh bodies).
+pub fn planar_face_plane(st: &ModelState, at: Vec3) -> Result<Plane> {
+    let (b, fi, _) = face_of(st, at, &None)?;
+    match kernel::face_surface(&b.body, fi) {
+        Some(FaceSurface::Plane { normal, point }) => Plane::from_normal(point, normal).ok_or_else(|| bad("degenerate face")),
+        _ => Err(bad("the face is not planar")),
+    }
+}
+
 /// A reference as a plane.
 pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     match g {
@@ -986,6 +1064,48 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
         },
         _ => Err(bad("pick a plane or planar face")),
     }
+}
+
+/// Where an extrude's To / From Object reference ([`crate::ObjectRef`]) is now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ObjectAt {
+    /// A construction point or the origin.
+    Point(Vec3),
+    /// An origin or construction plane.
+    Plane(Plane),
+}
+
+/// [`ObjectAt`] of `r` in the model `ctx.st`. A construction plane later in the timeline is
+/// refused: it would be read as it is defined, and moving it would not rebuild the extrude.
+pub(crate) fn object_at(ctx: &Ctx, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    use crate::walk::Walk;
+    let mut later = None;
+    r.walk_refs(&mut |item| {
+        if let crate::feature_refs::Ref::Feature(id) = item
+            && later.is_none()
+            && !ctx.st.construct.iter().any(|c| c.feature == id.0)
+        {
+            later = Some(id.0);
+        }
+    });
+    if let Some(id) = later {
+        let name = ctx.doc.feature(id).map_or_else(|| id.to_string(), |f| f.name.clone());
+        return Err(bad(format!("the plane `{name}` must come before the extrude in the timeline")));
+    }
+    match &r.0 {
+        // A construction plane of another component, where that component puts it (#11734).
+        GeoRef::Plane { plane } => {
+            let plane = crate::eval::construction_planes_in_frame(ctx.doc, ctx.st, ctx.component, plane)?;
+            Ok(ObjectAt::Plane(ctx.doc.resolve_plane_in(ctx.vals, &plane, ctx.depth + 1, ctx.component, Some(ctx.st))?))
+        }
+        g @ (GeoRef::ConstructPoint { .. } | GeoRef::Origin) => Ok(ObjectAt::Point(point(ctx, g)?)),
+        _ => Err(bad("not supported yet: To / From Object on this reference; give a plane or a construction point")),
+    }
+}
+
+/// [`object_at`] of `r` in the model `st`, for a feature in `component`.
+pub fn object_at_in(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    object_at(&Ctx { doc, vals, st, depth: 0, component }, r)
 }
 
 /// The centre of a round edge, sketch circle, sphere or torus.
@@ -1164,7 +1284,8 @@ fn touched<'a>(ctx: &Ctx<'a>, g: &GeoRef) -> Result<Touched<'a>> {
             let (b, fi, _) = face_of(ctx.st, *at, name)?;
             Ok(kernel::face_surface(&b.body, fi).map_or(Touched::Face(b, fi), Touched::Surface))
         }
-        GeoRef::Plane { .. } => {
+        // A construction or origin plane, or a component's origin plane (#23006).
+        GeoRef::Plane { .. } | GeoRef::Datum { .. } => {
             let pl = plane(ctx, g)?;
             Ok(Touched::Surface(FaceSurface::Plane { normal: pl.normal().unit().ok_or_else(|| bad("degenerate plane"))?, point: pl.origin }))
         }
@@ -1324,6 +1445,18 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
     Some(o + d * ((p.origin - o).dot(n) / den))
 }
 
+/// Drop `at` onto the plane midway between two parallel planes. `None` when they are not
+/// parallel; the bisector of planes that meet is the midplane constructor's, below.
+pub(crate) fn midway(a: (Vec3, Vec3), b: (Vec3, Vec3), at: Vec3) -> Option<Vec3> {
+    let (pa, na) = a;
+    let (pb, nb) = b;
+    // Measure both levels from `at`. `square_plane_offset` also checks that the normals are
+    // parallel.
+    let a = kernel::affine::square_plane_offset(&crate::IDENTITY, (pa - at).into(), na.into(), nb.into()).ok()??;
+    let b = kernel::affine::distance_along(at.into(), nb.into(), pb.into());
+    Some(at + nb * a.midpoint(b))
+}
+
 /// Planes built from model geometry (the `PlaneRef` kinds that need the model).
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
@@ -1331,10 +1464,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
-            if na.cross(nb).len() < 1e-9 {
-                // Parallel: half way between them.
-                let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                let center = pa.origin + half;
+            if let Some(center) = midway((pa.origin, na), (pb.origin, nb), pa.origin) {
                 // A design saved before the midplane took a world plane's frame keeps the
                 // frame it was saved with: the first plane's own origin and axes (#18260).
                 if *old_frame {

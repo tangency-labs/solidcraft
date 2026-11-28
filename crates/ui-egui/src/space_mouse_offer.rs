@@ -373,6 +373,7 @@ mod preferences_tests {
             h.frames(3);
             h.step(&serde_json::json!({"click": {"handle": "appbar:file"}})).unwrap();
             h.frames(3);
+            h.step(&serde_json::json!({"click":{"handle":"menu:file.menu.settings"}})).unwrap();
             h.step(&serde_json::json!({"widget": "Preferences…"})).unwrap_or_else(|e| panic!("{device:?}: {e}"));
             h.frames(4);
             let window = crate::scenario::rect_of("dialog:window");
@@ -410,6 +411,7 @@ mod preferences_tests {
             if !open_first {
                 h.step(&serde_json::json!({"click": {"handle": "appbar:file"}})).unwrap();
                 h.frames(3);
+                h.step(&serde_json::json!({"click":{"handle":"menu:file.menu.settings"}})).unwrap();
                 h.step(&serde_json::json!({"widget": "Preferences…"})).unwrap();
             }
             for frame in 0..200 {
@@ -451,6 +453,7 @@ mod preferences_tests {
             h.frames(30);
             h.step(&serde_json::json!({"click": {"handle": "appbar:file"}})).unwrap();
             h.frames(3);
+            h.step(&serde_json::json!({"click":{"handle":"menu:file.menu.settings"}})).unwrap();
             h.step(&serde_json::json!({"widget": "Preferences…"})).unwrap_or_else(|e| panic!("{device:?}: {e}"));
             for frame in 0..240 {
                 h.frame();

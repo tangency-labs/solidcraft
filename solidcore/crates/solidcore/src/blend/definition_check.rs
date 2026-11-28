@@ -71,7 +71,7 @@ impl CornerKind {
             return Self::Pinned;
         };
         match blend.event {
-            BlendCornerEvent::Ball => Self::Ball,
+            BlendCornerEvent::Ball | BlendCornerEvent::SupportBall => Self::Ball,
             BlendCornerEvent::Setback => Self::Setback,
             BlendCornerEvent::End => Self::End,
             BlendCornerEvent::Join | BlendCornerEvent::CliffJoin { .. } => Self::Join,

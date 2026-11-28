@@ -63,6 +63,7 @@ pub mod exact;
 pub mod offset;
 pub mod record;
 
+use crate::math::det;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -242,8 +243,54 @@ impl Drop for NetScope<'_> {
 /// definition made, copied or moved takes a new one, and two are the same only when they
 /// are one allocation ([`Arc::ptr_eq`]). The memo holds one while it keeps a station, so
 /// an identity is never reused while a station is kept for it.
-#[derive(Debug, Default)]
-pub struct DefinitionIdentity;
+///
+/// Not upstream: it also keeps what a station reads of the definition's leader and law that
+/// is the same at every station, their distinct knots, multiplicities and degree
+/// ([`DefinitionIdentity::knots`]): a definition whose leader or law changes is made anew or
+/// renewed, which gives it a new identity, as the memo's stations need.
+#[derive(Default)]
+pub struct DefinitionIdentity {
+    /// The leader's knots, multiplicities and degree, once read.
+    leader_knots: std::sync::OnceLock<CurveKnots>,
+    /// The law's, once read.
+    law_knots: std::sync::OnceLock<CurveKnots>,
+}
+
+/// A curve's distinct knots, their multiplicities and its degree
+/// ([`BSplineCurve::knots`], [`BSplineCurve::degree`]).
+pub(crate) type CurveKnots = (Vec<f64>, Vec<usize>, usize);
+
+/// Written as the identity alone, as before it kept the knots: what it keeps is read from the
+/// definition, not part of it, and a definition's debug text (which tests compare) stays the
+/// same whether a station has read the knots yet or not.
+impl std::fmt::Debug for DefinitionIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DefinitionIdentity")
+    }
+}
+
+impl DefinitionIdentity {
+    /// The knots, multiplicities and degree of the definition's leader (`law` false) or its
+    /// law, read from `curve` (that curve) the first time and kept. A read that fails is not
+    /// kept: the next asks again.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::knots`] and [`BSplineCurve::degree`].
+    pub(crate) fn knots(&self, curve: &BSplineCurve, law: bool) -> Result<&CurveKnots> {
+        let cell = if law {
+            &self.law_knots
+        } else {
+            &self.leader_knots
+        };
+        if let Some(kept) = cell.get() {
+            return Ok(kept);
+        }
+        let (knots, mult) = curve.knots(None)?;
+        let deg = curve.degree()?;
+        Ok(cell.get_or_init(|| (knots, mult, deg)))
+    }
+}
 
 /// A blend's definition (the members of `SmProceduralBlend` past its net). A clone
 /// keeps the identity: it is the same definition (the fork's copy constructor renews it,
@@ -316,6 +363,64 @@ pub struct ProceduralBlend {
     pub(crate) net: BSplineSurface,
     /// The definition.
     pub(crate) def: BlendDefinition,
+}
+
+impl ProceduralBlend {
+    /// Not upstream (#20158): writes this blend's net and non-support definition fields into
+    /// `d` (its two support surfaces are pushed onto the caller's iterative stack so digesting
+    /// nested blends uses no recursion). `identity` is a station-memo key only and is omitted.
+    pub(crate) fn eval_content_head(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        use crate::geom::content::Content;
+        let Self { net, def } = self;
+        let BlendDefinition {
+            supports: _,
+            sides,
+            offsets,
+            law,
+            order,
+            thumbweight,
+            leader,
+            seeds,
+            bound,
+            chamfer,
+            map_a,
+            map_b,
+            swapped,
+            identity: _,
+        } = def;
+        d.tag(0xB1E4);
+        net.content(d)?;
+        d.f64(sides[0]);
+        d.f64(sides[1]);
+        d.f64(offsets[0]);
+        d.f64(offsets[1]);
+        match law {
+            Some(c) => {
+                d.bool(true);
+                c.content(d)?;
+            }
+            None => d.bool(false),
+        }
+        d.u64(u64::from(*order));
+        d.f64(*thumbweight);
+        leader.content(d)?;
+        seeds[0].content(d)?;
+        seeds[1].content(d)?;
+        d.f64(*bound);
+        match chamfer {
+            Some(ch) => {
+                d.bool(true);
+                ch.content(d);
+            }
+            None => d.bool(false),
+        }
+        d.f64(map_a[0]);
+        d.f64(map_a[1]);
+        d.f64(map_b[0]);
+        d.f64(map_b[1]);
+        d.bool(*swapped);
+        Some(())
+    }
 }
 
 /// `sm_ReadCurve`: a curve of a definition (its type header with its dimension, then its
@@ -515,7 +620,7 @@ pub(crate) fn count_area_root(k: &Kernel) {
 
 /// `++s_lLastSerial`: a new identity.
 fn new_identity() -> Arc<DefinitionIdentity> {
-    Arc::new(DefinitionIdentity)
+    Arc::new(DefinitionIdentity::default())
 }
 
 impl ProceduralBlend {
@@ -1947,7 +2052,7 @@ fn set_entry(d: &mut [Vec<Vec3>], i: usize, j: usize, v: Vec3) {
 fn pow_index(x: f64, n: usize) -> f64 {
     #[allow(clippy::cast_precision_loss)]
     let e = n as f64;
-    x.powf(e)
+    det::powf(x, e)
 }
 
 // Rounding in the chord's crease test (PROVEN). `u` is `UNIT` (2^-53), `γ_n` is
@@ -2475,7 +2580,7 @@ mod tests {
 
     #[test]
     fn the_crease_threshold_is_a_lower_bound_on_the_g1_sine() {
-        let library = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
+        let library = det::sin(crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0));
         let lower = sin_turn_lower();
         assert!(lower < library, "{lower} {library}");
         assert!(lower > library * (1.0 - 1e-10), "{lower} {library}");
@@ -2492,9 +2597,9 @@ mod tests {
         // normals (0, 0, 1) before and (x, 0, 1) after: the largest x whose uncounted
         // bound was at most the library sine of the G1 angle skipped the split; the counted
         // bound must list it
-        let library = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
+        let library = det::sin(crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0));
         let a = Vec3::new(0.0, 0.0, 1.0);
-        let mut x = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).tan();
+        let mut x = det::tan(crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0));
         for _ in 0..200 {
             x = down(x);
         }

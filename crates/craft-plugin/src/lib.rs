@@ -404,6 +404,9 @@ impl FileGrant {
 /// An importer with user storage leaves its transaction pending after conversion; the app
 /// commits only when it accepts the validated design, or discards it on failure.
 pub trait PluginHost {
+    /// Host-side notification of importer preparation and conversion. Not a guest capability.
+    fn importer_stage(&mut self, _plugin: &str, _preparing: bool) {}
+
     /// Request a populated form. Programs refuse; interactive hosts defer opening until success.
     fn open_form(&mut self, entry: &str, _params: &Value) -> Result<()> {
         Err(HostError::InteractiveRequired { entry: entry.into() })

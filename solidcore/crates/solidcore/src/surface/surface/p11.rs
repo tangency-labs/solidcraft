@@ -1898,7 +1898,7 @@ impl Surface {
 /// `sm_ExtractIsoCurve(ctx, surface, domain, uv_curve, interval, tol, ..)`: the 3D
 /// curve and its deviation when the UV curve is an iso parameter line; `None`
 /// otherwise.
-fn extract_iso_curve(
+pub(crate) fn extract_iso_curve(
     k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,

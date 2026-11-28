@@ -110,7 +110,7 @@ pub(crate) fn report_gpu_error(e: &wgpu::Error) {
 /// count the device can't draw falls back to the largest supported count up to the default (4x),
 /// not to 1x, so an 8x chosen on another device still antialiases here.
 pub fn scene_samples(backend: wgpu::Backend, chosen: u32, supported: &[u32]) -> u32 {
-    let requested = egui_wgpu::effective_msaa_samples(backend, chosen.max(1));
+    let requested = backend_samples(backend, chosen.max(1));
     if requested <= 1 || supported.is_empty() || supported.contains(&requested) {
         requested
     } else {
@@ -122,8 +122,43 @@ pub fn scene_samples(backend: wgpu::Backend, chosen: u32, supported: &[u32]) -> 
 /// that the backend draws as such. A choice the backend would draw at 1x (OpenGL and WebGL) then
 /// shows as unavailable, instead of being offered and doing nothing.
 pub fn scene_sample_choices(backend: wgpu::Backend, supported: Vec<u32>) -> Vec<u32> {
-    supported.into_iter().filter(|&n| egui_wgpu::effective_msaa_samples(backend, n) == n).collect()
+    supported.into_iter().filter(|&n| backend_samples(backend, n) == n).collect()
 }
+
+/// The sample count `backend` draws a requested count with: OpenGL and WebGL 1x (their resolve
+/// presented black frames with MSAA, Mesa and llvmpipe among them), the others as asked.
+fn backend_samples(backend: wgpu::Backend, requested: u32) -> u32 {
+    if backend == wgpu::Backend::Gl { 1 } else { requested.max(1) }
+}
+
+/// The MSAA sample counts `device` can draw `target` with `depth` (ascending, starting at 1): the
+/// adapter's sample counts for each format (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`), and a
+/// multisampled target must also resolve.
+pub fn supported_msaa_samples(
+    adapter: &wgpu::Adapter,
+    device: &wgpu::Device,
+    target: wgpu::TextureFormat,
+    depth: Option<wgpu::TextureFormat>,
+) -> Vec<u32> {
+    let specific = device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+    let counts = |format: wgpu::TextureFormat| {
+        if specific { adapter.get_texture_format_features(format).flags } else { format.guaranteed_format_features(device.features()).flags }
+    };
+    let target_flags = counts(target);
+    let resolves = target_flags.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE);
+    let depth_flags = depth.map(counts);
+    let mut supported = vec![1];
+    for n in [2, 4, 8, 16] {
+        let both = target_flags.sample_count_supported(n) && depth_flags.is_none_or(|d| d.sample_count_supported(n));
+        if resolves && both {
+            supported.push(n);
+        }
+    }
+    supported
+}
+
+pub use solidcraft_viewport_egui::{WindowDevice, watch_window, window_device};
+pub use solidcraft_viewport_gpu::DeviceLost;
 
 /// Draw this process's headless pictures (`ui.render`, the agent's view image, thumbnails of
 /// designs and saves) on the app's own device, with the viewport's pipelines (native only: a
@@ -132,7 +167,7 @@ pub fn scene_sample_choices(backend: wgpu::Backend, supported: Vec<u32>) -> Vec<
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install_picture_renderer(rs: &egui_wgpu::RenderState) {
     match solidcraft_viewport_gpu::capture::Capturer::new(&rs.adapter, rs.device.clone(), rs.queue.clone()) {
-        Ok(capturer) => install_capturer(capturer.watching(rs.device_lost.flag())),
+        Ok(capturer) => install_capturer(capturer.watching(solidcraft_viewport_egui::window_device(rs).lost.flag())),
         Err(e) => {
             log::warn!("pictures of the model are drawn by the CPU rasterizer: the GPU cannot draw them: {e}");
             install_cpu_picture_renderer();
@@ -324,15 +359,16 @@ mod test_support {
                 renderer.update_texture(device, queue, id, &delta);
             }
         }
-        if let Some(effect) = &renderer.frame_compositor {
+        // As our own runner's painter does (`solidcraft_window_gpu::painter`).
+        let compositor = renderer.callback_resources.get::<solidcraft_window_gpu::Compositor>().map(|c| std::sync::Arc::clone(&c.0));
+        if let Some(effect) = &compositor {
             effect.begin_viewport(viewport.0.value());
+            effect.screen(&screen, &mut renderer.callback_resources);
         }
         let extra = renderer.update_buffers(device, queue, &mut encoder, &jobs, &screen);
         let target = output.create_view(&Default::default());
-        let composed = renderer
-            .frame_compositor
-            .as_ref()
-            .is_some_and(|effect| effect.render(&renderer, &mut encoder, &target, &jobs, &screen, [0.0, 0.0, 0.0, 1.0]));
+        let composed =
+            compositor.as_ref().is_some_and(|effect| effect.render(&renderer, &mut encoder, &target, &jobs, &screen, [0.0, 0.0, 0.0, 1.0]));
         if !composed {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -352,7 +388,7 @@ mod test_support {
             renderer.render(&mut pass, &jobs, &screen);
         }
         queue.submit(extra.into_iter().chain([encoder.finish()]));
-        if let Some(effect) = &renderer.frame_compositor {
+        if let Some(effect) = &compositor {
             effect.submitted();
         }
         for id in out.textures_delta.free.drain() {
@@ -1360,7 +1396,7 @@ mod tests {
         assert_eq!((counts.textures_created, counts.buffers_created, counts.bind_groups_created, counts.pipelines_created), (0, 0, 0, 0));
         assert_eq!((counts.markers_emitted, counts.markers_drawn), (0, 0));
         assert_eq!(counts.live_bytes, 0);
-        assert!(f.renderer.read().frame_compositor.is_none());
+        assert!(f.renderer.read().callback_resources.get::<solidcraft_window_gpu::Compositor>().is_none());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1387,7 +1423,7 @@ mod tests {
         for (name, count) in counters.as_object().unwrap() {
             assert_eq!(count, 0, "{name}");
         }
-        assert!(f.renderer.read().frame_compositor.is_none());
+        assert!(f.renderer.read().callback_resources.get::<solidcraft_window_gpu::Compositor>().is_none());
         assert!(f.app.blur.painted_frame().is_none());
     }
 
@@ -1702,7 +1738,7 @@ mod tests {
             assert_eq!(before.textures_created, f.app.blur.counters().textures_created);
             assert_eq!(before.markers_emitted, f.app.blur.counters().markers_emitted);
             assert_eq!(f.app.blur.counters().live_bytes, 0);
-            assert!(f.renderer.read().frame_compositor.is_none());
+            assert!(f.renderer.read().callback_resources.get::<solidcraft_window_gpu::Compositor>().is_none());
             assert!(plain.iter().any(|v| *v != 0));
             assert!(plain_jobs > 0);
         }
@@ -1981,11 +2017,11 @@ mod tests {
             eprintln!("skipping: no GPU adapter");
             return;
         };
-        let lost = egui_wgpu::DeviceLost::watch(&device);
+        let lost = solidcraft_viewport_gpu::DeviceLost::watch(&device);
         let capturer = solidcraft_viewport_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
         let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
         assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
-        assert!(!lost.probe(&device, &queue), "a working device isn't lost");
+        assert!(!lost.is_lost(), "a working device isn't lost");
 
         // egui's renderer is made with the window, before any loss (made on a lost device, its
         // uniform buffer's `create_buffer_init` panics).
@@ -1993,7 +2029,7 @@ mod tests {
 
         device.destroy();
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        assert!(lost.is_lost() && lost.probe(&device, &queue), "the lost callback marked the device");
+        assert!(lost.is_lost(), "the lost callback marked the device");
         assert!(lost.reason().is_some_and(|r| r.starts_with("Destroyed")), "{:?}", lost.reason());
 
         // The next frame's uploads, as the painter would make them were it not skipping: wgpu
@@ -2005,67 +2041,6 @@ mod tests {
         // A save's thumbnail still comes: from the CPU rasterizer.
         let picture = super::picture(&capturer, &scene, &cam, 16, 16).unwrap();
         assert_eq!((picture.renderer, picture.rgba.len()), ("cpu", 16 * 16 * 4));
-    }
-
-    /// The probe runs after a panicked frame and before every capture, so on a working device it
-    /// must cost nothing visible: no error for any scope or handler, and the uploads after it go
-    /// through. On a reset D3D12 device an empty submission went through and the upload after it
-    /// panicked inside wgpu (#6528); the probe now opens a command list, the driver call that
-    /// upload's queue write would make first. A driver reset can't be made here: `destroy` loses the
-    /// device in wgpu itself, before any driver call.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn the_lost_device_probe_is_clean_on_a_working_device() {
-        use egui_wgpu::wgpu;
-        let Some((adapter, device, queue)) = super::offscreen_own_device() else {
-            eprintln!("skipping: no GPU adapter");
-            return;
-        };
-        let lost = egui_wgpu::DeviceLost::watch(&device);
-        let capturer = solidcraft_viewport_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
-        let mut renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
-        let image = egui::ImageData::Color(std::sync::Arc::new(egui::ColorImage::filled([4, 4], egui::Color32::WHITE)));
-        let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
-        let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
-        for frame in 0..3 {
-            // The probe, then a queue write, as a frame after a survived panic makes them.
-            let (was_lost, error) = egui_wgpu::capture_errors(&device, || {
-                let was_lost = lost.probe(&device, &queue);
-                renderer.update_texture(&device, &queue, egui::TextureId::Managed(0), &delta);
-                was_lost
-            });
-            assert!(!was_lost && error.is_none(), "frame {frame}: lost {was_lost}, {error:?}");
-            // A save's thumbnail, which probes too, still comes from the GPU.
-            assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
-        }
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
-    }
-
-    /// A driver reset that lands mid-frame is met by a queue write (or the present),
-    /// which panics inside wgpu (#10240). The painter survives that panic once the device turns
-    /// out lost, and draws nothing more; on a working device a panic is a bug and carries on. A
-    /// driver reset can't be made here: `destroy` loses the device in wgpu itself, so the probe
-    /// after the panic finds it already marked.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn a_frame_that_meets_a_lost_device_is_survived() {
-        use egui_wgpu::wgpu;
-        let Some((_, device, queue)) = super::offscreen_own_device() else {
-            eprintln!("skipping: no GPU adapter");
-            return;
-        };
-        let lost = egui_wgpu::DeviceLost::watch(&device);
-        let met = || -> f32 { std::panic::panic_any(String::from("called `Result::unwrap()` on an `Err` value: Lost")) };
-        assert_eq!(lost.survive(&device, &queue, || 0.5), Some(0.5));
-        let bug = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lost.survive(&device, &queue, met)));
-        assert!(bug.is_err(), "a panic on a working device carries on");
-        assert!(!lost.is_lost());
-
-        device.destroy();
-        let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        assert_eq!(lost.survive(&device, &queue, met), None, "the frame's panic was the loss");
-        assert!(lost.is_lost());
     }
 }
 

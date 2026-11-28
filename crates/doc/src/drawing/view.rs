@@ -51,7 +51,7 @@ use super::dimension::{ModelEdge, check_edge};
 use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
-    Exploded, HiddenBodies, HiddenBody, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose,
+    Exploded, HiddenBodies, HiddenBody, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, Shows,
     TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides, ViewSettings,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
@@ -509,6 +509,8 @@ pub struct ResolvedView {
     pub hide: Setting<Option<OccurrencePaths>>,
     /// The bodies of its parts it leaves out, each on its own: none when None.
     pub hide_bodies: Setting<Option<HiddenBodies>>,
+    /// Which bodies it draws: every one, or only those the design shows (#22107).
+    pub shows: Setting<Shows>,
     /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
     pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
@@ -873,6 +875,7 @@ impl Drawing {
             occurrences: or_default(&chain, |s| s.occurrences.clone().map(Some), None),
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
             hide_bodies: or_default(&chain, |s| s.hide_bodies.clone().map(Some), None),
+            shows: or_default(&chain, |s| s.shows, Shows::All),
             line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
@@ -1003,25 +1006,45 @@ impl Drawing {
         (!lines.is_empty()).then(|| lines.join("\n"))
     }
 
-    /// The scale sheet `sheet`'s views draw at, as its scale field reads it: the one its base views
-    /// share (a view at a scale of its own carries that in its label), else, with no base view, the
-    /// one all its views draw at. None when they differ, or it has no view.
+    /// The scale sheet `sheet`'s views draw at, as its scale field reads it: ISO 5455's main scale,
+    /// the one most of its base views draw at (a view at a scale of its own carries that in its
+    /// label). With no base view, the one most of its views other than details draw at, and with
+    /// only details, the one most of them draw at: a detail enlarges its parent, and its label
+    /// always gives its scale. None when two scales are drawn by as many views, or it has no
+    /// view.
     pub fn sheet_scale(&self, sheet: u64) -> Option<Scale> {
         let on_sheet = || self.views.iter().filter(move |v| v.sheet == sheet);
+        let drawn = |v: &View| self.resolve_view(v.id).ok().map(|r| r.scale.value);
         let mut base = on_sheet().filter(|v| matches!(v.kind, ViewKind::Base { .. })).peekable();
         if base.peek().is_some() {
-            shared(base.map(|v| v.settings.scale))
-        } else {
-            shared(on_sheet().map(|v| self.resolve_view(v.id).ok().map(|r| r.scale.value)))
+            return most(base.map(|v| v.settings.scale));
         }
+        let mut not_detail = on_sheet().filter(|v| !matches!(v.kind, ViewKind::Detail { .. })).peekable();
+        if not_detail.peek().is_some() {
+            return most(not_detail.map(|v| drawn(v)));
+        }
+        most(on_sheet().map(|v| drawn(v)))
     }
 }
 
-/// The one scale all of `scales` are, so neither the order the views were placed in nor their ids
-/// decide it: none when there are none, or when one is unknown or differs.
-fn shared(mut scales: impl Iterator<Item = Option<Scale>>) -> Option<Scale> {
-    let first = scales.next()??;
-    scales.all(|scale| scale == Some(first)).then_some(first)
+/// The scale more of `scales` are than any other, so neither the order the views were placed in
+/// nor their ids decide it: none when there are none, when one is unknown, or when two scales are
+/// as many.
+fn most(scales: impl Iterator<Item = Option<Scale>>) -> Option<Scale> {
+    let mut counts: Vec<(Scale, usize)> = Vec::new();
+    for scale in scales {
+        let scale = scale?;
+        match counts.iter_mut().find(|(seen, _)| *seen == scale) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((scale, 1)),
+        }
+    }
+    let top = counts.iter().map(|(_, count)| *count).max()?;
+    let mut tops = counts.iter().filter(|(_, count)| *count == top);
+    match (tops.next(), tops.next()) {
+        (Some((scale, _)), None) => Some(*scale),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

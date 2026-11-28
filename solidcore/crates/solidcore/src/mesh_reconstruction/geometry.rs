@@ -3,6 +3,7 @@
 //! Deviations: no upstream counterpart. No recursion.
 
 use crate::eval::Frame;
+use crate::math::det;
 use crate::math::{Vec2, Vec3};
 use crate::prism::profile::{cross2, Loop2, Region2, Seg2};
 use crate::Result;
@@ -72,7 +73,7 @@ pub(super) trait PlanarVector {
 
 impl PlanarVector for Vec2 {
     fn len(self) -> f64 {
-        self.x.hypot(self.y)
+        det::hypot(self.x, self.y)
     }
 
     fn len2(self) -> f64 {
@@ -115,7 +116,7 @@ pub(super) fn ring_at_sharpest_corner(points: &[Vec2]) -> Vec<Vec2> {
         .map(|(i, (a, b, c))| {
             let first = b - a;
             let second = c - b;
-            (i, first.cross(second).atan2(first.dot(second)).abs())
+            (i, det::atan2(first.cross(second), first.dot(second)).abs())
         })
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .map_or(0, |(i, _)| i);
@@ -165,7 +166,7 @@ pub(super) fn distance_to_segment(segment: &Seg2, point: Vec2) -> f64 {
             ..
         } => {
             let offset = point - center;
-            let angle = offset.y.atan2(offset.x);
+            let angle = det::atan2(offset.y, offset.x);
             let along = ((angle - start) * sweep.signum()).rem_euclid(std::f64::consts::TAU);
             if along <= sweep.abs() {
                 along / sweep.abs()

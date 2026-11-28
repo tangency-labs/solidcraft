@@ -385,7 +385,9 @@ pub fn half_space(body: &Body, plane: &solidcore_record::Plane, positive: bool) 
     let _span = solidcraft_profile::span("kernel", "half_space");
     // The box's own construction roles describe no face of the design: the cut face has none.
     let tool = half_box(body, plane, positive)?.with_face_sources(None);
-    Ok((boolean(body, &tool, BoolOp::Intersect)?, tool))
+    // Through the router, so a second kernel in the build makes the cut too (solidcore's own
+    // boolean otherwise, as before).
+    Ok((crate::route::boolean(body, &tool, BoolOp::Intersect)?, tool))
 }
 
 /// A box covering everything of `body` on one side of a plane, its start cap in the plane.

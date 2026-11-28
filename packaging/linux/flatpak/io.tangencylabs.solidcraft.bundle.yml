@@ -43,6 +43,8 @@ modules:
       - install -Dm755 bin/solidcraft /app/bin/solidcraft
       - install -Dm755 bin/solidcraft-cli /app/bin/solidcraft-cli
       - install -Dm644 share/applications/io.tangencylabs.solidcraft.desktop /app/share/applications/io.tangencylabs.solidcraft.desktop
+      # solidcraft:// links (hidden entry; Flatpak exports it with the app id prefix it already has).
+      - install -Dm644 share/applications/io.tangencylabs.solidcraft.workshop-links.desktop /app/share/applications/io.tangencylabs.solidcraft.workshop-links.desktop
       - install -Dm644 share/mime/packages/io.tangencylabs.solidcraft.xml /app/share/mime/packages/io.tangencylabs.solidcraft.xml
       # Already has the release's version and date substituted by package.sh.
       - install -Dm644 share/metainfo/io.tangencylabs.solidcraft.metainfo.xml /app/share/metainfo/io.tangencylabs.solidcraft.metainfo.xml

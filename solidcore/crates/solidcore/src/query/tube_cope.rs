@@ -25,6 +25,7 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::sqrt;
+use crate::math::det;
 use crate::math::Vec3;
 
 const OP: &str = "query::tube_cope";
@@ -429,7 +430,7 @@ pub fn template(
             return Ok(Err(TemplateRefusal::Cancelled));
         }
         let theta = seam + TAU * (if i == n { 0.0 } else { i as f64 / n as f64 });
-        let radial = (t.x * theta.cos() + t.y * theta.sin()) * radius;
+        let radial = (t.x * det::cos(theta) + t.y * det::sin(theta)) * radius;
         let mut station = 0.0_f64;
         for &(axis, r) in mates {
             let axis = axis.unitize()?;
@@ -446,7 +447,7 @@ pub fn template(
     }
     Ok(Ok(Template {
         points,
-        seam_direction: t.x * seam.cos() + t.y * seam.sin(),
+        seam_direction: t.x * det::cos(seam) + t.y * det::sin(seam),
         circumference: TAU * radius,
         outer_diameter: 2.0 * radius,
     }))
@@ -567,7 +568,10 @@ mod tests {
         assert_eq!(t.points.len(), 2515);
         for (i, p) in t.points.iter().enumerate() {
             let theta = core::f64::consts::TAU * (i % 2514) as f64 / 2514.0;
-            assert!((p[1] - 20.0 * theta.cos().abs()).abs() < 1e-9, "{i}: {p:?}");
+            assert!(
+                (p[1] - 20.0 * det::cos(theta).abs()).abs() < 1e-9,
+                "{i}: {p:?}"
+            );
         }
         assert!((t.circumference - 40.0 * core::f64::consts::PI).abs() < 1e-12);
         assert_eq!(t.seam_direction, Y);

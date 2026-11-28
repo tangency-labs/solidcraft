@@ -22,6 +22,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 
 const OP: &str = "surface::face_pair::facing_planes";
 
@@ -72,7 +73,7 @@ pub fn facing_planes(
     let (ua, ub) = (a.outward.unitize()?, b.outward.unitize()?);
     // Opposite normals: pointing apart, and the sine of the angle between them within tolerance.
     let tol = kernel.tolerances;
-    if ua.dot(ub) >= 0.0 || ua.cross(ub).length() > tol.ang_tol_rad().sin() {
+    if ua.dot(ub) >= 0.0 || ua.cross(ub).length() > det::sin(tol.ang_tol_rad()) {
         return Ok(None);
     }
     // How far behind `a.point`, along `ua`, the normal line through it meets `b`'s plane:
@@ -161,7 +162,7 @@ mod tests {
         let top = plane([0.0, 0.0, 2.0], [0.0, 0.0, 1.0]);
         let tilted = |deg: f64| {
             let t = deg.to_radians();
-            plane([0.0, 0.0, 0.0], [t.sin(), 0.0, -t.cos()])
+            plane([0.0, 0.0, 0.0], [det::sin(t), 0.0, -det::cos(t)])
         };
         // The tolerance is 0.5 degrees.
         assert!(facing_planes(&k, &top, &tilted(0.4)).unwrap().is_some());
@@ -188,8 +189,8 @@ mod tests {
         let k = kernel();
         let t = 0.4_f64.to_radians();
         let top = plane([0.0, 0.0, 2.0], [0.0, 0.0, 1.0]);
-        let n = [t.sin(), 0.0, -t.cos()];
-        for p in [[0.0, 0.0, 0.0], [1000.0, 0.0, 1000.0 * t.tan()]] {
+        let n = [det::sin(t), 0.0, -det::cos(t)];
+        for p in [[0.0, 0.0, 0.0], [1000.0, 0.0, 1000.0 * det::tan(t)]] {
             let pair = facing_planes(&k, &top, &plane(p, n)).unwrap().unwrap();
             assert!((pair.thickness - 2.0).abs() < 1e-9, "{p:?}: {pair:?}");
             assert!(

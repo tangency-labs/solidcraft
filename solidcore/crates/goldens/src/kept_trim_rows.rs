@@ -16,9 +16,9 @@
 //! a UV line enclosed on any surface with an exact net) is within the edge's tolerance, over
 //! the whole edge interval. No point sample decides it. A trim whose kernel bound is over the
 //! tolerance is certified by the mean-value certifier ([`crate::trims_on_edges::certify_edgeuse`])
-//! instead, where that proves it within the tolerance; the kernel's enclosure is loose for
-//! some circle trims on a flat B-spline cap (#22037), and the count of such trims is asserted
-//! ([`MEAN_VALUE_CERTIFIED`]). A trim whose bound is not enclosed is
+//! instead, where that proves it within the tolerance; the kernel's enclosure was loose for
+//! six circle trims on a flat B-spline cap until #22037, and the count of such trims, none
+//! now, is asserted ([`MEAN_VALUE_CERTIFIED`]). A trim whose bound is not enclosed is
 //! accepted only where its edge is in `certify/trim_tolerance_open.tsv` with the class
 //! `not-enclosed`, and every such entry of these rows must be reached.
 
@@ -32,9 +32,12 @@ use crate::case::{repo_root, CaseContext};
 const SEEDS: usize = 16;
 
 /// The kept trims whose kernel bound is over their edge's tolerance and which the mean-value
-/// certifier proves instead (#22037): the four quarter arcs and two full circles of
-/// `subdivide_cylinder_face0_cinf`'s caps. A change in the kernel's enclosure shows here.
-const MEAN_VALUE_CERTIFIED: usize = 6;
+/// certifier proves instead: none. There were six, the four quarter arcs and two full circles
+/// of `subdivide_cylinder_face0_cinf`'s caps, bounded at 7.15e-4 to 0.098 for trims about
+/// 5e-15 off; since #22037 the kernel's enclosure of a rational UV piece is also taken about
+/// its middle, and its bound of each is within the edge's tolerance. A change in the kernel's
+/// enclosure shows here.
+const MEAN_VALUE_CERTIFIED: usize = 0;
 
 /// The rows, unit and case.
 const ROWS: &[(&str, &str)] = &[
@@ -188,11 +191,10 @@ fn every_kept_trim_is_certified() {
                     for (eu, bound) in bounds {
                         kept += 1;
                         row_kept += 1;
-                        // UNPROVED by the kernel's enclosure (#22037): it is thousands of times
-                        // loose for the circle trims of `subdivide_cylinder_face0_cinf` (bounds
-                        // 7.15e-4 to 0.098 for trims about 5e-15 off). A trim whose kernel bound
-                        // is over the tolerance is certified by the mean-value certifier instead,
-                        // at the target `certify_brep` uses; each such trim is listed and counted.
+                        // A trim whose kernel bound is over the tolerance is certified by the
+                        // mean-value certifier instead, at the target `certify_brep` uses; each
+                        // such trim is listed and counted (none since #22037, which tightened
+                        // the enclosure of `subdivide_cylinder_face0_cinf`'s circle trims).
                         let mean_value = match bound {
                             Some(x) if x > tol => {
                                 crate::trims_on_edges::certify_edgeuse(&k, b, eu, tol / 8.0)

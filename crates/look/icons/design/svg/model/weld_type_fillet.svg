@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: fillet</title>
+  <path d="M6 42L58 42L58 54L6 54Z" fill="#b8c3cf"/>
+  <path d="M6 42L58 42L58 54L6 54Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 10L38 10L38 42L26 42Z" fill="#b8c3cf"/>
+  <path d="M26 10L38 10L38 42L26 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38 42L38 30L50 42Z" fill="#328bd3"/>
+  <path d="M38 42L38 30L50 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 42L26 30L14 42Z" fill="#328bd3"/>
+  <path d="M26 42L26 30L14 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

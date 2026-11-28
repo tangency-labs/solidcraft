@@ -61,7 +61,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc.corner_reference(&s.model, &pick.pick, &pick.path).map_err(|e| bad(ADD, e.to_string()))
     };
     let (a, b) = (resolve(&request.a)?, resolve(&request.b)?);
-    check_drawn(&record, view, [Reference::Point(&a), Reference::Point(&b)], ADD)?;
+    check_drawn(s, &record, view, [Reference::Point(&a), Reference::Point(&b)], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let line = CentreLine { id, view, a, b, overshoot_mm: request.overshoot_mm };
     let mut probe = (*record).clone();
@@ -143,7 +143,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         points: r.points.map(|points| points.map(|p| [p.x, p.y, p.z])),
         exact: r.exact,
         candidates,
-        warnings: centre_warning(d, line.view, [Reference::Point(&line.a), Reference::Point(&line.b)]),
+        warnings: centre_warning(s, d, line.view, [Reference::Point(&line.a), Reference::Point(&line.b)]),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(EngineError::from)

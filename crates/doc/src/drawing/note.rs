@@ -53,11 +53,14 @@ pub enum Anchor {
     Sheet(#[serde(with = "crate::ids")] u64),
     /// A view, by its id.
     View(#[serde(with = "crate::ids")] u64),
-    /// An edge of a view's model: its leader ends on the edge's middle.
+    /// An edge of a view's model: its leader ends `along` it, as a part of its length from its start
+    /// (#22195), else on its middle.
     Edge {
         #[serde(with = "crate::ids")]
         view: u64,
         edge: ModelEdge,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<f64>,
     },
     /// A corner or a centre of a view's model: its leader ends there.
     Corner {
@@ -219,7 +222,12 @@ impl Drawing {
                 })?;
             }
             Anchor::View(_) => {}
-            Anchor::Edge { edge, .. } => check_edge(edge)?,
+            Anchor::Edge { edge, along, .. } => {
+                check_edge(edge)?;
+                require(along.is_none_or(|t| (0.0..=1.0).contains(&t)), || {
+                    "where its leader ends along its edge is a part of it from 0 to 1".into()
+                })?;
+            }
             Anchor::Corner { point, .. } => check_point(point)?,
         }
         if let Some(view) = n.anchor.view() {
@@ -258,8 +266,8 @@ impl End {
     /// The leader of no model reference: a note on a sheet or a view alone.
     const NONE: End = End { status: Status::Ok, point: None, exact: true };
 
-    fn edge(lookup: &mut Lookup<'_>, edge: &ModelEdge) -> End {
-        let (status, point, exact) = lookup.middle(edge);
+    fn edge(lookup: &mut Lookup<'_>, edge: &ModelEdge, along: Option<f64>) -> End {
+        let (status, point, exact) = lookup.along(edge, along);
         End { status, point, exact }
     }
 
@@ -293,11 +301,11 @@ impl Document {
                 let n = drawing.notes.by_id(*id).ok_or_else(|| DocError::Unknown(format!("note {}", ids::encode(*id))))?;
                 let anchor = match &n.anchor {
                     Anchor::Sheet(_) | Anchor::View(_) => End::NONE,
-                    Anchor::Edge { edge, .. } => End::edge(&mut lookup, edge),
+                    Anchor::Edge { edge, along, .. } => End::edge(&mut lookup, edge, *along),
                     Anchor::Corner { point, .. } => End::corner(&mut lookup, point),
                 };
                 let mut branch = |branch: &Branch| match branch {
-                    Branch::Edge(edge) => End::edge(&mut lookup, edge),
+                    Branch::Edge(edge) => End::edge(&mut lookup, edge, None),
                     Branch::Corner(point) => End::corner(&mut lookup, point),
                 };
                 Ok(Resolved { anchor, branches: n.branches.iter().map(&mut branch).collect() })

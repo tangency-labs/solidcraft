@@ -65,6 +65,7 @@
 mod bead;
 mod chart;
 mod contour;
+mod corner_tail;
 mod flat;
 mod fold;
 pub mod hermite;
@@ -84,11 +85,12 @@ pub use bead::{
     MIN_BEND_RISE,
 };
 pub use contour::{offset_closed_contour, offset_contour, ContourRefusal};
+pub use corner_tail::{retarget_corner_tail, set_back_past};
 pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};
 pub use holes::{note_beside, same_circle, Circle};
 pub use layout::{crossings, curve_through, develop};
-pub use refusal::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};
+pub use refusal::{CornerTailRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal};
 pub use rigid::{Rigid2, Rigid3};
 pub use sheet::{
     Anchor, Bend, Corner, CornerRelief, Cut, Datum, Joint, JointKind, Lap, Panel, Relief, Rip,

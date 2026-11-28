@@ -1720,7 +1720,7 @@ pub fn decode_retained_record(bytes: &[u8], registry: &PanelRegistry) -> PanelRe
 /// Read a retained record in its workspace without consuming a reappearance
 /// obligation or materializing absent order/projection metadata.
 pub fn decode_retained(bytes: &[u8], registry: &PanelRegistry, workspace: &WorkspaceId) -> PanelResult<LayoutEnvelope> {
-    valid_id(&workspace.0)?;
+    valid_workspace_id(&workspace.0)?;
     let envelope = decode_retained_record(bytes, registry)?;
     if envelope.layout.workspace != *workspace {
         return Err(error(Rule::Schema, "panel envelope workspace mismatch"));
@@ -2001,7 +2001,7 @@ fn validate_wire_structure(layout: &Layout) -> PanelResult<()> {
     if layout.version != LAYOUT_VERSION {
         return Err(error(Rule::Version, "unsupported layout version"));
     }
-    valid_id(&layout.workspace.0)?;
+    valid_workspace_id(&layout.workspace.0)?;
     if layout.instances.len() > MAX_INSTANCES || layout.sections.len() > MAX_SECTIONS || layout.columns.len() > MAX_SECTIONS {
         return Err(error(Rule::CollectionLimit, "layout collection limit"));
     }

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="580" viewBox="0 0 800 580">
+  <title>tangent-end-bands</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="800" height="580" fill="#ffffff"/>
+    <rect id="L_ring_above" data-name="L ring above" x="60" y="100" width="280" height="100" fill="#dce9f5"/>
+    <rect id="L_ring_below" data-name="L ring below" x="60" y="400" width="280" height="100" fill="#dce9f5"/>
+    <polygon id="R_band0_up" data-name="R band0 up" points="600,258.33 740,233.33 740,216.67 600,241.67" fill="#dce9f5"/>
+    <polygon id="R_band0_down" data-name="R band0 down" points="600,291.67 740,266.67 740,283.33 600,308.33" fill="#dce9f5"/>
+    <polygon id="R_band1_up" data-name="R band1 up" points="530,279.17 600,266.67 600,258.33 530,270.83" fill="#dce9f5"/>
+    <polygon id="R_band1_down" data-name="R band1 down" points="530,295.83 600,283.33 600,291.67 530,304.17" fill="#dce9f5"/>
+    <rect id="R_ring_up" data-name="R ring up" x="460" y="258.33" width="70" height="20.84" fill="#dce9f5"/>
+    <rect id="R_ring_down" data-name="R ring down" x="460" y="320.83" width="70" height="20.84" fill="#dce9f5"/>
+    <line id="L_alpha0" data-name="L alpha0" x1="60" y1="300" x2="340" y2="300" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="R_alpha0" data-name="R alpha0" x1="460" y1="300" x2="740" y2="300" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="L_mirror" data-name="L mirror" x1="60" y1="300" x2="340" y2="350" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="R_mirror" data-name="R mirror" x1="460" y1="300" x2="740" y2="350" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="L_root" data-name="L root" x1="60" y1="300" x2="340" y2="250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="R_root" data-name="R root" x1="460" y1="300" x2="740" y2="250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="R_t__2" data-name="R t*/2" x1="600" y1="200" x2="600" y2="520" fill="none" stroke="#999999" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <line id="R_t__4" data-name="R t*/4" x1="530" y1="200" x2="530" y2="520" fill="none" stroke="#999999" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <line id="L_t_" data-name="L t*" x1="340" y1="90" x2="340" y2="520" fill="none" stroke="#999999" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <line id="R_t_" data-name="R t*" x1="740" y1="200" x2="740" y2="520" fill="none" stroke="#999999" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">main: one ring about α0</tspan></text>
+    <text transform="matrix(1 0 0 1 440 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">this change: bands, then a ring</tspan></text>
+    <text transform="matrix(1 0 0 1 60 90)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">ring A ≤ |α − α0| ≤ 2A, A = 2 a(t*)</tspan></text>
+    <text transform="matrix(1 0 0 1 60 520)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">bound ≥ |S_α| (a + A) ≈ 3 |S_α| a(t*)</tspan></text>
+    <text transform="matrix(1 0 0 1 350 254)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">root α(t)</tspan></text>
+    <text transform="matrix(1 0 0 1 350 304)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">α0</tspan></text>
+    <text transform="matrix(1 0 0 1 350 354)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">mirror</tspan></text>
+    <text transform="matrix(1 0 0 1 332 540)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">t*</tspan></text>
+    <text transform="matrix(1 0 0 1 56 540)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">0</tspan></text>
+    <text transform="matrix(1 0 0 1 456 540)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">0</tspan></text>
+    <text transform="matrix(1 0 0 1 518 540)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">t*/4</tspan></text>
+    <text transform="matrix(1 0 0 1 588 540)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">t*/2</tspan></text>
+    <text transform="matrix(1 0 0 1 734 540)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">t*</tspan></text>
+    <text transform="matrix(1 0 0 1 610 190)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">bands h ≤ |α − αc(t)| ≤ 2h</tspan></text>
+    <text transform="matrix(1 0 0 1 610 206)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">h = 2/3 |αc − α0|</tspan></text>
+    <line id="leader_band" data-name="leader band" x1="660" y1="210" x2="670" y2="228" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 440 380)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">ring about α0 below the bands,</tspan></text>
+    <text transform="matrix(1 0 0 1 440 396)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">A = |αc − α0| + h there</tspan></text>
+    <line id="leader_ring" data-name="leader ring" x1="495" y1="368" x2="495" y2="344" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 610 420)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">bound ≈ the larger of</tspan></text>
+    <text transform="matrix(1 0 0 1 610 436)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">|S_α| h on a band and</tspan></text>
+    <text transform="matrix(1 0 0 1 610 452)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the smaller ring&apos;s</tspan></text>
+  </g>
+</svg>

@@ -212,6 +212,10 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     for file in app.file_load.operations() {
         let key = format!("file:{}", file.serial);
         let label = if file.name.is_empty() { command_name(file.command) } else { format!("{} {}", command_name(file.command), file.name) };
+        let label = match file.importer_status {
+            Some(stage) => format!("{label}: {stage}"),
+            None => label,
+        };
         let cancel = if file.waiting {
             Cancel::FileWaiting(file.serial)
         } else if file.queued {
@@ -696,7 +700,8 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         ..egui::text::LayoutJob::simple_singleline(row.label.clone(), font, fade(t.text))
     };
     let galley = painter.layout_job(job);
-    painter.galley(pos2(r.left(), r.center().y - galley.size().y * 0.5), galley, fade(t.text));
+    let rise = egui::galley_cap_ink_rise(painter, &galley);
+    painter.galley(pos2(r.left(), r.center().y - galley.size().y * 0.5 - rise), galley, fade(t.text));
     // The bar between them, the step over it.
     let bar = Rect::from_min_max(pos2(r.left() + name_w, r.center().y - 7.0), pos2(x.left() - 6.0, r.center().y + 7.0));
     painter.rect_filled(bar, t.space_3, fade(t.dialog_rule));
@@ -715,7 +720,7 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         None => {}
     }
     if let Some(status) = row.status() {
-        painter.text(bar.center(), Align2::CENTER_CENTER, status, FontId::monospace(t.font_small), fade(t.text));
+        crate::ui_kit::paint_anchored(painter, bar.center(), Align2::CENTER_CENTER, status, FontId::monospace(t.font_small), fade(t.text));
     }
     row.cancellable() && response.clicked()
 }

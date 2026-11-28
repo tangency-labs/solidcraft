@@ -38,6 +38,31 @@ pub fn planar_regions_boolean(a: &[Region2], b: &[Region2], op: BoolOp, toleranc
     })
 }
 
+/// The channel between two walls filled as `options` asks, solidcore's
+/// ([`solidcore_ops::prism::fill_channel`]): each wall a chain of lines and arcs in a plane's
+/// coordinates from its toe, the depth measured along `depth_normal` (or from the chord between
+/// the toes). The inner `Err` is a fill the channel cannot take, with the size that builds.
+///
+/// # Errors
+/// [`KernelError::Invalid`] for walls, a normal, contours or a depth the kernel refuses as input;
+/// [`KernelError::Failed`] for the kernel's other failures.
+pub fn fill_channel(
+    left: &[Seg2],
+    right: &[Seg2],
+    depth_normal: Option<Vec2>,
+    options: &FillOptions,
+) -> Result<std::result::Result<ChannelFill, FillRefusal>> {
+    crate::guard("channel fill", || {
+        solidcore_ops::prism::fill_channel(left, right, depth_normal, options).map_err(|e| match e {
+            solidcore_ops::Error::Refused { .. } | solidcore_ops::Error::Argument => KernelError::Invalid(format!("channel fill: {e}")),
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("channel fill: {message}")),
+            e => KernelError::Failed(format!("channel fill: {e}")),
+        })
+    })
+}
+
+pub use solidcore_ops::prism::{ChannelFill, Contour, FillFailure, FillNote, FillOptions, FillRefusal, FillSide};
+
 /// Each loop closed within ten times `tol` and within the segment budget, each segment finite
 /// and of some length (a line's ends apart, an arc of a positive radius turning at most once).
 fn check_regions<'a>(regions: impl Iterator<Item = &'a Region2>, tol: f64) -> Result<()> {

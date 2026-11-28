@@ -38,15 +38,19 @@ pub struct BodyDistance {
 }
 
 /// A body made ready for distance queries: its mesh's triangles under a hierarchy, and its faces
-/// and edges as they are first needed. Share one between the queries that involve its body.
+/// and edges initialized lazily as individual exact queries need them. Share one between the
+/// queries that involve its body.
 pub struct DistanceShape<'a> {
     body: &'a Body,
     mesh: &'a Mesh,
+    /// Optional column-major rigid transform mapping `mesh` into `body`'s world frame (`None`:
+    /// identity), so placed occurrences share one definition mesh without cloning it.
+    mesh_transform: Option<[[f64; 4]; 4]>,
     set: TriangleSet,
     chord: f64,
-    faces: Vec<Option<SurfaceEval>>,
-    edges: Vec<Option<(CurveEval, [f64; 2])>>,
-    surfaces: Vec<OnceLock<Option<FaceSurface>>>,
+    faces: OnceLock<Vec<OnceLock<Option<SurfaceEval>>>>,
+    edges: OnceLock<Vec<OnceLock<Option<(CurveEval, [f64; 2])>>>>,
+    surfaces: OnceLock<Vec<OnceLock<Option<FaceSurface>>>>,
 }
 
 /// Most face pairs near the nearest mesh points whose exact distance is worked out.
@@ -54,20 +58,51 @@ const MAX_FACE_PAIRS: usize = 128;
 /// Most projection rounds for one pair of features.
 const MAX_ROUNDS: usize = 400;
 
+/// Column-major 4x4 affine point transform.
+fn apply_point(m: &[[f64; 4]; 4], p: Vec3) -> Vec3 {
+    Vec3::new(
+        m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + m[3][0],
+        m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z + m[3][1],
+        m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z + m[3][2],
+    )
+}
+
 impl<'a> DistanceShape<'a> {
     /// `mesh` is `body`'s mesh, within `chord` (mm) of its faces.
     pub fn new(body: &'a Body, mesh: &'a Mesh, chord: f64) -> DistanceShape<'a> {
-        let record = body.record();
-        let faces: Vec<Option<SurfaceEval>> = record.faces.iter().map(|f| SurfaceEval::new(f.parameters()).ok()).collect();
-        let edges = record.edges.iter().map(|e| CurveEval::new(e.parameters()).ok().map(|c| (c, e.interval))).collect();
-        let surfaces = faces.iter().map(|_| OnceLock::new()).collect();
+        Self::with_triangle_set(body, mesh, None, TriangleSet::new(mesh), chord)
+    }
+
+    /// Creates a [`DistanceShape`] from a prebuilt [`TriangleSet`] (for example one built fallibly
+    /// in world coordinates from a shared definition mesh and rigid placement `mesh_transform`).
+    /// Does not touch `body.record()` until an exact face or edge query runs.
+    pub fn with_triangle_set(
+        body: &'a Body,
+        mesh: &'a Mesh,
+        mesh_transform: Option<[[f64; 4]; 4]>,
+        set: TriangleSet,
+        chord: f64,
+    ) -> DistanceShape<'a> {
         let chord = if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
-        DistanceShape { body, mesh, set: TriangleSet::new(mesh), chord, faces, edges, surfaces }
+        DistanceShape { body, mesh, mesh_transform, set, chord, faces: OnceLock::new(), edges: OnceLock::new(), surfaces: OnceLock::new() }
     }
 
     /// The box around the body: its mesh's, grown by the chord tolerance.
     pub fn bounds(&self) -> Aabb3 {
         self.set.bounds().inflated(self.chord)
+    }
+
+    /// The uninflated box around the mesh's finite triangles in world space.
+    pub fn mesh_bounds(&self) -> Aabb3 {
+        self.set.bounds()
+    }
+
+    /// Rough heap footprint of this shape's triangle hierarchy and lazy evaluator tables in bytes.
+    pub fn estimated_bytes(&self) -> usize {
+        let face_slots = self.faces.get().map_or(0, |v| v.capacity().saturating_mul(std::mem::size_of::<OnceLock<Option<SurfaceEval>>>()));
+        let edge_slots = self.edges.get().map_or(0, |v| v.capacity().saturating_mul(std::mem::size_of::<OnceLock<Option<(CurveEval, [f64; 2])>>>()));
+        let surf_slots = self.surfaces.get().map_or(0, |v| v.capacity().saturating_mul(std::mem::size_of::<OnceLock<Option<FaceSurface>>>()));
+        self.set.estimated_bytes().saturating_add(face_slots).saturating_add(edge_slots).saturating_add(surf_slots)
     }
 
     /// How far the mesh may lie from the faces (mm).
@@ -80,8 +115,22 @@ impl<'a> DistanceShape<'a> {
         self.set.closest(&other.set, limit)
     }
 
+    fn face_eval(&self, face: usize) -> Option<&SurfaceEval> {
+        let slots = self.faces.get_or_init(|| (0..self.body.face_count()).map(|_| OnceLock::new()).collect());
+        slots.get(face)?.get_or_init(|| self.body.record().faces.get(face).and_then(|f| SurfaceEval::new(f.parameters()).ok())).as_ref()
+    }
+
+    fn edge_eval(&self, edge: usize) -> Option<&(CurveEval, [f64; 2])> {
+        let slots = self.edges.get_or_init(|| (0..self.body.edge_count()).map(|_| OnceLock::new()).collect());
+        slots
+            .get(edge)?
+            .get_or_init(|| self.body.record().edges.get(edge).and_then(|e| CurveEval::new(e.parameters()).ok().map(|c| (c, e.interval))))
+            .as_ref()
+    }
+
     fn surface(&self, face: usize) -> Option<FaceSurface> {
-        *self.surfaces.get(face)?.get_or_init(|| surface_of(self.body.record(), face))
+        let slots = self.surfaces.get_or_init(|| (0..self.body.face_count()).map(|_| OnceLock::new()).collect());
+        *slots.get(face)?.get_or_init(|| surface_of(self.body.record(), face))
     }
 
     /// A projected point belongs to a face only when its distance to the trimmed face is
@@ -101,13 +150,18 @@ impl<'a> DistanceShape<'a> {
     fn features(&self, face: u32, p: Vec3) -> Vec<Feature> {
         let mut out = vec![Feature::Face(face as usize)];
         let reach = 2.0 * self.chord + 1e-9 * self.body.size().max(1.0);
+        let edge_count = self.body.edge_count();
+        let pt = |v: Vec3| match self.mesh_transform {
+            Some(m) => apply_point(&m, v),
+            None => v,
+        };
         for e in self.mesh.face_edges(face) {
             let Some(line) = self.mesh.edges.get(e) else { continue };
             let near = match line.as_slice() {
-                [one] => one.dist(p),
-                _ => line.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min),
+                [one] => pt(*one).dist(p),
+                _ => line.windows(2).map(|w| p.dist_to_segment(pt(w[0]), pt(w[1]))).fold(f64::INFINITY, f64::min),
             };
-            if near <= reach && e < self.edges.len() {
+            if near <= reach && e < edge_count {
                 out.push(Feature::Edge(e));
             }
         }
@@ -121,7 +175,7 @@ impl<'a> DistanceShape<'a> {
                 if let Some(q) = self.surface(i).and_then(|s| s.nearest(p)) {
                     return Some(q);
                 }
-                let s = self.faces.get(i)?.as_ref()?;
+                let s = self.face_eval(i)?;
                 let uv = s.project(p, hint.uv, f64::INFINITY).or_else(|| s.project(p, None, f64::INFINITY))?;
                 hint.uv = Some(uv);
                 s.point(uv).filter(|q| q.is_finite())
@@ -134,7 +188,7 @@ impl<'a> DistanceShape<'a> {
     /// spaced points along it (or the last call's), narrowed between its neighbours by golden
     /// section on the record curve's own points.
     fn edge_nearest(&self, i: usize, p: Vec3, hint: &mut Hint) -> Option<(Vec3, Vec3)> {
-        let (c, [t0, t1]) = self.edges.get(i)?.as_ref()?;
+        let (c, [t0, t1]) = self.edge_eval(i)?;
         let (t0, t1) = (*t0, *t1);
         let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
         let n = 32;
@@ -342,7 +396,7 @@ fn boundary_samples_in(shape: &DistanceShape, region: &Aabb3, cap: usize) -> Vec
         if out.len() >= cap {
             break;
         }
-        let Some((curve, [t0, t1])) = shape.edges.get(i).and_then(Option::as_ref) else {
+        let Some((curve, [t0, t1])) = shape.edge_eval(i) else {
             continue;
         };
         if matches!(edge.curve, Curve::Line { .. }) {

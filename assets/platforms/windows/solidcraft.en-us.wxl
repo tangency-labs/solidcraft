@@ -8,5 +8,11 @@
   <String Id="WelcomeDlgTitle" Value="{\WixUI_Font_Bigger}Welcome to the [ProductName] [SolidcraftVersion] Setup Wizard" />
   <String Id="WelcomeDlgDescription" Value="The Setup Wizard will install [ProductName] version [SolidcraftVersion] on your computer. Click Next to continue or Cancel to exit the Setup Wizard." />
   <String Id="VerifyReadyDlgInstallTitle" Value="{\WixUI_Font_Title}Ready to install [ProductName] [SolidcraftVersion]" />
+  <String Id="SolidcraftScopeDlgTitle" Value="{\WixUI_Font_Title}Who is SolidCraft for?" />
+  <String Id="SolidcraftScopeDlgDescription" Value="Install it for everyone on this computer, or just for you." />
+  <String Id="SolidcraftScopeDlgPerMachine" Value="{\WixUI_Font_Emphasized}Install for &amp;all users (needs admin)" />
+  <String Id="SolidcraftScopeDlgPerMachineDescription" Value="Installs in Program Files for everyone who uses this computer. Windows asks for an administrator's permission." />
+  <String Id="SolidcraftScopeDlgPerUser" Value="{\WixUI_Font_Emphasized}Install &amp;just for me" />
+  <String Id="SolidcraftScopeDlgPerUserDescription" Value="Installs in your own folder (AppData\Local\Programs\SolidCraft), with no administrator needed. The Start menu entry, .sc files and solidcraft:// links are set up for your account only." />
   <String Id="ExitDialogTitle" Value="{\WixUI_Font_Bigger}Completed the [ProductName] [SolidcraftVersion] Setup Wizard" />
 </WixLocalization>

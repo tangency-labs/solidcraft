@@ -219,6 +219,90 @@ fn the_end_faces_of_a_pipe_take_a_sketch_that_follows_the_pipe() {
     }
 }
 
+/// #20622: a rib's walls take a sketch, as a thin extrude's walls do: a 2 mm rib along a line
+/// across a shelled box (the issue's steps). Each wall is named by the line and its side, so the
+/// sketches follow the rib when its line moves and keep their faces after a save.
+#[test]
+fn the_walls_of_a_rib_take_a_sketch_that_follows_the_rib() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.shell", json!({"faces": [[30, 20, 10]], "thickness": "1mm"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "RibLine"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 1], [30, 39]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibLine", "curves": ["l1"], "thickness": "2 mm", "direction": "normal"}));
+    no_errors(&s);
+    sketch_on(&mut s, [31., 20., 5.], "PlusX");
+    sketch_on(&mut s, [29., 20., 5.], "MinusX");
+    let wall_x = |s: &Session, name: &str| {
+        let (plane, certificate) = healthy(s, name);
+        assert_eq!(certificate, Some(FaceCertificate::Lineage), "{name}");
+        plane.origin.x
+    };
+    assert!((wall_x(&s, "PlusX") - 31.).abs() < 1e-9 && (wall_x(&s, "MinusX") - 29.).abs() < 1e-9);
+    // The rib's line moves 5 mm along x: the sketches on its walls go with it.
+    run(&mut s, "sketch.edit", json!({"sketch": "RibLine"}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.start", "to": [35, 1]}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [35, 39]}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_errors(&s);
+    for t in [&s, &reopened(&s)] {
+        assert!((wall_x(t, "PlusX") - 36.).abs() < 1e-9, "{:?}", healthy(t, "PlusX"));
+        assert!((wall_x(t, "MinusX") - 34.).abs() < 1e-9, "{:?}", healthy(t, "MinusX"));
+    }
+}
+
+/// #21724: builds before #20622 named every face of a rib by its number among the faces the rib
+/// made (`F5:face:2`). A design saved so, with a fillet on the edge between a rib wall and the
+/// floor, opens with the fillet on that edge, and a face saved so is the rib's face its saved
+/// point lies on: the saved points say which face of the rib each name was.
+#[test]
+fn a_fillet_and_a_sketch_on_rib_walls_saved_under_numbered_names_open() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.shell", json!({"faces": [[30, 20, 10]], "thickness": "1mm"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "RibLine"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 1], [30, 39]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibLine", "curves": ["l1"], "thickness": "2 mm", "direction": "normal"}));
+    sketch_on(&mut s, [31., 20., 5.], "PlusX");
+    sketch_on(&mut s, [29., 20., 5.], "MinusX");
+    run(&mut s, "solid.fillet", json!({"edges": [[31, 20, 1]], "radius": 0.5, "name": "Round"}));
+    no_errors(&s);
+    let volume = s.model.state().bodies[0].volume().unwrap();
+
+    // Save, then name the walls as the earlier builds did.
+    let mut doc: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let anchor = |doc: &Value, sketch: &str| {
+        let f = doc["features"].as_array().unwrap().iter().find(|f| f["name"] == sketch).unwrap();
+        f["plane"]["anchor"]["target"]["name"].as_str().unwrap().to_string()
+    };
+    let (plus, minus) = (anchor(&doc, "PlusX"), anchor(&doc, "MinusX"));
+    let rib = plus.split_once(':').unwrap().0.to_string();
+    assert!(minus.starts_with(&format!("{rib}:")) && plus != minus, "{plus} {minus}");
+    let (old_plus, old_minus) = (format!("{rib}:face:3"), format!("{rib}:face:4"));
+    let features = doc["features"].as_array_mut().unwrap();
+    let round = features.iter_mut().find(|f| f["name"] == "Round").unwrap();
+    let edge = round["edge_names"][0].as_str().unwrap().to_string();
+    assert!(edge.contains(plus.as_str()), "the fillet's edge is on the +x wall: {edge}");
+    round["edge_names"][0] = json!(edge.replace(plus.as_str(), &old_plus));
+
+    let mut t = Session::new(solidcraft_doc::Document::from_json(&doc.to_string()).unwrap());
+    t.refresh();
+    no_errors(&t);
+    let round = t.doc.find_feature("Round").map(|f| f.id).unwrap();
+    let result = t.model.results.iter().find(|r| r.id == round).unwrap();
+    assert!(result.warning.is_none(), "{:?}", result.warning);
+    assert!((t.model.state().bodies[0].volume().unwrap() - volume).abs() < 1e-6, "the same edge is rounded");
+    let state = t.model.state();
+    let hit = solidcraft_doc::naming::locate_face(&state, &old_minus, solidcore_record::Vec3::new(29., 20., 5.)).expect("the -x wall");
+    assert_eq!(solidcraft_doc::naming::face_names(&state.bodies[hit.body])[hit.face], minus);
+    assert!(
+        solidcraft_doc::naming::locate_face(&state, &old_minus, solidcore_record::Vec3::new(10., 20., 1.)).is_none(),
+        "the floor is no face of the rib"
+    );
+}
+
 /// A plate with a boss patterned 3 times along x, `pitch` apart.
 fn patterned_bosses(sketch_on_seed_first: bool) -> Session {
     let mut s = Session::default();
@@ -298,6 +382,95 @@ fn a_raised_piece_of_a_split_top_takes_a_sketch_by_its_own_name() {
     assert!((healthy(&s, "Kept").0.origin.z - 10.).abs() < 1e-9);
     let t = reopened(&s);
     assert!((healthy(&t, "Raised").0.origin.z - 13.).abs() < 1e-9);
+}
+
+#[test]
+fn transform_face_moves_only_the_picked_piece_and_rebuilds_through_zero() {
+    let mut s = slotted_block();
+    run(&mut s, "parameters.add", json!({"name":"raise","expression":"2 mm"}));
+    run(&mut s, "solid.transform_face", json!({"face":[5,15,10],"translate":[0,0,"raise"],"name":"Raise"}));
+    no_errors(&s);
+    sketch_on(&mut s, [5., 15., 12.], "Raised");
+    sketch_on(&mut s, [35., 15., 10.], "Kept");
+    for height in [0, -1, 3] {
+        run(&mut s, "parameters.change", json!({"name":"raise","expression":format!("{height} mm")}));
+        no_errors(&s);
+        assert!((healthy(&s, "Raised").0.origin.z - f64::from(10 + height)).abs() < 1e-9);
+        assert!((healthy(&s, "Kept").0.origin.z - 10.).abs() < 1e-9);
+    }
+    assert!((healthy(&reopened(&s), "Raised").0.origin.z - 13.).abs() < 1e-9);
+}
+
+#[test]
+fn transform_face_patterns_carry_the_pivot_and_mirror_the_rotation() {
+    for (command, params) in [
+        ("solid.pattern.rectangular", json!({"features":["Tilt"],"dir1":[1,0,0],"count1":2,"spacing1":25})),
+        ("solid.mirror", json!({"features":["Tilt"],"plane":{"origin":[20,0,0],"normal":[1,0,0]}})),
+    ] {
+        let mut s = slotted_block();
+        run(&mut s, "solid.transform_face", json!({"face":[5,15,10],"axis":[0,-1,0],"angle":"10 deg","origin":[0,0,10],"name":"Tilt"}));
+        no_errors(&s);
+        run(&mut s, command, params);
+        no_errors(&s);
+        let measured = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+        // Stock minus the slot, plus two triangular prisms (width 15, depth 30).
+        let want = 40. * 30. * 10. - 10. * 30. * 5. + 30. * 15. * 15. * 10_f64.to_radians().tan();
+        assert!((measured - want).abs() < 1e-5, "{command}: {measured} vs {want}");
+    }
+}
+
+#[test]
+fn transform_face_edits_each_rebuilt_body_not_the_source_or_a_coincident_neighbour() {
+    for (command, params, count) in [
+        ("solid.pattern.rectangular", json!({"features":["Stock","Tilt"],"dir1":[1,0,0],"count1":3,"spacing1":30}), 4),
+        ("solid.mirror", json!({"features":["Tilt","Stock"],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}), 3),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"operation":"new","body_name":"Block","name":"Stock"}));
+        run(&mut s, "solid.box", json!({"corner":[30,0,0],"length":10,"width":10,"height":10,"operation":"new","body_name":"Neighbour"}));
+        run(
+            &mut s,
+            "solid.transform_face",
+            json!({"body":"Block","face":[5,5,10],"translate":[0,0,2],"axis":[0,-1,0],"origin":[0,0,10],"angle":"45 deg","name":"Tilt"}),
+        );
+        run(&mut s, command, params);
+        no_errors(&s);
+        let measured = run(&mut s, "inspect.measure", json!({}));
+        let bodies = measured["bodies"].as_array().unwrap();
+        assert_eq!(bodies.len(), count, "{command}: {measured}");
+        for body in bodies {
+            // Each copy has the same area 100 and mean roof height (12 + 22)/2. The
+            // neighbour also holds the copied pick but must not receive any part of the edit.
+            let want = if body["name"] == "Neighbour" { 1000. } else { 1700. };
+            assert!((body["volume_mm3"].as_f64().unwrap() - want).abs() < 1e-6, "{command}: {body}");
+        }
+    }
+}
+
+#[test]
+fn transform_face_on_a_placed_move_copy_is_not_applied_twice_by_a_mirror() {
+    use solidcore_record::Vec3;
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Blank"}));
+    run(&mut s, "solid.move", json!({"bodies":["Blank"],"translate":[20,0,0],"copy":true,"name":"Duplicate"}));
+    let duplicate = s.model.state().bodies.last().unwrap().name.clone();
+    run(&mut s, "solid.transform_face", json!({"body":duplicate,"face":[30,5,5],"translate":[2,0,0],"name":"Extend"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence":"Part:1","axis":[0,0,1],"angle":"90 deg","origin":[0,0,0],"translate":[50,0,0],"capture":true}),
+    );
+    run(&mut s, "solid.mirror", json!({"features":["Duplicate","Extend"],"plane":"YZ","name":"Echo"}));
+    no_errors(&s);
+    let echo = s.doc.find_feature("Echo").unwrap().id;
+    let world = s.world_state().unwrap();
+    let copy = world.bodies.iter().find(|b| b.feature == echo).unwrap();
+    // The extended face is at local x=32, world y=32. The mirror changes x, not y.
+    assert!(world.body(&duplicate).unwrap().body.face_at_point(Vec3::new(45., 32., 5.)).unwrap().is_some());
+    assert!(copy.body.face_at_point(Vec3::new(-45., 32., 5.)).unwrap().is_some());
 }
 
 /// A plastic Boss keeps the history of the body it stands on (#494): the plate's faces still
@@ -510,5 +683,90 @@ fn the_face_a_split_cuts_takes_a_sketch_and_an_offset_plane_that_follow_the_plan
         for k in 0..2 {
             assert!((healthy(&t, &format!("OnCut{k}")).0.origin.x - 20.).abs() < 1e-9, "{tool} reopened OnCut{k}");
         }
+    }
+}
+
+/// A case's wall (a block with a rib across its top) and a cover extruded above it from an
+/// offset start, cut by the wall so the rib leaves a groove across the cover's underside, with a
+/// pocket in the cover mirrored twice. Both caps of the cover lie above its sketch plane.
+fn grooved_cover() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "wall_h", "expression": "10 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "WallSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-20, -15], "p1": [20, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "WallSketch", "distance": "wall_h", "name": "Wall"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "RibSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-2, -15], "p1": [2, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "RibSketch", "distance": 1, "start_offset": "wall_h", "operation": "join", "targets": ["Body1"], "name": "Rib"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "CoverSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-20, -15], "p1": [20, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "CoverSketch", "distance": 5, "start_offset": "wall_h", "operation": "new_body", "name": "Cover"}));
+    run(&mut s, "solid.combine", json!({"target": "Body2", "tools": ["Body1"], "operation": "cut", "keep_tools": true, "name": "Groove"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PocketSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 8], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "PocketSketch", "distance": 3, "start_offset": "wall_h + 2 mm", "operation": "cut", "targets": ["Body2"], "name": "Pocket"}),
+    );
+    run(&mut s, "solid.mirror", json!({"features": ["Pocket"], "plane": "YZ", "name": "MirrorX"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Pocket", "MirrorX"], "plane": "XZ", "name": "MirrorY"}));
+    no_errors(&s);
+    s
+}
+
+/// Both caps of an extrude from an offset start lie on one side of its sketch plane, so their
+/// height gives both one role (`top`, numbered `top#1` and `top#2`), and the pieces of its
+/// underside the groove left are named after that shared role. Each cap also answers to the end
+/// it closes (`cap:low`, `cap:high`): the pieces take a sketch by it that keeps its attachment,
+/// without a fixed plane, and follows them when the offset changes (T-1986). The faces' names
+/// stay as they were.
+#[test]
+fn the_split_underside_of_an_extrude_from_an_offset_start_takes_a_sketch() {
+    let mut s = grooved_cover();
+    let cover = s.doc.find_feature("Cover").map(|f| f.id).unwrap();
+    let state = s.model.state();
+    let body = state.bodies.iter().find(|b| b.name == "Body2").unwrap();
+    let names = solidcraft_doc::naming::face_names(body);
+    assert!(names.iter().any(|n| n == &format!("F{cover}:top#2")), "{names:?}");
+    let under: Vec<&String> = names.iter().filter(|n| n.starts_with(&format!("F{cover}:top#[")) && n.ends_with("]#1")).collect();
+    assert_eq!(under.len(), 2, "the groove splits the underside in two: {names:?}");
+
+    let faces = run(&mut s, "model.faces", json!({"body": "Body2"}));
+    let piece = |x: f64| {
+        let face = faces["faces"].as_array().unwrap().iter().find(|f| {
+            let c = &f["centroid"];
+            (c[2].as_f64().unwrap() - 10.).abs() < 1e-6 && c[0].as_f64().unwrap() * x > 0.
+        });
+        let face = face.unwrap_or_else(|| panic!("no underside piece at x {x}: {faces}"));
+        (face["index"].as_u64().unwrap(), face["point"].clone())
+    };
+    for (name, x) in [("UnderLeft", -10.), ("UnderRight", 10.)] {
+        let (index, point) = piece(x);
+        run(&mut s, "sketch.create", json!({"plane": {"body": "Body2", "face": point, "index": index}, "name": name}));
+        run(&mut s, "sketch.finish", json!({}));
+        let (plane, certificate) = healthy(&s, name);
+        assert_eq!(certificate, Some(FaceCertificate::Lineage), "{name}");
+        let FaceAttachmentStatus::Healthy { target, .. } = status(&s, name) else { panic!("{name}") };
+        assert_eq!(target.name, format!("F{cover}:cap:low"), "{name}");
+        assert!((plane.normal().z + 1.).abs() < 1e-9 && (plane.origin.z - 10.).abs() < 1e-9, "{name}: {plane:?}");
+    }
+    sketch_on(&mut s, [0., 0., 15.], "OnTop");
+    run(&mut s, "parameters.change", json!({"name": "wall_h", "expression": "12 mm"}));
+    no_errors(&s);
+    for (name, z) in [("UnderLeft", 12.), ("UnderRight", 12.), ("OnTop", 17.)] {
+        assert!((healthy(&s, name).0.origin.z - z).abs() < 1e-9, "{name}");
+    }
+    let t = reopened(&s);
+    for (name, z) in [("UnderLeft", 12.), ("UnderRight", 12.), ("OnTop", 17.)] {
+        assert!((healthy(&t, name).0.origin.z - z).abs() < 1e-9, "{name}");
     }
 }

@@ -138,6 +138,7 @@ use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::{are_same_to_tol, scaled_zero2};
 use crate::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
@@ -2848,6 +2849,27 @@ pub(crate) fn with_object_context<T>(
 /// [`SolidError::NotFound`] for a dangling id; those of the notification's
 /// [`SolidError::Unported`] and of `ClearAttributes`.
 pub fn destroy(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut NotifyEnv<'_>) -> Result<()> {
+    destroy_in(k, b, e, env, true)
+}
+
+/// [`destroy`] without removing `e` from `b.edge_list`; the caller must call
+/// `Brep::retain_edge_list` once the batch finishes.
+pub(crate) fn destroy_unlisted(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    env: &mut NotifyEnv<'_>,
+) -> Result<()> {
+    destroy_in(k, b, e, env, false)
+}
+
+fn destroy_in(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    env: &mut NotifyEnv<'_>,
+    unlink_list: bool,
+) -> Result<()> {
     b.edge(e)?;
     let this = (env.key_of)(EntityRef::Edge(e));
     let notified = with_object_context(k, env, |n| {
@@ -2870,7 +2892,11 @@ pub fn destroy(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut NotifyEnv<'_>)
         notified
     });
     notified?;
-    b.remove_edge_record(e)?;
+    if unlink_list {
+        b.remove_edge_record(e)?;
+    } else {
+        b.remove_edge_record_unlisted(e)?;
+    }
     env.attributes.clear_attributes(this.key)
 }
 
@@ -3210,7 +3236,7 @@ fn blend_edgeuse_unless(
     let (fu_normal, fu_normal2) = (ev0.face_normal, ev1.face_normal);
     let (bin_vec, bin_vec2) = (ev0.binormal, ev1.binormal);
 
-    let max_dot = (CREASE_ANGLE * PI / 180.0).cos();
+    let max_dot = det::cos(CREASE_ANGLE * PI / 180.0);
 
     // the faces are tangent and can't be filleted. With `fillet_knife_edge_rounds`
     // (WR-570, fork b7ec55b) only when their binormals point away from each other (the

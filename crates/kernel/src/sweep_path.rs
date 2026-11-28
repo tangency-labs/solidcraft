@@ -18,30 +18,7 @@ const CORNER: f64 = 0.35;
 /// Samples per profile segment where a closed sweep checks that its last section lands on its first.
 const SEG_SAMPLES: usize = 12;
 
-/// How the profile turns as it follows a sweep path.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum SweepOrientation {
-    /// Square to the path, turned along it by a rotation-minimising frame.
-    #[default]
-    Perpendicular,
-    /// As drawn: the profile only moves along the path, never turning.
-    Parallel,
-    /// Square to the path, its turn about the path fixed by a direction: the direction's
-    /// projection onto the profile's plane stays where it was at the start.
-    Direction(Vec3),
-}
-
-/// How guide rails reshape the profile at each station.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum RailFit {
-    /// The profile grows or shrinks evenly with its distance across to the rail (between the
-    /// two rails).
-    #[default]
-    Scale,
-    /// The profile stretches only across to the rail (between the rails), keeping its size the
-    /// other way.
-    Stretch,
-}
+pub use solidcraft_kernel_api::{RailFit, SweepOrientation};
 
 /// Sweep options beyond following the path. `twist` turns the profile about the path by that
 /// many radians over the path's length (right hand about the direction of travel, in proportion
@@ -225,9 +202,25 @@ fn frames_toward(tangents: &[Vec3], d: Vec3) -> Result<Vec<[Vec3; 3]>> {
 /// Kept as drawn (parallel), the profile flattens to nothing where the path runs along its
 /// plane: the path, by its directions of travel `tangents` (the first leaving the profile), has to
 /// cross the plane at 5 degrees or more all the way.
-pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3]) -> Result<()> {
+///
+/// With `turning` (any orientation but parallel) the profile is instead carried by motions that
+/// take the path's direction where it starts onto its direction farther along, so the angle
+/// between its plane and the path stays what it is at the start. `tangents` is then the start
+/// direction alone, and a profile the path starts in (the caller's test) whose plane holds it
+/// (to 1e-6 rad) lies along the path everywhere and sweeps no volume, for example a circle drawn on XZ swept round a coil's end
+/// section, a circle in XZ.
+pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3], turning: bool) -> Result<()> {
     let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
     let t0 = *tangents.first().ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
+    if turning {
+        let t = t0.normalized().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+        if n.dot(t).abs() < 1e-6 {
+            return Err(KernelError::Invalid(
+                "the profile lies along the path where the sweep starts (its plane holds the path's direction there), so carried along the path it would sweep no volume: draw the profile across the path".into(),
+            ));
+        }
+        return Ok(());
+    }
     let axis = if n.dot(t0) < 0.0 { n * -1.0 } else { n };
     if tangents.iter().any(|t| t.dot(axis) < 5f64.to_radians().sin()) {
         return Err(KernelError::Invalid(
@@ -264,7 +257,7 @@ pub(crate) fn controlled_stations(
     // square to the path this is its normal, pointing the way the path leaves it.
     let axis = t0.normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
     if ctl.orientation == SweepOrientation::Parallel {
-        crossing_check(plane, tangents)?;
+        crossing_check(plane, tangents, false)?;
     }
     let mut run = Vec::with_capacity(pts.len());
     let mut total = 0.0;

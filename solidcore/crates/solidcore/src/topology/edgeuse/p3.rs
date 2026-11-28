@@ -94,8 +94,9 @@
 //!   `(max(def, face tolerance), zone_tol3d(gain * g)]` takes the same tighter fit,
 //!   which is never above the edge tolerance. Where the healer's edge/edge term
 //!   dominated, the fit is below the tolerance the edge had before the raise. Cost: each
-//!   call walks the edge's faces and, above that baseline with no gap cached, computes
-//!   the uses' edge/face gaps without caching them.
+//!   call walks the edge's faces and, above that baseline with no gap cached on the edge
+//!   use, reads or populates the kernel's content-keyed [`FitGapMemo`] (#20158) instead of
+//!   recalculating `calc_max_edge_face_gap` on every call.
 //! - **Periodic projection.** The point-drop interpolation lifts consecutive UV samples
 //!   across closed-surface seams before fitting. Interpolating their wrapped coordinates
 //!   instead invents a whole-period excursion between nearby points on the surface. This
@@ -119,14 +120,15 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::error::topology::TopologyFailure;
 use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::content::{Content, ContentId, Digest};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::vec_lin_comb_two_vectors;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::ObjectRef;
 use crate::geom::solution_array::ObjectKind;
 use crate::geom::tol::{
-    approx_tol_3d, are_same, brep_calc_edge_zone_tol_3d, gap_gain, xsect_tol_3d_from_zones,
-    zone_tol3d, SmallTopoType,
+    approx_tol_3d, are_same, brep_calc_edge_zone_tol_3d, context_xsect_tol_3d, gap_gain,
+    xsect_tol_3d_from_zones, zone_tol3d, SmallTopoType,
 };
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
@@ -405,6 +407,127 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
     Ok(vec![other, copy])
 }
 
+/// Maximum number of edge/face gap entries kept by [`FitGapMemo`]; oldest evicted first.
+const FIT_GAP_MEMO_CAPACITY: usize = 8192;
+
+/// Cached outcome of an uncached [`crate::topology::edgeuse::p1::calc_max_edge_face_gap`]
+/// call inside [`fit_tolerance`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum CachedFitGap {
+    /// A finite (or NaN) 3D gap returned by `calc_max_edge_face_gap`.
+    Measured(f64),
+    /// A soft error ignored by `ignored(calc_max_edge_face_gap(...))`.
+    Ignored,
+}
+
+impl CachedFitGap {
+    const fn from_option(gap: Option<f64>) -> Self {
+        match gap {
+            Some(g) => Self::Measured(g),
+            None => Self::Ignored,
+        }
+    }
+
+    const fn into_option(self) -> Option<f64> {
+        match self {
+            Self::Measured(g) => Some(g),
+            Self::Ignored => None,
+        }
+    }
+}
+
+/// Not upstream (#20158): content-keyed memo of [`fit_tolerance`]'s uncached
+/// [`crate::topology::edgeuse::p1::calc_max_edge_face_gap`] measurements. Keyed by a
+/// 128-bit [`ContentId`] over the kernel's tolerances/context/fixes, `xsect_tol`, the edge's
+/// interval and curve, the face's surface evaluation geometry, and the surface's
+/// `face_zone_tol_3d`. Bounded by [`FIT_GAP_MEMO_CAPACITY`] with deterministic FIFO eviction.
+/// Clearing it changes no result, only speed.
+#[derive(Debug, Default)]
+pub(crate) struct FitGapMemo {
+    gaps: std::collections::BTreeMap<ContentId, CachedFitGap>,
+    order: std::collections::VecDeque<ContentId>,
+}
+
+impl FitGapMemo {
+    /// Previously computed gap for `key`, if present.
+    pub(crate) fn get(&self, key: ContentId) -> Option<CachedFitGap> {
+        self.gaps.get(&key).copied()
+    }
+
+    /// Records `gap` for `key`, evicting the oldest entry past [`FIT_GAP_MEMO_CAPACITY`].
+    pub(crate) fn insert(&mut self, key: ContentId, gap: CachedFitGap) {
+        if let Some(existing) = self.gaps.get_mut(&key) {
+            *existing = gap;
+            return;
+        }
+        while self.order.len() >= FIT_GAP_MEMO_CAPACITY {
+            match self.order.pop_front() {
+                Some(old) => {
+                    self.gaps.remove(&old);
+                }
+                None => break,
+            }
+        }
+        self.order.push_back(key);
+        self.gaps.insert(key, gap);
+    }
+
+    /// Number of cached gap entries (tests).
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.gaps.len()
+    }
+}
+
+/// The edge-side prefix of a [`FitGapMemo`] digest: kernel state, `xsect_tol`, edge
+/// interval, and edge curve. `None` when the memo is off or the curve has no digest.
+fn fit_gap_edge_digest(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Option<Digest>> {
+    let Some(kernel) = crate::curve::curve::p5::CurveMemoKey::of_kernel(k) else {
+        return Ok(None);
+    };
+    let edge = b.edge(e)?;
+    let Some(curve) = edge.curve.as_ref() else {
+        return Ok(None);
+    };
+    let xsect_tol = context_xsect_tol_3d(k, None, SmallTopoType::NormalSize);
+    let mut d = Digest::new();
+    d.tag(0xF17_6A9);
+    // the kernel inputs are plain numbers and flags; their derived form writes every one
+    let _ = std::fmt::write(&mut d, format_args!("{kernel:?}"));
+    d.f64(k.blend_net_tolerance.get());
+    d.f64(xsect_tol);
+    if edge.interval.content(&mut d).is_none() {
+        return Ok(None);
+    }
+    if curve.content(&mut d).is_none() {
+        return Ok(None);
+    }
+    Ok(Some(d))
+}
+
+/// Finishes a [`FitGapMemo`] key with `face`'s surface evaluation geometry and face zone
+/// tolerance. `None` when the face has no surface, the surface has no evaluation digest, or
+/// `face_zone_tol_3d` fails (letting `calc_max_edge_face_gap` report any unported error).
+fn fit_gap_surface_key(mut d: Digest, b: &Brep, f: FaceId) -> Result<Option<ContentId>> {
+    let Some(surface) = b.face(f)?.surface.as_ref() else {
+        return Ok(None);
+    };
+    let Ok(face_zone_tol) = surface.face_zone_tol_3d() else {
+        return Ok(None);
+    };
+    if surface.eval_content(&mut d).is_none() {
+        return Ok(None);
+    }
+    match face_zone_tol {
+        Some(tol) => {
+            d.bool(true);
+            d.f64(tol);
+        }
+        None => d.bool(false),
+    }
+    Ok(Some(d.finish()))
+}
+
 /// Not upstream: the tolerance geometry fitted along the edge `e` is made at (upstream:
 /// the edge tolerance): [`create_uv_trim_curve`]'s UV trim curves of its edge uses, and
 /// the approximation tolerance of a fillet solver along it
@@ -445,16 +568,18 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
     if edge_tol <= brep_calc_edge_zone_tol_3d(k, 0.0, 0.0, b, Some(max_face_tol)) {
         return Ok(edge_tol);
     }
-    // (the cached gap, else the gap calculated without caching it, so the fit leaves
-    // the edge uses' gap caches as it found them; a failed calculation, ignored as
-    // `GetMaxEdgeFaceGap` ignores it, adds no gap)
+    // (the cached gap, else the gap calculated without caching it on the edge use so the fit
+    // leaves the B-rep's gap caches as it found them, memoised on the kernel by geometry
+    // content (#20158); a failed calculation, ignored as `GetMaxEdgeFaceGap` ignores it, adds
+    // no gap)
     let mut gap = 0.0_f64;
     let mut measured_faces = std::collections::BTreeSet::new();
+    let mut edge_digest: Option<Option<Digest>> = None;
     for eu in b.edge(e)?.edgeuses.clone() {
         let g = if !eu1::has_edge_face_gap(b, eu)? {
             None
         } else if eu1::is_max_edge_face_gap_init(b, eu)? {
-            eu1::cached_max_edge_face_gap(b, eu)?
+            eu1::cached_max_edge_face_gap(b, eu)?.map(|g| g.gap_3d)
         } else {
             // Uncached uses of this edge on one face measure the same curve over
             // the same interval against the same surface, including at a seam.
@@ -462,15 +587,49 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
             if measured_faces.contains(&face) {
                 continue;
             }
-            let measured = ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?;
+            let base = if let Some(d) = edge_digest {
+                d
+            } else {
+                let d = fit_gap_edge_digest(k, b, e)?;
+                edge_digest = Some(d);
+                d
+            };
+            let memo_key = match (base, face) {
+                (Some(d), Some(f)) => fit_gap_surface_key(d, b, f)?,
+                _ => None,
+            };
+            let measured = if let Some(key) = memo_key {
+                let cached = k
+                    .caches
+                    .fit_gap_memo
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(key);
+                if let Some(hit) = cached {
+                    hit.into_option()
+                } else {
+                    k.work_counters.add_fit_gap_calc();
+                    let computed =
+                        ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?.map(|g| g.gap_3d);
+                    k.caches
+                        .fit_gap_memo
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(key, CachedFitGap::from_option(computed));
+                    computed
+                }
+            } else {
+                k.work_counters.add_fit_gap_calc();
+                ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?.map(|g| g.gap_3d)
+            };
             if measured.is_some() {
                 measured_faces.insert(face);
             }
             measured
         };
         if let Some(g) = g {
-            if g.gap_3d > gap {
-                gap = g.gap_3d;
+            if g > gap {
+                gap = g;
             }
         }
     }
@@ -1995,11 +2154,13 @@ pub(crate) fn trim_raise_distance(
     // healer raised to cover a gap leaves them as they are, as it leaves the fit)
     let fit = fit_tolerance(k, b, e)?;
     // (a bound at most half the tolerance raises nothing, whatever its value: the bisection
-    // stops tightening it there; any other is the whole bisection's, not stopped at a cutoff,
-    // so a loose enclosure is tightened as far as it goes before the edge is raised to it)
+    // stops tightening it there; a bound strictly above both `2 * upstream` and the check's
+    // edge tolerance limit falls back to `upstream` below anyway, so `over` cuts off early
+    // without bisecting to `MAX_PIECES`)
     // (a UV line, as `MateEdges` attaches between two planes (WR-495), is bounded as its NURB
     // plus its evaluation's slack, as the stitch's cover bounds it: [`line_trim_bound`])
-    let bounds = [0.5 * tol, f64::INFINITY];
+    let over = (crate::geom::tol::LARGE_SMALL_SIZE_RATIO * b.tolerance()).max(2.0 * upstream);
+    let bounds = [0.5 * tol, over];
     let bound = match trim.kind() {
         CurveKind::Line(l) => line_trim_bound(k, b, eu, l, fit, bounds)?,
         _ => trim_deviation_bound(k, b, eu, trim, fit, bounds, None)?,
@@ -2365,8 +2526,12 @@ fn cover_moved_edge(
             }
             continue;
         }
-        // (the structure changed: the distance after the move is proved directly, for a
-        // trim covered before it)
+        // (the structure changed or the trim's control points lie outside the net's knot
+        // box: the distance after the move is proved directly, for a trim covered before it,
+        // using the same `MOVE_COVER_PIECES` budget as the `moved` branch so trims that never
+        // close on a pole or C^0 knot line do not spend `MAX_PIECES` while every endpoint
+        // stays within `tol`, while lifting the cap to `MAX_PIECES` if any endpoint of `b1`
+        // exceeds `tol`)
         let covered_before = trim_image_gap_bound_for_move(
             k,
             &t.surface,
@@ -2375,7 +2540,7 @@ fn cover_moved_edge(
             edge.range,
             floor,
             [tol, tol],
-            None,
+            Some(MOVE_COVER_PIECES),
         )?;
         if !matches!(covered_before, Some(b0) if b0.is_finite()) {
             continue;
@@ -2388,7 +2553,7 @@ fn cover_moved_edge(
             range,
             floor,
             [tol, limit],
-            None,
+            Some(MOVE_COVER_PIECES),
         )?;
         if let Some(b1) = b1.filter(|&b1| b1.is_finite() && b1 > tol) {
             need = need.max(b1);
@@ -4382,6 +4547,7 @@ pub fn calc_sector_angle(k: &Kernel, b: &mut Brep, eu: EdgeuseId, parameter: f64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::topology::Edgeuse;
 
     fn lone() -> (Brep, EdgeuseId) {
@@ -4540,7 +4706,7 @@ mod tests {
             .unwrap()
             .clone_for_evaluation()
             .unwrap();
-        let (s, c) = (0.3_f64.sin(), 0.3_f64.cos());
+        let (s, c) = (det::sin(0.3_f64), det::cos(0.3_f64));
         let placement = Axis2Placement::new(FAR, Vec3::new(c, s, 0.0), Vec3::new(-s, c, 0.0));
         crate::topology::brep::p5::transform(&mut k, &mut b, &placement, None, false).unwrap();
         let m = placement.matrix();
@@ -5341,5 +5507,472 @@ mod tests {
             }
         }
         assert!(seen >= 1, "a circle trim that is not a UV line");
+    }
+
+    /// #20158: repeated `fit_tolerance` calls on an edge with uncached edge/face gaps (including
+    /// a swept B-spline face carrying a `KeptDefinition`) calculate `calc_max_edge_face_gap`
+    /// once per distinct face via `Kernel::caches.fit_gap_memo`, leave every edgeuse's
+    /// `max_edge_face_gap` and the B-rep's write stamps untouched, respect `Caches::clear` and
+    /// `memoize_curve_caches = false`, and return the exact same fit bit for bit.
+    #[test]
+    fn fit_tolerance_memoizes_uncached_gaps_including_defined_spline_faces() {
+        use crate::curve::line::Line;
+        use crate::curve::path::{PathTolerances, Segment};
+        use crate::nurbs::math::CPoint;
+        use crate::surface::procedural_sweep::ProceduralSweep;
+        use crate::surface::surface::SurfaceKind;
+        use crate::sweep::segments::sweep_along_segments;
+        use crate::topology::edgeuse::p1 as eu1;
+
+        let mut k = Kernel::default();
+        // Closed profile with a curved cubic B-spline edge so the sweep produces a BSpline
+        // wall face carrying a `KeptDefinition::Sweep` (where `Surface::content` is `None`
+        // while `Surface::eval_content` still digests the evaluation net).
+        let spline = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: &[
+                    Point3::new(0.0, 0.0, 0.0),
+                    Point3::new(0.0, 3.0, 1.5),
+                    Point3::new(0.0, 7.0, 1.5),
+                    Point3::new(0.0, 10.0, 0.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let profile = vec![
+            spline,
+            Curve::from(Line::from_points(
+                Point3::new(0.0, 10.0, 0.0),
+                Point3::new(0.0, 10.0, -5.0),
+                3,
+            )),
+            Curve::from(Line::from_points(
+                Point3::new(0.0, 10.0, -5.0),
+                Point3::new(0.0, 0.0, -5.0),
+                3,
+            )),
+            Curve::from(Line::from_points(
+                Point3::new(0.0, 0.0, -5.0),
+                Point3::new(0.0, 0.0, 0.0),
+                3,
+            )),
+        ];
+        let path = [Segment::Line {
+            start: Point3::ZERO,
+            end: Point3::new(20.0, 0.0, 0.0),
+        }];
+        let tol = PathTolerances {
+            gap: 1e-9,
+            turn: 1e-12,
+            length: 1e-12,
+            closed: 1e-6,
+        };
+        let (mut b, _) = sweep_along_segments(&mut k, &profile, &path, true, &tol).unwrap();
+
+        // Find the curved extruded spline wall face (verifying `SurfOfExtrusion` itself gets
+        // an `eval_content` digest), then replace its surface with its NURBS net carrying a
+        // `KeptDefinition::Sweep` so `Surface::content` returns `None` while
+        // `Surface::eval_content` still digests the evaluation net.
+        let bs_face = b
+            .face_list()
+            .iter()
+            .copied()
+            .find(|&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().map(Surface::kind),
+                    Some(SurfaceKind::SurfOfExtrusion(_) | SurfaceKind::BSpline(_))
+                )
+            })
+            .expect("swept spline solid should have a curved wall face");
+        {
+            let orig = b.face(bs_face).unwrap().surface.as_ref().unwrap();
+            assert!(
+                orig.eval_content(&mut Digest::new()).is_some(),
+                "SurfOfExtrusion / BSpline wall should have an eval_content digest"
+            );
+            let owner = orig.owner();
+            let owner_tol = orig.owner_zone_tol_3d();
+            let nurb = match orig.kind() {
+                SurfaceKind::SurfOfExtrusion(_) => {
+                    orig.extrusion_base_with_nurb(&k).unwrap().into_owned()
+                }
+                SurfaceKind::BSpline(s) => s.clone_exact(),
+                _ => unreachable!(),
+            };
+            let line_crv = |a: [f64; 3], c: [f64; 3]| {
+                let pw = [
+                    CPoint::new(a[0], a[1], a[2], 1.0),
+                    CPoint::new(c[0], c[1], c[2], 1.0),
+                ];
+                BSplineCurve::from_data(3, 1, 3, 1, &pw, &[0.0, 0.0, 1.0, 1.0]).unwrap()
+            };
+            let (sweep_def, _) = ProceduralSweep::create_path_exact(
+                &line_crv([0.0, 0.0, 0.0], [0.0, 10.0, 0.0]),
+                &line_crv([0.0, 0.0, 0.0], [20.0, 0.0, 0.0]),
+                Vec3::Y,
+            )
+            .unwrap();
+            let mut defined = Surface::from(nurb);
+            defined.set_owner(owner);
+            defined.set_owner_zone_tol_3d(owner_tol);
+            defined.set_sweep_definition(sweep_def);
+            assert!(defined.procedural_definition().is_some());
+            assert!(defined.content(&mut Digest::new()).is_none());
+            assert!(defined.eval_content(&mut Digest::new()).is_some());
+            b.face_mut(bs_face).unwrap().surface = Some(defined);
+        }
+
+        let e = b
+            .edge_list()
+            .iter()
+            .copied()
+            .find(|&e| {
+                crate::topology::edge::faces(&b, e, None)
+                    .unwrap()
+                    .contains(&bs_face)
+            })
+            .expect("BSpline wall face should have a bounding edge");
+        let eus = b.edge(e).unwrap().edgeuses.clone();
+        let distinct_faces: std::collections::BTreeSet<_> = eus
+            .iter()
+            .filter_map(|&eu| eu1::face(&b, eu).unwrap())
+            .collect();
+        let expected_faces = u64::try_from(distinct_faces.len()).unwrap();
+        assert!(expected_faces >= 2, "edge should bound two faces");
+
+        // Raise edge tolerance above baseline and clear edgeuse gap caches so `fit_tolerance`
+        // must measure the uncached edge/face gaps.
+        b.edge_mut(e).unwrap().tolerance = 1e-3;
+        for &eu in &eus {
+            b.edgeuse_mut(eu).unwrap().max_edge_face_gap.reset();
+        }
+        let stamps_before = b.write_stamps();
+
+        k.caches.clear();
+        k.work_counters.reset();
+        let first = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(k.work_counters.fit_gap_calcs(), expected_faces);
+        assert_eq!(
+            k.caches
+                .fit_gap_memo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len(),
+            distinct_faces.len()
+        );
+        for _ in 0..4 {
+            let again = fit_tolerance(&k, &mut b, e).unwrap();
+            assert_eq!(again.to_bits(), first.to_bits());
+        }
+        assert_eq!(
+            k.work_counters.fit_gap_calcs(),
+            expected_faces,
+            "repeated calls must hit the content-keyed memo"
+        );
+        for &eu in &eus {
+            assert!(
+                !eu1::is_max_edge_face_gap_init(&b, eu).unwrap(),
+                "edgeuse gap cache must stay untouched"
+            );
+        }
+        assert_eq!(
+            b.write_stamps(),
+            stamps_before,
+            "fit_tolerance must not mutate the B-rep"
+        );
+
+        // Clearing kernel caches forces recomputation with the exact same answer.
+        k.caches.clear();
+        let after_clear = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(after_clear.to_bits(), first.to_bits());
+        assert_eq!(k.work_counters.fit_gap_calcs(), 2 * expected_faces);
+
+        // Disabling `memoize_curve_caches` bypasses the memo and produces identical bits.
+        let k_off = Kernel {
+            memoize_curve_caches: false,
+            ..Default::default()
+        };
+        for _ in 0..5 {
+            let uncached = fit_tolerance(&k_off, &mut b, e).unwrap();
+            assert_eq!(uncached.to_bits(), first.to_bits());
+        }
+        assert_eq!(k_off.work_counters.fit_gap_calcs(), 5 * expected_faces);
+        assert_eq!(
+            k_off
+                .caches
+                .fit_gap_memo
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len(),
+            0
+        );
+    }
+
+    /// #20158: mutating an edge's interval, curve, scale, or adjacent surface owner tolerance
+    /// without clearing `Edgeuse::max_edge_face_gap` changes the content key and recomputes a
+    /// fresh gap instead of returning a stale cached entry.
+    #[test]
+    fn fit_tolerance_memo_invalidates_on_interval_curve_scale_and_owner_edits() {
+        use crate::topology::edgeuse::p1 as eu1;
+
+        let (mut k, mut b, e, _) = box_with_moved_trim(1e-4);
+        let k_off = Kernel {
+            memoize_curve_caches: false,
+            ..Default::default()
+        };
+
+        let eus = b.edge(e).unwrap().edgeuses.clone();
+        let faces: Vec<FaceId> = eus
+            .iter()
+            .filter_map(|&eu| eu1::face(&b, eu).unwrap())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        assert_eq!(faces.len(), 2);
+
+        let half_def = 0.5 * k.tolerances.zone_tol_3d;
+        let raised_tol = zone_tol3d(&k, gap_gain(&k) * 3e-4 - half_def);
+        b.edge_mut(e).unwrap().tolerance = raised_tol;
+        for &eu in &eus {
+            b.edgeuse_mut(eu).unwrap().max_edge_face_gap.reset();
+        }
+        k.caches.clear();
+        k.work_counters.reset();
+
+        // Warm the memo, then confirm a hit.
+        let base_fit = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(k.work_counters.fit_gap_calcs(), 2);
+        assert_eq!(
+            fit_tolerance(&k, &mut b, e).unwrap().to_bits(),
+            base_fit.to_bits()
+        );
+        assert_eq!(k.work_counters.fit_gap_calcs(), 2);
+
+        // 1. Mutating edge interval directly (as `edge::set_interval` does).
+        let ivl = b.edge(e).unwrap().interval;
+        b.edge_mut(e).unwrap().interval =
+            Extent1d::from_raw(ivl.min(), ivl.min() + 0.5 * (ivl.max() - ivl.min()));
+        let fit_ivl = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(k.work_counters.fit_gap_calcs(), 4);
+        assert_eq!(
+            fit_ivl.to_bits(),
+            fit_tolerance(&k_off, &mut b, e).unwrap().to_bits()
+        );
+
+        // 2. Mutating edge curve directly (as edge split / trim in `topology/brep/p9.rs` does).
+        // Shift toward the box center `(0.5, 1.0, 1.5)` by `3e-4` on each axis so the curve
+        // stays inside both adjacent faces' domains at an exact `3e-4` perpendicular gap.
+        let mid_t = 0.5 * (b.edge(e).unwrap().interval.min() + b.edge(e).unwrap().interval.max());
+        let mid_pt = b
+            .edge(e)
+            .unwrap()
+            .curve
+            .as_ref()
+            .unwrap()
+            .evaluate_point(&k, mid_t)
+            .unwrap();
+        let toward_center = |coord: f64, center: f64| if coord < center { 3e-4 } else { -3e-4 };
+        let shift = Axis2Placement::new(
+            Point3::new(
+                toward_center(mid_pt.x, 0.5),
+                toward_center(mid_pt.y, 1.0),
+                toward_center(mid_pt.z, 1.5),
+            ),
+            Vec3::X,
+            Vec3::Y,
+        );
+        b.edge_mut(e)
+            .unwrap()
+            .curve
+            .as_mut()
+            .unwrap()
+            .transform(&k, &shift, None)
+            .unwrap();
+        let fit_shifted = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(k.work_counters.fit_gap_calcs(), 6);
+        assert_eq!(
+            fit_shifted.to_bits(),
+            fit_tolerance(&k_off, &mut b, e).unwrap().to_bits()
+        );
+        assert!(
+            fit_shifted < base_fit,
+            "shifted curve must recompute the new gap ({fit_shifted:e} < {base_fit:e})"
+        );
+
+        // 3. Scaling edge and faces uniformly (as `topology/brep/p5.rs` does) doubles the gap.
+        let identity = Axis2Placement::default();
+        let scale = Some(Vec3::new(2.0, 2.0, 2.0));
+        b.edge_mut(e)
+            .unwrap()
+            .curve
+            .as_mut()
+            .unwrap()
+            .transform(&k, &identity, scale)
+            .unwrap();
+        for &f in &faces {
+            b.face_mut(f)
+                .unwrap()
+                .surface
+                .as_mut()
+                .unwrap()
+                .transform(&k, &identity, scale)
+                .unwrap();
+        }
+        b.edge_mut(e).unwrap().tolerance = zone_tol3d(&k, gap_gain(&k) * 6e-4 - half_def);
+        let fit_scaled = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(k.work_counters.fit_gap_calcs(), 8);
+        assert_eq!(
+            fit_scaled.to_bits(),
+            fit_tolerance(&k_off, &mut b, e).unwrap().to_bits()
+        );
+        assert!(
+            fit_scaled > fit_shifted,
+            "scaled edge/face must recompute the doubled gap ({fit_scaled:e} > {fit_shifted:e})"
+        );
+
+        // 4. Clearing a single face surface's owner (as `create_uv_trim_curve` does) misses only
+        // that face and hits the other face.
+        b.face_mut(faces[0])
+            .unwrap()
+            .surface
+            .as_mut()
+            .unwrap()
+            .set_owner(None);
+        let fit_owner = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(k.work_counters.fit_gap_calcs(), 9);
+        assert_eq!(
+            fit_owner.to_bits(),
+            fit_tolerance(&k_off, &mut b, e).unwrap().to_bits()
+        );
+    }
+
+    /// #20158: `FitGapMemo` stays bounded at `FIT_GAP_MEMO_CAPACITY` with FIFO eviction.
+    #[test]
+    fn fit_gap_memo_evicts_oldest_entries_past_capacity() {
+        let mut memo = FitGapMemo::default();
+        let total = FIT_GAP_MEMO_CAPACITY + 3;
+        for i in 0..total {
+            memo.insert(i as ContentId, CachedFitGap::Measured(i as f64));
+        }
+        assert_eq!(memo.len(), FIT_GAP_MEMO_CAPACITY);
+        for i in 0..3 {
+            assert_eq!(memo.get(i as ContentId), None);
+        }
+        for i in 3..total {
+            assert_eq!(
+                memo.get(i as ContentId),
+                Some(CachedFitGap::Measured(i as f64))
+            );
+        }
+    }
+
+    /// #20158: `ProceduralBlend` faces get an iterative `eval_content` digest, are memoized by
+    /// `fit_tolerance`, invalidate when `blend_net_tolerance` changes (`NetScope`), and share
+    /// cached entries across kernels sharing `Caches::fit_gap_memo` (as boolean cache kernels do).
+    #[test]
+    fn fit_tolerance_memoizes_procedural_blends_and_tracks_blend_net_tolerance() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::procedural_blend::{BlendDefinitionInput, NetScope, ProceduralBlend};
+        use crate::topology::edgeuse::p1 as eu1;
+
+        let (mut k, mut b, e, _) = box_with_moved_trim(1e-4);
+        let eus = b.edge(e).unwrap().edgeuses.clone();
+        let face = eus
+            .iter()
+            .find_map(|&eu| eu1::face(&b, eu).unwrap())
+            .unwrap();
+        let orig = b.face(face).unwrap().surface.as_ref().unwrap();
+        let owner = orig.owner();
+        let owner_tol = orig.owner_zone_tol_3d();
+
+        let square = |z: f64| {
+            BSplineSurface::create_bilinear_surface(
+                Point3::new(0.0, 0.0, z),
+                Point3::new(10.0, 0.0, z),
+                Point3::new(0.0, 10.0, z),
+                Point3::new(10.0, 10.0, z),
+            )
+            .unwrap()
+        };
+        let line = || {
+            BSplineCurve::create_line_segment(
+                3,
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap()
+        };
+        let s0 = Surface::from(square(0.0));
+        let s1 = Surface::from(square(1.0));
+        let (leader, seed0, seed1) = (line(), line(), line());
+        let input = BlendDefinitionInput {
+            supports: [&s0, &s1],
+            sides: [1.0, -1.0],
+            offsets: [2.0, 2.0],
+            law: None,
+            order: 1,
+            thumbweight: 0.0,
+            leader: &leader,
+            seeds: [&seed0, &seed1],
+            bound: 1e-6,
+            chamfer: None,
+        };
+        let pb = ProceduralBlend::create(&k, &square(0.0), &input, |_, w| w < 1.0).unwrap();
+        let mut pb_surface = Surface::from(pb);
+        pb_surface.set_owner(owner);
+        pb_surface.set_owner_zone_tol_3d(owner_tol);
+        assert!(pb_surface.content(&mut Digest::new()).is_none());
+        assert!(pb_surface.eval_content(&mut Digest::new()).is_some());
+        b.face_mut(face).unwrap().surface = Some(pb_surface);
+
+        b.edge_mut(e).unwrap().tolerance = 1e-3;
+        for &eu in &eus {
+            b.edgeuse_mut(eu).unwrap().max_edge_face_gap.reset();
+        }
+        k.caches.clear();
+        k.work_counters.reset();
+
+        let k_off = Kernel {
+            memoize_curve_caches: false,
+            ..Default::default()
+        };
+        let fit_exact = fit_tolerance(&k, &mut b, e).unwrap();
+        assert_eq!(k.work_counters.fit_gap_calcs(), 2);
+        assert_eq!(
+            fit_tolerance(&k, &mut b, e).unwrap().to_bits(),
+            fit_exact.to_bits()
+        );
+        assert_eq!(k.work_counters.fit_gap_calcs(), 2);
+        assert_eq!(
+            fit_exact.to_bits(),
+            fit_tolerance(&k_off, &mut b, e).unwrap().to_bits()
+        );
+
+        // Changing `blend_net_tolerance` (`NetScope`) changes the digest and recomputes.
+        let fit_net = NetScope::with_net(&k, || {
+            let first = fit_tolerance(&k, &mut b, e).unwrap();
+            assert_eq!(k.work_counters.fit_gap_calcs(), 4);
+            let second = fit_tolerance(&k, &mut b, e).unwrap();
+            assert_eq!(k.work_counters.fit_gap_calcs(), 4);
+            assert_eq!(second.to_bits(), first.to_bits());
+            first
+        });
+        let fit_net_off = NetScope::with_net(&k_off, || fit_tolerance(&k_off, &mut b, e).unwrap());
+        assert_eq!(fit_net.to_bits(), fit_net_off.to_bits());
+
+        // A child kernel sharing `fit_gap_memo` (as boolean cache kernels do) hits immediately.
+        let mut k_child = Kernel::default();
+        k_child.caches.fit_gap_memo = std::sync::Arc::clone(&k.caches.fit_gap_memo);
+        let fit_child = fit_tolerance(&k_child, &mut b, e).unwrap();
+        assert_eq!(k_child.work_counters.fit_gap_calcs(), 0);
+        assert_eq!(fit_child.to_bits(), fit_exact.to_bits());
     }
 }

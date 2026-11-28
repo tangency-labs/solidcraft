@@ -322,3 +322,90 @@ fn a_bad_cylinder_reference_is_refused() {
     }
     assert!(panicked.is_empty(), "solid.cylinder panicked:\n{}", panicked.join("\n"));
 }
+
+#[test]
+fn a_referenced_hole_patterned_on_a_shelled_body_stays_in_its_wall() {
+    // #23221: a hole placed by edge distances on one wall of a hollow/shelled body is already
+    // drilled when a pattern or mirror replays it, so its centre sits in the bore opening.
+    // Pattern copies must stay in the front wall (y in 0..4), not jump across the cavity into
+    // the back wall (y in 56..60).
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 200, "width": 60, "height": 55}));
+    run(&mut s, "solid.shell", json!({"faces": [[100, 33, 55]], "thickness": 4}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({
+            "position": [140, 0, 22],
+            "diameter": 4,
+            "depth": 9,
+            "name": "H",
+            "references": [
+                {"edge": [170, 0, 55], "distance": 33},
+                {"edge": [200, 0, 33], "distance": 60}
+            ]
+        }),
+    );
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 18, "name": "P"}));
+    for x in [140.0, 158.0, 176.0, 194.0] {
+        assert!(!solid_at(&s, Vec3::new(x, 2.0, 22.0)), "front wall should have a bore at x={x}");
+        assert!(solid_at(&s, Vec3::new(x, 2.0, 25.0)) && solid_at(&s, Vec3::new(x, 2.0, 19.0)), "front wall should be solid beside bore at x={x}");
+        assert!(solid_at(&s, Vec3::new(x, 58.0, 22.0)), "back wall must stay solid at x={x}");
+    }
+    // Mirroring the front-wall hole across the box's midplane drills the back wall at x = 140.
+    run(&mut s, "solid.mirror", json!({"features": ["H"], "plane": {"origin": [0, 30, 0], "normal": [0, 1, 0]}, "name": "M"}));
+    assert!(!solid_at(&s, Vec3::new(140.0, 58.0, 22.0)), "mirrored hole should land in back wall at x=140");
+    for x in [158.0, 176.0, 194.0] {
+        assert!(solid_at(&s, Vec3::new(x, 58.0, 22.0)), "unmirrored back wall positions must stay solid at x={x}");
+    }
+}
+
+#[test]
+fn a_single_reference_and_shallow_blind_hole_pattern_stay_in_their_wall() {
+    // One reference edge on a shelled body: copies stay in the front wall.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 200, "width": 60, "height": 55}));
+    run(&mut s, "solid.shell", json!({"faces": [[100, 33, 55]], "thickness": 4}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({
+            "position": [140, 0, 22],
+            "diameter": 4,
+            "depth": 9,
+            "name": "H1",
+            "references": [{"edge": [170, 0, 55], "distance": 33}]
+        }),
+    );
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 18, "name": "P1"}));
+    for x in [140.0, 158.0, 176.0] {
+        assert!(!solid_at(&s, Vec3::new(x, 2.0, 22.0)), "single-ref front wall should have a bore at x={x}");
+        assert!(solid_at(&s, Vec3::new(x, 58.0, 22.0)), "single-ref back wall must stay solid at x={x}");
+    }
+
+    // Shallow blind hole whose bottom lies within `size * 1e-4` of the front face: flat_face
+    // must still resolve to the outer wall bordered by the reference edges, not the bore bottom.
+    let mut b = Session::default();
+    run(&mut b, "solid.box", json!({"corner": [0, 0, 0], "length": 2000, "width": 600, "height": 550}));
+    run(&mut b, "solid.shell", json!({"faces": [[1000, 330, 550]], "thickness": 40}));
+    run(
+        &mut b,
+        "solid.hole",
+        json!({
+            "position": [1400, 0, 220],
+            "diameter": 40,
+            "depth": 0.05,
+            "name": "H2",
+            "references": [
+                {"edge": [1700, 0, 550], "distance": 330},
+                {"edge": [2000, 0, 330], "distance": 600}
+            ]
+        }),
+    );
+    run(&mut b, "solid.pattern.rectangular", json!({"features": ["H2"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 180, "name": "P2"}));
+    for x in [1400.0, 1580.0] {
+        assert!(!solid_at(&b, Vec3::new(x, 0.025, 220.0)), "shallow blind bore should open at y=0 for x={x}");
+        assert!(solid_at(&b, Vec3::new(x, 0.1, 220.0)), "shallow blind bore should stop before y=0.1 for x={x}");
+        assert!(solid_at(&b, Vec3::new(x, 580.0, 220.0)), "back wall must stay solid at x={x}");
+    }
+}

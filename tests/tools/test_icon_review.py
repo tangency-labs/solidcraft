@@ -2,14 +2,14 @@
 import contextlib
 import json
 import os
+import queue
 import re
 from pathlib import Path
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
-import time
+import threading
 import tomllib
 import unittest
 import urllib.error
@@ -18,6 +18,54 @@ import xml.etree.ElementTree as ET
 
 TOOLS = Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="20" fill="currentColor"/></svg>'
+# A request does milliseconds of work, but each of its file creations and renames can stall for
+# seconds on a busy shared disk (a 3 s limit failed CI that way). These limits only bound a hung
+# server; nothing waits for them when the server is healthy.
+REQUEST_TIMEOUT = 120
+START_TIMEOUT = 300
+
+
+def start_review_server(tool):
+    """Serve `tool` on a free port; return (process, url) once it announces the address it bound.
+
+    Waiting for the announcement replaces polling with a short timeout, and letting the server pick
+    the port leaves no gap in which another program can take it."""
+    process = subprocess.Popen([sys.executable, '-B', str(tool), '--serve', '0'],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    lines = queue.Queue()
+    def read_stdout():
+        for line in process.stdout:
+            lines.put(line)
+        lines.put(b'')
+    process.stdout_reader = threading.Thread(target=read_stdout, daemon=True)
+    process.stdout_reader.start()
+    printed = b''
+    while True:
+        try:
+            line = lines.get(timeout=START_TIMEOUT)
+        except queue.Empty:
+            line = b''
+        printed += line
+        found = re.match(rb'review page: http://127\.0\.0\.1:(\d+) ', line)
+        if found:
+            return process, 'http://127.0.0.1:' + found.group(1).decode()
+        if not line:
+            process.kill()
+            stop_review_server(process)
+            raise RuntimeError('review server did not start: ' + printed.decode(errors='replace'))
+
+
+def stop_review_server(process):
+    if process.poll() is None:
+        process.terminate()
+    process.wait(timeout=START_TIMEOUT)
+    # The reader reaches end of file once the server has exited; close stdout only after it stops.
+    process.stdout_reader.join(timeout=START_TIMEOUT)
+    process.stdout.close()
+    error = process.stderr.read()
+    process.stderr.close()
+    if error:
+        sys.stderr.write(error.decode(errors='replace'))
 
 
 @contextlib.contextmanager
@@ -32,14 +80,9 @@ def review_fixture():
         (design / 'references.toml').write_text('[category.model]\nlabel="Model"\nrule="Standard projection"\nicons=["box"]\n', encoding='utf-8')
         (design / 'aliases.toml').write_text('[alias]\nbox_alias="box"\n', encoding='utf-8')
         (design / 'review.json').write_text(json.dumps({'final': {'box': ''}, 'notes': {}}), encoding='utf-8')
-        with socket.socket() as available:
-            available.bind(('127.0.0.1', 0))
-            port = available.getsockname()[1]
-        process = subprocess.Popen([sys.executable, '-B', str(design / 'tools/icon_status.py'), '--serve', str(port)],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        url = f'http://127.0.0.1:{port}'
+        process, url = start_review_server(design / 'tools/icon_status.py')
         def get(path):
-            with urllib.request.urlopen(url + path, timeout=3) as response:
+            with urllib.request.urlopen(url + path, timeout=REQUEST_TIMEOUT) as response:
                 data = response.read().decode()
                 return json.loads(data) if path == '/api/review' else data
         def post(state, final=None, notes=None, endpoint='/api/review', rev=None):
@@ -47,25 +90,27 @@ def review_fixture():
                 'base': state, 'final': state['final'] if final is None else final,
                 'notes': state['notes'] if notes is None else notes, 'rev': rev or state['rev']}
             try:
-                with urllib.request.urlopen(urllib.request.Request(url + endpoint, data=json.dumps(payload).encode()), timeout=3) as response:
+                with urllib.request.urlopen(urllib.request.Request(url + endpoint, data=json.dumps(payload).encode()), timeout=REQUEST_TIMEOUT) as response:
                     return json.load(response)
             except urllib.error.HTTPError as error:
                 error.close()
                 raise
         try:
-            for attempt in range(100):
-                try:
-                    get('/api/review'); break
-                except urllib.error.URLError:
-                    if process.poll() is not None: raise RuntimeError(process.stderr.read().decode())
-                    time.sleep(.02)
-            else: raise RuntimeError('server did not start')
             yield root, design, get, post
         finally:
-            process.terminate(); process.wait(timeout=5); process.stderr.close()
+            stop_review_server(process)
 
 
 class IconReviewTest(unittest.TestCase):
+    def test_stopping_the_review_server_closes_both_of_its_pipes(self):
+        with review_fixture() as (root, design, get, post):
+            process, url = start_review_server(design / 'tools/icon_status.py')
+            get('/api/review')
+            stop_review_server(process)
+            self.assertIsNotNone(process.returncode)
+            self.assertTrue(process.stdout.closed)
+            self.assertTrue(process.stderr.closed)
+
     def test_window_confirm_and_page_list_icons_are_discovered(self):
         with review_fixture() as (root, design, get, post):
             source = root / 'crates/ui-egui/src/windows.rs'

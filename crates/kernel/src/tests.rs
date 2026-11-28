@@ -2564,6 +2564,52 @@ fn raise_band_on_a_rounded_rim() {
     }
 }
 
+/// An outside lip on a shelled cylinder (#20625): the band's outer wall rises from the rim's kept
+/// circle, whose interval is on its NURBS form (arc length), not its angle. Taken as an angle,
+/// the wall's form came out half a turn from its edges for radii 35, 40 and 45: its pcurves ran
+/// past its domain, SMLib's check refused it ("Edge endpoints within face domain") and the next
+/// join failed. Every pcurve ends inside its face's domain (SMLib's tests 70 to 72), and a box
+/// joined under the floor adds its 20 × 10 × 1 to the band's area times its height.
+#[test]
+fn raise_band_outside_a_round_rim_keeps_its_wall_form_under_its_edges() {
+    use solidcore_record::brep::{Curve2, Loop};
+    for r in [20.0, 30.0, 35.0, 40.0, 45.0, 50.0] {
+        let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, r), holes: vec![] }], 0.0, 20.0).unwrap().pop().unwrap();
+        let sh = shell(&b, &[Vec3::new(0.0, 0.0, 20.0)], 4.0).unwrap();
+        let v0 = measure(&sh).unwrap().volume;
+        let lip = crate::lip::raise_band(&sh, Vec3::new(r - 2.0, 0.0, 20.0), 2.0, 4.0, true).unwrap();
+        let rec = crate::native::brep_record(&lip).unwrap();
+        for (fi, f) in rec.faces.iter().enumerate() {
+            for l in &f.loops {
+                let Loop::Edges { edges } = l else { continue };
+                for u in edges {
+                    let pts: Vec<[f64; 2]> = match &u.pcurve {
+                        Curve2::Spline { points, .. } => points.clone(),
+                        Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+                    };
+                    for p in [pts.first(), pts.last()].into_iter().flatten() {
+                        for d in 0..2 {
+                            let [lo, hi] = f.domain[d];
+                            assert!(
+                                p[d] >= lo - 1e-4 && p[d] <= hi + 1e-4,
+                                "r {r}: face {fi} edge {}: pcurve end {p:?} off domain {:?}",
+                                u.edge,
+                                f.domain
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let tab = box_solid(Vec3::new(-10.0, -5.0, -1.0), Vec3::new(10.0, 5.0, 0.0)).unwrap();
+        let joined = boolean(&lip, &tab, BoolOp::Union).unwrap().unwrap();
+        let band = PI * (r * r - (r - 2.0) * (r - 2.0));
+        let want = v0 + band * 4.0 + 200.0;
+        let v = measure(&joined).unwrap().volume;
+        assert!(rel(v, want) < 1e-5, "r {r}: {v} vs {want}");
+    }
+}
+
 /// A lip wider than its rim (#16742): the band reaches past the rim's outer wall, so what is left of
 /// the face is the underside of the overhang. It faces down, away from the rim's top, and the
 /// ring's two edges round with a small fillet. Volume added is the band's area times its height.
@@ -4021,6 +4067,32 @@ fn a_curve_chain_by_edge_index_starts_from_that_edge() {
     assert!(crate::curve_chain_of_edges(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
 }
 
+/// A face chain picked by face index runs round a slot's side: from a flat side, across the
+/// tangent edges onto both half cylinders and the other flat side, never onto the top or bottom it
+/// meets at sharp edges (#22845). An index the body does not have is refused.
+#[test]
+fn a_face_chain_by_face_index_runs_round_a_slots_tangent_side() {
+    let slab = box_solid(Vec3::new(-10.0, -15.0, 0.0), Vec3::new(10.0, 15.0, 12.0)).unwrap();
+    let mut b = slab;
+    for y in [-15.0, 15.0] {
+        let end = cylinder(Vec3::new(0.0, y, 0.0), Vec3::new(0.0, 0.0, 1.0), 10.0, 12.0).unwrap();
+        b = crate::boolean(&b, &end, crate::BoolOp::Union).unwrap().unwrap();
+    }
+    let face = |p: Vec3| b.face_at_point(p).unwrap().unwrap();
+    let side = face(Vec3::new(10.0, 0.0, 6.0));
+    let chain = crate::tangent_face_chain_of_faces(&b, &[side], solidcraft_geom::TANGENT_CHAIN).unwrap();
+    assert_eq!(chain.first(), Some(&side));
+    for p in [Vec3::new(-10.0, 0.0, 6.0), Vec3::new(0.0, 25.0, 6.0), Vec3::new(0.0, -25.0, 6.0)] {
+        assert!(chain.contains(&face(p)), "{p:?} in {chain:?}");
+    }
+    for p in [Vec3::new(0.0, 0.0, 12.0), Vec3::new(0.0, 0.0, 0.0)] {
+        assert!(!chain.contains(&face(p)), "{p:?} not in {chain:?}");
+    }
+    let count = b.record().faces.len();
+    assert!(crate::tangent_face_chain_of_faces(&b, &[count], solidcraft_geom::TANGENT_CHAIN).is_err());
+    assert!(crate::tangent_face_chain_of_faces(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
+}
+
 /// Whether a path of body edges lies in one plane is decided over each free-form span's whole
 /// length from its control points, not from its directions at sampled points. A degree 9 span
 /// along x whose height is the integral of `c (t - 1/8) (t - 2/8) … (t - 1)` runs level at eight
@@ -4088,4 +4160,21 @@ fn a_free_form_span_that_bows_out_of_plane_between_samples_has_no_plane() {
     let n = PathSeg::plane_normal(&path(0.0), 1e-6).unwrap();
     assert!(n.cross(normal).len() < 1e-9, "{n:?}");
     assert_eq!(PathSeg::plane_normal(&path(1e-3), 1e-6), None);
+}
+
+/// A drawing leader on an edge's polyline (#22195): the fraction of its length nearest a picked
+/// point, and the point a fraction along it, are each other's inverse and measure by length.
+#[test]
+fn polyline_fraction_and_point_measure_by_length() {
+    let line = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 30.0, 0.0)];
+    let f = polyline_fraction_at(&line, Vec3::new(12.0, 10.0, 5.0)).unwrap();
+    assert!((f - 0.5).abs() < 1e-12, "{f}");
+    let p = polyline_point_at(&line, f).unwrap();
+    assert!(p.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "{p:?}");
+    assert_eq!(polyline_fraction_at(&line, Vec3::new(-5.0, 1.0, 0.0)), Some(0.0));
+    assert_eq!(polyline_point_at(&line, 2.0), Some(line[2]));
+    let still = [Vec3::new(1.0, 1.0, 1.0); 2];
+    assert_eq!(polyline_fraction_at(&still, Vec3::new(0.0, 0.0, 0.0)), None);
+    assert_eq!(polyline_point_at(&still, 0.5), None);
+    assert_eq!(polyline_point_at(&line, f64::NAN), None);
 }

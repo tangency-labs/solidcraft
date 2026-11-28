@@ -81,6 +81,36 @@ pub struct Built {
     ready: Option<TessReady>,
 }
 
+/// The window device's lost flag and the sample count egui's own pass draws with, kept in the egui
+/// renderer's callback resources by the host ([`watch_window`]) so anything holding the render
+/// state reads them ([`window_device`]). Stock egui-wgpu keeps neither.
+#[derive(Clone, Debug)]
+pub struct WindowDevice {
+    pub lost: solidcraft_viewport_gpu::DeviceLost,
+    /// `NativeOptions::multisampling` (egui's pass, not the scene's).
+    pub msaa_samples: u32,
+}
+
+impl Default for WindowDevice {
+    fn default() -> Self {
+        Self { lost: Default::default(), msaa_samples: 1 }
+    }
+}
+
+/// Watch the window's device for a loss (its one lost callback) and keep that, with egui's sample
+/// count `msaa_samples`, for [`window_device`]. The host calls it once, where it gets the render
+/// state.
+pub fn watch_window(rs: &egui_wgpu::RenderState, msaa_samples: u32) -> WindowDevice {
+    let window = WindowDevice { lost: solidcraft_viewport_gpu::DeviceLost::watch(&rs.device), msaa_samples: msaa_samples.max(1) };
+    rs.renderer.write().callback_resources.insert(window.clone());
+    window
+}
+
+/// The window device's state [`watch_window`] kept; never lost and 1x if the host didn't watch it.
+pub fn window_device(rs: &egui_wgpu::RenderState) -> WindowDevice {
+    rs.renderer.read().callback_resources.get::<WindowDevice>().cloned().unwrap_or_default()
+}
+
 /// [`install`]'s slow half, the shader compile (seconds on some devices): it only needs the
 /// device, so a host can run it on a thread of its own while its window keeps drawing (#1210).
 pub fn build(

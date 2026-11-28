@@ -795,7 +795,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !app.help.about
         && !app.crashes.open
         && !app.help.menu
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && app.issue_report.draft.is_none()
         // A file waiting for its unit is asked on this page too (#15598): its Escape gives the
         // question up, and does not close the page behind it.
@@ -813,7 +813,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && app.issue_report.draft.is_none()
         && !crate::documents::active_is_blank(app)
     {
@@ -1029,17 +1029,9 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     } else {
         friendly_path(path).into()
     };
-    let mut menu = vec![start_page::MenuEntry {
-        label: app.tr_label("Remove from list").into(),
-        icon: "delete".into(),
-        chosen: FileAction::ForgetRecent(index),
-    }];
+    let mut menu = vec![(crate::ui_kit::Item::action("forget", app.tr_label("Remove from list"), "delete"), FileAction::ForgetRecent(index))];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry {
-            label: app.tr_label("Show in folder").into(),
-            icon: "folder".into(),
-            chosen: FileAction::ShowInFolder(index),
-        });
+        menu.push((crate::ui_kit::Item::action("folder", app.tr_label("Show in folder"), "folder"), FileAction::ShowInFolder(index)));
     }
     let mut kind = recent_kind(app, path);
     let mut security = None;
@@ -1882,6 +1874,18 @@ mod tests {
         assert_eq!(h.recent.len(), MAX_RECENT);
         assert_eq!(h.recent.first().map(String::as_str), Some("/d/5.solidcraft"));
         assert_eq!(h.recent.iter().filter(|p| p.as_str() == "/d/5.solidcraft").count(), 1);
+    }
+
+    /// Preferences that list a design twice (an older version, or two pages writing them) show it
+    /// once (#23033), and still hold no more than the list's size.
+    #[test]
+    fn saved_preferences_that_list_a_design_twice_show_it_once() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let mut listed: Vec<String> = vec!["/d/a.sc".into(), "/d/b.sc".into(), "/d/a.sc".into()];
+        listed.extend((0..20).map(|i| format!("/d/{i}.sc")));
+        app.load_prefs(&serde_json::json!({ "recent": listed }).to_string());
+        assert_eq!(app.home.recent[..3], ["/d/a.sc", "/d/b.sc", "/d/0.sc"]);
+        assert_eq!(app.home.recent.len(), MAX_RECENT);
     }
 
     /// Samples build in the background and make a picture; picking one opens its design.

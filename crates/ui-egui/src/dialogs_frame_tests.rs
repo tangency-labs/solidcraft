@@ -1014,6 +1014,8 @@ fn railed_box() -> SolveApp {
         distance: 1000.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     app
 }
@@ -1274,6 +1276,8 @@ fn from_above(app: &mut SolveApp) {
         distance: 1000.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
 }
 

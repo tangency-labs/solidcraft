@@ -6,7 +6,6 @@ use serde_json::json;
 use solidcraft_engine::{PickMode, Sel};
 
 use crate::SolveApp;
-use crate::ui_kit;
 use crate::viewport::Hit;
 
 /// The message id of the mode's name in the selection-mode menus (its icon is in
@@ -30,15 +29,6 @@ pub(crate) fn id(mode: PickMode) -> String {
 /// Switch to `mode` through `select.mode`, as scripts and the control channel do.
 pub(crate) fn set(app: &mut SolveApp, mode: PickMode) {
     let _ = app.run("select.mode", json!({"mode": mode}));
-}
-
-/// A mode's check box, as "Select bodies" in the selection filter and in Preferences: ticked exactly
-/// in that mode; ticking sets it, unticking sets Faces & edges, whichever mode was on.
-pub(crate) fn checkbox(app: &mut SolveApp, ui: &mut egui::Ui, mode: PickMode, label: &str) {
-    let mut on = app.ui.pick_mode == mode;
-    if ui_kit::checkbox(ui, label, &mut on).changed() {
-        set(app, if on { mode } else { PickMode::Faces });
-    }
 }
 
 /// The selection filter's three ways of seeing a mode (#6426, #11553): `face`, `body` or

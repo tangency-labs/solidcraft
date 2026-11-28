@@ -203,7 +203,7 @@ fn typed_offset(doc: &mut solidcraft_doc::Document, p: &Value, mode: &str) -> Re
     } else {
         rhs
     };
-    Ok(Some((doc.new_model_param(&stored, &unit), mm)))
+    Ok(Some((doc.new_model_param(&stored, &unit)?, mm)))
 }
 
 /// All valid solutions in deterministic order. This reads the sketch and never changes it.
@@ -464,12 +464,12 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
             _ => None,
         };
         if let Some(k) = kind {
-            let parameter = angle_expression.map(|e| doc.new_model_param(&e, "deg"));
+            let parameter = angle_expression.map(|e| doc.new_model_param(&e, "deg")).transpose()?;
             cons.push(sk.add_constraint(k, parameter)?);
         }
         if let Some((e, value)) = &length {
             let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let parameter = doc.new_model_param(e, &unit);
+            let parameter = doc.new_model_param(e, &unit)?;
             cons.push(sk.add_constraint(ConstraintKind::Length { l, value: *value }, Some(parameter))?);
         }
         if let ("tangent_two", Some(b)) = (mode, second) {

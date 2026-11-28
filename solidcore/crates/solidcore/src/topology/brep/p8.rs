@@ -1447,6 +1447,7 @@ mod tests {
     use super::*;
     use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
     use crate::geom::attribute::AttributeStore;
+    use crate::math::det;
     use crate::math::Point2;
     use crate::surface::plane::Plane;
 
@@ -1544,7 +1545,7 @@ mod tests {
                     .unwrap());
                 area += crate::mass::integrator::properties::face_area(k, b, face, 1e-6).unwrap();
             }
-            let expected = 4.0 * std::f64::consts::PI.powi(2);
+            let expected = 4.0 * det::powi(std::f64::consts::PI, 2);
             eprintln!("horn quarter area {area}, expected {expected}");
             assert!((area - expected).abs() < 1e-3, "{area}");
         });

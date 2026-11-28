@@ -102,6 +102,15 @@ pub const MAX_UNION_BREPS: usize = 100_000;
 /// Most points one selection may hold.
 pub const MAX_POINTS: usize = 4096;
 
+/// A resolved face in the body's native face list, and the point and reach that selected it.
+/// Keeping the resolved index avoids picking a different piece at a shared edge.
+#[derive(Clone, Copy, Debug)]
+pub struct PickedFace {
+    pub index: usize,
+    pub at: [f64; 3],
+    pub tolerance: f64,
+}
+
 /// One edge round an opened corner's hole ([`Brep::blend_setback_open`]): its index in the
 /// sheet's edge order, the face beside it in its face order, and whether that face, run
 /// counter-clockwise about its outward normal, runs the edge from its start vertex to its end.
@@ -346,6 +355,29 @@ impl Brep {
         r
     }
 
+    /// The edges nearest to `edges` (each within `tolerance`), one tangent chain, rounded in one
+    /// blend with the radius law of `degree`, `knots` and `radii` along the whole chain, 0 at its
+    /// end nearest `start`: each edge takes the part of the law its interval in the joined-curve parameterization
+    /// gives, scaled by endpoint-speed ratios so speed agrees at joints. Edges that are not one open chain are [`Error::Unported`], naming why.
+    pub fn fillet_variable_chain(
+        &self,
+        edges: &[[f64; 3]],
+        tolerance: f64,
+        start: [f64; 3],
+        degree: usize,
+        knots: &[f64],
+        radii: &[f64],
+    ) -> Result<Brep> {
+        let r = core::blend::fillet_variable_chain(self.core(), edges, tolerance, start, degree, knots, radii).map(Brep::made_core);
+        trace::made(
+            "fillet_variable_chain",
+            &[self],
+            &r,
+            || json!({"edges": trace::picks(self, PickKind::Edge, edges, tolerance), "start": start, "degree": degree, "knots": knots, "radii": radii}),
+        );
+        r
+    }
+
     /// The edges nearest to `edges` (each within `tolerance`), exactly those, cut by
     /// a chamfer `distance` back along the face whose outward normal leans most along `first`,
     /// and by `second` on the other, with bevelled corners (setbacks measured at each edge's
@@ -389,6 +421,24 @@ impl Brep {
     pub fn offset_faces(&self, faces: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
         let r = core::offset::offset_faces(self.core(), faces, tolerance, distance).map(Brep::made_core);
         trace::made("offset_faces", &[self], &r, || json!({"faces": trace::picks(self, PickKind::Face, faces, tolerance), "distance": distance}));
+        r
+    }
+
+    /// Rotate the selected support about `axis` through `origin`, then translate it. The
+    /// boolean is false if the support was unchanged; no retrim took place in that case.
+    pub fn transform_face(&self, face: PickedFace, translate: [f64; 3], origin: [f64; 3], axis: [f64; 3], angle: f64) -> Result<(Brep, bool)> {
+        let r =
+            core::offset::transform_face(self.core(), face.index, translate, origin, axis, angle).map(|(b, changed)| (Brep::made_core(b), changed));
+        trace::call(
+            "transform_face",
+            &[self],
+            &r,
+            |(b, _)| vec![b.id],
+            || {
+                json!({"face": {"kind": "face", "points": [face.at], "tolerance": face.tolerance, "picked": [{"index": face.index, "at": []}]},
+                "translate": translate, "origin": origin, "axis": axis, "angle": angle})
+            },
+        );
         r
     }
 

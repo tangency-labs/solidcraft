@@ -333,9 +333,12 @@ pub struct FilletCorner {
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
-    /// The chamfer event's configuration at a vertex of three but for chamfers of both
-    /// convexities (`ChamferClass::MixedConvexity`): as a bevel the corner is refused.
-    pub chamfer_mixed_convexity: bool,
+    /// The chamfer event's mitre of both convexities: the fillet geometries whose surfaces
+    /// end at a rail short of the mitre point, each with that point. Their surfaces are
+    /// continued to hold it once the rails are trimmed, before the faces are made
+    /// (`chamfer::continue_chamfer_surfaces`): the rails' trim reads them at the ends of
+    /// the surface's own parameter box.
+    pub chamfer_reach: Vec<(FilletGeomId, Point3)>,
     /// The fork's Setback's own members (`m_vSetBacks`, `m_lFillOrder`, `m_bConvexSetBack`,
     /// `m_bSetBackOverflows`, `m_pFill`; smlib#104, WR-697): set at its creation on a blend
     /// corner that is a Setback.
@@ -344,6 +347,10 @@ pub struct FilletCorner {
     /// faces' surfaces and loops; smlib#82, WR-697): set by its topology on a blend corner
     /// that is a Mixed one.
     pub mixed: Option<crate::blend::blend_corner::mixed::MixedCorner>,
+    /// Not the fork's (#19089): the support change's own members (its ring, its balls and,
+    /// until the patches take them, its two faces): set at its creation on a blend corner
+    /// that is one.
+    pub support_ball: Option<crate::blend::blend_corner::support_ball::SupportBall>,
     /// The fork's `m_pEndCap` (smlib 41a39ec, WR-697): an End at a smooth vertex's plane
     /// square to its edge there (`GetEndCapSurface`), set by its topology.
     pub end_cap: Option<Surface>,
@@ -358,6 +365,11 @@ pub struct FilletCorner {
     /// is looked for across the cliff's tangent seam as well. Set only on the second pass's corner
     /// at V, where the concave chain meets the cliff.
     pub roll_over: bool,
+    /// Not the fork's (tangency-labs/solidcraft#21940): a Join whose side seam on this face ends
+    /// inside the band the round takes off (`join::seams_short_of_rails`): the rails never cross
+    /// the seam, so the section's foot on this face keeps its name in the face's natural domain,
+    /// and the blend's rail ends on it are not renamed to the trim curve's side of the seam.
+    pub seam_short_of_rails: Option<FaceId>,
     /// Not upstream (#10876): the Roll-over's End across the cliff's tangent seam
     /// ([`crate::blend::blend_corner::rollover::seam_end`]), set by its topology: the end rib is
     /// two fillet edges, on the end face and on the wall, meeting at the seam, and the cap is
@@ -723,12 +735,14 @@ impl FilletCorner {
             swept: None,
             ball: None,
             chamfer_corner: None,
-            chamfer_mixed_convexity: false,
+            chamfer_reach: Vec::new(),
             setback: None,
             mixed: None,
+            support_ball: None,
             end_cap: None,
             turned_back_arcs: [None, None],
             roll_over: false,
+            seam_short_of_rails: None,
             seam_cap: None,
             end_face: None,
         }
@@ -2353,6 +2367,7 @@ impl FilletCorner {
                 || blend.is_end()
                 || blend.is_swept()
                 || blend.is_chamfer()
+                || blend.is_support_ball()
         }) {
             return Ok(());
         }

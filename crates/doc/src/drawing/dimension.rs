@@ -194,6 +194,9 @@ pub fn text_literal(text: &str) -> String {
 pub const MAX_DIMENSIONS: usize = 10_000;
 /// The most decimals a dimension shows.
 pub const MAX_DECIMALS: u8 = 6;
+/// How many decimals a new dimension or hole callout shows unless told: the length-decimals
+/// preference's default, one constant for both so a callout and a dimension on one sheet read alike.
+pub const DEFAULT_DECIMALS: u8 = 2;
 /// The most candidates an ambiguous dimension lists.
 pub const MAX_CANDIDATES: usize = 16;
 /// The longest text shown instead of a dimension's number, in bytes.
@@ -734,6 +737,14 @@ impl Document {
         let (body, edge) = picker.edge(pick)?;
         let (body, origin_feature, mut names) = picker.names(body, &[edge])?;
         Ok(ModelEdge { body, origin_feature, name: names.remove(0), path: path.to_vec() })
+    }
+
+    /// How far along `edge` (found on `model`, this design's) the point nearest `at` lies, as a
+    /// part of its length from its start: where a balloon's arrow or a note's leader picked on it
+    /// ends (#22195). `None` when the edge isn't found as one edge, or has no length.
+    pub fn along_edge(&self, model: &Model, edge: &ModelEdge, at: Vec3) -> Option<f64> {
+        let found = Lookup::new(self, model).edges(edge).ok().filter(|found| found.whole)?;
+        found.pieces.first().and_then(|(_, line)| solidcraft_kernel::polyline_fraction_at(line, at))
     }
 
     /// The face `pick` names, by its persistent name, as [`Document::edge_reference`] names an edge:
@@ -1285,14 +1296,15 @@ impl<'a> Lookup<'a> {
         Ok(self.named.entry(i).or_insert_with(|| BodyEdges::new(b)))
     }
 
-    /// The middle of the edge `edge` names, in the design's frame, where a balloon's arrow or a note's
-    /// leader ends: how it stands, the point, and whether it was found by exact history. A split edge
-    /// has no one middle: the pieces are listed, and none is chosen.
-    pub(super) fn middle(&mut self, edge: &ModelEdge) -> (Status, Option<Vec3>, bool) {
+    /// Where a balloon's arrow or a note's leader ends on the edge `edge` names, in the design's
+    /// frame: `along` its length (0 at its start, 1 at its end), else its middle. How it stands, the
+    /// point, and whether it was found by exact history. A split edge has no one place along it: the
+    /// pieces are listed, and none is chosen.
+    pub(super) fn along(&mut self, edge: &ModelEdge, along: Option<f64>) -> (Status, Option<Vec3>, bool) {
         match self.edges(edge) {
             Ok(found) if !found.whole => (Status::Ambiguous(edge_candidates(&edge.body, &found)), None, false),
             Ok(found) => {
-                let point = found.pieces.first().and_then(|(_, line)| crate::joints::edge::middle(line)).map(|(p, _)| p);
+                let point = found.pieces.first().and_then(|(_, line)| solidcraft_kernel::polyline_point_at(line, along.unwrap_or(0.5)));
                 let status = if point.is_some() { Status::Ok } else { Status::lost(format!("edge `{}` has no length", edge.name)) };
                 (status, point, found.exact)
             }

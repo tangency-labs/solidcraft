@@ -74,7 +74,9 @@ other is a tracked bug.
 - **Features:** extrude, revolve, sweep, loft, fillet, chamfer, shell, draft, holes, threads, patterns, mirror, split and combine on an editable parametric timeline.
 - **Parameters and configurations** with unit-aware expressions.
 - **Assemblies** with joints, motion studies, contact sets, interference and mass properties.
-- **Sheet metal** with flanges, hems, fold/unfold and flat patterns, and plastic enclosure features.
+- **Sheet metal** with flanges, hems, fold/unfold and flat patterns. Choose how two edge flanges
+  meet at a corner: **Butt**, **Partial overlap** or **Full overlap**.
+- **Plastic enclosure features.**
 - **Files:** STEP, IGES, 3MF, STL, OBJ and glTF in and out where supported, URDF export, `.sc` designs (`.solidcraft` files from earlier releases still open).
 - **Desktop app, browser app, headless CLI and MCP server**, all running the same commands.
 

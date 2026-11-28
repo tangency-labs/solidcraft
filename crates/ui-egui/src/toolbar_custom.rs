@@ -330,9 +330,10 @@ fn home_panel(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
 }
 
 /// FINISH EDITING, shown only while a linked design is edited in place, keeps its one button:
-/// nothing moves into it, and Finish Edit moves nowhere else.
+/// nothing moves into it, and Finish Edit moves nowhere else. So does ACTIVE COMPONENT, shown
+/// only while a component is active, with Activate Parent.
 fn fixed(tab: &str, panel: &str, id: &str) -> bool {
-    (tab == "MODEL" && panel == "FINISH EDITING") || id == "component.finish_edit"
+    (tab == "MODEL" && matches!(panel, "ACTIVE COMPONENT" | "FINISH EDITING")) || matches!(id, "component.activate.parent" | "component.finish_edit")
 }
 
 /// Pin a command to the toolbar of a tab (as a button of its panel, at the end).

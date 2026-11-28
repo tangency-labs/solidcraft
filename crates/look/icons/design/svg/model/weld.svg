@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld</title>
+  <path d="M4.29 37.75L32 53.75L32 57.75L4.29 41.75Z" fill="#b8c3cf"/>
+  <path d="M59.71 37.75L32 53.75L32 57.75L59.71 41.75Z" fill="#8e9faf"/>
+  <path d="M32 21.75L59.71 37.75L32 53.75L4.29 37.75Z" fill="#e2e8ef"/>
+  <path d="M32 21.75L59.71 37.75L59.71 41.75L32 57.75L4.29 41.75L4.29 37.75Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4.29 37.75L32 53.75L59.71 37.75" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 53.75L32 57.75" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.01 9.25L46.72 25.25L46.72 45.25L19.01 29.25Z" fill="#b8c3cf"/>
+  <path d="M51.92 22.25L46.72 25.25L46.72 45.25L51.92 42.25Z" fill="#8e9faf"/>
+  <path d="M24.21 6.25L51.92 22.25L46.72 25.25L19.01 9.25Z" fill="#e2e8ef"/>
+  <path d="M24.21 6.25L51.92 22.25L51.92 42.25L46.72 45.25L19.01 29.25L19.01 9.25Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.01 9.25L46.72 25.25L51.92 22.25" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M46.72 25.25L46.72 45.25" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.01 23.25L46.72 39.25L41.53 48.25L13.81 32.25Z" fill="#328bd3"/>
+  <path d="M46.72 45.25L46.72 39.25L41.53 48.25Z" fill="#236ead"/>
+  <path d="M19.01 23.25L46.72 39.25L41.53 48.25L13.81 32.25Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M46.72 45.25L46.72 39.25L41.53 48.25Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

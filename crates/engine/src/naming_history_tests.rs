@@ -1635,6 +1635,76 @@ fn saved_projections_of_a_revolve_cuts_flanks_open_with_0_45_numbered_names() {
     }
 }
 
+/// A 40 x 30 x 20 block ("Block") with a blind hole ("Hole", 16 deep from the bottom) whose wall
+/// breaks out through the block's y = 30 side, and a slot ("Slot", z 8 to 12) across the hole that
+/// cuts its wall in pieces. A sketch ("Projection") projects the four lines where the hole's
+/// wall meets that side, each between the side and a piece of the wall.
+fn hole_wall_in_pieces_projected() -> (Session, u64, [Vec3; 4]) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 29], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 16, "operation": "cut", "name": "Hole"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -5], "p1": [30, 35]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 4, "start_offset": 8, "operation": "cut", "name": "Slot"}));
+    // The hole's wall meets the y = 30 side where x = 20 ± √(3² - 1²).
+    let dx = 8f64.sqrt();
+    let at = [Vec3::new(20.0 - dx, 30.0, 4.0), Vec3::new(20.0 + dx, 30.0, 4.0), Vec3::new(20.0 - dx, 30.0, 14.0), Vec3::new(20.0 + dx, 30.0, 14.0)];
+    let profile = run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Projection"}))["sketch"].as_u64().unwrap();
+    let refs: Vec<Value> = at.iter().map(|p| json!({"edge": [p.x, p.y, p.z]})).collect();
+    run(&mut s, "sketch.project", json!({"refs": refs}));
+    run(&mut s, "sketch.finish", json!({}));
+    (s, profile, at)
+}
+
+#[test]
+fn saved_projections_of_numbered_edges_open_after_the_face_they_bound_is_split_into_named_pieces() {
+    let (s, profile, at) = hole_wall_in_pieces_projected();
+    let state = s.model.state();
+    let expected = &state.sketch(profile).unwrap().sketch;
+    assert_eq!(expected.links.len(), 4);
+    assert!(expected.links.iter().all(|link| !link.lost));
+    // Today the hole's wall is in pieces, each named after the faces around it, and each line
+    // lies between the side and a piece.
+    let names: Vec<String> = expected.links.iter().map(|link| link.edge_name.clone().unwrap_or_default()).collect();
+    assert!(names.iter().all(|n| n.contains(":side:c1#[")), "{names:?}");
+    // 0.46.2 saved such a wall as one face, and the lines between it and the side as numbered
+    // edges between those two faces (#22928): synthetic saved links of that form, in two orders.
+    let whole = |n: &str, k: usize| format!("{}~{k}", n.split_once("#[").unwrap().0);
+    let old: Vec<String> = names.iter().enumerate().map(|(i, n)| whole(n, i + 1)).collect();
+    let reversed: Vec<String> = names.iter().enumerate().map(|(i, n)| whole(n, names.len() - i)).collect();
+    assert!(old.iter().all(|n| !n.contains('#')), "{old:?}");
+    for saved in [names.clone(), old.clone(), reversed] {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+        for (link, name) in sketch.links.iter_mut().zip(&saved) {
+            link.edge_name = Some(name.clone());
+        }
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        assert_eq!(error(&cold, "Projection"), None, "{saved:?}");
+        let reopened = cold.model.state();
+        let actual = &reopened.sketch(profile).unwrap().sketch;
+        assert!(actual.links.iter().all(|link| !link.lost), "{saved:?}");
+        assert_eq!(actual.curves, expected.curves, "{saved:?}");
+        assert_eq!(actual.points, expected.points, "{saved:?}");
+    }
+    // A point off every such edge (on the side, 3 mm from the wall) still finds nothing.
+    let mut doc = solidcraft_doc::Document::clone(&s.doc);
+    let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+    sketch.links[0].edge_name = Some(old[0].clone());
+    sketch.links[0].source = solidcraft_sketch::LinkSource::Edge { body: "Body1".into(), at: at[0] - Vec3::new(3.0, 0.0, 0.0) };
+    let cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    assert!(error(&cold, "Projection").is_some(), "{} off the edge", old[0]);
+}
+
 /// The volume of body `name` (0 when there is none).
 fn volume_of(s: &Session, name: &str) -> f64 {
     s.model.state().body(name).map_or(0.0, |b| solidcraft_kernel::measure(&b.body).unwrap().volume)

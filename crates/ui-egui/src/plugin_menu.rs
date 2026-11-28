@@ -167,6 +167,9 @@ pub(crate) struct Field {
     /// Whether an option names a larger `x-solidcraft-image`: the list then shows a big picture of
     /// the highlighted option.
     pub(crate) pictured: bool,
+    /// `x-solidcraft-choice` asks for the options as a row of icon buttons, drawn when every
+    /// option's picture loaded and the row fits.
+    pub(crate) buttons: bool,
     conditions: FieldConditions,
     order: usize,
     pub(crate) visible: bool,
@@ -236,6 +239,14 @@ pub(crate) enum Kind {
         values: Vec<String>,
         titles: Vec<String>,
     },
+    /// A list of distinct strings from a fixed list (`uniqueItems`, `items` a `oneOf`), with the
+    /// counts Run checks.
+    Choices {
+        values: Vec<String>,
+        titles: Vec<String>,
+        min: usize,
+        max: Option<usize>,
+    },
     Text {
         min_length: Option<usize>,
         max_length: Option<usize>,
@@ -280,6 +291,8 @@ pub(crate) enum Input {
     /// The chosen option; `None` until one is chosen, when the schema gives no default (the
     /// dropdown then leads with "Choose…").
     Choice(Option<usize>),
+    /// The chosen options of a [`Kind::Choices`], in the order of the options.
+    Choices(Vec<usize>),
     Text(String),
     /// The picks, in the order they were picked.
     Selection(Vec<Sel>),
@@ -342,16 +355,20 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     // (`pattern`, `const`, `items`, `oneOf`, ...) would let an invalid value through.
     let font = craft_plugin::font_field(property).ok()?;
     let kind = p.get("type")?.as_str()?;
-    if kind == "array" {
+    // A list whose items are options to tick, rather than geometry to pick.
+    let list = kind == "array" && p.get("items").is_some_and(|items| items.get("oneOf").is_some());
+    if kind == "array" && !list {
         return selection_field(key, p, required);
     }
-    let choice = p.contains_key("enum") || p.contains_key("oneOf");
+    let choice = !list && (p.contains_key("enum") || p.contains_key("oneOf"));
+    use craft_plugin::layout::CHOICE;
     let allowed: &[&str] = match (kind, choice) {
         ("number", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"],
         ("integer", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
         ("boolean", false) => &[],
+        ("array", false) => &["items", "uniqueItems", "minItems", "maxItems", CHOICE],
         // A list of values, or of `{"const": value, "title": shown}` options; not both.
-        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf", "minLength", "maxLength", "format"],
+        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf", "minLength", "maxLength", "format", CHOICE],
         ("string", false) => &["minLength", "maxLength", "format", craft_plugin::FONT_KEY],
         _ => return None,
     };
@@ -383,7 +400,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let count = |k: &str| p.get(k).is_none_or(|v| v.as_u64().is_some());
     let words = |k: &str| p.get(k).is_none_or(Value::is_string);
     if !(numeric("minimum") && numeric("maximum") && numeric("multipleOf") && exclusive("exclusiveMinimum") && exclusive("exclusiveMaximum"))
-        || !(count("minLength") && count("maxLength"))
+        || !(count("minLength") && count("maxLength") && count("minItems") && count("maxItems"))
         || !(words("title") && words("description") && words("unit") && words("x-unit") && words("units") && words("format"))
     {
         return None;
@@ -471,6 +488,27 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
             (Kind::Choice { values, titles }, Input::Choice(chosen))
         }
+        "array" => {
+            // `items` is exactly a string `oneOf`, whose options have no conditions of their own.
+            let items = p.get("items")?.as_object()?;
+            let conditional = items.get("oneOf")?.as_array()?.iter().any(|option| option.get("x-solidcraft-when").is_some());
+            if items.keys().any(|k| k != "type" && k != "oneOf")
+                || items.get("type")?.as_str()? != "string"
+                || conditional
+                || p.get("uniqueItems") != Some(&Value::Bool(true))
+            {
+                return None;
+            }
+            let (values, titles, listed) = choices(items)?;
+            images = listed;
+            let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
+            let (min, max) = (length("minItems").unwrap_or(0), length("maxItems"));
+            if max.is_some_and(|max| max < min) {
+                return None;
+            }
+            let input = default.map_or(Some(Input::Choices(Vec::new())), |d| chosen_options(&values, d))?;
+            (Kind::Choices { values, titles, min, max }, input)
+        }
         "string" => {
             let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
             let input = Input::Text(default.and_then(Value::as_str).unwrap_or_default().to_owned());
@@ -492,6 +530,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             swatches,
             pictures,
             pictured,
+            buttons: p.contains_key(CHOICE),
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -576,6 +615,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             swatches: Vec::new(),
             pictures: Vec::new(),
             pictured: false,
+            buttons: false,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -694,6 +734,7 @@ fn default_input(field: &Field, value: &Value) -> Option<Input> {
         Kind::Boolean => value.as_bool().map(Input::Boolean),
         Kind::Text { .. } => value.as_str().map(|s| Input::Text(s.to_owned())),
         Kind::Choice { values, .. } => value.as_str().and_then(|v| values.iter().position(|s| s == v)).map(|i| Input::Choice(Some(i))),
+        Kind::Choices { values, .. } => chosen_options(values, value),
         Kind::Selection { accept, names, .. } => value
             .as_array()?
             .iter()
@@ -703,6 +744,26 @@ fn default_input(field: &Field, value: &Value) -> Option<Input> {
             })
             .collect::<Option<Vec<_>>>()
             .map(Input::Selection),
+    }
+}
+
+/// A list of option values as the options it names, in their order; `None` when an item is not one.
+fn chosen_options(values: &[String], list: &Value) -> Option<Input> {
+    let chosen = list
+        .as_array()?
+        .iter()
+        .map(|item| item.as_str().and_then(|item| values.iter().position(|v| v == item)))
+        .collect::<Option<std::collections::BTreeSet<_>>>()?;
+    Some(Input::Choices(chosen.into_iter().collect()))
+}
+
+/// Tick or untick option `index`, keeping the options in order.
+fn toggle_option(chosen: &mut Vec<usize>, index: usize) {
+    match chosen.binary_search(&index) {
+        Ok(at) => {
+            chosen.remove(at);
+        }
+        Err(at) => chosen.insert(at, index),
     }
 }
 
@@ -731,7 +792,7 @@ fn refresh_with_memory(fields: &mut [(Field, Input)], remembered: Option<&Value>
         {
             *input = default;
         }
-        if let Kind::Choice { values: choices, .. } = &field.kind {
+        if let Kind::Choice { values: choices, .. } | Kind::Choices { values: choices, .. } = &field.kind {
             let was_unavailable = field.controls.is_some() && field.available.is_empty();
             field.available = (0..choices.len()).filter(|i| field.conditions.option_available(*i, &values)).collect();
             if let Input::Choice(chosen) = input
@@ -755,7 +816,7 @@ fn refresh_with_memory(fields: &mut [(Field, Input)], remembered: Option<&Value>
             field.visible &= patch.get("visible") != Some(&Value::Bool(false));
             field.enabled &= patch.get("enabled") != Some(&Value::Bool(false));
             if let Some(choices) = patch.get("choices").and_then(Value::as_array)
-                && let Kind::Choice { values, .. } = &field.kind
+                && let Kind::Choice { values, .. } | Kind::Choices { values, .. } = &field.kind
             {
                 field.available.retain(|i| values.get(*i).is_some_and(|v| choices.iter().any(|c| c.as_str() == Some(v))));
             }
@@ -802,6 +863,19 @@ pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
                     return Err(invalid());
                 }
                 Some(json!(values.get(*index).ok_or_else(invalid)?))
+            }
+            // As a selection list: left out when optional and empty, sent empty when allowed.
+            (Kind::Choices { min, .. }, Input::Choices(chosen)) if chosen.is_empty() => {
+                if (field.required || field.prefilled) && *min > 0 {
+                    return Err(missing());
+                }
+                (field.required || field.prefilled).then(|| json!([]))
+            }
+            (Kind::Choices { values, min, max, .. }, Input::Choices(chosen)) => {
+                if chosen.len() < *min || max.is_some_and(|m| chosen.len() > m) || chosen.iter().any(|i| !field.available.contains(i)) {
+                    return Err(invalid());
+                }
+                Some(Value::Array(chosen.iter().map(|i| values.get(*i).map(|v| json!(v)).ok_or_else(invalid)).collect::<Result<_, _>>()?))
             }
             (Kind::Text { .. }, Input::Text(text)) if text.is_empty() && !field.prefilled => None,
             (Kind::Text { .. }, Input::Text(text)) => Some(json!(text)),
@@ -885,7 +959,7 @@ fn within(kind: &Kind, value: &Value) -> bool {
             let n = s.chars().count();
             min_length.is_none_or(|m| n >= m) && max_length.is_none_or(|m| n <= m)
         }),
-        Kind::Boolean | Kind::Choice { .. } | Kind::Selection { .. } => true,
+        Kind::Boolean | Kind::Choice { .. } | Kind::Choices { .. } | Kind::Selection { .. } => true,
     }
 }
 
@@ -1028,8 +1102,7 @@ fn ribbon_group<'a>(app: &'a SolveApp, id: &str) -> Option<(usize, &'a solidcraf
 }
 
 /// The group's rows reuse the Plugins menu actions and dialog path, in declared order.
-fn ribbon_group_rows(app: &SolveApp, id: &str) -> Vec<crate::app_bar::FileRow> {
-    use crate::app_bar::{FileItem, FileRow};
+fn ribbon_group_rows(app: &SolveApp, id: &str) -> Vec<crate::ui_kit::Item> {
     let Some((p, group)) = ribbon_group(app, id) else { return Vec::new() };
     let Some(plugin) = app.plugin_menu.listed.get(p) else { return Vec::new() };
     group
@@ -1037,13 +1110,7 @@ fn ribbon_group_rows(app: &SolveApp, id: &str) -> Vec<crate::app_bar::FileRow> {
         .iter()
         .filter_map(|name| {
             let (e, entry) = plugin.entries.iter().enumerate().find(|(_, entry)| entry.name == *name)?;
-            Some(FileRow::Item(FileItem {
-                id: format!("entry:{p}:{e}"),
-                label: command_title(plugin, entry),
-                key: String::new(),
-                icon: command_icon(plugin, entry).to_owned(),
-                enabled: true,
-            }))
+            Some(crate::ui_kit::Item::action(&format!("entry:{p}:{e}"), &command_title(plugin, entry), command_icon(plugin, entry)))
         })
         .collect()
 }
@@ -1109,43 +1176,31 @@ pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
 }
 
 /// The menu's rows: Install plugin…, Last import report…, a separator, then each plugin's entries.
-pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
-    use crate::app_bar::{FileItem, FileRow};
-    let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
+pub(crate) fn rows(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
+    use crate::ui_kit::Item;
     let mut rows = vec![
-        item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true),
-        item(LAST_REPORT.into(), app.tr("ui.plugin_menu_last_report").into(), app.import_report.is_some()),
-        FileRow::Separator,
+        Item::action(INSTALL, app.tr("ui.plugin_menu_install"), ""),
+        Item::action(LAST_REPORT, app.tr("ui.plugin_menu_last_report"), "").on_if(app.import_report.is_some()),
+        Item::sep(),
     ];
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
-        rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
+        rows.push(Item::action("empty", app.tr("ui.plugin_menu_empty"), "").on_if(false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
-        rows.push(item("empty".into(), app.tr("ui.plugin_menu_all_off").into(), false));
+        rows.push(Item::action("empty", app.tr("ui.plugin_menu_all_off"), "").on_if(false));
     }
-    // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
-        let entries: Vec<FileRow> = plugin
+        let entries: Vec<Item> = plugin
             .entries
             .iter()
             .enumerate()
             .map(|(e, entry)| {
-                FileRow::Item(FileItem {
-                    id: format!("entry:{p}:{e}"),
-                    label: format!("{}…", command_title(plugin, entry)),
-                    key: String::new(),
-                    // Keep the menu's unillustrated rows for entries without an annotation.
-                    icon: if entry.input_schema.get(crate::plugin_images::KEY).is_some() {
-                        command_icon(plugin, entry).to_owned()
-                    } else {
-                        String::new()
-                    },
-                    enabled: true,
-                })
+                let icon = if entry.input_schema.get(crate::plugin_images::KEY).is_some() { command_icon(plugin, entry) } else { "" };
+                Item::action(&format!("entry:{p}:{e}"), &format!("{}…", command_title(plugin, entry)), icon)
             })
             .collect();
-        match <[FileRow; 1]>::try_from(entries) {
+        match <[Item; 1]>::try_from(entries) {
             Ok([one]) => rows.push(one),
-            Err(entries) => rows.push(FileRow::Sub { label: plugin.name.clone(), rows: entries }),
+            Err(entries) => rows.push(Item::submenu(&format!("plugin:{p}"), &plugin.name, "", entries)),
         }
     }
     rows
@@ -1228,12 +1283,12 @@ pub(crate) fn menu(app: &mut SolveApp, ctx: &egui::Context) {
     let over_group_button =
         app.plugin_menu.ribbon_group_anchor.is_some_and(|rect| ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p))));
     let just_opened = app.plugin_menu.opened_pass == ctx.cumulative_pass_nr() || over_group_button;
-    let out = crate::app_bar::file_menu(ctx, &rows, at, egui::Id::unique("sc_plugins_area"), just_opened);
+    let out = crate::ui_kit::Menu::popup(ctx, egui::Id::unique("sc_plugins_area"), crate::ui_kit::MenuAnchor::Point(at), &rows, just_opened);
     if out.close {
         app.plugin_menu.open = false;
     }
-    if let Some(id) = out.chosen {
-        choose(app, &id);
+    if let Some(picked) = out.picked {
+        choose(app, &picked.id);
     }
 }
 
@@ -1902,6 +1957,11 @@ fn input_value(field: &Field, input: &Input) -> Option<Value> {
                     .collect(),
             ))
         }
+        Input::Choices(chosen) => match &field.kind {
+            Kind::Choices { .. } if chosen.is_empty() && !field.required && !field.prefilled => None,
+            Kind::Choices { values, .. } => Some(Value::Array(chosen.iter().filter_map(|i| values.get(*i)).map(|v| json!(v)).collect())),
+            _ => None,
+        },
         _ => scalar_value(field, input),
     }
 }
@@ -2148,6 +2208,10 @@ fn retain_edits(fields: &mut [(Field, Input)], previous: &[(Field, Input)]) {
             | (Kind::Number { .. }, Kind::Number { .. }, Input::Typed(_))
             | (Kind::Integer { .. }, Kind::Integer { .. }, Input::Typed(_))
             | (Kind::Selection { .. }, Kind::Selection { .. }, Input::Selection(_)) => Some(value.clone()),
+            // By value: the new list may order or name its options differently.
+            (Kind::Choices { .. }, Kind::Choices { .. }, Input::Choices(_)) => {
+                input_value(old, value).map_or(Some(Input::Choices(Vec::new())), |v| default_input(field, &v))
+            }
             _ => scalar_value(old, value).and_then(|v| default_input(field, &v)),
         };
         if let Some(value) = retained {
@@ -3348,15 +3412,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
             let mut index = chosen.and_then(|i| field.available.iter().position(|v| *v == i)).unwrap_or(0);
             let id = format!("plugin_field_{}", field.key);
             // Every option's picture from the package, when each has one that passed the check.
-            let pictures: Option<Vec<&str>> = (!field.images.is_empty())
-                .then(|| {
-                    field
-                        .available
-                        .iter()
-                        .map(|i| field.images.get(*i).and_then(|rel| plugin.images.get(rel)).map(String::as_str))
-                        .collect::<Option<Vec<&str>>>()
-                })
-                .flatten();
+            let pictures = field_pictures(plugin, field);
             let artwork = plugin.swatches.get();
             if artwork.is_none() && field.swatches.iter().chain(&field.pictures).any(Option::is_some) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
@@ -3397,6 +3453,18 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
             } else {
                 let before_index = index;
                 let response = match pictures {
+                    // A row of icon buttons; the dropdown below when it does not fit.
+                    Some(pictures) if field.buttons => ui_kit::row(ui, &label, |ui| {
+                        if let Some((response, clicked)) = choice_buttons(ui, field, titles, &pictures, |i| *chosen == Some(i)) {
+                            if clicked.is_some() {
+                                *chosen = clicked;
+                            }
+                            return response;
+                        }
+                        let lead_icon = lead.then_some(crate::plugin_images::GENERIC);
+                        let options: Vec<(&str, &str)> = shown.iter().copied().zip(lead_icon.into_iter().chain(pictures)).collect();
+                        ui_kit::dropdown_icons(ui, &id, &mut index, &options)
+                    }),
                     Some(pictures) => {
                         // "Choose…" has the generic plugin icon.
                         let lead_icon = lead.then_some(crate::plugin_images::GENERIC);
@@ -3409,6 +3477,43 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                     *chosen = (if lead { index.checked_sub(1) } else { Some(index) }).and_then(|i| field.available.get(i).copied());
                 }
                 response
+            }
+        }
+        (Kind::Choices { titles, .. }, Input::Choices(chosen)) => {
+            let pictures = field_pictures(plugin, field);
+            let check = |ui: &mut egui::Ui, chosen: &mut Vec<usize>, index: usize| {
+                let mut on = chosen.contains(&index);
+                let response = ui_kit::checkbox(ui, titles.get(index).map_or("", String::as_str), &mut on);
+                if on != chosen.contains(&index) {
+                    toggle_option(chosen, index);
+                }
+                response
+            };
+            let mut checkboxes = false;
+            let first = ui_kit::row(ui, &label, |ui| {
+                if let Some(pictures) = pictures.as_ref().filter(|_| field.buttons)
+                    && let Some((response, clicked)) = choice_buttons(ui, field, titles, pictures, |i| chosen.contains(&i))
+                {
+                    if let Some(index) = clicked {
+                        toggle_option(chosen, index);
+                    }
+                    return response;
+                }
+                // One checkbox per option: the first in the row, the others below it, as a row
+                // holds one line.
+                checkboxes = true;
+                match field.available.first() {
+                    Some(index) => check(ui, chosen, *index),
+                    None => ui.response(),
+                }
+            });
+            if checkboxes && field.available.len() > 1 {
+                let width = ui.available_width();
+                ui_kit::below_row_control(ui, &label, width, |ui| {
+                    field.available.iter().skip(1).fold(first, |all, index| all.union(check(ui, chosen, *index)))
+                })
+            } else {
+                first
             }
         }
         (Kind::Text { .. }, Input::Text(text)) if field.font => ui_kit::row(ui, &label, |ui| font_field_row(ui, field, text)),
@@ -3443,6 +3548,36 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         response.backing_on_hover_text(tip);
     }
     (browse, edited)
+}
+
+/// The pictures of a choice's available options, in order, when each has one that passed the check.
+fn field_pictures<'a>(plugin: &'a Listed, field: &Field) -> Option<Vec<&'a str>> {
+    if field.images.is_empty() {
+        return None;
+    }
+    field.available.iter().map(|i| field.images.get(*i).and_then(|rel| plugin.images.get(rel)).map(String::as_str)).collect()
+}
+
+/// The available options as icon buttons, with their titles as tooltips; `on` takes an option's
+/// schema index. `None` when the row does not fit; else the response and the clicked option.
+fn choice_buttons(
+    ui: &mut egui::Ui,
+    field: &Field,
+    titles: &[String],
+    pictures: &[&str],
+    on: impl Fn(usize) -> bool,
+) -> Option<(egui::Response, Option<usize>)> {
+    let keys: Vec<String> = field.available.iter().map(|i| format!("plugin_dialog:choice:{}:{i}", field.key)).collect();
+    let options: Vec<ui_kit::IconChoice<'_>> = field
+        .available
+        .iter()
+        .zip(&keys)
+        .zip(pictures)
+        .map(|((i, key), icon)| ui_kit::IconChoice { key, icon, tip: titles.get(*i).map_or("", String::as_str) })
+        .collect();
+    let states: Vec<bool> = field.available.iter().map(|i| on(*i)).collect();
+    let (response, clicked) = ui_kit::icon_choices(ui, &options, &states)?;
+    Some((response, clicked.and_then(|at| field.available.get(at).copied())))
 }
 
 /// Same background discovery and process cache as sketch text. The built-in name is a real

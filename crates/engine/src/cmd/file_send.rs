@@ -67,6 +67,9 @@ pub(super) struct Send<'a> {
     /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
     pub quality: solidcraft_io::MeshQuality,
     pub dest: Dest<'a>,
+    /// Only for [`Dest::Folder`]: the file's name without extension, already checked with
+    /// `slicer_files::check_name`. `None` keeps the name made from the design and the bodies.
+    pub name: Option<&'a str>,
     /// Only for [`Dest::Folder`].
     pub copy: Option<Copy>,
     pub single_instance: bool,
@@ -124,7 +127,10 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
         return Ok(out);
     }
     let dir = slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?;
-    let stem = slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies);
+    let stem = match r.name {
+        Some(name) => name.to_string(),
+        None => slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies),
+    };
     let (file, numbered) = slicer_files::write(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
     let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back});
     laid.report(&mut out);

@@ -159,7 +159,7 @@ fn document_analysis_levels_survive_parameter_application_and_offset_retries() {
 
         // Both original distances must follow the edited parameter before analyzing freedom.
         let doc = Arc::make_mut(&mut s.doc);
-        let param = doc.new_model_param("20 mm", "mm");
+        let param = doc.new_model_param("20 mm", "mm").unwrap();
         for c in &mut doc.sketch_mut(id).unwrap().constraints {
             if matches!(c.kind, ConstraintKind::Distance { .. }) {
                 c.param = Some(param.clone());
@@ -167,7 +167,7 @@ fn document_analysis_levels_survive_parameter_application_and_offset_retries() {
         }
         compare_document_levels(doc, id, true);
         // One conflicting dimension makes the first solve fail, exercising the offset retry.
-        let conflict = doc.new_model_param("11 mm", "mm");
+        let conflict = doc.new_model_param("11 mm", "mm").unwrap();
         doc.sketch_mut(id).unwrap().constraints.iter_mut().find(|c| matches!(c.kind, ConstraintKind::Distance { .. })).unwrap().param =
             Some(conflict);
         compare_document_levels(doc, id, false);

@@ -970,21 +970,18 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
                 if r.double_clicked() {
                     acts.open = Some(e.path.clone());
                 }
-                crate::ui_kit::Menu::context(&r, |ui| {
-                    let insert = if e.kind == Kind::Design { tr("parts_library.insert") } else { tr("parts_library.import") };
-                    let i = crate::ui_kit::MenuItem::new("library:menu_insert", insert, "").show(ui);
-                    crate::scenario::publish_handle("library:menu_insert", i.rect.center());
-                    if i.clicked() {
-                        acts.insert = Some(e.path.clone());
-                        ui.close();
+                let insert = if e.kind == Kind::Design { tr("parts_library.insert") } else { tr("parts_library.import") };
+                let mut insert_item = crate::ui_kit::Item::action("library:menu_insert", insert, "");
+                insert_item.aliases.push("library:menu_insert".into());
+                let mut open_item = crate::ui_kit::Item::action("library:menu_open", tr("parts_library.open"), "");
+                open_item.aliases.push("library:menu_open".into());
+                if let Some(picked) = crate::ui_kit::Menu::context_items(&r, &[insert_item, open_item]) {
+                    match picked.id.as_str() {
+                        "library:menu_insert" => acts.insert = Some(e.path.clone()),
+                        "library:menu_open" => acts.open = Some(e.path.clone()),
+                        _ => {}
                     }
-                    let o = crate::ui_kit::MenuItem::new("library:menu_open", tr("parts_library.open"), "").show(ui);
-                    crate::scenario::publish_handle("library:menu_open", o.rect.center());
-                    if o.clicked() {
-                        acts.open = Some(e.path.clone());
-                        ui.close();
-                    }
-                });
+                }
             }
         }
     }

@@ -16,6 +16,8 @@ fn schemas_and_the_key_check_agree() {
             "body",
             "body_name",
             "body_names",
+            "curves",
+            "extend",
             "line",
             "name",
             "participants",
@@ -60,7 +62,7 @@ fn design(level: ParamCheck) -> (Session, Value, Value, Value) {
 
 /// Calls that fail today give the same message in strict, each on a fresh [`design`]: what the
 /// contracts check (the body, the faces, each tool's form) and what they leave to the handler (a
-/// body, sketch, line, plane or face the design lacks, a sketch line that isn't straight, a tool
+/// body, sketch, line, plane or face the design lacks, a sketch curve that misses the body, a tool
 /// point off the tool, and no tool at all). Split Face without `faces` is left out: today it says
 /// "`faces` must be a list of points or face names", and strict "`faces` is required", as for
 /// every missing key.
@@ -99,6 +101,12 @@ fn strict_keeps_todays_errors() {
         ("solid.split_body", json!({"body": "B", "sketch": cuts, "line": "nope"})),
         ("solid.split_body", json!({"body": "B", "sketch": ring, "line": "c"})),
         ("solid.split_body", json!({"body": "B", "line": "cut"})),
+        ("solid.split_body", json!({"body": "B", "sketch": cuts, "extend": "x"})),
+        ("solid.split_body", json!({"body": "B", "sketch": cuts, "line": "cut", "extend": 1})),
+        ("solid.split_body", json!({"body": "B", "curves": 5})),
+        ("solid.split_body", json!({"body": "B", "sketch": cuts, "curves": [1]})),
+        ("solid.split_body", json!({"body": "B", "sketch": cuts, "curves": ["cut", "cut"]})),
+        ("solid.split_body", json!({"body": "B", "sketch": cuts, "curves": []})),
         ("solid.split_face", json!({"faces": 5, "plane": "XY"})),
         ("solid.split_face", json!({"faces": [], "plane": "XY"})),
         ("solid.split_face", json!({"faces": [[10, 15]], "plane": "XY"})),
@@ -530,4 +538,48 @@ fn split_body_splits_a_closed_surface_body_into_its_regions() {
     let mut want = [far, 450.0 * pi - far];
     want.sort_by(f64::total_cmp);
     assert!(areas.len() == 2 && areas.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3 * b), "{areas:?} want {want:?}");
+}
+
+/// #1552 with #22525: sketch curves split a surface body into its regions too, each a surface
+/// body. `Shell` is a cylinder r = 50 surface extruded 100 up; the curves lie on XY, so their
+/// sheet runs along Z through the whole wall. The line x = 30 (as `curves` with `extend: false`,
+/// and as `line` with `extend` on, which cuts a surface body by its sheet, not as a solid) meets
+/// the wall at angle ±acos 0.6, so the region past it is 2·acos 0.6 · 50 · 100 = 10000·acos 0.6
+/// mm². The arc about (50, 0), r 30, through (20, 0) meets it where
+/// x² + y² = 50² and (x − 50)² + y² = 30², at x = 41: 10000·acos 0.82 mm² past it. The rest
+/// is the shell's 2π · 50 · 100 less that.
+#[test]
+fn split_body_splits_a_surface_body_along_sketch_curves() {
+    let pi = std::f64::consts::PI;
+    let whole = 2.0 * pi * 50.0 * 100.0;
+    for (cut, past) in [("line", 10000.0 * 0.6f64.acos()), ("line extended", 10000.0 * 0.6f64.acos()), ("arc", 10000.0 * 0.82f64.acos())] {
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        run("sketch.create", json!({"plane": "XY", "name": "ShellSketch"}));
+        run("sketch.circle.center", json!({"center": [0, 0], "radius": 50, "id": "rim"}));
+        run("sketch.finish", json!({}));
+        run("surface.extrude", json!({"sketch": "ShellSketch", "curves": ["rim"], "distance": 100, "body_name": "Shell"}));
+        let sk = run("sketch.create", json!({"plane": "XY", "name": "Cut"}))["sketch"].as_u64().unwrap();
+        let p = if cut.starts_with("line") {
+            run("sketch.line", json!({"points": [[30, -60], [30, 60]], "ids": ["c"]}));
+            if cut == "line" {
+                json!({"body": "Shell", "sketch": sk, "curves": ["c"], "extend": false})
+            } else {
+                json!({"body": "Shell", "sketch": sk, "line": "c"})
+            }
+        } else {
+            let made = run("sketch.arc.center_point", json!({"center": [50, 0], "start": [50, 30], "end": [50, -30]}));
+            let id = made["created"]["curves"][0].clone();
+            json!({"body": "Shell", "sketch": sk, "line": id})
+        };
+        run("sketch.finish", json!({}));
+        run("solid.split_body", p.clone());
+        let st = s.model.state();
+        let shells: Vec<_> = st.bodies.iter().filter(|b| b.name.starts_with("Shell")).collect();
+        assert!(shells.iter().all(|b| b.body.is_surface()), "{cut}: every piece is a surface body");
+        let mut areas: Vec<f64> = shells.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().area).collect();
+        areas.sort_by(f64::total_cmp);
+        let want = [past, whole - past];
+        assert!(areas.len() == 2 && areas.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3 * b), "{cut} {p}: {areas:?} want {want:?}");
+    }
 }

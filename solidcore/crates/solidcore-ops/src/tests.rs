@@ -176,6 +176,92 @@ fn every_primitive_is_valid_at_every_level() {
     }
 }
 
+/// The check of some faces and edges of a valid body passes at every level, named through the
+/// body's record order; a face or edge past the record's is an argument error.
+#[test]
+fn a_local_check_passes_where_the_body_does() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let order = b.to_record().unwrap().1;
+    let all_faces: Vec<usize> = (0..order.faces.len()).collect();
+    let all_edges: Vec<usize> = (0..order.edges.len()).collect();
+    for level in [CheckLevel::Basic, CheckLevel::Geometry, CheckLevel::All] {
+        for (faces, edges) in [
+            (vec![0], vec![]),
+            (vec![1, 2], vec![0, 3]),
+            (all_faces.clone(), all_edges.clone()),
+        ] {
+            let r = b.check_local(&order, &faces, &edges, level).unwrap();
+            assert!(r.is_valid(), "{faces:?} {edges:?}, {level:?}: {r}");
+            assert_eq!(r.text, "");
+        }
+    }
+    let past = |faces: &[usize], edges: &[usize]| {
+        matches!(
+            b.check_local(&order, faces, edges, CheckLevel::All),
+            Err(Error::Argument)
+        )
+    };
+    assert!(past(&[order.faces.len()], &[]));
+    assert!(past(&[], &[order.edges.len()]));
+}
+
+/// The local check runs the tolerance pass on the edges it is given. A box edge whose curve is
+/// moved 0.01 off its two faces (its tolerance is 5e-6) fails it there, with the pass's own
+/// reports (`SmBrep` list 2 about the edge's uses): its vertex/edge gaps (tests 0 and 2) and its
+/// edge/face gap (test 4). The whole check refuses the body too. The local check of an edge with
+/// no vertex or face of the moved one still passes.
+#[test]
+fn a_local_check_tests_the_gaps_of_the_edges_it_is_given() {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::vector3d::{Point3, Vec3};
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let order = b.to_record().unwrap().1;
+    let moved = crate::order::edge(&order, 0).unwrap();
+    // an edge with no vertex and no face of the moved one
+    let apart = with_body("move an edge", &b, |k, br| {
+        // the identity frame at (0.01, 0.01, 0.01): a move, as a placement holds it
+        let shift = Axis2Placement::from_stored(
+            Point3::new(0.01, 0.01, 0.01),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        br.edge_mut(moved)?
+            .curve
+            .as_mut()
+            .expect("a box edge has its curve")
+            .transform(k, &shift, None)?;
+        let ends = |br: &Brep, e| solidcore::topology::edge::vertices(br, e, None);
+        let faces = |br: &Brep, e| solidcore::topology::edge::faces(br, e, None);
+        let (mv, mf) = (ends(br, moved)?, faces(br, moved)?);
+        for i in 1..order.edges.len() {
+            let e = crate::order::edge(&order, i).expect("a record edge");
+            if ends(br, e)?.iter().all(|v| !mv.contains(v))
+                && faces(br, e)?.iter().all(|f| !mf.contains(f))
+            {
+                return Ok(i);
+            }
+        }
+        panic!("a box has an edge apart from each of its edges");
+    })
+    .unwrap();
+    assert!(!b.check(CheckLevel::Basic).unwrap().is_valid());
+    let local = b.check_local(&order, &[], &[0], CheckLevel::Basic).unwrap();
+    assert!(!local.is_valid(), "{local}");
+    let pass = |test: u32| {
+        local.text.lines().any(|l| {
+            l.starts_with(&format!("SmBrep::Test #{test} ")) && l.ends_with("[owner SmEdgeuse]")
+        })
+    };
+    assert!(pass(4), "the edge/face gap: {local}");
+    assert!(pass(0) && pass(2), "the vertex/edge gaps: {local}");
+    let r = b
+        .check_local(&order, &[], &[apart], CheckLevel::Basic)
+        .unwrap();
+    assert!(r.is_valid(), "edge {apart}: {r}");
+}
+
 /// A vertex whose tolerance is below the body's fails the check with its numbered line; a
 /// vertex pointing at no vertexuse fails `ValidatePointers`, and `AssertValid` is then skipped.
 #[test]
@@ -1796,6 +1882,18 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     crate::record_check::validate(&completed).unwrap();
     crate::record_check::agreement(&completed).unwrap();
     assert!(crate::pcurve::import_check_failure(&completed).is_none());
+    // The completed record is the kernel's own, so it is not held to the item cap for input:
+    // the budget is the file's, set where the file is read. A record past that cap may still
+    // disagree with its geometry, but its size is not the reason it is refused.
+    let mut large = completed.clone();
+    large.edges[0].curve = Curve::Polyline {
+        points: (0..solidcore_record::brep::MAX_ITEMS)
+            .map(|i| [i as f64 * 1e-6, 0., 0.])
+            .collect(),
+    };
+    assert_eq!(large.validate().map_err(|e| e.0), Err("item budget"));
+    let why = crate::pcurve::import_check_failure(&large).unwrap_or_default();
+    assert!(!why.contains("the completed record is invalid"), "{why}");
     // A completion that leaves a trim over only the first half of its edge's interval, as
     // rebuilding a split edge's trim by sampling did for a real model, is refused by the
     // record's validity check, so the import keeps the record it had.
@@ -1894,4 +1992,36 @@ fn pcurves_of_malformed_records_are_refused_as_invalid() {
     assert!(matches!(one(&collapsed, [0., 1.]), Err(Error::Invalid(_))));
     // And a well-formed one still gets its pcurve.
     assert!(one(&line, [0., 1.]).is_ok());
+}
+
+/// The public reducer must carry the new Core orientation refusal through Ops,
+/// rather than flattening its typed cause into an unexplained `SM_ERR` status.
+#[test]
+fn mesh_reduction_preserves_the_uncertified_orientation_reason() {
+    use solidcore::error::mass::MassFailure;
+    let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0.5, 0.5, 0.]];
+    // Four nondegenerate coplanar facets form a zero-volume tetrahedral incidence;
+    // the fifth record repeats the first, so this is only the new duplicate path.
+    let indices = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3, 0, 2, 1];
+    let error = crate::reduce_mesh(&positions, &indices, None, 4).unwrap_err();
+    assert_eq!(
+        error,
+        Error::Refused {
+            operation: "mesh.reduce",
+            reason: MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON,
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "mesh.reduce: {}",
+            MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON
+        )
+    );
+    // Existing mass failures still retain their old status-only policy.
+    let other = solidcore::error::Failure::new("mass::op", MassFailure::Integrand).into_error();
+    assert_eq!(
+        crate::error::status(other),
+        Error::Status(solidcore::error::SM_ERR)
+    );
 }

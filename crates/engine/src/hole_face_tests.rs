@@ -437,6 +437,574 @@ fn a_hole_on_a_sketch_alone_drills_a_rectangle_centre_with_a_regular_diagonal() 
     assert!(!solid_at(&s, 20.0, 20.0, 4.0) && !solid_at(&s, 8.0, 8.0, 4.0));
 }
 
+fn measure_volume_and_com(s: &mut Session) -> (f64, [f64; 3]) {
+    let m = run(s, "inspect.measure", json!({}));
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    let c = m["bodies"][0]["center_of_mass"].as_array().unwrap();
+    (v, [c[0].as_f64().unwrap(), c[1].as_f64().unwrap(), c[2].as_f64().unwrap()])
+}
+
+/// Exact volume and centre of mass of a box plate with `holes` vertical Ø`diameter` through-holes
+/// centered at `hole_xy`: `V_plate - sum(V_hole)` and `(V_plate * plate_com - sum(V_hole * hole_com)) / V`.
+fn assert_plate_with_through_holes(s: &mut Session, plate_dims: [f64; 3], plate_com: [f64; 3], diameter: f64, hole_xy: &[[f64; 2]], context: &str) {
+    let v_plate = plate_dims[0] * plate_dims[1] * plate_dims[2];
+    let r = diameter * 0.5;
+    let v_hole = std::f64::consts::PI * r * r * plate_dims[2];
+    let n = hole_xy.len() as f64;
+    let v_expected = v_plate - n * v_hole;
+    let sum_x: f64 = hole_xy.iter().map(|p| p[0]).sum();
+    let sum_y: f64 = hole_xy.iter().map(|p| p[1]).sum();
+    let com_expected = [(v_plate * plate_com[0] - v_hole * sum_x) / v_expected, (v_plate * plate_com[1] - v_hole * sum_y) / v_expected, plate_com[2]];
+    let (v_actual, com_actual) = measure_volume_and_com(s);
+    assert!((v_actual - v_expected).abs() < 1.0, "{context}: volume {v_actual:.4} vs analytical {v_expected:.4} (1 hole = {v_hole:.4})");
+    for (axis, (a, e)) in com_actual.iter().zip(com_expected.iter()).enumerate() {
+        assert!((a - e).abs() < 1e-2, "{context}: CoM axis {axis} = {a:.5} vs analytical {e:.5} (actual {com_actual:?}, expected {com_expected:?})");
+    }
+    for [hx, hy] in hole_xy {
+        assert!(!solid_at(s, *hx, *hy, plate_com[2]), "{context}: expected hole at ({hx}, {hy})");
+    }
+}
+
+/// a circular pattern's centre point is reference geometry, not a hole site, so `solid.hole`
+/// from a sketch (with `points` omitted) drills only the `N` patterned points around `[0, 0]` or `[cx, cy]`.
+#[test]
+fn a_hole_on_a_sketch_alone_skips_circular_pattern_centre_for_points() {
+    let diameter = 4.0;
+    // Case A: pattern centred at [0, 0] on a symmetric plate.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+        run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "seed"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": [0, 0], "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "");
+        let holes = [[10.0, 0.0], [0.0, 10.0], [-10.0, 0.0], [0.0, -10.0]];
+        assert_plate_with_through_holes(&mut s, [40.0, 40.0, 10.0], [0.0, 0.0, 5.0], diameter, &holes, "origin centre");
+        assert!(solid_at(&s, 0.0, 0.0, 5.0), "origin pattern centre [0, 0] must remain solid");
+    }
+
+    // Case B: pattern centred off-origin at [22, 18] on a [0..60] x [0..40] x [0..10] plate.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+        run(&mut s, "sketch.point", json!({"point": [32, 18], "id": "seed"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": [22, 18], "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "");
+        let holes = [[32.0, 18.0], [22.0, 28.0], [12.0, 18.0], [22.0, 8.0]];
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "off-origin centre");
+        assert!(solid_at(&s, 22.0, 18.0, 5.0), "off-origin pattern centre [22, 18] must remain solid");
+    }
+}
+
+/// circular pattern of a `sketch.circle.center` drills only the `N` circle centres, not the pattern centre.
+#[test]
+fn a_hole_on_a_sketch_alone_skips_circular_pattern_centre_for_circles() {
+    let mut s = Session::default();
+    let (cx, cy, radius, diameter) = (24.0, 22.0, 10.0, 4.0);
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Circles"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [cx + radius, cy], "radius": 2, "id": "c1"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["c1"], "center": [cx, cy], "count": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Circles", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    let holes: Vec<[f64; 2]> = (0..3)
+        .map(|k| {
+            let a = std::f64::consts::TAU * (k as f64) / 3.0;
+            [cx + radius * a.cos(), cy + radius * a.sin()]
+        })
+        .collect();
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "patterned circles");
+    assert!(solid_at(&s, cx, cy, 5.0), "circular pattern centre ({cx}, {cy}) must remain solid");
+}
+
+/// changing a parameter driving pattern radius and reopening from JSON keeps only the `N`
+/// patterned holes drilled and leaves the pattern's centre point solid.
+#[test]
+fn a_hole_on_a_sketch_alone_skips_pattern_centre_across_parameter_change_and_reopen() {
+    let mut s = Session::default();
+    let (cx, cy, diameter) = (22.0, 18.0, 4.0);
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "8 mm"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": ["22 mm + R", "18 mm"], "id": "seed"}));
+    let pat = run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": [cx, cy], "count": 4}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": pat["center"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+
+    let check = |session: &mut Session, r: f64, label: &str| {
+        let holes = [[cx + r, cy], [cx, cy + r], [cx - r, cy], [cx, cy - r]];
+        assert_plate_with_through_holes(session, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, label);
+        assert!(solid_at(session, cx, cy, 5.0), "{label}: pattern centre ({cx}, {cy}) must remain solid");
+    };
+
+    check(&mut s, 8.0, "initial R=8");
+
+    change(&mut s, "R", "12 mm");
+    assert_eq!(said(&s, "H"), "");
+    assert!(solid_at(&s, cx + 8.0, cy, 5.0), "previous hole site at R=8 must heal");
+    check(&mut s, 12.0, "edited R=12");
+
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&mut reopened, 12.0, "reopened R=12");
+
+    change(&mut reopened, "R", "6 mm");
+    assert_eq!(said(&reopened, "H"), "");
+    assert!(solid_at(&reopened, cx + 12.0, cy, 5.0), "previous hole site at R=12 must heal after reopen");
+    check(&mut reopened, 6.0, "reopened R=6");
+}
+
+/// a standalone non-pattern-centre point in the same sketch as a circular pattern still
+/// drills alongside the `N` patterned holes, while the pattern centre stays solid.
+#[test]
+fn a_hole_on_a_sketch_alone_drills_standalone_point_without_pattern_centre() {
+    let mut s = Session::default();
+    let (cx, cy, radius, diameter) = (16.0, 18.0, 10.0, 4.0);
+    let extra = [50.0, 30.0];
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [cx + radius, cy], "id": "seed"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": [cx, cy], "count": 3}));
+    run(&mut s, "sketch.point", json!({"point": extra, "id": "extra"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    let mut holes: Vec<[f64; 2]> = (0..3)
+        .map(|k| {
+            let a = std::f64::consts::TAU * (k as f64) / 3.0;
+            [cx + radius * a.cos(), cy + radius * a.sin()]
+        })
+        .collect();
+    holes.push(extra);
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "pattern + standalone");
+    assert!(solid_at(&s, cx, cy, 5.0), "pattern centre ({cx}, {cy}) must remain solid");
+}
+
+/// Explicitly passing `points` on `solid.hole` still drills every named sketch point.
+#[test]
+fn a_hole_on_a_sketch_with_explicit_points_drills_named_points() {
+    let mut s = Session::default();
+    let diameter = 4.0;
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "ctr"}));
+    run(&mut s, "sketch.point", json!({"point": [32, 20], "id": "seed"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": "ctr", "count": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["ctr", "seed"], "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &[[20.0, 20.0], [32.0, 20.0]], "explicit points");
+}
+
+/// a circular pattern whose `center` names a `sketch.point` ("ctr") still treats that
+/// centre as pattern reference geometry when `solid.hole` runs with `sketch` alone.
+#[test]
+fn a_hole_on_a_sketch_alone_skips_named_circular_pattern_centre_point() {
+    let mut s = Session::default();
+    let (cx, cy, radius, diameter) = (20.0, 20.0, 10.0, 4.0);
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [cx, cy], "id": "ctr"}));
+    run(&mut s, "sketch.point", json!({"point": [cx + radius, cy], "id": "seed"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": "ctr", "count": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    let holes = [[cx + radius, cy], [cx, cy + radius], [cx - radius, cy], [cx, cy - radius]];
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "named pattern centre");
+    assert!(solid_at(&s, cx, cy, 5.0), "named pattern centre ({cx}, {cy}) must remain solid");
+}
+
+/// when a regular (non-construction) `hub` circle sits at `[cx, cy]` and outer hole
+/// circles are patterned around `"hub.center"`, `solid.hole` with `sketch` alone drills all `N + 1` circles.
+#[test]
+fn a_hole_on_a_sketch_alone_drills_regular_hub_circle_at_pattern_centre() {
+    let mut s = Session::default();
+    let (cx, cy, radius, diameter) = (24.0, 22.0, 10.0, 4.0);
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Circles"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [cx, cy], "radius": 2, "id": "hub"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [cx + radius, cy], "radius": 2, "id": "bolt"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["bolt"], "center": "hub.center", "count": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Circles", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    let mut holes: Vec<[f64; 2]> = (0..3)
+        .map(|k| {
+            let a = std::f64::consts::TAU * (k as f64) / 3.0;
+            [cx + radius * a.cos(), cy + radius * a.sin()]
+        })
+        .collect();
+    holes.push([cx, cy]);
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular hub + bolts");
+}
+
+/// an authored regular (non-construction) ellipse whose centre is named as the
+/// circular pattern's centre (`"e1.center"`) must still drill, alongside all `N` patterned sites,
+/// across undo/redo and JSON save/reopen.
+#[test]
+fn a_hole_on_a_sketch_alone_drills_regular_ellipse_at_pattern_centre() {
+    let mut s = Session::default();
+    let (cx, cy, radius, diameter) = (20.0, 20.0, 10.0, 4.0);
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hub"}));
+    let ell = run(&mut s, "sketch.ellipse", json!({"center": [cx, cy], "major": [cx + 4.0, cy], "minor_radius": 3}));
+    let ell_id = ell["curves"][0].as_str().unwrap();
+    assert_eq!(ell_id, "e1");
+    run(&mut s, "sketch.point", json!({"point": [cx + radius, cy], "id": "seed"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": format!("{ell_id}.center"), "count": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Hub", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+
+    let holes = [[cx + radius, cy], [cx, cy + radius], [cx - radius, cy], [cx, cy - radius], [cx, cy]];
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular ellipse + e1.center");
+
+    run(&mut s, "edit.undo", json!({}));
+    let (v_undone, _) = measure_volume_and_com(&mut s);
+    assert!((v_undone - 24_000.0).abs() < 1e-6, "undo must restore plate volume: {v_undone}");
+    assert!(solid_at(&s, cx, cy, 5.0) && solid_at(&s, cx + radius, cy, 5.0), "undo must restore solid at all hole sites");
+
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(said(&s, "H"), "");
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular ellipse after redo");
+
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(said(&reopened, "H"), "");
+    assert_plate_with_through_holes(&mut reopened, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular ellipse after reopen");
+}
+
+/// an authored regular ellipse at `[cx, cy]` combined with a circular pattern whose
+/// `center` is given as coordinates `[cx, cy]` drills all `N + 1` holes without double-drilling.
+#[test]
+fn a_hole_on_a_sketch_alone_drills_regular_ellipse_at_coordinate_pattern_centre() {
+    let mut s = Session::default();
+    let (cx, cy, radius, diameter) = (24.0, 22.0, 10.0, 4.0);
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hub"}));
+    run(&mut s, "sketch.ellipse", json!({"center": [cx, cy], "major": [cx + 4.0, cy], "minor_radius": 3}));
+    run(&mut s, "sketch.point", json!({"point": [cx + radius, cy], "id": "seed"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": [cx, cy], "count": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Hub", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    let mut holes: Vec<[f64; 2]> = (0..3)
+        .map(|k| {
+            let a = std::f64::consts::TAU * (k as f64) / 3.0;
+            [cx + radius * a.cos(), cy + radius * a.sin()]
+        })
+        .collect();
+    holes.push([cx, cy]);
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular ellipse + coordinate pattern centre");
+}
+
+/// a construction ellipse (via `construction: true` or `sketch.construction`) centred
+/// on the circular pattern's centre (whether named `"e1.center"` or given as `[cx, cy]`) drills
+/// only the `N` outer holes and leaves the centre solid, symmetric with construction bolt circles.
+#[test]
+fn a_hole_on_a_sketch_alone_skips_construction_ellipse_pattern_centre() {
+    let (cx, cy, radius, diameter) = (24.0, 22.0, 10.0, 4.0);
+    let holes: Vec<[f64; 2]> = (0..3)
+        .map(|k| {
+            let a = std::f64::consts::TAU * (k as f64) / 3.0;
+            [cx + radius * a.cos(), cy + radius * a.sin()]
+        })
+        .collect();
+
+    for (label, ctor_flag, toggle_via_cmd, named_center) in [
+        ("construction:true + e1.center", true, false, true),
+        ("construction:true + [cx, cy]", true, false, false),
+        ("sketch.construction + e1.center", false, true, true),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hub"}));
+        let ell = run(&mut s, "sketch.ellipse", json!({"center": [cx, cy], "major": [cx + 4.0, cy], "minor_radius": 3, "construction": ctor_flag}));
+        let ell_id = ell["curves"][0].as_str().unwrap();
+        if toggle_via_cmd {
+            run(&mut s, "sketch.construction", json!({"curves": [ell_id], "value": true}));
+        }
+        run(&mut s, "sketch.point", json!({"point": [cx + radius, cy], "id": "seed"}));
+        let center = if named_center { json!(format!("{ell_id}.center")) } else { json!([cx, cy]) };
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": center, "count": 3}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Hub", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "", "{label}");
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, label);
+        assert!(solid_at(&s, cx, cy, 5.0), "{label}: construction ellipse centre ({cx}, {cy}) must remain solid");
+    }
+}
+
+/// when a construction bolt circle (`construction: true`) sits at `[cx, cy]` and outer
+/// circles are patterned around `"bcd.center"`, `solid.hole` with `sketch` alone drills only the `N` outer holes.
+#[test]
+fn a_hole_on_a_sketch_alone_skips_construction_bolt_circle_pattern_centre() {
+    let mut s = Session::default();
+    let (cx, cy, radius, diameter) = (24.0, 22.0, 10.0, 4.0);
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Circles"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [cx, cy], "radius": radius, "construction": true, "id": "bcd"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [cx + radius, cy], "radius": 2, "id": "bolt"}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["bolt"], "center": "bcd.center", "count": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Circles", "diameter": diameter, "name": "H"}));
+    assert_eq!(said(&s, "H"), "");
+    let holes: Vec<[f64; 2]> = (0..3)
+        .map(|k| {
+            let a = std::f64::consts::TAU * (k as f64) / 3.0;
+            [cx + radius * a.cos(), cy + radius * a.sin()]
+        })
+        .collect();
+    assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "construction bcd + bolts");
+    assert!(solid_at(&s, cx, cy, 5.0), "construction bolt-circle centre ({cx}, {cy}) must remain solid");
+}
+
+/// a sketch containing only patterned lines around `[cx, cy]` has no hole sites, so
+/// `solid.hole` with `sketch` alone must return an error rather than drilling `[cx, cy]`.
+#[test]
+fn a_hole_on_a_sketch_alone_with_only_patterned_lines_errors() {
+    let mut s = Session::default();
+    let (cx, cy) = (20.0, 20.0);
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Lines"}));
+    run(&mut s, "sketch.line", json!({"points": [[28, 18], [32, 22]], "ids": ["l1"]}));
+    run(&mut s, "sketch.pattern.circular", json!({"entities": ["l1"], "center": [cx, cy], "count": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    let err = s.execute("solid.hole", &json!({"sketch": "Lines", "diameter": 4, "name": "H"})).unwrap_err().to_string();
+    assert!(!err.is_empty(), "expected error when no hole points exist");
+    let (v, _) = measure_volume_and_com(&mut s);
+    assert!((v - 24_000.0).abs() < 1e-6, "plate volume must be untouched: {v}");
+    assert!(solid_at(&s, cx, cy, 5.0), "pattern centre ({cx}, {cy}) must remain solid");
+}
+
+/// on a circular flange face (where `auto_project_face` projects the circular rim and its
+/// centre point), `solid.hole` with `sketch` alone skips both the pattern's centre and any
+/// coincident projected/construction reference centre, while still drilling an authored regular hub circle.
+#[test]
+fn a_hole_on_a_sketch_alone_on_circular_cylinder_face_skips_projected_and_pattern_centres() {
+    let (cyl_r, height, bolt_r, diameter): (f64, f64, f64, f64) = (30.0, 10.0, 18.0, 4.0);
+    let v_cyl = std::f64::consts::PI * cyl_r * cyl_r * height;
+    let v_hole = std::f64::consts::PI * (diameter * 0.5).powi(2) * height;
+
+    // 1. Pattern centred on the auto-projected circular face's rim centre ("c1.center").
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": cyl_r, "height": height, "name": "Flange"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [15, 0, height]}, "name": "Bolts"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [bolt_r, 0], "radius": 2, "id": "bolt"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["bolt"], "center": "c1.center", "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Bolts", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "");
+        let (v, _) = measure_volume_and_com(&mut s);
+        assert!((v - (v_cyl - 4.0 * v_hole)).abs() < 1.0, "c1.center pattern: {v:.4} vs {:.4}", v_cyl - 4.0 * v_hole);
+        assert!(solid_at(&s, 0.0, 0.0, 5.0), "flange centre (0, 0) must remain solid");
+    }
+
+    // 2. Pattern centred on [0, 0] coordinates over the auto-projected circular face.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": cyl_r, "height": height, "name": "Flange"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [15, 0, height]}, "name": "Bolts"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [bolt_r, 0], "radius": 2, "id": "bolt"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["bolt"], "center": [0, 0], "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Bolts", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "");
+        let (v, _) = measure_volume_and_com(&mut s);
+        assert!((v - (v_cyl - 4.0 * v_hole)).abs() < 1.0, "[0, 0] pattern on circular face: {v:.4} vs {:.4}", v_cyl - 4.0 * v_hole);
+        assert!(solid_at(&s, 0.0, 0.0, 5.0), "flange centre (0, 0) must remain solid");
+    }
+
+    // 3. Authored regular hub circle at "c1.center" + outer bolt pattern around "c1.center" drills N + 1 = 5 holes.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": cyl_r, "height": height, "name": "Flange"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [15, 0, height]}, "name": "Bolts"}));
+        run(&mut s, "sketch.circle.center", json!({"center": "c1.center", "radius": 2, "id": "hub"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [bolt_r, 0], "radius": 2, "id": "bolt"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["bolt"], "center": "c1.center", "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Bolts", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "");
+        let (v, _) = measure_volume_and_com(&mut s);
+        assert!((v - (v_cyl - 5.0 * v_hole)).abs() < 1.0, "authored hub + bolts: {v:.4} vs {:.4}", v_cyl - 5.0 * v_hole);
+        assert!(!solid_at(&s, 0.0, 0.0, 5.0), "authored hub hole at (0, 0) must drill");
+    }
+}
+
+/// on a circular flange face, an authored regular ellipse centred on the
+/// auto-projected rim centre (`"c1.center"`) with an outer bolt pattern around `"c1.center"` drills
+/// `N + 1` holes, whereas a construction ellipse at `"c1.center"` drills only the `N` outer holes.
+#[test]
+fn a_hole_on_a_sketch_alone_on_circular_cylinder_face_drills_regular_ellipse_at_rim_centre() {
+    let (cyl_r, height, bolt_r, diameter): (f64, f64, f64, f64) = (30.0, 10.0, 18.0, 4.0);
+    let v_cyl = std::f64::consts::PI * cyl_r * cyl_r * height;
+    let v_hole = std::f64::consts::PI * (diameter * 0.5).powi(2) * height;
+
+    for (label, construction, expected_holes, centre_must_be_solid) in
+        [("authored regular ellipse on c1.center", false, 5.0, false), ("construction ellipse on c1.center", true, 4.0, true)]
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": cyl_r, "height": height, "name": "Flange"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [15, 0, height]}, "name": "Bolts"}));
+        let ell = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [4, 0], "minor_radius": 3, "construction": construction}));
+        let ell_id = ell["curves"][0].as_str().unwrap();
+        run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{ell_id}.center"), "b": "c1.center"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [bolt_r, 0], "radius": 2, "id": "bolt"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["bolt"], "center": "c1.center", "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "Bolts", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "", "{label}");
+        let (v, _) = measure_volume_and_com(&mut s);
+        let v_expected = v_cyl - expected_holes * v_hole;
+        assert!((v - v_expected).abs() < 1.0, "{label}: volume {v:.4} vs analytical {v_expected:.4}");
+        for [bx, by] in [[bolt_r, 0.0], [0.0, bolt_r], [-bolt_r, 0.0], [0.0, -bolt_r]] {
+            assert!(!solid_at(&s, bx, by, 5.0), "{label}: expected outer bolt hole at ({bx}, {by})");
+        }
+        assert_eq!(solid_at(&s, 0.0, 0.0, 5.0), centre_must_be_solid, "{label}: flange centre (0, 0) solid state mismatch");
+    }
+}
+
+/// an authored regular ellipse concentric with an arc (`sketch.arc.center_point`
+/// with `center: "e1.center"`, construction or regular) still drills its centre hole when
+/// `solid.hole` runs with `sketch` alone — matching `sketch.circle.center` parity, across
+/// `edit.undo`/`edit.redo` and JSON save/reopen.
+#[test]
+fn a_hole_on_a_sketch_alone_drills_regular_ellipse_concentric_with_arc() {
+    let (cx, cy, diameter) = (20.0, 20.0, 4.0);
+    let holes = [[cx, cy]];
+
+    // Parity baseline: circle concentric with a construction or regular arc drills its centre.
+    for (label, arc_construction) in [("circle + construction arc", true), ("circle + regular arc", false)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [cx, cy], "radius": 3, "id": "c1"}));
+        run(&mut s, "sketch.arc.center_point", json!({"center": "c1.center", "start": [30, 20], "sweep": 90, "construction": arc_construction}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "S", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "", "{label}");
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, label);
+    }
+
+    for (label, arc_construction) in [("ellipse + construction arc", true), ("ellipse + regular arc", false)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let ell = run(&mut s, "sketch.ellipse", json!({"center": [cx, cy], "major": [25, 20], "minor_radius": 3}));
+        let ell_id = ell["curves"][0].as_str().unwrap();
+        assert_eq!(ell_id, "e1");
+        run(
+            &mut s,
+            "sketch.arc.center_point",
+            json!({"center": format!("{ell_id}.center"), "start": [30, 20], "sweep": 90, "construction": arc_construction}),
+        );
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "S", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "", "{label}");
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, label);
+
+        run(&mut s, "edit.undo", json!({}));
+        let (v_undone, _) = measure_volume_and_com(&mut s);
+        assert!((v_undone - 24_000.0).abs() < 1e-6, "{label}: undo must restore plate volume: {v_undone}");
+        assert!(solid_at(&s, cx, cy, 5.0), "{label}: undo must restore solid at ({cx}, {cy})");
+
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(said(&s, "H"), "", "{label} after redo");
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, &format!("{label} after redo"));
+
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(said(&reopened, "H"), "", "{label} after reopen");
+        assert_plate_with_through_holes(&mut reopened, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, &format!("{label} after reopen"));
+    }
+}
+
+/// an authored regular ellipse concentric with an arc (`center: "e1.center"`) and a
+/// circular pattern centred on `"e1.center"` or `[cx, cy]` drills all `N + 1` holes (all `N`
+/// patterned holes plus the hub hole), across undo/redo and JSON save/reopen.
+#[test]
+fn a_hole_on_a_sketch_alone_drills_regular_ellipse_concentric_with_arc_at_pattern_centre() {
+    let (cx, cy, radius, diameter) = (24.0, 22.0, 10.0, 4.0);
+    let holes = [[cx + radius, cy], [cx, cy + radius], [cx - radius, cy], [cx, cy - radius], [cx, cy]];
+
+    for (label, arc_construction, named_pattern_center) in [
+        ("construction arc + e1.center pattern", true, true),
+        ("regular arc + e1.center pattern", false, true),
+        ("construction arc + [cx, cy] pattern", true, false),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let ell = run(&mut s, "sketch.ellipse", json!({"center": [cx, cy], "major": [cx + 4.0, cy], "minor_radius": 3}));
+        let ell_id = ell["curves"][0].as_str().unwrap();
+        assert_eq!(ell_id, "e1");
+        run(
+            &mut s,
+            "sketch.arc.center_point",
+            json!({"center": format!("{ell_id}.center"), "start": [38, 22], "sweep": 90, "construction": arc_construction}),
+        );
+        run(&mut s, "sketch.point", json!({"point": [cx + radius, cy], "id": "seed"}));
+        let pattern_center = if named_pattern_center { json!(format!("{ell_id}.center")) } else { json!([cx, cy]) };
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": pattern_center, "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "S", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "", "{label}");
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, label);
+
+        run(&mut s, "edit.undo", json!({}));
+        let (v_undone, _) = measure_volume_and_com(&mut s);
+        assert!((v_undone - 24_000.0).abs() < 1e-6, "{label}: undo must restore plate volume: {v_undone}");
+        assert!(solid_at(&s, cx, cy, 5.0) && solid_at(&s, cx + radius, cy, 5.0), "{label}: undo must restore solid at all hole sites");
+
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(said(&s, "H"), "", "{label} after redo");
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, &format!("{label} after redo"));
+
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(said(&reopened, "H"), "", "{label} after reopen");
+        assert_plate_with_through_holes(&mut reopened, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, &format!("{label} after reopen"));
+    }
+}
+
+/// Negative control: a construction ellipse (via `construction: true` or
+/// `sketch.construction`) concentric with an arc (`center: "e1.center"`) and a circular pattern
+/// around `"e1.center"` still skips the hub and drills only the `N` patterned holes.
+#[test]
+fn a_hole_on_a_sketch_alone_skips_construction_ellipse_concentric_with_arc_at_pattern_centre() {
+    let (cx, cy, radius, diameter) = (24.0, 22.0, 10.0, 4.0);
+    let holes = [[cx + radius, cy], [cx, cy + radius], [cx - radius, cy], [cx, cy - radius]];
+
+    for (label, ctor_flag, toggle_via_cmd) in
+        [("construction:true + concentric arc + e1.center", true, false), ("sketch.construction + concentric arc + e1.center", false, true)]
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 40, "height": 10, "name": "Plate"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let ell = run(&mut s, "sketch.ellipse", json!({"center": [cx, cy], "major": [cx + 4.0, cy], "minor_radius": 3, "construction": ctor_flag}));
+        let ell_id = ell["curves"][0].as_str().unwrap();
+        assert_eq!(ell_id, "e1");
+        if toggle_via_cmd {
+            run(&mut s, "sketch.construction", json!({"curves": [ell_id], "value": true}));
+        }
+        run(&mut s, "sketch.arc.center_point", json!({"center": format!("{ell_id}.center"), "start": [38, 22], "sweep": 90, "construction": true}));
+        run(&mut s, "sketch.point", json!({"point": [cx + radius, cy], "id": "seed"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": format!("{ell_id}.center"), "count": 4}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "S", "diameter": diameter, "name": "H"}));
+        assert_eq!(said(&s, "H"), "", "{label}");
+        assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, label);
+        assert!(solid_at(&s, cx, cy, 5.0), "{label}: construction ellipse centre ({cx}, {cy}) must remain solid");
+    }
+}
+
 #[test]
 fn sketch_under_the_part_counterbore_and_four_points() {
     let one = std::f64::consts::PI * 36.0 * 3.0 + std::f64::consts::PI * 9.0 * 7.0;

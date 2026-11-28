@@ -331,3 +331,72 @@ fn a_holed_plane_sheet_grows_its_trim() {
     assert!(rel(got, want) < 1e-6, "area {got}, {want}");
     assert_eq!(counts(&grown).unwrap()[0], 1);
 }
+
+/// Every face of a box and of a holed plate yields an interior point on its boundary, strictly
+/// inside its face span (for the box, one distinct point on each of the six faces), and a stopped
+/// token still gets the same answer.
+#[test]
+fn face_points_lie_inside_every_face_of_a_box_and_holed_plate() {
+    let b = make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
+    assert_eq!(counts(&b).unwrap(), [6, 12, 8]);
+    let pts = super::trim::face_points(&b).unwrap();
+    assert_eq!(pts.len(), 6);
+    let lo = [1.0, -2.0, 3.0];
+    let hi = [11.0, 18.0, 33.0];
+    let mut sides = std::collections::BTreeSet::new();
+    for &p in &pts {
+        assert!(p.iter().all(|x| x.is_finite()), "{p:?}");
+        assert_eq!(super::classify_point(&b, p).unwrap(), crate::measure::PointClass::OnBoundary, "{p:?}");
+        let mut on = None;
+        for axis in 0..3 {
+            assert!(p[axis] >= lo[axis] - 1e-9 && p[axis] <= hi[axis] + 1e-9, "{p:?}");
+            if (p[axis] - lo[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, false)).is_none(), "edge/corner {p:?}");
+            } else if (p[axis] - hi[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, true)).is_none(), "edge/corner {p:?}");
+            } else {
+                assert!(p[axis] > lo[axis] + 1e-6 && p[axis] < hi[axis] - 1e-6, "too close to edge: {p:?}");
+            }
+        }
+        assert!(sides.insert(on.expect("point must lie on a box face")), "duplicate face {p:?}");
+    }
+    assert_eq!(sides.len(), 6);
+
+    let stop = crate::stop::Stop::new();
+    stop.stop();
+    assert_eq!(stop.within(|| super::trim::face_points(&b)).unwrap(), pts);
+
+    let p = plate();
+    assert_eq!(counts(&p).unwrap(), [7, 15, 10]);
+    let plate_pts = super::trim::face_points(&p).unwrap();
+    assert_eq!(plate_pts.len(), 7);
+    let mut plate_faces = std::collections::BTreeSet::new();
+    for &pt in &plate_pts {
+        assert!(pt.iter().all(|x| x.is_finite()), "{pt:?}");
+        assert_eq!(super::classify_point(&p, pt).unwrap(), crate::measure::PointClass::OnBoundary, "{pt:?}");
+        let [x, y, z] = pt;
+        let r = (x - 10.0).hypot(y - 10.0);
+        let in_x = x > 1e-6 && x < 20.0 - 1e-6;
+        let in_y = y > 1e-6 && y < 20.0 - 1e-6;
+        let in_z = z > 1e-6 && z < 5.0 - 1e-6;
+        let tag = if x.abs() < 1e-6 && in_y && in_z {
+            0
+        } else if (x - 20.0).abs() < 1e-6 && in_y && in_z {
+            1
+        } else if y.abs() < 1e-6 && in_x && in_z {
+            2
+        } else if (y - 20.0).abs() < 1e-6 && in_x && in_z {
+            3
+        } else if z.abs() < 1e-6 && in_x && in_y && r > 3.0 + 1e-6 {
+            4
+        } else if (z - 5.0).abs() < 1e-6 && in_x && in_y && r > 3.0 + 1e-6 {
+            5
+        } else if (r - 3.0).abs() < 1e-6 && in_z {
+            6
+        } else {
+            panic!("point {pt:?} not strictly inside any face of the holed plate");
+        };
+        assert!(plate_faces.insert(tag), "duplicate plate face {tag}: {pt:?}");
+    }
+    assert_eq!(plate_faces.len(), 7);
+}

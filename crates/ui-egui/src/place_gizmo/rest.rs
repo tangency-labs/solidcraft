@@ -18,7 +18,7 @@ pub(super) static SPEC: Spec = Spec {
     click: None,
     footprint,
     freedom: super::anywhere,
-    turn: Some(Turn { tip: "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.", reach, angle, set }),
+    turn: Some(Turn { tip: "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.", reach, angle, set, readout: None }),
 };
 
 /// Rotation step without a modifier (degrees).

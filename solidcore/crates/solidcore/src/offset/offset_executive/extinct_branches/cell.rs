@@ -10,7 +10,7 @@ use super::{missing, Halfspace, OP};
 use crate::error::Result;
 use crate::geom::expansion as ex;
 use crate::kernel::Kernel;
-use crate::math::Vec3;
+use crate::math::{Point3, Vec3};
 use crate::topology::{loopuse, Brep, LoopId, VertexId};
 
 type E = Vec<f64>;
@@ -38,13 +38,6 @@ fn dot([x, y, z]: &V, n: Vec3) -> Option<E> {
         &add(&ex::scale(x, n.x)?, &ex::scale(y, n.y)?)?,
         &ex::scale(z, n.z)?,
     )
-}
-fn cross([ax, ay, az]: &V, [bx, by, bz]: &V) -> Option<V> {
-    Some([
-        sub(&mul(ay, bz)?, &mul(az, by)?)?,
-        sub(&mul(az, bx)?, &mul(ax, bz)?)?,
-        sub(&mul(ax, by)?, &mul(ay, bx)?)?,
-    ])
 }
 fn constant(p: Halfspace) -> Option<E> {
     checked(ex::dot(
@@ -100,6 +93,11 @@ impl Point {
     }
 }
 
+/// The same supporting plane, bit for bit: an edge's two incident planes are its facets'.
+fn same(a: &Halfspace, b: &Halfspace) -> bool {
+    a.outward == b.outward && a.origin == b.origin
+}
+
 pub(super) fn normal_defines_plane(normal: Vec3, x: Vec3, y: Vec3) -> bool {
     let proof = || {
         Some(
@@ -115,13 +113,14 @@ pub(super) fn normal_defines_plane(normal: Vec3, x: Vec3, y: Vec3) -> bool {
 /// All analytic vertices are intersections of exactly three incident planes.
 /// Each facet's edges must strictly support all its other vertices; this also
 /// rules out self-intersecting cycles, which same-sign consecutive turns do not.
+/// `None` when the certificate is not proved; otherwise the cell's exact vertices.
 pub(super) fn convex(
     kernel: &Kernel,
     b: &Brep,
     attachment: LoopId,
     base: Halfspace,
     mut facets: Vec<(LoopId, Halfspace)>,
-) -> Result<bool> {
+) -> Result<Option<Cell>> {
     let cap = Halfspace {
         origin: base.origin,
         outward: -base.outward,
@@ -137,7 +136,7 @@ pub(super) fn convex(
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| missing("cell loop without vertex"))?;
         if cycle.len() < 3 {
-            return Ok(false);
+            return Ok(None);
         }
         for &v in &cycle {
             incident.entry(v).or_default().push(plane);
@@ -153,71 +152,152 @@ pub(super) fn convex(
     for (v, planes) in incident {
         kernel.check_cancelled(OP)?;
         let Ok(planes) = <Vec<Halfspace> as TryInto<[Halfspace; 3]>>::try_into(planes) else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(p) = Point::intersection(planes) else {
-            return Ok(false);
+            return Ok(None);
         };
         for &(_, plane) in &cycles {
             if !matches!(p.side(plane), Some(-1 | 0)) {
-                return Ok(false);
+                return Ok(None);
             }
         }
         raised |= p.side(cap) == Some(-1);
         points.insert(v, p);
     }
     if !raised {
-        return Ok(false);
+        return Ok(None);
     }
     for (i, a) in points.values().enumerate() {
         kernel.check_cancelled(OP)?;
         for c in points.values().skip(i + 1) {
             let Some(delta) = a.delta(c) else {
-                return Ok(false);
+                return Ok(None);
             };
             if delta.iter().all(|e| ex::is_zero(e)) {
-                return Ok(false);
+                return Ok(None);
             }
         }
     }
     for planes in edges.values() {
         let [a, c] = planes.as_slice() else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(v) = ex::cross(a.outward, c.outward) else {
-            return Ok(false);
+            return Ok(None);
         };
         if !v.iter().all(|e| e.iter().all(|c| c.is_finite())) || v.iter().all(|e| ex::is_zero(e)) {
-            return Ok(false);
+            return Ok(None);
         }
     }
-    for (cycle, plane) in cycles {
-        let mut orientation = None;
+    // Strict support of each facet edge, decided on planes, not on point differences: the
+    // edge lies on its facet's plane and on one other plane, which must have every other
+    // vertex of the facet strictly inside. All other vertices strictly on one side of each
+    // edge line makes the cycle a simple convex polygon. This is the side test above
+    // (degree four in the coefficients), where a turn test on vertex differences is of
+    // degree thirteen and leaves the exact products' range for a branch turned by a
+    // rotation whose cosines round (6e-17 for a quarter turn, #22784).
+    for (cycle, plane) in &cycles {
         for (&a, &c) in cycle.iter().zip(cycle.iter().cycle().skip(1)) {
             kernel.check_cancelled(OP)?;
-            let pa = points
-                .get(&a)
-                .ok_or_else(|| missing("cell vertex absent"))?;
-            let pc = points
-                .get(&c)
-                .ok_or_else(|| missing("cell vertex absent"))?;
+            let key = if a < c { (a, c) } else { (c, a) };
+            let others = edges.get(&key).ok_or_else(|| missing("cell edge absent"))?;
+            let mut beside = others.iter().filter(|e| !same(e, plane));
+            let (Some(other), None) = (beside.next(), beside.next()) else {
+                return Ok(None);
+            };
             for v in cycle.iter().filter(|&&v| v != a && v != c) {
                 let pv = points.get(v).ok_or_else(|| missing("cell vertex absent"))?;
-                let sign = || {
-                    Some(ex::sign(&dot(
-                        &cross(&pa.delta(pc)?, &pa.delta(pv)?)?,
-                        plane.outward,
-                    )?))
-                };
-                let Some(s @ (-1 | 1)) = sign() else {
-                    return Ok(false);
-                };
-                if orientation.is_some_and(|o| o != s) {
-                    return Ok(false);
+                if pv.side(*other) != Some(-1) {
+                    return Ok(None);
                 }
-                orientation = Some(s);
             }
         }
     }
-    Ok(true)
+    Ok(Some(Cell {
+        points: points.into_values().collect(),
+    }))
+}
+
+/// A certified convex source cell: the convex hull of its exact vertices.
+pub(super) struct Cell {
+    points: Vec<Point>,
+}
+
+/// An offset sheet's plane as it is defined: through `origin`, spanned by its axes
+/// `x` and `y`. Its exact normal is `x × y` in expansion arithmetic (not the rounded
+/// unit normal), so the halfspace below is the plane's own, whatever its tilt.
+pub(super) struct Sheet {
+    pub(super) origin: Point3,
+    pub(super) x: Vec3,
+    pub(super) y: Vec3,
+    /// The source face's outward normal: it fixes which side is material.
+    pub(super) outward: Vec3,
+}
+
+impl Sheet {
+    /// `(N, s)`: the exact normal `x × y` and the sign `s` that points it along
+    /// `outward`. `None` when that sign is not proved (an exact zero).
+    fn normal(&self) -> Option<(V, f64)> {
+        let n = ex::cross(self.x, self.y)?;
+        let n: V = [
+            checked(n[0].clone())?,
+            checked(n[1].clone())?,
+            checked(n[2].clone())?,
+        ];
+        match ex::sign(&dot(&n, self.outward)?) {
+            1 => Some((n, 1.0)),
+            -1 => Some((n, -1.0)),
+            _ => None,
+        }
+    }
+
+    /// The exact sign-scaled value `s N·(p - origin)` at a homogeneous point, times its
+    /// positive denominator: positive strictly outside the material halfspace.
+    fn excess(&self, (n, s): &(V, f64), p: &Point) -> Option<E> {
+        let mut at = E::new();
+        for (c, nc) in p.numerator.iter().zip(n) {
+            at = add(&at, &mul(c, nc)?)?;
+        }
+        let mut offset = E::new();
+        for (o, nc) in [self.origin.x, self.origin.y, self.origin.z]
+            .into_iter()
+            .zip(n)
+        {
+            offset = add(&offset, &ex::scale(nc, o)?)?;
+        }
+        checked(ex::scale(&sub(&at, &mul(&p.denominator, &offset)?)?, *s)?)
+    }
+}
+
+impl Cell {
+    /// Whether the material halfspaces of sheets `a` and `b` have no common interior
+    /// point in this cell: a Farkas certificate with unit multipliers. Each material
+    /// halfspace is `f <= 0` for the affine `f` of [`Sheet::excess`]; if `f_a + f_b >= 0`
+    /// at every vertex, it is non-negative on the cell, their convex hull, so no point
+    /// of the cell has both `f_a < 0` and `f_b < 0`: the two halfspaces' common part in
+    /// the cell has no interior, and the regularized cavity there is empty. Where the sum
+    /// is zero the two sheets coincide (a pad inset by exactly half its width, #22783):
+    /// what lies in both is a part of that one plane, of zero volume, which the
+    /// regularized offset does not keep. For exactly opposite normals `f_a + f_b` is the
+    /// constant crossing of the two planes; for normals opposite only up to rounding (a
+    /// turned branch) the plane's own tilt is decided exactly instead of being compared
+    /// bit for bit.
+    pub(super) fn separates(&self, a: &Sheet, b: &Sheet) -> bool {
+        let proof = || {
+            let na = a.normal()?;
+            let nb = b.normal()?;
+            if self.points.is_empty() {
+                return Some(false);
+            }
+            for p in &self.points {
+                let sum = add(&a.excess(&na, p)?, &b.excess(&nb, p)?)?;
+                if ex::sign(&sum) < 0 {
+                    return Some(false);
+                }
+            }
+            Some(true)
+        };
+        proof() == Some(true)
+    }
 }

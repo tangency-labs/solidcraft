@@ -122,7 +122,7 @@ pub(crate) fn follow(app: &mut SolveApp) {
 /// none without a drag whose frames are shown, on another design, with other uncaptured moves, or
 /// without a GPU.
 fn next(app: &SolveApp, motions: Option<DragMotions>) -> Option<DragMotions> {
-    let (doc, world, pending) = crate::joint_drag::began_on(app)?;
+    let (doc, world, pending) = crate::joint_drag::began_on(app).or_else(|| crate::joint_handles::began_on(app))?;
     if !Arc::ptr_eq(doc, &app.session.doc) || *pending != app.session.pending_moves || app.viewport.gpu.is_none() {
         return None;
     }
@@ -346,7 +346,7 @@ fn lit_moves(l: &DragMotions, s: &Sel) -> bool {
 /// began on (a drag that ended, or another design's tab, has none).
 fn drawn(app: &SolveApp) -> Option<&DragMotions> {
     let l = app.viewport.joint_motions.as_ref().filter(|l| l.on)?;
-    let (doc, _, _) = crate::joint_drag::began_on(app)?;
+    let (doc, _, _) = crate::joint_drag::began_on(app).or_else(|| crate::joint_handles::began_on(app))?;
     (Arc::ptr_eq(doc, &app.session.doc) && Arc::ptr_eq(&l.doc, doc)).then_some(l)
 }
 

@@ -101,7 +101,66 @@ pub struct T2Of<Z> {
     s: usize,
     e: usize,
     n: usize,
-    c: Vec<Z>,
+    c: Coefficients<Z>,
+}
+
+/// How many coefficients a [`T2Of`] holds without allocating: orders (2, 2), what a
+/// surface's partials to second order take.
+const INLINE: usize = 9;
+
+/// A [`T2Of`]'s coefficients: in place up to [`INLINE`] of them, else on the heap. Not the
+/// fork's: its series are arrays on the stack; here a series of small orders, the ones a
+/// point evaluation makes thousands of, allocates nothing. Read as a slice either way.
+#[derive(Clone)]
+enum Coefficients<Z> {
+    Inline { len: usize, c: [Z; INLINE] },
+    Heap(Vec<Z>),
+}
+
+impl<Z: Copy> Coefficients<Z> {
+    /// `len` copies of `zero`.
+    fn filled(len: usize, zero: Z) -> Self {
+        if len <= INLINE {
+            Self::Inline {
+                len,
+                c: [zero; INLINE],
+            }
+        } else {
+            Self::Heap(vec![zero; len])
+        }
+    }
+}
+
+impl<Z> core::ops::Deref for Coefficients<Z> {
+    type Target = [Z];
+    fn deref(&self) -> &[Z] {
+        match self {
+            Self::Inline { len, c } => c.get(..*len).unwrap_or(&[]),
+            Self::Heap(v) => v,
+        }
+    }
+}
+
+impl<Z> core::ops::DerefMut for Coefficients<Z> {
+    fn deref_mut(&mut self) -> &mut [Z] {
+        match self {
+            Self::Inline { len, c } => c.get_mut(..*len).unwrap_or(&mut []),
+            Self::Heap(v) => v,
+        }
+    }
+}
+
+/// Written as the list of coefficients, as the `Vec` it replaced writes them.
+impl<Z: core::fmt::Debug> core::fmt::Debug for Coefficients<Z> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&**self, f)
+    }
+}
+
+impl<Z: PartialEq> PartialEq for Coefficients<Z> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
 }
 
 /// `sm_T2`: [`T2Of`] in doubles.
@@ -117,7 +176,7 @@ impl<Z: Ring> T2Of<Z> {
     /// `sm_T2Of(lS, lE, d, lN)`: the constant d, kept to total order `n`.
     #[must_use]
     pub fn with_order(s: usize, e: usize, d: Z, n: usize) -> Self {
-        let mut c = vec![Z::lift(0.0); (s + 1) * (e + 1)];
+        let mut c = Coefficients::filled((s + 1) * (e + 1), Z::lift(0.0));
         if let Some(c0) = c.first_mut() {
             *c0 = d;
         }
@@ -156,7 +215,7 @@ impl<Z: Ring> T2Of<Z> {
     #[must_use]
     pub fn add(&self, b: &Self) -> Self {
         let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
-        for ((x, &p), &q) in r.c.iter_mut().zip(&self.c).zip(b.c.iter()) {
+        for ((x, &p), &q) in r.c.iter_mut().zip(self.c.iter()).zip(b.c.iter()) {
             *x = p + q;
         }
         r
@@ -166,7 +225,7 @@ impl<Z: Ring> T2Of<Z> {
     #[must_use]
     pub fn sub(&self, b: &Self) -> Self {
         let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
-        for ((x, &p), &q) in r.c.iter_mut().zip(&self.c).zip(b.c.iter()) {
+        for ((x, &p), &q) in r.c.iter_mut().zip(self.c.iter()).zip(b.c.iter()) {
             *x = p - q;
         }
         r
@@ -176,7 +235,7 @@ impl<Z: Ring> T2Of<Z> {
     #[must_use]
     pub fn scale(&self, d: Z) -> Self {
         let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
-        for (x, &p) in r.c.iter_mut().zip(&self.c) {
+        for (x, &p) in r.c.iter_mut().zip(self.c.iter()) {
             *x = p * d;
         }
         r
@@ -186,6 +245,30 @@ impl<Z: Ring> T2Of<Z> {
     #[must_use]
     pub fn mul(&self, b: &Self) -> Self {
         let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
+        if b.s >= self.s && b.e >= self.e {
+            // b holds every coefficient the product reads: the same sums, term by term in the
+            // same order, read straight from the two arrays
+            let (wa, wb) = (self.e + 1, b.e + 1);
+            let zero = Z::lift(0.0);
+            let a_at = |i: usize, j: usize| self.c.get(i * wa + j).copied().unwrap_or(zero);
+            let b_at = |i: usize, j: usize| b.c.get(i * wb + j).copied().unwrap_or(zero);
+            for i in 0..=self.s {
+                let mut j = 0;
+                while j <= self.e && i + j <= self.n {
+                    let mut d = zero;
+                    for i1 in 0..=i {
+                        for j1 in 0..=j {
+                            d = d + a_at(i1, j1) * b_at(i - i1, j - j1);
+                        }
+                    }
+                    if let Some(x) = r.c.get_mut(i * wa + j) {
+                        *x = d;
+                    }
+                    j += 1;
+                }
+            }
+            return r;
+        }
         for i in 0..=self.s {
             let mut j = 0;
             while j <= self.e && i + j <= self.n {
@@ -600,16 +683,20 @@ pub fn evaluate_definition(
         // (the leader's derivatives to order s + 1 enter, its unit tangent's; the law's
         // to order s; a curve is C^(p - multiplicity) at a knot, its derivatives to
         // that order the same either side)
-        let along = [(Some(&def.leader), ts + 1), (def.law.as_ref(), ts)];
-        for (curve, used) in along {
+        let along = [
+            (Some(&def.leader), ts + 1, false),
+            (def.law.as_ref(), ts, true),
+        ];
+        for (curve, used, is_law) in along {
             if sided {
                 break;
             }
             let Some(curve) = curve else {
                 continue;
             };
-            let (knots, mult) = curve.knots(None)?;
-            let deg = curve.degree()?;
+            // (the same at every station: kept with the definition's identity)
+            let (knots, mult, deg) = identity.knots(curve, is_law)?;
+            let deg = *deg;
             let mut m = 1;
             while m + 1 < knots.len() && m < mult.len() {
                 let (Some(&km), Some(&mm)) = (knots.get(m), mult.get(m)) else {

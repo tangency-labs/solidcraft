@@ -249,6 +249,110 @@ fn a_template_file_saves_and_starts_drawings() {
     assert!(std::path::Path::new(&inside.path("ok.scdwg")).is_file() && !std::path::Path::new(&outside.path("no.scdwg")).exists());
 }
 
+/// Save the open drawing as a template and start another from the file.
+fn create_from_saved_template(s: &mut Session, folder: &Folder) -> Arc<Drawing> {
+    let saved = run(s, "drawing.template.save", json!({"path": folder.path("layout.json")}));
+    let path = saved["path"].as_str().unwrap();
+    run(s, "drawing.close", json!({}));
+    run(s, "drawing.create", json!({"template": path}));
+    let made = open_one(s);
+    made.validate().unwrap();
+    made
+}
+
+#[test]
+fn file_template_keeps_parts_list_layout_for_the_new_design() {
+    let mut s = design();
+    run(&mut s, "component.create", json!({"name": "Fixture"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "drawing.create", json!({}));
+    let set = json!({"place": {"at": [23.0, 47.0]}, "heading": "bottom", "row_height_mm": 9.0, "list": {"component": "Fixture"}});
+    run(&mut s, "drawing.table.add", json!({"sheet": "Sheet 1", "kind": "parts_list", "set": set}));
+    let before = open_one(&s);
+    let made = create_from_saved_template(&mut s, &Folder::new("template-parts-list"));
+    assert_eq!(made.tables.len(), 1);
+    let old = &before.tables[0];
+    let list = &made.tables[0];
+    assert_eq!((&list.table, &list.place), (&old.table, &old.place));
+    assert_eq!(list.sheet, made.sheets[0].id);
+    let kind = serde_json::to_value(&list.kind).unwrap();
+    assert_eq!(kind["parts_list"]["of"], json!({"source": ids::encode(made.sources[0].id), "component": 0}));
+    // The numbers the new list shows are saved, as drawing.table.add saves them: a later change to
+    // the design does not move what is printed.
+    // The original list was of the empty Fixture component; the new one is of the design's root, whose
+    // one body is item 1.
+    let saved = s.doc.assembly.item_numbers.iter().find(|n| n.source == 0);
+    assert!(saved.is_some_and(|n| n.items.len() == 1 && n.items[0].number == 1), "{:?}", s.doc.assembly.item_numbers);
+}
+
+#[test]
+fn file_template_with_a_parts_list_refuses_a_linked_source() {
+    let folder = Folder::new("template-linked-parts-list");
+    let source = folder.path("plate.sc");
+    run(&mut design(), "file.save", json!({"path": source}));
+    let mut s = design();
+    run(&mut s, "file.save", json!({"path": folder.path("case.sc")}));
+    run(&mut s, "drawing.create", json!({}));
+    run(&mut s, "drawing.table.add", json!({"sheet": "Sheet 1", "kind": "parts_list"}));
+    let saved = run(&mut s, "drawing.template.save", json!({"path": folder.path("layout.json")}));
+    let path = saved["path"].as_str().unwrap();
+    run(&mut s, "drawing.close", json!({}));
+
+    let (before, undo) = (s.doc.clone(), s.undo.len());
+    let e = refused(&mut s, "drawing.create", json!({"template": path, "source": source}));
+    assert!(e.contains(&crate::Undrawn::Linked.to_string()), "{e}");
+    assert!(Arc::ptr_eq(&s.doc, &before) && s.open_drawing.is_none() && s.undo.len() == undo, "nothing changed");
+}
+
+#[test]
+fn file_template_preserves_notes_and_revision_table_on_their_respective_sheets() {
+    let mut s = design();
+    let drawing = run(&mut s, "drawing.create", json!({}));
+    run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": drawing["sheets"][0]["id"]}, "at": [18, 37], "content": "Inspect finish"}));
+    run(&mut s, "drawing.sheet.add", json!({"name": "History"}));
+    run(&mut s, "drawing.table.add", json!({"sheet": "History", "kind": "revision", "set": {"row_height_mm": 8.0}}));
+    let before = open_one(&s);
+    let made = create_from_saved_template(&mut s, &Folder::new("template-layout-owners"));
+    assert_eq!((made.sheets.len(), made.notes.len(), made.tables.len()), (2, 1, 1));
+    let old_note = &before.notes[0];
+    let note = &made.notes[0];
+    assert_eq!((&note.content, note.at), (&old_note.content, [18.0, 37.0]));
+    assert_eq!(made.sheet_of(&note.anchor), Some(0));
+    let old_table = &before.tables[0];
+    let table = &made.tables[0];
+    assert_eq!((&table.kind, &table.table, table.place), (&old_table.kind, &old_table.table, old_table.place));
+    assert_eq!(table.sheet, made.sheets[1].id);
+    assert_ne!(before.sheets[1].id, made.sheets[1].id);
+}
+
+#[test]
+fn file_template_leaves_model_notes_and_revision_tags_with_the_original_drawing() {
+    let (mut s, [front, ..]) = crate::cmd::drawing_view::tests::three_views();
+    let sheet = ids::encode(open_one(&s).sheets[0].id);
+    run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [60, 40], "content": "Inspect this view"}));
+    let row = run(&mut s, "drawing.revision.add", json!({"set": {}}))["row"].clone();
+    run(&mut s, "drawing.revision.tag.add", json!({"row": row, "sheet": sheet, "at": [40, 40]}));
+    let made = create_from_saved_template(&mut s, &Folder::new("template-model-notes"));
+    assert!(made.views.is_empty() && made.notes.is_empty());
+    assert!(made.revisions.ids().next().is_none());
+}
+
+#[test]
+fn file_template_preserves_a_sheet_sketch_and_its_fill() {
+    let (mut s, _, _, sketch, boundary) = sheet_fill_fixture(false);
+    run(&mut s, "drawing.sketch.fill", json!({"sketch": sketch["sketch"], "boundary": boundary, "paint": {"kind": "solid"}}));
+    let before = open_one(&s);
+    let made = create_from_saved_template(&mut s, &Folder::new("template-sheet-fill"));
+    assert_eq!((made.sketches.len(), made.fills.len()), (1, 1));
+    let sketch = &made.sketches[0];
+    assert_eq!((&sketch.name, &sketch.sketch), (&before.sketches[0].name, &before.sketches[0].sketch));
+    assert_eq!(sketch.owner, solidcraft_doc::drawing::Owner::Sheet(made.sheets[0].id));
+    let fill = &made.fills[0];
+    let old = &before.fills[0];
+    assert_eq!(fill.sketch, sketch.id);
+    assert_eq!((&fill.boundary, &fill.paint, &fill.last_region), (&old.boundary, &old.paint, &old.last_region));
+}
+
 /// The drawing open, as the design holds it.
 fn open_one(s: &Session) -> Arc<Drawing> {
     s.drawing("test").unwrap().clone()
@@ -1066,7 +1170,7 @@ fn inspect_lists_each_sheets_views_in_order() {
     })]);
     // Inspect only lists it, so the part it numbers needn't be in the design.
     let edge = ModelEdge { body: "Block".into(), origin_feature: s.doc.features[0].id, name: "edge".into(), path: vec![1] };
-    d.balloons.add([Arc::new(Balloon { id: balloon, view: right, edge, at: [20.0, 20.0], parts_list: None })]);
+    d.balloons.add([Arc::new(Balloon { id: balloon, view: right, edge, at: [20.0, 20.0], parts_list: None, along: None })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     let [front_id, right_id, top_id, left_id] = [front, right, top, left].map(ids::encode);
@@ -3975,7 +4079,7 @@ fn sheet_batch_move_scale_break_trim_and_drag_publish_only_the_selected_drawing(
 #[test]
 fn sheet_batch_extend_and_path_trim_keep_paper_geometry_without_model_pruning() {
     let (mut s, drawing, sketch, _) = sheet_editor();
-    s.doc_mut().new_model_param("10 mm", "mm");
+    s.doc_mut().new_model_param("10 mm", "mm").unwrap();
     run(&mut s, "sketch.line", json!({"points": [[30, 5], [30, 45]], "connect": false, "infer": false}));
     let extending = run(&mut s, "sketch.line", json!({"points": [[5, 25], [15, 25]], "connect": false, "infer": false}))["curves"][0]
         .as_str()

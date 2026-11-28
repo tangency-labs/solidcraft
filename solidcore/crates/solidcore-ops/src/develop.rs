@@ -28,9 +28,60 @@ use solidcore_record::develop::{
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::develop::{
-    BeadAgainst, BeadRefusal, ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
-    MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
+    BeadAgainst, BeadRefusal, ContourRefusal, CornerTailRefusal, JointRefusal, PanelRefusal,
+    Refusal, RuleRefusal, MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
 };
+
+/// Sets back a record region's flange side using the kernel's contour edit.
+///
+/// See [`k::set_back_past`] for parameter geometry and when it returns `None`.
+pub fn set_back_past(
+    region: &Region2,
+    from: Vec2,
+    direction: Vec2,
+    rise: f64,
+    height: f64,
+    into: Vec2,
+    by: f64,
+) -> Option<Region2> {
+    k::set_back_past(
+        &region2(region),
+        vec2(from),
+        vec2(direction),
+        rise,
+        height,
+        vec2(into),
+        by,
+    )
+    .map(|region| record_region2(&region))
+}
+
+/// Replaces a previous corner setback on a record region.
+///
+/// See [`k::retarget_corner_tail`] for the parameter geometry.
+///
+/// # Errors
+/// The kernel could not restore or trim the contour unambiguously.
+pub fn retarget_corner_tail(
+    region: &Region2,
+    edge: [Vec2; 2],
+    anchor_origin: Vec2,
+    anchor_direction: Vec2,
+    bend_length: f64,
+    old_cut: f64,
+    new_cut: f64,
+) -> Result<Region2, CornerTailRefusal> {
+    k::retarget_corner_tail(
+        &region2(region),
+        edge.map(vec2),
+        vec2(anchor_origin),
+        vec2(anchor_direction),
+        bend_length,
+        old_cut,
+        new_cut,
+    )
+    .map(|region| record_region2(&region))
+}
 
 /// Lays the sheet out flat ([`solidcore::develop::develop`]): `anchors` says where some panels'
 /// neutral charts lie in the flat frame.

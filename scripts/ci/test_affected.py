@@ -70,6 +70,9 @@ class Synthetic(unittest.TestCase):
     def test_docs_only_selects_nothing(self):
         self.assertEqual(affected.select(SYNTH, ["docs/book/a.md", "README.md", "packaging/x.yml"]), (False, []))
 
+    def test_typescript_client_selects_no_rust_package(self):
+        self.assertEqual(affected.select(SYNTH, ["typescript/src/compile.ts", "typescript/package.json"]), (False, []))
+
     def test_no_code_paths_select_nothing(self):
         # What CI reads as "no code changed", on pull requests and pushes to main alike.
         for p in [".github/workflows/docker.yml", ".github/ISSUE_TEMPLATE/bug.yml", "scripts/claim/claim.js",

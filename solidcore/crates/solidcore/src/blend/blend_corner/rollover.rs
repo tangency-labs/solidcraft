@@ -14,7 +14,7 @@
 //! |------------|--------------------------------------------------------------|
 //! | [`crease`] | the creases with the cliff faces: explicit graphs, certified |
 //! | [`geometry`] | the torus's frame, the cliff's profile, the creases as curves |
-//! | [`RollOver`], [`classify_roll_over`] | the event's corner: which vertex, which round goes first |
+//! | [`RollOver`], [`classify_roll_over`], [`classify_cusp`] | the event's corner: which vertex, which round goes first, ledge or cusp |
 //! | [`concave_chain`] | the second pass's edges: B2's remainder and B1's end arc on E |
 //! | [`is_concave_chain`] | whether edges asked of one round are such a chain (the event's second pass asked as a feature of its own) |
 //! | [`concave_chain_ends`] | the second pass's V: each end of an end arc where the cliff is |
@@ -74,6 +74,49 @@ pub struct RollOver {
     pub convex: EdgeId,
     /// B2's edge (concave).
     pub concave: EdgeId,
+    /// Which configuration: what the second pass needs.
+    pub kind: RollOverKind,
+}
+
+/// The two configurations of the Roll-over event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RollOverKind {
+    /// The ledge (#10876, [`classify_roll_over`]): B1 ends square on its end face E, a plane, at
+    /// a cliff. The second pass rounds B2's remainder and B1's end arc on E, its overflow at the
+    /// cliff trimmed at the creases.
+    Ledge,
+    /// The cusp (#22151, [`classify_cusp`]): B1 runs tangentially into B2, so their common face
+    /// T narrows to zero width at V (the blend corner's Mixed ring). B1 ends on B2's other face
+    /// E; the second pass rounds B2's remainder and B1's end on E as one tangent chain, its ball
+    /// rolling off T onto B1's surface. Nothing overflows: no cliff.
+    Cusp,
+}
+
+/// The Roll-over of a vertex the session's Mixed corner of rounds takes (#22151): a convex
+/// round B1 running tangentially into a concave round B2 across a tangent seam, their common
+/// face narrowing to zero width at `vertex` ([`mixed_ring`], three or four edges). The Mixed
+/// corner's Coons fill is no rolling ball's surface; the Roll-over builds the round there in
+/// two passes, B1 first. `None` where the edges are not such a ring.
+///
+/// # Errors
+/// Those of the ring's convexity and face lookups.
+pub fn classify_cusp(
+    k: &Kernel,
+    b: &mut Brep,
+    vertex: VertexId,
+    solver_eus: &[EdgeuseId],
+    all_eus: &[EdgeuseId],
+) -> Result<Option<RollOver>> {
+    let any = |_: EdgeuseId| Some(());
+    let Some((ring, _)) = mixed_ring(k, b, solver_eus, all_eus, &any)? else {
+        return Ok(None);
+    };
+    Ok(Some(RollOver {
+        vertex,
+        convex: ring.convex_edge,
+        concave: ring.concave_edge,
+        kind: RollOverKind::Cusp,
+    }))
 }
 
 /// Whether the filleted `vertex`, which no other corner kind takes (not the Mixed corner),
@@ -146,6 +189,7 @@ pub fn classify_roll_over(
         vertex,
         convex,
         concave,
+        kind: RollOverKind::Ledge,
     }))
 }
 

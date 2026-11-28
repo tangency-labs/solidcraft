@@ -55,7 +55,7 @@ jobs:
           }
       - name: XML, desktop entry, AppStream, Flatpak manifest
         run: |
-          xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml* packaging/windows/policies/*.admx packaging/windows/policies/*/*.adml packaging/macos/policies/*.mobileconfig
+          xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft-registry.wxi assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml* packaging/windows/policies/*.admx packaging/windows/policies/*/*.adml packaging/macos/policies/*.mobileconfig
           # An MSI update installs before it removes the old version, so Start menu pins survive (#9366).
           grep -q 'Schedule="afterInstallExecute"' assets/platforms/windows/solidcraft.wxs
           grep -q 'Id="REINSTALLMODE" Value="amus"' assets/platforms/windows/solidcraft.wxs
@@ -66,6 +66,12 @@ jobs:
           grep -q 'Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::the Start menu shortcut must stay Name="SolidCraft"'; exit 1; }
           grep -q 'RemoveFile Id="RemoveStartMenuShortcutCad".*Name="SolidCraft CAD.lnk"' assets/platforms/windows/solidcraft.wxs
           desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.desktop
+          desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
+          # Double-clicking a file runs the visible entry as it always has; solidcraft:// links have the hidden entry of their own.
+          grep -qx 'Exec=solidcraft %f' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
+          ! grep -q 'x-scheme-handler' assets/platforms/linux/io.tangencylabs.solidcraft.desktop || { echo '::error file=assets/platforms/linux/io.tangencylabs.solidcraft.desktop::solidcraft:// links belong to the hidden workshop-links entry, not the visible one'; exit 1; }
+          grep -qx 'Exec=solidcraft --open-url %u' assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
+          grep -qx 'NoDisplay=true' assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
           # The window's X11 class is its app id; the old ids stay only as the rename shims.
           grep -qx 'StartupWMClass=io.tangencylabs.solidcraft' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
           grep -q '<id>ai.storyteller.solidcraft</id>' assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in
@@ -76,3 +82,38 @@ jobs:
           python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/flatpak/io.tangencylabs.solidcraft.bundle.yml')); assert m['id'] == 'io.tangencylabs.solidcraft' and m['command'] == 'solidcraft'"
           python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/snap/snapcraft.yaml')); assert m['name'] == 'solidcraft' and m['confinement'] == 'strict' and m['apps']['solidcraft']['command'] == 'usr/bin/solidcraft'"
           python3 -m py_compile packaging/linux/snap-smoke.py
+
+  # The MSI's two install scopes on a real Windows machine: all users (the default, unchanged) and
+  # just for me. Builds the MSI around stand-in executables (no Rust build), runs every ICE, prints
+  # the scope tables, installs, upgrades and uninstalls both ways (also as a standard user and over
+  # the latest release), and drives the wizard for screenshots of its pages.
+  windows-msi-scopes:
+    runs-on: blacksmith-8vcpu-windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+      - name: Install both ways and check
+        shell: pwsh
+        run: |
+          git fetch --depth=1 origin main
+          # main's installer sources side by side, so its includes resolve.
+          New-Item -ItemType Directory -Force target/msi-scopes/main | Out-Null
+          foreach ($f in git ls-tree --name-only FETCH_HEAD assets/platforms/windows/) {
+            git show "FETCH_HEAD:$f" | Set-Content (Join-Path target/msi-scopes/main (Split-Path -Leaf $f))
+          }
+          ./packaging/windows/check-msi-scopes.ps1 -Out target/msi-scopes -BaselineWxs target/msi-scopes/main/solidcraft.wxs -FromRelease -Ui
+      - name: Upload logs and wizard screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: msi-scopes
+          path: |
+            target/msi-scopes/*.log
+            target/msi-scopes/*.png
+            target/msi-scopes/*.txt
+          if-no-files-found: warn
+          retention-days: 14

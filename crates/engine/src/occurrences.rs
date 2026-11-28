@@ -232,6 +232,37 @@ thread_local! {
     /// How many (placement, body) pairs [`Session::bodies_hidden_by_parents`] has looked at on
     /// this thread (tests).
     pub(crate) static HIDDEN_BY_PARENTS_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many times [`Session::design_hidden`] has worked its set out on this thread (tests).
+    pub(crate) static DESIGN_HIDDEN_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The bodies the browser's eyes hide, as a drawing view that shows only what the design shows
+/// leaves them out (#22107): each by the occurrences that place it and its definition's body name,
+/// the pair a view's shown body carries ([`crate::drawing_view::Shown`]). A body's own eye, a hidden
+/// placement above it and a hidden folder or group it is in hide it; an open sketch doesn't, so a
+/// drawing doesn't change while someone sketches ([`Session::design_hidden`]).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DesignHidden(std::collections::HashMap<Vec<u64>, std::collections::HashSet<String>>);
+
+impl DesignHidden {
+    /// Whether it hides body `body` placed by `path`.
+    pub fn hides(&self, path: &[u64], body: &str) -> bool {
+        self.0.get(path).is_some_and(|bodies| bodies.contains(body))
+    }
+
+    /// Whether it hides nothing.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// [`Session::design_hidden`]'s last answer, and what it was worked out from.
+pub(crate) struct DesignHiddenCache {
+    revision: u64,
+    bodies: Vec<String>,
+    paths: Vec<Vec<u64>>,
+    folders: Vec<String>,
+    hidden: std::sync::Arc<DesignHidden>,
 }
 
 /// How many placement paths [`PlacementIndex`] names before it stops remembering more.
@@ -412,8 +443,13 @@ impl Session {
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
+        let owners = previous.model_body_components(state);
+        let mut by_component: std::collections::HashMap<u64, Vec<&solidcraft_doc::ModelBody>> = std::collections::HashMap::new();
+        for (body, owner) in state.bodies.iter().zip(owners) {
+            by_component.entry(owner).or_default().push(body);
+        }
         for (component, path, _) in previous.placements() {
-            for body in state.bodies.iter().filter(|body| previous.model_body_component(body) == component) {
+            for body in by_component.get(&component).into_iter().flatten().copied() {
                 let old = before.name(&body.name, component, &path);
                 let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
                 let new = after.name(source, component, &path);
@@ -858,6 +894,15 @@ impl Session {
         self.occurrence_placement(&path).map(|p| p.world).unwrap_or(IDENTITY)
     }
 
+    /// The active component's placement as occurrence ids from the top: the one it was activated
+    /// at while that still leads to it, else its first. Empty for the design.
+    pub fn active_path(&self) -> Vec<u64> {
+        match &self.active_occurrence_path {
+            Some(path) if self.doc.path_placement(path).is_some_and(|(component, _)| component == self.active_component) => path.clone(),
+            _ => self.doc.first_path(self.active_component),
+        }
+    }
+
     pub fn occurrence_visible(&self, path: &[u64]) -> bool {
         !self.visibility.hidden_occurrences.iter().any(|hidden| path.starts_with(hidden))
     }
@@ -1067,6 +1112,62 @@ impl Session {
             return cache.as_ref().is_none_or(|c| !c.bodies.contains(name));
         }
         !self.bodies_hidden_by_parents().contains(name)
+    }
+
+    /// The bodies the design shows hidden, for a drawing view that follows the browser's eyes
+    /// (#22107): [`Session::body_visible`]'s rule less what is about an open sketch (its rolled-off
+    /// bodies, [`Session::body_removed_later`]), so a drawing doesn't flicker while someone sketches.
+    ///
+    /// Kept until the design or its hidden lists change, and handed back as the same `Arc` while the
+    /// set is the same, so a view drawn from it stays up to date through a selection or any other
+    /// change that moves the revision alone.
+    pub fn design_hidden(&self) -> std::sync::Arc<DesignHidden> {
+        let v = &self.visibility;
+        let Ok(mut cache) = self.design_hidden_cache.lock() else {
+            // The lock is poisoned: worked out each time.
+            return std::sync::Arc::new(self.work_out_design_hidden());
+        };
+        if let Some(c) = cache.as_ref()
+            && c.revision == self.revision
+            && c.bodies == v.hidden_bodies
+            && c.paths == v.hidden_occurrences
+            && c.folders == v.hidden_folders
+        {
+            return c.hidden.clone();
+        }
+        let now = self.work_out_design_hidden();
+        let hidden = match cache.as_ref() {
+            Some(c) if *c.hidden == now => c.hidden.clone(),
+            _ => std::sync::Arc::new(now),
+        };
+        *cache = Some(DesignHiddenCache {
+            revision: self.revision,
+            bodies: v.hidden_bodies.clone(),
+            paths: v.hidden_occurrences.clone(),
+            folders: v.hidden_folders.clone(),
+            hidden: hidden.clone(),
+        });
+        hidden
+    }
+
+    /// [`Session::design_hidden`]'s set, worked out: every body the design places that its own eye,
+    /// a hidden placement above it or a hidden folder or group hides.
+    fn work_out_design_hidden(&self) -> DesignHidden {
+        #[cfg(test)]
+        DESIGN_HIDDEN_BUILDS.with(|n| n.set(n.get() + 1));
+        let v = &self.visibility;
+        if v.hidden_bodies.is_empty() && v.hidden_occurrences.is_empty() && v.hidden_folders.is_empty() {
+            return DesignHidden::default();
+        }
+        let by_parents =
+            if v.hidden_occurrences.is_empty() && v.hidden_folders.is_empty() { Default::default() } else { self.bodies_hidden_by_parents() };
+        let mut out: std::collections::HashMap<Vec<u64>, std::collections::HashSet<String>> = std::collections::HashMap::new();
+        for (name, body, _, path, _) in self.doc.body_frames_with_source(&self.model.state()) {
+            if by_parents.contains(&name) || self.body_hidden_itself(&name) {
+                out.entry(path).or_default().insert(body);
+            }
+        }
+        DesignHidden(out)
     }
 
     /// Is the body hidden itself (its own eye; a placement, folder or group may still hide it)?

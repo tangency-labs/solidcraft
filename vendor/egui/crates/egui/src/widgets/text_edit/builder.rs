@@ -5,10 +5,10 @@ use epaint::text::{Galley, LayoutJob, TextWrapMode, cursor::CCursor};
 
 use crate::{
     Align, Align2, AsIdSalt, AtomExt as _, AtomKind, Atoms, Color32, Context, CursorIcon, Event,
-    EventFilter, FontSelection, Frame, IMEPurpose, Id, IdSalt, ImeEvent, IntoAtoms,
-    IntoSizedResult, Key, KeyboardShortcut, Margin, Modifiers, NumExt as _, Response, Sense,
-    SizedAtomKind, TextBuffer, TextStyle, Ui, Vec2, Widget, WidgetAtom, WidgetInfo,
-    WidgetWithState,
+    EventFilter, FontId, FontSelection, Frame, IMEPurpose, Id, IdSalt, ImeEvent, IntoAtoms,
+    IntoSizedResult, Key, KeyboardShortcut, Margin, Modifiers, NumExt as _, Painter, Response,
+    Sense, SizedAtomKind, TextBuffer, TextStyle, TextFormat, Ui, Vec2, Widget, WidgetAtom,
+    WidgetInfo, WidgetWithState,
     class::{ClassName, Classes, HasClasses},
     epaint,
     os::OperatingSystem,
@@ -720,8 +720,12 @@ impl<'t> TextEdit<'t> {
 
             // TODO(servo/rust-smallvec#146): Use extend_right instead of the loop once we have
             // smallvec 2.0. Using `extend_right` here won't compile, due to lifetime issues.
+            // SolidCraft: give the prefix the field's alignment, as the text and hint atoms
+            // below get it, so the vertical-centring lift treats the affixes exactly as it
+            // treats the text: lifted in a centred field, kept where it stands in a
+            // top-aligned one (SolidCraft #23381).
             for atom in prefix {
-                atoms.push_right(atom);
+                atoms.push_right(atom.atom_align(align));
             }
 
             if text.as_str().is_empty() && !hint_text.is_empty() {
@@ -803,7 +807,7 @@ impl<'t> TextEdit<'t> {
             // TODO(servo/rust-smallvec#146): Use extend_right instead of the loop once we have
             // smallvec 2.0. Using `extend_right` here won't compile, due to lifetime issues.
             for atom in suffix {
-                atoms.push_right(atom);
+                atoms.push_right(atom.atom_align(align)); // SolidCraft: see the prefix loop, #23381.
             }
 
             let min_height = (min_inner_height + frame.total_margin().sum().y).at_least(min_size.y);
@@ -846,6 +850,14 @@ impl<'t> TextEdit<'t> {
         let text_clip_rect = inner_rect;
         let painter = ui.painter_at(text_clip_rect.expand(1.0)); // expand to avoid clipping cursor
 
+        // SolidCraft: compute the optical lift once, so the preview cursor, the row and
+        // the caret all stand on the same lifted baseline (#23381).
+        let cap_ink_rise = if align.y() == Align::Center {
+            galley_cap_ink_rise(ui.painter(), &galley)
+        } else {
+            0.0
+        };
+
         if interactive && let Some(pointer_pos) = response.interact_pointer_pos() {
             if response.hovered() && text.is_mutable() {
                 ui.output_mut(|o| o.mutable_text_under_cursor = true);
@@ -863,7 +875,7 @@ impl<'t> TextEdit<'t> {
             {
                 // text cursor preview:
                 let cursor_rect = TSTransform::from_translation(
-                    inner_rect.min.to_vec2() - vec2(galley.rect.left(), 0.0),
+                    inner_rect.min.to_vec2() - vec2(galley.rect.left(), cap_ink_rise),
                 ) * cursor_rect(&galley, &cursor_at_pointer, row_height);
                 text_selection::visuals::paint_cursor_end(&painter, ui.visuals(), cursor_rect);
             }
@@ -936,6 +948,16 @@ impl<'t> TextEdit<'t> {
             .align_size_within_rect(galley.size(), inner_rect)
             .intersect(inner_rect) // limit pos to the response rect area
             .min;
+        // SolidCraft: optical vertical centring. `align_size_within_rect` centres the row box,
+        // but that is not where a centred line of text should read: a font's capitals sit low
+        // in their row box (the ascent exceeds the cap height, and a descent hangs under the
+        // baseline), so a vertically centred field's text reads low in its frame. Lift the row
+        // by the distance from the middle of its row box to the middle of a capital's ink,
+        // measured from a fixed probe glyph rather than the text itself, so the baseline never
+        // moves while one types (SolidCraft #23381).
+        if align.y() == Align::Center {
+            galley_pos.y -= cap_ink_rise;
+        }
         let align_offset = inner_rect.left_top() - galley_pos;
 
         // Visual clipping for singleline text editor with text larger than width
@@ -1631,4 +1653,35 @@ fn check_for_mutating_key_press(
 
         _ => None,
     }
+}
+
+/// How far the middle of a capital's ink sits below the middle of its row box, in points, for
+/// `font`. Used to lift vertically centred single-row text so its capitals read centred; see
+/// its use in [`crate::TextEdit`]'s paint (SolidCraft #23381). Lays out one fixed probe glyph
+/// rather than reading the laid-out text, so the result follows the font, its size and the
+/// pixels-per-point, and never moves with what is typed.
+pub fn cap_ink_rise(painter: &Painter, font: &FontId) -> f32 {
+    let job =
+        LayoutJob::single_section("H".to_owned(), TextFormat::simple(font.clone(), Color32::WHITE));
+    let probe = painter.layout_job(job);
+    let row = &probe.rows[0];
+    row.visuals.mesh_bounds.center().y - 0.5 * row.size.y
+}
+
+/// How far to lift `galley` so a vertically centred line of text reads centred in its row
+/// box: [`cap_ink_rise`] for the font `galley` was laid out with, or `0.0` for a multi-row
+/// galley, which is centred as a block rather than on one baseline. Use with
+/// [`Align::Center`] on the cross axis of whatever contains the text (SolidCraft #23381).
+pub fn galley_cap_ink_rise(painter: &Painter, galley: &Galley) -> f32 {
+    if galley.rows.len() != 1 {
+        return 0.0;
+    }
+    let font = galley.job.sections.first().map_or_else(
+        || {
+            let ctx = painter.ctx();
+            TextStyle::Body.resolve(&ctx.style_of(ctx.theme()))
+        },
+        |section| section.format.font_id.clone(),
+    );
+    cap_ink_rise(painter, &font)
 }

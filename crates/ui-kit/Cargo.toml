@@ -26,6 +26,9 @@ solidcraft-color = { workspace = true }
 # The blurred backing behind translucent panels: drawn over the viewport's GPU picture.
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
+# 3D mouse descriptors, reports and calibration, re-exported as `space_mouse` so other hosts
+# (FieldCraft) read devices the way SolidCraft does (#23205). It has no dependencies of its own.
+solidcraft-space-mouse = { workspace = true, features = ["serde"] }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 serde = { workspace = true }
@@ -37,6 +40,8 @@ tiny-skia = { workspace = true }
 image = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The blur's frame hook in our own window painter, and drawing a run of a frame (`render_run`).
+solidcraft-window-gpu = { workspace = true }
 # Text fields' context menu reads the system clipboard.
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 

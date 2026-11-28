@@ -141,26 +141,13 @@ pub fn projection_weld(weld: &ProjectionWeld) -> Result<Vec<Vec<SpotPiece>>> {
         if !p.at.iter().all(|v| v.is_finite()) {
             return bad("a projection centre that is not finite");
         }
-        out.push(match p.shape {
-            ProjectionShape::Round { d1 } => round(weld, p.at, d1).map_err(|why| ProjectionRefusal::AtProjection { projection: i, why })?,
-            ProjectionShape::Elongated { b1, l1, along } => {
-                if !(positive(b1) && positive(l1)) || l1 - b1 <= tol {
-                    return bad("an elongated projection whose width and length are not finite and positive, or not longer than wide");
-                }
-                let frame = placement(p.at, weld.normal, along)?;
-                let laid = Laid { d: b1, at: p.at, t_u, t_l: first, dimple: weld.dimple, tol };
-                laid.check()?;
-                laid.oval((l1 - b1) / 2.0, &frame)?
+        out.push(match (p.shape, laid(p.shape, p.at, t_u, first, weld.dimple, tol)?) {
+            (ProjectionShape::Round { d1 }, _) => round(weld, p.at, d1).map_err(|why| ProjectionRefusal::AtProjection { projection: i, why })?,
+            (ProjectionShape::Elongated { along, .. }, Some((laid, c))) => {
+                laid.oval(c, &placement(p.at, weld.normal, in_face(weld.normal, along)?)?)?
             }
-            ProjectionShape::Ring { d1, di } => {
-                if !(positive(d1) && positive(di)) || di >= d1 {
-                    return bad("a ring projection whose diameters are not finite and positive, or whose inner is not under its outer");
-                }
-                let frame = placement(p.at, weld.normal, [1.0, 0.0, 0.0])?;
-                let laid = Laid { d: (d1 - di) / 2.0, at: p.at, t_u, t_l: first, dimple: weld.dimple, tol };
-                laid.check()?;
-                laid.ring((d1 + di) / 4.0, &frame)?
-            }
+            (ProjectionShape::Ring { .. }, Some((laid, rc))) => laid.ring(rc, &placement(p.at, weld.normal, [1.0, 0.0, 0.0])?)?,
+            (_, None) => return bad("an oval or a ring projection without its sizes"),
         });
     }
     Ok(out)
@@ -184,6 +171,58 @@ fn round(weld: &ProjectionWeld, at: [f64; 3], d1: f64) -> std::result::Result<Ve
     let mut pieces = spot_weld(&spot(SpotMarks { faces: MarkFaces::Upper, ..upper }))?;
     pieces.extend(spot_weld(&spot(SpotMarks { faces: MarkFaces::Lower, ..lower }))?);
     Ok(pieces)
+}
+
+/// The least share of an elongated projection's direction that must lie in the face: the sine of
+/// its angle off the normal. Less than that, the direction is the normal but for rounding, and the
+/// oval would run where the kernel chooses, not where the user said.
+const IN_FACE: f64 = 1e-6;
+
+/// `along` as a unit direction in the face square to `normal`. Refused when it is zero or not
+/// finite, or runs along `normal`: its part in the face less than [`IN_FACE`] of its length. Made
+/// unit first, so a short direction in the face is kept, never replaced.
+fn in_face(normal: [f64; 3], along: [f64; 3]) -> Result<[f64; 3]> {
+    if !normal.iter().chain(&along).all(|v| v.is_finite()) || along == [0.0; 3] {
+        return bad("a projection direction that is zero or not finite");
+    }
+    let Some(a) = affine::unit_axis_direction(along, f64::MIN_POSITIVE) else {
+        return bad("a projection direction that is zero or not finite");
+    };
+    let [_, u] = affine::orthonormal_axes(normal, a)?;
+    if affine::distance_along([0.0; 3], u, a).abs() < IN_FACE {
+        return bad("an elongated projection whose direction runs along the normal, not in the face");
+    }
+    Ok(u)
+}
+
+/// The sizes of projection `shape` at `at`, checked as both [`projection_weld`] and
+/// [`projection_site`] check them: an oval's width `b1` and the half length `c` of its centre line,
+/// or a ring's width `(d1 - di) / 2` and centre radius `(d1 + di) / 4`, with room inside for its
+/// marks; each within the model's size limit ([`Laid::check`]). `None` for a round projection,
+/// which the spot checks.
+fn laid(shape: ProjectionShape, at: [f64; 3], t_u: f64, t_l: f64, dimple: Option<SpotSide>, tol: f64) -> Result<Option<(Laid, f64)>> {
+    let (d, extent) = match shape {
+        ProjectionShape::Round { .. } => return Ok(None),
+        ProjectionShape::Elongated { b1, l1, .. } => {
+            if !(positive(b1) && positive(l1)) || l1 - b1 <= tol {
+                return bad("an elongated projection whose width and length are not finite and positive, or not longer than wide");
+            }
+            (b1, (l1 - b1) / 2.0)
+        }
+        ProjectionShape::Ring { d1, di } => {
+            if !(positive(d1) && positive(di)) || di >= d1 {
+                return bad("a ring projection whose diameters are not finite and positive, or whose inner is not under its outer");
+            }
+            let (d, rc) = ((d1 - di) / 2.0, (d1 + di) / 4.0);
+            if rc - MARKS.edge * d / 2.0 <= tol {
+                return bad("a ring projection too narrow inside for its marks");
+            }
+            (d, rc)
+        }
+    };
+    let laid = Laid { d, at, t_u, t_l, dimple, tol };
+    laid.check(extent)?;
+    Ok(Some((laid, extent)))
 }
 
 /// The map from the local frame (the projection at the origin, its normal along +Z, `along` made
@@ -236,12 +275,13 @@ impl Laid {
         [0.0, MARKS.core * self.d / 2.0, MARKS.band * self.d / 2.0, MARKS.edge * self.d / 2.0]
     }
 
-    /// Refuses sizes the model cannot hold.
-    fn check(&self) -> Result<()> {
+    /// Refuses sizes the model cannot hold: the marks reach `extent` (an oval's half length, a
+    /// ring's centre radius) and then the width from the centre in the face.
+    fn check(&self, extent: f64) -> Result<()> {
         let MarkTop::Flat { thickness } = MARKS.top else {
             return bad("projection marks that are not flat");
         };
-        let reach = self.at.iter().fold(0.0_f64, |m, c| m.max(c.abs())) + self.d + self.t_u + self.t_l;
+        let reach = self.at.iter().fold(0.0_f64, |m, c| m.max(c.abs())) + extent + self.d + self.t_u + self.t_l;
         if !reach.is_finite() || reach > profiles::MAX_COORD {
             return bad("a projection so large that it passes the model's size limit");
         }
@@ -311,9 +351,6 @@ impl Laid {
     /// circle turned a whole turn.
     fn ring(&self, rc: f64, frame: &affine::Matrix) -> Result<Vec<SpotPiece>> {
         let r = self.radii();
-        if rc - r[3] <= self.tol {
-            return bad("a ring projection too narrow inside for its marks");
-        }
         let across_ring = Plane { base: [rc, 0.0, 0.0], side: [1.0, 0.0, 0.0] };
         let mut pieces = Vec::new();
         for (side, face, sense, top) in self.faces()? {
@@ -400,33 +437,33 @@ pub struct ProjectionSite {
 ///
 /// A round or ring projection is a spot site of its outer diameter ([`spot_site`]); an elongated
 /// one a seam site of its width along its straight part ([`seam_site`]). Every projection must lie
-/// on the same sheets and faces. The sheets are read, never changed.
+/// on the same sheets and faces, and its sizes are checked as [`projection_weld`] checks them. The
+/// sheets are read, never changed.
 ///
 /// # Errors
-/// [`ProjectionRefusal::Invalid`] for no projections or a size or direction out of range;
+/// [`ProjectionRefusal::Invalid`] for no projections or a size or direction out of range, as
+/// [`projection_weld`] refuses them;
 /// [`ProjectionRefusal::AtProjection`] and [`ProjectionRefusal::AlongProjection`] with the spot's
 /// or the seam's refusal; [`ProjectionRefusal::OnOtherSheets`]. The errors of the kernel calls
 /// otherwise.
 pub fn projection_site(sheets: &[&Body], picked: usize, face: usize, projections: &[Projection]) -> Result<ProjectionSite> {
+    let tol = profiles::zone_tolerance()?;
     let mut first: Option<(Vec<SpotSheet>, [f64; 3])> = None;
     let mut moved = Vec::new();
     for (i, p) in projections.iter().enumerate() {
-        let at = |d: f64| spot_site(sheets, picked, face, p.at, d).map_err(|why| ProjectionRefusal::AtProjection { projection: i, why });
-        let site = match p.shape {
-            ProjectionShape::Round { d1 } | ProjectionShape::Ring { d1, .. } => at(d1)?,
-            ProjectionShape::Elongated { b1, l1, along } => {
-                let site = at(b1)?;
-                if !positive(l1) || l1 <= b1 || along == [0.0; 3] || !along.iter().all(|v| v.is_finite()) {
-                    return bad("an elongated projection not longer than wide, or with no direction");
-                }
-                let [_, u] = affine::orthonormal_axes(site.normal, along)?;
-                let c = (l1 - b1) / 2.0;
-                let end = |k: f64| [p.at[0] + u[0] * k, p.at[1] + u[1] * k, p.at[2] + u[2] * k];
-                seam_site(sheets, picked, face, end(-c), &[SeamPiece::Line { to: end(c) }], b1)
-                    .map_err(|why| ProjectionRefusal::AlongProjection { projection: i, why })?;
-                site
-            }
+        let size = match p.shape {
+            ProjectionShape::Round { d1 } | ProjectionShape::Ring { d1, .. } => d1,
+            ProjectionShape::Elongated { b1, .. } => b1,
         };
+        let site = spot_site(sheets, picked, face, p.at, size).map_err(|why| ProjectionRefusal::AtProjection { projection: i, why })?;
+        let t_l = site.sheets.first().map_or(0.0, |s| s.thickness);
+        let t_u: f64 = site.sheets.iter().skip(1).map(|s| s.thickness).sum();
+        if let (ProjectionShape::Elongated { b1, along, .. }, Some((_, c))) = (p.shape, laid(p.shape, site.at, t_u, t_l, None, tol)?) {
+            let u = in_face(site.normal, along)?;
+            let end = |k: f64| [p.at[0] + u[0] * k, p.at[1] + u[1] * k, p.at[2] + u[2] * k];
+            seam_site(sheets, picked, face, end(-c), &[SeamPiece::Line { to: end(c) }], b1)
+                .map_err(|why| ProjectionRefusal::AlongProjection { projection: i, why })?;
+        }
         match &first {
             None => first = Some((site.sheets.clone(), site.normal)),
             Some((sheets, _)) => {
@@ -489,13 +526,17 @@ const ELONGATED: [(f64, [f64; 2]); 9] = [
 /// - ring: Annex A Table A.2 (sheets over 0.5 up to 1.0 mm, as printed) with Table 2's inner
 ///   diameter; `None` outside it (the tool keeps the last size used, else the user types it).
 ///
+/// A thickness within the zone tolerance of a table's boundary counts as on it: a measured
+/// thickness carries rounding (a 1 mm sheet can measure `0.9999999999999998`).
+///
 /// # Errors
 /// [`ProjectionRefusal::Invalid`] for fewer than two sheets, or a thickness that is not finite and
-/// positive.
+/// positive; the kernel's refusal of its zone tolerance.
 pub fn proposed_projection(thicknesses: &[f64], kind: ProjectionKind) -> Result<Option<ProposedProjection>> {
     check_sheets(thicknesses).map_err(|_| ProjectionRefusal::Invalid("fewer than two sheets, or a thickness that is not finite and positive"))?;
     let t = thicknesses.iter().fold(f64::INFINITY, |m, &v| m.min(v));
-    let group_b = GROUP_B.iter().find(|&&(upto, _)| t <= upto).map_or(6.3, |&(_, size)| size);
+    let tol = profiles::zone_tolerance()?;
+    let group_b = GROUP_B.iter().find(|&&(upto, _)| t <= upto + tol).map_or(6.3, |&(_, size)| size);
     Ok(match kind {
         ProjectionKind::Spherical => Some(ProposedProjection { size: group_b, inner: None, length: None }),
         ProjectionKind::Elongated => {
@@ -504,9 +545,9 @@ pub fn proposed_projection(thicknesses: &[f64], kind: ProjectionKind) -> Result<
         }
         // Table A.2 as printed: 0.5 < t <= 0.8, 0.8 < t < 1.0, t = 1.0; Table 2's inner diameters
         ProjectionKind::Ring => match t {
-            t if t > 0.5 && t <= 0.8 => Some(ProposedProjection { size: 3.0, inner: Some(1.6), length: None }),
-            t if t > 0.8 && t < 1.0 => Some(ProposedProjection { size: 4.0, inner: Some(2.0), length: None }),
-            1.0 => Some(ProposedProjection { size: 4.5, inner: Some(2.0), length: None }),
+            t if t > 0.5 + tol && t <= 0.8 + tol => Some(ProposedProjection { size: 3.0, inner: Some(1.6), length: None }),
+            t if t > 0.8 + tol && t < 1.0 - tol => Some(ProposedProjection { size: 4.0, inner: Some(2.0), length: None }),
+            t if (t - 1.0).abs() <= tol => Some(ProposedProjection { size: 4.5, inner: Some(2.0), length: None }),
             _ => None,
         },
     })

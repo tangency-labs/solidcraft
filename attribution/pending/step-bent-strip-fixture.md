@@ -1,0 +1,1 @@
+| tests/step-regressions/bent_strip_micrometre_cuts.step | SolidCraft contributors | written by SolidCraft from the commands of #22579 (a bent strip with two micrometre cuts, exported); import regression fixture | MIT OR Apache-2.0 |

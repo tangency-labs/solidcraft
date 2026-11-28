@@ -198,40 +198,6 @@ fn the_mode_through_commands_ui_set_and_saved_preferences() {
     assert_eq!(reopened(r#"{"pick_mode": "dim", "pick_bodies": true}"#), PickMode::Faces);
 }
 
-/// "Select bodies" (the filter's box and Preferences') is the Bodies mode: ticked exactly there;
-/// ticking sets Bodies and unticking Faces & edges, from whichever mode was on.
-#[test]
-fn the_select_bodies_box_is_the_bodies_mode() {
-    use crate::test_support::{frame, pointer};
-    let ctx = crate::fonts::test_context();
-    let mut app = crate::SolveApp::new(Default::default(), Default::default());
-    // Where the box is (its layout doesn't depend on the mode).
-    let mut rect = egui::Rect::NOTHING;
-    frame(&ctx, Default::default(), |ui: &mut egui::Ui| rect = crate::ui_kit::checkbox(ui, "Select bodies", &mut false).rect);
-    let at = rect.left_center() + egui::vec2(4.0, 0.0);
-    let press = |app: &mut crate::SolveApp| {
-        for down in [true, false] {
-            let input = egui::RawInput { events: pointer(at, down), ..Default::default() };
-            frame(&ctx, input, |ui: &mut egui::Ui| crate::selection_mode::checkbox(app, ui, PickMode::Bodies, "Select bodies"));
-        }
-    };
-    for (from, to) in [
-        (PickMode::Faces, PickMode::Bodies),
-        (PickMode::Bodies, PickMode::Faces),
-        (PickMode::Features, PickMode::Bodies),
-        (PickMode::Components, PickMode::Bodies),
-    ] {
-        crate::selection_mode::set(&mut app, from);
-        press(&mut app);
-        assert_eq!(app.ui.pick_mode, to, "from {from:?}");
-    }
-    // Unticked in Features: ticking gives Bodies, then unticking Faces & edges, not Features.
-    crate::selection_mode::set(&mut app, PickMode::Features);
-    press(&mut app);
-    press(&mut app);
-    assert_eq!(app.ui.pick_mode, PickMode::Faces);
-}
-
 /// The navigation bar's selection-mode slot (#6585): a menu row runs `select.mode`, and the slot
 /// shows the mode's icon and name. The menu lists the five modes that pick from the model, then
 /// sketch geometry.

@@ -138,8 +138,10 @@ pub enum Warning {
     Chars { count: usize, max: u32 },
     /// More lines than the value box holds.
     Height,
-    /// A word wider than the value box.
+    /// A word wider than the value box: set smaller to fit it.
     Width,
+    /// A value that doesn't fit its box even at the smallest size: clipped to it, with an ellipsis.
+    Clipped,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

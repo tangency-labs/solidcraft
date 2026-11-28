@@ -41,10 +41,12 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
     // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
     // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 111 because
-    // the keyboard profile (#15302) is a portable Shortcuts preference.
+    // the keyboard profile (#15302) is a portable Shortcuts preference; 111 -> 113 because the Roll
+    // key and the twist's roll (roll_key, trackpad_twist_rolls, #22691) are two more portable
+    // Navigation preferences.
     assert_eq!(
         keys.len(),
-        111,
+        113,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
@@ -878,6 +880,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "ribbon_reveal",
         "ribbon_tabs_only",
         "right_drag_orbits",
+        "roll_key",
         "select_other_hidden",
         "selection_shift_add_only",
         "shortcut_again_ends_tool",
@@ -909,6 +912,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "timeline_origin_bodies",
         "toast_place",
         "trackpad_pan",
+        "trackpad_twist_rolls",
         "trackpad_twist_turns",
         "trackpad_zoom_modifier",
         "ui_font",
@@ -930,10 +934,11 @@ fn profile_keys_cover_the_current_portable_preferences() {
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
     // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
+    // Test change: two more portable keys, roll_key and trackpad_twist_rolls (rolling the view, #22691).
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
     // Test change: one more portable key, keyboard_profile (the keyboard profile your keys sit on, #15302).
-    assert_eq!(expected.len(), 111);
+    assert_eq!(expected.len(), 113);
     assert_eq!(actual, expected);
 }
 
@@ -1050,14 +1055,14 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     let card = crate::scenario::rect_of("prefs:profile").unwrap();
     h.step(&json!({"click":[card.left() + 3.0, card.center().y]})).unwrap();
     h.frames(2);
-    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the card's padding opens its real menu");
+    assert!(crate::scenario::rect_of("menu:Laptop").is_some(), "the card's padding opens its real menu");
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.prefs_window.shell.open);
-    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
+    assert!(crate::scenario::rect_of("menu:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
-    assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the same trigger opens from the keyboard");
-    h.step(&json!({"click":{"handle":"dialog:list:Laptop"}})).unwrap();
+    assert!(crate::scenario::rect_of("menu:Laptop").is_some(), "the same trigger opens from the keyboard");
+    h.step(&json!({"click":{"handle":"menu:Laptop"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
     assert!(!h.app.preferences.zoom_reverse);
@@ -1108,7 +1113,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"text":"Next profile"})).unwrap();
     h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
     h.frames(2);
-    h.step(&json!({"click":{"handle":"dialog:list:Desk"}})).unwrap();
+    h.step(&json!({"click":{"handle":"menu:Desk"}})).unwrap();
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert_eq!(

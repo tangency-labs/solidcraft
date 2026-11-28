@@ -627,6 +627,178 @@ fn two_rings_written_as_a_torus_less_a_disc_each_import_whole() {
     }
 }
 
+/// The lens of #22669 on the sphere of radius 100 about the origin, bounded by two circle arcs
+/// that meet at A = (60, 69.28, −40) and B = (60, 69.28, 40): the sphere's circle in the plane
+/// x = 60 (radius 80 about +x) from A to B through (60, 80, 0), and its circle through B,
+/// (`x1`, y, 0) and A back to A. The sphere's frame has its axis along `pole` and its reference
+/// direction +z. Written as an open shell, or `closed` by the two planes of the circles, which
+/// meet along AB. Returns the file and, in closed form, the lens's area, the closed wedge's area
+/// and its volume.
+fn sphere_lens_step(x1: f64, pole: [f64; 3], closed: bool) -> (String, f64, f64, f64) {
+    use std::f64::consts::PI;
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |a: [f64; 3]| {
+        let l = dot(a, a).sqrt();
+        [a[0] / l, a[1] / l, a[2] / l]
+    };
+    let (radius, x0) = (100.0_f64, 60.0_f64);
+    let r1 = (radius * radius - x0 * x0).sqrt();
+    let (a, b) = ([x0, r1 * 0.75_f64.sqrt(), -0.5 * r1], [x0, r1 * 0.75_f64.sqrt(), 0.5 * r1]);
+    // The second circle: in the plane through A, B and P, about the axis it runs round from B
+    // through P to A; its centre c2 at the signed distance d along that axis.
+    let p = [x1, (radius * radius - x1 * x1).sqrt(), 0.0];
+    let n = unit(cross(sub(a, p), sub(b, p)));
+    let d = dot(n, p);
+    let c2 = [n[0] * d, n[1] * d, n[2] * d];
+    let r2 = (radius * radius - d * d).sqrt();
+    // By Gauss-Bonnet the lens's area over R² is 2π less its two corners' turns (π less the
+    // angle α between the arcs at A, the same at B) less each arc's geodesic curvature: the lens
+    // lies inside the cap of the circle at x = 60 (cos ρ = 60 / R, over its 60° arc) and outside
+    // the other's (cos ρ = |d| / R, over its arc's angle φ2).
+    let t1 = unit(cross([1.0, 0.0, 0.0], sub(a, [x0, 0.0, 0.0])));
+    let t2 = unit(cross(sub(a, c2), n));
+    let alpha = dot(t1, t2).acos();
+    let phi1 = PI / 3.0;
+    let phi2 = dot(unit(sub(b, c2)), unit(sub(a, c2))).acos();
+    let lens = radius * radius * (2.0 * alpha - x0 / radius * phi1 + d.abs() / radius * phi2);
+    // The planes' faces: each the circular segment between its arc and the chord AB. The volume
+    // is a third of the integral of p · n over the boundary: R on the sphere, the plane's
+    // signed distance from the centre on each plane (−60 facing −x, |d| facing towards c2).
+    let segment = |r: f64, phi: f64| 0.5 * r * r * (phi - phi.sin());
+    let (s1, s2) = (segment(r1, phi1), segment(r2, phi2));
+    let area = lens + s1 + s2;
+    let volume = (radius * lens - x0 * s1 + d.abs() * s2) / 3.0;
+
+    let mut lines: Vec<String> = Vec::new();
+    fn add(lines: &mut Vec<String>, body: String) -> usize {
+        lines.push(format!("#{}={body};\n", lines.len() + 1));
+        lines.len()
+    }
+    let xyz = |q: [f64; 3]| format!("({:.17E},{:.17E},{:.17E})", q[0], q[1], q[2]);
+    let frame = |lines: &mut Vec<String>, o: [f64; 3], z: [f64; 3], x: [f64; 3]| {
+        let (o, z, x) = (
+            add(lines, format!("CARTESIAN_POINT('',{})", xyz(o))),
+            add(lines, format!("DIRECTION('',{})", xyz(z))),
+            add(lines, format!("DIRECTION('',{})", xyz(x))),
+        );
+        add(lines, format!("AXIS2_PLACEMENT_3D('',#{o},#{z},#{x})"))
+    };
+    let vertex = |lines: &mut Vec<String>, q: [f64; 3]| {
+        let q = add(lines, format!("CARTESIAN_POINT('',{})", xyz(q)));
+        add(lines, format!("VERTEX_POINT('',#{q})"))
+    };
+    let (va, vb) = (vertex(&mut lines, a), vertex(&mut lines, b));
+    let f1 = frame(&mut lines, [x0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let k1 = add(&mut lines, format!("CIRCLE('',#{f1},{r1:.17E})"));
+    let arc1 = add(&mut lines, format!("EDGE_CURVE('',#{va},#{vb},#{k1},.T.)"));
+    let f2 = frame(&mut lines, c2, n, unit(sub(b, c2)));
+    let k2 = add(&mut lines, format!("CIRCLE('',#{f2},{r2:.17E})"));
+    let arc2 = add(&mut lines, format!("EDGE_CURVE('',#{vb},#{va},#{k2},.T.)"));
+    let face = |lines: &mut Vec<String>, uses: &[(usize, bool)], surface: usize| {
+        let oriented: Vec<String> =
+            uses.iter().map(|&(e, s)| format!("#{}", add(lines, format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if s { 'T' } else { 'F' })))).collect();
+        let lp = add(lines, format!("EDGE_LOOP('',({}))", oriented.join(",")));
+        let bound = add(lines, format!("FACE_BOUND('',#{lp},.T.)"));
+        add(lines, format!("ADVANCED_FACE('',(#{bound}),#{surface},.T.)"))
+    };
+    let fs = frame(&mut lines, [0.0; 3], unit(pole), [0.0, 0.0, 1.0]);
+    let sphere = add(&mut lines, format!("SPHERICAL_SURFACE('',#{fs},{radius:.1})"));
+    let lens_face = face(&mut lines, &[(arc1, true), (arc2, true)], sphere);
+    let (item, representation) = if closed {
+        // Each plane faces out of the wedge: −x, and towards c2 (the lens lies outside the
+        // second circle's cap).
+        let o = add(&mut lines, format!("CARTESIAN_POINT('',{})", xyz(a)));
+        let dir = add(&mut lines, format!("DIRECTION('',{})", xyz(unit(sub(b, a)))));
+        let v = add(&mut lines, format!("VECTOR('',#{dir},{:.17E})", 2.0 * a[2].abs()));
+        let line = add(&mut lines, format!("LINE('',#{o},#{v})"));
+        let chord = add(&mut lines, format!("EDGE_CURVE('',#{va},#{vb},#{line},.T.)"));
+        let fp1 = frame(&mut lines, [x0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let plane1 = add(&mut lines, format!("PLANE('',#{fp1})"));
+        let fp2 = frame(&mut lines, c2, unit(c2), unit(sub(b, c2)));
+        let plane2 = add(&mut lines, format!("PLANE('',#{fp2})"));
+        let side1 = face(&mut lines, &[(arc1, false), (chord, true)], plane1);
+        let side2 = face(&mut lines, &[(arc2, false), (chord, false)], plane2);
+        let shell = add(&mut lines, format!("CLOSED_SHELL('',(#{lens_face},#{side1},#{side2}))"));
+        (add(&mut lines, format!("MANIFOLD_SOLID_BREP('wedge',#{shell})")), "ADVANCED_BREP_SHAPE_REPRESENTATION")
+    } else {
+        let shell = add(&mut lines, format!("OPEN_SHELL('',(#{lens_face}))"));
+        (add(&mut lines, format!("SHELL_BASED_SURFACE_MODEL('lens',(#{shell}))")), "MANIFOLD_SURFACE_SHAPE_REPRESENTATION")
+    };
+    let ctx = lines.len() as u64 + 2;
+    add(&mut lines, format!("{representation}('',(#{item}),#{ctx})"));
+    let mut t = String::from(HEAD);
+    t += &lines.concat();
+    t += &context(ctx, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    (t, lens, area, volume)
+}
+
+/// A sphere face whose sphere's frame holds its pole inside the face reads as the same face as
+/// with the pole outside (#22669; a dished face of a part from another CAD program has it so):
+/// the issue's lens with the pole at (100, 0, 0), outside it, then with the pole inside, on the
+/// lens up to x = 62 and on the thinner one up to x = 61, each as a sheet and closed. With the
+/// pole inside, the face gets a seam from its loop to the pole.
+/// The seam's meridian frame missed the curve record's unit-and-square check on the first
+/// ("the frame's axes are not unit and square"), and on the thinner one, whose arcs pass 0.6 mm
+/// from the pole, the loop was not found to cross the seam's angle ("a loop round a pole that
+/// misses its seam's angle"): the sheet was refused, the closed wedge came in open without it.
+#[test]
+fn a_sphere_face_that_holds_its_frames_pole_reads_as_with_the_pole_outside() {
+    for (x1, pole) in [(62.0, [1.0, 0.0, 0.0]), (62.0, [61.0, 79.6806, 0.0]), (61.0, [60.5, 79.6225, 0.0])] {
+        let inside = pole[1] != 0.0;
+        for closed in [false, true] {
+            let case = format!("x1 {x1}, pole {pole:?}, closed {closed}");
+            let (text, lens, area, volume) = sphere_lens_step(x1, pole, closed);
+            let imp = step_import(&text).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
+            let body = &imp.bodies[0];
+            assert!(body.refused.is_none(), "{case}: {:?}", imp.warnings);
+            assert_eq!((body.closed, body.body.is_surface()), (closed, !closed), "{case}: {:?}", imp.warnings);
+            let m = measure(&body.body).unwrap_or_else(|e| panic!("{case}: {e}"));
+            // The arcs (and the chord) between A and B. With the pole inside, the seam to it and
+            // the arc it starts on split in two: A and B lie at angles about the axis that the
+            // arcs' pieces passing near the pole also reach (their control hulls fan out round
+            // it), so the seam starts in the middle of the widest range of angles the loop passes
+            // once, on a new vertex.
+            let (faces, edges) = if closed { (3, 3) } else { (1, 2) };
+            let seam = 2 * usize::from(inside);
+            assert_eq!((m.faces, m.edges, m.vertices, m.shells), (faces, edges + seam, 2 + seam, 1), "{case}: {:?}", imp.warnings);
+            assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("refused")), "{case}: {:?}", imp.warnings);
+            if inside {
+                // The seam ends on the pole, at R along the sphere's axis, and the sphere's face
+                // uses it twice, once each way.
+                let record = body.body.record();
+                let l = pole.iter().map(|c| c * c).sum::<f64>().sqrt();
+                let at = pole.map(|c| 100.0 * c / l);
+                let on_pole = |v: u32| {
+                    let p = record.vertices[v as usize].point;
+                    (0..3).map(|i| (p[i] - at[i]).powi(2)).sum::<f64>().sqrt() < 1e-9 * 100.0
+                };
+                let seams: Vec<usize> = (0..record.edges.len()).filter(|&e| record.edges[e].vertices.iter().any(|&v| on_pole(v))).collect();
+                assert_eq!(seams.len(), 1, "{case}: one edge to the pole");
+                let mut ways = Vec::new();
+                for face in &record.faces {
+                    for l in &face.loops {
+                        if let solidcore_record::brep::Loop::Edges { edges } = l {
+                            ways.extend(edges.iter().filter(|u| u.edge as usize == seams[0]).map(|u| u.forward));
+                        }
+                    }
+                }
+                ways.sort_unstable();
+                assert_eq!(ways, [false, true], "{case}: the seam's uses");
+            }
+            if closed {
+                assert!(rel(m.area, area) < 1e-6, "{case}: area {} vs {area}", m.area);
+                assert!(rel(m.volume, volume) < 1e-6, "{case}: volume {} vs {volume}", m.volume);
+            } else {
+                assert!(rel(m.area, lens) < 1e-6, "{case}: area {} vs {lens}", m.area);
+            }
+        }
+    }
+}
+
 /// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
 /// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
 /// a rational circle, which got no pcurves, so the block came in open. The round reads as a
@@ -644,6 +816,25 @@ fn a_round_on_a_revolved_rational_circle_imports_as_a_torus() {
     let volume = 9000.0 - 490.0 * PI - 2.0 * PI * centroid * corner;
     let m = measure(&imp.bodies[0].body).unwrap();
     assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
+}
+
+/// SolidCraft's export of a valid bent strip whose cuts leave edges 6.955e-5 mm long (#22579). The
+/// file states the strip's largest tolerance, 9.17e-5 mm, so the part is read again at a quarter
+/// of its shortest edge, 1.739e-5 mm. One vertex lies 1.427e-5 mm off its line edge's end. The
+/// kernel keeps half of a record's tolerance as the vertex's zone, and SMLib's check passes a
+/// vertex only when its gap to an edge's end is at most half that zone, so the read must give it
+/// at least four times its gap. Then the strip comes in closed, with its 9 faces, and passes the
+/// full check, as it does where it was built.
+#[test]
+fn a_part_read_finer_than_its_file_states_keeps_its_vertices_within_their_tolerances() {
+    let imp = step_import(include_str!("../../../../tests/step-regressions/bent_strip_micrometre_cuts.step")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0];
+    assert!(body.closed, "{:?}", imp.warnings);
+    assert_eq!(body.body.face_count(), 9);
+    assert!(imp.warnings.iter().any(|w| w.ends_with("read at 1.739e-5 mm")), "{:?}", imp.warnings);
+    assert_eq!(crate::validation::failing_check(&body.body).unwrap(), None, "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
 }
 
 /// The midpoint rule over n even steps of [a, b].
@@ -854,6 +1045,7 @@ fn parallel_curved_import_keeps_face_colours_and_exact_display_meshes() {
                 opacity: 0.7,
                 faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.3], opacity: 0.5, name: None }],
                 name: None,
+                layer: None,
             }))
         })
         .collect();
@@ -5471,6 +5663,31 @@ fn an_invisibility_record_hides_its_styled_item_and_representation() {
     assert!(!shown.bodies[0].hidden);
 }
 
+/// The presentation layer a file puts a body on is read with it, whether the layer lists the
+/// solid, its styled item or its representation; a body on two layers is on the first, a blank
+/// layer name is no layer, and a body on none has none.
+#[test]
+fn a_body_is_read_with_the_layer_it_is_assigned_to() {
+    let layer_of = |extra: &str| {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += extra;
+        t += TAIL;
+        let imported = step_import(&t).unwrap();
+        assert_eq!(imported.bodies.len(), 1, "{:?}", imported.warnings);
+        imported.bodies[0].layer.clone()
+    };
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT('Frame/Rails','',(#101));\n").as_deref(), Some("Frame/Rails"));
+    assert_eq!(layer_of("#70=STYLED_ITEM('',(),#101);\n#80=PRESENTATION_LAYER_ASSIGNMENT('Styled','',(#70));\n").as_deref(), Some("Styled"));
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT('Represented','',(#60));\n").as_deref(), Some("Represented"));
+    let two = "#80=PRESENTATION_LAYER_ASSIGNMENT('First','',(#101));\n#81=PRESENTATION_LAYER_ASSIGNMENT('Second','',(#101));\n";
+    assert_eq!(layer_of(two).as_deref(), Some("First"));
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT(' ','',(#101));\n"), None);
+    assert_eq!(layer_of(""), None);
+}
+
 /// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the
 /// surface colour, whichever style the file lists first or last. The edge's colour once painted
 /// the whole solid, because the first colour found was taken.
@@ -5901,18 +6118,21 @@ fn hair_step_step_file(step: f64, gap: f64, accuracy: f64) -> String {
 
 /// The heal at import is honest about what it cannot do: the hair step itself is read at a
 /// finer tolerance (the reader's own answer to edges shorter than the stated tolerance), so it
-/// imports clean and nothing is healed; with a corner off its edges past the edges'
-/// tolerance (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it still
-/// needs repair, and no heal is claimed.
+/// imports clean and nothing is healed, and so does a corner off its edges by a gap the stated
+/// tolerance covers as the kernel's check takes it (a quarter of it, #22579); with a corner off
+/// its edges past that (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it
+/// still needs repair, and no heal is claimed.
 #[test]
 fn a_hair_step_file_imports_clean_and_a_real_gap_still_needs_repair() {
     let healed = |imp: &StepImport| imp.warnings.iter().any(|w| w.contains("healed SMLib's check failures"));
     let needs = |imp: &StepImport| imp.report.issues.iter().any(|i| matches!(i.kind, IssueKind::NeedsRepair));
-    let clean = step_import(&hair_step_step_file(3e-4, 0.0, 1e-3)).unwrap();
-    assert_eq!(clean.bodies.len(), 1);
-    assert!(!needs(&clean) && !healed(&clean), "{:?}", clean.warnings);
-    assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None);
-    for (gap, accuracy) in [(4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
+    for (gap, accuracy) in [(0.0, 1e-3), (1e-4, 1e-3), (2.4e-4, 1e-3), (1e-4, 5e-4)] {
+        let clean = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
+        assert_eq!(clean.bodies.len(), 1);
+        assert!(!needs(&clean) && !healed(&clean), "{gap} {accuracy}: {:?}", clean.warnings);
+        assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None, "{gap} {accuracy}");
+    }
+    for (gap, accuracy) in [(2.6e-4, 1e-3), (4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
         let imp = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
         assert!(needs(&imp) && !healed(&imp), "{gap} {accuracy}: {:?}", imp.warnings);
         assert!(crate::validation::failing_check(&imp.bodies[0].body).unwrap().is_some());
@@ -6364,6 +6584,7 @@ fn the_checks_heal_a_shared_import_once_they_end() {
             file_faces: 8,
             refused: None,
             hidden: k > 1,
+            layer: None,
         })
         .collect();
     heals.apply(&mut bodies);
@@ -7094,22 +7315,190 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
 /// #20575 (`17-step-spring-wire-hang-b.step`): the closely wound wire cut where its flat end
 /// stands all but tangent to the tube of the turn above (the end plane touches the tube at the
 /// cut's last vertex) comes in as one closed body of the volume of the wire below that plane, about
-/// 68 mm³, not as surfaces with the wire's wall left out for an edge "4.78 mm off the face's
-/// surface". The kernel's drop of the cut's second piece onto the surface settled on another
+/// 64 mm³ (the plane is at z = 1.61 mm), not as surfaces with the wire's wall left out for an edge
+/// "4.78 mm off the face's surface". The kernel's drop of the cut's second piece onto the surface settled on another
 /// part of the surface for stretches of the edge; the trim is followed along the surface instead.
-/// The surface on the tube and 0.2 % off it (the file's) both read.
+/// The surface on the tube, 0.2 % inside it and 0.2 % outside it all read, their seams completed:
+/// off the tube, the file's seam on the exact tube is projected a sliver across the surface's
+/// boundary line, and the seam completion took it for a seam to put back; putting it back
+/// projected the cut afresh onto the turn it almost touches and left the loop a period short, so
+/// the body kept its imported trims with a warning that it had not been tidied.
 #[test]
 fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
     let (pitch, cut) = (1.125_f64, 8.995_466_109_045_587_f64);
     let expected = coil_wire_volume_below(pitch, pitch / (2.0 * std::f64::consts::PI) * cut);
-    for scale in [1.0, 0.998] {
+    for scale in [1.0, 0.998, 1.002] {
         let imported = step_import(&coil_wire_file(pitch, 22, scale, cut)).unwrap();
         assert_eq!(imported.bodies.len(), 1, "{scale}: {:?}", imported.warnings);
         let body = &imported.bodies[0];
         assert!(body.closed && body.refused.is_none(), "{scale}: {:?}", imported.warnings);
+        assert!(!imported.warnings.iter().any(|w| w.contains("were not completed")), "{scale}: {:?}", imported.warnings);
         let volume = measure(&body.body).unwrap().volume;
         assert!(rel(volume, expected) < 0.01, "{scale}: {volume} against {expected}");
+        assert_face_domains_hold_their_trims(&body.body);
     }
+}
+
+/// Every face's stored domain is around the control points of all its loops' pcurves (the
+/// positive-weight hull holds the whole trim), as `Face::domain` says: seating a seam's trims on
+/// the boundary lines must not leave a box taken before it.
+fn assert_face_domains_hold_their_trims(body: &Body) {
+    use solidcore_record::brep::{Curve2, Loop};
+
+    for (fi, face) in body.record().faces.iter().enumerate() {
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points: Vec<[f64; 2]> = match &u.pcurve {
+                    Curve2::Spline { points, .. } => points.clone(),
+                    Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+                };
+                for p in points {
+                    for (d, range) in face.domain.iter().enumerate() {
+                        assert!(p[d] >= range[0] - 1e-9 && p[d] <= range[1] + 1e-9, "face {fi}, edge {}: {p:?} outside {:?}", u.edge, face.domain);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The knots of a uniform periodic cubic of `n` spans: from -3 to `n + 3`, one apart.
+fn periodic_knots(n: usize) -> Vec<f64> {
+    (0..n + 7).map(|i| i as f64 - 3.0).collect()
+}
+
+/// The `n + 3` control points (the last three the first three again) of the uniform periodic
+/// cubic on [`periodic_knots`] that passes through `through(k)` at each whole parameter `k` of
+/// `0..n`.
+fn periodic_through(n: usize, through: impl Fn(usize) -> P3) -> Vec<P3> {
+    let knots = periodic_knots(n);
+    let mut basis = vec![vec![0.0; n]; n];
+    for (k, row) in basis.iter_mut().enumerate() {
+        for j in 0..n + 3 {
+            row[j % n] += spline_basis(&knots, j, 3, k as f64);
+        }
+    }
+    let mut points = solve_points(basis, (0..n).map(through).collect());
+    points.extend_from_within(0..3);
+    points
+}
+
+/// The file of a coil spring wire written as one face with two bounds and no seam (#20575, the
+/// layout of the extra files there): a tube of radius 0.55 mm round two turns of a helix of radius
+/// 7.5 mm about the z axis, one B-spline surface closed round the wire on uniform periodic knots
+/// (6 spans round, `spans` along it, through points on a tube `scale` times the wire's radius), a
+/// flat cap square to the wire at its start and a flat end at `z = z_cut`. The wire's face is
+/// bounded by the cap's circle and the cut, each one closed edge round the wire on its exact tube,
+/// and nothing joins the two.
+fn two_bound_coil_wire_file(pitch: f64, spans: usize, scale: f64, z_cut: f64) -> String {
+    use std::f64::consts::TAU;
+    const R: f64 = 7.5;
+    const TUBE: f64 = 0.55;
+    const ROUND: usize = 6;
+    const CUT_POINTS: usize = 96;
+    let c = pitch / TAU;
+    let l = R.hypot(c);
+    // The tangent, the normal towards the axis and the binormal of the helix at the angle `a`.
+    let frame = |a: f64| -> (P3, P3, P3) {
+        let t = [-R * a.sin() / l, R * a.cos() / l, c / l];
+        let n = [-a.cos(), -a.sin(), 0.0];
+        (t, n, cross3(t, n))
+    };
+    let tube = |a: f64, phi: f64, rho: f64| -> P3 {
+        let (_, n, b) = frame(a);
+        let h = [R * a.cos(), R * a.sin(), c * a];
+        [0, 1, 2].map(|i| h[i] + (n[i] * phi.cos() + b[i] * phi.sin()) * rho)
+    };
+
+    // The surface: round the wire through 6 points of each of its Greville rows along it, then
+    // along it through those.
+    let nv = spans + 3;
+    let kv = clamped_knots(nv, 0.0, 2.0 * TAU);
+    let gv: Vec<f64> = (0..nv).map(|i| (kv[i + 1] + kv[i + 2] + kv[i + 3]) / 3.0).collect();
+    let av: Vec<Vec<f64>> = gv.iter().map(|&t| (0..nv).map(|i| spline_basis(&kv, i, 3, t)).collect()).collect();
+    let rows: Vec<Vec<P3>> = gv.iter().map(|&a| periodic_through(ROUND, |k| tube(a, TAU * k as f64 / ROUND as f64, TUBE * scale))).collect();
+    let net: Vec<Vec<P3>> = (0..ROUND + 3).map(|k| solve_points(av.clone(), rows.iter().map(|r| r[k]).collect())).collect();
+
+    // The cut: where the tube meets the plane, round the wire, through as many points.
+    let cut_at = |phi: f64| tube((z_cut - TUBE * phi.sin() * R / l) / c, phi, TUBE);
+    let cut = periodic_through(CUT_POINTS, |k| cut_at(TAU * k as f64 / CUT_POINTS as f64));
+
+    let mut w = Entities::default();
+    let point = |w: &mut Entities, p: P3| format!("#{}", w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2])));
+    let list = |v: Vec<String>| v.join(",");
+    let ones = |n: usize| list(vec!["1".to_string(); n]);
+    let knots = |k: &[f64]| list(k.iter().map(|x| format!("{x:?}")).collect());
+    let surface_rows: Vec<String> = net.iter().map(|row| format!("({})", list(row.iter().map(|p| point(&mut w, *p)).collect()))).collect();
+    let (v_knots, v_mults) = distinct_knots(&kv);
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.T.,.F.,.F.,({}),({}),({}),({}),.UNSPECIFIED.)",
+        list(surface_rows),
+        ones(ROUND + 7),
+        list(v_mults.iter().map(|m| m.to_string()).collect()),
+        knots(&periodic_knots(ROUND)),
+        knots(&v_knots)
+    ));
+    let (t0, n0, _) = frame(0.0);
+    let v_ring = w.vertex(tube(0.0, 0.0, TUBE));
+    let ring_axis = w.axis(tube(0.0, 0.0, 0.0), t0, n0);
+    let ring = w.add(format!("CIRCLE('',#{ring_axis},{TUBE:?})"));
+    let e_ring = w.add(format!("EDGE_CURVE('',#{v_ring},#{v_ring},#{ring},.T.)"));
+    let cut_ids: Vec<String> = cut.iter().map(|p| point(&mut w, *p)).collect();
+    let cut_curve = w.add(format!(
+        "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.T.,.F.,({}),({}),.UNSPECIFIED.)",
+        list(cut_ids),
+        ones(CUT_POINTS + 7),
+        knots(&periodic_knots(CUT_POINTS))
+    ));
+    let v_cut = w.vertex(cut_at(0.0));
+    let e_cut = w.add(format!("EDGE_CURVE('',#{v_cut},#{v_cut},#{cut_curve},.T.)"));
+    let bound = |w: &mut Entities, e: usize, forward: bool| {
+        let oe = w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if forward { "T" } else { "F" }));
+        let l = w.add(format!("EDGE_LOOP('',(#{oe}))"));
+        w.add(format!("FACE_BOUND('',#{l},.T.)"))
+    };
+    // The surface's normal points out of the wire: round it (u) then along it (v).
+    let (start, end) = (bound(&mut w, e_ring, true), bound(&mut w, e_cut, false));
+    let wire = w.add(format!("ADVANCED_FACE('',(#{start},#{end}),#{surface},.T.)"));
+    let cap_axis = w.axis(tube(0.0, 0.0, 0.0), [-t0[0], -t0[1], -t0[2]], n0);
+    let cap_plane = w.add(format!("PLANE('',#{cap_axis})"));
+    let cap = w.face(&[(e_ring, false)], cap_plane);
+    let end_axis = w.axis([0.0, 0.0, z_cut], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let end_plane = w.add(format!("PLANE('',#{end_axis})"));
+    let end_face = w.face(&[(e_cut, true)], end_plane);
+    w.solid(&[wire, cap, end_face]).replace("LENGTH_MEASURE(1.E-3)", "LENGTH_MEASURE(1.E-5)")
+}
+
+/// #20575 (the extra files there): a coil spring wire written as one face bounded by the cap's
+/// circle and the cut, each a closed edge once round the wire, with no seam edge between them,
+/// comes in as one closed body of the volume of the wire below its end plane, its surface on the
+/// wire's tube or a little off it. Two loops that each go once round a closed surface bound a band
+/// of it; the import joins them by a seam along the surface's own boundary line. It refused the
+/// face ("a loop around a closed surface that never reaches the line its seam runs on") where the
+/// surface lies off the loops' vertices by more than the tolerance, and with the surface on them
+/// the face's trims were left crossing the surface's period.
+#[test]
+fn a_coil_spring_wire_bounded_by_two_closed_edges_and_no_seam_imports_closed() {
+    let mut failed = Vec::new();
+    for (pitch, spans, scale, z_cut) in
+        [(3.0, 16, 1.0, 4.98), (3.0, 16, 0.998, 4.98), (3.0, 22, 0.998, 4.98), (1.125, 22, 0.996, 1.62), (1.125, 22, 1.002, 1.62)]
+    {
+        let expected = coil_wire_volume_below(pitch, z_cut) * scale * scale;
+        let case = format!("pitch {pitch}, {spans} spans, scale {scale}");
+        match step_import(&two_bound_coil_wire_file(pitch, spans, scale, z_cut)) {
+            Err(e) => failed.push(format!("{case}: {e}")),
+            Ok(imported) => {
+                let body = imported.bodies.first();
+                let closed = imported.bodies.len() == 1 && body.is_some_and(|b| b.closed && b.refused.is_none());
+                let volume = body.and_then(|b| measure(&b.body).ok()).map(|m| m.volume);
+                if !closed || !volume.is_some_and(|v| rel(v, expected) < 0.01) {
+                    failed.push(format!("{case}: closed {closed}, volume {volume:?} against {expected}: {:?}", imported.warnings));
+                }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// #20534: a bore that touches a flat face along a line, so four faces meet there. The bore's
@@ -7543,6 +7932,50 @@ fn a_mapped_item_placed_by_an_operator_without_its_description_comes_in() {
         for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
             assert!((x - want).abs() < 1e-6, "{op}: {xs:?}");
         }
+    }
+}
+
+/// An operator that leaves `axis2` out takes +Y for it, made orthogonal to `axis3` and `axis1`
+/// (ISO 10303-42 `second_proj_axis`), not `axis3` x `axis1`: `axis1` = -X, `axis3` = +Z keeps
+/// +Y (a mirror), so the cube at x = 60 spans x 59..60 and y 0..1, as `axis1` = +Y with
+/// `axis2` = -X (a quarter turn about Z) places it. `axis1` = +Y with no `axis2` leaves nothing of
+/// +Y, where the standard derives no Y: it stays `axis3` x `axis1`, the same quarter turn.
+#[test]
+fn a_mapped_item_placed_by_an_operator_without_axis2_takes_the_standard_y() {
+    let axes = "#5091=DIRECTION('',(0.,1.,0.));\n#5092=DIRECTION('',(0.,0.,1.));\n#5093=DIRECTION('',(-1.,0.,0.));\n";
+    let ops =
+        ["('','',#5093,$,#5020,1.,#5092)", "('',#5093,$,#5020,1.,#5092)", "('','',#5091,#5093,#5020,1.,#5092)", "('','',#5091,$,#5020,1.,#5092)"];
+    for op in ops {
+        let text =
+            mapped_cube_row(axes).replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op}"));
+        let imp = step_import(&text).unwrap();
+        let mut boxes: Vec<_> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox).collect();
+        boxes.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        assert_eq!(boxes.len(), 3, "{op}: {boxes:?} {:?}", imp.warnings);
+        let placed = &boxes[2];
+        assert!((placed.min.x - 59.0).abs() < 1e-6 && (placed.max.x - 60.0).abs() < 1e-6, "{op}: {placed:?}");
+        assert!(placed.min.y.abs() < 1e-6 && (placed.max.y - 1.0).abs() < 1e-6, "{op}: {placed:?}");
+    }
+}
+
+/// ISO 10303-42 derives an operator's axes orthonormal (`base_axis`): `axis1` and `axis2` given
+/// off the right angle place the item on `axis3`, `axis1` made orthogonal to it and their cross
+/// product, never sheared. Here they derive the global axes, so the cube at x = 60 is not turned,
+/// and a non-uniform operator scales it along those axes (2 x 3 x 4).
+#[test]
+fn a_mapped_item_placed_by_an_operator_with_skew_axes_is_placed_on_their_orthonormal_frame() {
+    let axes = "#5091=DIRECTION('',(1.,0.,1.));\n#5092=DIRECTION('',(1.,1.,0.));\n#5093=DIRECTION('',(0.,0.,1.));\n";
+    for (op, size) in
+        [("_3D('','',#5091,#5092,#5020,1.,#5093)", [1.0, 1.0, 1.0]), ("_3D_NON_UNIFORM('','',#5091,#5092,#5020,2.,#5093,3.,4.)", [2.0, 3.0, 4.0])]
+    {
+        let text = mapped_cube_row(axes).replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR{op}"));
+        let imp = step_import(&text).unwrap();
+        let mut boxes: Vec<_> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox).collect();
+        boxes.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        assert_eq!(boxes.len(), 3, "{op}: {boxes:?} {:?}", imp.warnings);
+        let placed = &boxes[2];
+        assert!(placed.min.dist(Vec3::new(60.0, 0.0, 0.0)) < 1e-6, "{op}: {placed:?}");
+        assert!(placed.max.dist(Vec3::new(60.0 + size[0], size[1], size[2])) < 1e-6, "{op}: {placed:?}");
     }
 }
 

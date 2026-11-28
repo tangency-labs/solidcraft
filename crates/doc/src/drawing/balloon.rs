@@ -60,6 +60,10 @@ pub struct Balloon {
     /// The parts list it names, when it names one.
     #[serde(default, with = "crate::ids::option", skip_serializing_if = "Option::is_none")]
     pub parts_list: Option<u64>,
+    /// Where on its edge its arrow ends, as a part of the edge's length from its start (#22195);
+    /// none, its middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub along: Option<f64>,
 }
 
 impl Balloon {
@@ -130,6 +134,7 @@ impl Drawing {
         require(!b.edge.path.is_empty(), || {
             "a balloon points at a part placed as a component of an assembly: an edge with no `path` is on the design's own body, so place the part as a component and give its occurrence in the edge's `path`".into()
         })?;
+        require(b.along.is_none_or(|t| (0.0..=1.0).contains(&t)), || "where its arrow ends along its edge is a part of it from 0 to 1".into())?;
         let [x, y] = b.at;
         require(is_paper_coordinate(x) && is_paper_coordinate(y), || format!("its place is at most {MAX_SIDE_MM} mm on paper"))
     }
@@ -193,7 +198,7 @@ impl RowRead {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Resolved {
     pub status: Status,
-    /// Where its arrow ends, the middle of its edge, in the design's frame: when the edge was found.
+    /// Where its arrow ends on its edge (its middle unless it says), in the design's frame: when the edge was found.
     pub point: Option<Vec3>,
     /// Its edge was found by exact history, as one edge.
     pub exact: bool,
@@ -210,7 +215,7 @@ impl Document {
             .iter()
             .map(|id| {
                 let b = drawing.balloons.by_id(*id).ok_or_else(|| DocError::Unknown(format!("balloon {}", ids::encode(*id))))?;
-                let (status, point, exact) = lookup.middle(&b.edge);
+                let (status, point, exact) = lookup.along(&b.edge, b.along);
                 Ok(Resolved { status, point, exact })
             })
             .collect()
