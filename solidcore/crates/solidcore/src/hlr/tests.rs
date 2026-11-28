@@ -823,11 +823,13 @@ fn a_face_within_its_bound_of_an_edge_does_not_hide_it_for_certain() {
 
 /// A face whose surface stands ε off its own edges, as a blend's net may stand off the edges of
 /// its definition: the unit cube's top face drawn as the plane z = 1 + ε over its edges at
-/// z = 1, ε = 1e-3, far past the 1e-6 of the face a ray skips at its start. Seen from above,
-/// each top edge's ray crosses that plane λ = ε / |n · d| from its start, which lies on the
-/// face's boundary: the hit is within λ of the boundary, and the face itself may pass within
-/// λ of the hit, so it decides nothing. The top edges are uncertain, never hidden by their own
-/// face.
+/// z = 1, ε = 1e-3, far past the 1e-6 of the face a ray skips at its start. Seen from above
+/// along d = (0.3, 0.2, −1), each top edge's ray crosses that plane λ = ε / |n · d| from its
+/// start, 0.34 λ across. From the edges x = 1 and y = 1 it crosses inside the face, within λ of
+/// the boundary its start lies on, where the face itself may pass within λ of the hit: the hit
+/// decides nothing, and the edges are uncertain at their middles. From the edges x = 0 and
+/// y = 0 it crosses outside the face's box (padded 1e-6 of its size) and the edges are visible.
+/// No top edge is hidden by its own face.
 #[test]
 fn a_faces_own_edges_are_not_hidden_for_certain_by_its_surface_within_its_bound() {
     let eps = 1e-3;
@@ -859,15 +861,27 @@ fn a_faces_own_edges_are_not_hidden_for_certain_by_its_surface_within_its_bound(
         .collect();
     assert_eq!(top.len(), 4);
     for e in top {
-        let got: Vec<Visibility> = edge_line(&d, 0, e)
-            .pieces
-            .iter()
-            .map(|p| p.visibility)
-            .collect();
+        let pieces = &edge_line(&d, 0, e).pieces;
         assert!(
-            !got.is_empty() && got.iter().all(|v| *v == Visibility::Uncertain),
-            "top edge {e}: {got:?}"
+            !pieces.is_empty() && pieces.iter().all(|p| p.visibility != Visibility::Hidden),
+            "top edge {e}: {pieces:?}"
         );
+        let edge = &body.edges[e];
+        let k::Curve::Line { start, end } = edge.curve else {
+            panic!("a top edge is a line")
+        };
+        let inward = (start[0] == 1. && end[0] == 1.) || (start[1] == 1. && end[1] == 1.);
+        let mid = 0.5 * (edge.interval[0] + edge.interval[1]);
+        let at_mid = pieces
+            .iter()
+            .find(|p| p.t[0] <= mid && mid <= p.t[1])
+            .map(|p| p.visibility);
+        let want = if inward {
+            Visibility::Uncertain
+        } else {
+            Visibility::Visible
+        };
+        assert_eq!(at_mid, Some(want), "top edge {e}: {pieces:?}");
     }
 }
 
