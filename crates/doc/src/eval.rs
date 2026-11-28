@@ -10982,15 +10982,15 @@ pub(crate) fn revolve_axis(
             other => Err(DocError::Unknown(format!("sketch axis `{other}`"))),
         },
         AxisRef::World { axis } => {
-            let d = match axis.to_ascii_uppercase().as_str() {
-                "X" => Vec3::X,
-                "Y" => Vec3::Y,
-                "Z" => Vec3::Z,
+            let (world, d) = match axis.to_ascii_uppercase().as_str() {
+                "X" => ("X", Vec3::X),
+                "Y" => ("Y", Vec3::Y),
+                "Z" => ("Z", Vec3::Z),
                 other => return Err(DocError::Unknown(format!("axis `{other}`"))),
             };
             let pl = &ss.plane;
             if d.dot(pl.normal()).abs() > 1e-9 || pl.height(Vec3::ZERO).abs() > 1e-9 {
-                return Err(DocError::Invalid(format!("the {axis} axis does not lie in the sketch plane")));
+                return Err(DocError::WorldRevolveAxisOutsideSketchPlane { axis: world });
             }
             Ok((pl.to_local(Vec3::ZERO), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
         }
@@ -18540,11 +18540,47 @@ fn eval_feature(
     sources: Option<&SourceStates>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import, sources);
+    let result = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import, sources);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
-    r
+    let Err(error @ DocError::WorldRevolveAxisOutsideSketchPlane { axis: world @ ("X" | "Y") }) = &result else {
+        return result;
+    };
+
+    let mut retry = f.clone();
+    let axis = match &mut retry.kind {
+        FeatureKind::Revolve { axis, .. } | FeatureKind::SurfaceRevolve { axis, .. } => axis,
+        _ => return result,
+    };
+    let sketch = world.to_ascii_lowercase();
+    *axis = AxisRef::SketchAxis { axis: sketch.clone() };
+    if revolve_retry_succeeds(doc, vals, &retry, st, heal) {
+        return Err(DocError::Invalid(format!("{error}. Did you mean \"{sketch}\", the sketch's own axis?")));
+    }
+    result
+}
+
+/// The world axis was refused before any body changed. Test the suggested axis against the
+/// same selection, extent, and operation, with its own checks and a state we can discard.
+fn revolve_retry_succeeds(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, heal: bool) -> bool {
+    let mut trial = st.clone();
+    let validation = EVAL_VALIDATION.get();
+    let accepted = kernel::guard(&f.name, || {
+        let _validation = EvalValidationGuard::new(validation);
+        let (result, deferred) =
+            kernel::validating(validation, || eval_feature_kind(doc, vals, f, &mut trial, &mut None, &mut None, &mut None, heal, None, None, None));
+        if result.is_err() {
+            return Ok(false);
+        }
+        // The normal evaluator runs these checks outside its feature validation scope.
+        let (passed, _) = kernel::validating(kernel::Validation::EachStep, || {
+            (!deferred || check_kept(st, &trial).is_ok()) && absorb_sheet_cuts(doc, st, &mut trial, f, validation, &mut None).is_ok()
+        });
+        Ok(passed)
+    });
+    JOINED_TARGETS.with(|n| n.borrow_mut().clear());
+    matches!(accepted, Ok(true))
 }
 
 /// The start and end of the note a feature built from a sketch with a lost link carries.

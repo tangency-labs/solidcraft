@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "diagnostic.revolve_sketch_axis": "لا يقع المحور {world} في مستوى الرسم. هل تقصد «{sketch}»، محور الرسم نفسه؟"
+  },
+  "de": {
+    "diagnostic.revolve_sketch_axis": "Die Achse {world} liegt nicht in der Skizzenebene. Meinten Sie „{sketch}“, die skizzeneigene Achse?"
+  },
+  "en": {
+    "diagnostic.revolve_sketch_axis": "the {world} axis does not lie in the sketch plane. Did you mean \"{sketch}\", the sketch's own axis?"
+  },
+  "he": {
+    "diagnostic.revolve_sketch_axis": "הציר {world} אינו נמצא במישור הסקיצה. האם התכוונת ל־„{sketch}”, הציר של הסקיצה עצמה?"
+  },
+  "ja": {
+    "diagnostic.revolve_sketch_axis": "{world} 軸はスケッチ平面上にありません。スケッチ自体の軸「{sketch}」を指定するつもりでしたか？"
+  },
+  "ko": {
+    "diagnostic.revolve_sketch_axis": "{world}축은 스케치 평면에 없습니다. 스케치 자체의 축인 “{sketch}”를 지정하려고 하셨나요?"
+  },
+  "vi": {
+    "diagnostic.revolve_sketch_axis": "Trục {world} không nằm trong mặt phẳng phác thảo. Có phải bạn muốn dùng “{sketch}”, trục riêng của bản phác thảo?"
+  },
+  "zh": {
+    "diagnostic.revolve_sketch_axis": "{world} 轴不在草图平面内。您是想使用草图自身的“{sketch}”轴吗？"
+  }
+}
