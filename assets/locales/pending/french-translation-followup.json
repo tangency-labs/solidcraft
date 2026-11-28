@@ -14,7 +14,7 @@
     "appearance.keep_library": "Charger cette bibliothèque à chaque ouverture de ce panneau",
     "browser.edit_profile_sketch_of": "Modifier l’esquisse de profil : {sketch}",
     "browser.trace_click": "Cliquez sur la forme dans l’image à tracer, puis définissez la tolérance.",
-    "browser.trace_picked": "Forme sélectionnée. Modifiez la tolérance si nécessaire, puis cliquez sur Tracer (ou cliquez ailleurs).",
+    "browser.trace_picked": "Formes sélectionnées : {count}. Ctrl+clic en ajoute une autre, un clic simple recommence. Modifiez la tolérance si nécessaire, puis appuyez sur Tracer.",
     "browser.trace_title": "Tracer la région : {name}",
     "browser.trace_tolerance": "Tolérance",
     "cmd.sketch_spline_control_polygon": "Ajouter un polygone de contrôle",
