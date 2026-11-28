@@ -1899,6 +1899,41 @@ fn suppressing_or_deleting_target_body_never_jumps_blend_to_another_body() {
     }
 }
 
+/// An unnamed single-body fillet saved without edge names, edge refs, or an explicit body keeps
+/// following the moved edge via the unique-nearest fallback (with a warning) when the sole box is
+/// resized so the pick lies more than 5% off the edge.
+#[test]
+fn single_body_unnamed_fillet_follows_moved_edge_after_resize_with_warning() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "len", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": "len", "width": 30, "height": 10, "name": "Box1", "body_name": "Body1"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 10]], "radius": 2, "name": "Round"}));
+    let fid = id(&s, "Round");
+    {
+        let f = s.doc_mut().feature_mut(fid).unwrap();
+        f.edge_names.clear();
+        f.edge_refs.clear();
+        if let solidcraft_doc::FeatureKind::Fillet { body, .. } = &mut f.kind {
+            *body = None;
+        }
+    }
+    s.refresh();
+    let strip = (4.0 - std::f64::consts::PI) * 30.0;
+    assert_eq!(error(&s, "Round"), None);
+    assert_eq!(warning(&s, "Round"), None);
+    assert!(has_volume(&s, "Body1", 12000.0 - strip), "{}", volume_of(&s, "Body1"));
+
+    // Resize so the saved pick at x=40 is 6 mm off the moved edge at x=34 (> 5% of the ~46.4 mm
+    // body diagonal, so outside pick reach) while remaining uniquely nearest within 0.25 * size.
+    change(&mut s, "len", "34 mm");
+    assert_eq!(error(&s, "Round"), None);
+    let warn = warning(&s, "Round").unwrap_or_default();
+    assert!(warn.contains("re-found on the nearest edge"), "{warn}");
+    assert!(has_volume(&s, "Body1", 34.0 * 30.0 * 10.0 - strip), "{}", volume_of(&s, "Body1"));
+    assert!(!solid_at(&s, [33.9, 15.0, 9.9]), "fillet must land on the moved x=34 top edge");
+    assert!(solid_at(&s, [0.1, 15.0, 9.9]), "opposite top edge must stay sharp");
+}
+
 /// #4341: an unnamed legacy Fillet or Chamfer (empty `edge_names`, `body: None`) must neither
 /// remap its bounding box onto an unrelated body when its original body disappears nor jump onto
 /// an unrelated nearby edge on the same body when the picked edge is gone.
