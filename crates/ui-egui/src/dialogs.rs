@@ -819,6 +819,9 @@ pub struct Dialog {
     pub(crate) new_sketch: bool,
     /// Its handle drags, for Undo and Redo while it is open (#22838).
     pub(crate) drag_undo: crate::dialog_drag_undo::DragUndo,
+    /// The pull or edge drag that opened this window (its token, [`crate::drag_extrude::token`]):
+    /// only that gesture moves its value or applies it on release.
+    pub(crate) gesture: Option<u64>,
     /// Which opening of a dialog this is, new each time one opens: where it and its value box
     /// were dragged belongs to this opening only, so the next opens docked even on the very
     /// next frame (#22388).
@@ -1159,6 +1162,7 @@ impl Dialog {
             op_auto: Default::default(),
             anchor_hint: None,
             started_from_sketch: None,
+            gesture: None,
             auto: None,
             new_sketch: false,
             drag_undo: Default::default(),

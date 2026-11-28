@@ -201,6 +201,13 @@ pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2
         .map_err(|e| crate::KernelError::Invalid(format!("the body's reach along the plane's normal can't be measured: {e}")))
 }
 
+/// The cosine of the angle between the directions `a` and `b` in a plane, held to `[-1, 1]`
+/// (solidcore-ops' `measure::direction_cosine_2d`). `None` when either has no length or a
+/// coordinate is not finite.
+pub fn direction_cosine_2d(a: [f64; 2], b: [f64; 2]) -> Option<f64> {
+    solidcore_ops::measure::direction_cosine_2d(a, b).ok().flatten()
+}
+
 /// Whether the endless line through `o` along `d` meets the box `b`, its sides included (never an
 /// empty box, never a zero direction or a coordinate that is not finite). Each side counts a
 /// millionth of the box's size beyond it, so a line read back from a body's own face still meets

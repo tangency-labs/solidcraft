@@ -301,7 +301,7 @@ fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
 }
 
 /// The outward direction between the two faces at an edge: the mean of their normals.
-fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
+pub(crate) fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     edge_sides(m, index, p)?.iter().fold(Vec3::ZERO, |sum, (n, _)| sum + *n).normalized()
 }
 
@@ -532,6 +532,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             if let Some(g) = crate::gizmo::show(ui, painter, proj, triad_id, &t, snap_step(app.cam.half_height())) {
                 crate::dialogs_move::drag(app, &mut d, g);
                 dragging = true;
+                // In Creative Mode the release applies the move, as OK would.
+                if g.done && crate::creative_mode::on(app) {
+                    d.confirm = true;
+                }
             } else if let Some(handle) = crate::gizmo::take_click(ui, triad_id) {
                 // A click on a handle, with no drag, still shows the value it drives.
                 crate::dialogs_move::show_handle_value(&mut d, handle);
@@ -542,14 +546,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         // once an axis is selected.
         let triad = crate::dialogs_move::triad(app, &d);
         let rotation = draw_move_rotation(app, ui, painter, proj, &mut d);
-        dragging |= rotation.is_some_and(|(_, changed)| changed);
+        dragging |= rotation.is_some_and(|(_, changed, _)| changed);
+        // In Creative Mode letting go of Rotate's handle applies the move too.
+        if rotation.is_some_and(|(.., released)| released) && crate::creative_mode::on(app) {
+            d.confirm = true;
+        }
         // The box stays clear of the triad's handles: it is a foreground area, so a box over a
         // handle takes the press and the drag never reaches the model (#6608).
         let mut place = box_place(app, proj);
         if let Some(t) = triad.as_ref() {
             place.handles = crate::gizmo::handles_region(proj, t);
         }
-        if let Some((end, _)) = rotation {
+        if let Some((end, ..)) = rotation {
             let grip = egui::Rect::from_center_size(end, vec2(20.0, 20.0));
             place.handles = Some(place.handles.map_or(grip, |triad| triad.union(grip)));
         }
@@ -562,7 +570,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             // Clear of the triad: its arrows reach LEN_PX and its rings RING of that, so a box
             // beside the centre would cover the handles the user is reaching for.
             let off = if triad.is_some() { vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0) } else { vec2(16.0, -30.0) };
-            let box_at = rotation.map_or(bs + off, |(end, _)| end + vec2(16.0, -12.0));
+            let box_at = rotation.map_or(bs + off, |(end, ..)| end + vec2(16.0, -12.0));
             value_box_with(ui, label, value, box_at, focus || dragging, true, place);
         }
         app.dialog = Some(d);
@@ -676,8 +684,9 @@ fn move_rotation(app: &SolveApp, d: &Dialog, proj: &Proj) -> Option<MoveRotation
 }
 
 /// Reuse the angular handle's snapping and edge-on projection for Move's selected axis and Rotate
-/// Member's line.
-fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> Option<(Pos2, bool)> {
+/// Member's line. The handle: where it is, whether the drag changed the angle, and whether it was
+/// let go.
+fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> Option<(Pos2, bool, bool)> {
     let r = move_rotation(app, d, proj)?;
     let points: Vec<_> = (0..=64).filter_map(|i| proj.to_screen(r.point(i as f64 / 64.0 * std::f64::consts::TAU))).collect();
     painter.add(egui::Shape::line(points, Stroke::new(1.8, Tokens::get().manipulator)));
@@ -708,7 +717,8 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
         name,
         angle,
     )?;
-    Some((end, *angle != before))
+    let released = ui.ctx().read_response(egui::Id::unique(("sc_rotator", name))).is_some_and(|r| r.drag_stopped());
+    Some((end, *angle != before, released))
 }
 
 /// Move/Copy Sketch Entities' triad at `pivot` moved so far, in the sketch's x, y and normal.

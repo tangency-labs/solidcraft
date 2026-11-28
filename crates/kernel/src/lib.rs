@@ -381,6 +381,7 @@ pub use matchsurf::match_surface;
 pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
+pub use measure::direction_cosine_2d;
 pub use measure::levels_along;
 pub use measure::line_meets_box;
 pub use measure::measure;

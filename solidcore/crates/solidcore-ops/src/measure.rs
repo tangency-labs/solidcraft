@@ -575,6 +575,23 @@ pub fn centroid_and_mean_radius(points: &[[f64; 2]]) -> Result<PointSetSummary> 
     })
 }
 
+/// The cosine of the angle between the directions `a` and `b` in a plane, held to `[-1, 1]`
+/// (`query::api_queries::direction_cosine_2d`). `None` when either has no length.
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate that is not finite.
+pub fn direction_cosine_2d(a: [f64; 2], b: [f64; 2]) -> Result<Option<f64>> {
+    let finite = |v: [f64; 2]| v.iter().all(|x| x.is_finite());
+    if !finite(a) || !finite(b) {
+        return Err(Error::Argument);
+    }
+    q::direction_cosine_2d(
+        solidcore::Vec2::new(a[0], a[1]),
+        solidcore::Vec2::new(b[0], b[1]),
+    )
+    .map_err(status)
+}
+
 /// The vector from point `from` to point `to`.
 pub fn point_displacement(from: [f64; 2], to: [f64; 2]) -> Result<[f64; 2]> {
     let (from, to) = (point2(from)?, point2(to)?);

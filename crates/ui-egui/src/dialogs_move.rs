@@ -917,10 +917,10 @@ fn names(p: &Value) -> Vec<String> {
     p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
 }
 
-/// Whether Keep Axes With Body is ticked. It starts unticked, so an ordinary Move moves what it
-/// always did.
-pub(crate) fn keeps_axes(_app: &SolveApp, d: &Dialog) -> bool {
-    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or(false)
+/// Whether Keep Axes With Body is ticked. It starts ticked in Creative Mode and unticked
+/// otherwise, so an ordinary Move moves what it always did.
+pub(crate) fn keeps_axes(app: &SolveApp, d: &Dialog) -> bool {
+    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or_else(|| crate::creative_mode::on(app))
 }
 
 /// The construction axes held only by fixed points (a Center Pole) whose line runs through one
@@ -949,14 +949,19 @@ pub(crate) fn axes_through(app: &SolveApp, editing: Option<u64>, bodies: &[Strin
     through
 }
 
-/// Whether the construction axis `feature` is drawn through two fixed points (or the origin), so
-/// nothing a Move does takes it along unless it is carried.
+/// Whether the construction axis `feature` is a Center Pole: drawn through two fixed points (or
+/// the origin), or square to a body's face through a fixed point on it, as Creative Mode's face
+/// pole is. A Move takes neither along unless it is carried; an axis from a point of a body out to
+/// a fixed point (a tether) is neither, and stays.
 fn fixed_points_axis(app: &SolveApp, feature: u64) -> bool {
+    use solidcraft_engine::doc::FeatureKind::ConstructionAxis;
     use solidcraft_engine::doc::construct::{AxisDef, GeoRef};
     let fixed = |g: &GeoRef| matches!(g, GeoRef::Point { .. } | GeoRef::Origin);
-    app.session.doc.feature(feature).is_some_and(
-        |f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a, b } } if fixed(a) && fixed(b)),
-    )
+    app.session.doc.feature(feature).is_some_and(|f| match &f.kind {
+        ConstructionAxis { def: AxisDef::TwoPoints { a, b } } => fixed(a) && fixed(b),
+        ConstructionAxis { def: AxisDef::NormalToFace { face: GeoRef::Face { .. }, point } } => fixed(point),
+        _ => false,
+    })
 }
 
 /// The current type's move, or what it still needs picked.

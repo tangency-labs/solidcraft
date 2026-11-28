@@ -65,6 +65,8 @@ pub struct Gesture {
     /// The step now, and where the pointer is, for the label.
     step: f64,
     at: Pos2,
+    /// The token of the Extrude window this pull opened (`Dialog::gesture`), once started.
+    window: u64,
 }
 
 #[derive(Debug, Default)]
@@ -74,15 +76,33 @@ pub struct State {
     last_step: Option<f64>,
 }
 
+/// A new gesture token, for the window a pull or an edge drag opens.
+pub(crate) fn token() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether the open window is the one the gesture with `token` opened.
+pub(crate) fn owns(app: &SolveApp, token: u64) -> bool {
+    app.dialog.as_ref().is_some_and(|d| d.gesture == Some(token))
+}
+
 /// A pull has started: the box selection stays out of it.
 pub fn started(app: &SolveApp) -> bool {
     app.viewport.drag_extrude.gesture.as_ref().is_some_and(|g| g.started)
 }
 
+/// Drop a press that has not turned into a pull yet, as when an edge drag claims it.
+pub fn forget(app: &mut SolveApp) {
+    if !started(app) {
+        app.viewport.drag_extrude.gesture = None;
+    }
+}
+
 /// Note a press at `at` when it is on a planar face or a profile.
 pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
     app.viewport.drag_extrude.gesture = None;
-    if !app.preferences.direct_interaction {
+    if !app.preferences.direct_interaction && !crate::creative_mode::on(app) {
         return;
     }
     let hits = crate::viewport::pick(app, proj, at);
@@ -114,6 +134,7 @@ pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
         x0: at.x,
         step: 0.0,
         at,
+        window: 0,
     });
 }
 
@@ -137,6 +158,11 @@ fn pulls(proj: &Proj, g: &Gesture, p: Pos2) -> bool {
 /// The pointer is at `p` with the button down.
 pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let Some(mut g) = app.viewport.drag_extrude.gesture.clone() else { return };
+    // The window it opened is gone (closed, or replaced by another one): the pull is over.
+    if g.started && !owns(app, g.window) {
+        app.viewport.drag_extrude.gesture = None;
+        return;
+    }
     if !g.started {
         if app.dialog.is_some() || !pulls(proj, &g, p) {
             return;
@@ -147,7 +173,11 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
             app.viewport.drag_extrude.gesture = None;
             return;
         }
-        g = Gesture { started: true, x0: p.x, ..g };
+        let window = token();
+        if let Some(d) = app.dialog.as_mut() {
+            d.gesture = Some(window);
+        }
+        g = Gesture { started: true, x0: p.x, window, ..g };
     }
     g.at = p;
     g.step = STEPS[step_index(g.step0, p.x - g.x0)] * step_scale(&app.session.doc);
@@ -172,9 +202,23 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     };
 }
 
-/// The button is up: the window stays open for the user to adjust and confirm.
-pub fn end(app: &mut SolveApp) {
-    app.viewport.drag_extrude.gesture = None;
+/// The button is up: the window stays open for the user to adjust and confirm, or, in Creative
+/// Mode, the release applies the pull as OK would. `release` is where the pointer was let go,
+/// when it is known: a pull already under way takes it first, so the last movement counts (a
+/// press let go in the same frame starts nothing).
+pub fn end(app: &mut SolveApp, release: Option<(&Proj, Pos2)>) {
+    if let Some((proj, p)) = release
+        && started(app)
+    {
+        to(app, proj, p);
+    }
+    let Some(g) = app.viewport.drag_extrude.gesture.take().filter(|g| g.started) else { return };
+    if crate::creative_mode::on(app)
+        && owns(app, g.window)
+        && let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Extrude { .. }))
+    {
+        d.confirm = true;
+    }
 }
 
 /// Forget the last pull's step once the window is gone.
@@ -223,6 +267,46 @@ pub fn show(app: &SolveApp, painter: &egui::Painter) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pull ends with the window it opened: in Creative Mode the release applies that window,
+    /// and leaves another Extrude window that replaced it waiting for OK.
+    #[test]
+    fn a_pull_applies_only_the_window_it_opened() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.creative_mode = true;
+        h.app.run("solid.box", serde_json::json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0]})).unwrap();
+        h.settle();
+        let at = Vec3::new(10.0, 10.0, 10.0);
+        let st = h.app.session.model.state();
+        let top = st.body("Body1").unwrap().body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.5)).unwrap().index;
+        drop(st);
+        let sel = Sel::Face { body: "Body1".into(), index: top, point: at };
+        for (owned, applies) in [(true, true), (false, false)] {
+            h.app.dialog = None;
+            h.app.session.selection = vec![sel.clone()];
+            h.app.start("solid.press_pull");
+            assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { .. })));
+            let window = token();
+            // The window is this pull's, or another one that replaced it.
+            h.app.dialog.as_mut().unwrap().gesture = owned.then_some(window);
+            h.app.viewport.drag_extrude.gesture = Some(Gesture {
+                press: Pos2::ZERO,
+                sel: sel.clone(),
+                base: at,
+                normal: Vec3::Z,
+                grab: 0.0,
+                started: true,
+                step0: 0,
+                x0: 0.0,
+                step: 1.0,
+                at: Pos2::ZERO,
+                window,
+            });
+            end(&mut h.app, None);
+            assert_eq!(h.app.dialog.as_ref().map(|d| d.confirm), Some(applies), "owned {owned}");
+            assert!(!started(&h.app));
+        }
+    }
 
     #[test]
     fn drag_steps_follow_design_units() {

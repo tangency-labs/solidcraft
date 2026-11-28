@@ -403,6 +403,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Transient Update and Managed by controls follow the saved End items.
             let _ = draw_bar_offers(app, ui, &out);
             let tabs_end = out.tabs_end;
+            // The Creative switch takes the right end of the space left to the tabs, left of the
+            // End items, and hides when the tabs need that room. That space ends at the next
+            // part's edge, so it keeps a pill's gap.
+            let switch_right = tabs_end - 6.0;
+            let span = Rect::from_min_max(pos2(out.tabs_start.min(switch_right), out.offer.min.y), pos2(switch_right, out.offer.max.y));
+            let creative = if design_shown(app) { crate::creative_mode::bar_switch(app, ui, span) } else { None };
+            let tabs_end = creative.map_or(tabs_end, |c| tabs_end.min(c.left() - 8.0));
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));

@@ -1719,6 +1719,25 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
     })
 }
 
+/// The cosine of the angle between the directions `a` and `b` in a plane, `a·b / (|a| |b|)`
+/// held to `[-1, 1]`. `None` when either has no length.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite input or a length that overflows.
+pub fn direction_cosine_2d(a: Vec2, b: Vec2) -> Result<Option<f64>> {
+    if ![a.x, a.y, b.x, b.y].iter().all(|v| v.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite direction"));
+    }
+    let (la, lb) = (a.length(), b.length());
+    if !la.is_finite() || !lb.is_finite() {
+        return Err(SolidError::invalid_input(OP, "direction length overflows"));
+    }
+    if la == 0.0 || lb == 0.0 {
+        return Ok(None);
+    }
+    Ok(Some((a.dot(b) / la / lb).clamp(-1.0, 1.0)))
+}
+
 /// The vector from point `from` to point `to`.
 ///
 /// # Errors
@@ -2974,6 +2993,20 @@ mod tests {
         assert!(point_distance(Point3::ZERO, nan).is_err());
         let inf = Point3::new(0.0, f64::INFINITY, 0.0);
         assert!(point_distance(inf, Point3::ZERO).is_err());
+    }
+
+    #[test]
+    fn direction_cosine_2d_is_the_cosine_between_two_directions() {
+        let c = |a: [f64; 2], b: [f64; 2]| {
+            direction_cosine_2d(Vec2::new(a[0], a[1]), Vec2::new(b[0], b[1]))
+        };
+        assert_eq!(c([3.0, 0.0], [0.0, 5.0]).unwrap(), Some(0.0));
+        assert_eq!(c([2.0, 0.0], [-7.0, 0.0]).unwrap(), Some(-1.0));
+        let half = c([1.0, 0.0], [1.0, 3f64.sqrt()]).unwrap().unwrap();
+        assert!((half - 0.5).abs() < 1e-12, "{half}");
+        assert_eq!(c([0.0, 0.0], [1.0, 0.0]).unwrap(), None);
+        assert!(c([f64::NAN, 0.0], [1.0, 0.0]).is_err());
+        assert!(c([f64::MAX, f64::MAX], [1.0, 0.0]).is_err());
     }
 
     #[test]
