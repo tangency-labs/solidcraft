@@ -1,0 +1,42 @@
+{
+  "en": {
+    "pattern.body_names_clash": "Body name `{name}` is already in use",
+    "pattern.body_names_index_required": "body_names must contain {i} when creating more than one copy",
+    "pattern.body_names_invalid": "body_names must be a nonempty string"
+  },
+  "ar": {
+    "pattern.body_names_clash": "اسم الجسم `{name}` مستخدم بالفعل",
+    "pattern.body_names_index_required": "يجب أن يحتوي body_names على {i} عند إنشاء أكثر من نسخة",
+    "pattern.body_names_invalid": "يجب أن يكون body_names نصًا غير فارغ"
+  },
+  "de": {
+    "pattern.body_names_clash": "Der Körpername `{name}` wird bereits verwendet",
+    "pattern.body_names_index_required": "body_names muss beim Erstellen mehrerer Kopien {i} enthalten",
+    "pattern.body_names_invalid": "body_names muss eine nicht leere Zeichenfolge sein"
+  },
+  "he": {
+    "pattern.body_names_clash": "שם הגוף `{name}` כבר נמצא בשימוש",
+    "pattern.body_names_index_required": "body_names חייב להכיל {i} בעת יצירת יותר מעותק אחד",
+    "pattern.body_names_invalid": "body_names חייב להיות מחרוזת שאינה ריקה"
+  },
+  "ja": {
+    "pattern.body_names_clash": "ボディ名 `{name}` はすでに使用されています",
+    "pattern.body_names_index_required": "複数のコピーを作成する場合、body_names に {i} が必要です",
+    "pattern.body_names_invalid": "body_names は空でない文字列にしてください"
+  },
+  "ko": {
+    "pattern.body_names_clash": "바디 이름 `{name}`이(가) 이미 사용 중입니다",
+    "pattern.body_names_index_required": "복사본을 둘 이상 만들 때 body_names에 {i}가 포함되어야 합니다",
+    "pattern.body_names_invalid": "body_names는 비어 있지 않은 문자열이어야 합니다"
+  },
+  "vi": {
+    "pattern.body_names_clash": "Tên khối `{name}` đã được sử dụng",
+    "pattern.body_names_index_required": "body_names phải chứa {i} khi tạo nhiều hơn một bản sao",
+    "pattern.body_names_invalid": "body_names phải là chuỗi không trống"
+  },
+  "zh": {
+    "pattern.body_names_clash": "实体名称 `{name}` 已被使用",
+    "pattern.body_names_index_required": "创建多个副本时，body_names 必须包含 {i}",
+    "pattern.body_names_invalid": "body_names 必须是非空字符串"
+  }
+}

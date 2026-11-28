@@ -2100,6 +2100,7 @@ mod tests {
     fn a_path_pattern_keeps_its_path_icon_in_history() {
         use solidcraft_engine::doc::{FeatureKind, PatternKind};
         let feature = FeatureKind::Pattern {
+            body_names: None,
             features: Vec::new(),
             bodies: Vec::new(),
             placements: Vec::new(),

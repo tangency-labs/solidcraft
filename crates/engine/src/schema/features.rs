@@ -1177,6 +1177,9 @@ fn pattern_reversed2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D:
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PatternCircularParams {
+    /// Copy name template, e.g. Block {i}; copies count from 1, original unchanged.
+    #[serde(default)]
+    pub body_names: Option<String>,
     /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
     #[serde(default)]
     pub features: Option<NameList>,
@@ -1366,6 +1369,9 @@ fn rectangular_required(schema: &mut Schema) {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = rectangular_required)]
 pub struct PatternRectangularParams {
+    /// Copy name template, e.g. Block {i}; copies count from 1, original unchanged.
+    #[serde(default)]
+    pub body_names: Option<String>,
     /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
     #[serde(default)]
     pub features: Option<NameList>,
@@ -1589,6 +1595,9 @@ fn path_required(schema: &mut Schema) {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = path_required)]
 pub struct PatternPathParams {
+    /// Copy name template, e.g. Block {i}; copies count from 1, original unchanged.
+    #[serde(default)]
+    pub body_names: Option<String>,
     /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
     #[serde(default)]
     pub features: Option<NameList>,

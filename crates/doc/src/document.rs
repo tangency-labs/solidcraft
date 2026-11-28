@@ -1289,6 +1289,10 @@ pub enum FeatureKind {
     /// along a path). The copied features are named by id (#1134). Component copies are named by
     /// component id; the occurrence ids they make are kept so a count change keeps survivors (#12116).
     Pattern {
+        /// Optional template for copy names; the original keeps its name. The saved key
+        /// differs from the feature's legacy list of pinned body names.
+        #[serde(default, rename = "body_name_template", skip_serializing_if = "Option::is_none")]
+        body_names: Option<String>,
         features: Vec<FeatureId>,
         pattern: PatternKind,
         /// Copy these bodies (as new bodies) instead of replaying features.

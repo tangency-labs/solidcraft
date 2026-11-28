@@ -4785,3 +4785,56 @@ fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
     assert_eq!(s.doc, doc, "the refused edit leaves the design as it was");
     assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }
+
+#[test]
+fn body_name_templates_survive_count_changes_and_rebuilds() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"copies", "expression":"5", "unit":"none"}));
+    run(&mut s, "solid.box", json!({"length":1,"width":1,"height":1,"body_name":"Seed"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Seed"],"dir1":[1,0,0],"spacing1":3,"count1":"copies","body_names":"Block {i}"}));
+    let check = |s: &Session, count: usize| {
+        let names: Vec<_> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        let expected: Vec<_> = std::iter::once("Seed".to_string()).chain((1..=count).map(|i| format!("Block {i}"))).collect();
+        assert_eq!(names, expected);
+    };
+    check(&s, 4);
+    run(&mut s, "parameters.change", json!({"name":"copies","expression":"7"}));
+    check(&s, 6);
+    s.refresh();
+    check(&s, 6);
+    let saved = serde_json::to_value(&s.doc).unwrap();
+    assert!(saved.to_string().contains("Block {i}"));
+    s.doc = serde_json::from_value(saved).unwrap();
+    s.refresh();
+    check(&s, 6);
+}
+
+#[test]
+fn body_name_templates_refuse_duplicates_and_require_an_index() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":1,"width":1,"height":1,"body_name":"Seed"}));
+    run(&mut s, "solid.box", json!({"length":1,"width":1,"height":1,"corner":[0,10,0],"body_name":"Block 1"}));
+    for (template, message) in [("Block {i}", "Block 1"), ("Block", "{i}")] {
+        let error = s
+            .execute("solid.pattern.rectangular", &json!({"bodies":["Seed"],"dir1":[1,0,0],"spacing1":3,"count1":3,"body_names":template}))
+            .unwrap_err();
+        assert!(error.to_string().contains(message), "{error}");
+        assert_eq!(s.model.state().bodies.len(), 2);
+    }
+}
+
+#[test]
+fn body_patterns_without_templates_keep_legacy_names() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":1,"width":1,"height":1,"body_name":"Seed"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Seed"],"dir1":[1,0,0],"spacing1":3,"count1":3}));
+    let names: Vec<_> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, ["Seed", "Seed (2)", "Seed (3)"]);
+    let mut saved = serde_json::to_value(&s.doc).unwrap();
+    for feature in saved["features"].as_array_mut().unwrap() {
+        feature.as_object_mut().unwrap().remove("body_name_template");
+    }
+    s.doc = serde_json::from_value(saved).unwrap();
+    s.refresh();
+    assert_eq!(s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>(), names);
+}
