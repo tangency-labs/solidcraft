@@ -144,6 +144,75 @@ impl Rigid {
         self.exact()
     }
 
+    fn stored_point_fits(&self, p: [f64; 3]) -> bool {
+        fits_point(self.point(p))
+    }
+
+    /// Homogeneous controls as stored, `R·(xw, yw, zw) + w·t`, weight unchanged. The stored
+    /// components, not the cartesian point: a weight above 1 can fail while the point does not.
+    fn stored_homogeneous_fits(&self, h: [f64; 4]) -> bool {
+        let [x, y, z, _] = self.homogeneous(h);
+        fits(x) && fits(y) && fits(z)
+    }
+
+    /// Frame origin after the motion. Re-unitized axes stay unit, so they cannot newly fail the
+    /// ceiling; [`Self::frame`] returning `None` is not a ceiling failure.
+    fn frame_origin_fits(&self, frame: &Frame) -> bool {
+        self.frame(frame).is_none_or(|frame| fits_point(frame.origin))
+    }
+
+    fn plane_fits(&self, origin: [f64; 3], u_axis: [f64; 3], v_axis: [f64; 3]) -> bool {
+        let Ok([u_axis, v_axis]) = solidcore_ops::affine::rigid_plane_axes(&self.matrix(), u_axis, v_axis) else {
+            return true;
+        };
+        self.stored_point_fits(origin) && u_axis.into_iter().chain(v_axis).all(fits)
+    }
+
+    fn plane_through_fits(&self, origin: [f64; 3], u_point: [f64; 3], v_point: [f64; 3]) -> bool {
+        let Ok((origin, [u_axis, v_axis])) = solidcore_ops::affine::rigid_plane_through(&self.matrix(), origin, u_point, v_point) else {
+            return true;
+        };
+        fits_point(origin) && u_axis.into_iter().chain(v_axis).all(fits)
+    }
+
+    /// The revolution's placement after this motion: the matrix entries `validate_built` reads.
+    /// Profile, origin and axis are not moved.
+    fn placement_fits(&self, matrix: &[[f64; 4]; 4]) -> bool {
+        compose(&self.matrix(), matrix).into_iter().flatten().all(fits)
+    }
+
+    /// Numbers [`Self::curve`] stores that the record's `numbers` check sees. Knots, weights,
+    /// radii and tolerances are unchanged.
+    fn curve_fits(&self, c: &Curve) -> bool {
+        match c {
+            Curve::Line { start, end } => self.stored_point_fits(*start) && self.stored_point_fits(*end),
+            Curve::Circle { frame, .. } | Curve::Ellipse { frame, .. } => self.frame_origin_fits(frame),
+            Curve::Polyline { points } => points.iter().all(|p| self.stored_point_fits(*p)),
+            Curve::Spline { points, .. } => points.iter().all(|p| self.stored_point_fits(*p)),
+            Curve::RationalSpline { homogeneous, .. } => homogeneous.iter().all(|h| self.stored_homogeneous_fits(*h)),
+            Curve::SurfaceIntersection { surfaces, leader, .. } => {
+                self.surface_fits(&surfaces[0]) && self.surface_fits(&surfaces[1]) && self.curve_fits(leader)
+            }
+        }
+    }
+
+    /// Numbers [`Self::surface`] stores that the record's `numbers` check sees. A blend
+    /// definition is finite-only, so its net is not under that ceiling.
+    fn surface_fits(&self, s: &Surface) -> bool {
+        match s {
+            Surface::Plane { origin, u_axis, v_axis } => self.plane_fits(*origin, *u_axis, *v_axis),
+            Surface::PlaneThrough { origin, u_point, v_point } => self.plane_through_fits(*origin, *u_point, *v_point),
+            Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => {
+                self.frame_origin_fits(frame)
+            }
+            Surface::BallPatch { center, .. } => self.stored_point_fits(*center),
+            Surface::Spline { points, .. } => points.iter().flatten().all(|p| self.stored_point_fits(*p)),
+            Surface::RationalSpline { homogeneous, .. } => homogeneous.iter().flatten().all(|h| self.stored_homogeneous_fits(*h)),
+            Surface::PlacedRevolution { matrix, .. } => self.placement_fits(matrix),
+            Surface::Blend { .. } => true,
+        }
+    }
+
     fn exact(&self) -> bool {
         const ROUNDING: f64 = 16.0 * f64::EPSILON;
         let column = |j: usize| [self.rotation[0][j], self.rotation[1][j], self.rotation[2][j]];
@@ -272,6 +341,29 @@ fn face_net(s: &Surface) -> Option<Vec<([f64; 3], f64)>> {
         }
         _ => None,
     }
+}
+
+/// The ceiling `Brep::validate_built` applies to a stored coordinate: finite, absolute value at
+/// most 1e12.
+const COORDINATE_CEILING: f64 = 1e12;
+
+fn fits(x: f64) -> bool {
+    x.is_finite() && x.abs() <= COORDINATE_CEILING
+}
+
+fn fits_point(p: [f64; 3]) -> bool {
+    p.into_iter().all(fits)
+}
+
+/// Whether every coordinate [`moved`] would store, that the record's `numbers` check sees, is
+/// finite and at most 1e12 in absolute value. Does not clone the record. A move helper returning
+/// `None` is not a failure here: [`moved`] does not store that record. Unchanged fields (knots,
+/// weights, radii, angles, intervals) are not read again. A blend definition's net is not under
+/// this ceiling; the blend face's own NURBS form is.
+pub fn within_coordinate_ceiling(brep: &Brep, motion: &Rigid) -> bool {
+    brep.vertices.iter().all(|v| motion.stored_point_fits(v.point))
+        && brep.edges.iter().all(|e| motion.curve_fits(&e.curve) && e.nurbs.as_ref().is_none_or(|n| motion.curve_fits(n)))
+        && brep.faces.iter().all(|f| motion.surface_fits(&f.surface) && f.nurbs.as_ref().is_none_or(|n| motion.surface_fits(n)))
 }
 
 /// `a · b` of column-major 4×4 matrices.

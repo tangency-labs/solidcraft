@@ -54,6 +54,11 @@
 //!   edges `MergeCurvesOnSurface` names; a later imprint that splits one of them keeps only
 //!   one piece named. Here every piece of a face's edges along one of its imprint curves is
 //!   the imprint, whichever way the edge runs.
+//! - **A shallow crossing ends on the meet.** A crease that meets a boundary edge at a
+//!   shallow angle is classified short of that meet, by more than the trim's tolerance,
+//!   and the two edges there do not sew. Each curve lies in a tube of that tolerance, so
+//!   the meet can sit `2 tol / sin(theta)` past the classified end. The end moves onto
+//!   the crossing the edge's curve makes with the face.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1054,6 +1059,52 @@ fn pieces_in_face_to_ends(
     Ok(events)
 }
 
+/// Whether `q`, the crossing of `edge_curve` with the face, is the meet this crease stops
+/// short of. The classification ends the piece where it is still `tol` from the edge, and
+/// a shallow crossing (angle `theta` between the two tangents) is up to `2 tol / sin(theta)`
+/// further on: each curve lies in a tube of radius `tol`, and those tubes meet that far
+/// along the edge. The closest point of the crease to `q` is this end, so the curve does
+/// not already pass the crossing, and the gap is shorter than the piece, so the meet is
+/// not the crossing at the piece's other end.
+#[allow(clippy::too_many_arguments)]
+fn short_of_shallow_crossing(
+    k: &Kernel,
+    crease: &Curve,
+    edge_curve: &Curve,
+    t: f64,
+    end: Point3,
+    q: Point3,
+    tq: f64,
+    tol: f64,
+    other: Point3,
+) -> Result<bool> {
+    let foot = crease.evaluate_point(k, tq)?;
+    if foot.distance(end) > tol {
+        return Ok(false);
+    }
+    let gap = q.distance(end);
+    if gap <= tol || gap >= end.distance(other) {
+        return Ok(false);
+    }
+    let c_der = crease.evaluate(k, t, 1, false, false)?;
+    let Some(c_tan) = c_der.get(1).copied() else {
+        return Ok(false);
+    };
+    let Some((et, _)) = drop_on(k, edge_curve, &edge_curve.natural_interval(), end)? else {
+        return Ok(false);
+    };
+    let e_der = edge_curve.evaluate(k, et, 1, false, false)?;
+    let Some(e_tan) = e_der.get(1).copied() else {
+        return Ok(false);
+    };
+    let (c_len, e_len) = (c_tan.length(), e_tan.length());
+    if c_len <= 0.0 || e_len <= 0.0 {
+        return Ok(false);
+    }
+    let sin_theta = c_tan.cross(e_tan).length() / (c_len * e_len);
+    Ok(sin_theta > 0.0 && gap * sin_theta <= 2.0 * tol)
+}
+
 /// #17673: the pieces of the crease `crease` (on face `f` of `target`) that lie inside the
 /// sheet face `s` (its runs classified in the face, as [`crate::blend::fillet_overflow::pieces_in_face`]), each end that
 /// the classification puts on a boundary edge of the sheet face (one no other sheet face
@@ -1152,6 +1203,20 @@ fn pieces_ending_at_meets(
             };
             if on_crease && within {
                 *slot = (tq, Some(q));
+            } else if short_of_shallow_crossing(
+                k,
+                crease,
+                &edge_curve,
+                t,
+                end,
+                q,
+                tq,
+                tol,
+                crease.evaluate_point(k, if side == 0 { ivl.max() } else { ivl.min() })?,
+            )? {
+                // the classified parameter: the curve's domain stops at this end, and
+                // moving that control point lands it on the crossing
+                *slot = (t, Some(q));
             }
         }
         let [start, end] = ends;

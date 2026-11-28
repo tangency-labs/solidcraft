@@ -68,6 +68,15 @@ const SMOOTH_COSINE: f64 = 0.999_847_695_156_391_3;
 /// two sides are one: a rational circle's double knots, across which the surface is `C1`.
 const JUMP: f64 = EFF_ZERO_SQRT;
 
+/// Whether the two sides `a` and `b` of a first derivative at a knot differ by more than
+/// [`JUMP`] of the longer. The drop asks it of the surface's partials across a knot line
+/// ([`KnotLines::settle`]) and of the dropped curve's derivative at a knot of its own (`p3`'s
+/// span walk).
+#[must_use]
+pub(crate) fn derivative_jumps(a: Vec3, b: Vec3) -> bool {
+    (a - b).length() > JUMP * a.length().max(b.length())
+}
+
 /// One knot line: the direction whose parameter is constant along it, and that knot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KnotLine {
@@ -183,8 +192,8 @@ impl KnotLines {
         // smooth across the line, and a first derivative that jumps there
         let turns_a_corner = |behind: Option<(Vec3, Vec3, Vec3)>| {
             ahead.zip(behind).is_some_and(|(a, b)| {
-                let jumps = |x: Vec3, y: Vec3| (x - y).length() > JUMP * x.length().max(y.length());
-                a.0.dot(b.0) >= SMOOTH_COSINE && (jumps(a.1, b.1) || jumps(a.2, b.2))
+                a.0.dot(b.0) >= SMOOTH_COSINE
+                    && (derivative_jumps(a.1, b.1) || derivative_jumps(a.2, b.2))
             })
         };
         on_u_line = on_u_line && turns_a_corner(side(Side::Right, Side::Left)?);
@@ -257,6 +266,7 @@ impl KnotLines {
 mod tests {
     use super::*;
     use crate::geom::vector2d::Vec2;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::surface::plane::Plane;
@@ -268,7 +278,7 @@ mod tests {
     /// control points' row on `u = 1` (`x = 3`): each side rises `fold_degrees` from the
     /// plane, so the normals on the two sides of that line are twice that apart.
     fn patch(fold_degrees: f64, jump: bool) -> Surface {
-        let rise = fold_degrees.to_radians().tan();
+        let rise = det::tan(fold_degrees.to_radians());
         let step = if jump { 2.0 } else { 1.0 };
         let net: Vec<Vec<CPoint>> = (0..8_i32)
             .map(|i| {
