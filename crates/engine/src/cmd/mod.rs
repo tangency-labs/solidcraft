@@ -184,6 +184,7 @@ pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
+pub use design_link::resolve as resolve_design_link_path;
 mod config;
 mod design_link;
 mod documents;

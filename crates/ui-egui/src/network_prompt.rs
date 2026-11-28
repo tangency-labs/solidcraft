@@ -21,6 +21,8 @@ pub enum Then {
     UpdateLinks,
     /// Open Linked Design: open this file.
     OpenLinked(String),
+    /// Change Configuration: read the current source of this placement.
+    ChangeConfiguration { path: String, component: u64, occurrence: u64, tab: u64, document: std::sync::Arc<solidcraft_engine::doc::Document> },
     /// Reload from file: read this point cloud's file again (`pointcloud.reload`, off the window
     /// thread).
     ReloadCloud(u64),
@@ -97,6 +99,16 @@ pub(crate) fn reload_cloud(app: &mut SolveApp, cloud: u64, source: &str) {
     }
 }
 
+/// Change Configuration uses the same consent as other actions on a linked source.
+pub(crate) fn change_configuration(app: &mut SolveApp, path: String, component: u64, occurrence: u64) {
+    let then = Then::ChangeConfiguration { path: path.clone(), component, occurrence, tab: app.docs.active_tab(), document: app.session.doc.clone() };
+    if let Some(Remote::Network(host)) = design_path_refusal(&path, app.session.path.as_deref()) {
+        app.network_prompt = Some(NetworkPrompt { hosts: vec![host], then });
+    } else {
+        run(app, Vec::new(), then);
+    }
+}
+
 /// Run the action with `hosts` allowed for it alone.
 fn run(app: &mut SolveApp, hosts: Vec<String>, then: Then) {
     match then {
@@ -107,6 +119,20 @@ fn run(app: &mut SolveApp, hosts: Vec<String>, then: Then) {
         }
         // Opening a file reads only it, as File › Open does; the design it opens is checked anew.
         Then::OpenLinked(file) => app.open_path_async(&file),
+        Then::ChangeConfiguration { path, component, occurrence, tab, document } => {
+            if tab != app.docs.current_tab() || !std::sync::Arc::ptr_eq(&document, &app.session.doc) {
+                app.set_status(app.tr("insert_design.configuration_target_changed").to_string(), true);
+                return;
+            }
+            let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::ChangeConfiguration);
+            request.options.insert("component".into(), serde_json::json!(component));
+            request.options.insert("occurrence".into(), serde_json::json!(occurrence));
+            request.allow_hosts = hosts;
+            request.tab = Some(tab);
+            request.configuration_document = Some(document);
+            request.choose_configuration = true;
+            let _ = crate::file_load::begin_request(app, request);
+        }
         Then::ReloadCloud(cloud) => {
             let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
             request.options.insert("cloud".into(), serde_json::json!(cloud));

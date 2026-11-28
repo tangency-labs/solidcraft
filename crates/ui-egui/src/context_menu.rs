@@ -670,7 +670,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::OriginPlane { name } => origin_plane_items(app, name),
         Target::OriginAxis { name } => origin_axis_items(app, name),
         Target::OriginPoint { name } => origin_point_items(app, name),
-        Target::Component { id } => component_items(app, *id),
+        Target::Component { id } => component_items(app, *id, None),
         Target::Occurrence { path } => occurrence_items(app, path),
         Target::Group { id, scope } => crate::browser::group_items(app, *id, scope),
         Target::Folder { component, folder, scope } => crate::browser::folder_items(app, *component, folder, scope),
@@ -1595,8 +1595,9 @@ fn link_items(app: &SolveApp, index: usize) -> Vec<Item> {
 /// placement, and "Relink Source…" for it alone when the component is placed more than once.
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let Ok(placement) = app.session.occurrence_placement(path) else { return Vec::new() };
-    let mut entries = component_items(app, placement.component);
-    if app.session.occurrence_scope_count(path).is_ok_and(|n| n > 1) {
+    let mut entries = component_items(app, placement.component, Some(placement.occurrence));
+    let shared_child = app.session.occurrence_scope_count(path).is_ok_and(|n| n > 1);
+    if shared_child {
         entries.insert(0, Item::heading("Shared child: edits affect all copies of its parent"));
     }
     let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
@@ -1613,6 +1614,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
         }
         "ui.editInPlace" => item.params = Some(json!({"component": placement.component, "path": path})),
+        "ui.changeConfiguration" => item.enabled = !shared_child,
         "ui.zoomTo" => {
             item.params = Some(json!({ "items": [Sel::Occurrence { path: path.to_vec() }] }));
             item.enabled = has_bodies;
@@ -1750,7 +1752,7 @@ fn group(label: &str, icon: &str, children: Vec<Item>) -> Item {
 
 /// The everyday actions stay on the menu; the placement, what concerns the component itself,
 /// export and organising the browser tree open in category flyouts.
-fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
+fn component_items(app: &SolveApp, id: u64, occurrence: Option<u64>) -> Vec<Item> {
     let doc = &app.session.doc;
     let occ = doc.occurrence_of(id);
     let active = app.session.active_component == id;
@@ -1808,8 +1810,15 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id == 0 {
         own.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     }
-    if doc.links.get(&id).is_some_and(|link| link.is_design()) {
+    if let Some(link) = doc.links.get(&id).filter(|link| link.is_design()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+        let configuration_target =
+            occurrence.or_else(|| occ.filter(|_| doc.occurrences.iter().filter(|o| o.component == id).take(2).count() == 1).map(|o| o.id));
+        if !link.path.is_empty()
+            && let Some(occurrence) = configuration_target
+        {
+            own.push(act("ui.changeConfiguration", "ui.change_link_configuration", "edit").with(json!({"component": id, "occurrence": occurrence})));
+        }
         own.push(cmd(app, "component.break_link", "Break Link").with(json!({ "component": id })));
         own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
     } else if id != 0 {
@@ -2471,6 +2480,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.relinkSourceNames" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::start_with(app, component, None, true);
+            }
+        }
+        "ui.changeConfiguration" => {
+            if let (Some(component), Some(occurrence)) = (id_of(&p, "component"), id_of(&p, "occurrence")) {
+                crate::linked_source::start_configuration(app, component, occurrence);
             }
         }
         "ui.extractComponent" => {

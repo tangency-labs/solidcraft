@@ -37,6 +37,7 @@ impl SolveApp {
         self.file_picker.is_some()
             || self.saving.is_some()
             || self.disk_prompt
+            || self.insert_design_options.is_some()
             || (crate::documents::saving_to_close(self) && crate::save_job::host_pending(self, self.session.uid))
     }
 

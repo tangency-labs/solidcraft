@@ -52,6 +52,8 @@ pub enum Kind {
     /// Insert a saved design into the active design as a linked component
     /// (`component.insert_design`): reading a large design takes a while (#11593).
     InsertDesign,
+    /// Choose another saved configuration of a linked placement's current source.
+    ChangeConfiguration,
     /// Open a design an earlier run autosaved before it closed.
     Recover { id: String, dir: Option<String> },
     /// Export a snapshot of the current design without adopting the worker's session.
@@ -128,6 +130,10 @@ pub struct Request {
     /// An open (`doc.open` with `new_tab`) that gets a tab of its own, even where a blank design
     /// would be replaced.
     pub new_tab: bool,
+    /// Interactive Insert Design reads the saved configuration rows before inserting anything.
+    pub(crate) choose_configuration: bool,
+    /// A change of configuration is only for the assembly shown when the picker was requested.
+    pub(crate) configuration_document: Option<Arc<Document>>,
 }
 
 impl Request {
@@ -155,6 +161,8 @@ impl Request {
             plugin_folders: None,
             print: false,
             new_tab: false,
+            choose_configuration: false,
+            configuration_document: None,
         }
     }
     /// It adds what it reads to the active design.
@@ -163,7 +171,12 @@ impl Request {
     }
     /// It reads files the active design already names, and changes that design in place.
     fn reads_again(&self) -> bool {
-        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud)
+        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud | Kind::ChangeConfiguration)
+    }
+    pub(crate) fn configuration_is_current(&self, app: &SolveApp) -> bool {
+        self.configuration_document
+            .as_ref()
+            .is_none_or(|document| self.tab == Some(app.docs.current_tab()) && Arc::ptr_eq(document, &app.session.doc))
     }
     fn sheet_in_reply(&self) -> bool {
         self.kind == Kind::ExportSheet && self.path.is_empty()
@@ -199,6 +212,7 @@ impl Request {
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::InsertDesign => ("component.insert_design", self.params()),
+            Kind::ChangeConfiguration => ("component.relink", self.params()),
             // As an open: a link in another folder that the copy has no bodies of waits for Load.
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir, "linked_bodies": "folder"})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
@@ -250,6 +264,8 @@ struct Made {
     result: Value,
     /// Draw its Home picture once it is open (off the UI thread: a large design takes a while).
     thumbnail: bool,
+    /// A read-only first step of interactive Insert Design; no session changes have run yet.
+    configurations: Option<solidcraft_engine::doc::config::ConfigTable>,
 }
 /// Keep a plugin's deliberate refusal alongside the worker's localised error text until it
 /// reaches the window. All other failures retain their existing status-line behaviour.
@@ -288,6 +304,10 @@ impl From<solidcraft_engine::EngineError> for LoadFailure {
 }
 
 type Job = Result<Made, LoadFailure>;
+
+/// The worker reads configuration metadata before starting the file operation.
+const READING_CONFIGURATIONS: u8 = 3;
+
 struct Running {
     request: Request,
     base: Arc<Document>,
@@ -574,7 +594,7 @@ impl SolveApp {
     /// on, the design waits (commands, shortcuts and edits) while one runs or waits its turn.
     /// Off, the design stays usable: an operation's result lands after the person's edits.
     pub fn file_load_holds(&self) -> bool {
-        self.preferences.file_operations_wait && self.file_load.busy()
+        self.insert_design_options.is_some() || (self.preferences.file_operations_wait && self.file_load.busy())
     }
 }
 
@@ -685,6 +705,30 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
     }
     #[cfg(target_arch = "wasm32")]
     {
+        if request.choose_configuration {
+            request.choose_configuration = false;
+            let rows = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
+                solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || {
+                    crate::insert_design_options::read(&request.path, app.session.path.as_deref())
+                })
+            });
+            match rows {
+                Ok(rows) if !rows.rows.is_empty() => {
+                    crate::insert_design_options::offer(app, request, rows);
+                    return Ok(());
+                }
+                Ok(_) if request.kind == Kind::ChangeConfiguration => {
+                    let error = app.tr("insert_design.no_saved_configurations").to_string();
+                    app.set_status(error.clone(), true);
+                    return Err(error);
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    app.set_status(error.clone(), true);
+                    return Err(error);
+                }
+            }
+        }
         if staged_kind(&request) {
             app.file_load.queued.push_back(request);
             start_staged(app);
@@ -737,9 +781,15 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 }
                 r
             }
-            Kind::UpdateLinks | Kind::ReloadCloud => {
+            Kind::UpdateLinks | Kind::ReloadCloud | Kind::ChangeConfiguration => {
                 let (command, params) = request.command();
-                solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params))
+                let result = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
+                if request.kind == Kind::ChangeConfiguration
+                    && let Ok(result) = &result
+                {
+                    crate::linked_source::report_configuration_changed(app, result);
+                }
+                result
             }
         };
         request.answer(r);
@@ -747,6 +797,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if request.kind == Kind::ChangeConfiguration {
+            // Like Insert Design, only read the source file, even if another app has it open.
+            return queue(app, request);
+        }
         // A design open in another SolidCraft asks first (#5467).
         let Some(request) = crate::open_elsewhere::check_open(app, request) else { return Ok(()) };
         queue(app, request)
@@ -907,6 +961,8 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         plugin_folders: None,
         print: false,
         new_tab,
+        choose_configuration: false,
+        configuration_document: None,
     };
     let _ = begin_request(app, request);
     None
@@ -983,6 +1039,13 @@ fn start(app: &mut SolveApp) {
     if reuse_open(app, &request) {
         return;
     }
+    if !request.configuration_is_current(app) {
+        let error = app.tr("insert_design.configuration_target_changed").to_string();
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(error.clone()));
+        app.set_status(error.clone(), true);
+        request.answer(Err(error));
+        return;
+    }
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
         crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed("the design it was for is no longer shown".into()));
         request.answer(Err("the design it was for is no longer shown".into()));
@@ -1043,7 +1106,7 @@ fn start(app: &mut SolveApp) {
     }
     let base = app.session.doc.clone();
     let base_revision = app.session.revision;
-    let phase = Arc::new(AtomicU8::new(0));
+    let phase = Arc::new(AtomicU8::new(if request.choose_configuration { READING_CONFIGURATIONS } else { 0 }));
     let worker_phase = phase.clone();
     let progress = Arc::new(Progress::default());
     #[cfg(test)]
@@ -1057,6 +1120,7 @@ fn start(app: &mut SolveApp) {
     let scope = request.scope.clone();
     let allow_hosts = request.allow_hosts.clone();
     let thumbnail = request.kind == Kind::Open;
+    let choose_configuration = request.choose_configuration;
     let export = request.kind.exports();
     // While a design rebuilds, a picture of what is built so far (a large design takes a while).
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1122,7 +1186,7 @@ fn start(app: &mut SolveApp) {
         // Servers allowed once hold for this request only, on this worker thread.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             solidcraft_engine::io::vfs::allowing_hosts(&allow_hosts, || {
-                compute(scratch, command, &params, scope, thumbnail, export, &worker_phase, &worker_progress)
+                compute(scratch, command, &params, scope, thumbnail, export, choose_configuration, &worker_phase, &worker_progress)
             })
         }))
         .unwrap_or_else(|_| Err("the file operation failed; the current design is unchanged".into()));
@@ -1274,7 +1338,7 @@ fn step_staged(running: &mut Running) {
         }
         let (Some(session), Some(result)) = (staged.session.take(), staged.ran.take()) else { return };
         let thumbnail = staged.command == "doc.open" && staged.triangles <= STAGED_THUMBNAIL_TRIANGLES;
-        send(staged, Ok(Made { session, result, thumbnail }));
+        send(staged, Ok(Made { session, result, thumbnail, configurations: None }));
         return;
     }
     if staged.command == "doc.open" && solidcraft_engine::io::is_design_path(&path) {
@@ -1531,6 +1595,7 @@ fn compute(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     thumbnail: bool,
     export: bool,
+    choose_configuration: bool,
     phase: &AtomicU8,
     progress: &Arc<Progress>,
 ) -> Job {
@@ -1539,6 +1604,21 @@ fn compute(
     let cancelled = || Err("file operation cancelled".into());
     if progress.is_cancelled() {
         return cancelled();
+    }
+    if choose_configuration {
+        let path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+        let rows = solidcraft_engine::io::vfs::scoped(scope.clone(), || crate::insert_design_options::read(path, session.path.as_deref()))?;
+        if progress.is_cancelled() {
+            return cancelled();
+        }
+        if !rows.rows.is_empty() {
+            return Ok(Made { session, result: Value::Null, thumbnail: false, configurations: Some(rows) });
+        }
+        if command == "component.relink" {
+            return Err(solidcraft_ui_text::tr("insert_design.no_saved_configurations").to_string().into());
+        }
+        // There is no choice to make. The ordinary insert now owns the progress display.
+        phase.store(0, Ordering::Relaxed);
     }
     session.plugin_state.defer_user_settings();
     // The timeline's rebuild reports each feature and stops at the next one after Cancel. An
@@ -1549,7 +1629,7 @@ fn compute(
     if export {
         // A successful export has already published its complete file. A Cancel arriving
         // after that commit must not turn a completed save into a misleading cancellation.
-        return Ok(Made { session, result, thumbnail: false });
+        return Ok(Made { session, result, thumbnail: false, configurations: None });
     }
     if progress.is_cancelled() {
         return cancelled();
@@ -1575,7 +1655,7 @@ fn compute(
             began.elapsed().as_secs_f64() * 1000.0
         );
     }
-    Ok(Made { session, result, thumbnail })
+    Ok(Made { session, result, thumbnail, configurations: None })
 }
 
 /// A sheet export's line on the card: the PNG's rows drawn so far, once its band loop reports them.
@@ -1743,6 +1823,7 @@ fn quiet(app: &SolveApp, r: &Running) -> bool {
         && app.docs.closing.is_none()
         && app.docs.quitting.is_none()
         && app.docs.batch.is_none()
+        && app.insert_design_options.is_none()
 }
 
 fn landing(app: &SolveApp, r: &Running) -> Land {
@@ -1764,6 +1845,8 @@ fn landing(app: &SolveApp, r: &Running) -> Land {
         Kind::Open | Kind::Recover { .. } if quiet(app, r) => Land::Now,
         Kind::Open | Kind::Recover { .. } => Land::Behind,
         _ if r.request.tab.is_some_and(|tab| tab != app.docs.current_tab()) || !quiet(app, r) => Land::Wait,
+        _ if !r.request.configuration_is_current(app) => Land::Now,
+        _ if job.as_ref().is_ok_and(|made| made.configurations.is_some()) => Land::Now,
         _ if r.matches(&app.session) || r.request.tries >= MAX_TRIES => Land::Now,
         _ => Land::Again,
     }
@@ -1856,9 +1939,22 @@ pub(crate) fn cancel_waiting(app: &mut SolveApp, serial: u64) {
 
 /// Take up a finished file operation now.
 fn land_now(app: &mut SolveApp, mut running: Running) {
-    let Some(job) = running.ready.take() else { return };
+    let Some(mut job) = running.ready.take() else { return };
     if app.file_load.warm.as_ref().is_some_and(|(serial, _)| *serial == running.request.serial) {
         app.file_load.warm = None;
+    }
+    if !running.request.configuration_is_current(app) {
+        job = Err(app.tr("insert_design.configuration_target_changed").to_string().into());
+    }
+    if !running.cancelled()
+        && let Ok(made) = &mut job
+        && let Some(rows) = made.configurations.take()
+    {
+        running.request.choose_configuration = false;
+        crate::operations::ended(app, &format!("file:{}", running.request.serial), Outcome::Done);
+        let request = std::mem::replace(&mut running.request, Request::new("", Kind::Open));
+        crate::insert_design_options::offer(app, request, rows);
+        return;
     }
     // Opened while the person kept working: it lands, whatever they changed in the design shown.
     let opens = !app.preferences.file_operations_wait && matches!(running.request.kind, Kind::Open | Kind::Recover { .. });
@@ -1901,8 +1997,14 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 {
                     panel.depth = app.session.undo.len();
                 }
-                let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-                app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
+                if request.kind == Kind::ChangeConfiguration {
+                    if let Ok(result) = &r {
+                        crate::linked_source::report_configuration_changed(app, result);
+                    }
+                } else {
+                    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+                    app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
+                }
                 // A design it could not read is said as when that was all it was asked.
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
@@ -2077,6 +2179,7 @@ pub(crate) fn phase(app: &SolveApp) -> Option<&'static str> {
     Some(match (r.staged.is_some(), r.phase.load(Ordering::Relaxed)) {
         (true, 0) => "reading the file (staged)",
         (_, 0) => "reading the file",
+        (_, READING_CONFIGURATIONS) => "reading configurations",
         (_, 1) => "preparing the view",
         _ => "finishing the open",
     })
@@ -2151,6 +2254,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         _ => std::path::Path::new(&r.request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
     };
     let phase = r.phase.load(Ordering::Relaxed);
+    let reading_configurations = phase == READING_CONFIGURATIONS;
     let (done, total) = r.features();
     // Long work inside one feature (a large STEP file) has progress of its own.
     let export = r.request.kind.exports();
@@ -2191,6 +2295,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         solidcraft_ui_text::tr_label("dxf.cancelling")
     } else if cancelled {
         solidcraft_ui_text::tr("file_load.waiting")
+    } else if reading_configurations {
+        solidcraft_ui_text::tr("insert_design.configuration_loading")
     } else {
         solidcraft_ui_text::tr(match r.request.kind {
             Kind::Insert | Kind::InsertDesign => "file_load.inserting",
@@ -2199,6 +2305,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Kind::ExportDxf => "dxf.exporting",
             Kind::ExportSheet => "drawing_export.exporting",
             Kind::UpdateLinks => "file_load.updating_links",
+            Kind::ChangeConfiguration => "insert_design.changing_configuration",
             Kind::ReloadCloud => "file_load.reloading_cloud",
         })
     };
@@ -2207,7 +2314,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Open => "open",
         Kind::Recover { .. } => "restore",
         Kind::ExportDxf | Kind::ExportSheet => "export",
-        Kind::UpdateLinks => "update",
+        Kind::UpdateLinks | Kind::ChangeConfiguration => "update",
         Kind::ReloadCloud => "import",
     };
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)
@@ -2230,7 +2337,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             // An open or an import goes through three steps the card lists; the other operations
             // (and a cancelled one) say what they are doing in a line.
-            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
+            let stepped = !cancelled
+                && !reading_configurations
+                && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
             if let Some(status) = (!cancelled).then(|| importer_status(&r.progress)).flatten() {
                 ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);
             } else if stepped {
@@ -2420,7 +2529,7 @@ mod tests {
 
     fn completed_open(app: &mut SolveApp, request: Request, session: Session) {
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(Ok(Made { session, result: json!({"loaded": true}), thumbnail: false })).unwrap();
+        tx.send(Ok(Made { session, result: json!({"loaded": true}), thumbnail: false, configurations: None })).unwrap();
         app.file_load.running = Some(Running {
             request,
             base: app.session.doc.clone(),
@@ -2459,7 +2568,7 @@ mod tests {
         scratch.plugin_state = h.app.session.plugin_state.clone();
         let request = Request::new(&path.to_string_lossy(), Kind::Open);
         let (command, params) = request.command();
-        let made = compute(scratch, command, &params, None, false, false, &AtomicU8::new(0), &Arc::new(Progress::default())).unwrap();
+        let made = compute(scratch, command, &params, None, false, false, false, &AtomicU8::new(0), &Arc::new(Progress::default())).unwrap();
         assert!(
             solidcraft_engine::plugin::user_storage::load(&h.dir.join("settings"), "sample").unwrap().is_empty(),
             "a fully computed file worker cannot publish before it lands"
@@ -3059,7 +3168,7 @@ M30
                 ready: None,
                 sketch: None,
             });
-            tx.send(Ok(Made { session: other, result: json!({"visible":12}), thumbnail: false })).unwrap();
+            tx.send(Ok(Made { session: other, result: json!({"visible":12}), thumbnail: false, configurations: None })).unwrap();
             h.frames(2);
             assert_eq!(reply_rx.try_recv().unwrap()["result"]["visible"], 12);
             assert!(Arc::ptr_eq(&base, &h.app.session.doc));
@@ -3115,7 +3224,7 @@ M30
         let key = format!("file:{}", running.request.serial);
         let (worker, result) = std::sync::mpsc::channel();
         running.rx = result;
-        worker.send(Ok(Made { session: Session::default(), result: json!({"svg": "<svg/>"}), thumbnail: false })).unwrap();
+        worker.send(Ok(Made { session: Session::default(), result: json!({"svg": "<svg/>"}), thumbnail: false, configurations: None })).unwrap();
         crate::operations::control(&mut app, &json!({"cancel": key})).unwrap();
         tick(&mut app, &crate::fonts::test_context());
         assert_eq!(reply.try_recv().unwrap(), json!({"ok": false, "error": "file operation cancelled"}));
@@ -3209,7 +3318,7 @@ M30
             let newer = app.session.doc.clone();
             tick(&mut app, &crate::fonts::test_context());
             assert!(app.file_load.running.as_ref().unwrap().preview.is_none());
-            tx.send(Ok(Made { session: Session::default(), result: Value::Null, thumbnail: false })).unwrap();
+            tx.send(Ok(Made { session: Session::default(), result: Value::Null, thumbnail: false, configurations: None })).unwrap();
             tick(&mut app, &crate::fonts::test_context());
             assert!(Arc::ptr_eq(&newer, &app.session.doc));
             assert!(app.status.as_ref().unwrap().0.contains("discarded"));
@@ -3309,7 +3418,7 @@ M30
             app.file_load.queued.push_back(queued);
             let mut computed = Session::default();
             computed.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
-            let made = Ok(Made { session: computed, result: Value::Null, thumbnail: false });
+            let made = Ok(Made { session: computed, result: Value::Null, thumbnail: false, configurations: None });
             // Both races: the result was queued before Cancel, or arrives afterwards.
             let late = if finished {
                 tx.send(made).unwrap();

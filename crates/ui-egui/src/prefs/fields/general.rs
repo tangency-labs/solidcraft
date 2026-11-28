@@ -12,6 +12,9 @@ macro_rules! general_preferences {
             /// FreeCAD, Rhino, glTF) asks them first (`import_options`); off imports at once with the defaults,
             /// as before.
             ask_import_options: bool = true, PAGE_GENERAL => check_id("settings.ask_import_options");
+            /// Ask which saved configuration to insert from a linked design. Turning this off
+            /// inserts the source's saved state directly.
+            ask_insert_design_configuration: bool = true, PAGE_GENERAL => check_id("settings.ask_insert_design_configuration");
             /// Import with cadmpeg: a STEP, IGES, FreeCAD or Rhino file is read from cadmpeg's model
             /// straight into B-rep records: a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder
             /// instead of SolidCraft's own reader, and a FreeCAD or Rhino file's solids instead of

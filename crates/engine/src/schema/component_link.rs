@@ -144,6 +144,22 @@ fn component_and_path_required(schema: &mut Schema) {
 /// a file or one the caller holds in memory.
 fn path_or_document_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), json!([{"required": ["path"]}, {"required": ["document"]}]));
+    explicit_configuration_for_identity(schema);
+}
+
+fn explicit_configuration_for_identity(schema: &mut Schema) {
+    schema.insert(
+        "allOf".into(),
+        json!([{"anyOf": [
+            {"not": {"required": ["configuration_identity"]}},
+            {"required": ["configuration"], "properties": {"configuration": {"not": {"type": "null"}}}}
+        ]}]),
+    );
+}
+
+fn relink_schema(schema: &mut Schema) {
+    component_and_path_required(schema);
+    explicit_configuration_for_identity(schema);
 }
 
 /// Select a source configuration row, or follow the saved source state with `null`.
@@ -155,6 +171,17 @@ fn configuration<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::E
             n.as_u64().map(|id| Some(RowRef::Id(id))).ok_or_else(|| D::Error::custom(whole("`configuration` must be a row name, id, or null")))
         }
         _ => Err(D::Error::custom(whole("`configuration` must be a row name, id, or null"))),
+    }
+}
+
+/// An expected row creation identity: absent is unchecked; null names a legacy row.
+fn configuration_identity<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<u64>>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(Some(None)),
+        value => value
+            .as_u64()
+            .map(|identity| Some(Some(identity)))
+            .ok_or_else(|| D::Error::custom(whole("`configuration_identity` must be an unsigned integer or null"))),
     }
 }
 
@@ -209,6 +236,12 @@ pub struct InsertDesignKeys {
     /// saved state. The link stores the resolved id, so renaming the row keeps the selection.
     #[serde(default, deserialize_with = "configuration")]
     pub configuration: Option<RowRef>,
+    /// Expected creation identity of the selected configuration. An unsigned integer must
+    /// match its identity; null requires a legacy row without one. Omitted does not check.
+    /// Requires an explicit, non-null `configuration`.
+    #[serde(default, deserialize_with = "configuration_identity")]
+    #[schemars(with = "Option<u64>")]
+    pub configuration_identity: Option<Option<u64>>,
     /// The component's name. Default: the design's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -276,7 +309,11 @@ impl<'de> Deserialize<'de> for InsertDesignParams {
         {
             return Err(D::Error::custom(whole(format!("give either {key} or {k}, not both"))));
         }
-        serde_path_to_error::deserialize(&value).map(InsertDesignParams).map_err(|e| D::Error::custom(located(&e)))
+        let keys: InsertDesignKeys = serde_path_to_error::deserialize(&value).map_err(|e| D::Error::custom(located(&e)))?;
+        if keys.configuration_identity.is_some() && keys.configuration.is_none() {
+            return Err(D::Error::custom(whole("`configuration_identity` requires an explicit, non-null `configuration`")));
+        }
+        Ok(InsertDesignParams(keys))
     }
 }
 
@@ -461,7 +498,7 @@ pub struct LinkFailure {
 /// keeping their identities and placements, or with `occurrence` for that one only. The design is
 /// read and checked before anything changes; one undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = component_and_path_required)]
+#[schemars(deny_unknown_fields, transform = relink_schema)]
 pub struct RelinkParams {
     // Optional in the type and required in the schema (`component_and_path_required`).
     /// The linked component, by id or name.
@@ -476,6 +513,10 @@ pub struct RelinkParams {
     /// the same source file; a different file follows its saved state. Null clears the selection.
     #[serde(default, deserialize_with = "configuration")]
     pub configuration: Option<RowRef>,
+    /// The selected row's expected creation identity, or null for a legacy row.
+    #[serde(default, deserialize_with = "configuration_identity")]
+    #[schemars(with = "Option<u64>")]
+    pub configuration_identity: Option<Option<u64>>,
     /// One of its placements, by id. When the component has other placements, only this one
     /// comes to show the design, as a placement of the component already linked to it or of a
     /// new one under the same parent, keeping its position, grounding and joints.

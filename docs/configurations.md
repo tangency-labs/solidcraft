@@ -53,9 +53,15 @@ feature that produces that body, and become visible when it returns.
 ## Link several configurations from one file
 
 `component.insert_design` accepts `configuration` as a row name or row id. Each linked
-component can select a different row from the same source file. Select the row through command
-parameters; the Insert Design dialog does not yet include a configuration picker. A bolt design
-with rows `M6x20` and `M6x30` can supply both sizes in one assembly:
+component can select a different row from the same source file. **Insert Design** offers the
+saved rows when the file has configurations. It starts with the row that was active when the
+file was saved, or **Saved state** when no row was active. Select **Saved state** to follow the
+file's saved state. Turn off **Ask for a design's configuration before inserting** in
+**Preferences > General > Dialogs** to insert that state directly. A file with no configuration
+rows inserts directly. The list comes from the saved file, including when that design is open
+in another tab with unsaved changes. Selecting a row applies it to the inserted component.
+**Cancel** closes the picker. A bolt design with rows
+`M6x20` and `M6x30` can supply both sizes in one assembly:
 
 ```json
 {"command":"component.insert_design","params":{"path":"bolt.sc","name":"Short bolt","configuration":"M6x20"}}
@@ -75,6 +81,10 @@ Omit `configuration`, or pass `null`, to follow the source's saved state. Existi
 keep this behavior. With `reuse: true`, insertion shares a linked component only when the
 file and selected row match. A link following the saved state does not share a definition
 with a link selecting a row explicitly, even if both currently show the same shape.
+
+To change a linked placement's configuration, right-click the placement in the Browser and
+choose **Component > Change Configuration…**. The picker starts with that placement's linked configuration.
+Only the chosen placement changes.
 
 `component.relink` also accepts `configuration`. Supply `occurrence` to change only one
 direct placement when a linked component has several placements. Use the component and
