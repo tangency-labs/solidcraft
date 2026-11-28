@@ -583,10 +583,10 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     // Faces, their loops and edgeuses.
     let mut eu = 0u64;
     for (fi, f) in rec.faces.iter().enumerate() {
-        // A blend face is built on its net, its NURBS form; its definition is given back once
-        // the body is built ([`adopt`]).
+        // A blend or sweep face is built on its net, its NURBS form; a blend's definition is
+        // given back once the body is built ([`adopt`]).
         let made = match (&f.surface, &f.nurbs) {
-            (r::Surface::Blend { .. }, Some(net)) => {
+            (r::Surface::Blend { .. } | r::Surface::Sweep { .. }, Some(net)) => {
                 face_surface(k, &crate::surface(net)?, None, f.domain, &[])?
             }
             _ => face_surface(

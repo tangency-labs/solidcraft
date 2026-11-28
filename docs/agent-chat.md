@@ -12,6 +12,16 @@ For implementation details, see [the in-app agent chat design](design/in-app-age
 
 Desktop app only.
 
+## Choosing an AI workflow
+
+SolidCraft supports three ways to work with AI agents and models. Pick the one that fits how you work:
+
+| Workflow | Best for | Setup | Tools & isolation |
+|---|---|---|---|
+| **In-app Assistant + coding agent (ACP)** | Interactive modelling inside SolidCraft with Claude Code, Codex, OpenCode, Mistral Vibe, XAI Grok, Google Antigravity, etc. | Install the agent's ACP adapter; SolidCraft detects it automatically (see [Agents](#agents)). | Uses SolidCraft's built-in `solidcraft-app` MCP server, **Attach selection** / **Pick context** pills, **Attach view**, one undo step per message, and per-agent **Ask / Edits / All** approvals. Agent shell/file tools stay off where supported. |
+| **In-app Assistant + API / local model** | Running a local model (Ollama, LM Studio) or calling an OpenAI- or Anthropic-compatible API directly without installing a coding agent CLI. | **Preferences → Assistant → Add agent…**; API keys are stored in your system keychain. | Same panel, selection pills, undo grouping, and approval policy as ACP agents. Requires a model with native tool calling. |
+| **External MCP client (bridged or headless)** | Driving SolidCraft from a coding agent in your terminal or IDE alongside your own repo/shell tools, or running repeatable headless scripts and CI pipelines. | `uvx solidcraft mcp` or `solidcraft-cli mcp setup` (see [Driving SolidCraft with an AI agent (MCP)](mcp.md)). | Bridged mode connects to the open desktop app (live viewport, selection, desktop management tools); `--headless` runs with no window for scripted batch jobs. |
+
 ## Turning it on and off
 
 Everything about it is on one page: **Preferences → AI**.
@@ -394,7 +404,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
-  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, OpenRouter
+  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, LLMTR
+  `https://llmtr.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
   in the agent's settings. This routes requests to `/responses` and lets the model continue
@@ -675,6 +686,14 @@ never sees, stores or passes on a coding agent's password, token or key. An endp
 kept in the system keychain and sent only to that endpoint. SolidCraft's own connection to the
 agent's tools uses a random per-launch token in a file only you can read, which never passes
 through the agent.
+
+## Troubleshooting
+
+- **An installed agent is missing or marked *does not start*.** Run the agent's own `--version` command in a terminal to verify its installation finished cleanly, then click **Refresh** under **Preferences → Assistant → Agents**. If a Node-based adapter fails with `SyntaxError: Unexpected token 'with'`, install a newer Node (for example via nvm) and click **Refresh**. On Linux Flatpak, apply the `flatpak override` permissions under [Flatpak](#flatpak) and restart SolidCraft completely.
+- **The agent reports it is not signed in.** A cached login file can expire. Click **Test** in **Preferences → Assistant → Agents** or follow the **Sign in to the agent** card in the panel (run the shown CLI command in a terminal or complete browser sign-in), then press **I've signed in: connect again**.
+- **Saving, exporting, or opening a linked design is refused.** File actions wait for approval unless permissions are set to **Allow everything**, and the [MCP folder limits](mcp.md#which-files-the-agent-can-reach) still apply after approval. Add extra directories under **Preferences → Assistant → Allowed folders**, then reconnect or start a **New chat** so the bridged CLI server picks up the new `--allow-path` list.
+- **A turn looks stalled.** Check the panel for a pending **Allow / Deny** approval card (unanswered approvals time out after four minutes). Press **Stop** (or **Esc** in the input) to cancel; an ACP agent that does not finish cancelling within five seconds is disconnected in the background while keeping completed changes undoable.
+- **You also need the agent's shell, git, or workspace file tools.** The in-app Assistant intentionally withholds file-system and terminal capabilities and isolates Claude Code to `solidcraft-app`. To let a coding agent combine CAD edits with repository files or scripts, connect it externally through the [MCP server](mcp.md).
 
 ## Trying it without an account
 

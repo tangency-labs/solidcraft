@@ -7973,7 +7973,7 @@ fn capture_position_keeps_the_centered_pose_after_a_wall_is_removed() {
         id: 1,
         name: "Center1".into(),
         kind: JointKind::Planar,
-        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b }),
+        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b, snap: None }),
         b: JointOrigin::new(slider_occ, Snap::Frame { origin: Vec3::ZERO, z: Vec3::X, x: None }),
         values: vec![0.0; 3],
         limits: vec![None; 3],

@@ -123,6 +123,7 @@ pub(super) fn local_geometry(f: &Feature, components: &HashMap<u64, u64>) -> boo
                 through_all,
                 second_follows_first: _,
                 taper: _,
+                taper2: _,
                 to,
                 to_offset: _,
                 through_all2,
@@ -752,6 +753,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         point_clouds,
         // Display only: a plane's drawn size shapes nothing.
         plane_extents: _,
+        // Display only: the design's own view frame shapes nothing.
+        view_frame: _,
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,

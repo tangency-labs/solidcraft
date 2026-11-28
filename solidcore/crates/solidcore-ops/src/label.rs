@@ -51,8 +51,8 @@ pub fn curve_interval(
 /// form, and for a blend, whose form is its geometry; `None` where the form does not evaluate.
 #[must_use]
 pub fn form_turns(face: &Face) -> Option<bool> {
-    // A blend's label has no normal of its own: its form is the face's geometry.
-    if matches!(face.surface, Surface::Blend { .. }) {
+    // A blend's or a sweep's label has no normal of its own: its form is the face's geometry.
+    if matches!(face.surface, Surface::Blend { .. } | Surface::Sweep { .. }) {
         return Some(false);
     }
     let surface = solidcore_convert::surface(&face.surface).ok()?;

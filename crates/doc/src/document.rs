@@ -500,6 +500,12 @@ pub struct Extent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]
     pub taper: Option<Expr>,
+    /// Two Sides: the second side's taper angle (expression; positive grows the profile away
+    /// from the start, as `taper` does on the first side). Only with `distance2`. Absent: the
+    /// second side takes `taper`, as both halves of a symmetric extrude do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Taper angle 2")]
+    pub taper2: Option<Expr>,
     /// How a taper closes the profile's sharp corners, when the user chose
     /// ([`solidcraft_kernel::draft_corners`] says what each rule gives at each corner). Without
     /// it each profile takes preserve curvature where the kernel can build it exactly and the
@@ -5272,6 +5278,10 @@ pub struct Document {
     /// plane's own coordinates, mm. Others are drawn at their automatic size. Display only.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub plane_extents: std::collections::BTreeMap<u64, [f64; 4]>,
+    /// The design's own FRONT and TOP (the axes navigator's Set as, #6455): its views, Home and the
+    /// orbit follow them instead of the up axis preference. None: the preference's.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "solidcraft_viewport::frame_or_none")]
+    pub view_frame: Option<solidcraft_viewport::ViewFrame>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -5403,6 +5413,10 @@ pub struct NamedView {
     pub roll: f64,
     #[serde(default)]
     pub up: solidcraft_viewport::UpAxis,
+    /// The design frame the angles above are in. None: the up axis preference, as older designs
+    /// saved them. A view applied in another frame turns into the design's own frame.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "solidcraft_viewport::frame_or_none")]
+    pub frame: Option<solidcraft_viewport::ViewFrame>,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
@@ -5632,6 +5646,7 @@ impl Document {
             home_view: None,
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
+            view_frame: None,
             notes: Vec::new(),
             welds: Vec::new(),
             visibility: Visibility::default(),
