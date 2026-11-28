@@ -1636,7 +1636,10 @@ fn compile_fresh(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>
 }
 
 fn compile_fresh_reporting(
-    bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>, preparing: impl FnOnce(),
+    bytes: &[u8],
+    stack_bytes: usize,
+    disk: Option<wasmtime::Cache>,
+    preparing: impl FnOnce(),
 ) -> Result<(Engine, Component, Tier)> {
     if let Some(disk) = &disk
         && let Ok(engine) = engine_for(stack_bytes, Tier::Optimized, true, Some(disk.clone()))
