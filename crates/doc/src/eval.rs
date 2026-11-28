@@ -695,9 +695,9 @@ impl ModelBody {
     /// (once, however often this is asked) and `None` comes back meanwhile, so a caller drawing a
     /// frame (a face highlighted under the pointer) is not held up by a large body's plan
     /// (#3745): the plan mesh of a long modelled thread takes most of a second. The browser
-    /// build has no threads: there it is made now.
-    pub fn plan_mesh_soon(&self) -> Option<Arc<Mesh>> {
-        let q = crate::display_quality::current();
+    /// build has no threads: there it is made now. At `q`, the display quality the window asking
+    /// draws at (another window in the process may have set the process-wide level since).
+    pub fn plan_mesh_soon(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<Mesh>> {
         let cell = self.plan_mesh.get(q.index())?;
         if let Some(mesh) = cell.get() {
             return mesh.clone();
@@ -789,14 +789,14 @@ impl ModelBody {
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
     /// spaced across the face (faces on one surface spaced together, so they share them), exact
     /// and cut to its trims ([`kernel::iso_grid`]), their points at the chord
-    /// tolerance of the viewport's display quality. Worked out once per face, count and display
-    /// quality, and shared by every clone of this body (timeline snapshots, world states). A mesh
-    /// body has no surfaces, so none.
-    pub fn iso_lines(&self, face: usize, count: usize) -> Result<Arc<[kernel::IsoLine]>> {
+    /// tolerance of display quality `quality` (a viewport's: the one its window draws at, which
+    /// another window in the process may have changed the process-wide level from). Worked out
+    /// once per face, count and display quality, and shared by every clone of this body (timeline
+    /// snapshots, world states). A mesh body has no surfaces, so none.
+    pub fn iso_lines(&self, face: usize, count: usize, quality: crate::display_quality::DisplayQuality) -> Result<Arc<[kernel::IsoLine]>> {
         if self.body.is_mesh() {
             return Err(DocError::Invalid(format!("{} is a mesh body: its faces have no surface parameters, so no isoparametric curves", self.name)));
         }
-        let quality = crate::display_quality::current();
         let key = (face, count, quality.index());
         let make = || kernel::iso_grid(&self.body, face, count, quality.chord(self.body.size())).map(Arc::from);
         let Ok(mut cache) = self.iso.lock() else { return Ok(make()?) };

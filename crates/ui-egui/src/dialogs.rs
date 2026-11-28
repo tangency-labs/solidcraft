@@ -891,6 +891,37 @@ impl Drop for Applying {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The display quality another window in the process sets between this thread's window
+    /// setting up its frame and adopting a result ([`other_window_draws_at`]).
+    static OTHER_WINDOW_QUALITY: std::cell::Cell<Option<solidcraft_engine::doc::display_quality::DisplayQuality>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Until the returned guard is dropped, another window in the process sets the process-wide
+/// display quality to `quality` in each of this thread's frames, after the frame's own setup and
+/// before OK's result is adopted and the viewport keys and draws its scenes: what the other tests'
+/// windows do on a busy test run.
+#[cfg(test)]
+pub(crate) fn other_window_draws_at(quality: solidcraft_engine::doc::display_quality::DisplayQuality) -> impl Drop {
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            OTHER_WINDOW_QUALITY.with(|q| q.set(None));
+        }
+    }
+    OTHER_WINDOW_QUALITY.with(|q| q.set(Some(quality)));
+    Restore
+}
+
+#[cfg(test)]
+pub(crate) fn another_window_sets_quality() {
+    if let Some(quality) = OTHER_WINDOW_QUALITY.with(std::cell::Cell::get) {
+        solidcraft_engine::doc::display_quality::set_current(quality);
+    }
+}
+
 /// How long OK waits before displaying its computing state.
 pub const APPLY_AT_ONCE: std::time::Duration = std::time::Duration::from_millis(150);
 
@@ -5741,8 +5772,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Adopt the complete transaction. Never rerun a Boolean on the window thread.
     let finished = if cancel { None } else { app.applying.as_mut().and_then(Applying::finished) };
     // Preferences received after this frame's renderer setup take effect next frame.
-    // Keep the result ready until the viewport will consume the prepared quality.
-    let finished = if finished.is_some() && solidcraft_engine::doc::display_quality::current() != display_quality(app) {
+    // Keep the result ready until the viewport will consume the prepared quality: the quality
+    // this window set up this frame, never the process-wide level, which another window in the
+    // process can set at any time (each test's window does, every frame).
+    #[cfg(test)]
+    another_window_sets_quality();
+    let finished = if finished.is_some() && crate::prefs::drawn_quality(app) != display_quality(app) {
         if let Some(job) = app.applying.as_mut() {
             job.ready = finished;
         }

@@ -1131,7 +1131,8 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.preferences.vertex_markers.hash(&mut h);
     // The cached ground AO receiver and the ellipse share the selected ground plane.
     app.preferences.ground_shadow_follows_model.hash(&mut h);
-    solidcraft_engine::doc::display_quality::current().hash(&mut h);
+    // The level this window draws at, not the process-wide one another window may have set.
+    crate::prefs::drawn_quality(app).hash(&mut h);
     // How bodies are drawn: from their plans on the GPU, or built here (until the evaluation
     // shader has compiled, #4860).
     app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
@@ -1523,7 +1524,7 @@ fn drawn_plan(
         .then(|| match refined(app, b) {
             Some((plan, _)) => Some(plan),
             None if repeated_copy(app, b) => None,
-            None => b.gpu_plan_at(solidcraft_engine::doc::display_quality::current()),
+            None => b.gpu_plan_at(crate::prefs::drawn_quality(app)),
         })
         .flatten()
         .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
@@ -1553,7 +1554,7 @@ fn repeated_copy(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool 
 /// The refined plan and mesh `b` is drawn from, when the view has it drawn finer than the chosen
 /// display quality (#1320).
 fn refined(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> crate::display_lod::Refined {
-    app.viewport.lod.lock().ok()?.refined(b, solidcraft_engine::doc::display_quality::current())
+    app.viewport.lod.lock().ok()?.refined(b, crate::prefs::drawn_quality(app))
 }
 
 /// Changes whenever a body's refinement changes (the scene and highlight keys).
@@ -1579,7 +1580,7 @@ fn shown_mesh(
         .flatten()
         // A large body's plan mesh is made on a worker: until then its faces are lit on the
         // mesh drawn here (#3745).
-        .and_then(|_| b.plan_mesh_soon())
+        .and_then(|_| b.plan_mesh_soon(crate::prefs::drawn_quality(app)))
         .unwrap_or_else(|| drawn_mesh(app, b))
 }
 
@@ -1592,11 +1593,13 @@ fn drawn_mesh(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> std::syn
     if crate::render_workspace::active(app) {
         return b.mesh();
     }
-    use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
     if let Some((_, mesh)) = refined(app, b) {
         return mesh;
     }
-    if current() == DisplayQuality::Normal { b.mesh() } else { b.plan_mesh().unwrap_or_else(|| b.mesh()) }
+    match crate::prefs::drawn_quality(app) {
+        solidcraft_engine::doc::display_quality::DisplayQuality::Normal => b.mesh(),
+        q => b.plan_mesh_at(q).unwrap_or_else(|| b.mesh()),
+    }
 }
 
 /// The move a Move dialog's earlier types made to body `name`, if it is one they moved
@@ -1650,7 +1653,7 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     if app.viewport.gpu.is_none() || !crate::display_lod::enabled() {
         return; // The CPU picture draws the reference mesh.
     }
-    let q = solidcraft_engine::doc::display_quality::current();
+    let q = crate::prefs::drawn_quality(app);
     // A moving camera is left alone: every refinement swapped in rebuilds and uploads the whole
     // model scene, which in a large assembly takes tens of milliseconds a time. The bodies keep
     // the step they have until the camera has stood still for [`REFINE_STILL_MS`].
@@ -2812,11 +2815,11 @@ fn shared_mesh(
     app: &SolveApp,
     b: &solidcraft_engine::doc::ModelBody,
 ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
-    use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
     if refined(app, b).is_some() {
         return None;
     }
-    let q = current();
+    let q = crate::prefs::drawn_quality(app);
     Some(if q == DisplayQuality::Normal { b.mesh_in_place() } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()) })
 }
 
@@ -3094,7 +3097,8 @@ fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::d
 /// Isocurve Analysis: the isoparametric curves of each face it shows, on the faces (depth
 /// tested, as edges are).
 fn isocurves(sc: &mut GpuScene, app: &SolveApp) {
-    let iso = app.session.isocurve_lines();
+    // At the quality this window draws at, which the scene key holds, not the process-wide one.
+    let iso = app.session.isocurve_lines(crate::prefs::drawn_quality(app));
     if !iso.is_empty() {
         let col = sc.color(c4(Tokens::get().accent));
         for line in iso.iter().flat_map(|lines| lines.iter()) {
@@ -7035,8 +7039,8 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     }
     lights_hovered_edge(app).hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`), and at
-    // which display quality its plan and edges are made.
-    solidcraft_engine::doc::display_quality::current().hash(&mut h);
+    // which display quality its plan and edges are made (this window's).
+    crate::prefs::drawn_quality(app).hash(&mut h);
     lod_generation(app).hash(&mut h);
     // Whole-body highlights redraw the model scene's own blocks: they must be the scene's
     // current ones (their keys and the bodies' ranges in them).
@@ -7209,7 +7213,7 @@ fn wireframe_highlight_plan(
     app.viewport
         .gpu
         .is_some_and(|g| g.tess)
-        .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(solidcraft_engine::doc::display_quality::current())))
+        .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(crate::prefs::drawn_quality(app))))
         .flatten()
         .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
 }
@@ -8661,6 +8665,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
+    #[cfg(test)]
+    crate::dialogs::another_window_sets_quality();
     let scene_slot = app.viewport.scene_slot();
     if app.viewport.scene_target != scene_slot {
         app.viewport.invalidate_view_uploads();
@@ -13126,7 +13132,7 @@ mod tests {
         h.step(&json!({"click": {"world": [10, 0, 15]}})).unwrap();
         assert_eq!(h.app.session.isocurves.len(), 1, "{:?}", h.app.status);
         let sc = build_scene(&h.app);
-        let segments: usize = h.app.session.isocurve_lines().iter().flat_map(|l| l.iter()).map(|l| l.points.len() - 1).sum();
+        let segments: usize = h.app.session.isocurve_lines(solidcraft_engine::doc::display_quality::current()).iter().flat_map(|l| l.iter()).map(|l| l.points.len() - 1).sum();
         assert!(segments > 16, "eight curves each way: {segments} segments");
         assert_eq!(accent(&sc.lines, &sc), segments, "every segment on the model, in the accent");
         assert_eq!(accent(&sc.overlay, &sc), 0, "none over the model");
@@ -13149,7 +13155,7 @@ mod tests {
         h.app.run("solid.cylinder", json!({"radius": 12, "height": 50, "base": [6, -20, 0], "operation": "join"})).unwrap();
         h.settle();
         h.app.run("inspect.isocurve", json!({"faces": [[-18, -20, 15], [24, -20, 15]]})).unwrap();
-        let faces = h.app.session.isocurve_lines();
+        let faces = h.app.session.isocurve_lines(solidcraft_engine::doc::display_quality::current());
         assert_eq!(faces.len(), 2, "{:?}", h.app.status);
         // Each piece's lines up the face (x held) and across it (z held), by where they are held.
         let held = |lines: &[solidcraft_engine::kernel::IsoLine], k: usize| {
