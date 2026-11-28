@@ -85,4 +85,17 @@ pub trait Curves: Backend {
     /// curve; `None` for a zero-sweep arc, a conic whose weight is not finite and positive, or a
     /// Bézier of a degree the record does not hold.
     fn seg_curve(&self, seg: &Seg2, plane: &Plane) -> Result<Option<Curve>, CurveRefused>;
+    /// The biarc from `start` along unit `start_tangent` to `end` along unit `end_tangent`, its
+    /// pieces meeting where `ratio` splits the two tangent distances: the join and the two pieces.
+    fn biarc(&self, start: Vec2, start_tangent: Vec2, end: Vec2, end_tangent: Vec2, ratio: f64) -> Result<(Vec2, [Seg2; 2]), CurveRefused>;
+    /// [`Curves::biarc`] with one straight piece, at the start when `straight_start`.
+    fn biarc_with_straight_piece(
+        &self,
+        start: Vec2,
+        start_tangent: Vec2,
+        end: Vec2,
+        end_tangent: Vec2,
+        ratio: f64,
+        straight_start: bool,
+    ) -> Result<(Vec2, [Seg2; 2]), CurveRefused>;
 }

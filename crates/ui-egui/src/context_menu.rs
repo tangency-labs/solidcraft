@@ -2109,13 +2109,16 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
+    if crate::sketch_modify_ui::selected_biarc(app).is_some() {
+        v.push(cmd(app, crate::sketch_biarc_ui::EDIT, "cmd.sketch.spline.biarc.edit"));
+    }
     v.push(cmd(app, "sketch.move", "Move/Copy"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     // Points switch too (#18448): a construction point is reference geometry a Hole leaves out.
     // The origin is the sketch's own and is not offered.
     let construction_points: Vec<&str> =
         app.session.selection.iter().filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel)).filter(|id| *id != "origin").collect();
-    if !curves.is_empty() || !construction_points.is_empty() {
+    if (!curves.is_empty() || !construction_points.is_empty()) && !curves.iter().any(|id| ss.sketch.biarc_guide_spline(id).is_some()) {
         let mut params = json!({});
         if !curves.is_empty() {
             params["curves"] = json!(curves);
@@ -2126,18 +2129,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.construction", "Normal / Construction").with(params));
     }
     // Infinite lines (#1359): the selected lines switch together.
-    let lines: Vec<String> = curves
-        .iter()
-        .filter(|id| {
-            ss.sketch
-                .curve_index(id)
-                .and_then(|i| ss.sketch.curves.get(i))
-                .is_some_and(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }))
-        })
-        .cloned()
-        .collect();
-    if !lines.is_empty() {
-        v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    let infinite_lines: Vec<_> =
+        lines.iter().filter(|id| ss.sketch.biarc_spline(id).is_none() && ss.sketch.biarc_guide_spline(id).is_none()).collect();
+    if !infinite_lines.is_empty() {
+        v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": infinite_lines })));
     }
     // #20317: lines joined end to end on one straight line become one. The whole selection goes,
     // so an arc in it is refused rather than left out.

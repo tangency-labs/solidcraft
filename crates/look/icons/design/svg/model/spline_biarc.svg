@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Biarc spline</title>
+  <path d="M10 54A22 22 0 0 0 32 32A22 22 0 0 1 54 10" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="10" cy="54" r="5.8" fill="#ffffff"/>
+  <circle cx="10" cy="54" r="3.4" fill="#236ead"/>
+  <circle cx="32" cy="32" r="4.7" fill="#ffffff" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="54" cy="10" r="5.8" fill="#ffffff"/>
+  <circle cx="54" cy="10" r="3.4" fill="#236ead"/>
+</svg>

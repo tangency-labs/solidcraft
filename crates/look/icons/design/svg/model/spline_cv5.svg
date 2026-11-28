@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Control-point spline (degree 5)</title>
+  <path d="M8 54L8 24L24 10L40 10L56 24L56 54" fill="none" stroke="#6f879c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8 54C8 41.5 11.25 32.320312 15.78125 26.226562C20.3125 20.132812 26.166667 17.125 32 17.125C37.833333 17.125 43.6875 20.132812 48.21875 26.226562C52.75 32.320312 56 41.5 56 54" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="8" cy="54" r="5.8" fill="#ffffff"/>
+  <circle cx="8" cy="54" r="3.4" fill="#236ead"/>
+  <circle cx="8" cy="24" r="5.8" fill="#ffffff"/>
+  <circle cx="8" cy="24" r="3.4" fill="#236ead"/>
+  <circle cx="24" cy="10" r="5.8" fill="#ffffff"/>
+  <circle cx="24" cy="10" r="3.4" fill="#236ead"/>
+  <circle cx="40" cy="10" r="5.8" fill="#ffffff"/>
+  <circle cx="40" cy="10" r="3.4" fill="#236ead"/>
+  <circle cx="56" cy="24" r="5.8" fill="#ffffff"/>
+  <circle cx="56" cy="24" r="3.4" fill="#236ead"/>
+  <circle cx="56" cy="54" r="5.8" fill="#ffffff"/>
+  <circle cx="56" cy="54" r="3.4" fill="#236ead"/>
+</svg>

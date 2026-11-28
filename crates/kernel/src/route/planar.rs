@@ -5,7 +5,7 @@
 //! profile's inside, and a sketch plane's normal and points
 //! as a sketch solver holds them.
 
-use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::{OpKind, Planar};
 
 pub use solidcraft_kernel_api::planar::{PlanarRefused, StrokeRun};
@@ -286,6 +286,94 @@ pub fn plane_normal(plane: &Plane) -> Vec3 {
 pub fn plane_point(plane: &Plane, point: Vec2) -> Vec3 {
     match which(OpKind::Planar) {
         Which::Solidcore => Solidcore.plane_point(plane, point),
+    }
+}
+
+/// `point` moved by `fraction` of `displacement`.
+#[must_use]
+pub fn translate_point(point: Vec2, displacement: Vec2, fraction: f64) -> Vec2 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.translate_point(point, displacement, fraction),
+    }
+}
+
+/// The directed displacement from `a` to `b` and its length.
+#[must_use]
+pub fn chord(a: Vec2, b: Vec2) -> (Vec2, f64) {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.chord(a, b),
+    }
+}
+
+/// The point at `fraction` (unrestricted) along the chord from `a` to `b`.
+#[must_use]
+pub fn chord_point(a: Vec2, b: Vec2, fraction: f64) -> Vec2 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.chord_point(a, b, fraction),
+    }
+}
+
+/// The chord's left unit normal; `None` for a chord too short or not finite.
+#[must_use]
+pub fn left_unit_normal(a: Vec2, b: Vec2, minimum_length: f64) -> Option<Vec2> {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.left_unit_normal(a, b, minimum_length),
+    }
+}
+
+/// A tangent guide's tip from `at` along `tangent`, or at the first fallback length that fits.
+#[must_use]
+pub fn tangent_guide_tip(at: Vec2, tangent: Vec2, min_length: f64, angle_tolerance: f64, fallback_lengths: &[f64], coord_limit: f64) -> Option<Vec2> {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.tangent_guide_tip(at, tangent, min_length, angle_tolerance, fallback_lengths, coord_limit),
+    }
+}
+
+/// `direction` lengthened to `min_length` when it is shorter.
+#[must_use]
+pub fn lengthen_direction(direction: Vec2, min_length: f64) -> Vec2 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.lengthen_direction(direction, min_length),
+    }
+}
+
+/// The stored circular arc from its centre and ends, clockwise when `reversed`.
+#[must_use]
+pub fn stored_arc(center: Vec2, start: Vec2, end: Vec2, reversed: bool) -> Seg2 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.stored_arc(center, start, end, reversed),
+    }
+}
+
+/// Whether `stored` keeps the signed sweep and end tangents of `expected`.
+#[must_use]
+pub fn arc_contacts_match(expected: &Seg2, stored: &Seg2, angle_tolerance: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.arc_contacts_match(expected, stored, angle_tolerance),
+    }
+}
+
+/// Whether `actual` is `expected` within an absolute and a coordinate-scale allowance.
+#[must_use]
+pub fn points_agree(actual: Vec2, expected: Vec2, absolute_tolerance: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.points_agree(actual, expected, absolute_tolerance),
+    }
+}
+
+/// The curvature vector at a circular contact, pointing towards `center`.
+#[must_use]
+pub fn circle_curvature(center: Vec2, point: Vec2, radius: f64) -> Vec2 {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.circle_curvature(center, point, radius),
+    }
+}
+
+/// Where the ray's line meets `plane`, as a fraction along the chord between `endpoints`.
+#[must_use]
+pub fn ray_chord_parameter(plane: &Plane, origin: Vec3, direction: Vec3, endpoints: [Vec2; 2]) -> Option<f64> {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.ray_chord_parameter(plane, origin, direction, endpoints),
     }
 }
 

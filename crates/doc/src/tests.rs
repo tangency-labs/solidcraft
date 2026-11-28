@@ -2841,8 +2841,8 @@ fn a_midplane_parallel_to_a_world_plane_takes_that_world_planes_frame() {
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 }
 
-/// #18260: a design saved before the midplane took a world plane's frame keeps it. The pending
-/// format change marks every midplane of an older design, so the sketch drawn on it opens
+/// #18260: a design saved before the midplane took a world plane's frame keeps it. The format
+/// 64 migration marks every midplane of an older design, so the sketch drawn on it opens
 /// where it was drawn; a design saved now takes the world plane's frame.
 #[test]
 fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {

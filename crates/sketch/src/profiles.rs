@@ -37,7 +37,7 @@ const ON_CARRIER_TOL: f64 = MERGE_TOL * 0.1;
 /// How far apart (radians) the tangents of two curves leaving a corner may be and still count as
 /// one direction, so that their curvature says which turns first. Curves the solver holds
 /// tangent differ by about 1e-7 there.
-const TANGENT_ANGLE_TOL: f64 = 1e-6;
+pub(crate) const TANGENT_ANGLE_TOL: f64 = 1e-6;
 
 /// Whether two pieces leaving one corner `angle` radians apart, with curvatures `dk` apart and
 /// the shorter `reach` mm long, leave it the same way, so that curvature orders them: their

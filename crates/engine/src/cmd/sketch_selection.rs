@@ -16,8 +16,24 @@ use crate::sketch::{Shape, Sketch};
 const MOST: usize = 200;
 
 /// The parameters `command` takes from `selection` in `sketch` (the sketch being edited), or
-/// `None` when the selection is not exactly what it takes.
+/// `None` when the selection is not exactly what it takes. Without the sketch's identity,
+/// only curves selected without an explicit sketch can be resolved here.
 pub fn constraint_params(command: &str, selection: &[Sel], sketch: Option<&Sketch>) -> Option<Value> {
+    constraint_params_in(command, selection, sketch, None)
+}
+
+/// Curve ids repeat between sketches (#3726); ownership is checked before resolving any id.
+fn curves_belong_to(selection: &[Sel], active: Option<u64>) -> bool {
+    selection.iter().all(|sel| match sel {
+        Sel::SketchCurve { sketch: Some(owner), .. } => Some(*owner) == active,
+        _ => true,
+    })
+}
+
+fn constraint_params_in(command: &str, selection: &[Sel], sketch: Option<&Sketch>, active: Option<u64>) -> Option<Value> {
+    if !curves_belong_to(selection, active) {
+        return None;
+    }
     use Sel::{SketchCurve, SketchPoint};
     // Horizontal and Vertical on their own take what Horizontal/Vertical takes; the command, not
     // a `mode`, says which way.
@@ -58,6 +74,9 @@ pub fn constraint_params(command: &str, selection: &[Sel], sketch: Option<&Sketc
         }
         ("sketch.constraint.horizontal_vertical", _) => alignment_points(selection).map(|points| json!({"points": points})),
         ("sketch.constraint.coincident", [_, _]) => coincident_operands(selection),
+        ("sketch.constraint.tangent", [SketchPoint { .. }, SketchCurve { .. }] | [SketchCurve { .. }, SketchPoint { .. }]) => {
+            biarc_tangent_operands(sketch?, selection)
+        }
         ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
             if a != b =>
         {
@@ -94,9 +113,7 @@ fn fix_preselection(selection: &[Sel]) -> Option<Vec<&str>> {
     let mut seen = std::collections::BTreeSet::new();
     for s in selection {
         let id = match s {
-            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
-            // A curve of another sketch: its id alone would name a curve of this one (#3726).
-            SketchCurve { .. } => return None,
+            SketchCurve { id, .. } | SketchPoint { id } => id.as_str(),
             SketchConstraint { .. } => continue,
             _ => return None,
         };
@@ -122,6 +139,26 @@ fn curve_pair(command: &str, selection: &[Sel]) -> Option<Value> {
     }
     let [Sel::SketchCurve { id: a, .. }, Sel::SketchCurve { id: b, .. }] = selection else { return None };
     (a != b).then(|| json!({"a": a, "b": b}))
+}
+
+/// A Biarc fit point can meet a circle or arc outside its spline tangentially.
+fn biarc_tangent_operands(sketch: &Sketch, selection: &[Sel]) -> Option<Value> {
+    use crate::sketch::CurveKind;
+    let (point, target) = match selection {
+        [Sel::SketchPoint { id }, Sel::SketchCurve { id: target, .. }] | [Sel::SketchCurve { id: target, .. }, Sel::SketchPoint { id }] => {
+            (id, target)
+        }
+        _ => return None,
+    };
+    let point = &sketch.points.get(sketch.resolve_point(point)?)?.id;
+    if !sketch.biarc_splines.iter().any(|spline| spline.nodes.iter().any(|node| &node.point == point)) || sketch.biarc_spline(target).is_some() {
+        return None;
+    }
+    let curve = sketch.curves.get(sketch.curve_index(target)?)?;
+    if !matches!(curve.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }) {
+        return None;
+    }
+    coincident_operands(selection)
 }
 
 /// What a selected sketch entity is, for [`kinds_fit`].
@@ -158,13 +195,17 @@ fn kind(sketch: &Sketch, sel: &Sel) -> Option<Kind> {
 /// round curves, or a point with any curve; Horizontal/Vertical a
 /// single line. An origin axis counts as a line. Entities of no sketch never fit.
 pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
+    curves_belong_to(selection, None) && kinds_fit_in(command, selection, sketch)
+}
+
+fn kinds_fit_in(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
     let Some(kinds) = selection.iter().map(|s| kind(sketch, s)).collect::<Option<Vec<Kind>>>() else { return false };
     let count = |k: Kind| kinds.iter().filter(|x| **x == k).count();
     let (n, p, l, r, c) = (kinds.len(), count(Kind::Point), count(Kind::Line), count(Kind::Round), count(Kind::Curve));
     match command.strip_prefix("sketch.constraint.").unwrap_or_default() {
         "parallel" | "perpendicular" | "collinear" => n == 2 && l == 2,
         "equal" => n >= 2 && (l == n || r == n),
-        "tangent" => n == 2 && p == 0 && l < 2,
+        "tangent" => (n == 2 && p == 0 && l < 2) || biarc_tangent_operands(sketch, selection).is_some(),
         "concentric" => n == 2 && (r == 2 || (r == 1 && p == 1)),
         "curvature" => n == 2 && p == 0 && c >= 1,
         "horizontal_vertical" | "horizontal" | "vertical" => n != 1 || l == 1,
@@ -194,16 +235,20 @@ fn from_session(command: &str, s: &Session) -> Option<Value> {
 /// geometry of a selection that also boxed constraint icons, so those do not hide the
 /// constraints its lines and points take.
 pub fn params_for(command: &str, s: &Session, selection: &[Sel]) -> Option<Value> {
+    let active = super::sketch_store::active(s)?;
+    if !curves_belong_to(selection, Some(active)) {
+        return None;
+    }
     let state = s.world_state().ok()?;
-    let sketch = super::sketch_store::active(s).and_then(|id| state.sketch(id)).map(|ss| &ss.sketch)?;
+    let sketch = &state.sketch(active)?.sketch;
     // A selected curve the sketch no longer has says nothing of its kind: the command names it
     // in its error, where a pick tool would start over a selection that cannot be completed.
     let stale = selection.iter().any(|sel| matches!(sel, Sel::SketchCurve { id, .. } if sketch.curve_index(id).is_none()));
     // Fix reads its own selection: a box's dimensions and constraint icons come along (#11663).
-    if command != "sketch.constraint.fix" && !stale && !kinds_fit(command, selection, sketch) {
+    if command != "sketch.constraint.fix" && !stale && !kinds_fit_in(command, selection, sketch) {
         return None;
     }
-    constraint_params(command, selection, Some(sketch))
+    constraint_params_in(command, selection, Some(sketch), Some(active))
 }
 
 macro_rules! takes {

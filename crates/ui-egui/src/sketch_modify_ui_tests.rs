@@ -11,6 +11,7 @@
 use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::sketch::{BiarcSpanMode, CurveKind};
 
 use crate::dialogs::{Kind, apply_commands};
 use crate::scenario::Harness;
@@ -89,6 +90,247 @@ fn break_can_still_pick_a_shared_endpoint() {
     h.step(&json!({"start": "sketch.break"})).unwrap();
     h.step(&json!({"click": {"sketch": [19.95,0]}})).unwrap();
     assert!(!shared(&h));
+}
+
+#[test]
+fn biarc_spline_draws_from_point_and_tangent_clicks_and_edits_from_its_member_menu() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [6, 0, 0], "distance": 125}));
+    h.step(&json!({"start": "sketch.spline.biarc"})).unwrap();
+    for (i, point) in [[-36, -12], [-28, -12], [-10, 8], [-2, 8], [18, -4], [26, -4]].into_iter().enumerate() {
+        h.step(&json!({"click": {"sketch": point}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), i + 1, "{point:?}: {:?}", h.app.status);
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    assert!(h.app.session.doc.sketch(sid).unwrap().curves.is_empty());
+    h.step(&json!({"click": {"sketch": [26, -4]}, "button": "right"})).unwrap();
+    let spline = h
+        .app
+        .session
+        .doc
+        .sketch(sid)
+        .unwrap()
+        .biarc_splines
+        .first()
+        .unwrap_or_else(|| panic!("a completed spline should be saved: {:?}", h.app.status))
+        .clone();
+    assert_eq!(spline.spans.len(), 2);
+    assert!(spline.spans.iter().all(|span| span.ratio == 0.5));
+    assert!(h.app.tool.is_none());
+    h.app.session.selection = vec![Sel::SketchCurve { id: spline.spans[0].curves[1].clone(), sketch: None }];
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let item = menu.iter().find(|item| item.id == "sketch.spline.biarc.edit").unwrap();
+    crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+    let Kind::SketchModify(Mod::Biarc { curve, span, ratio, mode }) = &h.app.dialog.as_ref().unwrap().kind else {
+        panic!("Edit Biarc Spline should open the ratio editor");
+    };
+    assert_eq!(curve, &spline.id);
+    assert_eq!((*span, ratio.as_str(), *mode), (0, "0.5", BiarcSpanMode::Auto));
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:Ratio"}})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "0.3"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let edited = sk.biarc_spline(&spline.id).unwrap();
+    assert_eq!(edited.spans[0].ratio, 0.3);
+    assert_eq!(edited.spans[1], spline.spans[1]);
+    assert_eq!(edited.nodes, spline.nodes);
+}
+
+#[test]
+fn biarc_hint_refreshes_stay_with_the_sketch_view() {
+    fn painted(h: &Harness, expected: &str) -> bool {
+        let mut found = false;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    found |= text.galley.text() == expected;
+                }
+            });
+        }
+        found
+    }
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    let owner = h.app.docs.views.active().id;
+    let sibling = crate::documents::view_duplicate(&mut h.app, owner).unwrap();
+    let render = crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Render, None, false);
+    assert!(crate::documents::focus_view(&mut h.app, owner));
+    h.app.run("sketch.create", json!({"plane": "XY", "view": owner})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [6, 0, 0], "distance": 125}));
+    h.step(&json!({"start": "sketch.spline.biarc"})).unwrap();
+    let sketch = h.app.session.active_sketch;
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+
+    // Every action refreshes the guidance: a pick asks for its tangent, right-click cannot
+    // finish that incomplete pair, and Undo takes back the pending point instead of the sketch.
+    for (action, points, key) in [
+        (json!({"click": {"sketch": [-36, -12]}}), 1, "sketch.biarc.tangent"),
+        (json!({"click": {"sketch": [-36, -12]}, "button": "right"}), 1, "sketch.biarc.tangent"),
+        (json!({"key": "Z", "cmd": true}), 0, "sketch.biarc.point"),
+    ] {
+        h.step(&action).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), points);
+        let hint = h.app.tr(key).to_string();
+        assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(hint.as_str()));
+        assert!(h.app.status_is_tool_hint, "{action}: refreshed guidance belongs to the sketch tool");
+        h.frames(2);
+        assert!(painted(&h, &hint), "{action}: the owner shows the refreshed instruction");
+
+        for away in [sibling, render] {
+            assert!(crate::documents::focus_view(&mut h.app, away));
+            h.frames(2);
+            assert!(!crate::workspace::tool_receives_input(&h.app));
+            assert!(!painted(&h, &hint), "{action}: the suspended Biarc tool gives no instruction in view {away}");
+            assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some(hint.as_str()));
+            assert!(crate::documents::focus_view(&mut h.app, owner));
+            h.frames(2);
+            assert!(crate::workspace::tool_receives_input(&h.app));
+            assert!(painted(&h, &hint), "{action}: returning to the owner resumes its instruction");
+        }
+        assert_eq!(h.app.session.active_sketch, sketch);
+        assert_eq!(h.app.tool.as_ref().map(|tool| (tool.cmd, tool.pts.len())), Some(("sketch.spline.biarc", points)));
+        assert_eq!(h.app.session.doc.to_json(), before, "pending picks and focus changes leave the sketch uncommitted");
+        assert_eq!(h.app.session.undo.len(), undo, "Undo consumed the pending point rather than document history");
+    }
+}
+
+#[test]
+fn biarc_drawing_keeps_fit_point_snaps_and_the_existing_hidden_construction_snaps() {
+    use solidcraft_engine::sketch::ConstraintKind;
+
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.preferences.sketch_align_points = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [-36, -12], "id": "anchor", "connect": false})).unwrap();
+    for (id, points) in [("across", [[-20, 10], [40, 10]]), ("upright", [[2, -5], [2, 35]])] {
+        h.app.run("sketch.line", json!({"points": points, "ids": [id], "construction": true, "connect": false, "infer": false})).unwrap();
+    }
+    h.app
+        .run(
+            "sketch.spline.biarc",
+            json!({"construction": true, "nodes": [{"point": [30, -24], "tangent": [8, 0]}, {"point": [54, -24], "tangent": [8, 0]}]}),
+        )
+        .unwrap();
+    h.app.run("sketch.options", json!({"show_construction": false})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [6, 0, 0], "distance": 125}));
+    h.step(&json!({"start": "sketch.spline.biarc"})).unwrap();
+    for (i, (point, reference)) in [
+        ([-36, -12], Some("anchor")),
+        ([-28, -12], None),
+        ([2, 10], Some("x:across+upright:")),
+        ([9, 10], None),
+        ([10, 10], Some("mid:across")),
+        ([17, 10], None),
+        ([24, 10], Some("on:across:")),
+        ([31, 10], None),
+        ([34, -24], None),
+        ([42, -24], None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        h.step(&json!({"click": {"sketch": point}})).unwrap();
+        let points = &h.app.tool.as_ref().unwrap().pts;
+        assert_eq!(points.len(), i + 1, "{point:?}: {:?}", h.app.status);
+        match reference {
+            Some(prefix) => assert!(points[i].1.as_deref().is_some_and(|snap| snap.starts_with(prefix)), "{point:?}: {:?}", points[i]),
+            None => assert!(points[i].1.is_none(), "{point:?}: {:?}", points[i]),
+        }
+    }
+    h.step(&json!({"click": {"sketch": [42, -24]}, "button": "right"})).unwrap();
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sk.biarc_splines.len(), 2, "{:?}", h.app.status);
+    let fit: Vec<_> = sk.biarc_splines[1].nodes.iter().map(|node| sk.point_index(&node.point).unwrap()).collect();
+    let anchor = sk.point_index("anchor").unwrap();
+    let across = sk.curve_index("across").unwrap();
+    let upright = sk.curve_index("upright").unwrap();
+    assert_ne!(fit[0], anchor);
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if p == fit[0] && q == anchor)));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { p, l } if p == fit[2] && l == across)));
+    for (fit_point, curve) in [(fit[1], across), (fit[1], upright), (fit[3], across)] {
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == fit_point && c == curve)));
+    }
+}
+
+#[test]
+fn biarc_tangent_guides_keep_line_constraints_without_an_infinite_toggle() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[-10, 0], [0, 10]], "ids": ["refline"], "infer": false})).unwrap();
+    h.app.run("sketch.spline.biarc", json!({"nodes": [{"point": [10, 0], "tangent": [4, 0]}, {"point": [30, 10], "tangent": [4, 0]}]})).unwrap();
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    let guide = sk.biarc_splines[0].nodes[0].handle.as_ref().unwrap().curve.clone();
+    h.app.session.selection = vec![Sel::SketchCurve { id: guide.clone(), sketch: None }];
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    let orientation = menu.iter().find(|item| item.id == "sketch.constraint.horizontal_vertical").unwrap();
+    assert_eq!(orientation.params, Some(json!({"line": guide})));
+    assert!(menu.iter().all(|item| item.id != "sketch.infinite"));
+
+    h.app.session.selection.push(Sel::SketchCurve { id: "refline".into(), sketch: None });
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    for id in ["sketch.constraint.parallel", "sketch.constraint.perpendicular", "sketch.constraint.collinear", "sketch.constraint.equal"] {
+        let constraint = menu.iter().find(|item| item.id == id).unwrap();
+        assert_eq!(constraint.params, Some(json!({"a": guide, "b": "refline"})));
+    }
+    let infinite = menu.iter().find(|item| item.id == "sketch.infinite").unwrap();
+    assert_eq!(infinite.params, Some(json!({"curves": ["refline"]})));
+}
+
+#[test]
+fn biarc_shape_editor_keeps_the_span_inputs_and_restores_the_automatic_ratio() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app
+        .run(
+            "sketch.spline.biarc",
+            json!({"nodes": [{"point": [0, 0], "tangent": [10, 0]}, {"point": [12, 4], "tangent": [0, 10]}], "ratios": [0.31]}),
+        )
+        .unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let original = h.app.session.doc.sketch(sid).unwrap().biarc_splines[0].clone();
+    let select_mode = |h: &mut Harness, key: &str| {
+        h.app.session.selection = vec![Sel::SketchCurve { id: original.spans[0].curves[0].clone(), sketch: Some(sid) }];
+        h.step(&json!({"start": "sketch.spline.biarc.edit"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "dialog:Shape"}})).unwrap();
+        h.step(&json!({"click": {"handle": format!("dialog:Shape:{key}")}})).unwrap();
+        h.settle();
+    };
+
+    select_mode(&mut h, "sketch.biarc.mode_straight_start");
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().biarc_splines[0], original);
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1, json!({"curve": original.id, "span": 0, "mode": "straight_start"}));
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let span = &sk.biarc_splines[0].spans[0];
+    assert_eq!(span.mode, BiarcSpanMode::StraightStart);
+    assert_eq!(span.ratio, 0.31);
+    assert_eq!(span.curves, original.spans[0].curves);
+    assert!(matches!(sk.curves[sk.curve_index(&span.curves[0]).unwrap()].kind, CurveKind::Line { .. }));
+    assert!(matches!(sk.curves[sk.curve_index(&span.curves[1]).unwrap()].kind, CurveKind::Arc { .. }));
+
+    select_mode(&mut h, "sketch.biarc.mode_auto");
+    let Kind::SketchModify(Mod::Biarc { ratio, mode, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
+        panic!("The selected spline should reopen the span editor");
+    };
+    assert_eq!((ratio.as_str(), *mode), ("0.31", BiarcSpanMode::Auto));
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().biarc_splines[0], original);
 }
 
 #[test]

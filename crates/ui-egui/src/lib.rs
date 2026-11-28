@@ -360,6 +360,8 @@ mod sketch3d_frame_ui_tests;
 mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
+mod sketch_biarc_edit;
+mod sketch_biarc_ui;
 mod sketch_construction;
 mod sketch_cursor_readout;
 pub mod sketch_dims;
@@ -3701,6 +3703,9 @@ impl SolveApp {
             self.set_status(why.clone(), true);
             return Err(why);
         }
+        // The ratio edit is still a preview. Cancel before history starts computing, so a
+        // held pointer cannot add another undo step while that history action waits.
+        sketch_biarc_edit::cancel(self);
         if self.editing_state.is_some() || self.dialog.as_ref().is_some_and(|d| d.editing.is_some()) {
             dialogs::cancel(self);
         }

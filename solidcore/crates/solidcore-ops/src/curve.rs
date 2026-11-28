@@ -1,8 +1,8 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
-//! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
-//! curves joined end to end, the point of a curve nearest a given point or a ray, and a planar curve
-//! offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
+//! blend from one curve's end to another's, circles and arcs, a planar biarc, a curve extended at
+//! an end, two curves joined end to end, the point of a curve nearest a given point or a ray, and
+//! a planar curve offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
 //! [`solidcore::query::deviation::distance_deviation`]), and a curve on a sheet offset along its
 //! surface ([`offset_on_surface`]: the kernel's
 //! [`solidcore::curve::geodesic_offset::geodesic_offset`]).
@@ -36,9 +36,12 @@ use solidcore::nurbs::crv_geom::ToleranceKind;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, MAX_DEGREE};
 use solidcore::nurbs::math::{MatrixType, RealMatrix};
+use solidcore::prism::profile;
 use solidcore::query::continuity;
 use solidcore::{Point3, SolidError, Vec3};
+use solidcore_convert::{record_seg2, record_vec2, vec2};
 use solidcore_record::brep::{check_curve, Budget, Curve, Invalid, Natural};
+use solidcore_record::{Seg2, Vec2};
 
 use crate::body::REGULAR_RATIO;
 use crate::continuity::{tooth, CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH};
@@ -516,6 +519,82 @@ pub fn circle_through(points: [[f64; 3]; 3]) -> Result<Curve> {
 /// As [`circle_through`].
 pub fn arc_through(points: [[f64; 3]; 3]) -> Result<Curve> {
     through(points, false)
+}
+
+/// The joint and two analytic planar segments (circular arcs or straight lines) joining the
+/// endpoints with the given forward tangents. The tangents need not have unit length. The
+/// `ratio` in `(0, 1)` is the start's fraction of the sum of the auxiliary tangent distances.
+///
+/// # Errors
+/// An invalid endpoint, tangent or ratio, or a tangent configuration that the kernel's
+/// positive-distance biarc construction cannot represent at model precision.
+pub fn biarc(
+    start: Vec2,
+    start_tangent: Vec2,
+    end: Vec2,
+    end_tangent: Vec2,
+    ratio: f64,
+) -> Result<(Vec2, [Seg2; 2])> {
+    // Like the other stateless planar queries, this construction needs no process kernel.
+    profile::biarc(
+        vec2(start),
+        vec2(start_tangent),
+        vec2(end),
+        vec2(end_tangent),
+        ratio,
+    )
+    .map(|(joint, pieces)| (record_vec2(joint), pieces.map(|piece| record_seg2(&piece))))
+    .map_err(crate::error::status)
+}
+
+/// An equal-distance biarc for a free-form approximation span with supplied unit tangents.
+/// Keeps the kernel arc fitter's input-coordinate rounding and one-or-two-piece cardinality.
+/// A negligible bend or a radius above `1e7` may become a line; [`biarc`] retains exact contacts.
+///
+/// # Errors
+/// Non-finite contacts, nonunit tangents, or a span the approximation cannot represent.
+pub fn fit_biarc(
+    start: Vec2,
+    start_tangent: Vec2,
+    end: Vec2,
+    end_tangent: Vec2,
+) -> Result<Vec<Seg2>> {
+    profile::fit_biarc(
+        vec2(start),
+        vec2(start_tangent),
+        vec2(end),
+        vec2(end_tangent),
+    )
+    .map(|pieces| pieces.iter().map(record_seg2).collect())
+    .map_err(crate::error::status)
+}
+
+/// The joint and two analytic segments in start-to-end order, with a straight piece at
+/// the start when `straight_start` is true, or at the end otherwise. Both endpoint tangents
+/// give forward directions. The fit uses `ratio` in `(0, 1)` to split the span into two
+/// straight pieces when both tangents point along the chord.
+///
+/// # Errors
+/// An invalid endpoint, tangent or ratio, or a directed contact configuration that cannot
+/// be joined at model precision with the selected straight piece.
+pub fn biarc_with_straight_piece(
+    start: Vec2,
+    start_tangent: Vec2,
+    end: Vec2,
+    end_tangent: Vec2,
+    ratio: f64,
+    straight_start: bool,
+) -> Result<(Vec2, [Seg2; 2])> {
+    profile::biarc_with_straight_piece(
+        vec2(start),
+        vec2(start_tangent),
+        vec2(end),
+        vec2(end_tangent),
+        ratio,
+        straight_start,
+    )
+    .map(|(joint, pieces)| (record_vec2(joint), pieces.map(|piece| record_seg2(&piece))))
+    .map_err(crate::error::status)
 }
 
 /// [`circle_through`] (`closed`) and [`arc_through`].
@@ -1129,7 +1208,7 @@ pub fn plane_crossings(
     curve: &Curve,
     interval: [f64; 2],
     plane: &solidcore_record::Plane,
-) -> Result<Vec<solidcore_record::Vec2>> {
+) -> Result<Vec<Vec2>> {
     Ok(match plane_section(curve, interval, plane)? {
         PlaneSection::InPlane => Vec::new(),
         PlaneSection::Meets { points, .. } => points,
@@ -1194,10 +1273,7 @@ pub fn plane_section(
             });
         }
         Ok(Ok(PlaneSection::Meets {
-            points: points
-                .into_iter()
-                .map(|p| solidcore_record::Vec2::new(p.x, p.y))
-                .collect(),
+            points: points.into_iter().map(|p| Vec2::new(p.x, p.y)).collect(),
             in_plane,
         }))
     })?
@@ -1213,14 +1289,14 @@ pub fn plane_section(
 pub fn piece_plane_crossings(
     pieces: &[(&Curve, [f64; 2])],
     plane: &solidcore_record::Plane,
-) -> Result<Vec<solidcore_record::Vec2>> {
+) -> Result<Vec<Vec2>> {
     let tolerance = run("curve::piece_plane_crossings_tolerance", |k| {
         Ok(solidcore::geom::tol::zone_tol3d(
             k,
             solidcore::geom::tol::USE_DEFAULT,
         ))
     })?;
-    let mut points: Vec<solidcore_record::Vec2> = Vec::new();
+    let mut points: Vec<Vec2> = Vec::new();
     for (curve, interval) in pieces {
         for hit in plane_crossings(curve, *interval, plane)? {
             let mut duplicate = false;
@@ -1444,6 +1520,36 @@ mod tests {
     }
 
     #[test]
+    fn biarc_argument_errors_keep_the_kernel_operation_and_reason() {
+        use solidcore_record::Vec2;
+
+        for (result, operation, reason) in [
+            (
+                biarc(Vec2::ZERO, Vec2::ZERO, Vec2::X, Vec2::X, 0.5).map(|_| ()),
+                "prism::profile::biarc",
+                "tangents must be finite and nonzero",
+            ),
+            (
+                fit_biarc(Vec2::ZERO, Vec2::ZERO, Vec2::X, Vec2::X).map(|_| ()),
+                "prism::profile::fit_biarc",
+                "tangents must be finite unit vectors",
+            ),
+            (
+                biarc_with_straight_piece(Vec2::ZERO, Vec2::ZERO, Vec2::X, Vec2::X, 0.5, true)
+                    .map(|_| ()),
+                "prism::profile::biarc_with_straight_piece",
+                "tangents must be finite and nonzero",
+            ),
+        ] {
+            assert_eq!(result, Err(Error::Refused { operation, reason }));
+        }
+        assert!(matches!(
+            biarc(Vec2::ZERO, Vec2::Y, Vec2::X, Vec2::Y, 0.5),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    #[test]
     fn piece_plane_crossings_keep_shared_endpoints_once() {
         use solidcore_record::Plane;
 
@@ -1507,9 +1613,9 @@ mod tests {
                 expected,
                 "distance = {factor} times zone tolerance"
             );
-            assert_eq!(hits[0], solidcore_record::Vec2::ZERO);
+            assert_eq!(hits[0], Vec2::ZERO);
             if expected == 2 {
-                assert_eq!(hits[1], solidcore_record::Vec2::new(offset, 0.0));
+                assert_eq!(hits[1], Vec2::new(offset, 0.0));
             }
         }
     }

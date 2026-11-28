@@ -16,9 +16,12 @@
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::planar as prism;
+use std::cell::Cell;
 
+use crate::biarc::BiarcSpanPlan;
 use crate::decompose::Budget;
-use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
+use crate::linalg::{Mat, NullSpace, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
@@ -173,6 +176,62 @@ struct Layout {
     /// (a `Symmetric` constraint's line). Such a line is a reference for the mirrored geometry
     /// and must not drift to satisfy an edit made to that geometry: it is made expensive to move.
     heavy: Vec<bool>,
+    biarc: BiarcLayout,
+}
+
+#[derive(Default)]
+struct BiarcLayout {
+    plans: Vec<BiarcSpanPlan>,
+    trials: Vec<Cell<Option<(BiarcInputs, Option<BiarcGeometry>)>>>,
+    points: Vec<Option<(usize, BiarcPoint)>>,
+    curves: Vec<Option<(usize, usize)>>,
+    invalid: bool,
+}
+
+#[derive(Clone, Copy)]
+enum BiarcPoint {
+    Joint,
+    Centre(usize),
+}
+
+type BiarcInputs = (Vec2, Vec2, Option<Vec2>, Option<Vec2>);
+type BiarcGeometry = (Vec2, [Seg2; 2]);
+const INVALID_POINT: Vec2 = Vec2::new(f64::NAN, f64::NAN);
+
+impl BiarcLayout {
+    fn new(sk: &Sketch) -> Self {
+        let Ok(plans) = sk.biarc_span_plans() else { return Self { invalid: true, ..Self::default() } };
+        let mut layout = Self::default();
+        for plan in plans.into_iter().filter(BiarcSpanPlan::movable) {
+            if layout.plans.is_empty() {
+                layout.points.resize(sk.points.len(), None);
+                layout.curves.resize(sk.curves.len(), None);
+            }
+            let index = layout.plans.len();
+            if let Some(point) = layout.points.get_mut(plan.joint) {
+                *point = Some((index, BiarcPoint::Joint));
+            }
+            for (half, (curve, centre)) in plan.curves.into_iter().zip(plan.centers).enumerate() {
+                if let Some(slot) = layout.curves.get_mut(curve) {
+                    *slot = Some((index, half));
+                }
+                if let Some(slot) = centre.and_then(|id| layout.points.get_mut(id)) {
+                    *slot = Some((index, BiarcPoint::Centre(half)));
+                }
+            }
+            layout.plans.push(plan);
+            layout.trials.push(Cell::new(None));
+        }
+        layout
+    }
+
+    fn point(&self, point: usize) -> Option<(usize, BiarcPoint)> {
+        self.points.get(point).copied().flatten()
+    }
+
+    fn curve(&self, curve: usize) -> Option<(usize, usize)> {
+        self.curves.get(curve).copied().flatten()
+    }
 }
 
 impl Layout {
@@ -210,11 +269,16 @@ pub(crate) fn held_points(sk: &Sketch, hold: &Hold) -> Vec<bool> {
 }
 
 fn layout(sk: &Sketch, hold: &Hold) -> Layout {
+    layout_biarc(sk, hold, BiarcLayout::new(sk))
+}
+
+fn layout_biarc(sk: &Sketch, hold: &Hold, biarc: BiarcLayout) -> Layout {
     let mut n = 0;
     let pvar: Vec<Option<usize>> = held_points(sk, hold)
         .iter()
-        .map(|f| {
-            if *f {
+        .enumerate()
+        .map(|(i, f)| {
+            if *f || biarc.point(i).is_some() {
                 None
             } else {
                 n += 2;
@@ -268,7 +332,21 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
             }
         }
     }
-    Layout { pvar, rvar, n, points, slide, heavy }
+    Layout { pvar, rvar, n, points, slide, heavy, biarc }
+}
+
+impl Layout {
+    fn fixed(sk: &Sketch) -> Self {
+        Self {
+            pvar: vec![None; sk.points.len()],
+            rvar: vec![None; sk.curves.len()],
+            n: 0,
+            points: 0,
+            slide: Vec::new(),
+            heavy: Vec::new(),
+            biarc: BiarcLayout::new(sk),
+        }
+    }
 }
 
 /// Read-only view of the sketch with variable values substituted.
@@ -279,13 +357,55 @@ struct State<'a> {
 }
 
 impl State<'_> {
-    fn p(&self, i: usize) -> Vec2 {
+    fn source_point(&self, i: usize) -> Vec2 {
         match self.lay.pvar.get(i).copied().flatten() {
             Some(v) => Vec2::new(self.x.get(v).copied().unwrap_or(0.0), self.x.get(v + 1).copied().unwrap_or(0.0)),
             None => self.sk.points.get(i).map(|p| p.pos).unwrap_or_default(),
         }
     }
+    fn biarc_geometry(&self, span: usize) -> Option<BiarcGeometry> {
+        let plan = self.lay.biarc.plans.get(span)?;
+        let cache = self.lay.biarc.trials.get(span)?;
+        let [from, to] = plan.handles;
+        let a = self.source_point(plan.start);
+        let b = self.source_point(plan.end);
+        let inputs = (a, b, from.map(|id| self.source_point(id)), to.map(|id| self.source_point(id)));
+        if let Some((at, geometry)) = cache.get()
+            && at == inputs
+        {
+            return geometry;
+        }
+        let geometry = plan.geometry(|point| self.source_point(point)).ok();
+        cache.set(Some((inputs, geometry)));
+        geometry
+    }
+
+    fn biarc_segment(&self, c: usize) -> Option<Seg2> {
+        let (span, half) = self.lay.biarc.curve(c)?;
+        self.biarc_geometry(span)?.1.get(half).copied()
+    }
+
+    fn p(&self, i: usize) -> Vec2 {
+        if let Some((span, point)) = self.lay.biarc.point(i) {
+            if let Some((joint, pieces)) = self.biarc_geometry(span) {
+                if let BiarcPoint::Centre(half) = point
+                    && let Some(Seg2::Arc { center, .. }) = pieces.get(half)
+                {
+                    return *center;
+                }
+                return joint;
+            }
+            return INVALID_POINT;
+        }
+        self.source_point(i)
+    }
     fn line(&self, l: usize) -> (Vec2, Vec2) {
+        if self.lay.biarc.curve(l).is_some() {
+            return match self.biarc_segment(l) {
+                Some(Seg2::Line { a, b }) => (a, b),
+                _ => (INVALID_POINT, INVALID_POINT),
+            };
+        }
         match self.sk.curves.get(l).map(|c| &c.kind) {
             Some(CurveKind::Line { a, b }) => (self.p(*a), self.p(*b)),
             _ => (Vec2::ZERO, Vec2::X),
@@ -293,6 +413,12 @@ impl State<'_> {
     }
     /// Centre and radius of a circle or arc.
     fn round(&self, c: usize) -> (Vec2, f64) {
+        if self.lay.biarc.curve(c).is_some() {
+            return match self.biarc_segment(c) {
+                Some(Seg2::Arc { center, radius, .. }) => (center, radius),
+                _ => (INVALID_POINT, f64::NAN),
+            };
+        }
         match self.sk.curves.get(c).map(|c| &c.kind) {
             Some(CurveKind::Circle { c: ci, r }) => {
                 let r = match self.lay.rvar.get(c).copied().flatten() {
@@ -309,6 +435,9 @@ impl State<'_> {
         }
     }
     fn is_line(&self, c: usize) -> bool {
+        if let Some(segment) = self.biarc_segment(c) {
+            return matches!(segment, Seg2::Line { .. });
+        }
         matches!(self.sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }))
     }
     fn is_freeform(&self, c: usize) -> bool {
@@ -403,6 +532,17 @@ impl State<'_> {
     /// and an ellipse from its major-axis end, both counter-clockwise, an ellipse as four exact
     /// conic quarters.
     fn segs(&self, c: usize) -> Vec<Seg2> {
+        if self.lay.biarc.curve(c).is_some() {
+            // PointAlong uses the counterclockwise parameterization of the arc after placement.
+            return self
+                .biarc_segment(c)
+                .map(|piece| match piece {
+                    Seg2::Arc { sweep, .. } if sweep < 0.0 => piece.reversed(),
+                    _ => piece,
+                })
+                .into_iter()
+                .collect();
+        }
         match self.sk.curves.get(c).map(|c| &c.kind) {
             Some(CurveKind::Line { a, b }) => vec![Seg2::Line { a: self.p(*a), b: self.p(*b) }],
             Some(CurveKind::Circle { .. }) => {
@@ -467,7 +607,7 @@ impl State<'_> {
     }
     /// Where a point at share `at` of curve `c`'s length lies, with trial values.
     fn along(&self, c: usize, at: f64) -> Vec2 {
-        crate::curves::point_along(&self.segs(c), at).unwrap_or_default()
+        crate::curves::point_along(&self.segs(c), at).unwrap_or_else(|| if self.lay.biarc.curve(c).is_some() { INVALID_POINT } else { Vec2::ZERO })
     }
     /// Radius of a circle or arc; an ellipse's minor radius.
     fn radius_of(&self, c: usize) -> f64 {
@@ -484,6 +624,12 @@ impl State<'_> {
     }
     /// Length along an arc (counter-clockwise from its start).
     fn arc_length(&self, c: usize) -> f64 {
+        if let Some(segment) = self.biarc_segment(c) {
+            return match segment {
+                Seg2::Arc { .. } => segment.length(),
+                _ => f64::NAN,
+            };
+        }
         match self.sk.curves.get(c).map(|c| &c.kind) {
             Some(CurveKind::Arc { c: ci, a, b }) => {
                 let (cc, pa, pb) = (self.p(*ci), self.p(*a), self.p(*b));
@@ -497,6 +643,12 @@ impl State<'_> {
         }
     }
     fn arc_sweep(&self, c: usize) -> f64 {
+        if let Some(segment) = self.biarc_segment(c) {
+            return match segment {
+                Seg2::Arc { sweep, .. } => sweep,
+                _ => f64::NAN,
+            };
+        }
         let Some(curve) = self.sk.curves.get(c) else { return 0.0 };
         let CurveKind::Arc { c: cp, a, b } = curve.kind else { return 0.0 };
         let sweep = ((self.p(b) - self.p(cp)).angle() - (self.p(a) - self.p(cp)).angle()).rem_euclid(std::f64::consts::TAU);
@@ -530,12 +682,18 @@ impl State<'_> {
     }
     /// Curvature vector of a curve at its point `p` (towards the centre of curvature).
     fn curvature_at(&self, c: usize, p: usize) -> Vec2 {
+        if let Some(segment) = self.biarc_segment(c) {
+            return match segment {
+                Seg2::Arc { center, radius, .. } => prism::circle_curvature(center, self.p(p), radius),
+                _ => Vec2::ZERO,
+            };
+        }
         let Some(kind) = self.sk.curves.get(c).map(|c| &c.kind) else { return Vec2::ZERO };
         match kind {
             CurveKind::Line { .. } | CurveKind::Ellipse { .. } => Vec2::ZERO,
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => {
                 let (cc, r) = self.round(c);
-                (cc - self.p(p)) / (r * r).max(1e-24)
+                prism::circle_curvature(cc, self.p(p), r)
             }
             CurveKind::Spline { pts, control, degree, periodic, nurbs, handles } => {
                 let q = self.spline_points(pts, *periodic && !*control);
@@ -555,6 +713,18 @@ impl State<'_> {
     }
     /// Unit tangent of any curve at its point `p` (an end point for open free-form curves).
     fn tangent_at(&self, c: usize, p: usize) -> Option<Vec2> {
+        if let Some((span, half)) = self.lay.biarc.curve(c) {
+            let segment = self.biarc_segment(c)?;
+            let plan = self.lay.biarc.plans.get(span)?;
+            let at = if p == plan.start || (half == 1 && p == plan.joint) {
+                0.0
+            } else if p == plan.end || p == plan.joint {
+                1.0
+            } else {
+                segment.closest_param(self.p(p))
+            };
+            return segment.derivative(at).normalized();
+        }
         match self.sk.curves.get(c).map(|c| &c.kind)? {
             CurveKind::Line { a, b } => (self.p(*b) - self.p(*a)).normalized(),
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => (self.p(p) - self.round(c).0).perp().normalized(),
@@ -763,8 +933,13 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             } else if la || lb {
                 let (l, c) = if la { (a, b) } else { (b, a) };
                 let (p0, p1) = s.line(l);
-                let (cc, r) = s.round(c);
-                out.push(line_dist(cc, p0, p1).abs() - r);
+                if la && lb && (s.lay.biarc.curve(a).is_some() || s.lay.biarc.curve(b).is_some()) {
+                    let (q0, q1) = s.line(c);
+                    out.push((p1 - p0).normalized().zip((q1 - q0).normalized()).map_or(f64::INFINITY, |(u, v)| u.cross(v) * 10.0));
+                } else {
+                    let (cc, r) = s.round(c);
+                    out.push(line_dist(cc, p0, p1).abs() - r);
+                }
             } else {
                 let (c1, r1) = s.round(a);
                 let (c2, r2) = s.round(b);
@@ -790,7 +965,9 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         Midpoint { p, l } => {
             // A line's middle is its ends' mean; an arc's is the point halfway along it, which
             // is not the middle of its chord.
-            let middle = if matches!(s.sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
+            let middle = if matches!(s.sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { .. }))
+                || matches!(s.biarc_segment(l), Some(Seg2::Arc { .. }))
+            {
                 s.along(l, 0.5)
             } else {
                 let (a, b) = s.line(l);
@@ -937,7 +1114,7 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
 /// What a dimension measures on the sketch as it stands (mm, radians for angles); `None` for a
 /// constraint that is not a dimension.
 pub fn measure_dimension(sk: &Sketch, k: &ConstraintKind) -> Option<f64> {
-    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
+    let lay = Layout::fixed(sk);
     measure(&State { sk, lay: &lay, x: &[] }, k).filter(|v| v.is_finite())
 }
 
@@ -948,7 +1125,7 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
     if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
         return None;
     }
-    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
+    let lay = Layout::fixed(sk);
     crate::curves::point_along(&State { sk, lay: &lay, x: &[] }.segs(c), at).filter(|p| p.x.is_finite() && p.y.is_finite())
 }
 
@@ -974,6 +1151,7 @@ fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
 fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.residual_block_evaluations = c.residual_block_evaluations.saturating_add(1));
+    let first = out.len();
     match b {
         Block::Closure { a, b } => {
             let d = s.p(*a) - s.p(*b);
@@ -987,10 +1165,12 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
         Block::TangentAt(_, k, p) => {
             let ConstraintKind::Tangent { a, b } = **k else { return };
             let pt = s.p(*p);
-            if s.is_freeform(a) || s.is_freeform(b) {
+            let biarc = s.lay.biarc.curve(a).is_some() || s.lay.biarc.curve(b).is_some();
+            if biarc || s.is_freeform(a) || s.is_freeform(b) {
                 // Directions at the shared end parallel.
                 match (s.tangent_at(a, *p), s.tangent_at(b, *p)) {
                     (Some(u), Some(v)) => out.push(u.cross(v) * 10.0),
+                    _ if biarc => out.push(f64::INFINITY),
                     _ => out.push(0.0),
                 }
             } else if s.is_line(a) || s.is_line(b) {
@@ -1007,6 +1187,14 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
                 // Both centres on one line through the touch point.
                 out.push(u.cross(v) / (u.len() + v.len()).max(1e-12));
             }
+        }
+    }
+    if !s.lay.biarc.plans.is_empty()
+        && let Some(rows) = out.get_mut(first..)
+    {
+        // An invalid trial must not look solved when an exact span cannot be built.
+        for row in rows.iter_mut().filter(|row| !row.is_finite()) {
+            *row = f64::INFINITY;
         }
     }
 }
@@ -1113,30 +1301,49 @@ fn block_vars(sk: &Sketch, lay: &Layout, b: &Block) -> (Vec<usize>, bool) {
     let mut v = Vec::new();
     let mut constant = false;
     // Adds a point's variables; true when it is a constant.
-    let pt = |v: &mut Vec<usize>, p: usize| match lay.pvar.get(p).copied().flatten() {
+    let own = |v: &mut Vec<usize>, p: usize| match lay.pvar.get(p).copied().flatten() {
         Some(x) => {
             v.extend([x, x + 1]);
             false
         }
         None => true,
     };
+    let span_inputs = |v: &mut Vec<usize>, i: usize| {
+        let mut fixed = false;
+        for p in lay.biarc.plans.get(i).into_iter().flat_map(BiarcSpanPlan::inputs) {
+            fixed |= own(v, p);
+        }
+        fixed
+    };
     for r in block_refs(sk, b) {
         let (c, fits): (usize, fn(&CurveKind) -> bool) = match r {
             Ref::Point(p) => {
-                constant |= pt(&mut v, p);
+                if let Some((span, _)) = lay.biarc.point(p) {
+                    constant |= span_inputs(&mut v, span);
+                } else {
+                    constant |= own(&mut v, p);
+                }
                 continue;
             }
             Ref::Curve(c) => (c, |_| true),
             Ref::Line(c) => (c, |k| matches!(k, CurveKind::Line { .. })),
             Ref::Round(c) => (c, |k| matches!(k, CurveKind::Circle { .. } | CurveKind::Arc { .. })),
         };
+        if let Some((span, _)) = lay.biarc.curve(c) {
+            constant |= span_inputs(&mut v, span);
+            continue;
+        }
         // A curve of another kind reads as a constant (see `State::line`, `State::round`).
         let Some(k) = sk.curves.get(c).map(|c| &c.kind).filter(|k| fits(k)) else {
             constant = true;
             continue;
         };
         for q in k.point_ids() {
-            constant |= pt(&mut v, q);
+            if let Some((span, _)) = lay.biarc.point(q) {
+                constant |= span_inputs(&mut v, span);
+            } else {
+                constant |= own(&mut v, q);
+            }
         }
         v.extend(lay.rvar.get(c).copied().flatten());
     }
@@ -1342,10 +1549,8 @@ fn local_system(
     let mut row = 0;
     let mut plus = Vec::new();
     let mut minus = Vec::new();
-    for (b, vars) in blocks {
-        plus.clear();
-        block_residuals(&State { sk, lay, x }, b, &mut plus);
-        let rows = plus.len();
+    for (bi, (b, vars)) in blocks.iter().enumerate() {
+        let rows = owner.get(row..).unwrap_or_default().iter().take_while(|index| **index == bi).count();
         for &v in vars {
             let Some(c) = col.get(v).copied().filter(|c| *c < ncols) else { continue };
             let Some(x0) = x.get(v).copied() else { continue };
@@ -1365,7 +1570,13 @@ fn local_system(
                 *xv = x0;
             }
             for k in 0..rows {
-                let d = (plus.get(k).copied().unwrap_or(0.0) - minus.get(k).copied().unwrap_or(0.0)) / (2.0 * h);
+                let d = difference(
+                    r.get(row + k).copied().unwrap_or(0.0),
+                    plus.get(k).copied().unwrap_or(0.0),
+                    minus.get(k).copied().unwrap_or(0.0),
+                    h,
+                    !lay.biarc.plans.is_empty(),
+                );
                 j.set(row + k, c, if k == 0 { opening.unwrap_or(d) } else { d });
             }
         }
@@ -1453,7 +1664,13 @@ impl SparseSystem {
                     *xv = x0;
                 }
                 for k in 0..rows {
-                    let d = (plus.get(k).copied().unwrap_or(0.0) - minus.get(k).copied().unwrap_or(0.0)) / (2.0 * h);
+                    let d = difference(
+                        r.get(row + k).copied().unwrap_or(0.0),
+                        plus.get(k).copied().unwrap_or(0.0),
+                        minus.get(k).copied().unwrap_or(0.0),
+                        h,
+                        !lay.biarc.plans.is_empty(),
+                    );
                     if let Some(slot) = self.jac.get_mut(k * m + i) {
                         *slot = if k == 0 { opening.unwrap_or(d) } else { d };
                     }
@@ -1514,6 +1731,18 @@ fn direction_difference_step(s: &State<'_>, block: &Block<'_>, variable: usize, 
 
 fn max_abs(v: &[f64]) -> f64 {
     v.iter().fold(0.0_f64, |m, x| if x.is_finite() { m.max(x.abs()) } else { f64::INFINITY })
+}
+
+fn difference(at: f64, plus: f64, minus: f64, step: f64, biarc: bool) -> f64 {
+    if !biarc {
+        return (plus - minus) / (2.0 * step);
+    }
+    match (plus.is_finite(), minus.is_finite()) {
+        (true, true) => (plus - minus) / (2.0 * step),
+        (true, false) if at.is_finite() => (plus - at) / step,
+        (false, true) if at.is_finite() => (at - minus) / step,
+        _ => 0.0,
+    }
 }
 fn norm2(v: &[f64]) -> f64 {
     v.iter().map(|x| x * x).sum()
@@ -2166,7 +2395,7 @@ fn accumulate(sk: &Sketch, lay: &Layout, b: &Block, unit: &[usize], x: &mut [f64
         if let Some(xv) = x.get_mut(v) {
             *xv = x0;
         }
-        *dk = plus.iter().zip(&minus).map(|(p, m)| (p - m) / (2.0 * h)).collect();
+        *dk = r.iter().zip(plus.iter().zip(&minus)).map(|(&at, (&p, &m))| difference(at, p, m, h, !lay.biarc.plans.is_empty())).collect();
     }
     let [d0, d1] = &d;
     for k in 0..r.len() {
@@ -2794,6 +3023,7 @@ fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -
         }
         if let CurveKind::Arc { c, a, b } = c.kind
             && !sk.offset_arc_follows_source(k)
+            && lay.biarc.curve(k).is_none()
         {
             raw.push(Block::Arc { c, a, b });
         }
@@ -3499,8 +3729,12 @@ fn arc_senses(sk: &Sketch, pos: &dyn Fn(usize) -> Vec2) -> Vec<ArcSense> {
             _ => None,
         })
         .collect();
-    let arc =
-        |i: usize| sk.curves.get(i).is_some_and(|c| matches!(c.kind, CurveKind::Arc { .. }) && !c.fixed && c.link.is_none() && !swept.contains(&i));
+    let members: std::collections::HashSet<_> = sk.biarc_splines.iter().flat_map(crate::BiarcSpline::curves).collect();
+    let arc = |i: usize| {
+        sk.curves.get(i).is_some_and(|c| {
+            matches!(c.kind, CurveKind::Arc { .. }) && !c.fixed && c.link.is_none() && !swept.contains(&i) && !members.contains(c.id.as_str())
+        })
+    };
     let line = |i: usize| sk.curves.get(i).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. }));
     let on_curve = points_on_curves(sk);
     let mut out: Vec<ArcSense> = Vec::new();
@@ -3766,11 +4000,13 @@ fn solve_inner(
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
+    let biarc = BiarcLayout::new(sk);
     let mut orientation_before = Vec::new();
     for constraint in &sk.constraints {
         if !constraint.driven
             && let ConstraintKind::ArcSweep { c, value } = constraint.kind
             && value.is_finite()
+            && biarc.curve(c).is_none()
             && let Some(curve) = sk.curves.get_mut(c)
             && let CurveKind::Arc { a, b, .. } = &mut curve.kind
             && curve.reversed != (value < 0.0)
@@ -3780,7 +4016,7 @@ fn solve_inner(
             curve.reversed = value < 0.0;
         }
     }
-    let lay = layout(sk, hold);
+    let lay = layout_biarc(sk, hold, biarc);
     let mut x = initial_x(sk, &lay);
     let x0 = x.clone();
     let on_curve = points_on_curves(sk);
@@ -4018,9 +4254,27 @@ fn solve_inner(
     // its rank is the sum of the components' ranks).
     #[cfg(feature = "solver-profiling")]
     let _analysis_timer = profiling::timer(Phase::Analysis);
-    let mut max_residual = 0.0_f64;
+    let mut max_residual: f64 = if lay.biarc.invalid { f64::MAX } else { 0.0 };
     let mut failing: Vec<String> = Vec::new();
     let mut det = vec![false; lay.n];
+    // Once the node is determined, only motion across its tangent handle can reshape the spline.
+    // Test that direction in the same null space used to report the sketch's degrees of freedom.
+    let mut guide_normals = Vec::new();
+    if analysis != Analysis::StatusOnly && !lay.biarc.plans.is_empty() {
+        guide_normals.resize(lay.points, None);
+        let state = State { sk, lay: &lay, x: &x };
+        for plan in &lay.biarc.plans {
+            for (node, tip) in [plan.start, plan.end].into_iter().zip(plan.handles) {
+                if let Some(tip) = tip
+                    && let Some(v) = lay.pvar.get(tip).copied().flatten()
+                    && let Some(normal) = guide_normals.get_mut(v)
+                {
+                    *normal = prism::left_unit_normal(state.source_point(node), state.source_point(tip), solidcraft_geom::EPS);
+                }
+            }
+        }
+    }
+    let mut guide_determined = vec![false; guide_normals.len()];
     let mut rank = 0;
     let mut redundant: Vec<String> = Vec::new();
     let mut degenerate = false;
@@ -4115,7 +4369,9 @@ fn solve_inner(
         columns(&mut col, &rest, vars);
         let reading = blocks_reading(&sub, &rest);
         let (_, j, _) = local_system(sk, &lay, &reading, &mut x, &col, rest.len());
-        let (rest_det, rest_rank) = if j.rows > 0 { determined_vars(&j, 1e-7) } else { (vec![false; rest.len()], 0) };
+        let null = NullSpace::new(&j, 1e-7);
+        let rest_det = null.determined_vars();
+        let rest_rank = null.rank();
         let nearby = Nearby { blocks: &reading, rest: &rest, col: &col }.determined(sk, &lay, &x, &j, &rest_det, rest_rank);
         let comp_rank = pin_flags.iter().filter(|p| **p).count() + rest_rank;
         rank += comp_rank;
@@ -4139,6 +4395,13 @@ fn solve_inner(
             let moves = matches!(pin, Pin::Floating(_)) && lay.is_point(v);
             if let Some(slot) = det.get_mut(v) {
                 *slot = flag && !moves;
+            }
+            if !moves
+                && let Some(normal) = guide_normals.get(v).copied().flatten()
+                && let Some(slot) = guide_determined.get_mut(v)
+            {
+                let column = |v| col.get(v).copied().filter(|c| *c < rest.len());
+                *slot = null.determines([(column(v), normal.x), (column(v + 1), normal.y)]);
             }
         }
         #[cfg(test)]
@@ -4217,39 +4480,32 @@ fn solve_inner(
     } else {
         None
     };
-    let status = if max_residual < ACCEPT { SolveStatus::Solved } else { SolveStatus::Failed };
+    let mut status = SolveStatus::Failed;
+    if max_residual < ACCEPT {
+        let published = if lay.biarc.plans.is_empty() {
+            write_solution(sk, &lay, &x, periodic_positions.as_deref())
+        } else {
+            // Derived geometry is published together with the independent trial coordinates.
+            // Keep the whole prior pose if a span became singular or could not change kind.
+            let mut candidate = sk.clone();
+            let result = write_solution(&mut candidate, &lay, &x, periodic_positions.as_deref());
+            if result.is_ok() {
+                *sk = candidate;
+            }
+            result
+        };
+        if published.is_ok() {
+            status = SolveStatus::Solved;
+        } else {
+            max_residual = f64::MAX;
+        }
+    }
     if status == SolveStatus::Failed {
         for id in named {
             if !failing.contains(&id) {
                 failing.push(id);
             }
         }
-    }
-    for id in &folded {
-        if !failing.contains(id) {
-            failing.push(id.clone());
-        }
-    }
-    let use_x = if status == SolveStatus::Solved { &x } else { &x0 };
-    // Write back.
-    for (i, p) in sk.points.iter_mut().enumerate() {
-        if let Some(v) = lay.pvar.get(i).copied().flatten() {
-            p.pos = Vec2::new(use_x.get(v).copied().unwrap_or(p.pos.x), use_x.get(v + 1).copied().unwrap_or(p.pos.y));
-        }
-    }
-    for (i, c) in sk.curves.iter_mut().enumerate() {
-        if let (CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }, Some(v)) = (&mut c.kind, lay.rvar.get(i).copied().flatten()) {
-            *r = use_x.get(v).copied().unwrap_or(*r).abs().max(1e-9);
-        }
-    }
-    if status == SolveStatus::Solved
-        && let Some(positions) = periodic_positions
-    {
-        for (point, position) in sk.points.iter_mut().zip(positions) {
-            point.pos = position;
-        }
-    }
-    if status == SolveStatus::Failed {
         for (ci, a_before, b_before, reversed) in orientation_before.into_iter().rev() {
             if let Some(curve) = sk.curves.get_mut(ci)
                 && let CurveKind::Arc { a, b, .. } = &mut curve.kind
@@ -4260,17 +4516,43 @@ fn solve_inner(
             }
         }
     }
+    for id in &folded {
+        if !failing.contains(id) {
+            failing.push(id.clone());
+        }
+    }
     let vdet = |v: Option<usize>| v.is_none_or(|v| det.get(v).copied().unwrap_or(false));
-    let pdet = |p: usize| match lay.pvar.get(p).copied().flatten() {
+    let source_determined = |p: usize| match lay.pvar.get(p).copied().flatten() {
         Some(v) => vdet(Some(v)) && vdet(Some(v + 1)),
         None => true,
     };
+    let span_determined = |span| {
+        lay.biarc.plans.get(span).is_some_and(|plan: &BiarcSpanPlan| {
+            source_determined(plan.start)
+                && source_determined(plan.end)
+                && plan
+                    .handles
+                    .into_iter()
+                    .flatten()
+                    .all(|tip| lay.pvar.get(tip).copied().flatten().is_none_or(|v| guide_determined.get(v).copied().unwrap_or(false)))
+        })
+    };
+    let pdet = |p| lay.biarc.point(p).map_or_else(|| source_determined(p), |(span, _)| span_determined(span));
     refresh_driven_dimensions(sk);
     let (dof, point_determined, curve_determined) = match analysis {
         Analysis::Full | Analysis::Freedom => (
             lay.n.saturating_sub(rank),
             (0..sk.points.len()).map(pdet).collect(),
-            sk.curves.iter().enumerate().map(|(i, c)| c.kind.point_ids().into_iter().all(pdet) && vdet(lay.rvar.get(i).copied().flatten())).collect(),
+            sk.curves
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    lay.biarc.curve(i).map_or_else(
+                        || c.kind.point_ids().into_iter().all(pdet) && vdet(lay.rvar.get(i).copied().flatten()),
+                        |(span, _)| span_determined(span),
+                    )
+                })
+                .collect(),
         ),
         Analysis::StatusOnly => (0, Vec::new(), Vec::new()),
     };
@@ -4290,11 +4572,28 @@ fn solve_inner(
     }
 }
 
+fn write_solution(sk: &mut Sketch, lay: &Layout, x: &[f64], periodic: Option<&[Vec2]>) -> crate::model::Result<()> {
+    for (i, p) in sk.points.iter_mut().enumerate() {
+        if let Some(position) = periodic.and_then(|positions| positions.get(i)) {
+            p.pos = *position;
+        } else if let Some(v) = lay.pvar.get(i).copied().flatten()
+            && let Some([a, b]) = x.get(v..v + 2)
+        {
+            p.pos = Vec2::new(*a, *b);
+        }
+    }
+    for (i, c) in sk.curves.iter_mut().enumerate() {
+        if let (CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }, Some(v)) = (&mut c.kind, lay.rvar.get(i).copied().flatten()) {
+            *r = x.get(v).copied().unwrap_or(*r).abs().max(1e-9);
+        }
+    }
+    sk.place_biarc_plan(&lay.biarc.plans)
+}
+
 /// Geometry can also be finalized by feasible cursor motion, without another solve.
 /// Both paths must measure reference dimensions from the pose they publish.
 fn refresh_driven_dimensions(sk: &mut Sketch) {
-    let fixed_lay =
-        Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
+    let fixed_lay = Layout::fixed(sk);
     let measured: Vec<Option<f64>> =
         sk.constraints.iter().map(|c| if c.driven { measure(&State { sk, lay: &fixed_lay, x: &[] }, &c.kind) } else { None }).collect();
     for (c, m) in sk.constraints.iter_mut().zip(measured) {
@@ -4338,8 +4637,7 @@ mod continuation_unit_tests {
         let a = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
         let b = sk.add_point(Vec2::new(40.0, 0.0), None).unwrap();
         let c = sk.add_point(Vec2::new(20.0, 1e-6), None).unwrap();
-        let lay =
-            Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
+        let lay = Layout::fixed(&sk);
         let turn = Orient::Turn([a, b, c]);
         let state =
             |sk: &Sketch| (orientation(&State { sk, lay: &lay, x: &[] }, turn), reference_orientation(&State { sk, lay: &lay, x: &[] }, turn));
@@ -4359,8 +4657,7 @@ mod continuation_unit_tests {
         let q = sk.add_point(Vec2::new(10.0, 5.0), None).unwrap();
         let r = sk.add_point(Vec2::new(0.0, 10.0), None).unwrap();
         let l = sk.add_line(Vec2::new(-5.0, -5.0), Vec2::new(5.0, -5.0), None, None, None).unwrap();
-        let lay =
-            Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
+        let lay = Layout::fixed(&sk);
         let sign = |sk: &Sketch, o: Orient| orientation(&State { sk, lay: &lay, x: &[] }, o);
         let checks = [Orient::SideX(p, q, 10.0), Orient::SideY(p, q, 5.0), Orient::OfLine(q, l, 10.0), Orient::Turn([p, q, r])];
         let before: Vec<_> = checks.iter().map(|o| sign(&sk, *o)).collect();
@@ -4380,6 +4677,101 @@ mod continuation_unit_tests {
 #[cfg(test)]
 mod typed_dimension_tests {
     use super::*;
+
+    /// Two runs start from the same stored geometry and variables but read different span
+    /// ratios. The first straight piece ends at x = 4r, so its midpoint is x = 2r.
+    #[test]
+    fn biarc_ratio_metadata_invalidates_a_remembered_lm_run() {
+        let mut original = Sketch::new();
+        let spline = original.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (Vec2::new(4.0, 0.0), Vec2::X)], None, false).unwrap();
+        let left = original.curve_index(&spline.spans[0].curves[0]).unwrap();
+        let p = original.add_point(Vec2::new(3.0, 1.0), None).unwrap();
+        original.add_constraint(ConstraintKind::Midpoint { p, l: left }, None).unwrap();
+        let hold = Hold { points: (0..original.points.len()).filter(|&i| i != p).collect(), ..Hold::default() };
+        let mut changed = original.clone();
+        // Leave the stored pieces where they were: the next trial reads the new ratio.
+        changed.biarc_splines[0].spans[0].ratio = 0.25;
+        assert_eq!(changed.points, original.points);
+        assert_eq!(changed.curves, original.curves);
+        assert_eq!(changed.constraints, original.constraints);
+        let original_layout = layout(&original, &hold);
+        let changed_layout = layout(&changed, &hold);
+        assert_eq!(original_layout.pvar, changed_layout.pvar);
+        assert_eq!(initial_x(&original, &original_layout), initial_x(&changed, &changed_layout));
+        let run = |sk: &Sketch| {
+            let lay = layout(sk, &hold);
+            assert_eq!(lay.n, 2, "only the constrained midpoint can move");
+            let mut x = initial_x(sk, &lay);
+            let (blocks, _) = build_blocks(sk, &lay, &[]);
+            let vars: Vec<usize> = (0..lay.n).collect();
+            let out = lm_capped(sk, &lay, &blocks, &vars, &mut x, &vars, MAX_ITERS);
+            assert!(out.1 < TOL, "{out:?}");
+            ((State { sk, lay: &lay, x: &x }).p(p), out)
+        };
+        let plain = run(&changed);
+        // Each coordinate's residual is below TOL, hence the point's error is below sqrt(2) TOL.
+        assert!(plain.0.dist(Vec2::new(0.5, 0.0)) < 2.0 * TOL, "{plain:?}");
+        let ((first, remembered, repeated), hits) = lm_memo::tests::any_size(|| lm_memo::scope(|| (run(&original), run(&changed), run(&changed))));
+        assert!(first.0.dist(Vec2::new(1.0, 0.0)) < 2.0 * TOL, "{first:?}");
+        assert!(hits > 0, "the identical repeat must take a remembered run");
+        assert_eq!(remembered, plain, "the new span ratio must solve to its own midpoint");
+        assert_eq!(repeated, plain, "remembering that run preserves its geometry and report");
+    }
+
+    /// A valid short guide has one invalid central-difference sample: shortening its x by h
+    /// collapses its tangent. Lengthening it keeps +X exactly, so the length derivative is zero.
+    #[test]
+    fn biarc_sparse_normals_match_dense_at_a_collapsed_handle_sample() {
+        let mut sk = Sketch::new();
+        let spline = sk.add_biarc_spline(&[(Vec2::ZERO, Vec2::X), (Vec2::new(4.0, 4.0), Vec2::Y)], None, false).unwrap();
+        let left = sk.curve_index(&spline.spans[0].curves[0]).unwrap();
+        let tip = sk.point_index(&spline.nodes[0].handle.as_ref().unwrap().point).unwrap();
+        let p = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        sk.add_constraint(ConstraintKind::Midpoint { p, l: left }, None).unwrap();
+        // The contacts remain on the quarter circle about (0, 4), radius 4. Only the guide
+        // length changes; it is a nonzero authored input even though one numerical sample is zero.
+        sk.points[tip].pos = Vec2::new(1e-7, 0.0);
+        sk.refresh_biarc_splines().unwrap();
+        sk.validate_biarc_splines().unwrap();
+        let hold = Hold { points: (0..sk.points.len()).filter(|&i| i != tip).collect(), ..Hold::default() };
+        let lay = layout(&sk, &hold);
+        assert_eq!(lay.n, 2, "only the tangent handle can move");
+        let mut x = initial_x(&sk, &lay);
+        let (blocks, _) = build_blocks(&sk, &lay, &[]);
+        assert_eq!(blocks.len(), 1);
+        let col: Vec<usize> = (0..lay.n).collect();
+        let v = lay.pvar[tip].unwrap();
+        let h = direction_difference_step(&State { sk: &sk, lay: &lay, x: &x }, &blocks[0].0, v, x[v]);
+        let mut plus = x.clone();
+        let mut minus = x.clone();
+        plus[v] += h;
+        minus[v] -= h;
+        assert_eq!(minus[v], 0.0, "the negative sample collapses the tangent exactly");
+        assert!((State { sk: &sk, lay: &lay, x: &x }).biarc_geometry(0).is_some());
+        assert!((State { sk: &sk, lay: &lay, x: &plus }).biarc_geometry(0).is_some());
+        assert!((State { sk: &sk, lay: &lay, x: &minus }).biarc_geometry(0).is_none());
+        let (r, _, _) = system(&sk, &lay, &blocks, &mut x, false);
+        let (plus_r, _, _) = system(&sk, &lay, &blocks, &mut plus, false);
+        let (minus_r, _, _) = system(&sk, &lay, &blocks, &mut minus, false);
+        assert_eq!(r.len(), 2);
+        assert!(r.iter().all(|value| value.is_finite()));
+        assert_eq!(plus_r, r, "positive handle length does not change the tangent direction");
+        assert!(minus_r.iter().all(|value| value.is_infinite()), "{minus_r:?}");
+        let (_, j, _) = local_system(&sk, &lay, &blocks, &mut x, &col, lay.n);
+        assert!(j.data.iter().all(|value| value.is_finite()));
+        for row in 0..j.rows {
+            assert_eq!(j.get(row, v), 0.0, "the analytic guide-length derivative is zero");
+        }
+        let mut dense_g = vec![0.0; lay.n];
+        let dense_a = normal_equations(&j, &r, lay.n, &mut dense_g);
+        let mut sparse = SparseSystem::new(&blocks, &col, lay.n);
+        let mut sparse_g = vec![0.0; lay.n];
+        assert!(sparse.fill(&sk, &lay, &blocks, &mut x, &r, &mut sparse_g));
+        assert!(sparse.normal.vals.iter().all(|value| value.is_finite()), "{sparse_g:?}");
+        assert!(sparse_g.iter().all(|value| value.is_finite()), "{sparse_g:?}");
+        assert_eq!(sparse.normal.dense().data, dense_a.data);
+        assert_eq!(sparse_g, dense_g);
+    }
 
     #[test]
     fn failed_signed_sweep_restores_arc_orientation_and_coordinates() {

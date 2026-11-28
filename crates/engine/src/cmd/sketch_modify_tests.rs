@@ -3071,6 +3071,57 @@ fn fillet_a_corner_a_construction_diagonal_ends_in() {
 }
 
 #[test]
+fn corner_edits_refuse_a_biarc_node_reached_through_coincident_points_atomically() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [40, 10]], "ids": ["a"], "connect": false}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 10], [40, 40]], "ids": ["b"], "connect": false}));
+    run(&mut s, "sketch.spline.biarc", json!({"nodes": [{"point": [40, 10], "tangent": [1, 1]}, {"point": [70, 10], "tangent": [1, -1]}]}));
+    let node = sketch(&s).biarc_splines[0].nodes[0].point.clone();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "a.end", "b": "b.start"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "b.start", "b": node}));
+    s.mark_saved();
+    let before = s.doc.to_json();
+    let history = (s.undo.len(), s.redo.len());
+    for (command, dims) in [
+        ("sketch.fillet", json!({"radius": 2})),
+        ("sketch.chamfer.equal_distance", json!({"distance": 2})),
+        ("sketch.chamfer.two_distance", json!({"distance": 2, "distance2": 3})),
+        ("sketch.chamfer.distance_angle", json!({"distance": 2, "angle": 45})),
+    ] {
+        for mut params in [json!({"point": "a.end"}), json!({"a": "a", "b": "b"}), json!({"a": "b", "b": "a"})] {
+            params.as_object_mut().unwrap().extend(dims.as_object().unwrap().clone());
+            let error = s.execute(command, &params).expect_err("welding a fit point must be refused").to_string();
+            assert!(error.contains("use Edit Biarc Spline to change its generated geometry"), "{command} {params}: {error}");
+            assert_eq!(s.doc.to_json(), before, "{command} {params}");
+            assert_eq!((s.undo.len(), s.redo.len()), history, "{command} {params}");
+            assert!(!s.is_dirty(), "{command} {params}");
+        }
+    }
+}
+
+#[test]
+fn corner_edits_do_not_follow_coincidences_through_an_unweldable_origin() {
+    for (command, dims) in [("sketch.fillet", json!({"radius": 2})), ("sketch.chamfer.equal_distance", json!({"distance": 2}))] {
+        for mut params in [json!({"point": "a.end"}), json!({"a": "a", "b": "b"}), json!({"a": "b", "b": "a"})] {
+            let mut s = new_sketch();
+            run(&mut s, "sketch.line", json!({"points": [[-30, 0], [0, 0]], "ids": ["a"], "connect": false}));
+            run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]], "ids": ["b"], "connect": false}));
+            run(&mut s, "sketch.spline.biarc", json!({"nodes": [{"point": [0, 0], "tangent": [1, 1]}, {"point": [30, 0], "tangent": [1, -1]}]}));
+            let spline = sketch(&s).biarc_splines[0].clone();
+            run(&mut s, "sketch.constraint.coincident", json!({"a": "a.end", "b": "b.start"}));
+            run(&mut s, "sketch.constraint.coincident", json!({"a": "b.start", "b": "origin"}));
+            run(&mut s, "sketch.constraint.coincident", json!({"a": "origin", "b": spline.nodes[0].point}));
+            params.as_object_mut().unwrap().extend(dims.as_object().unwrap().clone());
+            let out = run(&mut s, command, params);
+            assert_eq!(out["sketch"]["solved"], true, "{command}: {out}");
+            let after = sketch(&s);
+            assert_eq!(after.biarc_splines, vec![spline], "the weld cannot pass through the origin");
+            after.validate_biarc_splines().unwrap();
+        }
+    }
+}
+
+#[test]
 fn fillet_a_line_and_an_arc() {
     let mut s = new_sketch();
     // A line into a quarter arc meeting at a sharp corner.

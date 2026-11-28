@@ -176,38 +176,48 @@ fn nearest_crossing_with_extents(x: &Shape, y: &Shape, near: Vec2, infinite: [bo
 /// cannot meet near the cursor and are ignored. Infinite lines use their full support;
 /// ordinary segments and arcs keep their bounds.
 pub fn nearest_curve_intersection(sk: &Sketch, p: Vec2, tol: f64) -> Option<(Vec2, usize, usize)> {
-    if !p.is_finite() || !tol.is_finite() || tol <= 0.0 {
-        return None;
-    }
-    let mut candidates: Vec<(usize, Shape, bool)> = Vec::new();
-    for (i, curve) in sk.curves.iter().enumerate() {
-        if candidates.len() >= MAX_INTERSECTION_CANDIDATES {
-            break;
+    sk.nearest_curve_intersection(p, tol, |_| true)
+}
+
+impl Sketch {
+    /// The nearest crossing among curves admitted by `take`.
+    pub fn nearest_curve_intersection(&self, p: Vec2, tol: f64, take: impl Fn(usize) -> bool) -> Option<(Vec2, usize, usize)> {
+        if !p.is_finite() || !tol.is_finite() || tol <= 0.0 {
+            return None;
         }
-        let Some(sh) = sk.shape(i) else { continue };
-        if snap_distance(&sh, curve.infinite, p) <= tol {
-            candidates.push((i, sh, curve.infinite));
-        }
-    }
-    let mut best: Option<(f64, Vec2, usize, usize)> = None;
-    for a in 0..candidates.len() {
-        for b in a + 1..candidates.len() {
-            let Some((ia, sa, infinite_a)) = candidates.get(a) else { continue };
-            let Some((ib, sb, infinite_b)) = candidates.get(b) else { continue };
-            let Some(q) = nearest_crossing_with_extents(sa, sb, p, [*infinite_a, *infinite_b]) else { continue };
-            let d = q.dist(p);
-            if d > tol {
+        let mut candidates: Vec<(usize, Shape, bool)> = Vec::new();
+        for (i, curve) in self.curves.iter().enumerate() {
+            if candidates.len() >= MAX_INTERSECTION_CANDIDATES {
+                break;
+            }
+            if !take(i) {
                 continue;
             }
-            if sk.points.iter().any(|pt| pt.pos.dist(q) <= ON_CURVE) {
-                continue;
-            }
-            if best.is_none_or(|prev| d < prev.0) {
-                best = Some((d, q, *ia, *ib));
+            let Some(sh) = self.shape(i) else { continue };
+            if snap_distance(&sh, curve.infinite, p) <= tol {
+                candidates.push((i, sh, curve.infinite));
             }
         }
+        let mut best: Option<(f64, Vec2, usize, usize)> = None;
+        for a in 0..candidates.len() {
+            for b in a + 1..candidates.len() {
+                let Some((ia, sa, infinite_a)) = candidates.get(a) else { continue };
+                let Some((ib, sb, infinite_b)) = candidates.get(b) else { continue };
+                let Some(q) = nearest_crossing_with_extents(sa, sb, p, [*infinite_a, *infinite_b]) else { continue };
+                let d = q.dist(p);
+                if d > tol {
+                    continue;
+                }
+                if self.points.iter().any(|pt| pt.pos.dist(q) <= ON_CURVE) {
+                    continue;
+                }
+                if best.is_none_or(|prev| d < prev.0) {
+                    best = Some((d, q, *ia, *ib));
+                }
+            }
+        }
+        best.map(|(_, q, i, j)| (q, i, j))
     }
-    best.map(|(_, q, i, j)| (q, i, j))
 }
 
 impl Shape {

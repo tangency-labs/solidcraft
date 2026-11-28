@@ -1,8 +1,8 @@
 //! solidcore's planar helpers ([`Planar`]): each the solidcore-ops call this crate's callers made
 //! before the interface existed, its refusal's words kept whole.
 
-use solidcore_ops::{board_drill, constraint, footprint, joint_turn, paper_gaps, section_corners, sketch_arc, stroke_runs};
-use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+use solidcore_ops::{board_drill, constraint, footprint, joint_turn, paper_gaps, prism, section_corners, sketch_arc, stroke_runs};
+use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::planar::{Planar, PlanarRefused, StrokeRun};
 
 use super::Solidcore;
@@ -132,5 +132,57 @@ impl Planar for Solidcore {
 
     fn plane_point(&self, plane: &Plane, point: Vec2) -> Vec3 {
         constraint::plane_point(plane, point)
+    }
+
+    fn translate_point(&self, point: Vec2, displacement: Vec2, fraction: f64) -> Vec2 {
+        prism::translate_point(point, displacement, fraction)
+    }
+
+    fn chord(&self, a: Vec2, b: Vec2) -> (Vec2, f64) {
+        prism::chord(a, b)
+    }
+
+    fn chord_point(&self, a: Vec2, b: Vec2, fraction: f64) -> Vec2 {
+        prism::chord_point(a, b, fraction)
+    }
+
+    fn left_unit_normal(&self, a: Vec2, b: Vec2, minimum_length: f64) -> Option<Vec2> {
+        prism::left_unit_normal(a, b, minimum_length)
+    }
+
+    fn tangent_guide_tip(
+        &self,
+        at: Vec2,
+        tangent: Vec2,
+        min_length: f64,
+        angle_tolerance: f64,
+        fallback_lengths: &[f64],
+        coord_limit: f64,
+    ) -> Option<Vec2> {
+        prism::tangent_guide_tip(at, tangent, min_length, angle_tolerance, fallback_lengths, coord_limit)
+    }
+
+    fn lengthen_direction(&self, direction: Vec2, min_length: f64) -> Vec2 {
+        prism::lengthen_direction(direction, min_length)
+    }
+
+    fn stored_arc(&self, center: Vec2, start: Vec2, end: Vec2, reversed: bool) -> Seg2 {
+        prism::stored_arc(center, start, end, reversed)
+    }
+
+    fn arc_contacts_match(&self, expected: &Seg2, stored: &Seg2, angle_tolerance: f64) -> bool {
+        prism::arc_contacts_match(expected, stored, angle_tolerance)
+    }
+
+    fn points_agree(&self, actual: Vec2, expected: Vec2, absolute_tolerance: f64) -> bool {
+        prism::points_agree(actual, expected, absolute_tolerance)
+    }
+
+    fn circle_curvature(&self, center: Vec2, point: Vec2, radius: f64) -> Vec2 {
+        prism::circle_curvature(center, point, radius)
+    }
+
+    fn ray_chord_parameter(&self, plane: &Plane, origin: Vec3, direction: Vec3, endpoints: [Vec2; 2]) -> Option<f64> {
+        prism::ray_chord_parameter(plane, origin, direction, endpoints)
     }
 }

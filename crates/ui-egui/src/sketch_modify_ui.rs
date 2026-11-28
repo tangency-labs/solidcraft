@@ -33,7 +33,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::sketch::{PatternAlignment, VariableUnit};
+use solidcraft_engine::sketch::{BiarcSpanMode, PatternAlignment, VariableUnit};
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind};
@@ -71,6 +71,12 @@ pub(crate) const EQUATION_FORMS: [&str; 2] = ["Parametric", "Explicit"];
 
 /// The three chamfer types, drawn as the cut each one makes, in `CHAMFER_TYPES` order.
 const CHAMFER_TYPE_ICONS: [&str; 3] = ["sketch_chamfer_equal", "sketch_chamfer_two", "sketch_chamfer_angle"];
+
+const BIARC_MODES: [(BiarcSpanMode, &str); 3] = [
+    (BiarcSpanMode::Auto, "sketch.biarc.mode_auto"),
+    (BiarcSpanMode::StraightStart, "sketch.biarc.mode_straight_start"),
+    (BiarcSpanMode::StraightEnd, "sketch.biarc.mode_straight_end"),
+];
 
 /// The engine's own cap on the copies one sketch pattern may make.
 const MAX_COPIES: f64 = 500.0;
@@ -156,6 +162,8 @@ pub enum Mod {
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
     /// how far the curve may stray from the formulas.
     Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool, radians_trig: bool },
+    /// `sketch.spline.biarc.edit`: the shape and join ratio of the selected span.
+    Biarc { curve: String, span: usize, ratio: String, mode: BiarcSpanMode },
     /// `sketch.point.divide` (#8969): the curves picked are each divided into `count` pieces of equal
     /// length by points held at their shares of it.
     Divide { count: String },
@@ -172,6 +180,7 @@ impl Mod {
                 | Self::Offset { .. }
                 | Self::Corner { .. }
                 | Self::Divide { .. }
+                | Self::Biarc { .. }
         )
     }
 
@@ -187,6 +196,7 @@ impl Mod {
             Mod::Corner { chamfer: false, .. } => "FILLET",
             Mod::Corner { .. } => "CHAMFER",
             Mod::Equation { .. } => "EQUATION CURVE",
+            Mod::Biarc { .. } => "cmd.sketch.spline.biarc.edit",
             Mod::Divide { .. } => "DIVIDE CURVE",
         }
     }
@@ -210,7 +220,7 @@ impl Mod {
             Mod::PatternCirc { angle, .. } => Some(("Angle", ValueKind::Angle, angle)),
             Mod::Corner { chamfer: false, size, .. } => Some(("Radius", ValueKind::Length, size)),
             Mod::Corner { size, .. } => Some(("Distance", ValueKind::Length, size)),
-            Mod::Equation { .. } | Mod::Divide { .. } => None,
+            Mod::Biarc { .. } | Mod::Equation { .. } | Mod::Divide { .. } => None,
         }
     }
 }
@@ -249,7 +259,7 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // alike (`points`). Two lines name the corner between them where more lines meet at its
         // point (#1824), for both.
         Mod::Corner { .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
-        Mod::Equation { .. } => Vec::new(),
+        Mod::Biarc { .. } | Mod::Equation { .. } => Vec::new(),
         Mod::Divide { .. } => vec![SelInput::new("Curves", CURVES, true)],
     }
 }
@@ -318,6 +328,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             range_unit: false,
             radians_trig: false,
         },
+        crate::sketch_biarc_ui::EDIT => selected_biarc(app)?,
         "sketch.point.divide" => Mod::Divide { count: "4".into() },
         _ => return None,
     };
@@ -369,6 +380,15 @@ pub(crate) fn selected_equation(app: &SolveApp) -> Option<String> {
     let sid = app.session.active_sketch?;
     let state = crate::open_meshing::session_world(&app.session);
     state.sketch(sid)?.sketch.equation_of(id).map(|e| e.curve.clone())
+}
+
+pub(crate) fn selected_biarc(app: &SolveApp) -> Option<Mod> {
+    let sid = app.session.active_sketch?;
+    let state = crate::open_meshing::session_world(&app.session);
+    let sk = &state.sketch(sid)?.sketch;
+    let (spline, span) = crate::sketch_biarc_ui::selected_span(sk, sid, &app.session.selection)?;
+    let value = spline.spans.get(span)?;
+    Some(Mod::Biarc { curve: spline.id.clone(), span, ratio: value.ratio.to_string(), mode: value.mode })
 }
 
 /// What a click on `hit` picks in a sketch modify window: what the active input takes
@@ -608,6 +628,7 @@ pub(crate) fn command(k: &Mod) -> &'static str {
         Mod::Corner { ctype: 2, .. } => "sketch.chamfer.distance_angle",
         Mod::Corner { .. } => "sketch.chamfer.equal_distance",
         Mod::Equation { .. } => "sketch.equation_curve",
+        Mod::Biarc { .. } => crate::sketch_biarc_ui::EDIT,
         Mod::Divide { .. } => "sketch.point.divide",
     }
 }
@@ -772,6 +793,20 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
             ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.equation_variable_unit"), range_unit)], 1);
             if *range_unit {
                 ui_kit::text(ui, solidcraft_ui_text::tr("ui.equation_note_range"), ui_kit::Text::Note("equation_range"));
+            }
+        }
+        Mod::Biarc { span, ratio, mode, .. } => {
+            let label = solidcraft_ui_text::format("sketch.biarc.span", &[("number", &(span.saturating_add(1)).to_string())]);
+            ui_kit::text(ui, &label, ui_kit::Text::Hint("biarc_span"));
+            let mut choice = BIARC_MODES.iter().position(|(value, _)| *value == *mode).unwrap_or_default();
+            ui_kit::choice_row(ui, "Shape", "biarc_span_shape", &mut choice, &BIARC_MODES.map(|(_, key)| key));
+            if let Some((value, _)) = BIARC_MODES.get(choice) {
+                *mode = *value;
+            }
+            if *mode == BiarcSpanMode::Auto {
+                enter |= number(ui, "Ratio", ratio);
+            } else {
+                ui_kit::text(ui, solidcraft_ui_text::tr("sketch.biarc.straight_join"), ui_kit::Text::Note("biarc_join"));
             }
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
@@ -1334,6 +1369,16 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             p["variable_unit"] = json!(if *range_unit { "range" } else { "number" });
             (if extra.contains_key("curve") { "sketch.equation_curve.edit" } else { "sketch.equation_curve" }, p)
+        }
+        Mod::Biarc { curve, span, ratio, mode } => {
+            let mut params = json!({"curve": curve, "span": span, "mode": mode});
+            if *mode == BiarcSpanMode::Auto {
+                let ratio = ui_kit::parse_number(ratio)
+                    .filter(|ratio| *ratio > 0.0 && *ratio < 1.0)
+                    .ok_or_else(|| solidcraft_ui_text::tr("sketch.biarc.ratio_range").to_string())?;
+                params["ratio"] = json!(ratio);
+            }
+            (crate::sketch_biarc_ui::EDIT, params)
         }
     };
     if let Value::Object(m) = &mut params {

@@ -4,7 +4,7 @@
 //! whether a path runs through a profile's inside, and a sketch plane's normal and points as a sketch solver holds them. Plain numbers and the
 //! record's values in, plain numbers out.
 
-use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
 
 use crate::Backend;
 
@@ -134,4 +134,37 @@ pub trait Planar: Backend {
     fn plane_normal(&self, plane: &Plane) -> Vec3;
     /// Sketch point `point` in space, through its orthonormal plane.
     fn plane_point(&self, plane: &Plane, point: Vec2) -> Vec3;
+    /// `point` moved by `fraction` of `displacement` (the scale and the addition kept apart).
+    fn translate_point(&self, point: Vec2, displacement: Vec2, fraction: f64) -> Vec2;
+    /// The directed displacement from `a` to `b` and its length.
+    fn chord(&self, a: Vec2, b: Vec2) -> (Vec2, f64);
+    /// The point at `fraction` (unrestricted) along the chord from `a` to `b`.
+    fn chord_point(&self, a: Vec2, b: Vec2, fraction: f64) -> Vec2;
+    /// The chord's left unit normal; `None` for a chord shorter than `minimum_length` or not finite.
+    fn left_unit_normal(&self, a: Vec2, b: Vec2, minimum_length: f64) -> Option<Vec2>;
+    /// A tangent guide's tip from `at` along `tangent`: at the tangent's length, or the first of
+    /// `fallback_lengths` whose tip fits inside `coord_limit` and keeps the direction within half
+    /// of `angle_tolerance`. `None` when none does.
+    fn tangent_guide_tip(
+        &self,
+        at: Vec2,
+        tangent: Vec2,
+        min_length: f64,
+        angle_tolerance: f64,
+        fallback_lengths: &[f64],
+        coord_limit: f64,
+    ) -> Option<Vec2>;
+    /// A finite nonzero `direction` lengthened to `min_length` when it is shorter.
+    fn lengthen_direction(&self, direction: Vec2, min_length: f64) -> Vec2;
+    /// The stored circular arc from its centre and ends, clockwise when `reversed`.
+    fn stored_arc(&self, center: Vec2, start: Vec2, end: Vec2, reversed: bool) -> Seg2;
+    /// Whether `stored` keeps the signed sweep and end tangents of `expected`.
+    fn arc_contacts_match(&self, expected: &Seg2, stored: &Seg2, angle_tolerance: f64) -> bool;
+    /// Whether `actual` is `expected` within an absolute and a coordinate-scale allowance.
+    fn points_agree(&self, actual: Vec2, expected: Vec2, absolute_tolerance: f64) -> bool;
+    /// The curvature vector at a circular contact, pointing towards `center`.
+    fn circle_curvature(&self, center: Vec2, point: Vec2, radius: f64) -> Vec2;
+    /// Where the ray's line meets `plane`, as a fraction (unrestricted) along the chord between
+    /// `endpoints` in plane coordinates; `None` where the ray misses the plane.
+    fn ray_chord_parameter(&self, plane: &Plane, origin: Vec3, direction: Vec3, endpoints: [Vec2; 2]) -> Option<f64>;
 }

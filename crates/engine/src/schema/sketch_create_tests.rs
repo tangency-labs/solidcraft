@@ -1,14 +1,96 @@
 use serde_json::{Value, json};
 
 use super::{
-    ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
-    ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams,
-    SplineRemovePointResult, SplineReverseParams, SplineReverseResult, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
+    ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BiarcSplineEditParams, BiarcSplineParams, BiarcSplineResult,
+    BlendCurveParams, CenterlineParams, ConicParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams,
+    FitPointSplineParams, InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineInsertPointParams,
+    SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams, SplineReverseResult, TextResult,
+    ThreeTangentCircleParams, TwoTangentCircleParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+
+#[test]
+fn biarc_schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<BiarcSplineParams>(), &["construction", "nodes", "ratios", "sketch"]);
+    assert_keys(input_schema_for::<BiarcSplineEditParams>(), &["curve", "mode", "ratio", "ratios", "sketch", "span"]);
+}
+
+#[test]
+fn biarc_fit_point_snap_references_add_the_ordinary_sketch_constraints() {
+    use solidcore_record::Vec2;
+    use solidcraft_geom::prelude::*;
+    use solidcraft_sketch::ConstraintKind;
+
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    s.execute("sketch.point", &json!({"id": "anchor", "point": [-30, -8], "connect": false})).unwrap();
+    for (id, points) in [("guide", [[-22, 2], [-10, 2]]), ("cross1", [[21, 6], [32, 6]]), ("cross2", [[26, 1], [26, 10]])] {
+        s.execute("sketch.line", &json!({"ids": [id], "points": points, "construction": true, "connect": false, "infer": false})).unwrap();
+    }
+    s.execute("sketch.circle.center", &json!({"center": [12, -5], "radius": 5, "id": "refcircle", "construction": true})).unwrap();
+    let created = s
+        .execute(
+            "sketch.spline.biarc",
+            &json!({"nodes": [
+                {"point": [-29, -7], "tangent": [4, 0], "reference": "anchor"},
+                {"point": [-15, 3], "tangent": [4, 0], "reference": "mid:guide"},
+                {"point": [13, 2], "tangent": [4, 0], "reference": "on:refcircle:12,1"},
+                {"point": [27, 7], "tangent": [4, 0], "reference": "x:cross1+cross2:27,6"}
+            ]}),
+        )
+        .unwrap();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let spline = sk.biarc_spline(created["curve"].as_str().unwrap()).unwrap();
+    let fit: Vec<_> = spline.nodes.iter().map(|node| sk.point_index(&node.point).unwrap()).collect();
+    let anchor = sk.point_index("anchor").unwrap();
+    assert_ne!(fit[0], anchor);
+    for (&point, [x, y]) in fit.iter().zip([[-30.0, -8.0], [-16.0, 2.0], [12.0, 0.0], [26.0, 6.0]]) {
+        assert!(sk.point(point).unwrap().dist(Vec2::new(x, y)) < 1e-8);
+    }
+    let guide = sk.curve_index("guide").unwrap();
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if p == fit[0] && q == anchor)));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { p, l } if p == fit[1] && l == guide)));
+    for (fit_point, curve) in [(fit[2], "refcircle"), (fit[3], "cross1"), (fit[3], "cross2")] {
+        let curve = sk.curve_index(curve).unwrap();
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == fit_point && c == curve)));
+    }
+    sk.validate_biarc_splines().unwrap();
+}
+
+#[test]
+fn biarc_vertex_snap_projects_and_constrains_in_one_undo_step() {
+    use solidcore_record::Vec2;
+    use solidcraft_geom::prelude::*;
+    use solidcraft_sketch::ConstraintKind;
+
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    s.execute("solid.box", &json!({"corner": [20, 10, 15], "length": 10, "width": 12, "height": 8})).unwrap();
+    let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let command = "sketch.spline.biarc";
+    let first = json!({"point": [21, 11], "tangent": [4, 0], "reference": "vertex:20,10,15"});
+    for second in [json!({"point": [40, 22], "tangent": [4, 0], "reference": "missing_point"}), json!({"point": [20, 10], "tangent": [4, 0]})] {
+        assert!(s.execute(command, &json!({"nodes": [first, second]})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+
+    let created = s.execute(command, &json!({"nodes": [first, {"point": [40, 22], "tangent": [4, 0]}]})).unwrap();
+    assert_eq!(s.undo.len(), undo + 1);
+    let sk = s.doc.sketch(sketch).unwrap();
+    let spline = sk.biarc_spline(created["curve"].as_str().unwrap()).unwrap();
+    let fit = sk.point_index(&spline.nodes[0].point).unwrap();
+    let anchor = sk.points.iter().position(|p| p.link.is_some() && p.pos.dist(Vec2::new(20.0, 10.0)) < 1e-8).unwrap();
+    assert_ne!(fit, anchor);
+    assert!(sk.point(fit).unwrap().dist(sk.point(anchor).unwrap()) < 1e-8);
+    assert!(sk.points[fit].link.is_none() && !sk.points[fit].fixed);
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if p == fit && q == anchor)));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc.to_json(), before);
+}
 
 #[test]
 fn schemas_and_the_key_check_agree() {
@@ -26,6 +108,156 @@ fn schemas_and_the_key_check_agree() {
     let reply = reply.as_value();
     let required: Vec<&str> = reply.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
     assert!(!required.contains(&"param_warnings"), "{reply}");
+}
+
+#[test]
+fn biarc_spline_edit_keeps_nodes_tangents_and_member_ids_through_reopen() {
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
+
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let sketch = s.execute("sketch.create", &json!({"plane": "XY", "name": "Biarc"})).unwrap()["sketch"].as_u64().unwrap();
+    let nodes = json!([
+        {"point": [0, 0], "tangent": [1, 0]},
+        {"point": [24, 12], "tangent": [2, 0]},
+        {"point": [48, 12], "tangent": [1, 0]}
+    ]);
+    let run_schema = |s: &mut Session, command, params| {
+        let result = s.execute(command, &params).unwrap();
+        let schema = output_schema_for::<BiarcSplineResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &result), "{result}");
+        result
+    };
+    let created = run_schema(&mut s, "sketch.spline.biarc", json!({"nodes": nodes}));
+    let id = created["curve"].as_str().unwrap();
+    let member = &created["curves"][1];
+    let created_ids = created["created"]["curves"].as_array().unwrap();
+    assert_eq!(created_ids.len(), 7);
+    assert!(created["curves"].as_array().unwrap().iter().all(|id| created_ids.contains(id)));
+    assert_eq!(created["ratios"], json!([0.5, 0.5]));
+    let pieces = |s: &Session| -> Vec<Seg2> {
+        let sk = s.doc.sketch(sketch).unwrap();
+        let spline = sk.biarc_spline(id).unwrap();
+        spline
+            .curves()
+            .map(|id| {
+                let i = sk.curve_index(id).unwrap();
+                let piece = sk.segs(i)[0];
+                if sk.curves[i].reversed { piece.reversed() } else { piece }
+            })
+            .collect()
+    };
+    let before = pieces(&s);
+    let edited = run_schema(&mut s, "sketch.spline.biarc.edit", json!({"curve": member, "ratios": [0.3, 0.5]}));
+    assert_eq!(edited["curve"], created["curve"]);
+    assert_eq!(edited["curves"], created["curves"]);
+    assert_eq!(edited["ratios"], json!([0.3, 0.5]));
+    let after = pieces(&s);
+    assert!(after[0].end().dist(before[0].end()) > 2.0);
+    assert_eq!(after[2..], before[2..]);
+    assert!(matches!(after.as_slice(), [Seg2::Arc { .. }, Seg2::Arc { .. }, Seg2::Line { .. }, Seg2::Line { .. }]));
+    for (piece, t, point) in [(0, 0.0, Vec2::ZERO), (1, 1.0, Vec2::new(24.0, 12.0)), (3, 1.0, Vec2::new(48.0, 12.0))] {
+        assert!(after[piece].point_at(t).dist(point) < 1e-9);
+        assert!(after[piece].derivative(t).normalized().unwrap().dist(Vec2::X) < 1e-9);
+    }
+    for pair in after.windows(2) {
+        assert!(pair[0].end().dist(pair[1].start()) < 1e-9);
+        assert!(pair[0].derivative(1.0).normalized().unwrap().dist(pair[1].derivative(0.0).normalized().unwrap()) < 1e-9);
+    }
+    let saved = s.doc.to_json();
+    for invalid in [json!([0.2]), json!([0.2, 1.0])] {
+        assert!(s.execute("sketch.spline.biarc.edit", &json!({"curve": id, "ratios": invalid})).is_err());
+        assert_eq!(s.doc.to_json(), saved);
+    }
+    assert!(s.execute("sketch.trim", &json!({"curve": member, "at": [10, 3]})).is_err());
+    assert_eq!(s.doc.to_json(), saved);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(pieces(&s), before);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(pieces(&s), after);
+    let mut reopened = Session::new(solidcraft_doc::format::read(&saved).unwrap());
+    reopened.execute("sketch.edit", &json!({"sketch": sketch})).unwrap();
+    assert_eq!(pieces(&reopened), after);
+    run_schema(&mut reopened, "sketch.spline.biarc.edit", json!({"curve": id, "ratios": [0.5, 0.5]}));
+    assert_eq!(pieces(&reopened), before);
+    reopened.execute("sketch.delete", &json!({"entities": [member]})).unwrap();
+    let sk = reopened.doc.sketch(sketch).unwrap();
+    assert!(sk.biarc_splines.is_empty() && sk.curves.is_empty());
+}
+
+#[test]
+fn biarc_span_edit_persists_modes_and_preserves_the_legacy_ratio_command() {
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
+    use solidcraft_sketch::BiarcSpanMode;
+
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let spline = s
+        .execute(
+            "sketch.spline.biarc",
+            &json!({"nodes": [
+                {"point": [0, 0], "tangent": [1, 0]},
+                {"point": [12, 4], "tangent": [0, 1]},
+                {"point": [12, 16], "tangent": [0, 1]}
+            ]}),
+        )
+        .unwrap();
+    assert_eq!(spline["modes"], json!(["auto", "auto"]));
+    let edit = "sketch.spline.biarc.edit";
+    let member = &spline["curves"][0];
+    let id = &spline["curve"];
+    let edited = s.execute(edit, &json!({"curve": member, "span": 0, "mode": "straight_start", "ratio": 0.25})).unwrap();
+    let schema = output_schema_for::<BiarcSplineResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &edited), "{edited}");
+    assert_eq!(edited["modes"], json!(["straight_start", "auto"]));
+    assert_eq!(edited["ratios"], json!([0.25, 0.5]));
+    assert_eq!(edited["curves"], spline["curves"]);
+    let sk = s.doc.sketch(sketch).unwrap();
+    let index = sk.curve_index(member.as_str().unwrap()).unwrap();
+    let [piece]: [Seg2; 1] = sk.exact_pieces(index).try_into().unwrap();
+    assert!(matches!(piece, Seg2::Line { .. }));
+    assert!(piece.end().dist(Vec2::new(8.0, 0.0)) < 1e-12);
+
+    let saved = s.doc.to_json();
+    for invalid in [
+        json!({"curve": id, "span": 0, "mode": "straight_end"}),
+        json!({"curve": id, "span": 0, "mode": "circle"}),
+        json!({"curve": id, "span": 2, "mode": "auto"}),
+        json!({"curve": id, "span": 0, "mode": "auto", "ratios": [0.5, 0.5]}),
+        json!({"curve": id, "span": 0}),
+        json!({"curve": id, "ratio": 0.2}),
+    ] {
+        assert!(s.execute(edit, &invalid).is_err(), "{invalid}");
+        assert_eq!(s.doc.to_json(), saved);
+    }
+    let mut reopened = Session::new(solidcraft_doc::format::read(&saved).unwrap());
+    reopened.execute("sketch.edit", &json!({"sketch": sketch})).unwrap();
+    let sk = reopened.doc.sketch(sketch).unwrap();
+    assert_eq!(sk.biarc_spline(id.as_str().unwrap()).unwrap().spans[0].mode, BiarcSpanMode::StraightStart);
+    let ratios = reopened.execute(edit, &json!({"curve": id, "ratios": [0.5, 0.75]})).unwrap();
+    assert_eq!(ratios["modes"], edited["modes"]);
+    assert_eq!(ratios["ratios"], json!([0.5, 0.75]));
+    let reset = reopened.execute(edit, &json!({"curve": id, "span": 0, "mode": "auto"})).unwrap();
+    assert_eq!(reset["modes"], spline["modes"]);
+    assert_eq!(reset["curves"], spline["curves"]);
+}
+
+#[test]
+fn a_biarc_semicircle_and_a_line_extrude_to_the_analytic_volume() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"plane": "XY", "name": "Biarc profile"})).unwrap();
+    let output = s
+        .execute("sketch.spline.biarc", &json!({"nodes": [{"point": [-10, 0], "tangent": [0, 1]}, {"point": [10, 0], "tangent": [0, -1]}]}))
+        .unwrap();
+    let first = output["curves"][0].as_str().unwrap();
+    let last = output["curves"][1].as_str().unwrap();
+    s.execute("sketch.line", &json!({"points": [format!("{last}.end"), format!("{first}.start")], "infer": false})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.extrude", &json!({"sketch": "Biarc profile", "distance": 5})).unwrap();
+    let measured = s.execute("inspect.measure", &json!({})).unwrap();
+    let volume = measured["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 250.0 * std::f64::consts::PI).abs() < 0.05, "{measured}");
 }
 
 #[test]

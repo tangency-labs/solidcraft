@@ -110,4 +110,20 @@ impl Curves for Solidcore {
         let Some(placed) = solidcore_ops::sweep::Curve::from_seg2(seg, plane) else { return Ok(None) };
         placed.to_record().map(|r| Some(r.curve)).map_err(refused)
     }
+
+    fn biarc(&self, start: Vec2, start_tangent: Vec2, end: Vec2, end_tangent: Vec2, ratio: f64) -> Result<(Vec2, [Seg2; 2]), CurveRefused> {
+        curve::biarc(start, start_tangent, end, end_tangent, ratio).map_err(refused)
+    }
+
+    fn biarc_with_straight_piece(
+        &self,
+        start: Vec2,
+        start_tangent: Vec2,
+        end: Vec2,
+        end_tangent: Vec2,
+        ratio: f64,
+        straight_start: bool,
+    ) -> Result<(Vec2, [Seg2; 2]), CurveRefused> {
+        curve::biarc_with_straight_piece(start, start_tangent, end, end_tangent, ratio, straight_start).map_err(refused)
+    }
 }

@@ -130,6 +130,24 @@ chart often gives it for a 90° bend. Compare *bend allowance*.
 - **Elsewhere:** BD.
 - **For translators:** a length taken off the flat blank, not a tax or a logical deduction.
 
+### biarc ratio
+
+Starting end's share of the two auxiliary distances measured along a span's endpoint tangents.
+
+The default is 0.5, which gives equal distances. Each span has its own ratio. The ratio sets
+where the two pieces meet while preserving the span's endpoints and tangent directions.
+
+- **In SolidCraft:** `sketch.spline.biarc` and `sketch.spline.biarc.edit`.
+
+### biarc spline
+
+Planar curve that passes through ordered points with specified tangent directions using only circular arcs and straight lines.
+
+Each span between consecutive points uses two pieces. The tangent directions agree at every
+join (G1), including the specified points.
+
+- **In SolidCraft:** **Sketch › Create › Spline › Biarc Spline**.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.

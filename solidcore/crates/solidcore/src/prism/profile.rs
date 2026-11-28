@@ -32,10 +32,11 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Vec2};
+use crate::math::{Point2, Vec2, EFF_ZERO};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::CONIC_ANGLE_TOL_DEG;
 use crate::nurbs::crv_common::DEFAULT_ANGLE_TOL;
+use crate::nurbs::math::MODEL_TOL;
 
 mod crossing;
 
@@ -44,6 +45,9 @@ pub(crate) use crossing::{on_arc, on_seg};
 
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
+const OP_BIARC: &str = "prism::profile::biarc";
+const OP_STRAIGHT_BIARC: &str = "prism::profile::biarc_with_straight_piece";
+const OP_FIT_BIARC: &str = "prism::profile::fit_biarc";
 
 /// Counter-clockwise angle from the ray `center`–`start` to `center`–`end`, in
 /// radians modulo one turn. Equal rays give zero; this does not infer a full circle.
@@ -272,6 +276,830 @@ fn unit(angle: f64) -> Vec2 {
 
 fn finite2(p: Point2) -> bool {
     p.x.is_finite() && p.y.is_finite()
+}
+
+fn length2d(direction: Vec2) -> f64 {
+    direction.x.hypot(direction.y)
+}
+
+/// Move a point by a fraction of a planar displacement, rounding the scale before addition.
+#[inline]
+#[must_use]
+pub fn translate_point(point: Point2, displacement: Vec2, fraction: f64) -> Point2 {
+    point + displacement * fraction
+}
+
+/// The directed displacement from `a` to `b` and its length.
+#[inline]
+#[must_use]
+pub fn chord(a: Point2, b: Point2) -> (Vec2, f64) {
+    let direction = b - a;
+    (direction, length2d(direction))
+}
+
+/// A point at an unrestricted fraction along the chord from `a` to `b`.
+#[inline]
+#[must_use]
+pub fn chord_point(a: Point2, b: Point2, fraction: f64) -> Point2 {
+    translate_point(a, b - a, fraction)
+}
+
+/// Left unit normal of the directed chord, absent at or below `minimum_length` or for
+/// a non-finite chord.
+#[must_use]
+pub fn left_unit_normal(a: Point2, b: Point2, minimum_length: f64) -> Option<Vec2> {
+    let (direction, length) = chord(a, b);
+    if !(length.is_finite() && length > minimum_length && length > 0.0) {
+        return None;
+    }
+    let unit = direction / length;
+    Some(Vec2::new(-unit.y, unit.x))
+}
+
+/// Place a positive tangent guide. Use the supplied vector when its tip fits and its length
+/// reaches `min_length`. Otherwise try each permitted length along its direction in order.
+/// A tip fits when it is distinct from `at` and each coordinate's magnitude is below `coord_limit`.
+/// Its recovered unit direction must stay within half of `angle_tolerance`, measured as a chord
+/// of the unit circle, reserving the other half for reading the generated circular contact.
+#[must_use]
+pub fn tangent_guide_tip(
+    at: Point2,
+    tangent: Vec2,
+    min_length: f64,
+    angle_tolerance: f64,
+    fallback_lengths: &[f64],
+    coord_limit: f64,
+) -> Option<Point2> {
+    if !(angle_tolerance.is_finite() && angle_tolerance > 0.0) {
+        return None;
+    }
+    let op = "prism::profile::tangent_guide_tip";
+    let direction = biarc_direction(tangent, op).ok()?;
+    let usable = |tip: Point2| {
+        finite2(tip)
+            && tip.max_dimension() < coord_limit
+            && biarc_direction(tip - at, op).is_ok_and(|placed| {
+                placed.dot(direction) > 0.0 && biarc_near(placed, direction, 0.5 * angle_tolerance)
+            })
+    };
+    let tip = at + tangent;
+    if usable(tip) && length2d(tangent) >= min_length {
+        return Some(tip);
+    }
+    fallback_lengths
+        .iter()
+        .copied()
+        .filter(|length| length.is_finite() && *length > 0.0)
+        .map(|length| translate_point(at, direction, length))
+        .find(|tip| usable(*tip))
+}
+
+/// Lengthen a finite nonzero direction to `min_length` if it is shorter than that.
+#[must_use]
+pub fn lengthen_direction(direction: Vec2, min_length: f64) -> Vec2 {
+    let length = length2d(direction);
+    if length.is_finite() && length > 0.0 && length < min_length {
+        direction / length * min_length
+    } else {
+        direction
+    }
+}
+
+/// Read a stored circular arc from its center and directed endpoints. The counterclockwise
+/// arc reads its radius from its first radial point and wraps a sweep at or below `EFF_ZERO`
+/// through a whole turn. A clockwise arc is read in the opposite order and then reversed.
+#[must_use]
+pub fn stored_arc(center: Point2, start: Point2, end: Point2, reversed: bool) -> Seg2 {
+    let (a, b) = if reversed { (end, start) } else { (start, end) };
+    let first = a - center;
+    let last = b - center;
+    let start = first.y.atan2(first.x);
+    let mut sweep = last.y.atan2(last.x) - start;
+    // Each angle lies in [-π, π], so there can be at most two wraps. Both may
+    // be needed across the branch cut at ±π with signed zero coordinates.
+    for _ in 0..2 {
+        if sweep <= EFF_ZERO {
+            sweep += TAU;
+        }
+    }
+    let arc = Seg2::Arc {
+        center,
+        radius: length2d(first),
+        start,
+        sweep,
+    };
+    if reversed {
+        arc.reversed()
+    } else {
+        arc
+    }
+}
+
+/// Whether a stored arc keeps the signed sweep and directed endpoint contacts of another arc.
+/// Each endpoint tangent may move by at most half of `angle_tolerance` measured as a chord of
+/// the unit circle. An arc wrapped to a whole turn fails the check.
+#[must_use]
+pub fn arc_contacts_match(expected: &Seg2, stored: &Seg2, angle_tolerance: f64) -> bool {
+    let (
+        Seg2::Arc {
+            start: want_start,
+            sweep: want,
+            ..
+        },
+        Seg2::Arc {
+            start: have_start,
+            sweep: have,
+            ..
+        },
+    ) = (*expected, *stored)
+    else {
+        return false;
+    };
+    let tolerance = 0.5 * angle_tolerance;
+    have.abs() < TAU
+        && (want - have).abs() <= angle_tolerance
+        && biarc_near(
+            biarc_arc_tangent(want_start, want.signum()),
+            biarc_arc_tangent(have_start, have.signum()),
+            tolerance,
+        )
+        && biarc_near(
+            biarc_arc_tangent(want_start + want, want.signum()),
+            biarc_arc_tangent(have_start + have, have.signum()),
+            tolerance,
+        )
+}
+
+/// Compare a stored point with its expected position, including a coordinate-scale rounding
+/// allowance of sixteen machine epsilons in addition to `absolute_tolerance`.
+#[must_use]
+pub fn points_agree(actual: Point2, expected: Point2, absolute_tolerance: f64) -> bool {
+    let scale = expected.max_dimension().max(1.0);
+    finite2(actual)
+        && finite2(expected)
+        && biarc_near(
+            actual,
+            expected,
+            absolute_tolerance + 16.0 * f64::EPSILON * scale,
+        )
+}
+
+/// Curvature vector at a circular contact, pointing towards `center`. The squared radius has
+/// a floor at `EFF_ZERO²` so an intermediate collapsed circle can still be evaluated.
+#[must_use]
+pub fn circle_curvature(center: Point2, point: Point2, radius: f64) -> Vec2 {
+    let offset = center - point;
+    let squared_radius = (radius * radius).max(crate::math::EFF_ZERO_SQ);
+    // Component division keeps the regularised value even for off-circle solver trials.
+    Vec2::new(offset.x / squared_radius, offset.y / squared_radius)
+}
+
+/// The joint and two circular arcs or line segments through the given endpoints and directed
+/// tangents, meeting with the same forward tangent. `ratio` is the start's fraction of the sum of
+/// the two auxiliary distances along the endpoint tangents (Scarparo, *Corner Detection
+/// and Arc Approximation of Planar Data Set*, §5, <https://arxiv.org/abs/1311.5881>).
+///
+/// # Errors
+/// Invalid input for a non-finite coordinate, coincident points, a zero tangent, or a
+/// ratio outside `(0, 1)`. Unsupported when the positive-distance construction is
+/// singular or its resulting segments cannot hold both contacts to numerical precision.
+pub fn biarc(
+    start: Point2,
+    start_tangent: Vec2,
+    end: Point2,
+    end_tangent: Vec2,
+    ratio: f64,
+) -> Result<(Point2, [Seg2; 2])> {
+    let contacts = BiarcContacts::new(start, start_tangent, end, end_tangent, ratio, OP_BIARC)?;
+    let (joint, pieces) = contacts.construct(ratio, None, OP_BIARC)?;
+    let pieces = pieces
+        .try_into()
+        .map_err(|_| biarc_precision_error(OP_BIARC))?;
+    Ok((joint, pieces))
+}
+
+/// An equal-distance biarc for approximating a free-form span, using the supplied unit
+/// tangents without renormalizing them. A forward-collinear span is one line; otherwise
+/// each endpoint contributes a piece unless it is within `1e-12` of the joint. A piece
+/// whose sagitta is negligible or whose radius exceeds `1e7` is represented by its chord.
+///
+/// The auxiliary-distance construction is shared with [`biarc`], including the choice of a
+/// conditioned quadratic root. The approximation keeps the planar arc fitter's input-coordinate
+/// circular parameters and piece cardinality. Use [`biarc`] to retain exact endpoint contacts
+/// and shallow circular bends.
+///
+/// # Errors
+/// Non-finite or coincident endpoints, tangents that are not unit vectors, or a span whose
+/// positive-distance construction cannot be represented by finite arcs or lines.
+pub fn fit_biarc(
+    start: Point2,
+    start_tangent: Vec2,
+    end: Point2,
+    end_tangent: Vec2,
+) -> Result<Vec<Seg2>> {
+    let contacts = BiarcContacts::from_unit_tangents(
+        start,
+        start_tangent,
+        end,
+        end_tangent,
+        0.5,
+        OP_FIT_BIARC,
+    )?;
+    let (_, pieces) = contacts.construct(0.5, Some(BiarcApproximation::FIT), OP_FIT_BIARC)?;
+    Ok(pieces)
+}
+
+/// A line joined to a circular arc through the two directed contacts, in start-to-end order.
+/// The line comes first when `straight_start` is true. If both tangents point along the
+/// chord, the result is two lines with the joint at `ratio` along that chord.
+/// Otherwise the contacts uniquely decide the joint.
+///
+/// # Errors
+/// The input errors of [`biarc`], or an unsupported fit when the selected directed tangent
+/// cannot give a positive-length line joined to a circle at model precision.
+pub fn biarc_with_straight_piece(
+    start: Point2,
+    start_tangent: Vec2,
+    end: Point2,
+    end_tangent: Vec2,
+    ratio: f64,
+    straight_start: bool,
+) -> Result<(Point2, [Seg2; 2])> {
+    let op = OP_STRAIGHT_BIARC;
+    let contacts = BiarcContacts::new(start, start_tangent, end, end_tangent, ratio, op)?;
+    let BiarcContacts {
+        chord,
+        length,
+        first,
+        last,
+        ..
+    } = contacts;
+    let direction = chord / length;
+    let both_straight = forward_collinear(cross2(first, direction), first.dot(direction))
+        && forward_collinear(cross2(last, direction), last.dot(direction));
+    let (joint, chords) = if both_straight {
+        let left = chord * ratio;
+        (start + left, [left, chord * (ratio - 1.0)])
+    } else {
+        // The line shares an endpoint tangent with the arc. The arc chord is
+        // perpendicular to first - last since the circle's endpoint tangents
+        // reflect across its chord (Šír et al., §2.1, <https://www.ag.jku.at/pubs/2006sfj.pdf>).
+        // Use the sum for nearby tangents and the perpendicular to their difference
+        // near opposite tangents. In the latter case tangent × arc_axis = ±|difference|² / 2.
+        let difference = first - last;
+        let arc_axis = if first.dot(last) >= 0.0 {
+            first + last
+        } else {
+            Vec2::new(-difference.y, difference.x)
+        };
+        let tangent = if straight_start { first } else { last };
+        let denominator = cross2(tangent, arc_axis);
+        if denominator.abs() <= gamma(16) {
+            return Err(SolidError::Unsupported {
+                operation: op,
+                reason: "parallel tangents require a forward straight span",
+            });
+        }
+        // Decompose the span chord along the straight tangent and the arc axis.
+        // Solving both coefficients directly keeps a short arc's chord accurate.
+        let distance = cross2(direction, arc_axis) / denominator * length;
+        if !distance.is_finite() {
+            return Err(biarc_precision_error(op));
+        }
+        if distance <= 0.0 {
+            return Err(SolidError::Unsupported {
+                operation: op,
+                reason: "the selected tangent does not give a positive straight piece",
+            });
+        }
+        let arc_chord = arc_axis * (cross2(tangent, direction) / denominator) * length;
+        if straight_start {
+            let left = first * distance;
+            (start + left, [left, -arc_chord])
+        } else {
+            let right = -last * distance;
+            (end + right, [arc_chord, right])
+        }
+    };
+    let pieces = contacts.pieces(joint, chords, op)?;
+    let straight = [
+        both_straight || straight_start,
+        both_straight || !straight_start,
+    ];
+    if pieces.map(|piece| matches!(piece, Seg2::Line { .. })) != straight {
+        return Err(biarc_precision_error(op));
+    }
+    Ok((joint, pieces))
+}
+
+#[derive(Clone, Copy)]
+struct BiarcContacts {
+    start: Point2,
+    end: Point2,
+    chord: Vec2,
+    length: f64,
+    first: Vec2,
+    last: Vec2,
+}
+
+/// The planar arc fitter's geometric approximation bounds.
+#[derive(Clone, Copy)]
+struct BiarcApproximation {
+    minimum_piece: f64,
+    straight_tolerance: f64,
+    maximum_radius: f64,
+}
+
+impl BiarcApproximation {
+    const FIT: Self = Self {
+        minimum_piece: 1e-12,
+        straight_tolerance: 1e-12,
+        maximum_radius: 1e7,
+    };
+}
+
+impl BiarcContacts {
+    fn new(
+        start: Point2,
+        start_tangent: Vec2,
+        end: Point2,
+        end_tangent: Vec2,
+        ratio: f64,
+        op: &'static str,
+    ) -> Result<Self> {
+        let contacts = Self::from_unit_tangents(
+            start,
+            biarc_direction(start_tangent, op)?,
+            end,
+            biarc_direction(end_tangent, op)?,
+            ratio,
+            op,
+        )?;
+        if !(contacts.length > EFF_ZERO) {
+            return Err(SolidError::invalid_input(
+                op,
+                "endpoints must be distinct at model precision",
+            ));
+        }
+        Ok(contacts)
+    }
+
+    fn from_unit_tangents(
+        start: Point2,
+        first: Vec2,
+        end: Point2,
+        last: Vec2,
+        ratio: f64,
+        op: &'static str,
+    ) -> Result<Self> {
+        if !(finite2(start) && finite2(end) && 0.0 < ratio && ratio < 1.0) {
+            return Err(SolidError::invalid_input(
+                op,
+                "endpoints must be finite and the ratio must be between 0 and 1",
+            ));
+        }
+        let chord = end - start;
+        let length = length2d(chord);
+        if !(length.is_finite() && length > 0.0) {
+            return Err(SolidError::invalid_input(
+                op,
+                "endpoints must be finite and distinct",
+            ));
+        }
+        if ![first, last]
+            .into_iter()
+            .all(|direction| finite2(direction) && (length2d(direction) - 1.0).abs() <= gamma(8))
+        {
+            return Err(SolidError::invalid_input(
+                op,
+                "tangents must be finite unit vectors",
+            ));
+        }
+        Ok(Self {
+            start,
+            end,
+            chord,
+            length,
+            first,
+            last,
+        })
+    }
+
+    /// Both callers use one auxiliary-distance solve and weighted tangent-point joint.
+    /// Only the approximation's chord representation and cardinality bounds differ.
+    fn construct(
+        &self,
+        ratio: f64,
+        approximation: Option<BiarcApproximation>,
+        op: &'static str,
+    ) -> Result<(Point2, Vec<Seg2>)> {
+        if let Some(bounds) = approximation {
+            let squared_length = self.chord.dot(self.chord);
+            // The approximate fitter admits equality at the squared chord threshold.
+            if squared_length < 1e-24 {
+                return Err(biarc_precision_error(op));
+            }
+            let direction = self.chord / squared_length.sqrt();
+            if cross2(self.first, direction).abs() < bounds.straight_tolerance
+                && cross2(self.last, direction).abs() < bounds.straight_tolerance
+                && self.first.dot(direction) > 0.0
+                && self.last.dot(direction) > 0.0
+            {
+                return Ok((
+                    self.start + self.chord * 0.5,
+                    vec![Seg2::Line {
+                        a: self.start,
+                        b: self.end,
+                    }],
+                ));
+            }
+        }
+        let total = self.auxiliary_distance(ratio, op)?;
+        let rest = 1.0 - ratio;
+        let first_distance = ratio * total;
+        let last_distance = rest * total;
+        if !(first_distance > 0.0 && last_distance > 0.0) {
+            return Err(biarc_precision_error(op));
+        }
+        let first_contact = self.start + self.first * first_distance;
+        let last_contact = self.end - self.last * last_distance;
+        let [left_chord, right_chord] = self.local_chords(ratio, total);
+        let weighted_joint = first_contact * rest + last_contact * ratio;
+        let local_joint = self.start + left_chord;
+        // The coordinate readback allowance can exceed a tiny translated span. Arithmetic
+        // placement must also retain the span's own scale before any coordinate allowance.
+        let placement_tolerance = self.position_tolerance().min(EFF_ZERO * self.length);
+        // Tangent points can overflow or lose the endpoint separation before they are averaged.
+        // Use the local placement when that error exceeds the existing position allowance or
+        // loses the direction of an analytically straight piece.
+        let joint = if finite2(local_joint)
+            && (!biarc_near(weighted_joint, local_joint, placement_tolerance)
+                || !self.keeps_straight_contacts(weighted_joint, [left_chord, right_chord]))
+        {
+            local_joint
+        } else {
+            weighted_joint
+        };
+        let chords = if approximation.is_some() {
+            [joint - self.start, joint - self.end]
+        } else {
+            [left_chord, right_chord]
+        };
+        Ok((
+            joint,
+            self.construct_pieces(joint, chords, approximation, op)?,
+        ))
+    }
+
+    /// Twice the mean auxiliary distance, shared by interpolation and approximation.
+    ///
+    /// Let u = total/2 and w = r*first + (1-r)*last. The positive-distance construction
+    /// gives A*u² + 2*B*u - C = 0, with A = 8*r*(1-r)*(1-first·last),
+    /// B = 2*chord·w and C = chord·chord. At r = 1/2 these are the equal-distance
+    /// fitter's coefficients, retaining its arithmetic when the root meets the join bound.
+    fn auxiliary_distance(&self, ratio: f64, op: &'static str) -> Result<f64> {
+        let rest = 1.0 - ratio;
+        let weighted = self.first * ratio + self.last * rest;
+        let a = 8.0 * ratio * rest * (1.0 - self.first.dot(self.last));
+        let b = 2.0 * self.chord.dot(weighted);
+        let c = self.chord.dot(self.chord);
+        let direct = if a < EFF_ZERO {
+            (b > EFF_ZERO * c.sqrt()).then(|| c / (2.0 * b))
+        } else {
+            Some((-b + (b * b + a * c).max(0.0).sqrt()) / a)
+        };
+        let direct = direct.and_then(|half| {
+            let total = 2.0 * half;
+            if !(total.is_finite() && total > 0.0) {
+                return None;
+            }
+            let residual = self.join_residual(self.local_chords(ratio, total));
+            (residual <= EFF_ZERO * 0.5).then_some((total, residual))
+        });
+        if let Some((total, residual)) = direct {
+            if residual <= gamma(64) {
+                return Ok(total);
+            }
+        }
+
+        // A subtractive root can lose precision near parallel tangents. Use the same
+        // construction in chord-length units, with the difference-squared coefficient
+        // and a same-sign root. The choice depends on the geometric residual, not the caller.
+        let difference = self.first - self.last;
+        let a = ratio * rest * difference.length_squared();
+        let b = (self.chord / self.length).dot(weighted);
+        let root = b.hypot(a.sqrt());
+        let inverse = if b >= 0.0 { root + b } else { a / (root - b) };
+        if !(inverse > 0.0) {
+            return Err(SolidError::Unsupported {
+                operation: op,
+                reason: "tangents do not admit a finite biarc at this ratio",
+            });
+        }
+        let total = self.length / inverse;
+        if !(total.is_finite() && total > 0.0) {
+            return Err(biarc_precision_error(op));
+        }
+        if let Some((candidate, _)) = direct {
+            if self.centres_within_roundoff(ratio, candidate, total) {
+                return Ok(candidate);
+            }
+        }
+        Ok(total)
+    }
+
+    fn centres_within_roundoff(&self, ratio: f64, candidate: f64, reference: f64) -> bool {
+        let direct_chords = self.local_chords(ratio, candidate);
+        let reference_chords = self.local_chords(ratio, reference);
+        // Two root/chord/radius evaluations take fewer than 256 unit roundings,
+        // including two each for sqrt and hypot. This is the 128-EPSILON allowance
+        // used by the analytical circle check, before curvature conditioning.
+        let epsilon = gamma(256);
+        let model_tolerance = self.position_tolerance().max(MODEL_TOL);
+        direct_chords
+            .into_iter()
+            .zip(reference_chords)
+            .zip([self.first, self.last])
+            .all(|((direct, reference), tangent)| {
+                let direct_length = length2d(direct);
+                let reference_length = length2d(reference);
+                if !(direct_length.is_finite()
+                    && direct_length > 0.0
+                    && reference_length.is_finite()
+                    && reference_length > 0.0)
+                {
+                    return false;
+                }
+                let normal = Vec2::new(-tangent.y, tangent.x);
+                let direct_height = normal.dot(direct);
+                let reference_height = normal.dot(reference);
+                let sine = reference_height.abs() / reference_length;
+                if !(sine.is_finite() && sine > epsilon) {
+                    return false;
+                }
+                let direct_radius = (0.5 * direct_length) / (direct_height / direct_length);
+                let reference_radius =
+                    (0.5 * reference_length) / (reference_height / reference_length);
+                // R(h) = |h|²/(2 n·h). For |delta h| <= epsilon |h| and
+                // sine = |n·h|/|h|, the relative radius change is bounded by
+                // epsilon (2 + epsilon + 1/sine)/(1 - epsilon/sine).
+                // Both centres lie on the same endpoint normal. Account for supplied
+                // tangents being unit only to roundoff; bound both radius and centre.
+                let allowance = (reference_radius.abs() * epsilon * (2.0 + epsilon + 1.0 / sine)
+                    / (1.0 - epsilon / sine))
+                    .min(model_tolerance);
+                direct_radius.is_finite()
+                    && reference_radius.is_finite()
+                    && (direct_radius - reference_radius).abs() * length2d(tangent).max(1.0)
+                        <= allowance
+            })
+    }
+
+    fn local_chords(&self, ratio: f64, total: f64) -> [Vec2; 2] {
+        let rest = 1.0 - ratio;
+        let turn = (self.first - self.last) * (ratio * rest * total);
+        [self.chord * ratio + turn, self.chord * -rest + turn]
+    }
+
+    /// Reflection across a circular piece's chord gives its other endpoint tangent.
+    /// Normalization, dot products and reflection contribute fewer than 24 rounding units per
+    /// side. Both sides and their cross product fit within `gamma(64)`.
+    fn join_residual(&self, [left, right]: [Vec2; 2]) -> f64 {
+        let left_length = length2d(left);
+        let right_length = length2d(right);
+        if !(left_length.is_finite()
+            && left_length > 0.0
+            && right_length.is_finite()
+            && right_length > 0.0)
+        {
+            return f64::INFINITY;
+        }
+        let left = left / left_length;
+        let right = right / right_length;
+        let from_left = left * (2.0 * self.first.dot(left)) - self.first;
+        let from_right = right * (2.0 * self.last.dot(right)) - self.last;
+        if from_left.dot(from_right) > 0.0 {
+            cross2(from_left, from_right).abs()
+        } else {
+            f64::INFINITY
+        }
+    }
+
+    /// Coordinate-rounding allowance shared by joint placement and exact piece validation.
+    fn position_tolerance(&self) -> f64 {
+        EFF_ZERO * self.length.max(1.0)
+            + gamma(4) * self.start.max_dimension().max(self.end.max_dimension())
+    }
+
+    fn keeps_straight_contacts(&self, joint: Point2, [left, right]: [Vec2; 2]) -> bool {
+        [
+            (self.start, self.first, left),
+            (self.end, -self.last, right),
+        ]
+        .into_iter()
+        .all(|(start, tangent, chord)| {
+            let length = length2d(chord);
+            if !(length.is_finite() && length > 0.0) {
+                return true;
+            }
+            let unit = chord / length;
+            if !forward_collinear(cross2(tangent, unit), tangent.dot(unit)) {
+                return true;
+            }
+            let placed_chord = joint - start;
+            let placed_length = length2d(placed_chord);
+            placed_length.is_finite()
+                && placed_length > 0.0
+                && same_biarc_direction(placed_chord / placed_length, tangent)
+        })
+    }
+
+    fn pieces(&self, joint: Point2, chords: [Vec2; 2], op: &'static str) -> Result<[Seg2; 2]> {
+        self.construct_pieces(joint, chords, None, op)?
+            .try_into()
+            .map_err(|_| biarc_precision_error(op))
+    }
+
+    fn construct_pieces(
+        &self,
+        joint: Point2,
+        [left_chord, right_chord]: [Vec2; 2],
+        approximation: Option<BiarcApproximation>,
+        op: &'static str,
+    ) -> Result<Vec<Seg2>> {
+        let tol =
+            approximation.map_or_else(|| self.position_tolerance(), |bounds| bounds.minimum_piece);
+        let mut built = Vec::new();
+        for (start, tangent, chord, reverse) in [
+            (self.start, self.first, left_chord, false),
+            (self.end, -self.last, right_chord, true),
+        ] {
+            if approximation.is_some_and(|bounds| !(length2d(joint - start) > bounds.minimum_piece))
+            {
+                continue;
+            }
+            let (piece, tangent, piece_tol) =
+                biarc_piece(start, tangent, joint, chord, tol, approximation, op)?;
+            built.push((
+                if reverse { piece.reversed() } else { piece },
+                tangent,
+                piece_tol,
+            ));
+        }
+        if approximation.is_none() {
+            let [(left, from_left, left_tol), (right, from_right, right_tol)] = built.as_slice()
+            else {
+                return Err(biarc_precision_error(op));
+            };
+            let join_tol = (left_tol + right_tol).min(tol.max(MODEL_TOL));
+            if !same_biarc_direction(*from_left, -*from_right)
+                || !biarc_near(left.end(), right.start(), join_tol)
+                || !biarc_near(right.end(), self.end, *right_tol)
+            {
+                return Err(biarc_precision_error(op));
+            }
+        }
+        if built.is_empty() {
+            return Err(biarc_precision_error(op));
+        }
+        Ok(built.into_iter().map(|(piece, _, _)| piece).collect())
+    }
+}
+
+fn biarc_direction(vector: Vec2, op: &'static str) -> Result<Vec2> {
+    let scale = vector.max_dimension();
+    if !(finite2(vector) && scale > 0.0) {
+        return Err(SolidError::invalid_input(
+            op,
+            "tangents must be finite and nonzero",
+        ));
+    }
+    let scaled = vector / scale;
+    Ok(scaled / scaled.length())
+}
+
+fn biarc_piece(
+    start: Point2,
+    tangent: Vec2,
+    end: Point2,
+    chord: Vec2,
+    tol: f64,
+    approximation: Option<BiarcApproximation>,
+    op: &'static str,
+) -> Result<(Seg2, Vec2, f64)> {
+    let placed_chord = end - start;
+    let placed_length = length2d(placed_chord);
+    let length = length2d(chord);
+    if !(length.is_finite() && length > tol && placed_length.is_finite() && placed_length > tol) {
+        return Err(biarc_precision_error(op));
+    }
+    let direction = chord / length;
+    let sin_half = cross2(tangent, direction);
+    let cos_half = tangent.dot(direction);
+    let normal = Vec2::new(-tangent.y, tangent.x);
+    let (straight, signed_radius) = if let Some(bounds) = approximation {
+        let squared_length = chord.dot(chord);
+        let height = normal.dot(chord);
+        let signed_radius = squared_length / (2.0 * height);
+        (
+            height.abs() * squared_length.sqrt() < bounds.straight_tolerance * squared_length
+                || signed_radius.abs() > bounds.maximum_radius,
+            signed_radius,
+        )
+    } else {
+        (
+            forward_collinear(sin_half, cos_half),
+            (0.5 * length) / sin_half,
+        )
+    };
+    if straight {
+        let admissible = if approximation.is_some() {
+            tangent.dot(chord) > 0.0
+        } else {
+            same_biarc_direction(placed_chord / placed_length, tangent)
+        };
+        return if admissible {
+            Ok((
+                Seg2::Line { a: start, b: end },
+                placed_chord / placed_length,
+                tol,
+            ))
+        } else {
+            Err(biarc_precision_error(op))
+        };
+    }
+    let side = signed_radius.signum();
+    let radius = signed_radius.abs();
+    let center = start + normal * signed_radius;
+    if !(finite2(center) && radius.is_finite()) {
+        return Err(biarc_precision_error(op));
+    }
+    let (start_angle, sweep) = if approximation.is_some() {
+        let radial = start - center;
+        let start_angle = radial.y.atan2(radial.x);
+        let last = end - center;
+        let mut sweep = last.y.atan2(last.x) - start_angle;
+        // The polar-angle difference lies in [-2π, 2π]; two wraps include signed zero.
+        for _ in 0..2 {
+            if (side > 0.0 && sweep <= 0.0) || (side < 0.0 && sweep >= 0.0) {
+                sweep += side * TAU;
+            }
+        }
+        (start_angle, sweep)
+    } else {
+        // Local tangent/chord angles retain precision on a short arc far from the origin.
+        let radial = normal * -side;
+        (radial.y.atan2(radial.x), 2.0 * sin_half.atan2(cos_half))
+    };
+    let arc = Seg2::Arc {
+        center,
+        radius,
+        start: start_angle,
+        sweep,
+    };
+    let readback_tol = (tol + gamma(24) * radius).min(tol.max(MODEL_TOL));
+    let valid = if approximation.is_some() {
+        sweep.is_finite() && sweep.abs() <= TAU
+    } else {
+        sweep.abs() > EFF_ZERO
+            && sweep.abs() < TAU
+            && biarc_near(arc.start(), start, readback_tol)
+            && biarc_near(arc.end(), end, readback_tol)
+            && same_biarc_direction(biarc_arc_tangent(start_angle, side), tangent)
+    };
+    if !valid {
+        return Err(biarc_precision_error(op));
+    }
+    Ok((
+        arc,
+        biarc_arc_tangent(start_angle + sweep, side),
+        readback_tol,
+    ))
+}
+
+fn forward_collinear(sine: f64, cosine: f64) -> bool {
+    sine.abs() <= gamma(16) && cosine > 0.0
+}
+
+fn biarc_arc_tangent(angle: f64, side: f64) -> Vec2 {
+    let radial = unit(angle);
+    Vec2::new(-radial.y, radial.x) * side
+}
+
+fn same_biarc_direction(a: Vec2, b: Vec2) -> bool {
+    a.dot(b) > 0.0 && cross2(a, b).abs() <= EFF_ZERO
+}
+
+fn biarc_near(a: Point2, b: Point2, tol: f64) -> bool {
+    let gap = a - b;
+    gap.x.hypot(gap.y) <= tol
+}
+
+fn biarc_precision_error(operation: &'static str) -> SolidError {
+    SolidError::Unsupported {
+        operation,
+        reason: "two tangent biarc segments cannot be represented at model precision",
+    }
 }
 
 fn h(p: Point2, w: f64) -> H2 {
@@ -1084,6 +1912,31 @@ pub fn to_local(frame: &Frame, q: Point3) -> Point2 {
     let (o, x, y, _) = axes(frame);
     let d = q - o;
     Vec2::new(d.dot(x), d.dot(y))
+}
+
+/// Chord fraction of the point where the view ray meets the plane, projected orthogonally onto
+/// the chord. The fraction is not clamped and the intersection may lie behind the ray origin.
+/// A parallel ray or collapsed chord has no fraction.
+#[must_use]
+pub fn ray_chord_parameter(
+    frame: &Frame,
+    origin: Point3,
+    direction: Vec3,
+    [a, b]: [Point2; 2],
+) -> Option<f64> {
+    let (plane_origin, _, _, normal) = axes(frame);
+    let denom = direction.dot(normal);
+    if denom.abs() < EFF_ZERO {
+        return None;
+    }
+    let t = (plane_origin - origin).dot(normal) / denom;
+    if !t.is_finite() {
+        return None;
+    }
+    let at = to_local(frame, origin + direction * t);
+    let d = b - a;
+    let ratio = (at - a).dot(d) / d.dot(d);
+    ratio.is_finite().then_some(ratio)
 }
 
 /// `q`'s height above `frame`: `(q - o).n`.

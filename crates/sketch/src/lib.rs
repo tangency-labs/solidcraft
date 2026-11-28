@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod biarc;
 pub mod cancel;
 mod construct;
 mod curves;
@@ -52,6 +53,12 @@ mod wire;
 mod wire_fillet;
 mod wire_solve;
 
+pub use biarc::BiarcNode;
+pub use biarc::BiarcSpan;
+pub use biarc::BiarcSpanMode;
+pub use biarc::BiarcSpanPreview;
+pub use biarc::BiarcSpline;
+pub use biarc::MAX_BIARC_NODES;
 pub use curves::MAX_SPLINE_POINTS;
 pub use curves::ToleranceFit;
 pub use curves::bezier_distance;
