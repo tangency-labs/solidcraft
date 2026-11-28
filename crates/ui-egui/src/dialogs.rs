@@ -1532,6 +1532,23 @@ impl Dialog {
         } else {
             hole_points
         };
+        let sketch_as_profiles = matches!(d.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
+            && d.inputs.first().is_some_and(|i| i.accept & PROFILES != 0);
+        let mut sketch_preselected = false;
+        let preselection: Vec<Sel> = if sketch_as_profiles {
+            preselection
+                .into_iter()
+                .flat_map(|sel| match sel {
+                    Sel::Feature { id } if s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })) => {
+                        sketch_preselected = true;
+                        sketch_profiles(s, id)
+                    }
+                    sel => vec![sel],
+                })
+                .collect()
+        } else {
+            preselection
+        };
         if matches!(d.kind, Kind::Thread { .. })
             && preselection.iter().filter(|sel| fits(FACES, sel)).take(2).count() > 1
             && let Some(input) = d.inputs.first_mut()
@@ -1678,6 +1695,7 @@ impl Dialog {
         // With nothing pre-selected, a single profile in the sketch being used is taken (#684:
         // not one a feature already builds from).
         if matches!(d.kind, Kind::Extrude { .. } | Kind::Revolve { .. })
+            && !sketch_preselected
             && let Some(inp) = d.inputs.first_mut()
             && inp.items.is_empty()
         {
@@ -2286,14 +2304,10 @@ impl Dialog {
         if self.active != 0
             || !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
             || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
-            || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         {
             return false;
         }
-        let profiles: Vec<Sel> = crate::open_meshing::session_world(s)
-            .sketch(id)
-            .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
-            .unwrap_or_default();
+        let profiles = sketch_profiles(s, id);
         let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
             return false;
@@ -2937,6 +2951,17 @@ fn outermost_profiles(profiles: &[solidcraft_engine::sketch::Profile]) -> impl I
     };
     let holes: Vec<Vec<String>> = profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| key(h))).collect();
     (0..profiles.len()).filter(move |&i| profiles.get(i).is_some_and(|p| !holes.contains(&key(&p.outer_curves))))
+}
+
+/// The Profiles picks a whole sketch `id` stands for (`drawn_profiles`); none when it is no sketch.
+fn sketch_profiles(s: &Session, id: u64) -> Vec<Sel> {
+    if !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })) {
+        return Vec::new();
+    }
+    crate::open_meshing::session_world(s)
+        .sketch(id)
+        .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
+        .unwrap_or_default()
 }
 
 /// The profiles of `ss` that make up what was drawn, as `profiles: "all"` takes it (#15521):
