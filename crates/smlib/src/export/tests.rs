@@ -392,6 +392,7 @@ mod native_tests {
                     vertices: e.vertices,
                     reversed: false,
                     trim_map: None,
+                    grown: 0.0,
                 })
                 .collect();
             for (f, rf) in record.faces.iter().enumerate() {
