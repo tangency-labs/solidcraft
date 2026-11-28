@@ -4492,6 +4492,29 @@ fn an_emboss_that_works_has_no_warning() {
     }
 }
 
+/// #23375: an Emboss whose raised piece stands apart from the body it joins (the Emboss window
+/// sends the shown body A when B, under the profile, is hidden) leaves A in two pieces, and says
+/// so as an Extrude Join apart does. A Deboss there keeps its own "changed nothing" warning.
+#[test]
+fn an_emboss_apart_from_its_body_says_it_left_two_pieces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [40, 0, 0], "operation": "new", "body_name": "B"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Logo"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [45, 5], "p1": [55, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 1, "mode": "emboss", "targets": ["A"]}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the joined piece doesn't touch `A`, so `A` is now in 2 separate pieces"), "{reply}");
+    assert!(!warning.contains("New Body"), "Emboss has no New Body: {reply}");
+    assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), reply["warning"].as_str());
+    assert!(rel(body_volume(&s, "A"), 8100.0) < 1e-9 && rel(body_volume(&s, "B"), 8000.0) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 1, "mode": "deboss", "targets": ["A"]}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("deboss changed nothing") && !warning.contains("separate pieces"), "{reply}");
+}
+
 /// #6612: an explicitly fixed face extrusion stays on its fixed plane even when the converted
 /// mesh also supports dynamic attachments. A 20 x 20 x 10 block with a bore of
 /// radius 3, through STL and Convert Mesh, joined 5 up from its top face.

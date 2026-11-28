@@ -2385,6 +2385,7 @@ mod tests {
                         one_sided_direction: None,
                         to_ref: None,
                         from_ref: None,
+                        extend_to_face: false,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

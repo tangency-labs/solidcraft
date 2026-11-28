@@ -72,6 +72,29 @@ pub fn insert_knot(curve: &Curve, t: f64) -> Result<Curve> {
     })?
 }
 
+/// `curve` with a knot inserted at the middle of each of its spans
+/// ([`solidcore::nurbs::knots::span_midpoints`]; Boehm's insertion, [`NurbCurve::insert_knot`]):
+/// the same curve, twice the spans, so a curve fitted on its knots has twice the freedom.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a valid clamped spline or rational spline, or a
+/// result the record cannot hold (more control points than it takes); the kernel's status
+/// otherwise.
+pub fn halve_spans(curve: &Curve) -> Result<Curve> {
+    let nurb = nurb_of(curve)?;
+    let Natural::Range(t0, t1) = curve.natural() else {
+        return Err(Error::Argument);
+    };
+    let mids = solidcore::nurbs::knots::span_midpoints(nurb.knots(), [t0, t1]);
+    run("curve_knots::halve_spans", |_| {
+        let mut halved = nurb;
+        for t in mids {
+            halved = halved.insert_knot(t, 1)?;
+        }
+        Ok(record_of(&halved))
+    })?
+}
+
 /// `curve` with one copy of its interior knot `t` removed (The NURBS Book, A5.8; a knot of
 /// multiplicity `m` keeps `m - 1`), and the kernel's certified bound of how far the result is
 /// from `curve` ([`solidcore::nurbs::crv_deviation::certified_distance`], measured against
@@ -356,6 +379,42 @@ mod tests {
         assert_eq!(multiplicity(parts(&c3).0, 0.5), 3);
         same_shape(&c, &c3, 1e-12);
         assert_eq!(insert_knot(&c3, 0.5), Err(Error::Argument));
+    }
+
+    /// The cubic on six points has three spans (inner knots 1/3 and 2/3): halved, the knots
+    /// 1/6, 1/2 and 5/6 come in, three points more, the same curve. A quarter circle's one span
+    /// halved stays rational, on its circle.
+    #[test]
+    fn halved_spans_keep_the_shape() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let halved = halve_spans(&c).unwrap();
+        let (knots, count) = parts(&halved);
+        assert_eq!(count, WAVE.len() + 3);
+        for t in [1.0 / 6.0, 0.5, 5.0 / 6.0] {
+            assert!(
+                knots.iter().any(|k| (k - t).abs() < 1e-15),
+                "{t}: {knots:?}"
+            );
+        }
+        same_shape(&c, &halved, 1e-12);
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![
+                [10.0, 0.0, 0.0, 1.0],
+                [10.0 * w, 10.0 * w, 0.0, w],
+                [0.0, 10.0, 0.0, 1.0],
+            ],
+        };
+        let halved = halve_spans(&arc).unwrap();
+        assert!(matches!(halved, Curve::RationalSpline { .. }), "{halved:?}");
+        assert_eq!(parts(&halved).1, 4);
+        same_shape(&arc, &halved, 1e-12);
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(halve_spans(&line), Err(Error::Argument));
     }
 
     #[test]

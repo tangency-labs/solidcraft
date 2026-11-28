@@ -121,6 +121,21 @@ SolidCraft changes to egui and eframe:
   the handle each window, the main one and every pop-out, publishes its own bar for one window
   procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
 
+- `crates/egui/src/widgets/text_edit/{builder.rs,mod.rs}`, `crates/egui/src/widgets/mod.rs`,
+  `crates/egui/src/atomics/container_atom.rs`, `crates/egui/src/lib.rs`: a vertically centred
+  `TextEdit` lifts its single row of text so the middle of a capital's ink lands in the middle of
+  the field, not the middle of the font's row box (SolidCraft #23381). A row box is not where
+  capitals sit: the ascent exceeds the cap height and a descent hangs below the baseline, so
+  centring the row box puts the text low in the frame — 1.5 pt with egui's own font. The lift
+  comes from `cap_ink_rise`; it lays out one fixed probe glyph, so it follows the font, its size
+  and the pixels-per-point, and the baseline never moves while one types. `galley_cap_ink_rise`
+  applies it to a laid-out galley (zero for multi-row galleys, which centre as a block); both are
+  exported for SolidCraft's ui-kit to centre hand-drawn pills the same way. The atom layout
+  applies the lift to every [`AtomKind::Text`] atom whose cross-axis alignment is centred, so
+  `TextEdit`'s hint, prefix and suffix atoms share its lifted baseline and centred labels in
+  other atom containers read centred too. Only `Align::Center` rows are touched; top- and
+  bottom-aligned edits are unchanged. Tests: `crates/egui/tests/text_edit_centering.rs`.
+
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
@@ -145,17 +160,6 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   an unsupported surface no longer unwrap.
 - `src/winit.rs`: acquire a drawable before preparing paint callbacks, so a skipped
   surface frame cannot discard initialization commands for cached viewport meshes.
-- `src/lib.rs`, `src/winit.rs`: surfaces are configured under `capture_errors` (error scopes):
-  a configuration the device refuses (D3D12 "Failed to wait for GPU to come idle before
-  reconfiguring the Surface", #1935) is logged, the frame is skipped and the configure is tried
-  again, instead of the device's uncaptured-error handler panicking. A streak of refusals warns
-  once (debug after), waits 16 ms doubling up to 1 s between tries and recreates the surface
-  every `SURFACE_RECREATE_AFTER` refusals (`ConfigureRetry`). Each surface keeps the deadline of
-  its next try: until it is due, no configure or recreate happens, whether the repaint comes
-  from input, an animation, a resize (its size is kept for the retry) or an outdated surface,
-  and the frame is skipped with a repaint asked for when it is due. The streak and the deadline
-  survive a recreate; a configure the device takes ends the streak, a recreate it asked for
-  included. A recreate for a lost surface goes ahead as before.
 - `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
   (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
   submits a command buffer holding a debug marker (`DeviceLost::probe`), so a device the
@@ -165,19 +169,6 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   A reset that lands after the probe is still met by a queue write or the present: the painter
   runs the frame under `DeviceLost::survive`, which takes that panic for the loss once the probe
   then finds the device lost, and lets any other panic carry on (#10240).
-- `src/lib.rs`, `src/winit.rs`: a surface configure that meets a lost device is not taken as
-  configured (`configure_captured`): wgpu reports device-loss errors to no error scope, and on
-  D3D12 a driver reset found by the configure has already dropped the surface's configuration.
-  The next acquire failed with "Surface is not configured for presentation" and the device's
-  default handler panicked (#7007). An unsupported surface is a refused configure too. The
-  acquire runs under `capture_errors`, and the `Validation` status it then returns reconfigures
-  the surface instead of skipping every later frame.
-- `src/lib.rs`, `src/winit.rs`: the painter holds an acquired frame as `AcquiredFrame`, which
-  destroys a second handle to the frame's texture once the frame is presented or dropped. On a
-  lost device wgpu's present and discard keep the frame's image in the surface, and dropping
-  the surface (the window closing for the restart) then panicked in wgpu-hal ("Trying to
-  destroy a SwapchainAcquireSemaphore that is still in use by a SurfaceTexture", #7148); the
-  destroy takes the image back whatever the device's state.
 - `src/lib.rs`: creation of the egui renderer uses validation, internal and out-of-memory
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
