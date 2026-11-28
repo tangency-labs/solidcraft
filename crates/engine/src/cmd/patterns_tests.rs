@@ -4759,3 +4759,29 @@ fn mirror_combine_unmerged_copies_inherit_seed_material() {
         assert_eq!(s.doc.body_material(copy), solidcraft_doc::DEFAULT_MATERIAL, "{copy}");
     }
 }
+
+/// A pattern of picked placements adds them again once and keeps no timeline feature, so a body
+/// pattern redefined into one says so instead of "did not make a feature" (#22942).
+#[test]
+fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,0],"body_name":"PartBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[30,0,0],"body_name":"Block"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Block"],"dir1":[0,0,1],"count1":3,"spacing1":20,"name":"Pattern"}));
+    let (doc, occurrences) = (s.doc.clone(), s.doc.occurrences.len());
+    let err = s
+        .execute(
+            "timeline.redefine",
+            &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+                "occurrences":[[occurrence]],"dir1":[0,0,1],"count1":3,"spacing1":20}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not kept in the timeline"), "{err}");
+    assert!(!err.contains("did not make a feature"), "{err}");
+    assert_eq!(s.doc, doc, "the refused edit leaves the design as it was");
+    assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
+}

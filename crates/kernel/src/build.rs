@@ -1741,18 +1741,12 @@ pub fn path_polyline(path: &[PathSeg]) -> Result<Vec<Vec3>> {
     Ok(pts)
 }
 
-/// [`sweep`] with sweep options. The default options are exactly [`sweep`]; a twist, an end
+/// Sweep a planar region along a chain of path segments, keeping the profile perpendicular to
+/// the path (at sharp corners the walls meet in mitres), with sweep options: a twist, an end
 /// scale, guide rails or an orientation direction place the profile at stations along the path.
 pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "sweep_with");
     smlib_sweep(plane, region, path, ctl)
-}
-
-/// Sweep a planar region along a chain of path segments, keeping the profile perpendicular to
-/// the path; at sharp corners the walls meet in mitres.
-pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "sweep");
-    smlib_sweep(plane, region, path, &crate::SweepControl::default())
 }
 
 /// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that

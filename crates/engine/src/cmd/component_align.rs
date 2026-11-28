@@ -28,7 +28,7 @@ fn parse_path(v: &Value, key: &str, cmd: &str) -> Result<Vec<u64>> {
         .ok_or_else(|| bad(cmd, format!("`{key}` must list 1..64 occurrence ids")))
 }
 
-fn resolve_paths(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
+pub(crate) fn resolve_paths(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
     let raw: Vec<Vec<u64>> = if let Some(v) = p.get("paths") {
         if ["occurrences", "occurrence", "path"].into_iter().any(|k| p.get(k).is_some()) {
             return Err(bad(cmd, "give `paths`, `occurrences`, or `occurrence`/`path`, not more than one"));

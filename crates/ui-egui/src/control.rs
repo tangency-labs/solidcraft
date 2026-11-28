@@ -188,6 +188,7 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
         (app.params.is_some(), "parameters.change"),
         (app.design_properties.is_some(), "document.metadata"),
         (app.sketch_report.is_some(), "sketch.inspect"),
+        (app.design_report.is_some(), "document.inspect"),
         (app.bom.is_some(), "assembly.bom"),
         (app.material_card_review.is_some(), "material.properties.validate"),
         (app.help.about, "about"),
@@ -1113,19 +1114,21 @@ fn ui_browser(app: &SolveApp) -> Outcome {
     }))
 }
 
-/// `ui.workspace {workspace?}`: enter the design, render or drawing workspace; returns the one shown.
+/// `ui.workspace {workspace?}`: enter a built-in or plugin workspace; returns the one shown.
 fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
     if let Some(w) = q.workspace
-        && let Err(e) = crate::workspace::enter(app, w.as_str())
+        && let Err(e) = crate::workspace::enter(app, &w)
     {
         return err(e);
     }
     ok(json!({"workspace":current_workspace(app)}))
 }
 
-/// The workspace shown: drawing, render or design.
-fn current_workspace(app: &SolveApp) -> &'static str {
-    if crate::drawing_workspace::active(app) {
+/// The workspace shown, including namespaced plugin workspaces.
+fn current_workspace(app: &SolveApp) -> &str {
+    if let Some(id) = crate::plugin_workspaces::active_id(app) {
+        id
+    } else if crate::drawing_workspace::active(app) {
         "drawing"
     } else if crate::render_workspace::active(app) {
         "render"

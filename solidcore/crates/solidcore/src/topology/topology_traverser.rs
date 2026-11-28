@@ -31,7 +31,10 @@
 //! curves they make, as upstream's `const` queries leave them. `IsInnerShell` keeps each target face surface's solve cache for the whole call
 //! (upstream's surface keeps its cache across the rays); the port otherwise builds one
 //! per intersection, and a failed build is kept too instead of being retried on every
-//! ray (the build is deterministic, so a retry fails the same way).
+//! ray (the build is deterministic, so a retry fails the same way). (Not upstream)
+//! `IsInnerShell` abandons a ray with a counted hit that is a limit root (one crossing of a
+//! leaf whose certified pass stopped at its limit, `Solution::limit_root`) and goes to the
+//! next sample (its counts reach no check).
 //! Existing co-ported accessors are reused.
 //! `ClosureTraversalFromBothSides` is not in the pinned upstream: it is the fork's
 //! (tangency-labs/smlib@69c5198), used by `SmBrep::TestClosureSplitRegion` in place of
@@ -734,8 +737,10 @@ impl crate::geom::solution_array::SolutionObject for RaySurface {
 }
 
 /// `pTargetFace->GlobalLineIntersect(GetUVDomain(), origin, direction, NULL, FALSE,
-/// GetTolerance(), sols)`: the line parameter of each solution. `held` is the face
-/// surface's cache, kept across the rays as upstream keeps it on the surface.
+/// GetTolerance(), sols)`: the line parameter of each solution, with whether it is a limit
+/// root (not upstream: [`crate::geom::solution_array::Solution::limit_root`]).
+/// `held` is the face surface's cache, kept across the rays as upstream keeps it on the
+/// surface.
 fn line_parameters(
     k: &Kernel,
     b: &mut Brep,
@@ -743,7 +748,7 @@ fn line_parameters(
     held: &mut HeldSolveCache<RaySurface>,
     origin: Vec3,
     direction: Vec3,
-) -> Result<Vec<f64>> {
+) -> Result<Vec<(f64, bool)>> {
     let face = b.face(f)?;
     let (uv_domain, tol) = (face.uv_domain, face.tolerance);
     let surface = RaySurface(
@@ -758,7 +763,7 @@ fn line_parameters(
     Ok(solutions
         .as_slice()
         .iter()
-        .map(|s| s.start.parameters[0])
+        .map(|s| (s.start.parameters[0], s.limit_root))
         .collect())
 }
 
@@ -766,6 +771,13 @@ fn line_parameters(
 /// Errors propagate from face sampling and the ray/face intersections (whose other
 /// failures skip the face, as upstream).
 /// An empty or inconclusive set returns the upstream `SM_ERR`.
+///
+/// (Not upstream) A ray with a counted hit that is a limit root
+/// ([`crate::geom::solution_array::Solution::limit_root`]: a crossing of a leaf whose
+/// certified pass stopped at its limit, whose partner may be unreported, which would turn
+/// the ray's parity) is abandoned: its counts decide nothing, and the next sample's ray is
+/// fired. The abandoned ray's hits are still solved, so the B-rep's trims are made as
+/// before. Every other hit is counted as before, whatever its contact.
 ///
 /// The rays and face samples run on `b` itself, so the UV trim curves their face
 /// classifications create stay on the B-rep, as upstream's `const` queries leave them.
@@ -783,8 +795,7 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     if faceuses.len() < 3 {
         samples *= 2;
     }
-    let mut forward = 0_u64;
-    let mut backward = 0_u64;
+    let mut rays = ShellRays::default();
     // each target face surface's cache, built on its first ray (upstream's
     // smsurf_GetSurfaceCache keeps one per surface; the rays do not change surfaces)
     let mut caches: BTreeMap<FaceId, HeldSolveCache<RaySurface>> = BTreeMap::new();
@@ -806,55 +817,196 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
             let (Some(&origin), Some(&direction)) = (pair.first(), pair.get(1)) else {
                 continue;
             };
-            forward = 0;
-            backward = 0;
+            // each target face's hits, with its tolerance
+            let mut faces: Vec<(f64, Vec<(f64, bool)>)> = Vec::new();
             for &target in faceuses {
                 let f = link(b.faceuse(target)?.face, NO_FACE)?;
                 let tol = b.face(f)?.tolerance;
                 let held = caches.entry(f).or_default();
                 match line_parameters(k, b, f, held, origin, direction) {
-                    Ok(parameters) => {
-                        for t in parameters {
-                            if t < -tol {
-                                backward += 1;
-                            } else if t > tol {
-                                forward += 1;
-                            }
-                        }
-                    }
+                    Ok(parameters) => faces.push((tol, parameters)),
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => (),
                 }
             }
-            if forward == 1 && backward == 0 {
-                return Ok(true);
-            }
-            if forward == 0 && backward == 1 {
-                return Ok(false);
-            }
-            if forward % 2 != 0 && backward % 2 == 0 {
-                return Ok(true);
-            }
-            if forward % 2 == 0 && backward % 2 != 0 {
-                return Ok(false);
+            if let Some(inner) = rays.ray(ray_count(&faces)) {
+                return Ok(inner);
             }
         }
     }
-    if forward > backward && backward == 0 && forward % 2 != 0 {
-        return Ok(true);
+    rays.after_samples()
+}
+
+/// What one ray of [`is_inner_shell`] counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RayCount {
+    /// The hits beyond each face's tolerance ahead of the ray's start and behind it.
+    Counts { forward: u64, backward: u64 },
+    /// (Not upstream) A counted hit is a limit root: the ray decides nothing.
+    Abandoned,
+}
+
+/// The count of one ray of [`is_inner_shell`] from each target face's `(tolerance, hits)`
+/// (each hit its line parameter and whether it is a limit root): a hit within its face's
+/// tolerance of the start is not counted, and a counted limit root abandons the ray.
+fn ray_count(faces: &[(f64, Vec<(f64, bool)>)]) -> RayCount {
+    let (mut forward, mut backward) = (0_u64, 0_u64);
+    let mut limit = false;
+    for (tol, hits) in faces {
+        for &(t, limit_root) in hits {
+            if t < -tol {
+                backward += 1;
+            } else if t > *tol {
+                forward += 1;
+            } else {
+                continue;
+            }
+            limit |= limit_root;
+        }
     }
-    if backward > forward && forward == 0 && backward % 2 != 0 {
-        return Ok(false);
+    if limit {
+        RayCount::Abandoned
+    } else {
+        RayCount::Counts { forward, backward }
     }
-    Err(SolidError::topology(
-        OP,
-        TopologyFailure::ShellSideUndecided { forward, backward },
-    ))
+}
+
+/// The rays of [`is_inner_shell`] in the order fired: the counts of the last one.
+#[derive(Debug, Default)]
+struct ShellRays {
+    forward: u64,
+    backward: u64,
+}
+
+impl ShellRays {
+    /// Takes the next ray: whether the shell is inner when the ray decides it. An
+    /// abandoned ray leaves no counts (no partial count reaches [`Self::after_samples`]).
+    fn ray(&mut self, count: RayCount) -> Option<bool> {
+        let (forward, backward) = match count {
+            RayCount::Counts { forward, backward } => (forward, backward),
+            RayCount::Abandoned => (0, 0),
+        };
+        self.forward = forward;
+        self.backward = backward;
+        if count == RayCount::Abandoned {
+            return None;
+        }
+        if forward == 1 && backward == 0 {
+            return Some(true);
+        }
+        if forward == 0 && backward == 1 {
+            return Some(false);
+        }
+        if forward % 2 != 0 && backward % 2 == 0 {
+            return Some(true);
+        }
+        if forward % 2 == 0 && backward % 2 != 0 {
+            return Some(false);
+        }
+        None
+    }
+
+    /// The answer when no ray decided, from the last ray's counts (upstream's checks after
+    /// the samples); the error when they do not decide either.
+    fn after_samples(&self) -> Result<bool> {
+        let (forward, backward) = (self.forward, self.backward);
+        if forward > backward && backward == 0 && forward % 2 != 0 {
+            return Ok(true);
+        }
+        if backward > forward && forward == 0 && backward % 2 != 0 {
+            return Ok(false);
+        }
+        Err(SolidError::topology(
+            OP,
+            TopologyFailure::ShellSideUndecided { forward, backward },
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One ray of `is_inner_shell`: hits within a face's tolerance of the start are not
+    /// counted, limit root or not; every other hit that is no limit root is counted as
+    /// upstream counts it (whatever its contact); a counted limit root abandons the ray.
+    #[test]
+    fn a_counted_limit_root_abandons_the_ray_and_a_start_hit_does_not() {
+        let (limit, plain) = (true, false);
+        let counts = |forward, backward| RayCount::Counts { forward, backward };
+        assert_eq!(
+            ray_count(&[
+                (1e-3, vec![(5.0, plain), (-2.0, plain)]),
+                (1e-2, vec![(7.0, plain)])
+            ]),
+            counts(2, 1)
+        );
+        assert_eq!(
+            ray_count(&[(1e-3, vec![(5e-4, limit), (3.0, plain)])]),
+            counts(1, 0)
+        );
+        assert_eq!(ray_count(&[(1e-3, vec![(-5e-4, limit)])]), counts(0, 0));
+        assert_eq!(
+            ray_count(&[(1e-3, vec![(3.0, plain)]), (1e-3, vec![(4.0, limit)])]),
+            RayCount::Abandoned
+        );
+        assert_eq!(
+            ray_count(&[(1e-3, vec![(-4.0, limit)])]),
+            RayCount::Abandoned
+        );
+    }
+
+    /// The rays of `is_inner_shell` in order: a ray with an odd count ahead and an even one
+    /// behind (or one hit) decides; an abandoned ray decides nothing and leaves no counts, so
+    /// samples that are all abandoned end in the shell's undecided side with no counts (the
+    /// error `is_inner_shell` returns), and an abandoned last ray hides the counts of the ray
+    /// before it from the checks after the samples, which read the last ray's.
+    #[test]
+    fn abandoned_rays_decide_nothing_and_reach_no_check() {
+        let undecided = |r: Result<bool>| match r {
+            Err(e) => format!("{e:?}"),
+            Ok(v) => panic!("decided {v}"),
+        };
+        let mut rays = ShellRays::default();
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        let none = undecided(rays.after_samples());
+        assert!(none.contains("forward: 0, backward: 0"), "{none}");
+        let mut rays = ShellRays::default();
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 2,
+                backward: 2
+            }),
+            None
+        );
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        let none = undecided(rays.after_samples());
+        assert!(none.contains("forward: 0, backward: 0"), "{none}");
+        let mut rays = ShellRays::default();
+        assert_eq!(rays.ray(RayCount::Abandoned), None);
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 3,
+                backward: 0
+            }),
+            Some(true)
+        );
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 0,
+                backward: 1
+            }),
+            Some(false)
+        );
+        assert_eq!(
+            rays.ray(RayCount::Counts {
+                forward: 1,
+                backward: 1
+            }),
+            None
+        );
+    }
     use crate::geom::context::MarkType;
     use crate::topology::{Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
 
