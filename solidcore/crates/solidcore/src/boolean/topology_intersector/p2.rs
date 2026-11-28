@@ -688,20 +688,50 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         faces: &[O],
         opt_keep_as_wires: Option<&[O]>,
     ) -> Result<()> {
+        if faces.is_empty() {
+            return Ok(());
+        }
+        if let Some((deleted_edges, deleted_vertices)) =
+            brep.brep_delete_faces_batch(k, faces, opt_keep_as_wires)?
+        {
+            for &f in faces {
+                if let Some(o_face) = self.other_mate(Some(f)) {
+                    self.remove_relationship(Some(f), Some(o_face))?;
+                }
+            }
+            for e in deleted_edges {
+                if let Some(o_e) = self.other_mate(Some(e)) {
+                    self.remove_relationship(Some(e), Some(o_e))?;
+                }
+            }
+            for v in deleted_vertices {
+                if let Some(o_v) = self.other_mate(Some(v)) {
+                    self.remove_relationship(Some(v), Some(o_v))?;
+                }
+            }
+            return Ok(());
+        }
+
         let mut faces_vertices: Vec<O> = Vec::new();
+        let mut seen_vertices: std::collections::BTreeSet<O> = std::collections::BTreeSet::new();
         let mut faces_edges: Vec<O> = Vec::new();
+        let mut seen_edges: std::collections::BTreeSet<O> = std::collections::BTreeSet::new();
         let mut face_brep_h: Option<O> = None;
 
         // iter every face saving all face vertices and edges and calling DeleteFace()
         for &f in faces {
             // Accumulate DeletedFace unique EdgeList for later
             for e in brep.face_edges(f)? {
-                add_unique(&mut faces_edges, e);
+                if seen_edges.insert(e) {
+                    faces_edges.push(e);
+                }
             }
 
             // Accumulate DeletedFace unique VertexList for later
             for v in brep.face_vertices(f)? {
-                add_unique(&mut faces_vertices, v);
+                if seen_vertices.insert(v) {
+                    faces_vertices.push(v);
+                }
             }
 
             // remove TargetFace<->OtherFace relationship if it exists (status unchecked
@@ -724,13 +754,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Ok(());
         }
 
+        let keep_wires: Option<std::collections::BTreeSet<O>> =
+            opt_keep_as_wires.map(|keep| keep.iter().copied().collect());
+
         // iter every edge of every deleted face looking for wire edges to delete
         for &e in &faces_edges {
             if !brep.edge_is_wire(e)? {
                 continue;
             }
             // save wires when asked
-            if opt_keep_as_wires.is_some_and(|keep| contains(keep, &e)) {
+            if keep_wires.as_ref().is_some_and(|keep| keep.contains(&e)) {
                 continue;
             }
 
@@ -1962,7 +1995,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         mgr.combine_proto_vertices_with_incidence(k, &*brep)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
-        // (the list is re-read after each split: splitting appends proto edges)
+        // (the list is re-read after each split: splitting appends proto edges).
+        // Cache each proto edge's certified bounding box keyed by its current interval bits
+        // so disjoint curved pairs reject in O(1) without recomputing boxes or setting up
+        // `global_curve_intersect`.
+        let mut pe_boxes: std::collections::HashMap<ProtoEdgeId, (u64, u64, Option<Extent3d>)> =
+            std::collections::HashMap::new();
         let mut ii = 0usize;
         while ii < mgr.proto_edges().len() {
             k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
@@ -1976,8 +2014,25 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .proto_edges()
                     .get(jj)
                     .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "proto edge list"))?;
+                let mut cached_box = |pe: ProtoEdgeId| -> Result<Option<Extent3d>> {
+                    let Some(edge) = mgr.proto_edge(pe) else {
+                        return Ok(None);
+                    };
+                    let dom = edge.xsect_interval();
+                    let (min_b, max_b) = (dom.min().to_bits(), dom.max().to_bits());
+                    if let Some(&(c_min, c_max, bbox)) = pe_boxes.get(&pe) {
+                        if c_min == min_b && c_max == max_b {
+                            return Ok(bbox);
+                        }
+                    }
+                    let bbox = mgr.proto_edge_bounding_box(k, &*brep, pe)?;
+                    pe_boxes.insert(pe, (min_b, max_b, bbox));
+                    Ok(bbox)
+                };
+                let b1 = cached_box(pe1)?;
+                let b2 = cached_box(pe2)?;
                 // (status unchecked upstream; passed on here, WR-658)
-                let d = mgr.split_intersecting_proto_edges(k, brep, pe1, pe2)?;
+                let d = mgr.split_intersecting_proto_edges_with_boxes(k, brep, pe1, pe2, b1, b2)?;
                 deleted.extend(d);
                 jj += 1;
             }
@@ -1985,15 +2040,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         }
 
         // 2. for every ProtoEdge/ProtoVertex pair - remove edge-less proto vertices
-        // coincident with a proto edge (count backward: they are removed from the list)
+        // coincident with a proto edge (count backward: they are removed from the list;
+        // `remove_coincident_no_edge_proto_vertex` never edits `proto_edges`, so snapshot
+        // the list once outside the loop).
+        let pes = mgr.proto_edges().to_vec();
         let mut ii = mgr.proto_vertices().len();
         while ii > 0 {
             let pv = *mgr
                 .proto_vertices()
                 .get(ii - 1)
                 .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "proto vertex list"))?;
-            let pes = mgr.proto_edges().to_vec();
-            for pe in pes {
+            for &pe in &pes {
                 // a failure is FALSE (the SmBoolean function's error return)
                 let removed =
                     ignore_soft(mgr.remove_coincident_no_edge_proto_vertex(k, brep, pe, pv))?

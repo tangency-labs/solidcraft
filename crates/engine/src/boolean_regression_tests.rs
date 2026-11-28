@@ -1689,7 +1689,7 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
             &json!({"sketch": "Sketch1", "profiles": [{"point": [50, 10]}], "distance": 10, "operation": "join", "name": "Extrude2"}),
         )
         .unwrap();
-    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart)), "{join}");
+    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart) && w.contains("(New Body makes it a body of its own)")), "{join}");
     assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), join["warning"].as_str());
     assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Body1"]);
     assert!((volume(&s, "Body1") - 8000.0).abs() < 1e-6, "{}", volume(&s, "Body1"));
@@ -2226,6 +2226,23 @@ fn a_fillet_of_a_tangent_chain_ends_at_a_slight_bend() {
     let (area, c) = ((1.0 - std::f64::consts::FRAC_PI_4) * r * r, r * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI)));
     let want = area * (sweep * (49.0 + c) + handle);
     assert!((removed - want).abs() < 1e-4, "removed {removed}, expected {want}");
+}
+
+/// #17356: the 2 mm fillet of the outer top edges, after the inner top edges were rounded, was
+/// refused as cutting the part in pieces. The ray classifying a point beside the new round crosses
+/// the inner round's face twice within one leaf of its search tree, and only the far crossing was found.
+#[test]
+fn outer_top_fillet_after_the_inner_round_builds_one_closed_body() {
+    let s = replay(include_str!("../../../examples/regressions/fillet_outer_top_after_inner_round.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // a recorded volume: the rim is seven tapered lobes, and its round has no closed form
+    let (got, want) = (volume(&s, "Body1"), 323_074.223_6);
+    assert!((got - want).abs() < 1e-6 * want, "volume {got}, want {want}");
 }
 
 /// A section of #15701: an arch (a seven-point fit spline) on the plane x = `x`, offset 1 mm to

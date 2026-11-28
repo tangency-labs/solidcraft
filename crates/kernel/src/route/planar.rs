@@ -1,7 +1,8 @@
 //! The router's planar helpers ([`solidcraft_kernel_api::Planar`]), as `solidcraft_kernel::planar`:
 //! the arcs a sketch tool draws from its picks, the side of a sketch curve a region lies on, the turn
 //! between two path directions, a frame section's corners, paper strokes and the runs a round-joined
-//! line is stroked in, where a board's drilled hole reaches, and a sketch plane's normal and points
+//! line is stroked in, where a board's drilled hole reaches, whether a path runs through a
+//! profile's inside, and a sketch plane's normal and points
 //! as a sketch solver holds them.
 
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
@@ -53,6 +54,15 @@ pub fn bisector_centre(start: [f64; 2], end: [f64; 2], p: [f64; 2]) -> Option<[f
 pub fn is_square_to_radius(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool {
     match which(OpKind::Planar) {
         Which::Solidcore => Solidcore.is_square_to_radius(centre, p, dir),
+    }
+}
+
+/// Whether `p` lies on the line through `origin` along `dir`, within `tol` of it; `false` where
+/// `dir` is of no length.
+#[must_use]
+pub fn on_line(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.on_line(p, origin, dir, tol),
     }
 }
 
@@ -152,13 +162,18 @@ pub fn exit_through_box(end: Vec3, toward: Vec3, rect: [Vec3; 4]) -> Option<f64>
     }
 }
 
-/// How far along `toward` from `start` its line leaves the round bar of `radius` (mm) about the
-/// line `axis`, without end. `None` for a zero `toward`, a radius not finite and positive, a
-/// degenerate axis, or a line that misses the bar or runs along it.
-#[must_use]
-pub fn exit_through_round(start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64> {
+/// How far past `end` along `toward` a member's end is built to leave the round bars `rounds`
+/// (each its axis's ends and radius, mm) that `end` lies in: the farthest any point of its
+/// section runs on before leaving such a bar's far side, the section bounded by `sections` (each a
+/// rectangle's corners in order, placed at `end`), from 0 to `most`; `Ok(0.0)` where the end meets
+/// no bar.
+///
+/// # Errors
+/// The kernel's refusal, in its words: a non-finite point or length, a zero `toward`, or a bad
+/// radius for a bar the end lies in.
+pub fn reach_through_rounds(end: Vec3, toward: Vec3, sections: &[[Vec3; 4]], rounds: &[(Vec3, Vec3, f64)], most: f64) -> Result<f64, PlanarRefused> {
     match which(OpKind::Planar) {
-        Which::Solidcore => Solidcore.exit_through_round(start, toward, axis, radius),
+        Which::Solidcore => Solidcore.reach_through_rounds(end, toward, sections, rounds, most),
     }
 }
 
@@ -219,6 +234,18 @@ pub fn side_on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, points: &
     }
 }
 
+/// Whether the polyline `path` runs through the inside of one of `regions` (each its outer
+/// loop and then its holes, each loop a list of corners that closes back to its first), not
+/// only along their outline or through one of its corners: a piece of it lies in a region
+/// farther than `margin` from every loop, or it crosses a profile thinner than that from one
+/// side to the other.
+#[must_use]
+pub fn path_runs_inside(path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margin: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.path_runs_inside(path, regions, margin),
+    }
+}
+
 /// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
 /// `c`, at `radius` and starting `from` radians.
 #[must_use]
@@ -264,7 +291,7 @@ pub fn plane_point(plane: &Plane, point: Vec2) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore_ops::{board_drill, constraint, joint_turn as turn, paper_gaps, sketch_arc, stroke_runs as stroke};
+    use solidcore_ops::{board_drill, constraint, footprint, joint_turn as turn, paper_gaps, sketch_arc, stroke_runs as stroke};
 
     #[test]
     fn routed_planar_helpers_are_solidcores() {
@@ -275,6 +302,8 @@ mod tests {
         assert_eq!(tangent_arc_centre(a, b, [0.0, 1.0]), sketch_arc::tangent_arc_centre(a, b, [0.0, 1.0]));
         assert_eq!(joint_turn([1.0, 0.0], [0.0, 1.0]).ok(), turn::joint_turn([1.0, 0.0], [0.0, 1.0]).ok());
         assert_eq!(straight_length(a, b), paper_gaps::straight_length(a, b));
+        assert_eq!(on_line(c, a, [1.0, 1.0], 1e-9), sketch_arc::on_line(c, a, [1.0, 1.0], 1e-9));
+        assert_eq!(on_line(c, a, b, 1e-9), sketch_arc::on_line(c, a, b, 1e-9));
         assert_eq!(distance(a, b), sketch_arc::distance(a, b));
         assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), sketch_arc::left_side_along_line(a, [2.0, 0.0], a, b, 1e-9));
         assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), Some(true));
@@ -287,6 +316,10 @@ mod tests {
             assert_eq!(hole_reaches_loops(c, [2.0, 1.0], 0.0, &square), board_drill::hole_reaches_loops(c, [2.0, 1.0], 0.0, &square));
             let side = [[c[0] + 1.0, c[1]], [c[0], c[1] + 0.5]];
             assert_eq!(side_on_hole_wall(c, [2.0, 1.0], 0.0, &side, 0.02), board_drill::side_on_hole_wall(c, [2.0, 1.0], 0.0, &side, 0.02));
+        }
+        let region = std::slice::from_ref(&square);
+        for path in [vec![[5.0, 5.0]], vec![[-5.0, 5.0], [15.0, 5.0]], vec![[0.0, -5.0], [0.0, 15.0]]] {
+            assert_eq!(path_runs_inside(&path, region, 0.1), footprint::path_runs_inside(&path, region, 0.1));
         }
         let xy = Plane::XY;
         let tilted = Plane { origin: Vec3::new(1.0, 2.0, 3.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };

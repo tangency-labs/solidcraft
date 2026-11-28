@@ -122,12 +122,57 @@ impl Default for Palette {
     }
 }
 
+/// Pre-warms the display meshes of unmeshed visible bodies in parallel so framing a large assembly
+/// does not tessellate serially on one thread. Rigid placements of one definition share one lazy
+/// source mesh, so each definition is warmed once.
+fn warm_mesh_in_place(bodies: &[&solidcraft_doc::ModelBody]) {
+    let mut seen = std::collections::HashSet::new();
+    let cold: Vec<&solidcraft_doc::ModelBody> = bodies
+        .iter()
+        .copied()
+        .filter(|b| {
+            !b.mesh_bounds_made()
+                && b.cached_mesh().is_none()
+                && seen.insert(b.placed_definition().unwrap_or_else(|| Arc::as_ptr(&b.display_identity()) as *const () as usize))
+        })
+        .collect();
+    if cold.len() > 1 {
+        solidcraft_kernel::map_on_threads(&cold, 16, |&b| {
+            let _ = b.mesh_in_place();
+        });
+    }
+}
+
+/// Pre-warms the placed display meshes of unmeshed visible bodies in parallel before building a
+/// headless scene: unique definitions first (avoiding `OnceLock` contention across shared
+/// placements), then each body's placed mesh.
+fn warm_visible_meshes(bodies: &[&solidcraft_doc::ModelBody]) {
+    let cold: Vec<&solidcraft_doc::ModelBody> = bodies.iter().copied().filter(|b| b.cached_mesh().is_none()).collect();
+    if cold.len() <= 1 {
+        return;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let defs: Vec<&solidcraft_doc::ModelBody> = cold
+        .iter()
+        .copied()
+        .filter(|b| seen.insert(b.placed_definition().unwrap_or_else(|| Arc::as_ptr(&b.display_identity()) as *const () as usize)))
+        .collect();
+    if defs.len() > 1 {
+        solidcraft_kernel::map_on_threads(&defs, 16, |&b| {
+            let _ = b.mesh_in_place();
+        });
+    }
+    solidcraft_kernel::map_on_threads(&cold, 16, |&b| {
+        let _ = b.mesh();
+    });
+}
+
 /// Bounds of everything visible now, in world space: shown bodies where their occurrences,
 /// joints and moves place them, and the sketches the view draws (not ones used by a feature,
 /// hidden ones, or ones in hidden components). What Home, Fit and the orbit pivot frame. A model
 /// that cannot be placed is the error.
 pub fn bounds(s: &Session) -> Result<Aabb3> {
-    bounds_by(s, |body| body.mesh_bounds())
+    bounds_by(s, true, |body| body.mesh_bounds())
 }
 
 /// The Point Clouds folder's tree key (`Visibility::hidden_folders`).
@@ -143,13 +188,17 @@ pub fn shown_point_clouds(s: &Session) -> impl Iterator<Item = &solidcraft_doc::
 /// ([`solidcraft_kernel::Body::outline_bounds`]), which a face curving out past all of its edges
 /// can exceed. Frames a design whose bodies are still being meshed.
 pub fn unmeshed_bounds(s: &Session) -> Result<Aabb3> {
-    bounds_by(s, |body| body.cached_mesh().map(|m| m.bounds()).unwrap_or_else(|| body.outline_bounds()))
+    bounds_by(s, false, |body| body.cached_mesh().map(|m| m.bounds()).unwrap_or_else(|| body.outline_bounds()))
 }
 
-fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Result<Aabb3> {
+fn bounds_by(s: &Session, warm: bool, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Result<Aabb3> {
     let st = s.world_state()?;
+    let visible: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|x| s.body_visible(&x.name)).collect();
+    if warm {
+        warm_mesh_in_place(&visible);
+    }
     let mut b = Aabb3::EMPTY;
-    for body in st.bodies.iter().filter(|x| s.body_visible(&x.name)) {
+    for body in visible {
         b = b.union(&of(body));
     }
     for ss in st.sketches.iter().filter(|x| sketch_shown(s, x.feature)) {
@@ -1063,7 +1112,9 @@ fn build_scene(
     let mut thread_budget = crate::cosmetic_threads::Budget::default();
     // Where the section cuts each closed solid body, by its mesh in `sc.meshes`: their hatches.
     let mut cuts: Vec<(usize, u64, Vec<(Vec3, Vec3)>)> = Vec::new();
-    for body in st.bodies.iter().filter(|b| s.body_visible(&b.name)) {
+    let visible: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|b| s.body_visible(&b.name)).collect();
+    warm_visible_meshes(&visible);
+    for body in visible {
         let selected = selected_occurrences.contains(&body.name) || s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
         // The body's appearance (or imported colour) and faces with looks of their own, as in
@@ -1136,7 +1187,7 @@ fn build_scene(
         }
     }
     // Isocurve Analysis: the isoparametric curves of each face it shows, on the faces.
-    for line in s.isocurve_lines().iter().flat_map(|lines| lines.iter()) {
+    for line in s.isocurve_lines(solidcraft_doc::display_quality::current()).iter().flat_map(|lines| lines.iter()) {
         sc.lines.push(SceneLine { points: line.points.clone(), color: p.isocurve, alpha: 1.0, width: 1.4, on_top: false });
     }
     for ss in &st.sketches {
@@ -2134,6 +2185,32 @@ mod tests {
         let (minor, fine) = sketch_grid_step(110.0);
         assert_eq!(minor, 5.0, "the finer level's lines are still drawn");
         assert_eq!(sketch_grid_point(Vec2::new(5.7, 10.0), minor, fine), Vec2::new(5.0, 10.0));
+    }
+
+    /// Parallel display-mesh pre-warming in `bounds` and `scene` preserves exact bounds, mesh
+    /// order and line output across multi-body models.
+    #[test]
+    fn bounds_and_scene_prewarm_unmeshed_bodies_deterministically() {
+        let mut s = Session::default();
+        for i in 0..12 {
+            s.execute(
+                "solid.box",
+                &json!({"length": 10, "width": 12, "height": 8, "corner": [20 * i, 0, 0], "body_name": format!("B{i}"), "operation": "new"}),
+            )
+            .unwrap();
+        }
+        let b = bounds(&s).unwrap();
+        assert!((b.min.x - 0.0).abs() < 1e-6 && (b.max.x - 230.0).abs() < 1e-6, "{b:?}");
+        assert!((b.min.y - 0.0).abs() < 1e-6 && (b.max.y - 12.0).abs() < 1e-6, "{b:?}");
+        assert!((b.min.z - 0.0).abs() < 1e-6 && (b.max.z - 8.0).abs() < 1e-6, "{b:?}");
+
+        let cam = home_camera(&s).unwrap();
+        let sc1 = scene(&s, &cam).unwrap();
+        let sc2 = scene(&s, &cam).unwrap();
+        assert_eq!(sc1.meshes.len(), 12);
+        assert_eq!(sc1.meshes.len(), sc2.meshes.len());
+        assert_eq!(sc1.lines.len(), sc2.lines.len());
+        assert!(s.world_state().unwrap().bodies.iter().all(|body| body.cached_mesh().is_some()));
     }
 }
 

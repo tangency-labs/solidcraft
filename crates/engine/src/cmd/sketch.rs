@@ -148,7 +148,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_TWO_POINT_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the corner is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner), or a snap that holds the corner there, as `sketch.point` takes one: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the corner is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner), or a snap that holds the corner there, as `sketch.point` takes one: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; construction?; rotatable?: bool (hold the sides parallel and perpendicular with only the bottom horizontal, so deleting that constraint lets the rectangle turn; default false: each side horizontal or vertical). Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", crate::checked!("sketch.rectangle.three_point", rect_three_point))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -172,7 +172,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_CENTER_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that holds the point there, as `sketch.point` takes one: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that holds the point there, as `sketch.point` takes one: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; construction?: bool; rotatable?: bool (as in `sketch.rectangle.two_point`). Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.edge_center", "Edge Center Rectangle", crate::checked!("sketch.rectangle.edge_center", rect_edge_center))
         .at("SKETCH", "CREATE")
         .icon("rect_edge_center")
@@ -287,7 +287,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::sketch_selection::coincident)
         .contract(&COINCIDENT_CONTRACT)
         .output(output_schema_for::<CoincidentResult>)
-        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (they become collinear), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two points or a point and a line or circle, at least one of them drawn 3D geometry (`<3D curve>.start`, `.end`, `.through`, `.<n>`, a 3D point's id, a drawn 3D line or arc); the other may be fixed: a model curve included with sketch.include_3d (`<curve>.start`, `.end`, or the straight or circular curve itself) or a 2D point, line, circle or arc of the sketch", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (they become collinear), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two points or a point and a line or circle, at least one of them drawn 3D geometry (`<3D curve>.start`, `.end`, `.through`, `.<n>`, a 3D point's id, a drawn 3D line or arc); the other may be fixed: a picked model edge is included as 3D geometry and a picked model vertex is projected onto the sketch plane, or give a model curve already included with sketch.include_3d (`<curve>.start`, `.end`, or the straight or circular curve itself) or a 2D point, line, circle or arc of the sketch", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", crate::checked!("sketch.constraint.tangent", c_tangent))
         .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
@@ -1840,6 +1840,7 @@ fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
     step.active_sketch = None;
     step.sketching_view = None;
     step.sketch_restore_marker = None;
+    step.sketch_entry = None;
 }
 
 /// Fold only the steps still belonging to this edit. Its snapshots describe the complete
@@ -1868,6 +1869,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             active_sketch: None,
             sketching_view: None,
             sketch_restore_marker: None,
+            sketch_entry: None,
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: entry.pending_moves.clone(),
             pending_move_records: entry.pending_move_records.clone(),
@@ -1889,6 +1891,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             snap.active_sketch = None;
             snap.sketching_view = None;
             snap.sketch_restore_marker = None;
+            snap.sketch_entry = None;
         }
     }
 }
@@ -2028,9 +2031,20 @@ fn polygon_lines_on(sk: &mut Sketch, corners: &[(Vec2, Option<usize>)]) -> Resul
     Ok((lines, pts))
 }
 
-fn rect_constraints(sk: &mut Sketch, l: &[usize]) -> Result<Vec<String>> {
+/// The constraints that keep the sides `l` (bottom, right, top, left) a rectangle: each side
+/// horizontal or vertical, or with `rotatable` the sides parallel and perpendicular and only the
+/// bottom horizontal (#21467), so deleting that one constraint lets the rectangle turn. Both hold
+/// the same freedom.
+fn rect_constraints(sk: &mut Sketch, l: &[usize], rotatable: bool) -> Result<Vec<String>> {
     let mut cons = Vec::new();
-    if let [a, b, c, d] = l[..] {
+    if let [a, b, c, d] = l[..]
+        && rotatable
+    {
+        cons.push(add_c(sk, ConstraintKind::Horizontal { l: a })?);
+        cons.push(add_c(sk, ConstraintKind::Perpendicular { a, b })?);
+        cons.push(add_c(sk, ConstraintKind::Parallel { a, b: c })?);
+        cons.push(add_c(sk, ConstraintKind::Parallel { a: b, b: d })?);
+    } else if let [a, b, c, d] = l[..] {
         cons.push(add_c(sk, ConstraintKind::Horizontal { l: a })?);
         cons.push(add_c(sk, ConstraintKind::Horizontal { l: c })?);
         cons.push(add_c(sk, ConstraintKind::Vertical { l: b })?);
@@ -2282,7 +2296,7 @@ fn rect_two_point(s: &mut Session, given: &Value) -> Result<Value> {
         let (l, mut pts) = polygon_lines_on(sk, &corners)?;
         place_point(sk, pts.first(), PointExprs { x: lo_x.clone(), y: lo_y.clone() });
         place_point(sk, pts.get(2), PointExprs { x: hi_x.clone(), y: hi_y.clone() });
-        cons.extend(rect_constraints(sk, &l)?);
+        cons.extend(rect_constraints(sk, &l, bool_(p, "rotatable").unwrap_or(false))?);
         let mut joined = Vec::new();
         join_snapped(sk, &c0, pts.get(at0), &mut cons, &mut joined)?;
         join_snapped(sk, &c1, pts.get(at1), &mut cons, &mut joined)?;
@@ -2412,7 +2426,7 @@ fn rect_center(s: &mut Session, given: &Value) -> Result<Value> {
         let mut cons: Vec<String> = [&centre, &corner].into_iter().flat_map(|c| snap_holds(sk, c)).collect();
         let (l, mut pts) = polygon_lines_on(sk, &corners)?;
         place_point(sk, pts.get(at), ek);
-        cons.extend(rect_constraints(sk, &l)?);
+        cons.extend(rect_constraints(sk, &l, bool_(p, "rotatable").unwrap_or(false))?);
         let mut joined = Vec::new();
         join_snapped(sk, &corner, pts.get(at), &mut cons, &mut joined)?;
         // Both diagonals (construction), the centre at their crossing. Only the first carries
@@ -2640,7 +2654,7 @@ pub(super) fn slot_width_dimension(
 ) -> Result<Option<String>> {
     let Some(e) = driven else { return Ok(None) };
     let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-    let pname = doc.new_model_param(e, &unit);
+    let pname = doc.new_model_param(e, &unit)?;
     Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
 }
 
@@ -2663,7 +2677,7 @@ fn size_dimension(
     let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
     if !paper {
         let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-        let pname = doc.new_model_param(e, &unit);
+        let pname = doc.new_model_param(e, &unit)?;
         return Ok(sk.add_constraint(mk(value), Some(pname))?);
     }
     if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
@@ -4863,7 +4877,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             doc.add_user_param(name, &rhs, Some(&unit), None).map_err(|e| bad(cmd, format!("value: {e}")))?;
         }
         let e = value.as_ref().map(|e| doc.with_design_unit(e, kind)).unwrap_or(default_expr);
-        let pname = doc.new_model_param(&e, &unit);
+        let pname = doc.new_model_param(&e, &unit)?;
         // The value must evaluate.
         let (vals, errs) = doc.param_values();
         if let Some(err) = errs.get(&pname) {

@@ -318,6 +318,64 @@ pub struct ProceduralBlend {
     pub(crate) def: BlendDefinition,
 }
 
+impl ProceduralBlend {
+    /// Not upstream (#20158): writes this blend's net and non-support definition fields into
+    /// `d` (its two support surfaces are pushed onto the caller's iterative stack so digesting
+    /// nested blends uses no recursion). `identity` is a station-memo key only and is omitted.
+    pub(crate) fn eval_content_head(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        use crate::geom::content::Content;
+        let Self { net, def } = self;
+        let BlendDefinition {
+            supports: _,
+            sides,
+            offsets,
+            law,
+            order,
+            thumbweight,
+            leader,
+            seeds,
+            bound,
+            chamfer,
+            map_a,
+            map_b,
+            swapped,
+            identity: _,
+        } = def;
+        d.tag(0xB1E4);
+        net.content(d)?;
+        d.f64(sides[0]);
+        d.f64(sides[1]);
+        d.f64(offsets[0]);
+        d.f64(offsets[1]);
+        match law {
+            Some(c) => {
+                d.bool(true);
+                c.content(d)?;
+            }
+            None => d.bool(false),
+        }
+        d.u64(u64::from(*order));
+        d.f64(*thumbweight);
+        leader.content(d)?;
+        seeds[0].content(d)?;
+        seeds[1].content(d)?;
+        d.f64(*bound);
+        match chamfer {
+            Some(ch) => {
+                d.bool(true);
+                ch.content(d);
+            }
+            None => d.bool(false),
+        }
+        d.f64(map_a[0]);
+        d.f64(map_a[1]);
+        d.f64(map_b[0]);
+        d.f64(map_b[1]);
+        d.bool(*swapped);
+        Some(())
+    }
+}
+
 /// `sm_ReadCurve`: a curve of a definition (its type header with its dimension, then its
 /// record), which must be a B-spline; it evaluates past its ends.
 fn read_curve(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<BSplineCurve> {

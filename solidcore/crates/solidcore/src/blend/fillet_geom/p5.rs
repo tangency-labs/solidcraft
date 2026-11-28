@@ -615,6 +615,7 @@ pub(crate) fn turned_back_arc(
             skip_two_pnts_intersection: false,
             ref_point: None,
             closed_by_start_direction: true,
+            heading_side_only: false,
         },
     )?
     .curve_3d;
@@ -1336,6 +1337,8 @@ impl FilletBrep {
         let mut surface1: Surface;
         // the other geometry, its solver's tolerance and its fillet surface, together
         let mut second: Option<(FilletGeomId, f64, Surface)> = None;
+        // the round the section runs across short of its end (#23151)
+        let mut crossed: Option<FilletGeomId> = None;
         let tol: f64;
         if let Some(g1) = g1 {
             let sid1 = self.geom(g1)?.fillet_solver();
@@ -1409,7 +1412,7 @@ impl FilletBrep {
                         };
                         let solvers = [solver_of(g1)?, solver_of(g2)?];
                         // fork 9b7cd48 passes this on (SER)
-                        super::p1::examine_n_fix_fillet_geoms_with_solvers(
+                        crossed = super::p1::examine_n_fix_fillet_geoms_with_solvers(
                             k,
                             self,
                             g1,
@@ -1457,6 +1460,21 @@ impl FilletBrep {
             surface1_face = Some(orig_face);
             tol = crate::topology::face::p2::tolerance(target.brep(), orig_face)?;
         }
+
+        // Not upstream (#23151): the section is the end row of one round and runs across
+        // the other. Its curve is the first one's, so that round is taken first whichever
+        // use of the edge is the primary one; the other's trim is the curve lifted onto it.
+        let (prim, mate, g1, g2, tol) = match (crossed, g1, second.as_mut()) {
+            (Some(across), Some(first), Some((other, other_tol, other_surface)))
+                if across == first =>
+            {
+                std::mem::swap(&mut surface1, other_surface);
+                let owner = std::mem::replace(other, first);
+                let owner_tol = std::mem::replace(other_tol, tol);
+                (mate, prim, Some(owner), Some(first), owner_tol)
+            }
+            _ => (prim, mate, g1, g2, tol),
+        };
 
         // Drop start & end points onto pFilletSurface1, then join them with a uv-curve
         let mut create_two_boundary_curves = false;
@@ -1535,17 +1553,39 @@ impl FilletBrep {
 
         // See if we need to add side curve for the other solver
         if let Some((g2, tol, surface2)) = second {
-            let uv = super::p4::create_uv_curve(
-                k,
-                self,
-                start_fv,
-                end_fv,
-                false,
-                &surface2,
-                50.0 * tol,
-            )?;
-            // the duplicate 3D curve and an unexpected second UV curve are deleted
-            self.set_uv(mate, uv.uv_curve1)?;
+            let trim = if crossed == Some(g2) {
+                // Not upstream (#23151): two vertices do not say where the section runs
+                // between them on a round it crosses; the edge's own curve does
+                let section = self
+                    .brep()
+                    .edge(e)?
+                    .curve
+                    .clone()
+                    .ok_or_else(|| broken_link(OP_CROSS, SECTION_NO_CURVE))?;
+                let lifted = crate::blend::blend_corner::proved_trim::lifted_trim(
+                    k, &surface2, &section, tol,
+                )?
+                .ok_or(SolidError::Unsupported {
+                    operation: OP_CROSS,
+                    reason: "two rounds that meet at a corner apart by more than the \
+                             tolerance: the section they share is not proved to lie on \
+                             the round it runs across",
+                })?;
+                Some(lifted)
+            } else {
+                let uv = super::p4::create_uv_curve(
+                    k,
+                    self,
+                    start_fv,
+                    end_fv,
+                    false,
+                    &surface2,
+                    50.0 * tol,
+                )?;
+                // the duplicate 3D curve and an unexpected second UV curve are deleted
+                uv.uv_curve1
+            };
+            self.set_uv(mate, trim)?;
             self.geom_mut(g2)?.add_side_fillet_edgeuse(mate);
         } else if g2.is_none() {
             self.rolled_piece_side_curve(k, mate, g1, start_fv, end_fv, resolve)?;
