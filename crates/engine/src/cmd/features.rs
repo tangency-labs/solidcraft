@@ -3681,6 +3681,79 @@ pub(crate) fn axis_line_object(o: &Value) -> std::result::Result<(Vec3, Vec3), &
     Ok((origin, dir))
 }
 
+/// A mirror plane given by name is read where its plane is (a construction plane in its own
+/// component's frame, an origin plane in the active component's), not in the frame of the
+/// features it mirrors: put it into `target`, the frame the mirror is authored in, as an
+/// explicit plane when the two frames differ.
+fn mirror_plane_into(s: &Session, kind: &mut FeatureKind, target: &solidcraft_doc::Mat) {
+    use solidcraft_doc::PlaneRef;
+    let FeatureKind::Mirror { plane, .. } = kind else { return };
+    let (source, found) = match &*plane {
+        PlaneRef::Construction { feature, placement: None } => {
+            let Some(f) = s.doc.feature(feature.0) else { return };
+            let source =
+                if f.component == s.active_component { s.active_component_frame() } else { s.placed_document().component_transform(f.component) };
+            let state = s.model.state();
+            let found = state.construct.iter().find(|c| c.feature == f.id).and_then(|c| match &c.geom {
+                solidcraft_doc::construct::ConstructGeom::Plane(p) => Some(*p),
+                _ => None,
+            });
+            (source, found)
+        }
+        PlaneRef::Origin { name } => (s.active_component_frame(), solidcore_record::Plane::named(name)),
+        _ => return,
+    };
+    let alike = |a: &solidcraft_doc::Mat, b: &solidcraft_doc::Mat| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= 1e-9);
+    if alike(&source, target) {
+        return;
+    }
+    let local = found.and_then(|p| {
+        let inverse = solidcraft_doc::mat_inverse(target)?;
+        solidcraft_doc::map_plane(&inverse, &solidcraft_doc::map_plane(&source, &p)?)
+    });
+    if let Some(local) = local {
+        *plane = PlaneRef::Custom { plane: local };
+    }
+}
+
+/// Add a mirror or pattern of `features`, in the component those features belong to. Its
+/// geometry replays theirs in that component's own frame, so the plane, axis and directions have
+/// to be in that frame too: a copy made from a placed component's features in another component
+/// (the root, say) would otherwise build local geometry about a world plane or axis.
+/// `kind` is in the world, or in the active component's frame when `frames` mapped it. Features
+/// of two components are refused.
+fn add_copy_of_features(s: &mut Session, p: &Value, mut kind: FeatureKind, features: &[solidcraft_doc::FeatureId], cmd: &str) -> Result<Value> {
+    let mut owners: Vec<u64> = features.iter().filter_map(|f| s.doc.feature(f.0)).map(|f| f.component).collect();
+    owners.sort_unstable();
+    owners.dedup();
+    let owner = match owners.as_slice() {
+        [] => s.active_component,
+        [one] => *one,
+        _ => return Err(bad(cmd, "the features to copy belong to different components: copy each component's features separately")),
+    };
+    if !crate::frames::placed(s) {
+        return add_feature(s, p, kind);
+    }
+    if owner == s.active_component {
+        // Authored in the active component's frame, where `frames` leaves a named plane as it is.
+        let target = if crate::frames::mapped() { s.active_component_frame() } else { solidcraft_doc::IDENTITY };
+        mirror_plane_into(s, &mut kind, &target);
+        return add_feature(s, p, kind);
+    }
+    let owner_frame = s.placed_document().component_transform(owner);
+    let to_owner = solidcraft_doc::mat_inverse(&owner_frame)
+        .ok_or_else(|| bad(cmd, "the component holding the features to copy is in a singular frame, so the copy cannot be placed"))?;
+    // From the frame the kind is in to the owner's.
+    let from = if crate::frames::mapped() { s.active_component_frame() } else { solidcraft_doc::IDENTITY };
+    kind.transform_geometry(&solidcraft_doc::mat_mul(&to_owner, &from));
+    mirror_plane_into(s, &mut kind, &owner_frame);
+    let saved = (s.active_component, s.active_occurrence_path.take());
+    s.active_component = owner;
+    let reply = add_feature_in(s, p, kind, false);
+    (s.active_component, s.active_occurrence_path) = saved;
+    reply
+}
+
 /// A pattern feature, or for `components`, a Pattern that places them again as occurrences.
 /// Named components keep a managed Pattern so count changes rebuild placements (#12116). Path
 /// occurrences stay one-shot beside the picked placement (main).
@@ -3702,19 +3775,17 @@ fn finish_pattern(
     }
     if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
-        let mut reply = add_feature(
-            s,
-            p,
-            FeatureKind::Pattern {
-                features,
-                pattern,
-                bodies: bodies.into_iter().map(BodyName).collect(),
-                placements,
-                components: Vec::new(),
-                occurrences: Vec::new(),
-                join,
-            },
-        )?;
+        let sources = features.clone();
+        let kind = FeatureKind::Pattern {
+            features,
+            pattern,
+            bodies: bodies.into_iter().map(BodyName).collect(),
+            placements,
+            components: Vec::new(),
+            occurrences: Vec::new(),
+            join,
+        };
+        let mut reply = add_copy_of_features(s, p, kind, &sources, "pattern")?;
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before. (Appearance copy from main.)
@@ -4097,8 +4168,9 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         resolve_explicit_placements(s, bodies, explicit_placements, cmd)?
     };
-    let mut reply =
-        add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
+    let sources = features.clone();
+    let kind = FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements };
+    let mut reply = add_copy_of_features(s, p, kind, &sources, cmd)?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
         copies_keep_looks(s, &reply, &bodies)?;

@@ -43,6 +43,25 @@ pub(crate) fn profile_frame(doc: &Document, feature: &crate::Feature, sketch: u6
     None
 }
 
+/// Where a feature's geometry was carried between `source` and `until` in the timeline: the
+/// product of the transforms of the body transfers in between that move one of `bodies` (every
+/// transfer when `bodies` is empty), and the component the last of them moved into. A pattern
+/// placed after a transfer finds the hole it copies in the carried frame, not at its authored
+/// spot.
+pub(crate) fn carried_between(doc: &Document, source: u64, until: u64, bodies: &[String]) -> (Mat, Option<u64>) {
+    let (Some(from), Some(to)) = (doc.feature_index(source), doc.feature_index(until)) else { return (crate::IDENTITY, None) };
+    let mut carried = crate::IDENTITY;
+    let mut component = None;
+    for step in doc.features.iter().take(to).skip(from.saturating_add(1)).filter(|step| !step.suppressed) {
+        let crate::FeatureKind::BodyTransfer { bodies: moved, to, transform, .. } = &step.kind else { continue };
+        if valid_transfer_matrix(transform) && (bodies.is_empty() || moved.iter().any(|m| bodies.iter().any(|b| b == m.as_ref()))) {
+            carried = crate::mat_mul(transform, &carried);
+            component = Some(*to);
+        }
+    }
+    (carried, component)
+}
+
 pub fn valid_transfer_matrix(m: &Mat) -> bool {
     crate::is_placement(m)
 }

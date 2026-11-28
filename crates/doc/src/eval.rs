@@ -16419,6 +16419,20 @@ fn replay(
             // shows them (#17623).
             let from = targets_as_shown(named_from.unwrap_or(st), src, targets)?;
             let (spots, dir) = hole_spots_raw(vals, &from, src)?;
+            // A body transfer between the hole and this pattern has baked its frame change into
+            // the body: the copies are seeded from the hole as carried, not from its authored
+            // spot, where the body no longer is.
+            let (carry, landed_in) = {
+                let aimed: &[String] = if !src.participants.is_empty() { &src.participants } else { &f.participants };
+                let aimed: &[String] = if aimed.iter().any(|b| b == "*") { &[] } else { aimed };
+                crate::body_transfer::carried_between(doc, src.id, f.id, aimed)
+            };
+            let (spots, dir, carried_to) = if crate::is_identity(&carry) {
+                (spots, dir, None)
+            } else {
+                let moved = spots.into_iter().map(|spot| HoleSpot { at: crate::apply_point(&carry, spot.at), ..spot }).collect();
+                (moved, crate::apply_vector(&carry, dir), Some(carry))
+            };
             let prefixes: Vec<_> = spots.iter().map(|spot| spot.point.map(hole_point_role)).collect();
             let shown = if named_from.is_some() { targets_as_shown(st, src, targets)? } else { from };
             let st: &ModelState = &shown;
@@ -16444,6 +16458,21 @@ fn replay(
             // A hole at a picked spot is kept in the frame of the body it lies on.
             let picks = PickFrames::new(doc, st, own, src);
             let scope = hole_drill_scope(src);
+            // The pattern's matrices are in its own component's frame, the carried hole in the
+            // frame of the component the body went into: turn the matrices into that frame, as
+            // a pattern of the body itself does.
+            let conjugated: Vec<Mat>;
+            let mats: &[Mat] = match landed_in.filter(|c| *c != f.component && picks.at.is_none()) {
+                Some(c) => {
+                    let (here, there) = (doc.component_transform(f.component), doc.component_transform(c));
+                    let singular = || DocError::Invalid("the component holding the hole has a singular placement".into());
+                    let into = crate::mat_mul(&crate::mat_inverse(&there).ok_or_else(singular)?, &here);
+                    let from = crate::mat_mul(&crate::mat_inverse(&here).ok_or_else(singular)?, &there);
+                    conjugated = mats.iter().map(|m| crate::mat_mul(&into, &crate::mat_mul(m, &from))).collect();
+                    &conjugated
+                }
+                None => mats,
+            };
             let named = |b: &ModelBody, q: Vec3| (scope.is_empty() || scope.contains(&b.name)).then(|| box_dist(b, q));
             for (k, m) in mats.iter().enumerate() {
                 let (m, _) = match spots.first() {
@@ -16454,7 +16483,9 @@ fn replay(
                 let d = match sketch_side {
                     Some((n, flip)) => {
                         let moved = spots.iter().map(|spot| crate::apply_point(m, spot.at));
-                        let n = crate::apply_vector(m, n).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+                        let n = crate::apply_vector(m, carried_to.as_ref().map_or(n, |c| crate::apply_vector(c, n)))
+                            .normalized()
+                            .ok_or_else(|| DocError::Invalid("hole direction".into()))?;
                         if record_probes {
                             probe_rays.extend(moved.clone().map(|q| (q, n)));
                         }
@@ -16476,7 +16507,7 @@ fn replay(
                         probe_boxes.push(Some(seg.inflated(extra_tol + 1e-6)));
                     }
                     on.push((at, d));
-                    let to = to.map(|t| crate::apply_point(m, t.0));
+                    let to = to.map(|t| crate::apply_point(m, carried_to.as_ref().map_or(t.0, |c| crate::apply_point(c, t.0))));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     reach_of.push(depth.as_ref().map_or(Ok(f64::INFINITY), |e| val(vals, e, Kind::Length))?);
                     let reach = hole_reach(vals, st, &at, d, diameter, &depth, hole, !from_inside, mesh_scope)?;
