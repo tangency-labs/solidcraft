@@ -116,6 +116,7 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
@@ -4353,7 +4354,7 @@ fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
     }
     let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
     let exponent = i32::try_from(p).ok()?;
-    let grow = ratio.powi(exponent) * (1.0 + gamma(p.saturating_add(1)));
+    let grow = det::powi(ratio, exponent) * (1.0 + gamma(p.saturating_add(1)));
     grow.is_finite().then_some(grow)
 }
 

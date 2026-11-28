@@ -652,3 +652,43 @@ fn enter_places_a_typed_line_while_the_window_is_not_focused() {
         sketch.curves.iter().filter_map(|c| c.kind.ends()).filter_map(|(a, b)| Some(sketch.point(a)?.dist(sketch.point(b)?))).collect();
     assert!(lengths.iter().any(|length| (length - 20.0).abs() < 1e-6), "a line 20 long is placed: {lengths:?}");
 }
+
+/// Over `--control`, sending `ui.click` then `ui.text` then `ui.key Enter` commits the sketch
+/// shape with the typed dimension without requiring an intermediate `ui.move` (#23137).
+#[test]
+fn control_channel_ui_key_enter_confirms_sketch_line() {
+    use crate::control::ControlRequest;
+
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call_queued("ui.view", json!({"view": "top"}));
+    h.call_queued("ui.start", json!({"command": "sketch.line"}));
+    let s2s = h.call_queued("ui.sketchToScreen", json!({"points": [[0.0, 0.0]]})).0;
+    let x = s2s["result"][0][0].as_f64().unwrap();
+    let y = s2s["result"][0][1].as_f64().unwrap();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+
+    let send_no_settle = |h: &mut Harness, method: &str, params: serde_json::Value| {
+        let (req, reply_rx) = ControlRequest::new(method, params);
+        tx.send(req).unwrap();
+        h.frame();
+        reply_rx.try_recv().expect("must reply in 1 frame")
+    };
+
+    send_no_settle(&mut h, "ui.click", json!({"x": x, "y": y}));
+    send_no_settle(&mut h, "ui.text", json!({"text": "20"}));
+    send_no_settle(&mut h, "ui.key", json!({"key": "Enter"}));
+
+    // Step frames to drain synthetic event queue and commit the line
+    h.frames(3);
+
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "a line must be placed");
+    assert!(
+        constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Length { value, .. } if (*value - 20.0).abs() < 1e-6)),
+        "must have length 20 constraint"
+    );
+}

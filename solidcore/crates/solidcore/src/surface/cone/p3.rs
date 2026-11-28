@@ -78,6 +78,7 @@ use crate::geom::tol::{
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BoundingBoxRequest, LocationType};
@@ -320,7 +321,7 @@ fn sweep_end_on_the_lens(
                 continue;
             }
             let y_axis = axis.cross(x_axis);
-            return Ok(Some(end.cos() * x_axis + end.sin() * y_axis));
+            return Ok(Some(det::cos(end) * x_axis + det::sin(end) * y_axis));
         }
     }
     Ok(None)
@@ -1171,8 +1172,8 @@ fn add_ellipse_intervals_trimmed_to_two_cones(
             for intersection in interval.intersect_periodic(other_interval, 360.0, false)? {
                 if intersection.length() < zero_ang {
                     let angle = intersection.min();
-                    let cos = (angle * PI / 180.0).cos();
-                    let sin = (angle * PI / 180.0).sin();
+                    let cos = det::cos(angle * PI / 180.0);
+                    let sin = det::sin(angle * PI / 180.0);
                     let point = center + rx * cos * x + y * sin * ry;
                     let mut unique = true;
                     for existing in degenerate.iter() {
@@ -1478,7 +1479,7 @@ mod tests {
             for p in [start, end] {
                 for c in on {
                     let origin = c.rev().position().origin();
-                    let r = (p.x - origin.x).hypot(p.y - origin.y);
+                    let r = det::hypot(p.x - origin.x, p.y - origin.y);
                     assert!((r - c.bot_radius()).abs() < 1e-9, "{p:?}");
                 }
             }
@@ -1653,7 +1654,7 @@ mod tests {
             let n = curve.natural_interval();
             for t in [n.min(), 0.5 * (n.min() + n.max()), n.max()] {
                 let p = curve.evaluate_point(&k, t).unwrap();
-                assert!((p.x.hypot(p.y) - 5.0).abs() < 1e-7, "{p:?}");
+                assert!((det::hypot(p.x, p.y) - 5.0).abs() < 1e-7, "{p:?}");
             }
         }
     }
@@ -1963,7 +1964,12 @@ mod tests {
             (PlaneOwner::Face(zone), [None, zone]),
             (PlaneOwner::NoFace, [zone, None]),
         ];
-        let at = |deg: f64| (3.0 * deg.to_radians().cos(), 3.0 * deg.to_radians().sin());
+        let at = |deg: f64| {
+            (
+                3.0 * det::cos(deg.to_radians()),
+                3.0 * det::sin(deg.to_radians()),
+            )
+        };
         let near = |got: (TsectCurveType, f64, f64), kind: TsectCurveType, (x, y): (f64, f64)| {
             got.0 == kind && (got.1 - x).abs() < 1e-12 && (got.2 - y).abs() < 1e-12
         };
@@ -1973,7 +1979,7 @@ mod tests {
         for (depth, start) in [(1.6e-10, 8.6e-5), (1e-6, 0.04)] {
             let c = wall_swept(&k, start, 80.0);
             let d = 3.0 - depth;
-            let crossing = (1.0 - depth / 3.0_f64).acos().to_degrees();
+            let crossing = det::acos(1.0 - depth / 3.0_f64).to_degrees();
             assert!(start < crossing, "{depth}: the face starts on the lens");
             for (owner, zone_tols) in faces {
                 let lines = section_lines(&wall_section(&k, &c, d, owner, zone_tols));
@@ -2068,8 +2074,8 @@ mod tests {
                 && (got[0].2 - y).abs() < 1e-12
         };
         let start = (
-            3.0 * 0.04_f64.to_radians().cos(),
-            3.0 * 0.04_f64.to_radians().sin(),
+            3.0 * det::cos(0.04_f64.to_radians()),
+            3.0 * det::sin(0.04_f64.to_radians()),
         );
 
         // the requested part of the wall from 0.045°

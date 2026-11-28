@@ -14,6 +14,7 @@
 //!   non-manifold, warped off its plane, or fails strict classification. Any uncertainty
 //!   yields [`Verdict::Undecided`], never a false clearance.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::CurveKind;
@@ -1018,7 +1019,7 @@ fn point_to_face_distance_3d(face: &PlanarFace, p: Point3) -> f64 {
             d_edge = d_edge.min(dist_point_to_segment_2d(uv, a, b));
         }
     }
-    h.hypot(d_edge)
+    det::hypot(h, d_edge)
 }
 
 fn scanline_intervals_2d(loops: &[Vec<[f64; 2]>], y: f64) -> Vec<(f64, f64)> {
@@ -1454,7 +1455,7 @@ mod tests {
             let pts = (0..n)
                 .map(|i| {
                     let ang = std::f64::consts::TAU * (i as f64) / (n as f64);
-                    [ox + r * ang.cos(), r * ang.sin()]
+                    [ox + r * det::cos(ang), r * det::sin(ang)]
                 })
                 .collect();
             vec![pts]

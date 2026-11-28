@@ -555,7 +555,7 @@ pub(crate) fn modifier_motion(
 ) -> Option<(NavMode, egui::Vec2)> {
     let owns = inside
         && ui.input(|i| i.focused && !i.pointer.any_down() && !i.pointer.any_released() && !i.pointer.any_pressed())
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && !crate::dim_view::editing()
         && app.viewport.context_menu.is_none()
         && app.viewport.axis_drag.is_none()
@@ -604,7 +604,7 @@ pub(crate) struct KeyHold {
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
 fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
     (app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_LAYOUT)
-        || egui::Popup::is_any_open(ctx)
+        || (egui::Popup::is_any_open(ctx) || crate::ui_kit::Menu::any_open(ctx))
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
         || ctx.memory(|m| m.focused().is_some_and(|focused| Some(focused) != canvas))
@@ -5855,7 +5855,7 @@ mod view_key_tests {
         let ctx = crate::fonts::test_context();
         let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
             assert!(ui.memory(|memory| memory.focused().is_none()));
-            assert!(!egui::Popup::is_any_open(ui.ctx()));
+            assert!(!(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx())));
             app.prefs_window.shell.open = true;
             app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;

@@ -847,6 +847,15 @@ impl DialogFolder {
         Some(picked.path().to_string_lossy().into_owned())
     }
 
+    /// A dialog's answer of several files as paths, their folder remembered for the next dialog.
+    fn answer_all(&self, picked: Option<Vec<rfd::FileHandle>>) -> Vec<String> {
+        let picked = picked.unwrap_or_default();
+        if let Some(first) = picked.first() {
+            self.chosen(first.path());
+        }
+        picked.iter().map(|p| p.path().to_string_lossy().into_owned()).collect()
+    }
+
     /// A file was chosen in a dialog of this kind: remember its folder for the next one.
     fn picked(&self, kind: DialogKind, file: &std::path::Path) {
         self.chosen(file);
@@ -900,6 +909,19 @@ impl DialogFolder {
             None => dialog,
         }
     }
+}
+
+/// Extensions as given and in lower and upper case, each once (Linux dialogs match case).
+fn any_case(exts: &[&str]) -> Vec<String> {
+    let mut all: Vec<String> = Vec::new();
+    for e in exts {
+        for v in [e.to_string(), e.to_ascii_lowercase(), e.to_ascii_uppercase()] {
+            if !all.contains(&v) {
+                all.push(v);
+            }
+        }
+    }
+    all
 }
 
 /// Linux file dialogs match patterns by case, so each extension goes in as lower and upper
@@ -971,8 +993,15 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
+    let files_parent = parent.clone();
+    let folders_parent = parent.clone();
     let folder_parent = parent.clone();
+    #[cfg(target_os = "macos")]
+    let any_parent = parent.clone();
     let (open_folder, file_folder, save_folder, browse_folder) = (folder.clone(), folder.clone(), folder.clone(), folder.clone());
+    let (files_folder, folders_folder) = (folder.clone(), folder.clone());
+    #[cfg(target_os = "macos")]
+    let any_folder = folder.clone();
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
@@ -1007,20 +1036,43 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         // One kind of file (the agent chat's attachments): only the types it names, as given and in
         // lower and upper case (Linux dialogs match case; macOS allows just the listed types).
         pick_file: Some(Box::new(move |label: &str, exts: &[&str]| {
-            let mut all: Vec<String> = Vec::new();
-            for e in exts {
-                for v in [e.to_string(), e.to_ascii_lowercase(), e.to_ascii_uppercase()] {
-                    if !all.contains(&v) {
-                        all.push(v);
-                    }
-                }
-            }
+            let all = any_case(exts);
             let all: Vec<&str> = all.iter().map(String::as_str).collect();
             // Any other file attaches by reference, so the list is not the only choice.
             let future = file_folder.start(DialogKind::Open, file_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_file();
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(DialogKind::Open, future.await) })
         })),
+        // Several files at once (the agent chat's attachments: a batch of photos): only the types
+        // named, as `pick_file` lists them (for an endpoint, which is refused any other); with none
+        // named (for a coding agent, which reads any file itself), any file.
+        pick_files: Some(Box::new(move |label: &str, exts: &[&str]| {
+            let mut dialog = files_folder.start(DialogKind::Open, files_parent.clone());
+            if !exts.is_empty() {
+                let all = any_case(exts);
+                let all: Vec<&str> = all.iter().map(String::as_str).collect();
+                dialog = dialog.add_filter(label, &all);
+            }
+            let future = dialog.pick_files();
+            let folder = files_folder.clone();
+            Box::pin(async move { folder.answer_all(future.await) })
+        })),
+        // Several folders at once (the agent chat attaches them by path).
+        pick_folders: Some(Box::new(move || {
+            let future = folders_folder.start(DialogKind::Open, folders_parent.clone()).pick_folders();
+            let folder = folders_folder.clone();
+            Box::pin(async move { folder.answer_all(future.await) })
+        })),
+        // macOS's open panel chooses files and folders together; Windows' and Linux's dialogs
+        // choose one or the other, so there the chat offers both.
+        #[cfg(target_os = "macos")]
+        pick_files_or_folders: Some(Box::new(move || {
+            let future = any_folder.start(DialogKind::Open, any_parent.clone()).pick_files_or_folders();
+            let folder = any_folder.clone();
+            Box::pin(async move { folder.answer_all(future.await) })
+        })),
+        #[cfg(not(target_os = "macos"))]
+        pick_files_or_folders: None,
         pick_program: Some(Box::new(move || {
             let dialog = program_parent.clone().set_title("Choose your slicer");
             let dialog = if cfg!(target_os = "windows") { dialog.add_filter("Programs", &["exe"]) } else { dialog };

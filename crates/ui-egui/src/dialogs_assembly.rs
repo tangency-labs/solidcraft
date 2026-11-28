@@ -3416,33 +3416,35 @@ pub fn open_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
 }
 
 /// A joint's menu (timeline and browser): Edit, Drive, Suppress, Delete.
-pub(crate) fn joint_menu(
+pub(crate) fn joint_menu_items(app: &SolveApp, (id, kind, suppressed): (u64, JointKind, bool)) -> Vec<crate::ui_kit::Item> {
+    use crate::ui_kit::Item;
+    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
+    let edit = if tagged { solidcraft_ui_text::tr("cmd.assembly_constraint_edit") } else { solidcraft_ui_text::tr_label("Edit Joint") };
+    let mut items = vec![Item::action("joint_menu.edit", edit, "edit")];
+    if kind != JointKind::Rigid {
+        items.push(Item::action("joint_menu.drive", solidcraft_ui_text::tr_label("Drive Joint"), "joint"));
+    }
+    items.extend([
+        Item::action("joint_menu.suppress", solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), "suppress"),
+        Item::sep(),
+        Item::action("joint_menu.delete", solidcraft_ui_text::tr_label("Delete"), "delete"),
+    ]);
+    items
+}
+
+pub(crate) fn run_joint_menu_item(
     app: &SolveApp,
-    ui: &mut egui::Ui,
-    (id, kind, suppressed): (u64, JointKind, bool),
+    picked: &crate::ui_kit::Item,
+    (id, suppressed): (u64, bool),
     open: &mut Option<Dialog>,
     run: &mut Option<(&'static str, Value)>,
 ) {
-    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
-    let edit = if tagged { solidcraft_ui_text::tr("cmd.assembly_constraint_edit") } else { solidcraft_ui_text::tr_label("Edit Joint") };
-    if crate::ui_kit::button(ui, edit, crate::ui_kit::Button::Normal).clicked() {
-        *open = open_joint(app, id);
-        ui.close();
-    }
-    if kind != JointKind::Rigid && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Drive Joint"), crate::ui_kit::Button::Normal).clicked() {
-        *open = drive_joint(app, id);
-        ui.close();
-    }
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), crate::ui_kit::Button::Normal)
-        .clicked()
-    {
-        *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed})));
-        ui.close();
-    }
-    ui.separator();
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete"), crate::ui_kit::Button::Normal).clicked() {
-        *run = Some(("selection.delete", json!({ "joints": [id] })));
-        ui.close();
+    match picked.id.as_str() {
+        "joint_menu.edit" => *open = open_joint(app, id),
+        "joint_menu.drive" => *open = drive_joint(app, id),
+        "joint_menu.suppress" => *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed}))),
+        "joint_menu.delete" => *run = Some(("selection.delete", json!({"joints": [id]}))),
+        _ => {}
     }
 }
 
@@ -3630,7 +3632,12 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
         if resp.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
             pick_joint(app, id, false);
         }
-        crate::ui_kit::Menu::context(&resp, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
+        if crate::ui_kit::Menu::context_active(&resp) {
+            let items = joint_menu_items(app, (id, kind, suppressed));
+            if let Some(picked) = crate::ui_kit::Menu::context_items(&resp, &items) {
+                run_joint_menu_item(app, &picked, (id, suppressed), &mut open, &mut run);
+            }
+        }
         x += 32.0;
     }
     if let Some((c, prm)) = run {
@@ -3721,7 +3728,12 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
         if response.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
             pick_joint(app, id, false);
         }
-        crate::ui_kit::Menu::context(&response, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
+        if crate::ui_kit::Menu::context_active(&response) {
+            let items = joint_menu_items(app, (id, kind, suppressed));
+            if let Some(picked) = crate::ui_kit::Menu::context_items(&response, &items) {
+                run_joint_menu_item(app, &picked, (id, suppressed), &mut open, &mut run);
+            }
+        }
     }
     if let Some((command, params)) = run {
         if command == "selection.delete" {
