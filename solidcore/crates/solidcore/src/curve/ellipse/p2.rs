@@ -148,6 +148,7 @@ use crate::geom::tol::{
 };
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, min2, rad_to_deg, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
     TWO_PI,
@@ -613,9 +614,9 @@ impl PolarConversion {
         let angle_rad = (angle_deg - start_angle_deg) * PI / 180.0;
 
         // get coefficients of quadratic equation
-        let cos_angle = angle_rad.cos();
-        let cos_theta = theta.cos();
-        let a = 2.0 * cos_angle * (1.0 - cos_theta) - 1.0 + 2.0 * cos_theta - (2.0 * theta).cos();
+        let cos_angle = det::cos(angle_rad);
+        let cos_theta = det::cos(theta);
+        let a = 2.0 * cos_angle * (1.0 - cos_theta) - 1.0 + 2.0 * cos_theta - det::cos(2.0 * theta);
         let b = 2.0 * cos_angle * (-1.0 + cos_theta) + 2.0 - 2.0 * cos_theta;
         let c = cos_angle - 1.0;
 
@@ -1369,8 +1370,8 @@ impl Ellipse {
 
         // get input in radians
         let angle_rad = t * PI / 180.0;
-        let cos_u = angle_rad.cos();
-        let sin_u = angle_rad.sin();
+        let cos_u = det::cos(angle_rad);
+        let sin_u = det::sin(angle_rad);
         let o = self.position.origin();
         let x = self.position.x_axis();
         let y = self.position.y_axis();
@@ -1427,7 +1428,7 @@ impl Ellipse {
         // get dAngleParam in radians [-Pi, +Pi]
         let mut angle_param = 0.0;
         if self.radius_y != 0.0 {
-            angle_param = (self.radius_x / self.radius_y * dy).atan2(dx);
+            angle_param = det::atan2(self.radius_x / self.radius_y * dy, dx);
         }
 
         // convert to degrees, in [ 0, 360 ) strictly positive result [B630]
@@ -1456,8 +1457,8 @@ impl Ellipse {
 
         // Calculate end point on Ellipse
         let angle_rad = self.anal_domain.max() * PI / 180.0;
-        let cos_u = angle_rad.cos();
-        let sin_u = angle_rad.sin();
+        let cos_u = det::cos(angle_rad);
+        let sin_u = det::sin(angle_rad);
         let end = self.position.origin()
             + self.radius_x * cos_u * self.position.x_axis()
             + self.radius_y * sin_u * self.position.y_axis();
@@ -2569,8 +2570,10 @@ pub(crate) fn set_up_polar_conversion(
         } else {
             let own_angle = |pnt: Point3| {
                 let vec = pnt - e.position.origin();
-                let mut angle = (e.radius_x / e.radius_y * vec.dot(e.position.y_axis()))
-                    .atan2(vec.dot(e.position.x_axis()));
+                let mut angle = det::atan2(
+                    e.radius_x / e.radius_y * vec.dot(e.position.y_axis()),
+                    vec.dot(e.position.x_axis()),
+                );
                 if angle < 0.0 {
                     angle += TWO_PI;
                 }
@@ -2721,7 +2724,7 @@ pub(crate) fn set_up_polar_conversion(
         let weight_a = table(&weights, ii * 2 - 2, OP_SET_UP)?;
         let weight_b = table(&weights, ii * 2 - 1, OP_SET_UP)?;
         let weight_c = table(&weights, ii * 2, OP_SET_UP)?;
-        let cos_half_ang = ((span_end_angle - span_start_angle) / 2.0 * PI / 180.0).cos();
+        let cos_half_ang = det::cos((span_end_angle - span_start_angle) / 2.0 * PI / 180.0);
         pc.exact_conversion
             .push(are_same(weight_a, weight_c) && are_same(weight_b / weight_c, cos_half_ang));
     }
@@ -3199,7 +3202,7 @@ mod tests {
         let span = [quarter[0], q1, q2];
         let (w0, w2) = (span[0][2], span[2][2]);
         assert!((w0 - w2).abs() > 0.09, "end weights {w0}, {w2}");
-        let end_deg = q2[1].atan2(q2[0]).to_degrees();
+        let end_deg = det::atan2(q2[1], q2[0]).to_degrees();
         let point = |u: f64| {
             let b = [(1.0 - u) * (1.0 - u), 2.0 * u * (1.0 - u), u * u];
             let h = [0, 1, 2].map(|i| b[0] * span[0][i] + b[1] * span[1][i] + b[2] * span[2][i]);
@@ -3219,7 +3222,7 @@ mod tests {
             .expect("u");
             let (x, y) = point(u);
             let a = angle_deg.to_radians();
-            worst = worst.max((x - a.cos()).hypot(y - a.sin()));
+            worst = worst.max(det::hypot(x - det::cos(a), y - det::sin(a)));
         }
         assert!(worst < 1e-14, "worst distance {worst}");
     }
@@ -3389,7 +3392,7 @@ mod tests {
         let x = c + Vec3::new(s, 10.0 - delta, 0.0);
         // an arc that starts on the line at the right crossing touches it at its start, not
         // at the chord's midpoint further along it
-        let theta = 90.0 - (s / 10.0).asin().to_degrees();
+        let theta = 90.0 - det::asin(s / 10.0).to_degrees();
         let arc = circle(&k, theta, 180.0, 10.0, false);
         let r = flat
             .intersect_with_ellipse::<i64>(
@@ -3408,7 +3411,11 @@ mod tests {
         };
         let p = arc.base().evaluate_point(sol.start.parameters[1]).unwrap();
         assert!(p.distance(x) < 1e-6, "arc: {p:?} vs {x:?}");
-        let d = Vec3::new(3_f64.to_radians().cos(), 0.0, 3_f64.to_radians().sin());
+        let d = Vec3::new(
+            det::cos(3_f64.to_radians()),
+            0.0,
+            det::sin(3_f64.to_radians()),
+        );
         let tilted = Line::from_points(x - 20.0 * d, x + 20.0 * d, 3);
         let r = a
             .intersect_with_line::<i64>(

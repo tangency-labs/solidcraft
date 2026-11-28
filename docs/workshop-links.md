@@ -44,7 +44,7 @@ If SolidCraft is already running, a link opened from the browser goes to that wi
 
 | Platform | Where |
 |---|---|
-| Windows (MSI) | `HKLM\Software\Classes\solidcraft`, command `"solidcraft.exe" --open-url "%1"` (`assets/platforms/windows/solidcraft.wxs`) |
+| Windows (MSI) | `HKLM\Software\Classes\solidcraft` (an install for all users) or `HKCU\Software\Classes\solidcraft` (just for me), command `"solidcraft.exe" --open-url "%1"` (`assets/platforms/windows/solidcraft.wxs`) |
 | macOS | `CFBundleURLTypes` in `assets/platforms/macos/Info.plist.in`; AppKit hands the link to `application:openURLs:` |
 | Linux (deb, rpm, Flatpak, Snap, Nix, FreeBSD) | `x-scheme-handler/solidcraft` in a hidden entry of its own, `io.tangencylabs.solidcraft.workshop-links.desktop` (`NoDisplay=true`, `Exec=solidcraft --open-url %u`); the visible `io.tangencylabs.solidcraft.desktop` opens files as before (`%f`) |
 | AppImage | the two entries AppRun installs into `~/.local/share/applications` (`Exec="<AppImage>" %F`, and `Exec="<AppImage>" --open-url %u` for links) |

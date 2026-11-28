@@ -38,7 +38,7 @@ later pull requests, one topic at a time, each pointing at its entry here.
 A view of the timeline that draws each feature in the row of the component it changes, with one
 column for each step.
 
-- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+- **In SolidCraft:** the chevron in the bottom History's header (`timeline_2d`) and the options
   behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
 - **Don't use:** 2D history, matrix timeline.
 - **Elsewhere:** multi-track timeline.
@@ -841,6 +841,22 @@ to each other keep a quarter, three an eighth. A section has at most six.
 - **Elsewhere:** section plane, cutting plane, clipping plane.
 - **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
   feature.
+
+### section stack
+
+A row of parallel planes through a mesh body, each with a sketch of the curves fitted to the
+mesh's section there, and optionally the slabs extruded between them.
+
+The planes run along one plane's normal at a set spacing; a plane that misses the mesh gets no
+sketch. The sketches and slabs are ordinary features in one timeline folder.
+
+- **In SolidCraft:** `mesh.section_stack` (`body`, `plane`, `from`, `to`, `spacing`,
+  `max_sections`, `extrude`, `name`); the Section Stack button under SURFACE › Convert.
+- **Don't use:** slice stack, X-ray (for the command), section sketch.
+- **Elsewhere:** mesh slicing, cross-section stack.
+- **For translators:** "section" is a cut through a mesh body that makes sketch geometry, not
+  a section plane of Section Analysis, which only changes the view; "slabs" are the solid layers
+  extruded between the planes.
 
 ### settings profile
 

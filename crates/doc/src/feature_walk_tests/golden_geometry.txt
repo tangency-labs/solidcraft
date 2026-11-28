@@ -235,6 +235,9 @@ surface_match
 surface_fair
   moves: faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
+surface_morph
+  moves: base_face[0], base_face[1], base_face[2], control_face[0], control_face[1], control_face[2], faces[0][0], faces[0][1], faces[0][2]
+  face points: [0, 0, 0]
 unstitch
   moves: faces[0][0], faces[0][1], faces[0][2]
 reverse_normal
@@ -248,6 +251,8 @@ surface_extend_to_plane
   moves: edges[0][0], edges[0][1], edges[0][2], up_to.plane.axis_dir[0], up_to.plane.axis_dir[1], up_to.plane.axis_origin[0], up_to.plane.axis_origin[1], up_to.plane.axis_origin[2]
 surface_extend_to_face
   moves: edges[0][0], edges[0][1], edges[0][2], up_to.face.point[0], up_to.face.point[1], up_to.face.point[2]
+surface_extend_law
+  moves: edges[0][0], edges[0][1], edges[0][2]
 surface_ruled
   moves: direction[0], direction[2], edges[0][0], edges[0][1], edges[0][2], face[1], face[2]
   face points: [1, 0, 0]

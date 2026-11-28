@@ -1160,7 +1160,8 @@ fn shortcut_row(
     ui.push_id(command.id, |ui| {
         let name =
             egui::Rect::from_min_size(rect.min + egui::vec2(0.0, t.space_4), egui::vec2(if beside { name_width } else { width }, label_height));
-        ui.painter().galley(egui::pos2(name.left(), name.center().y - label_galley.size().y / 2.0), label_galley, t.form_ink);
+        let rise = egui::galley_cap_ink_rise(ui.painter(), &label_galley);
+        ui.painter().galley(egui::pos2(name.left(), name.center().y - label_galley.size().y / 2.0 - rise), label_galley, t.form_ink);
         let response = ui.interact(name, ui.scope_id().with("command"), egui::Sense::hover()).backing_on_hover_text(command.id);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{label} ({})", command.id)));
         let top = if beside { name.top() } else { name.bottom() + t.space_4 };
@@ -2707,10 +2708,9 @@ mod tests {
         h.step(&json!({"click": {"handle": "prefs:keyboard_profile:nx"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.preferences.keyboard_profile, "nx");
-        assert!(
-            h.widget("Ctrl+W for Show/Hide Selection is not used: SolidCraft keeps this key for itself.").is_some(),
-            "the left-out key is reported"
-        );
+        // The note names the key as this platform writes it (the Command key on macOS).
+        let note = format!("{} for Show/Hide Selection is not used: SolidCraft keeps this key for itself.", crate::ui_kit::chord_label("Ctrl+W"));
+        assert!(h.widget(&note).is_some(), "the left-out key is reported: {note}");
     }
 }
 

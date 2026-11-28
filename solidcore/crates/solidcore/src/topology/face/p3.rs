@@ -1314,6 +1314,7 @@ fn create_uv_trim_curves_body(
     let mut max_cc_gap = 0.0_f64;
     let mut mean_3d_gap = 0.0;
     let mut max_3d_gap = 0.0_f64;
+    let mut count_3d: u64 = 0;
     let mut total_dropped: u64 = 0;
 
     let PreRescue {
@@ -1461,16 +1462,25 @@ fn create_uv_trim_curves_body(
                 }
             }
 
-            let pnt_3d0 = normalized_evaluate(k, b, eu, 0.0, false, false)?.0;
-            let gap_3d = pnt_3d0.distance(b.vertex(v)?.point);
-
             mean_cc_gap += if gap_at_pole { 0.0 } else { uv_gap_size };
             max_cc_gap = smos_max(max_cc_gap, uv_gap_size);
-            mean_3d_gap += gap_3d;
-            max_3d_gap = smos_max(max_3d_gap, gap_3d);
 
-            if adjust_tolerances && b.vertex(v)?.tolerance < 2.0 * gap_3d {
-                vertex::set_tolerance(b, v, 2.0 * gap_3d, true, true)?;
+            // A tangent field has no positional endpoint to compare with a vertex.
+            let e = eu1::edge(b, eu)?
+                .ok_or_else(|| null("CreateUVTrimCurves: edge use without edge"))?;
+            if !matches!(
+                edge_curve(b, e)?.kind(),
+                crate::curve::curve::CurveKind::TangentField(_)
+            ) {
+                let pnt_3d0 = normalized_evaluate(k, b, eu, 0.0, false, false)?.0;
+                let gap_3d = pnt_3d0.distance(b.vertex(v)?.point);
+                mean_3d_gap += gap_3d;
+                count_3d += 1;
+                max_3d_gap = smos_max(max_3d_gap, gap_3d);
+
+                if adjust_tolerances && b.vertex(v)?.tolerance < 2.0 * gap_3d {
+                    vertex::set_tolerance(b, v, 2.0 * gap_3d, true, true)?;
+                }
             }
         }
     }
@@ -1479,7 +1489,11 @@ fn create_uv_trim_curves_body(
     Ok(UvTrimCurveGaps {
         mean_curve_surface_gap: mean_cs_gap / n,
         max_curve_surface_gap: max_cs_gap,
-        mean_3d_vertex_gap: mean_3d_gap / n,
+        mean_3d_vertex_gap: if count_3d == 0 {
+            0.0
+        } else {
+            mean_3d_gap / count_3d as f64
+        },
         max_3d_vertex_gap: max_3d_gap,
         mean_ps_curve_curve_gap: mean_cc_gap / n,
         max_ps_curve_curve_gap: max_cc_gap,
@@ -1805,6 +1819,7 @@ pub fn is_degenerate(
                     contact: sol.contact,
                     unique: sol.unique,
                     shared_contact: sol.shared_contact,
+                    limit_root: sol.limit_root,
                 })
                 .collect();
 
@@ -3262,6 +3277,7 @@ mod tests {
     use crate::geom::context::{Context, NotifyCallback};
     use crate::geom::object::{NotifyOperation, ObjectRef};
     use crate::kernel::Kernel;
+    use crate::math::det;
     use crate::primitive::api_curves::create_line_segment;
     use crate::primitive::api_trim_ops::create_planar_faces;
     use crate::topology::edge::NotifyEnv;
@@ -3302,7 +3318,7 @@ mod tests {
         let n = 24;
         let point = |i: usize| {
             let t = core::f64::consts::TAU * i as f64 / n as f64;
-            crate::math::Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), 0.0)
+            crate::math::Vec3::new(30.0 * det::cos(t), 30.0 * det::sin(t), 0.0)
         };
         let curves: Vec<Curve> = (0..n)
             .map(|i| Curve::from(create_line_segment(point(i), point(i + 1)).unwrap()))

@@ -34,8 +34,9 @@ mod ground_shadow_tests;
 mod interface;
 mod mouse3d;
 mod navbar;
-mod navigation;
+pub(crate) mod navigation;
 mod panel_layout;
+mod platform;
 mod privacy;
 mod security;
 mod sketch;
@@ -1555,6 +1556,10 @@ pub struct PrefsWindow {
     /// The Profile operations preference the profiler last followed: applied when it changes,
     /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
     applied_profile: Option<bool>,
+    /// The display quality this window's frame set up its views with ([`apply`]), so a result
+    /// waiting for it is adopted by what this window set, not by what the process-wide level
+    /// reads (another window in the process may have set it since).
+    drawn_quality: Option<solidcraft_engine::doc::display_quality::DisplayQuality>,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
     window_theme: Option<egui::SystemTheme>,
     /// Last observed OS tone, independent of the selected theme's tone.
@@ -1943,7 +1948,8 @@ pub(crate) fn held_panel_layout(app: &SolveApp) -> Option<Option<serde_json::Val
 /// ones, with Import…, Export… (the theme on now as a complete file, to start a new one from)
 /// and Remove (an imported theme). Like the other preferences, a choice applies at once.
 fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    theme_picker::row(app, ui);
+    let locked = app.policy.locks("theme");
+    crate::policy::row(ui, locked, |ui| theme_picker::row(app, ui));
 }
 
 fn theme_action(app: &mut SolveApp, ui: &mut egui::Ui, action: Option<&str>, action_theme: Option<String>) {
@@ -2193,6 +2199,12 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
     }
 }
 
+/// The display quality this window's views are drawn at this frame: what its last [`apply`] set
+/// (the process-wide level before the first).
+pub(crate) fn drawn_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::DisplayQuality {
+    app.prefs_window.drawn_quality.unwrap_or_else(solidcraft_engine::doc::display_quality::current)
+}
+
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     crate::plugins::sync_policy(app);
@@ -2213,9 +2225,9 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_sketch_limit(&app.preferences);
     apply_tolerance_heal(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
-    solidcraft_engine::doc::display_quality::set_current(
-        solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
-    );
+    let quality = solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
+    solidcraft_engine::doc::display_quality::set_current(quality);
+    app.prefs_window.drawn_quality = Some(quality);
     // The view's up axis follows the preference (set in the dialog, by ui.prefs or loaded).
     if app.prefs_window.applied_up.as_deref() != Some(app.preferences.up_axis.as_str()) {
         up_axis_changed(app);
@@ -2343,7 +2355,7 @@ pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
 pub fn set_autosave(app: &mut SolveApp) {
     let m = app.autosave_minutes;
     if let Some(a) = app.autosave.as_mut() {
-        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::from_secs(u64::MAX / 4) };
+        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::MAX };
     }
 }
 
@@ -3137,8 +3149,8 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut long_jobs = crate::space_mouse::button_long_jobs(app, &device);
     let mut numbers: std::collections::BTreeSet<u8> = jobs.keys().copied().collect();
     numbers.extend(app.space_mouse.seen.iter());
-    // A reader that reports long presses (smed) gives every button a held job beside its short one;
-    // the others only where one is saved or a long press was seen.
+    // Readers with long-press reports offer a held job for every button; others only
+    // where a held job is saved or a long press has been seen.
     let held_everywhere = device.starts_with("smed ");
     let long_numbers: std::collections::BTreeSet<u8> = long_jobs.keys().copied().chain(app.space_mouse.seen_long.iter()).collect();
     numbers.extend(long_numbers.iter().copied());
@@ -3148,35 +3160,28 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     let lock = app.space_mouse.lock;
     ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
         hint_under_controls(ui, solidcraft_ui_text::tr("ui.3d_mouse_buttons_hint"), "space_mouse_buttons");
-        // A driver that keeps a rotation lock (smed) can be asked to switch it from here.
         if let Some(mut on) = lock {
             let label = solidcraft_ui_text::tr("ui.3d_mouse_rotation_lock").to_string();
             if ui_kit::checkbox(ui, &label, &mut on).changed() {
                 app.space_mouse.lock_request = Some(on);
             }
         }
-        // The short and the held job of a button side by side, under "Press" and "Held". Preferences
-        // is never narrower than its 880 pt dialog (the window's minimum holds it), so both fit.
-        let t = Tokens::get();
-        let gap = t.space_8;
-        let row_width = ui.available_width();
-        let control_width = row_width - FORM_LABEL_WIDTH.min(row_width * 0.6) - t.space_14;
-        let half = ((control_width - gap) / 2.0).max(0.0);
-        let column = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
-            ui.allocate_ui_with_layout(egui::vec2(half, ui.available_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.set_width(half);
-                add(ui);
-            });
-        };
-        if any_held {
-            let heading = |ui: &mut egui::Ui, key: &str| {
-                ui.add(egui::Label::new(egui::RichText::new(solidcraft_ui_text::tr(key)).size(t.font_small).color(t.form_dim)).truncate());
-            };
-            ui_kit::row(ui, "", |ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                column(ui, &mut |ui| heading(ui, "ui.3d_mouse_buttons_press"));
-                column(ui, &mut |ui| heading(ui, "ui.3d_mouse_buttons_held"));
-            });
+    });
+    let mut columns = vec![
+        ui_kit::Column::new(solidcraft_ui_text::tr("ui.3d_mouse_buttons"), 1.0).flex(),
+        ui_kit::Column::new(
+            if any_held { solidcraft_ui_text::tr("ui.3d_mouse_buttons_press") } else { solidcraft_ui_text::tr_label("Actions") },
+            2.0,
+        )
+        .flex(),
+    ];
+    if any_held {
+        columns.push(ui_kit::Column::new(solidcraft_ui_text::tr("ui.3d_mouse_buttons_held"), 2.0).flex());
+    }
+    let mut shown = Vec::new();
+    ui_kit::table_fitted(ui, "space_mouse_buttons", &columns, solidcraft_ui_text::tr("ui.3d_mouse_buttons_hint"), |ui, table| {
+        if !ui_kit::settings_search::suppress_chrome(ui) {
+            table.headers(ui, |_, _| false);
         }
         for number in numbers {
             let mut name = crate::space_mouse::button_name(&device, number, false);
@@ -3186,9 +3191,8 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
             let long_name = crate::space_mouse::button_name(&device, number, true);
             let current = jobs.get(&number).cloned();
             let current_long = long_jobs.get(&number).cloned();
-            // Shift, Ctrl and Alt are held for as long as their button is down: a held job would let
-            // go of them at the long-press threshold, so there is none to pick (one saved stays
-            // changeable, so it can be taken back).
+            // Modifier keys stay down for the whole press. An existing held job
+            // remains editable so it can be removed.
             let modifier = matches!(
                 current,
                 Some(crate::space_mouse::ButtonJob::Key(
@@ -3196,55 +3200,69 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ))
             );
             let locked = modifier && current_long.is_none();
-            let long_picker = |app: &SolveApp, ui: &mut egui::Ui| {
-                ui_kit::named_control(ui, &long_name, |ui| {
-                    if locked {
-                        ui.add_enabled_ui(false, |ui| button_job_picker(app, ui, number, true, None))
-                            .response
-                            .backing_on_disabled_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_buttons_held_modifier"));
-                        None
-                    } else {
-                        button_job_picker(app, ui, number, true, current_long.as_ref())
-                    }
-                })
-            };
-            let (choice, long_choice) = if any_held && held(number) {
-                ui_kit::row(ui, &name, |ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    let (mut short, mut long) = (None, None);
-                    column(ui, &mut |ui| short = button_job_picker(app, ui, number, false, current.as_ref()));
-                    column(ui, &mut |ui| long = long_picker(app, ui));
-                    (short, long)
-                })
-            } else {
-                let short = ui_kit::row(ui, &name, |ui| {
-                    if any_held {
-                        // No held job here: the press picker keeps its column's width.
-                        let mut short = None;
-                        column(ui, &mut |ui| short = button_job_picker(app, ui, number, false, current.as_ref()));
-                        short
-                    } else {
-                        button_job_picker(app, ui, number, false, current.as_ref())
+            let has_held = held(number);
+            let labels = [name.as_str(), long_name.as_str()];
+            let labels = &labels[..if has_held { 2 } else { 1 }];
+            ui_kit::settings_search::set_control(ui, &name);
+            let show = ui_kit::settings_search::visible(ui, labels);
+            let draw = |ui: &mut egui::Ui| {
+                let (mut choice, mut long_choice) = (None, None);
+                let response = table.row(ui, &number.to_string(), false, |row| {
+                    row.cell(|ui| ui_kit::text(ui, &name, ui_kit::Text::Cell));
+                    choice = row.cell(|ui| ui_kit::named_control(ui, &name, |ui| button_job_picker(app, ui, number, false, current.as_ref())));
+                    if has_held {
+                        long_choice = row.cell(|ui| {
+                            ui_kit::named_control(ui, &long_name, |ui| {
+                                if locked {
+                                    ui.add_enabled_ui(false, |ui| button_job_picker(app, ui, number, true, None))
+                                        .response
+                                        .backing_on_disabled_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_buttons_held_modifier"));
+                                    None
+                                } else {
+                                    button_job_picker(app, ui, number, true, current_long.as_ref())
+                                }
+                            })
+                        });
+                    } else if any_held {
+                        row.cell(|_| {});
                     }
                 });
-                (short, None)
+                if let Some(choice) = choice {
+                    changed = true;
+                    match choice {
+                        Some(job) => jobs.insert(number, job),
+                        None => jobs.remove(&number),
+                    };
+                }
+                if let Some(choice) = long_choice {
+                    long_changed = true;
+                    match choice {
+                        Some(job) => long_jobs.insert(number, job),
+                        None => long_jobs.remove(&number),
+                    };
+                }
+                response
             };
-            if let Some(choice) = choice {
-                changed = true;
-                match choice {
-                    Some(job) => jobs.insert(number, job),
-                    None => jobs.remove(&number),
-                };
-            }
-            if let Some(choice) = long_choice {
-                long_changed = true;
-                match choice {
-                    Some(job) => long_jobs.insert(number, job),
-                    None => long_jobs.remove(&number),
-                };
+            if show {
+                ui_kit::settings_search::push_passthrough(ui);
+                let response = ui_kit::named_control(ui, &name, draw);
+                ui_kit::settings_search::pop_passthrough(ui);
+                shown.push((name.clone(), response.rect));
+                if has_held {
+                    shown.push((long_name.clone(), response.rect));
+                }
+            } else {
+                ui_kit::settings_search::run_hidden(ui, &name, draw);
+                ui_kit::settings_search::recheck(ui, labels);
             }
         }
     });
+    // Reveal through the enclosing page, after the table's viewport has finished.
+    for (name, rect) in shown {
+        ui_kit::settings_search::remember(ui, &name, rect);
+        ui_kit::settings_search::follow(ui, &name, rect);
+        crate::scenario::publish_target(&format!("dialog:row:{name}"), rect);
+    }
     if changed {
         app.preferences.space_mouse_buttons.insert(device.clone(), jobs);
     }
@@ -3370,6 +3388,17 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some(serde_json::Value::Bool(true)) => true,
         Some(_) => return Err("`forget_stand_up` must be true".into()),
     };
+    // Importing or following a theme turns it on, which the organization's policy has set.
+    // The saved path written back unchanged is not a change: it starts nothing and is kept.
+    let theme_locked = app.policy.locks("theme");
+    let saved_follow = rest.get("theme_follow").and_then(serde_json::Value::as_str) == Some(app.preferences.theme_follow.as_str());
+    let follows = rest.get("theme_follow").and_then(serde_json::Value::as_str).is_some_and(|path| !path.trim().is_empty()) && !saved_follow;
+    if theme_locked && (rest.contains_key("theme_import") || follows) {
+        return Err("`theme` is set by your organization's policy and cannot be changed here".into());
+    }
+    if theme_locked && saved_follow && !app.policy.locks("theme_follow") {
+        rest.remove("theme_follow");
+    }
     let mut staged = app.preferences.clone();
     let mut follow = app.prefs_window.follow.clone();
     let imported = rest
@@ -3417,7 +3446,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") && !follow_locked => {
+        // Picking a theme stops following one; the organization's theme, which no pick changes, does not.
+        None if rest.contains_key("theme") && !follow_locked && !theme_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);
@@ -3715,6 +3745,10 @@ pub fn import_theme_bytes(app: &mut SolveApp, bytes: Vec<u8>) {
 }
 
 pub fn import_theme(app: &mut SolveApp, v: &serde_json::Value) -> Result<String, String> {
+    // Importing turns the theme on, which the organization's policy has set.
+    if app.policy.locks("theme") {
+        return Err(solidcraft_ui_text::tr("policy.set_by_organization").to_string());
+    }
     let theme = match v {
         serde_json::Value::String(text) => crate::theme_files::parse(text)?,
         other => crate::theme_files::from_value(other)?,
@@ -3750,7 +3784,9 @@ fn current_theme_file(app: &SolveApp) -> serde_json::Value {
 }
 
 fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
-    followed_theme(&app.preferences, &app.prefs_window.follow).or_else(|| {
+    // A theme the organization's policy sets wins over a followed file.
+    let followed = (!app.policy.locks("theme")).then(|| followed_theme(&app.preferences, &app.prefs_window.follow)).flatten();
+    followed.or_else(|| {
         crate::theme_files::find(
             theme_picker::active_id(&app.preferences, app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark)),
             &app.preferences.custom_themes,
@@ -5529,7 +5565,9 @@ mod tests {
             h.call("ui.prefs", json!({"open":"Layout"}));
             h.frames(20);
             let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-            for (key, label) in checks {
+            // The window buttons' row is drawn only where the app draws its own buttons (#22848).
+            let buttons = platform::shown(&h.app, platform::Needs::OwnWindowButtons);
+            for (key, label) in checks.into_iter().filter(|(key, _)| buttons || *key != "show_window_controls") {
                 let label = solidcraft_ui_text::tr(label);
                 let check = crate::scenario::rect_of(&format!("prefs:{key}")).unwrap();
                 assert!(check.left() >= body.left() - 0.5 && check.right() <= body.right() + 0.5, "{key} at {width}: {check:?} outside {body:?}");
@@ -5989,10 +6027,35 @@ mod tests {
                             "width {width}, frame {frame}: the section reaches {}; past the panel: {wide:?}",
                             ui.min_rect().right()
                         );
+                        let viewport = crate::scenario::rect_of("dialog:table:space_mouse_axes:viewport").unwrap();
+                        assert!(viewport.left() >= panel.left() && viewport.right() <= panel.right() + 0.5);
+                        assert!(
+                            crate::scenario::count_of("dialog:table:space_mouse_axes:content_width").unwrap() <= f64::from(viewport.width()) + 0.5
+                        );
+                        assert!((0..6).all(|axis| crate::scenario::rect_of(&format!("dialog:table:space_mouse_axes:{axis}")).is_some()));
                     });
                 });
                 output.textures_delta.clear();
             }
+        }
+    }
+
+    #[test]
+    fn the_3d_mouse_section_stays_inside_720p_preferences_when_hovered() {
+        for width in [1280, 1000, 900] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width,"height":720}));
+            open_at(&mut h.app, PAGE_MOUSE3D);
+            h.frames(6);
+            reveal_preference(&mut h, "dialog:table:space_mouse_axes:viewport");
+            let viewport = crate::scenario::rect_of("dialog:table:space_mouse_axes:viewport").unwrap();
+            h.call("ui.move", json!({"x":viewport.center().x,"y":viewport.center().y}));
+            h.frames(6);
+            let viewport = crate::scenario::rect_of("dialog:table:space_mouse_axes:viewport").unwrap();
+            let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+            assert!(page.expand(1.0).contains_rect(viewport), "{width}: hovered table fits the page");
+            assert!(crate::scenario::count_of("dialog:table:space_mouse_axes:content_width").unwrap() <= f64::from(viewport.width()) + 0.5);
         }
     }
 
@@ -7601,6 +7664,7 @@ mod tests {
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
+            ("browser_fold_other_components", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("origin_plane_scale", json!(2.0), PAGE_DESIGN),
@@ -11338,6 +11402,40 @@ mod tests {
     }
 
     #[test]
+    fn a_keyboard_opened_saved_layout_menu_owns_keys_and_returns_focus() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        let before = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let list_focus = h.ctx.memory(|memory| memory.focused()).expect("clicking the saved tile focuses its list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some());
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "Down/Enter choose Delete within the menu");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "cancelling the confirmation keeps Preferences open");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "cancelling the confirmation restores the actual saved-layout list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some(), "the restored list accepts Shift+F10");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "closing the menu keeps Preferences open");
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_none(), "Escape closes only the tile menu");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "menu Escape restores the same list focus");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        let replace = crate::scenario::rect_of("prefs:panel_layout:menu_replace").expect("the next keyboard visit opens the menu");
+        let focused = h.ctx.memory(|memory| memory.focused()).and_then(|id| h.ctx.read_response(id)).expect("the reopened menu has a focused row");
+        assert!(replace.contains(focused.rect.center()), "the reopened menu focuses Replace rather than stale Delete: {:?}", focused.rect);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "closing the menu restores the list for the next keyboard visit");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+    }
+
+    #[test]
     fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
         let mut h = layout_page_with_a_saved_layout();
         let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
@@ -12165,6 +12263,45 @@ mod tests {
     }
 
     #[test]
+    fn navigation_builtin_mappings_paint_the_shared_headerless_card_and_keycaps() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1000,"height":720}));
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Navigation"}));
+            h.frames(6);
+            reveal_preference(&mut h, "dialog:table:mouse_mapping:viewport");
+            let t = Tokens::get();
+            let viewport = crate::scenario::rect_of("dialog:table:mouse_mapping:viewport").unwrap();
+            let card = h
+                .shapes
+                .iter()
+                .find(|shape| {
+                    matches!(&shape.shape, egui::Shape::Rect(rect)
+                if rect.fill == t.table_fill() && rect.rect.contains_rect(viewport))
+                })
+                .expect("built-in mappings paint the shared card");
+            assert!(card.clip_rect.expand(1.0).contains_rect(viewport));
+            assert!(
+                !h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(band)
+                if band.fill == t.text.gamma_multiply(0.08) && band.rect.intersects(viewport))),
+                "no header band"
+            );
+            assert!(!h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
+                if ["Input", "Action"].contains(&text.galley.text()) && viewport.contains(text.pos))));
+            let first = crate::scenario::rect_of("dialog:table:mouse_mapping:0").unwrap();
+            assert!((first.top() - viewport.top()).abs() <= 0.5, "no header allocation");
+            for (index, (keys, _)) in navigation::mapping_rows(&h.app).iter().enumerate() {
+                let cell = crate::scenario::rect_of(&format!("dialog:table:mouse_mapping:{index}:cell:input")).unwrap();
+                for key in keys {
+                    assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
+                        if text.galley.text() == key && cell.contains(text.pos))));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn navigation_legend_follows_all_presets_and_runtime_options_without_mutating_them() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         for preset in NAV_PRESETS {
@@ -12207,6 +12344,59 @@ mod tests {
         assert!(rows.iter().any(|(_, action)| action == solidcraft_ui_text::tr("prefs.context_menu_ring")));
         assert!(!rows.iter().any(|(keys, action)| keys.contains(&solidcraft_ui_text::tr("prefs.button_right").to_owned())
             && action == solidcraft_ui_text::tr("prefs.gesture_orbit")));
+    }
+
+    #[test]
+    fn mouse_mapping_table_keeps_action_key_and_reset_edits() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":4000}));
+        h.call("ui.prefs", json!({"language":"en","open":"Navigation"}));
+        h.frames(6);
+        scroll_to_and_click(&mut h, "prefs:nav_button:extra1");
+        h.step(&json!({"click":{"handle":"dialog:list:prefs.gesture_pan"}})).unwrap();
+        h.frames(3);
+        assert_eq!(nav_choice(&h.app.preferences, NavButton::Extra1), Some(NavChoice { keys: NavKeys::NONE, mode: Some(NavMode::Pan) }));
+        scroll_to_and_click(&mut h, "prefs:nav_button_keys:extra1");
+        h.step(&json!({"click":{"handle":"dialog:list:Ctrl/Cmd"}})).unwrap();
+        h.frames(3);
+        assert_eq!(
+            nav_choice(&h.app.preferences, NavButton::Extra1),
+            Some(NavChoice { keys: NavKeys { ctrl: true, ..NavKeys::NONE }, mode: Some(NavMode::Pan) })
+        );
+        let mut expected = h.app.preferences.clone();
+        expected.nav_button_map.clear();
+        scroll_to_and_click(&mut h, "prefs:nav_button_reset");
+        assert_eq!(h.app.preferences, expected, "reset only clears the button overrides");
+        assert!(crate::scenario::rect_of("dialog:table:nav_buttons:viewport").is_some());
+    }
+
+    #[test]
+    fn mouse3d_button_table_edits_and_resets_only_the_connected_device() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.space_mouse.device = Some("test mouse".into());
+        h.app.space_mouse.seen = crate::space_mouse::ButtonSet::of(1);
+        h.app.space_mouse.seen.insert(200);
+        let mapping = [(1, crate::space_mouse::ButtonJob::Settings)].into();
+        h.app.preferences.space_mouse_buttons.insert("test mouse".into(), mapping);
+        h.app.preferences.space_mouse_buttons.insert("other mouse".into(), [(1, crate::space_mouse::ButtonJob::Settings)].into());
+        h.call("ui.resize", json!({"width":1600,"height":4000}));
+        h.call("ui.prefs", json!({"language":"en","open":"3D mouse"}));
+        h.frames(6);
+        assert!(crate::scenario::rect_of("dialog:table:space_mouse_buttons:200").is_some(), "buttons beyond the old 32-bit set stay listed");
+        assert!(crate::scenario::handle_at("dialog:row:Button 1").is_some(), "the former form-row click handle remains available");
+        scroll_to_and_click(&mut h, "dialog:Button 1");
+        let nothing = solidcraft_ui_text::Locale::for_language("en").text("ui.3d_mouse_button_nothing").to_owned();
+        h.step(&json!({"widget":nothing})).unwrap();
+        h.frames(3);
+        assert!(h.app.preferences.space_mouse_buttons["test mouse"].is_empty());
+        let mut expected = h.app.preferences.clone();
+        expected.space_mouse_buttons.remove("test mouse");
+        let reset = solidcraft_ui_text::Locale::for_language("en").text("ui.3d_mouse_buttons_reset").to_owned();
+        scroll_to_and_click(&mut h, &format!("dialog:button::{reset}"));
+        assert_eq!(h.app.preferences, expected);
+        assert!(crate::scenario::rect_of("dialog:table:space_mouse_buttons:viewport").is_some());
     }
 
     #[test]
@@ -12265,6 +12455,52 @@ mod tests {
         }
     }
 
+    /// #22848: the twist and the cursor wrap are drawn only where the platform delivers them
+    /// (`platform::available`), and a hidden option keeps its saved value.
+    #[test]
+    fn navigation_shows_the_twist_and_the_cursor_wrap_only_where_they_work() {
+        use platform::{Facts, Needs, available};
+        let rows = [("prefs:trackpad_twist_turns", Needs::TrackpadTwist), ("prefs:orbit_cursor_wrap", Needs::CursorWarp)];
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.trackpad_twist_turns = true;
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.frames(2);
+        for (handle, needs) in rows {
+            assert_eq!(crate::scenario::handle_at(handle).is_some(), available(needs, Facts::of(&h.app)), "{handle}");
+        }
+        if cfg!(target_os = "windows") {
+            assert!(crate::scenario::handle_at("prefs:trackpad_twist_turns").is_none(), "no twist reaches the app on Windows");
+            assert!(crate::scenario::handle_at("prefs:orbit_cursor_wrap").is_some());
+        }
+        // On Linux the window system this run uses decides.
+        for window_system in ["wayland", "x11"] {
+            h.app.services.window_system = Some(window_system);
+            h.frames(2);
+            for (handle, needs) in rows {
+                assert_eq!(crate::scenario::handle_at(handle).is_some(), available(needs, Facts::of(&h.app)), "{handle} on {window_system}");
+            }
+        }
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert!(h.app.preferences.trackpad_twist_turns, "a hidden option keeps its value");
+    }
+
+    /// The window buttons' option is drawn only where the app draws its own window buttons
+    /// (`platform::available`): not on macOS, which draws its own, nor in the browser. A hidden
+    /// option keeps its saved value.
+    #[test]
+    fn layout_shows_the_window_buttons_option_only_where_the_app_draws_them() {
+        use platform::{Facts, Needs, available};
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.show_window_controls = false;
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        h.frames(2);
+        let shown = crate::scenario::handle_at("prefs:show_window_controls").is_some();
+        assert_eq!(shown, available(Needs::OwnWindowButtons, Facts::of(&h.app)));
+        assert_eq!(shown, !cfg!(target_os = "macos"), "hidden on macOS only, in a desktop build");
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert!(!h.app.preferences.show_window_controls, "a hidden option keeps its value");
+    }
+
     #[test]
     fn orbit_cursor_wrap_defaults_on_and_can_be_turned_off() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
@@ -12289,7 +12525,7 @@ mod tests {
         assert!(old.mark_orbit_point, "saved preferences from before the option mark the point");
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Navigation"}));
-        h.step(&json!({"click":{"handle":"prefs:mark_orbit_point"}})).unwrap();
+        scroll_to_and_click(&mut h, "prefs:mark_orbit_point");
         assert!(!h.app.preferences.mark_orbit_point);
         h.call("ui.prefs", json!({"button":"apply"}));
         let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -14035,16 +14271,25 @@ pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => "ui.ground_shadow_ellipse",
     };
     let mut mode = before;
+    let items: Vec<_> = ["off", "ellipse", "projected"]
+        .into_iter()
+        .map(|value| {
+            let mut item = ui_kit::Item::action(value, app.tr(label(value)), "");
+            item.checked = Some(mode == value);
+            item.radio = true;
+            item.aliases.push(format!("view:ground_shadow:{value}"));
+            item
+        })
+        .collect();
+    let was_open = ui_kit::dropdown_is_open(ui, "ground_shadow_mode");
     let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
-        for value in ["off", "ellipse", "projected"] {
-            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
-            row.selected = mode == value;
-            let choice = row.show(ui);
-            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
-            if choice.clicked() {
-                mode = value;
-                ui.close();
-            }
+        if let Some(picked) = ui_kit::Menu::items(ui, ui.make_persistent_id("ground_shadow_choices"), &items, !was_open).picked {
+            mode = match picked.id.as_str() {
+                "off" => "off",
+                "projected" => "projected",
+                _ => "ellipse",
+            };
+            ui.close();
         }
     });
     crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);
@@ -14970,7 +15215,6 @@ mod settings_search_tests {
             for (query, native) in [
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
                 ("Preview panel placement while dragging", Some((Role::CheckBox, "prefs:live_panel_drag_preview"))),
-                ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
                 ("Position", None),
@@ -15287,6 +15531,8 @@ mod settings_search_tests {
         for theme in ["light", "dark"] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
+            h.app.space_mouse.device = Some("test mouse".into());
+            h.app.space_mouse.seen = crate::space_mouse::ButtonSet::of(1);
             h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
             h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
             for (query, page, target) in [
@@ -15302,6 +15548,9 @@ mod settings_search_tests {
                 ("Overall speed", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_speed"),
                 ("Traced", crate::prefs::PAGE_MOUSE3D, "prefs:3d_mouse_orbit_traced"),
                 ("Position", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_ghost_position"),
+                ("Side button (back) drag", crate::prefs::PAGE_NAVIGATION, "prefs:nav_button:extra1"),
+                ("Axis 1", crate::prefs::PAGE_MOUSE3D, "prefs:axis:Axis 1"),
+                ("Button 1", crate::prefs::PAGE_MOUSE3D, "dialog:row:Button 1"),
             ] {
                 h.call("ui.prefs", serde_json::json!({"open":"General"}));
                 h.app.prefs_window.shell.filter = query.into();

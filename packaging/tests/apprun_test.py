@@ -50,6 +50,19 @@ class AppRunCli(unittest.TestCase):
         self.env["APPIMAGE"] = str(moved)
         self.run_apprun()
         self.assertIn(str(moved), self.wrapper.read_text())
+        out = subprocess.run([str(self.wrapper), "mcp"], env=self.env, capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(out, "solidcraft-cli mcp")
+
+    def test_wrapper_of_a_removed_appimage_says_so_in_one_line(self):
+        self.run_apprun()
+        self.image.unlink()
+        r = subprocess.run([str(self.wrapper), "--version"], env=self.env, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 127)
+        self.assertEqual(r.stdout, "")
+        lines = r.stderr.strip().splitlines()
+        self.assertEqual(len(lines), 1, r.stderr)
+        self.assertIn(f"no longer at {self.image}", lines[0])
+        self.assertIn("open SolidCraft once from where it is now", lines[0])
 
     def test_a_file_that_is_not_ours_is_left_alone(self):
         self.wrapper.parent.mkdir(parents=True)

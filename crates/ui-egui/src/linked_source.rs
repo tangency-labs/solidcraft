@@ -1434,7 +1434,10 @@ mod tests {
         export(30);
         crate::documents::switch(&mut app, 0);
         let prompt = app.link_folders_prompt.first().cloned().expect("asked about the folder on tab return");
-        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        // The prompt names the folder as the link spells it. On macOS the temporary folder is
+        // reached through a link (`/var` is `/private/var`), so the same folder is compared.
+        let asked: Vec<String> = prompt.folders.iter().map(|f| engine_folder(std::path::Path::new(f))).collect();
+        assert_eq!(asked, std::slice::from_ref(&folder));
         assert!(app.file_load.idle(), "the file is not read while the question is open");
         assert!((volume(&app) - 1000.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
         assert_eq!(app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);

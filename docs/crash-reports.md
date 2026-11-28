@@ -88,7 +88,9 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
     - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build. A panic on a Rayon worker during a command is recorded this way, with that command and design, when the worker was inside the kernel guard or the command fails with a kernel error.
     - `panic`: an internal error outside any command. A Rayon worker panic while no command is running is still this kind, written at once.
     - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a power loss, a system shutdown, or the process being forcibly stopped (SIGKILL, or a second stop signal). On Linux and macOS, once the window has opened, the first SIGTERM (what a shutdown or restart sends), SIGHUP or Ctrl+C in a terminal closes the app as a forced quit does, keeping unsaved designs for recovery, and the session ends cleanly if the close finishes before the system stops the process. A macOS logout's quit event is not handled this way yet. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows and macOS, a captured native crash also says the exception or signal, the module it happened in and the offset into it.
+    - `device_lost`: the graphics device was lost after the window opened (the driver stopped responding or was reset, or the GPU went away). The app closes and starts again by itself; the run that lost the device writes this report first, with the driver's reason in `message`, so the next start opens Crash Reports with it as it does after a crash. The same reason again is counted.
   - `message`, `location` (file:line), `thread`
+  - `run`: `{pid, start}` of the run the report is about. The app's log starts with the same run on its first line (`SolidCraft log of process <pid>, started <start>`), so Report… attaches the end of that run's own log, even several starts later: each start keeps the last 5 runs' logs (`solidcraft.previous.log`, `solidcraft.previous.2.log` … `.5.log`, the older ones within 8 MB together).
   - `backtrace`: frames `symbol (file:line)`, without the panic machinery, std internals or the user's home folder
   - `app` (version, commit, build date), `system` (OS, architecture, renderer and GPU), `session.uptime_s`
   - `command`: the command that crashed, with its parameters
@@ -104,6 +106,13 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
     behind that page: `viewport pipelines (shader compile)`, `design`, `recovery`, `first frame`)
     and how many milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
     driver) as soon as the adapter is picked, so it is there even when the device never started.
+    A ticket filed from such a report describes this run's GPU, driver and graphics API in its
+    system info, not those of the start that sends it (often safe mode on the software renderer),
+    which it names under `reported_from`.
+  - After a graphics failure (`device_lost`, a death in one of the graphics steps above, or a native
+    crash in a graphics driver), the Crash Reports window that opens at the next start also offers
+    to start with another graphics API (Direct3D 12 on Windows, OpenGL on Linux; nothing on macOS,
+    which has Metal alone). It saves the choice as Preferences › Graphics does and restarts.
   - `native` (Windows and macOS): what the native crash handler caught: `code`, `name`,
     `address` (of the faulting instruction), `module`, `offset` (into the module), `detail` (for
     an access violation or a segfault, the address read or written) and `thread`. The `backtrace`

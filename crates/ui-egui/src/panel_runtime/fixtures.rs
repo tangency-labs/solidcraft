@@ -106,6 +106,7 @@ impl PanelController for FixtureController {
             } else {
                 Vec::new()
             },
+            menu_heading: None,
         }
     }
     fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {

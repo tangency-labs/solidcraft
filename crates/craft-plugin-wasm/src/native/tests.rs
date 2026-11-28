@@ -1313,6 +1313,32 @@ fn files_inside_grant_work_and_escape_is_refused() {
 }
 
 #[test]
+#[cfg(unix)]
+fn reading_a_granted_fifo_without_a_writer_is_refused_without_blocking() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-fifo-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(root.join("pipe")).status().unwrap().success());
+    let folder = Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false };
+    let (tx, rx) = mpsc::channel();
+    // Keep a regression from hanging the test process: no writer ever opens the pipe.
+    let worker = std::thread::spawn(move || {
+        let mut state = state(App::default());
+        state.effect = Effect::Read;
+        state.folders.insert("data".into(), folder);
+        let refused = matches!(
+            state.read_file("data".into(), "pipe".into()),
+            Err(PluginError::PermissionDenied(reason)) if reason.contains("only regular files are supported")
+        );
+        let _ = tx.send(refused);
+    });
+    let refused = rx.recv_timeout(Duration::from_secs(5));
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(refused, Ok(true), "a FIFO must be rejected before opening can block");
+    worker.join().unwrap();
+}
+
+#[test]
 fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-write-order-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -2208,6 +2234,16 @@ fn a_late_cranelift_compile_never_replaces_another_components_code() {
     assert_eq!((cached.tier, Arc::ptr_eq(&cached.bytes, &second)), (Tier::Baseline, true));
 }
 #[test]
+fn preparation_is_reported_only_for_an_uncached_component() {
+    let bytes = importer_component();
+    let mut preparations = 0;
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+}
+
+#[test]
 fn a_component_winch_refuses_is_compiled_with_cranelift_and_runs() {
     // Relaxed SIMD is one of the proposals Wasmtime's Winch does not compile.
     let code = "call $box v128.const i64x2 0 0 v128.const i64x2 0 0 v128.const i64x2 0 0 f32x4.relaxed_madd drop";
@@ -3007,4 +3043,33 @@ fn a_cache_hit_loads_cranelift_code_without_compiling_with_winch() {
     std::fs::remove_dir_all(folder).unwrap();
     // Best effort: Wasmtime's cache worker may still be writing here.
     let _ = std::fs::remove_dir_all(root.parent().unwrap());
+}
+
+/// #23498: a component whose inner instances each have their own memory makes Wasmtime write an
+/// adapter over two memories, which it panics on with multi-memory off: refused instead.
+#[test]
+fn a_component_needing_multi_memory_is_refused_plainly() {
+    let bytes = wat::parse_str(
+        r#"(component
+          (component $a
+            (core module $m
+              (memory (export "mem") 1)
+              (func (export "realloc") (param i32 i32 i32 i32) (result i32) i32.const 0)
+              (func (export "take") (param i32 i32)))
+            (core instance $i (instantiate $m))
+            (func (export "take") (param "s" string)
+              (canon lift (core func $i "take") (memory (core memory $i "mem")) (realloc (core func $i "realloc")))))
+          (component $b
+            (import "take" (func $take (param "s" string)))
+            (core module $m (memory (export "mem") 1))
+            (core instance $mi (instantiate $m))
+            (core func $low (canon lower (func $take) (memory (core memory $mi "mem"))))
+            (core module $user (import "d" "take" (func (param i32 i32))))
+            (core instance (instantiate $user (with "d" (instance (export "take" (func $low)))))))
+          (instance $ai (instantiate $a))
+          (instance (instantiate $b (with "take" (func $ai "take")))))"#,
+    )
+    .unwrap();
+    let error = compile_with(&bytes, 512 * 1024, Tier::Optimized).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("multi-memory"), "{error}");
 }
