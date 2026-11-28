@@ -629,6 +629,153 @@ mod tests {
         rounded_box_outline(1000., 1.);
     }
 
+    /// The index of the edge of `b` through `p` and of its vertex at `q`, in the lists the blend
+    /// operations read.
+    fn edge_and_vertex(b: &crate::Body, p: [f64; 3], q: [f64; 3]) -> (usize, usize) {
+        use solidcore::geom::vector3d::Point3;
+        use solidcore::query::api_queries::{edge_closest_point, vertex_get_point};
+
+        let k = solidcore::kernel::Kernel::default();
+        let body = b.lock();
+        let (p, q) = (Point3::new(p[0], p[1], p[2]), Point3::new(q[0], q[1], q[2]));
+        let edge = body
+            .edge_list()
+            .iter()
+            .position(|&e| {
+                edge_closest_point(&k, &body, e, p).is_ok_and(|c| c.closest.distance < 1e-9)
+            })
+            .unwrap();
+        let vertex = body
+            .vertex_list()
+            .iter()
+            .position(|&v| vertex_get_point(&body, v).is_ok_and(|x| x.distance(q) < 1e-9))
+            .unwrap_or(usize::MAX);
+        (edge, vertex)
+    }
+
+    /// `b`'s record and its one blend face.
+    fn one_blend(b: &crate::Body) -> (Brep, usize) {
+        let (rec, _) = b.to_record().unwrap();
+        let faces: Vec<usize> = (0..rec.faces.len())
+            .filter(|&i| matches!(rec.faces[i].surface, Surface::Blend { .. }))
+            .collect();
+        assert_eq!(faces.len(), 1, "one round");
+        (rec, faces[0])
+    }
+
+    /// The 10 x 20 x 30 block at the origin with its edge x = 10, z = 30 rounded from radius 2 at
+    /// y = 0 to 5 at y = 20 (`tests/blend.rs`): a procedural blend.
+    fn variable_round() -> (Brep, usize) {
+        crate::session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied())
+            .unwrap();
+        let b = crate::body::make_box([0.; 3], [10., 20., 30.]).unwrap();
+        let (edge, start) = edge_and_vertex(&b, [10., 10., 30.], [10., 0., 30.]);
+        crate::blend::fillet_variable(&b, edge, start, 1, &[0., 0., 1., 1.], &[2., 5.]).unwrap();
+        one_blend(&b)
+    }
+
+    /// The certified bound of face `face`'s net from its definition, as `face_surface` rebuilds
+    /// and certifies it; it is the bound the record states.
+    fn certified_bound(rec: &Brep, face: usize) -> f64 {
+        use solidcore_record::brep::blend::BlendDefinition;
+        let crate::face_surface::Exact::Blend { bound } =
+            *crate::face_surface::FaceSurface::of(rec, face)
+                .unwrap()
+                .exact()
+        else {
+            panic!("face {face} is not a procedural blend");
+        };
+        let Surface::Blend { definition } = &rec.faces[face].surface else {
+            panic!("face {face} is not a blend");
+        };
+        let BlendDefinition::Procedural(d) = definition.as_ref() else {
+            panic!("face {face} is not a procedural blend");
+        };
+        assert_eq!(
+            bound, d.bound,
+            "the bound certified again is the one stated"
+        );
+        bound
+    }
+
+    /// A variable round between two planes at right angles has a cone for its net (its radius
+    /// grows linearly along a straight edge), which hidden lines recognise and draw as that cone.
+    /// The round itself is its definition, within the net's certified bound ε of it (3e-6
+    /// here): seen across the round, its outline stands for the round within ε, bounded, not
+    /// analytic, alone and in a drawing.
+    #[test]
+    fn a_variable_rounds_outline_is_bounded_by_its_nets_certified_distance() {
+        let (rec, face) = variable_round();
+        let eps = certified_bound(&rec, face);
+        assert!(eps > 0. && eps.is_finite(), "ε {eps}");
+        let opts = Options::default();
+        let def = prepare(&rec, &opts).unwrap();
+        assert_eq!(def.report.surfaces.get("cone"), Some(&1));
+        let view = View::new(Vec3::new(1., 0.2, -1.), Vec3::new(0., 0., 1.)).unwrap();
+        let p = Placement {
+            body: 0,
+            rotation: [
+                Vec3::new(1., 0., 0.),
+                Vec3::new(0., 1., 0.),
+                Vec3::new(0., 0., 1.),
+            ],
+            translation: Vec3::new(0., 0., 0.),
+        };
+        let bounded = CurveAccuracy::Bounded {
+            max_deviation_mm: eps,
+        };
+        let alone: Vec<CurveAccuracy> = silhouettes(&def, &p, &view, &opts)
+            .unwrap()
+            .into_iter()
+            .filter(|s| s.face == face)
+            .map(|s| s.accuracy)
+            .collect();
+        assert!(!alone.is_empty(), "the round has an outline in this view");
+        assert!(alone.iter().all(|a| *a == bounded), "{alone:?}");
+        let d = hidden_lines(&[def], &[p], &view, &opts, &|| false).unwrap();
+        let drawn: Vec<CurveAccuracy> = d
+            .lines
+            .iter()
+            .filter(|l| l.source == Source::Silhouette { face })
+            .flat_map(|l| l.pieces.iter().map(|p| p.accuracy))
+            .collect();
+        assert!(!drawn.is_empty(), "the round's outline is drawn");
+        assert!(drawn.iter().all(|a| *a == bounded), "{drawn:?}");
+    }
+
+    /// A variable round's record with its net damaged, a middle control point moved 0.5 along
+    /// x: its definition no longer certifies the net, so loading the record refuses the face
+    /// (`face_surface`'s `DefinitionNotCertified`, as the kernel's own load), and hidden lines
+    /// refuse it as an invalid record instead of drawing the damaged net as the round.
+    #[test]
+    fn a_blend_face_whose_net_its_definition_does_not_certify_is_refused() {
+        let (mut rec, face) = variable_round();
+        match rec.faces[face].nurbs.as_mut().unwrap() {
+            Surface::Spline { points, .. } => {
+                let row = points.len() / 2;
+                let col = points[row].len() / 2;
+                points[row][col][0] += 0.5;
+            }
+            Surface::RationalSpline { homogeneous, .. } => {
+                let row = homogeneous.len() / 2;
+                let col = homogeneous[row].len() / 2;
+                let h = &mut homogeneous[row][col];
+                h[0] += 0.5 * h[3];
+            }
+            other => panic!("a blend's net is a NURBS surface: {other:?}"),
+        }
+        assert!(matches!(
+            crate::face_surface::FaceSurface::of(&rec, face),
+            Err(crate::Error::DefinitionNotCertified { .. })
+        ));
+        assert!(matches!(
+            prepare(&rec, &Options::default()),
+            Err(HlrError::Invalid(
+                "a blend face whose net its definition does not certify"
+            ))
+        ));
+    }
+
     /// A deviation scales with the curve; an analytic curve stays analytic and a sampled zero
     /// stays sampled.
     #[test]
