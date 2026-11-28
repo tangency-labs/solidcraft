@@ -626,7 +626,9 @@ fn whole_body_overlap_contradicted(
         return None;
     }
     let outer_classes = outer.classify_points(&interior).ok()?;
-    if outer_classes.iter().all(|&c| c == solidcraft_kernel::PointClass::Outside) {
+    let all_outside = outer_classes.iter().all(|&c| c == solidcraft_kernel::PointClass::Outside);
+    let exact_whole_with_outside_interior = volume >= smaller_vol * (1.0 - 1e-4) && outer_classes.contains(&solidcraft_kernel::PointClass::Outside);
+    if all_outside || exact_whole_with_outside_interior {
         return Some(
             "not checked: the shared part equals the whole smaller body, yet its interior points classify outside the other body; the boolean misread this pair"
                 .into(),

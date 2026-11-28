@@ -742,3 +742,35 @@ fn whole_body_overlap_contradicted_rejects_pocket_seated_disk_and_accepts_embedd
     assert_eq!(super::impossible_overlap(&disk_mass, disk, solid_block), None);
     assert_eq!(super::unchecked_overlap_invalid(&disk_mass, disk, solid_block), None);
 }
+
+/// Whole-body overlap verification also rejects a fabricated 100%-volume overlap when the smaller
+/// body lies inside the larger body's bounding box and partially overlaps it (e.g. a screw whose
+/// shank overlaps a tapped hole while its head sits in an empty counterbore pocket): some interior
+/// points are `Inside` and others are strictly `Outside`, proving the shared part cannot equal
+/// 100% of the screw.
+#[test]
+fn whole_body_overlap_contradicted_rejects_partial_overlap_claiming_entire_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 16, "corner": [-20, -20, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 2.1, "height": 16, "base": [0, 0, 0], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6.0, "height": 6, "base": [0, 0, 10], "operation": "cut", "targets": ["Plate"]}));
+    // Screw inside Plate's bbox: shank Ø5 (overlaps Ø4.2 tap inside z = 2..10) + head Ø8.5 in empty counterbore (z = 10..15).
+    run(&mut s, "solid.cylinder", json!({"radius": 2.5, "height": 8, "base": [0, 0, 2], "operation": "new", "body_name": "Screw"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4.25, "height": 5, "base": [0, 0, 10], "operation": "join", "targets": ["Screw"]}));
+
+    let st = s.world_state().unwrap();
+    let plate = &st.body("Plate").unwrap().body;
+    let screw = &st.body("Screw").unwrap().body;
+    let screw_mass = solidcraft_kernel::measure_mass(screw).unwrap();
+
+    // Fabricated 100% whole-screw overlap is caught by interior-point verification (bbox fits inside Plate).
+    let rejected = super::impossible_overlap(&screw_mass, screw, plate);
+    assert!(rejected.as_deref().is_some_and(|r| r.contains("interior points classify outside")), "{rejected:?}");
+    let rejected_swapped = super::impossible_overlap(&screw_mass, plate, screw);
+    assert!(rejected_swapped.as_deref().is_some_and(|r| r.contains("interior points classify outside")), "{rejected_swapped:?}");
+
+    // Genuine partial thread overlap (~15% of screw volume) is accepted untouched.
+    let mut partial_mass = screw_mass.clone();
+    partial_mass.volume = screw_mass.volume * 0.15;
+    assert_eq!(super::impossible_overlap(&partial_mass, screw, plate), None);
+}
