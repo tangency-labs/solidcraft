@@ -3228,6 +3228,29 @@ fn a_second_taper_needs_a_second_side() {
     assert!(e.contains("`taper2` goes with `distance2`"), "{e}");
 }
 
+/// A second side that runs Through All or To Object (#18691) takes no taper yet: a taper on the
+/// first side (which the second would take) or one of its own is refused, by name, and the
+/// design keeps no half-built feature.
+#[test]
+fn a_taper_with_the_second_side_through_all_or_to_object_is_refused() {
+    for second in [json!({"through_all2":true}), json!({"to2":[0,0,-20]})] {
+        for tapers in [json!({"taper":"6 deg"}), json!({"taper":"6 deg","taper2":"3 deg"}), json!({"taper":"0 deg","taper2":"3 deg"})] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length":40,"width":40,"height":40,"corner":[-20,-20,-20],"body_name":"Box"}));
+            run(&mut s, "sketch.create", json!({"plane":"XY","name":"Hole"}));
+            run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":5}));
+            run(&mut s, "sketch.finish", json!({}));
+            let before = s.doc.to_json();
+            let mut p = json!({"sketch":"Hole","distance":"5 mm","operation":"cut","targets":["Box"]});
+            p.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+            p.as_object_mut().unwrap().extend(tapers.as_object().unwrap().clone());
+            let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
+            assert!(e.contains("a taper with the second side Through All or To Object"), "{second} {tapers}: {e}");
+            assert_eq!(s.doc.to_json(), before, "{second} {tapers}: the design is unchanged");
+        }
+    }
+}
+
 /// A drafted pocket that starts above its sketch plane, cut into a body three booleans deep:
 /// its rim lies on a face bounded by an intersection curve, not by straight lines. The tool
 /// lies wholly in material, so the cut removes exactly the frustum over its profile.

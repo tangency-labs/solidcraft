@@ -12800,6 +12800,15 @@ fn feature_tools_with_constructor(
             // side's taper (`taper2`, Two Sides only) is the first's when absent, as the two
             // halves of a symmetric extrude both take `taper`.
             let taper = extent.taper.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?.unwrap_or(0.0);
+            // A second side that runs Through All or To Object (#18691) takes no taper yet: the
+            // tapered path ends each side at a distance. Refused, whichever taper would reach it
+            // (`taper2`, or `taper` standing in for it), so neither is dropped without a word.
+            let taper_given = taper != 0.0 || extent.taper2.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?.is_some_and(|t| t != 0.0);
+            if taper_given && (extent.through_all2 || extent.to2.is_some()) {
+                return Err(DocError::Invalid(
+                    "not supported yet: a taper with the second side Through All or To Object; give the second side a Distance, or leave out the taper".into(),
+                ));
+            }
             let taper2 = match (&extent.taper2, &extent.distance2) {
                 (Some(_), None) => return Err(DocError::Invalid("`taper2` goes with `distance2` (the second side's taper)".into())),
                 (Some(e), Some(_)) => val(vals, e, Kind::Angle)?,

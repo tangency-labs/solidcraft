@@ -7510,7 +7510,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 if *taper_present || tapered {
                     common["taper"] = json!(taper);
                 }
-                if two_sided(*direction) && !taper2.trim().is_empty() {
+                // Taper Angle 2 is for a Distance second side only (hidden for All and To Object,
+                // which the build refuses a taper with), so text left in it is not sent there.
+                if two_sided(*direction) && !*all2 && !object_on(&d.inputs, TO_OBJECT2) && !taper2.trim().is_empty() {
                     common["taper2"] = json!(taper2);
                 }
             }

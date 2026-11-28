@@ -935,6 +935,28 @@ fn two_sides_second_side_has_its_own_extent_type() {
     }
 }
 
+/// Taper Angle 2 is a Distance second side's: with the second side All or To Object it is hidden,
+/// and text left in it is not sent (the build refuses a taper there, #22420).
+#[test]
+fn taper_angle_2_is_hidden_and_not_sent_for_an_all_or_to_object_second_side() {
+    for second in [json!({"through_all2":true}), json!({"to2":[5,5,-20]})] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,-30],"body_name":"Floor"})).unwrap();
+        let mut params = json!({"distance":"5 mm","distance2":"3 mm","operation":"join","targets":["Floor"]});
+        params.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        let mut h = make_in(h, params);
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Taper Angle").is_some(), "{second}: the first side's taper row stays");
+        assert!(h.widget("ui.taper_angle_2").is_none() && h.widget("Taper Angle 2").is_none(), "{second}: Taper Angle 2 is hidden");
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { taper2, .. }, .. }) = &mut h.app.dialog else { panic!("extrude") };
+        *taper2 = "3 deg".into();
+        let (_, p) = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+        assert!(p.get("taper2").is_none(), "{second}: {p}");
+    }
+}
+
 /// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
 /// `-` typed first can be finished there.
 #[test]
