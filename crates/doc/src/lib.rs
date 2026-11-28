@@ -236,6 +236,9 @@ pub use eval::hole_start;
 pub use eval::import_body_names;
 pub use eval::join_pieces_added;
 pub use eval::keep_one_sided_direction;
+pub use eval::living_hinge::HingeReport;
+pub use eval::living_hinge::MAX_CUT_SLOTS;
+pub use eval::living_hinge::SLOW_CUT_SLOTS;
 pub use eval::map_wire;
 pub use eval::metric_thread_sizes;
 pub use eval::object_height;
@@ -457,6 +460,8 @@ mod coil_tests;
 mod drafting_profile_tests;
 #[cfg(test)]
 mod feature_walk_tests;
+#[cfg(test)]
+mod living_hinge_tests;
 #[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]

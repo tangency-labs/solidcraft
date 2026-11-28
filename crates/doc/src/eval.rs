@@ -1193,6 +1193,11 @@ impl ModelState {
         self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
     }
 
+    /// What living hinge `feature` cut: its slots, rows and the slots it left out.
+    pub fn living_hinge_report(&self, feature: u64) -> Option<&living_hinge::HingeReport> {
+        self.living_hinges.get(&feature)
+    }
+
     /// Each edge fillet `feature` tapered (a point on it) with the radius spline it was given.
     pub fn tapered(&self, feature: u64) -> Option<&[(Vec3, kernel::Taper)]> {
         self.tapered.get(&feature).map(Vec::as_slice)
@@ -1316,6 +1321,8 @@ pub struct ModelState {
     /// feature id), so the session keeps the names stored for their copies in their places
     /// ([`crate::Feature::pattern_pins`]).
     pattern_left_out: BTreeMap<u64, Vec<usize>>,
+    /// What each living hinge cut (by feature id), for its result.
+    living_hinges: BTreeMap<u64, living_hinge::HingeReport>,
     /// For a feature saved before format 14 that split a body, a digest of the later features'
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
@@ -1391,6 +1398,7 @@ impl ModelState {
             pattern_left_out,
             legacy_picks,
             cut_extents,
+            living_hinges,
             dogbones,
         } = self;
         ModelState {
@@ -1414,6 +1422,7 @@ impl ModelState {
             pattern_left_out: pattern_left_out.clone(),
             legacy_picks: legacy_picks.clone(),
             cut_extents: cut_extents.clone(),
+            living_hinges: living_hinges.clone(),
             dogbones: dogbones.clone(),
         }
     }
@@ -4239,6 +4248,8 @@ struct ModelChange {
     kept_separate: Option<KeptSeparate>,
     /// A body Pattern's sources it left out.
     pattern_left_out: Option<Vec<usize>>,
+    /// A living hinge's report.
+    living_hinge: Option<living_hinge::HingeReport>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
     /// Cosmetic threads appended by this feature (`t.feature == feature`), in order.
@@ -4600,6 +4611,7 @@ impl ModelState {
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
             && others_same(&self.pattern_left_out, &before.pattern_left_out, feature)
+            && others_same(&self.living_hinges, &before.living_hinges, feature)
             && others_same(&self.named_faces, &before.named_faces, feature);
         if !same_rest {
             return None;
@@ -4664,6 +4676,7 @@ impl ModelState {
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
             pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
+            living_hinge: self.living_hinges.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
             added_threads: Arc::from(added_threads.to_vec()),
             clear_of: Arc::from(clear_boxes),
@@ -4786,6 +4799,10 @@ impl ModelState {
         next.pattern_left_out.remove(&feature);
         if let Some(l) = &change.pattern_left_out {
             next.pattern_left_out.insert(feature, l.clone());
+        }
+        next.living_hinges.remove(&feature);
+        if let Some(r) = &change.living_hinge {
+            next.living_hinges.insert(feature, r.clone());
         }
         next.named_faces.remove(&feature);
         if let Some(p) = &change.named_faces {
@@ -14785,6 +14802,7 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
             },
             crate::plain(targets),
         ),
+        FeatureKind::LivingHinge { targets, .. } => (Operation::Cut, crate::plain(targets)),
         FeatureKind::Rib { .. } => (Operation::Join, Vec::new()),
         _ => (Operation::NewBody, Vec::new()),
     }
@@ -17681,6 +17699,8 @@ pub use model_cache::{PendingChecks, SavedModel};
 pub mod cell_grid;
 #[path = "eval_frame.rs"]
 pub(crate) mod frame_member;
+#[path = "eval_living_hinge.rs"]
+pub mod living_hinge;
 #[path = "eval_release.rs"]
 mod release;
 #[path = "eval_shaft_spline.rs"]
@@ -19318,6 +19338,17 @@ fn eval_feature_kind(
                 && st.bodies.len() == before.len()
                 && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body))
             {
+                append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
+            }
+            Ok(())
+        }
+        FeatureKind::LivingHinge { targets, .. } => {
+            let (tools, report) = living_hinge::tools(doc, vals, f, st, warning)?;
+            // An area beside the plate's material changes nothing: say so, as a cut does.
+            let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
+            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
+            st.living_hinges.insert(f.id, report);
+            if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
                 append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
             }
             Ok(())
@@ -21299,6 +21330,7 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
         | FeatureKind::Pipe { operation, .. }
         | FeatureKind::Coil { operation, .. } => *operation != Operation::NewBody,
         FeatureKind::CellGrid { .. } => true,
+        FeatureKind::LivingHinge { .. } => true,
         _ => false,
     }
 }

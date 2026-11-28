@@ -236,6 +236,23 @@ pub(crate) fn tools(
     Ok(packed)
 }
 
+/// One cutting tool from `regions` lying apart on `plane`: every region a prism from `lo` to `hi`
+/// along the plane's normal, joined into one body. Used by Living Hinge.
+pub(crate) fn prism_tool(plane: &Plane, regions: &[Region2], lo: f64, hi: f64) -> Result<Vec<Traced>> {
+    extrude_within_reach([lo, hi])?;
+    let mut tools: Vec<Traced> = Vec::new();
+    for region in regions {
+        tools.extend(centered_extrude(plane, region, lo, hi, None, None, CapRoles::ByHeight, None)?);
+    }
+    if tools.len() > 1 {
+        let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
+        if let Some(one) = kernel::join_apart(&bodies)? {
+            return Ok(vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())]);
+        }
+    }
+    Ok(tools)
+}
+
 /// The cell tools in groups that meet the same target bodies (each group in the order of the
 /// cells). With fewer than two target bodies there is nothing to tell apart: one group. Exact
 /// contact, as the join itself decides which bodies a tool joins.
@@ -267,7 +284,7 @@ fn group_by_targets(tools: Vec<Traced>, shown: &ModelState, scope: &[String]) ->
 /// How far from the sketch plane the bodies named in `scope` reach, with a margin: the distance a
 /// through-all cell must go on either side to leave nothing. From each body's exact bounds, not
 /// from its display mesh.
-fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> {
+pub(crate) fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> {
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| scope.contains(&b.name)) {

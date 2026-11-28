@@ -595,6 +595,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            LivingHinge(crate::dialogs_living_hinge::LivingHinge),
             /// Weld tool (`dialogs_weld`).
             Weld(Box<crate::dialogs_weld::WeldDialog>),
             /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
@@ -1509,6 +1510,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_shaft_spline::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_living_hinge::start(app, id))
                     .or_else(|| crate::dialogs_weld::start(app, id))
                     .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_cell_grid::start(app, id))
@@ -1842,6 +1844,7 @@ impl Dialog {
             | Kind::FramePlate(_)
             | Kind::FrameTrim(_)
             | Kind::Gusset(_) => return true,
+            Kind::LivingHinge(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             Kind::Pulley(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
@@ -3706,6 +3709,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::LivingHinge(_) => "ui.living_hinge_title",
         Kind::Weld(_) => "cmd.weld.create",
         Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::CellGrid(_) => "ui.cell_grid_title",
@@ -6052,6 +6056,7 @@ fn rememberable(kind: &Kind) -> bool {
             )
             | Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::LivingHinge(_)
             | Kind::Dogbone(_)
             | Kind::CellGrid(_)
     )
@@ -8841,6 +8846,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::LivingHinge(k) => return crate::dialogs_living_hinge::commands(app, k, &d.inputs, &d.extra),
         Kind::Weld(k) => return crate::dialogs_weld::params(k).map(|p| vec![("weld.create".into(), p)]),
         Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::CellGrid(k) => return crate::dialogs_cell_grid::commands(app, k, &d.inputs, &d.extra),
@@ -11328,6 +11334,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
+                .or_else(|| crate::dialogs_living_hinge::for_feature(app, other))
                 .or_else(|| crate::dialogs_dogbone::for_feature(app, &f))
                 .or_else(|| crate::dialogs_cell_grid::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))

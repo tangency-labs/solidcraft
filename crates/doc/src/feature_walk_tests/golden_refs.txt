@@ -158,6 +158,10 @@ cell_grid
   sketches: [1]
   remap_refs: sketch
   remap_bodies: targets[0]
+living_hinge
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: targets[0]
 sheet_base
   sketches: [1]
   remap_refs: sketch

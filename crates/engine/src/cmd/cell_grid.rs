@@ -8,6 +8,7 @@ use solidcraft_doc::{BodyName, CELL_GRID_MAX_SIDES, CELL_GRID_MIN_SIZE, CellGrid
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, default_extrude_profiles, feature_sketch, point_param, profiles, sketch_key};
+use super::help_text::help_with_cap;
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list};
 use crate::schema::cell_grid::CellGridParams;
 use crate::schema::features::FeatureResult;
@@ -18,48 +19,8 @@ const CELL_GRID_CONTRACT: TypedContract<CellGridParams> = TypedContract::new();
 
 const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter; not with shape sketch); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon|sketch (default hexagon; sketch repeats the one closed profile of the sketch cell_sketch, on a lattice: it needs cell_sketch, pitch_x and pitch_y, ignores size, sides and dot_grid, and clip defaults to whole, snap is refused); cell_sketch?: id|name (shape sketch: the sketch holding the cell, exactly one closed profile without holes); pitch_x?, pitch_y?: expr (shape sketch: the distance between cell origins along a row, and between rows, at least 0.001 mm; a cell that overlaps a neighbour or comes nearer than web is refused); stagger?: expr (shape sketch: how far each row shifts along the row as a fraction of pitch_x, 0 to 1, default 0; 0.5 gives hexagonal and brick layouts); cell_angle?: expr (shape sketch: the cell's turn about its own origin, apart from angle, which turns the whole grid; default 0); flip?: bool (shape sketch: mirror every other cell, those with row plus column odd, in the vertical axis through its origin; default false); cell_origin?: [x,y] (shape sketch: the cell's origin in the cell sketch's own coordinates, the point at each lattice point; default the profile's centroid, anchor is where cell (0,0)'s origin sits); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap, whole with shape sketch); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut|raised (default cut; raised adds the cells as material standing `depth` from the sketch plane in `direction`, joined to the targets, or a new body if there is none; not with through_all; the sketch plane is where they stand, so the sketch on the face they rise from and direction away from the body); name?. Cuts or raises at most ";
 const HELP_TAIL: &str = " cells in one operation; not for sheet metal (use sheet.perforate). The faces cut have no stable names yet";
-const HELP_LEN: usize = HELP_HEAD.len() + decimal_len(MAX_CUT_CELLS) + HELP_TAIL.len();
-const HELP_BYTES: [u8; HELP_LEN] = help_bytes();
 /// The parameter help, with the cap read from [`MAX_CUT_CELLS`] so the text cannot drift from the limit.
-const HELP: &str = match std::str::from_utf8(&HELP_BYTES) {
-    Ok(h) => h,
-    Err(_) => HELP_HEAD,
-};
-
-const fn decimal_len(mut n: usize) -> usize {
-    let mut len = 1;
-    while n >= 10 {
-        n /= 10;
-        len += 1;
-    }
-    len
-}
-
-const fn help_bytes() -> [u8; HELP_LEN] {
-    let mut out = [0u8; HELP_LEN];
-    let mut at = 0;
-    let mut i = 0;
-    while i < HELP_HEAD.len() {
-        out[at] = HELP_HEAD.as_bytes()[i];
-        at += 1;
-        i += 1;
-    }
-    let mut n = MAX_CUT_CELLS;
-    let mut d = decimal_len(n);
-    while d > 0 {
-        d -= 1;
-        out[at + d] = b'0' + (n % 10) as u8;
-        n /= 10;
-    }
-    at += decimal_len(MAX_CUT_CELLS);
-    let mut i = 0;
-    while i < HELP_TAIL.len() {
-        out[at] = HELP_TAIL.as_bytes()[i];
-        at += 1;
-        i += 1;
-    }
-    out
-}
+const HELP: &str = help_with_cap!(HELP_HEAD, MAX_CUT_CELLS, HELP_TAIL);
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.cell_grid", "Cell Grid", crate::checked!("solid.cell_grid", cell_grid))
     .begins_edit()

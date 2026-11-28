@@ -160,6 +160,9 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// The reply of a previewed Living Hinge (`slots`, `rows`, `cut_length_mm`, ...): the dialog's
+    /// report lines.
+    pub report: Option<serde_json::Value>,
     /// Source-rim pairs offered by the evaluated flange command.
     pub flange_corners: Vec<[solidcraft_engine::doc::SheetEdgeName; 2]>,
     /// Current mesh faces for those source-rim pairs.
@@ -292,6 +295,9 @@ pub struct PreviewState {
     pub stopped: Option<serde_json::Value>,
     /// The reply of a previewed assembly constraint (see [`Built::placed`]).
     pub placed: Option<serde_json::Value>,
+    /// The reply of a previewed Living Hinge (see [`Built::report`]); the last good one stays while
+    /// the next computes.
+    pub report: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     /// Whether the previewed Mirror's copy meets its body (see [`Built::mirror_meets`]).
@@ -455,6 +461,7 @@ impl PreviewState {
         self.applied = None;
         self.stopped = None;
         self.placed = None;
+        self.report = None;
         self.tapered.clear();
         self.mirror_meets = None;
         self.mirror_decided = None;
@@ -548,6 +555,7 @@ impl PreviewState {
                 self.applied = b.applied;
                 self.stopped = b.stopped;
                 self.placed = b.placed;
+                self.report = b.report;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
                 self.points = b.points;
@@ -593,6 +601,7 @@ impl PreviewState {
                 self.applied = None;
                 self.stopped = None;
                 self.placed = None;
+                self.report = None;
                 self.tapered.clear();
                 self.mirror_meets = None;
                 self.mirror_decided = None;
@@ -1101,6 +1110,11 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let warnings: Vec<&str> = p.replies.iter().filter_map(|r| r.get("warning").and_then(Value::as_str)).filter(|w| !w.is_empty()).collect();
             b.warning = (!warnings.is_empty()).then(|| warnings.join(" "));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.report = cmds
+                .iter()
+                .zip(&p.replies)
+                .find(|((c, p), _)| c == "solid.living_hinge" || p.get("command").and_then(Value::as_str) == Some("solid.living_hinge"))
+                .map(|(_, r)| r.clone());
             b.centrelines = crate::dialogs_frame::centrelines(&p);
             if let Some((command, params)) = cmds.first() {
                 let editing = if command == "timeline.redefine" { params.get("feature").and_then(Value::as_u64) } else { None };
@@ -1302,6 +1316,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        report: None,
         flange_corners: Vec::new(),
         flange_faces: Vec::new(),
         layer: None,
@@ -1361,6 +1376,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        report: None,
         flange_corners: Vec::new(),
         flange_faces: Vec::new(),
         layer: None,
@@ -1685,6 +1701,7 @@ fn build_scene(
         mirror_meets: None,
         points,
         placed: None,
+        report: None,
         flange_corners: Vec::new(),
         flange_faces: Vec::new(),
         layer: None,
@@ -2166,6 +2183,7 @@ mod tests {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            report: None,
             flange_corners: Vec::new(),
             flange_faces: Vec::new(),
             layer: None,

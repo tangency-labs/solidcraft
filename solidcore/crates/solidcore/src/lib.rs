@@ -60,6 +60,7 @@ pub mod geom;
 pub mod heal;
 pub mod hlr;
 pub mod intersect;
+pub mod living_hinge;
 pub mod mass;
 pub mod mesh_reduce;
 pub mod nurbs;

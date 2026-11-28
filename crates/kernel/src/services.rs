@@ -19,6 +19,7 @@ pub use solidcore_ops::Error;
 pub use solidcore_ops::constraint;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::finger_joint;
+pub use solidcore_ops::living_hinge;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
 pub use solidcore_ops::morph;

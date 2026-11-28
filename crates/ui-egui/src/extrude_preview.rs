@@ -166,6 +166,7 @@ impl StraightPreview {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            report: None,
             centrelines: Vec::new(),
             tapered: Vec::new(),
             flange_corners: Vec::new(),

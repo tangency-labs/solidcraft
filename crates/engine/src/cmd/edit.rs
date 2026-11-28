@@ -250,7 +250,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(crate::schema::output_schema_for::<TimelineInspectResult>)
         .params(
         "group: folder id → group, name, parent, features, joints; or feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
-         inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
+         inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning, \
+         report? (what the last build counted, for features that keep it: Living Hinge's slots to band_width_mm)",
     ),
     CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).any_part().icon("select")
         .noundo()
@@ -1693,6 +1694,15 @@ fn heavy_fields(kind: &FeatureKind) -> &'static [(&'static str, &'static str)] {
     }
 }
 
+/// The report a feature keeps of its last build, as `timeline.inspect`'s `report`; `None` for
+/// kinds that keep none.
+fn feature_report(s: &Session, kind: &FeatureKind, id: u64) -> Option<Value> {
+    match kind {
+        FeatureKind::LivingHinge { .. } => super::living_hinge::report(s, id).map(Value::Object),
+        _ => None,
+    }
+}
+
 fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.inspect";
     if p.get("group").is_some() {
@@ -1749,6 +1759,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         error: r.and_then(|r| r.error.clone()),
         error_code: r.and_then(|r| r.error_code.as_ref()).map(Into::into),
         warning: r.and_then(|r| r.warning.clone()),
+        report: feature_report(s, &f.kind, id),
     };
     reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
 }
@@ -3283,6 +3294,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .chain(super::features_more::COMMANDS)
         .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
+        .chain(super::living_hinge::COMMANDS)
         .chain(super::shaft_spline::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)

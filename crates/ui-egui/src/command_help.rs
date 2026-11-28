@@ -309,6 +309,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.fillet",
     "solid.finger_joint",
     "solid.hole",
+    "solid.living_hinge",
     "solid.loft",
     "solid.mirror",
     "solid.move",

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Living Hinge</title>
+  <path d="M6 30L32 45.01L32 49.01L6 34Z" fill="#b8c3cf"/>
+  <path d="M58 30L32 45.01L32 49.01L58 34Z" fill="#8e9faf"/>
+  <path d="M32 14.99L58 30L32 45.01L6 30Z" fill="#e2e8ef"/>
+  <path d="M32 14.99L58 30L58 34L32 49.01L6 34L6 30Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 30L32 45.01L58 30" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 45.01L32 49.01" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.87 20.49L48.47 29.5L45 31.5L29.4 22.49Z" fill="#236ead"/>
+  <path d="M32.87 20.49L48.47 29.5L45 31.5L29.4 22.49Z" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.9 22.74L31.57 27.75L28.1 29.75L19.43 24.74Z" fill="#236ead"/>
+  <path d="M22.9 22.74L31.57 27.75L28.1 29.75L19.43 24.74Z" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M35.9 30.25L44.57 35.25L41.1 37.25L32.43 32.25Z" fill="#236ead"/>
+  <path d="M35.9 30.25L44.57 35.25L41.1 37.25L32.43 32.25Z" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19 28.5L34.6 37.5L31.13 39.51L15.53 30.5Z" fill="#236ead"/>
+  <path d="M19 28.5L34.6 37.5L31.13 39.51L15.53 30.5Z" fill="none" stroke="#34465b" stroke-width="2.04" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
