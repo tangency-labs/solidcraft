@@ -2282,7 +2282,11 @@ fn is_topological_with(
         let Some(kept) = keep else {
             return Ok(out);
         };
-        let was_whole = if kept == face1 { whole_before[0] } else { whole_before[1] };
+        let was_whole = if kept == face1 {
+            whole_before[0]
+        } else {
+            whole_before[1]
+        };
         if !was_whole && k.caches.cover_across_sweeps.get() {
             whole_turn_seam(k, b, e, [face1, face2_], kept)?;
         }
