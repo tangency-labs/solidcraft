@@ -3169,12 +3169,18 @@ fn body(
     let field_errors = dialog.form_guard.as_ref().map(|_| dialog.field_errors(app)).unwrap_or_default();
     let id = dialog.id;
     let plugin = &dialog.plugin;
-    let about = if plugin.description.is_empty() {
-        format!("{} {}", plugin.name, plugin.version)
-    } else {
-        format!("{} {} · {}", plugin.name, plugin.version, plugin.description)
-    };
-    ui_kit::text(ui, &about, ui_kit::Text::Note("plugin_about"));
+    // What this command is for, when its schema says so; the plugin's own name, version and
+    // description belong in Preferences › Plugins, not above every form (#23388).
+    let purpose = plugin
+        .entries
+        .iter()
+        .find(|entry| entry.name == dialog.entry)
+        .and_then(|entry| entry.input_schema.get("description")?.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    if let Some(purpose) = purpose {
+        ui_kit::text(ui, purpose, ui_kit::Text::Note("entry_description"));
+    }
     let missing = missing_groups(app, plugin);
     let other_design = dialog.session != app.session.uid;
     if other_design {
