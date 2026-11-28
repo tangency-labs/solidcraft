@@ -2690,16 +2690,19 @@ fn twin_sides(sk: &Sketch, corner: usize, twin: usize, la: usize, lb: usize, axi
 /// worked on its own still works.
 fn symmetric_corners(sk: &Sketch, corners: &[Value], cmd: &str) -> Vec<Value> {
     let mut out = corners.to_vec();
-    let mut named: Vec<usize> = corners.iter().filter_map(|q| corner_point(sk, q)).collect();
-    for q in corners {
-        let Some(c) = corner_point(sk, q) else { continue };
-        let Ok((la, lb, _, _, _)) = corner(sk, q, cmd) else { continue };
+    let mut named: std::collections::BTreeSet<usize> = corners.iter().filter_map(|q| corner_point(sk, q)).collect();
+    // Newly found corners may themselves have mirrored copies.
+    let mut next = 0;
+    while let Some(q) = out.get(next).cloned() {
+        next += 1;
+        let Some(c) = corner_point(sk, &q) else { continue };
+        let Ok((la, lb, _, _, _)) = corner(sk, &q, cmd) else { continue };
         for (twin, axis) in symmetric_twins(sk, c) {
             if named.contains(&twin) {
                 continue;
             }
             let Some((a, b)) = twin_sides(sk, c, twin, la, lb, axis) else { continue };
-            named.push(twin);
+            named.insert(twin);
             out.push(json!({ "a": a, "b": b }));
         }
     }
