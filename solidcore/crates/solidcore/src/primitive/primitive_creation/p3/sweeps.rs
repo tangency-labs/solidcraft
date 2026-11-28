@@ -804,16 +804,21 @@ fn axis_crosses_face_inside(
 /// Take `n` the plane's unit normal, `a` the unit axis and `P` the point where the axis
 /// meets the plane. By Rodrigues' formula a turn by `phi` about the axis moves `P + v`,
 /// for `v` in the plane, by `(cos phi - 1) v + sin phi (a x v) + (1 - cos phi) a (a . v)`,
-/// whose component along `n` is `sin phi v . (n x a) + (1 - cos phi)(a . n)(a . v)`. Both
-/// `|v . (n x a)|` and `|a . v|` (`v` is square to `n`) are at most `|n x a| |v|`, and
-/// `|sin phi| + 1 - cos phi` is at most `1 + sqrt 2` for every `phi`, so no point of the
-/// turned face leaves the plane by more than `(1 + sqrt 2) |n x a| R`, with `R` bounding
-/// `|v|` over the face (the distance from `P` to the face's bounding sphere, plus its
-/// radius). A point of the face off the plane by up to the planarity deviation `d` moves
-/// rigidly with its foot in the plane, so it stays within `d` of where the foot goes. The
-/// face is flat for the whole turn when `d + (1 + sqrt 2) |n x a| R` is within the
-/// tolerance. The bound is an upper one: an axis tilted from the normal far enough to
-/// sweep a solid, however thin, beyond the tolerance is never decided flat. An axis close
+/// whose component along `n` is `sin phi v . (n x a) + (1 - cos phi)(a . n)(a . v)`. As
+/// `v` is square to `n`, `a . v = a_t . v` with `a_t = a - (a . n) n`; `n x a` and `a_t`
+/// both lie in the plane, are square to each other and have length `s = |n x a|`, so
+/// `(v . (n x a))^2 + (a_t . v)^2 = s^2 |v|^2`. With `|a . n| <= 1` the lift is at most
+/// `sqrt(sin^2 phi + (1 - cos phi)^2) s |v| = 2 |sin(phi / 2)| s |v| <= 2 s |v|`. The
+/// check uses `(1 + sqrt 2) s R`, with `R` bounding `|v|` over the face (the distance
+/// from `P` to the face's bounding sphere, plus its radius): the bound of the two terms
+/// taken one at a time. It exceeds the exact `2 s R` by the factor `(1 + sqrt 2) / 2`,
+/// about 1.21, and that 21 % margin holds the floating-point rounding of `P`, `R` and the
+/// product, a few units in the last place of numbers no larger than the coordinates.
+/// A point of the face off the plane by up to the planarity deviation `d` moves rigidly
+/// with its foot in the plane, so it stays within `d` of where the foot goes. The face is
+/// flat for the whole turn when `d + (1 + sqrt 2) s R` is within the tolerance. The bound
+/// is an upper one: an axis tilted from the normal far enough to sweep a solid thicker
+/// than the tolerance, however thin, is never decided flat. An axis close
 /// to parallel to the plane meets it far away or nowhere, and is not flat (`false`); a face
 /// that is not planar within its tolerance is not decided here (`false`).
 ///
