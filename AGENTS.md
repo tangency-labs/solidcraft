@@ -56,6 +56,7 @@ Dev: `.agents/skills/` (`.claude/skills` symlink; Windows: Developer Mode, `git 
 | `.agents/skills/solidcraft-agent-tools/SKILL.md` | running the app, MCP |
 | `skills/solidcraft-modeling/SKILL.md` | building a part over MCP |
 | `skills/solidcraft-editing/SKILL.md` | changing an existing design |
+| `skills/solidcraft-plugins/SKILL.md` | plugins |
 | `skills/solidcraft-reporting/SKILL.md` | a bug report |
 | `skills/solidcraft-checking/SKILL.md` | checking, porting, designs in git |
 | `skills/solidcraft-mechanisms/SKILL.md` | assemblies, joints, motion |
