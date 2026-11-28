@@ -1037,6 +1037,16 @@ pub struct OpenParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "linked_bodies_schema")]
     pub linked_bodies: Option<String>,
+    /// For a STEP, IGES, FreeCAD or Rhino file: write each leaf product and assembly node as its
+    /// own `.sc` under `split_folder`, then open the top assembly. Default: false.
+    #[serde(default)]
+    pub split_to_files: Option<bool>,
+    /// With `split_to_files`: folder for the written `.sc` files. Default: the STEP file's directory.
+    #[serde(default)]
+    pub split_folder: Option<String>,
+    /// With `split_to_files`: replace an existing `.sc` at the same path. Default: false.
+    #[serde(default)]
+    pub overwrite: Option<bool>,
     /// For a STEP or IGES file: false recomputes the import without reading or writing the local
     /// saved-model cache. Default: true.
     #[serde(default)]

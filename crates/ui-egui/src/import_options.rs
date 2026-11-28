@@ -326,7 +326,7 @@ mod tests {
         let none = Map::new();
         let step = Values::for_path("part.STEP", &[], &none).expect("STEP imports");
         let params: Vec<&str> = step.fields.iter().map(|f| f.param).collect();
-        assert_eq!(params, ["names"], "the up axis stays with the stand-up offer");
+        assert_eq!(params, ["names", "split_to_files", "split_folder"], "the up axis stays with the stand-up offer");
         assert!(step.params().is_empty(), "untouched, the import is as before");
 
         let mut solids = Map::new();

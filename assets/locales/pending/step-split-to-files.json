@@ -1,0 +1,47 @@
+{
+  "en": {
+    "import_options.folder_for_part_files": "Folder for part files",
+    "import_options.save_as_separate_files": "Save as separate files",
+    "import_options.split_folder_hint": "Same folder as the STEP file"
+  },
+  "pl": {
+    "import_options.folder_for_part_files": "Folder na pliki części",
+    "import_options.save_as_separate_files": "Zapisz jako osobne pliki",
+    "import_options.split_folder_hint": "Ten sam folder co plik STEP"
+  },
+  "de": {
+    "import_options.folder_for_part_files": "Ordner für Teiledateien",
+    "import_options.save_as_separate_files": "Als separate Dateien speichern",
+    "import_options.split_folder_hint": "Gleicher Ordner wie die STEP-Datei"
+  },
+  "ja": {
+    "import_options.folder_for_part_files": "部品ファイルのフォルダー",
+    "import_options.save_as_separate_files": "個別ファイルとして保存",
+    "import_options.split_folder_hint": "STEPファイルと同じフォルダー"
+  },
+  "zh": {
+    "import_options.folder_for_part_files": "零件文件文件夹",
+    "import_options.save_as_separate_files": "保存为单独文件",
+    "import_options.split_folder_hint": "与 STEP 文件相同的文件夹"
+  },
+  "vi": {
+    "import_options.folder_for_part_files": "Thư mục cho tệp chi tiết",
+    "import_options.save_as_separate_files": "Lưu thành các tệp riêng",
+    "import_options.split_folder_hint": "Cùng thư mục với tệp STEP"
+  },
+  "ar": {
+    "import_options.folder_for_part_files": "مجلد ملفات الأجزاء",
+    "import_options.save_as_separate_files": "حفظ كملفات منفصلة",
+    "import_options.split_folder_hint": "نفس مجلد ملف STEP"
+  },
+  "he": {
+    "import_options.folder_for_part_files": "תיקייה לקבצי חלקים",
+    "import_options.save_as_separate_files": "שמירה כקבצים נפרדים",
+    "import_options.split_folder_hint": "אותה תיקייה כמו קובץ ה-STEP"
+  },
+  "ko": {
+    "import_options.folder_for_part_files": "부품 파일 폴더",
+    "import_options.save_as_separate_files": "별도 파일로 저장",
+    "import_options.split_folder_hint": "STEP 파일과 같은 폴더"
+  }
+}
