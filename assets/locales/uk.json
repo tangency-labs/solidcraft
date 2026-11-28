@@ -2801,7 +2801,7 @@
   "keymap.use_anyway": "Усе одно використовувати тут {key}",
   "label.move_to_left_side": "Перемістити ліворуч",
   "label.move_to_right_side": "Перемістити праворуч",
-  "linked_files.other_folders_detail": "Цей проєкт використовує файли з {folders}. Завантажити їх?",
+  "linked_files.other_folders_detail": "Цей проєкт використовує файли з цих папок. Завантажити їх?",
   "linked_files.other_folders_load": "Завантажити",
   "linked_files.other_folders_not_now": "Не зараз",
   "linked_files.other_folders_title": "Пов'язані файли в інших теках",

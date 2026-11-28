@@ -2908,7 +2908,7 @@
   "keymap.use_anyway": "Utiliser quand même {key} ici",
   "label.move_to_left_side": "Déplacer sur le côté gauche",
   "label.move_to_right_side": "Déplacer sur le côté droit",
-  "linked_files.other_folders_detail": "Cette conception utilise des fichiers provenant de {folders}. Voulez-vous les charger ?",
+  "linked_files.other_folders_detail": "Cette conception utilise des fichiers provenant de ces dossiers. Voulez-vous les charger ?",
   "linked_files.other_folders_load": "Charger",
   "linked_files.other_folders_not_now": "Pas maintenant",
   "linked_files.other_folders_title": "Fichiers liés dans d’autres dossiers",

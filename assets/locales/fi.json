@@ -2925,7 +2925,7 @@
   "keymap.use_anyway": "Käytä {key} tässä silti",
   "label.move_to_left_side": "Siirrä vasemmalle puolelle",
   "label.move_to_right_side": "Siirrä oikealle puolelle",
-  "linked_files.other_folders_detail": "Tämä malli käyttää tiedostoja kansioista {folders}. Ladataanko ne?",
+  "linked_files.other_folders_detail": "Tämä malli käyttää tiedostoja näistä kansioista. Ladataanko ne?",
   "linked_files.other_folders_load": "Lataa",
   "linked_files.other_folders_not_now": "Ei nyt",
   "linked_files.other_folders_title": "Linkitettyjä tiedostoja muissa kansioissa",

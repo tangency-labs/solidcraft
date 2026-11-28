@@ -3030,7 +3030,7 @@
   "keymap.use_anyway": "Přesto zde použít {key}",
   "label.move_to_left_side": "Přesunout na levou stranu",
   "label.move_to_right_side": "Přesunout na pravou stranu",
-  "linked_files.other_folders_detail": "Tento návrh používá soubory z {folders}. Načíst je?",
+  "linked_files.other_folders_detail": "Tento návrh používá soubory z těchto složek. Načíst je?",
   "linked_files.other_folders_load": "Načíst",
   "linked_files.other_folders_not_now": "Teď ne",
   "linked_files.other_folders_title": "Propojené soubory v jiných složkách",

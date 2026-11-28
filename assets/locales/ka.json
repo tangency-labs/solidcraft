@@ -2988,7 +2988,7 @@
   "keymap.use_anyway": "{key}-ის აქ მაინც გამოყენება",
   "label.move_to_left_side": "მარცხენა მხარეს გადატანა",
   "label.move_to_right_side": "მარჯვენა მხარეს გადატანა",
-  "linked_files.other_folders_detail": "ეს პროექტი იყენებს ფაილებს აქედან: {folders}. ჩაიტვირთოს?",
+  "linked_files.other_folders_detail": "ეს პროექტი იყენებს ფაილებს ამ საქაღალდეებიდან. ჩაიტვირთოს?",
   "linked_files.other_folders_load": "ჩატვირთვა",
   "linked_files.other_folders_not_now": "ახლა არა",
   "linked_files.other_folders_title": "დაკავშირებული ფაილები სხვა საქაღალდეებში",
