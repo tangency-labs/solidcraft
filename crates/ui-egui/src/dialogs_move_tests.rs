@@ -2976,6 +2976,186 @@ fn component_move_rejects_inline_param_definition_while_body_move_defines_it() {
     assert!((b.min.x - 50.8).abs() < 1e-4, "{b:?}");
 }
 
+/// Two components (`Base` grounded, `Part` free) joined by a joint of `joint_type` along `axis`
+/// at the origin. Returns `(harness, base_occ, part_occ, joint_id)`.
+fn jointed_pair_harness(joint_type: &str, axis: [f64; 3]) -> (crate::scenario::Harness, u64, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let base = h.app.run("component.create", json!({"name": "Base", "parent": "root", "activate": true, "grounded": true})).unwrap()["occurrence"]
+        .as_u64()
+        .unwrap();
+    h.app.run("solid.box", json!({"corner": [-10, -10, -10], "length": 20, "width": 20, "height": 10})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let part = h.app.run("component.create", json!({"name": "Part", "parent": "root", "activate": true, "grounded": false})).unwrap()["occurrence"]
+        .as_u64()
+        .unwrap();
+    h.app.run("solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 20})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let joint = h
+        .app
+        .run(
+            "joint.create",
+            json!({
+                "name": "J1",
+                "type": joint_type,
+                "a": {"occurrence": base, "point": [0, 0, 0], "z": axis},
+                "b": {"occurrence": part, "point": [0, 0, 0], "z": axis},
+                "flip": true
+            }),
+        )
+        .unwrap()["joint"]
+        .as_u64()
+        .unwrap();
+    h.settle();
+    (h, base, part, joint)
+}
+
+#[test]
+fn rigid_joint_component_is_fully_constrained_in_move_copy() {
+    let (mut h, _, part, _) = jointed_pair_harness("rigid", [0.0, 0.0, 1.0]);
+    open_on_occurrence(&mut h.app, vec![part], false);
+    let d = h.app.dialog.as_ref().unwrap();
+    let c = constraint(&h.app, d);
+    assert!(matches!(c, MoveConstraint::FullyConstrained { .. }), "expected FullyConstrained, got {c:?}");
+    let note = c.note().unwrap();
+    assert!(note.contains("0 DOF") && note.contains("J1"), "reason should name 0 DOF and J1: {note}");
+    assert!(!can_edit_values(&h.app, d));
+    assert!(triad(&h.app, d).is_none(), "fully constrained part must show no triad");
+    assert!(commands(&h.app, d).unwrap().is_empty(), "fully constrained part must emit no commands");
+}
+
+#[test]
+fn slider_joint_limits_triad_drag_and_drives_joint() {
+    let (mut h, _, part, joint_id) = jointed_pair_harness("slider", [1.0, 0.0, 0.0]);
+    open_on_occurrence(&mut h.app, vec![part], false);
+    {
+        let d = h.app.dialog.as_ref().unwrap();
+        let c = constraint(&h.app, d);
+        assert!(matches!(c, MoveConstraint::SingleJoint(ref j) if j.kind == JointKind::Slider), "expected SingleJoint Slider, got {c:?}");
+        let note = c.note().unwrap();
+        assert!(note.contains("J1") && note.contains("Slider"), "note should explain slider constraint: {note}");
+        let t = triad(&h.app, d).expect("slider should show a 1-axis triad");
+        assert!(t.translate && !t.rotate);
+        assert_eq!(t.axes, [false, false, true], "only joint Z arrow should show");
+        assert_eq!(t.rings, [false, false, false]);
+        // Joint Z was created along world +X.
+        assert!((t.frame[2].x - 1.0).abs() < 1e-6, "triad Z should align with world +X: {:?}", t.frame);
+    }
+
+    // Drag off-axis in world space (+25 X, +40 Y, +15 Z): only the projection onto joint Z (+X = +25) applies.
+    let mut d = h.app.dialog.take().unwrap();
+    drag(&h.app, &mut d, Drag { handle: gizmo::Handle::Axis(2), change: Change::Translate(Vec3::new(25.0, 40.0, 15.0)), started: true, done: true });
+    let Kind::Move { ref x, ref y, ref z, .. } = d.kind else { panic!("expected Kind::Move") };
+    assert_eq!(len(&h.app, x).unwrap(), 0.0, "constrained X stays 0");
+    assert_eq!(len(&h.app, y).unwrap(), 0.0, "constrained Y stays 0");
+    assert!((len(&h.app, z).unwrap() - 25.0).abs() < 1e-6, "free joint Z got +25 mm: {z}");
+
+    let cmds = commands(&h.app, &d).unwrap();
+    assert!(
+        cmds.iter().any(|(id, p)| id == "joint.drive" && p["joint"] == json!(joint_id) && p["values"] == json!([25.0])),
+        "expected joint.drive: {cmds:?}"
+    );
+    assert!(!cmds.iter().any(|(id, _)| id == "occurrence.move"), "must not emit occurrence.move: {cmds:?}");
+
+    // Running the commands actually moves the slider occurrence to +25 mm along world X.
+    for (id, p) in cmds {
+        h.app.run(&id, p).unwrap();
+    }
+    let props = h.app.run("occurrence.properties", json!({"occurrence": part})).unwrap();
+    let cx = props["total"]["center_of_mass"][0].as_f64().unwrap();
+    assert!((cx - 25.0).abs() < 1e-4, "part should have slid to X=25 mm, got {cx}");
+}
+
+#[test]
+fn revolute_joint_limits_triad_to_z_ring_and_drives_angle() {
+    let (mut h, _, part, joint_id) = jointed_pair_harness("revolute", [0.0, 0.0, 1.0]);
+    open_on_occurrence(&mut h.app, vec![part], false);
+    {
+        let d = h.app.dialog.as_ref().unwrap();
+        let c = constraint(&h.app, d);
+        assert!(matches!(c, MoveConstraint::SingleJoint(ref j) if j.kind == JointKind::Revolute), "expected SingleJoint Revolute, got {c:?}");
+        let t = triad(&h.app, d).expect("revolute should show Z ring");
+        assert!(!t.translate && t.rotate);
+        assert_eq!(t.axes, [false, false, false]);
+        assert_eq!(t.rings, [false, false, true]);
+    }
+    set_angles(&mut h, ["30 deg", "20 deg", "45 deg"]);
+    let cmds = commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let drive = cmds.iter().find(|(id, _)| id == "joint.drive").expect("expected joint.drive");
+    assert_eq!(drive.1["joint"], json!(joint_id));
+    let deg_val = drive.1["values"][0].as_f64().unwrap();
+    assert!((deg_val - 45.0).abs() < 1e-6, "only Z angle (45 deg) should drive revolute, got {deg_val}");
+}
+
+#[test]
+fn floating_rigid_chain_moves_together_in_move_copy() {
+    let mut h = crate::scenario::Harness::new();
+    let a = h.app.run("component.create", json!({"name": "A", "parent": "root", "activate": true, "grounded": false})).unwrap()["occurrence"]
+        .as_u64()
+        .unwrap();
+    h.app.run("solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = h.app.run("component.create", json!({"name": "B", "parent": "root", "activate": true, "grounded": false})).unwrap()["occurrence"]
+        .as_u64()
+        .unwrap();
+    h.app.run("solid.box", json!({"corner": [10, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    h.app
+        .run(
+            "joint.create",
+            json!({
+                "name": "J_float",
+                "type": "rigid",
+                "a": {"occurrence": a, "point": [10, 5, 5], "z": [1, 0, 0]},
+                "b": {"occurrence": b, "point": [10, 5, 5], "z": [1, 0, 0]},
+                "flip": true
+            }),
+        )
+        .unwrap();
+    h.settle();
+
+    // Pick B (the non-anchor side of the floating rigid pair) and translate +50 mm along Y.
+    open_on_occurrence(&mut h.app, vec![b], false);
+    assert!(matches!(constraint(&h.app, h.app.dialog.as_ref().unwrap()), MoveConstraint::Free));
+    if let Kind::Move { y, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *y = "50 mm".into();
+    }
+    let cmds = commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let moved_occs: Vec<u64> = cmds.iter().filter(|(id, _)| id == "occurrence.move").filter_map(|(_, p)| p["occurrence"].as_u64()).collect();
+    assert!(moved_occs.contains(&a) && moved_occs.contains(&b), "both A and B should move together: {moved_occs:?}");
+    let mut prev = Vec::new();
+    preview(&h.app, h.app.dialog.as_ref().unwrap(), &mut prev);
+    let prev_bodies: Vec<&str> = prev.first().and_then(|(_, p)| p["bodies"].as_array()).into_iter().flatten().filter_map(Value::as_str).collect();
+    assert!(prev_bodies.contains(&"Body1") && prev_bodies.contains(&"Body2"), "preview should include both A and B: {prev_bodies:?}");
+}
+
+#[test]
+fn slider_joint_clamps_triad_drag_and_commands_to_limits() {
+    let (mut h, _, part, joint_id) = jointed_pair_harness("slider", [0.0, 0.0, 1.0]);
+    h.app.run("joint.limits", json!({"joint": joint_id, "min": 0.0, "max": 15.0})).unwrap();
+    h.settle();
+    open_on_occurrence(&mut h.app, vec![part], false);
+
+    // Drag past the 15 mm upper limit (+40 mm along Z): drag clamps to 15 mm.
+    let mut d = h.app.dialog.take().unwrap();
+    drag(&h.app, &mut d, Drag { handle: gizmo::Handle::Axis(2), change: Change::Translate(Vec3::new(0.0, 0.0, 40.0)), started: true, done: true });
+    let Kind::Move { ref z, .. } = d.kind else { panic!("expected Kind::Move") };
+    assert!((len(&h.app, z).unwrap() - 15.0).abs() < 1e-6, "drag should clamp to 15 mm limit, got {z}");
+
+    // Typing past the limit also clamps preview and commands to 15 mm.
+    if let Kind::Move { z, .. } = &mut d.kind {
+        *z = "100 mm".into();
+    }
+    let cmds = commands(&h.app, &d).unwrap();
+    assert!(
+        cmds.iter().any(|(id, p)| id == "joint.drive" && p["joint"] == json!(joint_id) && p["values"] == json!([15.0])),
+        "commands should clamp to 15 mm limit: {cmds:?}"
+    );
+    let mut prev = Vec::new();
+    preview(&h.app, &d, &mut prev);
+    assert_eq!(prev.len(), 1);
+    assert_eq!(prev[0].1["translate"], json!(["0 mm", "0 mm", "15 mm"]), "preview should clamp to 15 mm: {prev:?}");
+}
+
 /// Keep Axes With Body: a box with an upright Center Pole (an axis held by two fixed points)
 /// through its middle, and a second box apart from it.
 mod keep_axes {

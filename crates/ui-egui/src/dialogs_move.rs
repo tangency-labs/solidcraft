@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::doc::joints::{self, JointKind};
 use solidcraft_engine::doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
 use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
@@ -78,12 +79,23 @@ pub fn object_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
 }
 
 /// The Move Type row (below Selection, above the type's own picks). Switching keeps the picks and
-/// the move made so far (`chain`), and starts the new type's values at zero.
+/// the move made so far (`chain`), and starts the new type's values at zero. Constrained
+/// components lock Move Type to Free Move so joint-frame handles stay active.
 pub fn type_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
+    let move_constraint = constraint(app, d);
+    if matches!(move_constraint, MoveConstraint::SingleJoint(_))
+        && let Kind::Move { mode, .. } = d.kind
+        && mode != FREE
+    {
+        switch_type(app, d, FREE);
+    }
     let Kind::Move { mode, .. } = d.kind else { return };
+    let enabled = matches!(move_constraint, MoveConstraint::Free);
     let mut m = mode;
-    choice_row(ui, "Move Type", "move_type", &mut m, &TYPES);
-    if m != mode {
+    ui.add_enabled_ui(enabled, |ui| {
+        choice_row(ui, "Move Type", "move_type", &mut m, &TYPES);
+    });
+    if enabled && m != mode {
         switch_type(app, d, m);
     }
 }
@@ -484,13 +496,279 @@ fn check_no_inline_defs(d: &Dialog) -> Result<(), String> {
     Ok(())
 }
 
-/// What OK runs. Each component picked without Create Copy moves by its placement: when Capture
-/// All Positions is ticked, the moved occurrences and any other pending moves or driven joints
-/// are captured into a single `CapturePosition` timeline feature (and coalesced into one Undo
-/// step by `adopt_dialog`); when it is not ticked, the moves stay pending until Capture Position.
-/// The bodies picked (or, with Create Copy, the bodies and components) move by solid.move. Empty
-/// when only components are picked, nothing moved them and nothing is left to capture: OK then
-/// just closes.
+/// Constraint data for a component constrained by a single joint directly to a fixed part.
+#[derive(Clone, Debug)]
+pub(crate) struct SingleJointConstraint {
+    pub(crate) joint_id: u64,
+    pub(crate) kind: JointKind,
+    /// True when the picked occurrence is the joint's B side (positive delta adds to joint values).
+    pub(crate) as_b: bool,
+    /// World-space joint axes `[X, Y, Z]` (unit, right-handed).
+    pub(crate) frame: [Vec3; 3],
+    /// World-space rotation pivot (B's current joint origin in world coordinates).
+    pub(crate) pivot: Vec3,
+    /// Joint DOF index for each free translation axis `[X, Y, Z]` of `frame`.
+    pub(crate) free_translate: [Option<usize>; 3],
+    /// Joint DOF index for each free rotation axis `[X, Y, Z]` of `frame`.
+    pub(crate) free_rotate: [Option<usize>; 3],
+    /// Stored joint values (mm / rad) before this dialog's move.
+    pub(crate) base_values: Vec<f64>,
+    /// Optional `(min, max)` limits (mm / rad) per joint DOF.
+    pub(crate) limits: Vec<Option<(f64, f64)>>,
+    /// Human-readable explanation of which joint constrains the part and which directions are free.
+    pub(crate) reason: String,
+}
+
+/// How joints, grounding, or rigid groups constrain the picked components in Move/Copy.
+#[derive(Clone, Debug)]
+pub(crate) enum MoveConstraint {
+    /// Free to translate and rotate in all 6 DOFs (or moving bodies / copying).
+    Free,
+    /// Fully constrained (0 DOF): cannot move at all.
+    FullyConstrained { reason: String },
+    /// Constrained by a single joint directly to a fixed part: moves only along that joint's free
+    /// axes and updates the joint via `joint.drive` instead of `occurrence.move`.
+    SingleJoint(Box<SingleJointConstraint>),
+    /// Partially constrained by a multi-joint chain, closed loop, or multi-axis orientation joint.
+    ComplexConstrained { reason: String },
+}
+
+#[derive(Clone)]
+struct ConstraintCache {
+    doc_ptr: usize,
+    revision: u64,
+    places: Vec<Vec<u64>>,
+    result: MoveConstraint,
+}
+
+thread_local! {
+    static CONSTRAINT_CACHE: std::cell::RefCell<Option<ConstraintCache>> = const { std::cell::RefCell::new(None) };
+}
+
+impl MoveConstraint {
+    /// Notice shown in the Move/Copy dialog explaining why movement is restricted, if any.
+    pub(crate) fn note(&self) -> Option<&str> {
+        match self {
+            MoveConstraint::Free => None,
+            MoveConstraint::FullyConstrained { reason } | MoveConstraint::ComplexConstrained { reason } => Some(reason),
+            MoveConstraint::SingleJoint(j) => Some(&j.reason),
+        }
+    }
+
+    /// Whether the user can edit any move value (false when fully constrained or complex-constrained).
+    pub(crate) fn allows_values(&self) -> bool {
+        matches!(self, MoveConstraint::Free | MoveConstraint::SingleJoint(_))
+    }
+}
+
+/// Clamp a delta along a single joint's DOF `dof_idx` to its stored limits (if any).
+fn clamp_single_joint_delta(base_values: &[f64], limits: &[Option<(f64, f64)>], as_b: bool, dof_idx: usize, delta: f64) -> f64 {
+    if let Some((lo, hi)) = limits.get(dof_idx).copied().flatten() {
+        let sign = if as_b { 1.0 } else { -1.0 };
+        let base = base_values.get(dof_idx).copied().unwrap_or(0.0);
+        let target = (base + sign * delta).clamp(lo.min(hi), lo.max(hi));
+        sign * (target - base)
+    } else {
+        delta
+    }
+}
+
+/// How the picked components are constrained by grounding, rigid groups, or joints.
+/// Cached per `(doc pointer, session revision, picked placements)` so `joints::solve` runs at
+/// most once per edit/selection instead of multiple times per frame.
+pub(crate) fn constraint(app: &SolveApp, d: &Dialog) -> MoveConstraint {
+    let places = placements(d);
+    if places.is_empty() {
+        return MoveConstraint::Free;
+    }
+    let doc_ptr = std::sync::Arc::as_ptr(&app.session.doc) as usize;
+    let revision = app.session.revision;
+    if let Some(cached) = CONSTRAINT_CACHE
+        .with(|c| c.borrow().as_ref().filter(|e| e.doc_ptr == doc_ptr && e.revision == revision && e.places == places).map(|e| e.result.clone()))
+    {
+        return cached;
+    }
+    let result = compute_constraint(app, &places);
+    CONSTRAINT_CACHE.with(|c| {
+        *c.borrow_mut() = Some(ConstraintCache { doc_ptr, revision, places, result: result.clone() });
+    });
+    result
+}
+
+fn compute_constraint(app: &SolveApp, places: &[Vec<u64>]) -> MoveConstraint {
+    let s = &app.session;
+    let mut blocked: Vec<(&[u64], u64, String)> = Vec::new();
+    for path in places {
+        let Some(&occ_id) = path.last() else { continue };
+        if let Err(err) = s.drag_group(path) {
+            blocked.push((path.as_slice(), occ_id, err.to_string()));
+        }
+    }
+    if blocked.is_empty() {
+        return MoveConstraint::Free;
+    }
+
+    let doc = &s.doc;
+    let st = s.model.state();
+
+    // Grounded or held in a rigid group: always fully constrained (0 DOF).
+    for &(_, occ_id, ref why) in &blocked {
+        let grounded = doc.occurrences.iter().any(|o| o.id == occ_id && o.grounded);
+        if grounded || s.held_by_rigid_group(occ_id).is_some() {
+            return MoveConstraint::FullyConstrained {
+                reason: solidcraft_ui_text::format("dialog.move_constraint_fixed", &[("reason", why.as_str())]),
+            };
+        }
+    }
+
+    let sol = joints::solve(doc, &st);
+    for &(_, occ_id, ref why) in &blocked {
+        let dof = sol.dof.get(&occ_id).copied().unwrap_or(6);
+        if dof == 0 {
+            return MoveConstraint::FullyConstrained {
+                reason: solidcraft_ui_text::format("dialog.move_constraint_zero_dof", &[("reason", why.as_str())]),
+            };
+        }
+    }
+
+    // Single picked occurrence constrained directly by one joint to a fixed (0-DOF) occurrence:
+    // map its free axes directly onto the triad and dialog fields.
+    if places.len() == 1
+        && let Some(&(_, occ_id, _)) = blocked.first()
+        && let Some(single) = single_joint_constraint(doc, &st, &sol, occ_id)
+    {
+        return single;
+    }
+
+    let summary_occ = blocked.first().map(|&(_, id, _)| id).unwrap_or(0);
+    let dof = sol.dof.get(&summary_occ).copied().unwrap_or(1);
+    let joint_names: Vec<&str> = doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| !j.suppressed && (j.a.occurrence == summary_occ || j.b.occurrence == summary_occ))
+        .map(|j| j.name.as_str())
+        .collect();
+    let by =
+        if joint_names.is_empty() { solidcraft_ui_text::tr("dialog.move_constraint_joints_fallback").to_string() } else { joint_names.join(", ") };
+    let dof_str = dof.to_string();
+    MoveConstraint::ComplexConstrained { reason: solidcraft_ui_text::format("dialog.move_constraint_complex", &[("dof", &dof_str), ("joints", &by)]) }
+}
+
+fn single_joint_constraint(
+    doc: &solidcraft_engine::doc::Document,
+    st: &solidcraft_engine::doc::ModelState,
+    sol: &joints::Solution,
+    occ_id: u64,
+) -> Option<MoveConstraint> {
+    let active: Vec<&joints::Joint> =
+        doc.assembly.joints.iter().filter(|j| !j.suppressed && (j.a.occurrence == occ_id || j.b.occurrence == occ_id)).collect();
+    if active.len() != 1 {
+        return None;
+    }
+    let j = *active.first()?;
+    let (as_b, other) = if j.b.occurrence == occ_id { (true, j.a.occurrence) } else { (false, j.b.occurrence) };
+    let other_fixed = other == 0 || sol.fixed.contains(&other) || sol.dof.get(&other) == Some(&0);
+    if !other_fixed {
+        return None;
+    }
+    // If a motion link drives any DOF of this joint, defer to Drive Joint / viewport drag.
+    if doc.assembly.links.iter().any(|l| l.b == j.id) {
+        return None;
+    }
+    if !as_b && !matches!(j.kind, JointKind::Slider | JointKind::Revolute | JointKind::Cylindrical) {
+        return None;
+    }
+    let (free_translate, free_rotate, msg_key): ([Option<usize>; 3], [Option<usize>; 3], &str) = match j.kind {
+        JointKind::Slider => ([None, None, Some(0)], [None, None, None], "dialog.move_constraint_slider"),
+        JointKind::Revolute => ([None, None, None], [None, None, Some(0)], "dialog.move_constraint_revolute"),
+        JointKind::Cylindrical => ([None, None, Some(1)], [None, None, Some(0)], "dialog.move_constraint_cylindrical"),
+        JointKind::PinSlot => ([Some(1), None, None], [None, None, Some(0)], "dialog.move_constraint_pin_slot"),
+        JointKind::Planar => ([Some(0), Some(1), None], [None, None, Some(2)], "dialog.move_constraint_planar"),
+        JointKind::Parallel => ([Some(0), Some(1), Some(2)], [None, None, Some(3)], "dialog.move_constraint_parallel"),
+        _ => return None,
+    };
+
+    let fa_local = j.offset_frame_a(joints::resolve_origin(doc, st, &j.a).ok()?);
+    let world_a = joints::occurrence_world(doc, j.a.occurrence);
+    let fa_world = mat_mul(&world_a, &fa_local);
+    let unit_col = |col: usize| -> Option<Vec3> {
+        let v = Vec3::new(fa_world[col][0], fa_world[col][1], fa_world[col][2]);
+        let l = v.len();
+        (l > 1e-12).then(|| v * (1.0 / l))
+    };
+    let fx = unit_col(0)?;
+    let fy = unit_col(1)?;
+    let fz = unit_col(2)?;
+    let origin_a = Vec3::new(fa_world[3][0], fa_world[3][1], fa_world[3][2]);
+
+    let dof_count = j.kind.dofs().len();
+    let mut base_values = j.values.clone();
+    base_values.resize(dof_count, 0.0);
+    let mut limits = j.limits.clone();
+    limits.resize(dof_count, None);
+    let base_t = Vec3::new(
+        free_translate[0].and_then(|i| base_values.get(i).copied()).unwrap_or(0.0),
+        free_translate[1].and_then(|i| base_values.get(i).copied()).unwrap_or(0.0),
+        free_translate[2].and_then(|i| base_values.get(i).copied()).unwrap_or(0.0),
+    );
+    let pivot = origin_a + fx * base_t.x + fy * base_t.y + fz * base_t.z;
+    let reason = solidcraft_ui_text::format(msg_key, &[("joint", j.name.as_str())]);
+
+    Some(MoveConstraint::SingleJoint(Box::new(SingleJointConstraint {
+        joint_id: j.id,
+        kind: j.kind,
+        as_b,
+        frame: [fx, fy, fz],
+        pivot,
+        free_translate,
+        free_rotate,
+        base_values,
+        limits,
+        reason,
+    })))
+}
+
+/// Whether the open Move/Copy dialog allows editing values (used by the canvas value box).
+pub(crate) fn can_edit_values(app: &SolveApp, d: &Dialog) -> bool {
+    constraint(app, d).allows_values()
+}
+
+/// Delta translation (mm, in joint frame) and rotation (rad, about joint axes) for a `SingleJoint`,
+/// clamped to the joint's limits so preview and commands agree.
+fn single_joint_deltas(app: &SolveApp, d: &Dialog, j: &SingleJointConstraint) -> Result<([f64; 3], [f64; 3]), String> {
+    let Kind::Move { mode, x, y, z, rx, ry, rz, .. } = &d.kind else { return Err("not a move".into()) };
+    if !matches!(*mode, FREE | TRANSLATE) {
+        return Ok(([0.0; 3], [0.0; 3]));
+    }
+    let clamp_t = |i: usize, text: &str| -> Result<f64, String> {
+        let Some(idx) = j.free_translate[i] else { return Ok(0.0) };
+        Ok(clamp_single_joint_delta(&j.base_values, &j.limits, j.as_b, idx, len(app, text)?))
+    };
+    let clamp_r = |i: usize, text: &str| -> Result<f64, String> {
+        let Some(idx) = j.free_rotate[i] else { return Ok(0.0) };
+        Ok(clamp_single_joint_delta(&j.base_values, &j.limits, j.as_b, idx, ang(app, text)?))
+    };
+    let dt = [clamp_t(0, x)?, clamp_t(1, y)?, clamp_t(2, z)?];
+    let dr = if *mode == FREE { [clamp_r(0, rx)?, clamp_r(1, ry)?, clamp_r(2, rz)?] } else { [0.0; 3] };
+    Ok((dt, dr))
+}
+
+/// World rigid transform corresponding to the current dialog deltas for a `SingleJoint`.
+fn single_joint_world_transform(app: &SolveApp, d: &Dialog, j: &SingleJointConstraint) -> Option<Mat> {
+    let (dt, dr) = single_joint_deltas(app, d, j).ok()?;
+    let world_t = j.frame[0] * dt[0] + j.frame[1] * dt[1] + j.frame[2] * dt[2];
+    let angle = dr[2];
+    Some(rigid(world_t, j.pivot, j.frame[2], angle))
+}
+
+/// What OK runs. Each component picked without Create Copy moves by its placement (or drives its
+/// single constraining joint): when Capture All Positions is ticked, the moved occurrences and any
+/// other pending moves or driven joints are captured into a single `CapturePosition` timeline
+/// feature (and coalesced into one Undo step by `adopt_dialog`); when it is not ticked, the moves
+/// stay pending until Capture Position. Fully constrained components produce no move. The bodies
+/// picked (or, with Create Copy, the bodies and components) move by solid.move. Empty when only
+/// components are picked, nothing moved them and nothing is left to capture: OK then just closes.
 pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     if several_destinations(d) {
         // One copy at each To point, each moved from From to it; the original stays (#22900).
@@ -510,6 +788,53 @@ pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, Stri
     if !places.is_empty() || (bodies.is_empty() && !components.is_empty()) {
         check_no_inline_defs(d)?;
     }
+    let move_constraint = constraint(app, d);
+    match &move_constraint {
+        MoveConstraint::FullyConstrained { .. } | MoveConstraint::ComplexConstrained { .. } => {
+            return Ok(Vec::new());
+        }
+        MoveConstraint::SingleJoint(j) => {
+            let (dt, dr) = single_joint_deltas(app, d, j)?;
+            let sign = if j.as_b { 1.0 } else { -1.0 };
+            let mut next = j.base_values.clone();
+            next.resize(j.kind.dofs().len(), 0.0);
+            let mut changed = false;
+            for i in 0..3 {
+                if let Some(idx) = j.free_translate[i]
+                    && dt[i].abs() > 1e-12
+                    && let Some(slot) = next.get_mut(idx)
+                {
+                    *slot += sign * dt[i];
+                    changed = true;
+                }
+                if let Some(idx) = j.free_rotate[i]
+                    && dr[i].abs() > 1e-12
+                    && let Some(slot) = next.get_mut(idx)
+                {
+                    *slot += sign * dr[i];
+                    changed = true;
+                }
+            }
+            let mut out = Vec::new();
+            if changed {
+                let values: Vec<Value> = next.iter().enumerate().map(|(i, v)| json!(if j.kind.is_angle(i) { v.to_degrees() } else { *v })).collect();
+                out.push(("joint.drive".to_string(), json!({ "joint": j.joint_id, "values": values })));
+            }
+            if captures(d) && (changed || !app.session.pending_moves.is_empty()) {
+                out.push(("component.capture_position".to_string(), json!({})));
+            }
+            let bodies = items(d, 0).body_names();
+            if !bodies.is_empty()
+                && let Some(m) = single_joint_world_transform(app, d, j)
+                && !is_identity(&m)
+            {
+                out.push(("solid.move".to_string(), with_transform(json!({ "bodies": bodies }), &m)));
+            }
+            return Ok(out);
+        }
+        MoveConstraint::Free => {}
+    }
+
     let p = params(app, d)?;
     let mut out = Vec::new();
     if !places.is_empty() {
@@ -520,7 +845,8 @@ pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, Stri
         let mut moved = Vec::new();
         if !is_identity(&m) || has_expr {
             let matrix = chained.then(|| matrix_rows(&m));
-            for path in &places {
+            let expanded = expanded_placements(app, &places);
+            for path in &expanded {
                 let Some(&occurrence) = path.last() else { continue };
                 moved.push(occurrence);
                 let mut cmd_params = json!({
@@ -557,15 +883,59 @@ pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, Stri
     Ok(out)
 }
 
+/// Expand floating joint chains so moving or previewing any member carries its free connected group.
+fn expanded_placements(app: &SolveApp, places: &[Vec<u64>]) -> Vec<Vec<u64>> {
+    let mut expanded: Vec<Vec<u64>> = Vec::new();
+    for path in places {
+        let group = app.session.drag_group(path).unwrap_or_else(|_| vec![path.clone()]);
+        for member in group {
+            if let Some(&occ) = member.last()
+                && !expanded.iter().any(|p| p.last() == Some(&occ))
+            {
+                expanded.push(member);
+            }
+        }
+    }
+    expanded
+}
+
 /// What the preview draws. The components that move by their placement are drawn as their
 /// bodies moved, which is where the placement move will put them: one solid.move of every moved
 /// body, which the fast move preview draws (`move_preview`) without evaluating the design. What
 /// is hidden is left out of the preview (it still moves on OK), so hiding a body or a component
 /// while it moves hides it; with everything hidden there is nothing to preview.
 pub(crate) fn preview(app: &SolveApp, d: &Dialog, cmds: &mut Vec<(String, Value)>) {
-    if !placements(d).is_empty() {
-        let Some(m) = params(app, d).ok().and_then(|p| transform(app, &p).ok()) else { return };
-        *cmds = vec![("solid.move".to_string(), with_transform(json!({ "bodies": bodies_of(app, d) }), &m))];
+    let places = placements(d);
+    if !places.is_empty() {
+        match constraint(app, d) {
+            MoveConstraint::FullyConstrained { .. } | MoveConstraint::ComplexConstrained { .. } => {
+                cmds.clear();
+                return;
+            }
+            MoveConstraint::SingleJoint(j) => {
+                let Some(m) = single_joint_world_transform(app, d, &j) else {
+                    cmds.clear();
+                    return;
+                };
+                if is_identity(&m) {
+                    cmds.clear();
+                    return;
+                }
+                *cmds = vec![("solid.move".to_string(), with_transform(json!({ "bodies": bodies_of(app, d) }), &m))];
+            }
+            MoveConstraint::Free => {
+                let Some(m) = params(app, d).ok().and_then(|p| transform(app, &p).ok()) else { return };
+                let mut bodies = bodies_of(app, d);
+                for path in expanded_placements(app, &places) {
+                    for name in app.session.occurrence_bodies(&path, true).unwrap_or_default() {
+                        if !bodies.contains(&name) {
+                            bodies.push(name);
+                        }
+                    }
+                }
+                *cmds = vec![("solid.move".to_string(), with_transform(json!({ "bodies": bodies }), &m))];
+            }
+        }
     }
     for (id, p) in cmds.iter_mut() {
         if id != "solid.move" {
@@ -686,25 +1056,41 @@ fn carried(d: &Dialog, moved: bool, p: Vec3) -> Vec3 {
 }
 
 /// The value rows after the inputs; true when Enter was pressed in one.
-pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
+/// Constrained dimensions are shown disabled with a notice explaining why.
+pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Kind, move_constraint: &MoveConstraint) -> bool {
     let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = k else { return false };
+    if let Some(note) = move_constraint.note() {
+        crate::ui_kit::text(ui, note, crate::ui_kit::Text::Note("move_constraint"));
+    }
+    let (t_on, r_on, all_on) = match move_constraint {
+        MoveConstraint::Free => ([true; 3], [true; 3], true),
+        MoveConstraint::SingleJoint(j) => (j.free_translate.map(|o| o.is_some()), j.free_rotate.map(|o| o.is_some()), true),
+        MoveConstraint::FullyConstrained { .. } | MoveConstraint::ComplexConstrained { .. } => ([false; 3], [false; 3], false),
+    };
     let mut enter = false;
+    let mut gated_row = |enabled: bool, label: &str, value: &mut String| {
+        ui.add_enabled_ui(enabled, |ui| {
+            if expr_row(ui, label, value) && enabled {
+                enter = true;
+            }
+        });
+    };
     match *mode {
         FREE | TRANSLATE => {
-            enter |= expr_row(ui, "X Distance", x);
-            enter |= expr_row(ui, "Y Distance", y);
-            enter |= expr_row(ui, "Z Distance", z);
+            gated_row(t_on[0], "X Distance", x);
+            gated_row(t_on[1], "Y Distance", y);
+            gated_row(t_on[2], "Z Distance", z);
             if *mode == FREE {
-                enter |= expr_row(ui, "X Angle", rx);
-                enter |= expr_row(ui, "Y Angle", ry);
-                enter |= expr_row(ui, "Z Angle", rz);
+                gated_row(r_on[0], "X Angle", rx);
+                gated_row(r_on[1], "Y Angle", ry);
+                gated_row(r_on[2], "Z Angle", rz);
             }
         }
-        ROTATE => enter |= expr_row(ui, "Angle", angle),
+        ROTATE => gated_row(all_on && r_on.iter().any(|&b| b), "Angle", angle),
         POINT_TO_POSITION => {
-            enter |= expr_row(ui, "X", x);
-            enter |= expr_row(ui, "Y", y);
-            enter |= expr_row(ui, "Z", z);
+            gated_row(t_on[0], "X", x);
+            gated_row(t_on[1], "Y", y);
+            gated_row(t_on[2], "Z", z);
         }
         _ => {}
     }
@@ -1166,19 +1552,51 @@ pub fn kept_axis_note(ui: &mut egui::Ui, inputs: &[SelInput], extra: &serde_json
 }
 
 /// Where the triad sits: the pivot carried by the move so far, on the bodies for an edited
-/// move's kept turn (Free Move and Translate only).
+/// move's kept turn (Free Move and Translate only). Constrained components hide locked handles
+/// (or the entire triad when fully constrained) and align to their joint's axes.
 pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
     let Kind::Move { mode, x, y, z, .. } = &d.kind else { return None };
     if !matches!(*mode, FREE | TRANSLATE) || bodies_empty(d) {
         return None;
     }
-    let t = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
-    let on_body = if kept_turn(d) { moved_centre(app, d) } else { None };
-    let center = match on_body {
-        Some(at) => at,
-        None => pivot(app, d)? + t,
-    };
-    Some(gizmo::Triad::world(center, true, *mode == FREE))
+    match constraint(app, d) {
+        MoveConstraint::FullyConstrained { .. } | MoveConstraint::ComplexConstrained { .. } => None,
+        MoveConstraint::SingleJoint(j) => {
+            let axes = j.free_translate.map(|o| o.is_some());
+            let rings = j.free_rotate.map(|o| o.is_some());
+            let translate = axes.iter().any(|&b| b);
+            let rotate = *mode == FREE && rings.iter().any(|&b| b);
+            if !translate && !rotate {
+                return None;
+            }
+            let clamp_t = |i: usize, text: &str| {
+                j.free_translate[i]
+                    .map(|idx| clamp_single_joint_delta(&j.base_values, &j.limits, j.as_b, idx, len(app, text).unwrap_or(0.0)))
+                    .unwrap_or(0.0)
+            };
+            let dt = [clamp_t(0, x), clamp_t(1, y), clamp_t(2, z)];
+            let world_t = j.frame[0] * dt[0] + j.frame[1] * dt[1] + j.frame[2] * dt[2];
+            let base = if !translate {
+                // Pure rotation: put the ring on the joint axis, level with the bodies' centre.
+                let c = bodies_center(app, d).unwrap_or(j.pivot);
+                let delta = c - j.pivot;
+                let along = delta.x * j.frame[2].x + delta.y * j.frame[2].y + delta.z * j.frame[2].z;
+                j.pivot + j.frame[2] * along
+            } else {
+                pivot(app, d).unwrap_or(j.pivot)
+            };
+            Some(gizmo::Triad { center: base + world_t, translate, rotate, frame: j.frame, axes, rings })
+        }
+        MoveConstraint::Free => {
+            let t = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
+            let on_body = if kept_turn(d) { moved_centre(app, d) } else { None };
+            let center = match on_body {
+                Some(at) => at,
+                None => pivot(app, d)? + t,
+            };
+            Some(gizmo::Triad::world(center, true, *mode == FREE))
+        }
+    }
 }
 
 /// Rotate's ring lies on the selected axis, level with the picked bodies' centre.
@@ -1239,6 +1657,10 @@ pub fn show_handle_value(d: &mut Dialog, handle: crate::gizmo::Handle) {
 }
 
 pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
+    let move_constraint = constraint(app, d);
+    if !move_constraint.allows_values() {
+        return;
+    }
     show_handle_value(d, g.handle);
     let snapshot = |d: &mut Dialog| {
         let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
@@ -1254,8 +1676,10 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
         && angle != 0.0
         && !d.extra.contains_key("ring_set")
     {
-        turn_on_centre(app, d);
-        settle_ring(app, d, axis);
+        if matches!(move_constraint, MoveConstraint::Free) {
+            turn_on_centre(app, d);
+            settle_ring(app, d, axis);
+        }
         d.extra.insert("ring_set".into(), json!(true));
         snapshot(d);
     }
@@ -1263,13 +1687,38 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     let turning = d.extra.contains_key("ring_set");
     let v0: [f64; 6] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &mut d.kind else { return };
-    match g.change {
-        Change::Translate(t) => {
+    match (g.change, &move_constraint) {
+        (Change::Translate(t), MoveConstraint::SingleJoint(j)) => {
+            let proj = |axis: Vec3| t.x * axis.x + t.y * axis.y + t.z * axis.z;
+            if let Some(idx) = j.free_translate[0] {
+                let d_val = clamp_single_joint_delta(&j.base_values, &j.limits, j.as_b, idx, v0[0] + proj(j.frame[0]));
+                *x = crate::length_input::model(&app.session.doc, d_val);
+            }
+            if let Some(idx) = j.free_translate[1] {
+                let d_val = clamp_single_joint_delta(&j.base_values, &j.limits, j.as_b, idx, v0[1] + proj(j.frame[1]));
+                *y = crate::length_input::model(&app.session.doc, d_val);
+            }
+            if let Some(idx) = j.free_translate[2] {
+                let d_val = clamp_single_joint_delta(&j.base_values, &j.limits, j.as_b, idx, v0[2] + proj(j.frame[2]));
+                *z = crate::length_input::model(&app.session.doc, d_val);
+            }
+        }
+        (Change::Rotate { axis, angle }, MoveConstraint::SingleJoint(j)) => {
+            let i = axis.min(2);
+            if let Some(idx) = j.free_rotate[i]
+                && let Some(slot) = [rx, ry, rz].into_iter().nth(i)
+                && turning
+            {
+                let d_val = clamp_single_joint_delta(&j.base_values, &j.limits, j.as_b, idx, gizmo::within_turn(v0[3 + i] + angle));
+                *slot = deg(d_val);
+            }
+        }
+        (Change::Translate(t), _) => {
             *x = crate::length_input::model(&app.session.doc, v0[0] + t.x);
             *y = crate::length_input::model(&app.session.doc, v0[1] + t.y);
             *z = crate::length_input::model(&app.session.doc, v0[2] + t.z);
         }
-        Change::Rotate { axis, angle } => {
+        (Change::Rotate { axis, angle }, _) => {
             let i = axis.min(2);
             if let Some(slot) = [rx, ry, rz].into_iter().nth(i)
                 && turning

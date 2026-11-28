@@ -1,0 +1,98 @@
+{
+  "en": {
+    "dialog.move_constraint_complex": "Partially constrained ({dof} DOF) by {joints}. Drag directly in the viewport or use Drive Joint to move along its mechanism.",
+    "dialog.move_constraint_cylindrical": "Constrained by joint \"{joint}\" — Cylindrical (2 DOF): moves along and rotates about joint Z only.",
+    "dialog.move_constraint_fixed": "Fully constrained: {reason}.",
+    "dialog.move_constraint_joints_fallback": "joints",
+    "dialog.move_constraint_parallel": "Constrained by joint \"{joint}\" — Parallel (4 DOF): translates freely and rotates about joint Z only.",
+    "dialog.move_constraint_pin_slot": "Constrained by joint \"{joint}\" — Pin-Slot (2 DOF): moves along joint X and rotates about joint Z only.",
+    "dialog.move_constraint_planar": "Constrained by joint \"{joint}\" — Planar (3 DOF): moves in joint XY plane and rotates about joint Z only.",
+    "dialog.move_constraint_revolute": "Constrained by joint \"{joint}\" — Revolute (1 DOF): rotates about joint Z only.",
+    "dialog.move_constraint_slider": "Constrained by joint \"{joint}\" — Slider (1 DOF): moves along joint Z only.",
+    "dialog.move_constraint_zero_dof": "Fully constrained (0 DOF): {reason}. Move the anchored parent or edit the joint instead."
+  },
+  "ar": {
+    "dialog.move_constraint_complex": "مقيّد جزئياً ({dof} درجة حرية) بواسطة {joints}. اسحب مباشرة في منفذ العرض أو استخدم تحريك المفصل للتحرك على طول الآلية.",
+    "dialog.move_constraint_cylindrical": "مقيّد بالمفصل \"{joint}\" — أسطواني (درجتا حرية): يتحرك ويدور حول محور Z للمفصل فقط.",
+    "dialog.move_constraint_fixed": "مقيّد بالكامل: {reason}.",
+    "dialog.move_constraint_joints_fallback": "المفاصل",
+    "dialog.move_constraint_parallel": "مقيّد بالمفصل \"{joint}\" — متوازٍ (4 درجات حرية): ينتقل بحرية ويدور حول محور Z للمفصل فقط.",
+    "dialog.move_constraint_pin_slot": "مقيّد بالمفصل \"{joint}\" — مسمار وشق (درجتا حرية): يتحرك على محور X ويدور حول محور Z للمفصل فقط.",
+    "dialog.move_constraint_planar": "مقيّد بالمفصل \"{joint}\" — مستوٍ (3 درجات حرية): يتحرك في مستوى XY ويدور حول محور Z للمفصل فقط.",
+    "dialog.move_constraint_revolute": "مقيّد بالمفصل \"{joint}\" — دوّار (درجة حرية واحدة): يدور حول محور Z للمفصل فقط.",
+    "dialog.move_constraint_slider": "مقيّد بالمفصل \"{joint}\" — منزلق (درجة حرية واحدة): يتحرك على محور Z للمفصل فقط.",
+    "dialog.move_constraint_zero_dof": "مقيّد بالكامل (0 درجة حرية): {reason}. حرّك المكوّن الأصل المثبّت أو عدّل المفصل بدلاً من ذلك."
+  },
+  "de": {
+    "dialog.move_constraint_complex": "Teilweise eingeschränkt ({dof} Freiheitsgrade) durch {joints}. Ziehen Sie direkt im Ansichtsfenster oder verwenden Sie Gelenk antreiben.",
+    "dialog.move_constraint_cylindrical": "Durch Gelenk \"{joint}\" eingeschränkt — Zylindrisch (2 Freiheitsgrade): bewegt und dreht sich nur um Gelenk-Z.",
+    "dialog.move_constraint_fixed": "Vollständig eingeschränkt: {reason}.",
+    "dialog.move_constraint_joints_fallback": "Gelenke",
+    "dialog.move_constraint_parallel": "Durch Gelenk \"{joint}\" eingeschränkt — Parallel (4 Freiheitsgrade): verschiebt sich frei und dreht sich nur um Gelenk-Z.",
+    "dialog.move_constraint_pin_slot": "Durch Gelenk \"{joint}\" eingeschränkt — Stift-Schlitz (2 Freiheitsgrade): bewegt sich entlang Gelenk-X und dreht sich nur um Gelenk-Z.",
+    "dialog.move_constraint_planar": "Durch Gelenk \"{joint}\" eingeschränkt — Eben (3 Freiheitsgrade): bewegt sich in der Gelenk-XY-Ebene und dreht sich nur um Gelenk-Z.",
+    "dialog.move_constraint_revolute": "Durch Gelenk \"{joint}\" eingeschränkt — Drehgelenk (1 Freiheitsgrad): dreht sich nur um Gelenk-Z.",
+    "dialog.move_constraint_slider": "Durch Gelenk \"{joint}\" eingeschränkt — Schiebegelenk (1 Freiheitsgrad): bewegt sich nur entlang Gelenk-Z.",
+    "dialog.move_constraint_zero_dof": "Vollständig eingeschränkt (0 Freiheitsgrade): {reason}. Bewegen Sie stattdessen die verankerte übergeordnete Komponente oder bearbeiten Sie das Gelenk."
+  },
+  "he": {
+    "dialog.move_constraint_complex": "מוגבל חלקית ({dof} דרגות חופש) על ידי {joints}. גרור ישירות בחלון התצוגה או השתמש בהנעת מפרק כדי להזיז לאורך המנגנון.",
+    "dialog.move_constraint_cylindrical": "מוגבל על ידי מפרק \"{joint}\" — גלילי (2 דרגות חופש): נע ומסתובב סביב ציר Z של המפרק בלבד.",
+    "dialog.move_constraint_fixed": "מוגבל לחלוטין: {reason}.",
+    "dialog.move_constraint_joints_fallback": "מפרקים",
+    "dialog.move_constraint_parallel": "מוגבל על ידי מפרק \"{joint}\" — מקבילי (4 דרגות חופש): נע בחופשיות ומסתובב סביב ציר Z של המפרק בלבד.",
+    "dialog.move_constraint_pin_slot": "מוגבל על ידי מפרק \"{joint}\" — פין וחריץ (2 דרגות חופש): נע לאורך ציר X ומסתובב סביב ציר Z של המפרק בלבד.",
+    "dialog.move_constraint_planar": "מוגבל על ידי מפרק \"{joint}\" — מישורי (3 דרגות חופש): נע במישור XY ומסתובב סביב ציר Z של המפרק בלבד.",
+    "dialog.move_constraint_revolute": "מוגבל על ידי מפרק \"{joint}\" — סיבובי (דרגת חופש 1): מסתובב סביב ציר Z של המפרק בלבד.",
+    "dialog.move_constraint_slider": "מוגבל על ידי מפרק \"{joint}\" — החלקה (דרגת חופש 1): נע לאורך ציר Z של המפרק בלבד.",
+    "dialog.move_constraint_zero_dof": "מוגבל לחלוטין (0 דרגות חופש): {reason}. הזז את רכיב האב המעוגן או ערוך את המפרק במקום זאת."
+  },
+  "ja": {
+    "dialog.move_constraint_complex": "{joints} により部分的に拘束されています ({dof} 自由度)。ビューポートで直接ドラッグするか、ジョイント駆動を使用してください。",
+    "dialog.move_constraint_cylindrical": "ジョイント \"{joint}\" により拘束 — 円筒 (2 自由度): ジョイント Z 軸に沿った移動と回転のみ可能です。",
+    "dialog.move_constraint_fixed": "完全に拘束されています: {reason}。",
+    "dialog.move_constraint_joints_fallback": "ジョイント",
+    "dialog.move_constraint_parallel": "ジョイント \"{joint}\" により拘束 — 平行 (4 自由度): 自由に並進し、ジョイント Z 軸周りの回転のみ可能です。",
+    "dialog.move_constraint_pin_slot": "ジョイント \"{joint}\" により拘束 — ピンスロット (2 自由度): ジョイント X 軸に沿った移動と Z 軸周りの回転のみ可能です。",
+    "dialog.move_constraint_planar": "ジョイント \"{joint}\" により拘束 — 平面 (3 自由度): ジョイント XY 平面内の移動と Z 軸周りの回転のみ可能です。",
+    "dialog.move_constraint_revolute": "ジョイント \"{joint}\" により拘束 — 回転 (1 自由度): ジョイント Z 軸周りの回転のみ可能です。",
+    "dialog.move_constraint_slider": "ジョイント \"{joint}\" により拘束 — スライダー (1 自由度): ジョイント Z 軸に沿った移動のみ可能です。",
+    "dialog.move_constraint_zero_dof": "完全に拘束されています (0 自由度): {reason}。代わりに固定された親コンポーネントを移動するか、ジョイントを編集してください。"
+  },
+  "ko": {
+    "dialog.move_constraint_complex": "{joints}에 의해 부분 구속되었습니다({dof} 자유도). 뷰포트에서 직접 드래그하거나 조인트 구동을 사용하세요.",
+    "dialog.move_constraint_cylindrical": "조인트 \"{joint}\"에 의해 구속됨 — 원통(2 자유도): 조인트 Z축 이동 및 회전만 가능합니다.",
+    "dialog.move_constraint_fixed": "완전히 구속되었습니다: {reason}.",
+    "dialog.move_constraint_joints_fallback": "조인트",
+    "dialog.move_constraint_parallel": "조인트 \"{joint}\"에 의해 구속됨 — 평행(4 자유도): 자유롭게 평행 이동하고 조인트 Z축 회전만 가능합니다.",
+    "dialog.move_constraint_pin_slot": "조인트 \"{joint}\"에 의해 구속됨 — 핀-슬롯(2 자유도): 조인트 X축 이동 및 Z축 회전만 가능합니다.",
+    "dialog.move_constraint_planar": "조인트 \"{joint}\"에 의해 구속됨 — 평면(3 자유도): 조인트 XY 평면 이동 및 Z축 회전만 가능합니다.",
+    "dialog.move_constraint_revolute": "조인트 \"{joint}\"에 의해 구속됨 — 회전(1 자유도): 조인트 Z축 회전만 가능합니다.",
+    "dialog.move_constraint_slider": "조인트 \"{joint}\"에 의해 구속됨 — 슬라이더(1 자유도): 조인트 Z축 이동만 가능합니다.",
+    "dialog.move_constraint_zero_dof": "완전히 구속되었습니다(0 자유도): {reason}. 고정된 상위 컴포넌트를 이동하거나 조인트를 편집하세요."
+  },
+  "vi": {
+    "dialog.move_constraint_complex": "Bị ràng buộc một phần ({dof} bậc tự do) bởi {joints}. Kéo trực tiếp trong khung nhìn hoặc dùng Điều khiển khớp để di chuyển theo cơ cấu.",
+    "dialog.move_constraint_cylindrical": "Bị ràng buộc bởi khớp \"{joint}\" — Trụ (2 bậc tự do): chỉ trượt dọc và xoay quanh trục Z của khớp.",
+    "dialog.move_constraint_fixed": "Bị ràng buộc hoàn toàn: {reason}.",
+    "dialog.move_constraint_joints_fallback": "các khớp",
+    "dialog.move_constraint_parallel": "Bị ràng buộc bởi khớp \"{joint}\" — Song song (4 bậc tự do): tịnh tiến tự do và chỉ xoay quanh trục Z của khớp.",
+    "dialog.move_constraint_pin_slot": "Bị ràng buộc bởi khớp \"{joint}\" — Chốt-rãnh (2 bậc tự do): chỉ trượt dọc trục X và xoay quanh trục Z của khớp.",
+    "dialog.move_constraint_planar": "Bị ràng buộc bởi khớp \"{joint}\" — Phẳng (3 bậc tự do): chỉ trượt trong mặt phẳng XY và xoay quanh trục Z của khớp.",
+    "dialog.move_constraint_revolute": "Bị ràng buộc bởi khớp \"{joint}\" — Quay (1 bậc tự do): chỉ xoay quanh trục Z của khớp.",
+    "dialog.move_constraint_slider": "Bị ràng buộc bởi khớp \"{joint}\" — Trượt (1 bậc tự do): chỉ trượt dọc trục Z của khớp.",
+    "dialog.move_constraint_zero_dof": "Bị ràng buộc hoàn toàn (0 bậc tự do): {reason}. Hãy di chuyển thành phần cha được neo hoặc chỉnh sửa khớp."
+  },
+  "zh": {
+    "dialog.move_constraint_complex": "受 {joints} 部分约束（{dof} 个自由度）。请直接在视口中拖动或使用“驱动关节”沿机构运动。",
+    "dialog.move_constraint_cylindrical": "受关节“{joint}”约束 — 圆柱（2 个自由度）：仅可沿关节 Z 轴移动和旋转。",
+    "dialog.move_constraint_fixed": "完全约束：{reason}。",
+    "dialog.move_constraint_joints_fallback": "关节",
+    "dialog.move_constraint_parallel": "受关节“{joint}”约束 — 平行（4 个自由度）：可自由平移，仅可绕关节 Z 轴旋转。",
+    "dialog.move_constraint_pin_slot": "受关节“{joint}”约束 — 销槽（2 个自由度）：仅可沿关节 X 轴移动并绕 Z 轴旋转。",
+    "dialog.move_constraint_planar": "受关节“{joint}”约束 — 平面（3 个自由度）：仅可在关节 XY 平面内移动并绕 Z 轴旋转。",
+    "dialog.move_constraint_revolute": "受关节“{joint}”约束 — 旋转（1 个自由度）：仅可绕关节 Z 轴旋转。",
+    "dialog.move_constraint_slider": "受关节“{joint}”约束 — 滑块（1 个自由度）：仅可沿关节 Z 轴移动。",
+    "dialog.move_constraint_zero_dof": "完全约束（0 个自由度）：{reason}。请改为移动锚定的父组件或编辑关节。"
+  }
+}
