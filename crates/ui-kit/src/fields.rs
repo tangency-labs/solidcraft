@@ -1121,7 +1121,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
     super::disclosure(painter, egui::pos2(rect.left() + t.form_inset + t.space_8 * 0.5, y), open, t.text_dim);
     let small = egui::FontId::proportional(t.font_small);
     let title = painter.layout_no_wrap(compact(&name.to_uppercase(), SEARCH_LABEL_CAP), small.clone(), t.text);
-    let title_pos = egui::pos2(rect.left() + t.form_inset + t.space_16, y - title.size().y / 2.0);
+    let title_pos = egui::pos2(rect.left() + t.form_inset + t.space_16, y - title.size().y / 2.0 - egui::galley_cap_ink_rise(painter, &title));
     let title_width = title.size().x;
     painter.galley(title_pos, title, t.text);
     let number = painter.layout_no_wrap(count.to_string(), small, t.text_dim);
@@ -1132,7 +1132,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
         vec2(number.size().x + pad * 2.0, badge_height),
     );
     painter.rect_filled(badge, t.radius_sm, t.chip);
-    painter.galley(egui::pos2(badge.left() + pad, y - number.size().y / 2.0), number, t.text_dim);
+    painter.galley(egui::pos2(badge.left() + pad, y - number.size().y / 2.0 - egui::galley_cap_ink_rise(painter, &number)), number, t.text_dim);
     let (rule_from, rule_to) = (badge.right() + t.space_8, rect.right() - t.form_inset);
     if rule_from < rule_to {
         painter.hline(rule_from..=rule_to, y, egui::Stroke::new(1.0, t.border));
