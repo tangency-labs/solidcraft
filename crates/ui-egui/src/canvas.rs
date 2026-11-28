@@ -476,6 +476,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     let _tool_window = ToolWindow::enter(app);
     crate::extrude_face_snap::set(None);
+    crate::dialogs_print_unfold::overlay(app, painter, proj);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
         return;

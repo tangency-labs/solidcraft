@@ -240,7 +240,7 @@ impl LayoutFill {
 pub struct Documents {
     /// What the places of a layout without a view show ([`LayoutFill`]).
     pub(crate) layout_fill: LayoutFill,
-    slots: Vec<Option<DocSlot>>,
+    pub(crate) slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
     pub closing: Option<usize>,

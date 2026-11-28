@@ -63,6 +63,8 @@ macro_rules! unpaged_preferences {
             /// Importer options, by plugin id and entry name: each entry's own "Remember these options"
             /// choice and its last-run values. Bookkeeping, never design data.
             plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, crate::plugin_menu::ImporterMemory>> = std::collections::BTreeMap::new();
+            /// The printers the user saved in Unfold for Printing, each `name|width|depth` (mm).
+            print_beds: Vec<String> = Vec::new();
             /// Resource identities and history belong to the user, never the design.
             render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
             render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();

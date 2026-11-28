@@ -171,6 +171,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         next_component_color_index: _,
         materials,
         print_faces,
+        print_unfold,
         // Read only by robot exports: no feature's geometry depends on it.
         collision_shapes: _,
         // Display only: no feature's geometry depends on it.
@@ -222,6 +223,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *text_params == b.text_params
         && *materials == b.materials
         && *print_faces == b.print_faces
+        && *print_unfold == b.print_unfold
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components

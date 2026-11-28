@@ -5231,6 +5231,10 @@ pub struct Document {
     /// The flat face per body (by body name) that a slicer export lays on the print bed.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub print_faces: std::collections::BTreeMap<String, crate::config::ConfigFaceTarget>,
+    /// The body this design unfolds for printing, with its base face and bends (Unfold for
+    /// Printing); none in any other design.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_unfold: Option<crate::print_unfold::PrintUnfold>,
     /// What a body looks like to a simulator, by body name; a body not listed is `Auto`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub collision_shapes: std::collections::BTreeMap<String, CollisionShape>,
@@ -5632,6 +5636,7 @@ impl Document {
             collision_shapes: Default::default(),
             edgeless_bodies: Default::default(),
             print_faces: Default::default(),
+            print_unfold: None,
             user_materials: Vec::new(),
             appearances: Default::default(),
             favorites: Default::default(),
@@ -5680,6 +5685,9 @@ impl Document {
         if let Some(mut face) = self.print_faces.remove(old) {
             face.body = new.to_string();
             self.print_faces.insert(new.to_string(), face);
+        }
+        if let Some(unfold) = self.print_unfold.as_mut().filter(|u| u.body == old) {
+            unfold.body = new.to_string();
         }
         if let Some(rule) = self.plastic.assigned.remove(old) {
             self.plastic.assigned.insert(new.to_string(), rule);

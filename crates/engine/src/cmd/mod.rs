@@ -244,6 +244,7 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod print_face;
+pub mod print_unfold;
 mod remove_history;
 mod render;
 pub(crate) use render::PreparedCapture;
@@ -716,6 +717,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(file_library::COMMANDS.iter());
     v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
+    v.extend(print_unfold::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(hole_callout::COMMANDS.iter());

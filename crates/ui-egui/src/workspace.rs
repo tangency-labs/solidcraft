@@ -841,6 +841,7 @@ pub const SECTIONS: &[Section] = &[
             "sheet.hardware",
             "sheet.convert",
             "sheet.recognize",
+            "print.unfold.start",
         ],
     },
     Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },

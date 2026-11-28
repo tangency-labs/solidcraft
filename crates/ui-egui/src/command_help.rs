@@ -163,6 +163,7 @@ pub const DOCUMENTED: &[&str] = &[
     "plastic.rest",
     "plastic.snap_fit",
     "pointcloud.insert",
+    "print.unfold.start",
     "pulley.insert",
     "scan.align",
     "shaft_spline.insert",

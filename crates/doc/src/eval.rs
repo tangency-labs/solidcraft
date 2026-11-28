@@ -20854,10 +20854,14 @@ fn eval_feature_kind(
                 }
                 st.bodies.push(ModelBody::traced_new(name, b, f.id));
             }
+            // The surface model of an unfolded print is open sheets on purpose: that they are
+            // open is no warning there, and its parts need no check.
+            let sheets = doc.print_unfold.as_ref().is_some_and(|u| u.surface == Some(f.id));
+            let warnings: Vec<&String> = imp.warnings.iter().filter(|w| !(sheets && w.contains("imported as an open body"))).collect();
             // SMLib's check of the parts may still be running: the report holds it, and what it
             // finds joins the warning when it ends ([`Model::settle_import_checks`]).
-            *warning = import_warning(&imp.warnings);
-            if warning.is_some() || !imp.report.checks.is_empty() {
+            *warning = import_warning(&warnings);
+            if warning.is_some() || (!sheets && !imp.report.checks.is_empty()) {
                 *import_report = Some(Arc::new(imp.report.clone()));
             }
             Ok(())
