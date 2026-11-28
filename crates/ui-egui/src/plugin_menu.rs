@@ -3500,7 +3500,16 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         }
         (Kind::Choices { titles, .. }, Input::Choices(chosen)) => {
             let pictures = field_pictures(plugin, field);
-            ui_kit::row(ui, &label, |ui| {
+            let check = |ui: &mut egui::Ui, chosen: &mut Vec<usize>, index: usize| {
+                let mut on = chosen.contains(&index);
+                let response = ui_kit::checkbox(ui, titles.get(index).map_or("", String::as_str), &mut on);
+                if on != chosen.contains(&index) {
+                    toggle_option(chosen, index);
+                }
+                response
+            };
+            let mut checkboxes = false;
+            let first = ui_kit::row(ui, &label, |ui| {
                 if let Some(pictures) = pictures.as_ref().filter(|_| field.buttons)
                     && let Some((response, clicked)) = choice_buttons(ui, field, titles, pictures, |i| chosen.contains(&i))
                 {
@@ -3509,24 +3518,22 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                     }
                     return response;
                 }
-                // One checkbox per option.
-                ui.vertical(|ui| {
-                    let mut all: Option<egui::Response> = None;
-                    for index in field.available.iter().copied() {
-                        let mut on = chosen.contains(&index);
-                        let response = ui_kit::checkbox(ui, titles.get(index).map_or("", String::as_str), &mut on);
-                        if on != chosen.contains(&index) {
-                            toggle_option(chosen, index);
-                        }
-                        all = Some(match all {
-                            Some(all) => all.union(response),
-                            None => response,
-                        });
-                    }
-                    all.unwrap_or_else(|| ui.response())
+                // One checkbox per option: the first in the row, the others below it, as a row
+                // holds one line.
+                checkboxes = true;
+                match field.available.first() {
+                    Some(index) => check(ui, chosen, *index),
+                    None => ui.response(),
+                }
+            });
+            if checkboxes && field.available.len() > 1 {
+                let width = ui.available_width();
+                ui_kit::below_row_control(ui, &label, width, |ui| {
+                    field.available.iter().skip(1).fold(first, |all, index| all.union(check(ui, chosen, *index)))
                 })
-                .inner
-            })
+            } else {
+                first
+            }
         }
         (Kind::Text { .. }, Input::Text(text)) if field.font => ui_kit::row(ui, &label, |ui| font_field_row(ui, field, text)),
         (Kind::Text { directory: true, .. }, Input::Text(text)) => {
