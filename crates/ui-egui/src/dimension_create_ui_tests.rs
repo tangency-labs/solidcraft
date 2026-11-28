@@ -233,19 +233,23 @@ fn clicking_an_unnamed_driven_dimension_names_it_then_inserts_the_name() {
     let driven = with_an_unnamed_driven_dimension(&mut h);
     crate::dim_view::edit_param(&h.app, "d2");
     h.frames(5);
-    type_value(&mut h, "10");
+    // The caret between the brackets: the name goes in there.
+    type_value(&mut h, "( ) / 5");
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.step(&json!({"key":"ArrowRight"})).unwrap();
+    h.step(&json!({"key":"ArrowRight"})).unwrap();
+    h.frames(3);
     h.step(&json!({"click":{"dimension":driven}})).unwrap();
     // The name box opens once the double-click window has passed.
     h.frames(40);
     assert_eq!(crate::dim_view::naming().map(|n| n.0), Some(driven.clone()), "{:?}", h.app.status);
     h.step(&json!({"text":"gap"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
-    // Back in d2's value, the name in place of the plain number.
+    // Back in d2's value, the name at its caret.
     h.frames(3);
     assert!(crate::dim_view::editing() && crate::dim_view::naming().is_none(), "{:?}", h.app.status);
-    h.step(&json!({"text":" / 5"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "gap / 5");
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "( gap) / 5");
     assert!((h.app.session.doc.eval("d2", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 4.).abs() < 1e-6);
     // A named one goes straight in.
     crate::dim_view::edit_param(&h.app, "d2");

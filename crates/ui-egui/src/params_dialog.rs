@@ -740,6 +740,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
     fn kind(&self, row: usize, col: usize) -> Option<ui_kit::CellKind> {
         // A model parameter's unit is the dimension's: shown, not chosen. A driven dimension's
         // parameter is what it measures: read, never typed (#5582).
+        let col = self.column(col);
         let r = self.row(row)?;
         ((col == UNIT && r.source != "user") || (col == EXPRESSION && r.driven)).then_some(ui_kit::CellKind::ReadOnly)
     }
