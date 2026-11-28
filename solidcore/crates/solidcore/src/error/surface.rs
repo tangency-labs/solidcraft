@@ -153,6 +153,8 @@ pub enum SurfaceFailure {
     /// radius at a control point of the net is not above the kernel's zero.
     /// [`ErrorKind::Degenerate`].
     ConeClosesWithinSpan,
+    /// A Cartesian control point exceeds the model coordinate ceiling. [`ErrorKind::InvalidInput`].
+    ControlPointOutsideModel,
     /// The cross-section values given do not agree in size or order (arrays of different
     /// sizes, a derivative without the lower ones, or end values without their start's).
     /// [`ErrorKind::InvalidInput`].
@@ -826,7 +828,8 @@ impl SurfaceFailure {
             | Self::SurfaceNotBSplineKind
             | Self::SurfaceWithoutGenerator
             | Self::TrimmedCacheHasNoFace => SM_ERR_NULL_POINTER,
-            Self::DegenerateIsoCurve
+            Self::ControlPointOutsideModel
+            | Self::DegenerateIsoCurve
             | Self::DisjointFaceDomain
             | Self::DomainPastApex
             | Self::InvalidValue(_)
@@ -859,6 +862,7 @@ impl SurfaceFailure {
             | Self::CacheWithoutSurfaceHandle
             | Self::ClassificationWithoutIntervals
             | Self::ConeBoundaryOnAxis
+            | Self::ControlPointOutsideModel
             | Self::CrossSectionValuesDisagree
             | Self::CurveDimensionTooLarge
             | Self::CurveWithoutControlPoints
@@ -986,6 +990,7 @@ impl SurfaceFailure {
 impl core::fmt::Display for SurfaceFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::ControlPointOutsideModel => f.write_str("control point coordinate above 1e150"),
             Self::AltCachesFull => {
                 f.write_str("the surface cache holds as many alternate caches as its limit")
             }

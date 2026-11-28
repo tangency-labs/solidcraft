@@ -102,7 +102,7 @@
 
 use std::sync::Arc;
 
-use crate::error::{nurbs::NurbsFailure, Result, SolidError};
+use crate::error::{curve::CurveFailure, nurbs::NurbsFailure, Result, SolidError};
 use crate::limits;
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
@@ -167,9 +167,9 @@ impl Curve {
             .iter()
             .any(|point| point.exceeds_model_coordinate_bound())
         {
-            return Err(invalid(
+            return Err(SolidError::curve(
                 "nurbs::crv_basic::Curve::new",
-                "control point coordinate above 1e150",
+                CurveFailure::ControlPointOutsideModel,
             ));
         }
         Ok(Self {
@@ -207,9 +207,9 @@ impl Curve {
             .take(n + 1)
             .any(|point| point.exceeds_model_coordinate_bound())
         {
-            return Err(invalid(
+            return Err(SolidError::curve(
                 "nurbs::crv_basic::Curve::with_indices",
-                "control point coordinate above 1e150",
+                CurveFailure::ControlPointOutsideModel,
             ));
         }
         Ok(Self {
@@ -1419,13 +1419,22 @@ mod tests {
     fn coordinate_bound_refuses_curve_control_points_in_use() {
         let start = CPoint::new(0.0, 0.0, NOZ, NOW);
         let knots = vec![0.0, 0.0, 1.0, 1.0];
-        for x in [1e300, -1e300] {
-            let far = CPoint::new(x, 0.0, NOZ, NOW);
-            for result in [
-                Curve::new(vec![start, far], 1, knots.clone()),
-                Curve::with_indices(vec![start, far], 1, 1, knots.clone(), 3),
+        for coordinate in [1e300, -1e300, f64::MAX, -f64::MAX] {
+            for far in [
+                CPoint::new(coordinate, 0.0, NOZ, NOW),
+                CPoint::new(0.0, coordinate, NOZ, NOW),
             ] {
-                assert!(matches!(result, Err(SolidError::InvalidInput { .. })));
+                for result in [
+                    Curve::new(vec![start, far], 1, knots.clone()),
+                    Curve::with_indices(vec![start, far], 1, 1, knots.clone(), 3),
+                ] {
+                    let error = result.unwrap_err();
+                    assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
+                    assert_eq!(
+                        error.curve_failure(),
+                        Some(&CurveFailure::ControlPointOutsideModel)
+                    );
+                }
             }
         }
         let near = CPoint::new(1e150, 0.0, NOZ, NOW);
@@ -1437,10 +1446,9 @@ mod tests {
         let weighted_end = CPoint::new(1e200, 0.0, NOZ, 1e200);
         assert!(Curve::new(vec![weighted_start, weighted_end], 1, knots.clone()).is_ok());
         let far_cartesian = CPoint::new(1.0, 0.0, NOZ, 1e-200);
-        assert!(matches!(
-            Curve::new(vec![weighted_start, far_cartesian], 1, knots),
-            Err(SolidError::InvalidInput { .. })
-        ));
+        let error = Curve::new(vec![weighted_start, far_cartesian], 1, knots).unwrap_err();
+        assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(error.curve_failure(), Some(&CurveFailure::ControlPointOutsideModel));
     }
 
     fn line2() -> Curve {

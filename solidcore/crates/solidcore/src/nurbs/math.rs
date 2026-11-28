@@ -371,12 +371,12 @@ impl CPoint {
     /// coordinate ceiling. Test Cartesian coordinates, not weighted coefficients:
     /// scaling all homogeneous coefficients does not change the geometry.
     pub(crate) fn exceeds_model_coordinate_bound(self) -> bool {
-        use crate::limits::{exceeds_coordinate_bound, MAX_COORDINATE_MAGNITUDE};
+        use crate::limits::MAX_COORDINATE_MAGNITUDE;
         let z = if self.z == NOZ { 0.0 } else { self.z };
         if self.w == NOW {
-            [self.x, self.y, z]
-                .into_iter()
-                .any(exceeds_coordinate_bound)
+            [self.x, self.y, z].into_iter().any(|coordinate| {
+                coordinate.is_finite() && coordinate.abs() > MAX_COORDINATE_MAGNITUDE
+            })
         } else if self.w.is_finite() && self.w != 0.0 {
             [self.x, self.y, z].into_iter().any(|coordinate| {
                 coordinate.is_finite() && (coordinate / self.w).abs() > MAX_COORDINATE_MAGNITUDE
