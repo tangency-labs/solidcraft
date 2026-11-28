@@ -158,6 +158,30 @@ fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
     }
 }
 
+/// Not upstream (#2784): the intersection of two kernel bodies inside an operation already on
+/// the kernel, as [`boolean_with`] makes it (tolerances matched, the boolean's tolerance update,
+/// the result contract); `None` where the result is empty or the contract refuses it.
+///
+/// # Errors
+/// The kernel's (cancellation included).
+pub(crate) fn intersection_in(
+    k: &mut Kernel,
+    a: Brep,
+    b: Brep,
+    contract: Contract,
+) -> KernelResult<Option<Brep>> {
+    let mut operands = [(a, Proof::default()), (b, Proof::default())];
+    let expect = expect_of(k, &mut operands, contract)?;
+    let [(mut ca, _), (mut cb, _)] = operands;
+    matched_tolerances(k, &mut ca, &mut cb)?;
+    let mut r = sm::boolean(k, ca, cb, BooleanOperation::Intersection)?.result;
+    after_boolean(k, &mut r)?;
+    Ok(match finished(k, r, expect, contract)? {
+        Done::Body(b, _) => Some(*b),
+        Done::Empty | Done::Refused(_) => None,
+    })
+}
+
 /// `a` op `b` (`SmApiBoolean`) under [`Contract::Closed`]: `None` when the result is empty,
 /// [`Error::NotSolid`] when solid operands give a body that is not closed (solids touching
 /// along an edge or at a vertex are closed). An empty difference or intersection of solids is

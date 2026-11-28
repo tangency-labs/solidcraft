@@ -13,6 +13,7 @@
 //! | [`FilletSession::mitred_edges`] | `SmFilletExecutive::GetMitredEdges` (the fork's `9ba2b12`) |
 //! | [`FilletSession::add_earlier_pass_face`] | `SmFilletExecutive::AddEarlierPassFace` (the fork's `9822462`) |
 //! | the stop in `FilletExecutive::refuse_blends_larger_than_faces` | the `m_bClassifyOnly` / `m_bOverflowFirst` stop of `CreateFilletBrep` |
+//! | [`FilletSession::set_groups_apart`], [`FilletSession::bands_meet_apart`] | none (not upstream, #2784) |
 //!
 //! Deviations: both settings are per session and off by default, so a session that does
 //! not set them is unchanged. They act where the fork's rail classification runs
@@ -63,6 +64,25 @@ impl FilletSession<'_> {
     /// edges keeps it.
     pub fn set_classify_only(&mut self, only: bool) {
         self.executive.set_classify_only(only);
+    }
+
+    /// Not upstream (#2784; off by default): the caller found the edges in at least two
+    /// groups that share no vertex, and builds blends whose bands meet across a face they
+    /// share apart, group by group, then intersects what each leaves. With it, a refusal of
+    /// bands that meet while no blend adds material is also noted as that event
+    /// ([`Self::bands_meet_apart`]); the refusal itself, with its size, is unchanged.
+    /// Preparing the edges keeps it.
+    pub fn set_groups_apart(&mut self, apart: bool) {
+        self.executive.set_groups_apart(apart);
+    }
+
+    /// Not upstream (#2784): whether `do_fillet`'s refusal is the event of
+    /// [`Self::set_groups_apart`] (bands that meet across a face, no blend adding material),
+    /// in which the caller builds the groups apart; `false` otherwise (preparing the edges
+    /// clears it).
+    #[must_use]
+    pub fn bands_meet_apart(&self) -> bool {
+        self.executive.bands_meet_apart()
     }
 
     /// `GetOverflowEdges` (the fork's, tangency-labs/smlib `241f7ba`, WR-634): the target

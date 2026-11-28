@@ -6,6 +6,7 @@
 //! `SmFilletRemoval`, `SmCurveFilletExecutive`, `SmFeatureExecutive` in `source/SMLib`, and
 //! `SM_API/SmApiFillets`.
 
+pub mod apart_volumes;
 pub mod band_room;
 pub mod blend_corner;
 pub mod blend_refusal;

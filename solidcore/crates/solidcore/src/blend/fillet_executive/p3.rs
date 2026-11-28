@@ -854,6 +854,19 @@ pub struct FilletExecutive<O> {
     /// [`Self::overflow_edges`] the edges whose blends overflow (possibly none). Acts only
     /// with the flags of [`Self::overflow_first`].
     pub classify_only: bool,
+    /// Not upstream (#2784; `false` from the constructor): the caller found the edges in at
+    /// least two groups that share no vertex, and builds blends whose bands meet across a
+    /// face apart, group by group ([`Self::bands_meet_apart`]). Set by
+    /// `FilletSession::set_groups_apart`.
+    pub groups_apart: bool,
+    /// Not upstream (#2784): with [`Self::groups_apart`], the refusal recorded is that of
+    /// bands that meet only across curved faces (`FaceConsumed` from the bands, or
+    /// `BandsOverlap`), or, where no band contact is found, of a band reaching another blended
+    /// edge of a curved face (the faces-outlast check's reach), while no blend adds material
+    /// and no polygon is taken whole: the event in which each group's blend
+    /// takes off what it takes alone, so the body is the intersection of what each group
+    /// leaves. The refusal, with its size, stands for when that construction gives no body.
+    pub bands_meet_apart: bool,
     /// Not upstream (#10876; `false` from the constructor): the session is the blend
     /// corner's Roll-over's second pass, the concave chain
     /// ([`crate::blend::blend_corner::rollover`]): its concave overflow across the cliff is
@@ -2484,6 +2497,13 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Those of the sizing and the face's interior-point query.
     fn creation_bands_meet(&mut self, k: &mut Kernel, solvers: &[O]) -> Result<Vec<BandFit<O>>>;
+
+    /// Not upstream (#2784): whether the last [`SolverGeometryAccess::geometry_faces_outlast`]
+    /// found a blend's band reaching another blended edge of a curved face (its band covers that
+    /// face up to the other edge or past it). `false` where the context does not judge it.
+    fn creation_bands_reached_curved_face(&self) -> bool {
+        false
+    }
 }
 
 /// A band contact's limiting size and the target entities that locate it.
@@ -2499,6 +2519,8 @@ pub struct BandFit<O> {
     pub face: Option<O>,
     /// An interior point of the shared face, when it is named.
     pub at: Option<Point3>,
+    /// Not upstream (#2784): the shared face is curved (its surface is not a plane).
+    pub curved: bool,
 }
 
 /// Where a solver's convex blend would cut the part
@@ -3611,20 +3633,58 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // (NoteFitOfPolygonsTakenWhole) and a plane bounded by one blended circle (the ball
             // touching it at the centre); open, so less the fit margin
             let solvers = self.solvers.clone();
-            for (best, solver, _) in access.creation_polygons_taken_whole(k, &solvers)? {
+            let polygons = access.creation_polygons_taken_whole(k, &solvers)?;
+            let no_polygon = polygons.is_empty();
+            for (best, solver, _) in polygons {
                 self.note_open_fit(access, true, best, FitKind::Radius, solver)?;
             }
-            for solver in solvers {
+            for &solver in &solvers {
                 for (fit, edge) in access.creation_circle_tops(k, solver)? {
                     if self.fit_radius < 0.0 || fit < self.fit_radius {
                         self.note_fit_radius(fit, Some(edge), FitKind::Radius);
                     }
                 }
             }
-            return self.record_no_room(
+            // Not the fork's (#2784): a face of any kind taken whole by bands that reach its
+            // other blended edges (a disc's side, both rims blended by its height or more)
+            // fits only where those bands still meet: their contact size, where less, and
+            // located there as `refuse_overlapping_bands` locates it. A polygon taken whole
+            // keeps its own event's size against the plane bands' contacts, but a curved face's
+            // contact counts wherever it is, so a polygon elsewhere in the selection never
+            // names a size larger than the curved face allows.
+            let mut site = None;
+            // the event only where every meeting of bands is on a curved face (a plane's
+            // bands keep their refusal), and no polygon is taken whole
+            let (mut met, mut all_curved) = (false, true);
+            for fit in access.creation_bands_meet(k, &solvers)? {
+                met |= no_polygon;
+                all_curved &= fit.curved;
+                if (no_polygon || fit.curved)
+                    && (self.fit_radius < 0.0 || fit.size < self.fit_radius)
+                {
+                    self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
+                    site = Some(fit);
+                }
+            }
+            // where no band contact is found (each band covers the face past the other edge),
+            // the reach the faces-outlast check found on a curved face stands for it
+            let reached = no_polygon && access.creation_bands_reached_curved_face();
+            let curved_only = if met { all_curved } else { reached };
+            self.bands_meet_apart =
+                (met || reached) && curved_only && self.blends_take_material(k, access)?;
+            let refused = self.record_no_room(
                 NoRoomReason::FaceConsumed,
                 "Fillet Error: the blends take the whole of a face they roll on, some at an angle to it (the blend is larger than the faces allow)",
             );
+            if let Some(fit) = site {
+                self.error.edge = Some(fit.edge);
+                self.error.vertex = None;
+                self.error.end_face = None;
+                self.error.side_face = fit.face;
+                self.error.location = fit.at;
+                self.error.no_room_without_site = false;
+            }
+            return refused;
         }
         Ok(())
     }
@@ -3775,12 +3835,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if !access.geometry_bands_clear_other_rails(k, &self.solvers)? {
             let solvers = self.solvers.clone();
             let mut site = None;
+            // the event only where every meeting of bands is on a curved face
+            let (mut met, mut all_curved) = (false, true);
             for fit in access.creation_bands_meet(k, &solvers)? {
+                met = true;
+                all_curved &= fit.curved;
                 if self.fit_radius < 0.0 || fit.size < self.fit_radius {
                     self.note_fit_radius(fit.size, Some(fit.edge), fit.kind);
                     site = Some(fit);
                 }
             }
+            self.bands_meet_apart = met && all_curved && self.blends_take_material(k, access)?;
             let refused = self.record_no_room(
                 NoRoomReason::BandsOverlap,
                 "Fillet Error: a blend's rail runs inside the band another blend takes off a face they share (the blends are larger than the face allows)",
@@ -3796,6 +3861,29 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return refused;
         }
         Ok(())
+    }
+
+    /// Not upstream (#2784): with [`Self::groups_apart`], whether every blend takes material
+    /// off (none is concave), so that each group's blend takes off what it takes alone and the
+    /// body left is the intersection of what each group leaves ([`Self::bands_meet_apart`]).
+    /// `false` without [`Self::groups_apart`], asking nothing of the geometry.
+    ///
+    /// # Errors
+    /// Those of the material test.
+    fn blends_take_material(
+        &self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<bool> {
+        if !self.groups_apart {
+            return Ok(false);
+        }
+        for &solver in &self.solvers {
+            if access.geometry_blend_adds_material(k, solver)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Ease each round into its curvature-continuous section before the setbacks that ask

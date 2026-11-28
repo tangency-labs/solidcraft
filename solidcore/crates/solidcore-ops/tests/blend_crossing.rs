@@ -912,3 +912,63 @@ fn rounds_overlapping_past_a_tab_corner_are_refused() {
         assert!(c.check(CheckLevel::All).unwrap().is_valid(), "{centre:?}");
     }
 }
+
+/// #2784: a disc 10 across and 1 high, both rims blended past half its height. Each rim's
+/// blend takes off what it takes alone; the side face goes and the two blends meet in a ridge.
+/// The volume: the disc less, at `u` in from the blend's foot on the side (`5 - d`), what both
+/// keep (the bottom blend keeps `z` above `u` for a chamfer, `d - sqrt(d^2 - u^2)` for a round,
+/// the top one the mirror), swept round the axis (Pappus); a chamfer's in closed form,
+/// `pi (5 - d)^2 + 2 pi (0.25 (5 - d) + 1/24)`.
+#[test]
+#[allow(clippy::disallowed_methods)] // test code computing the expected volume (docs/layers.md §4)
+fn both_rims_of_a_disc_past_half_its_height_build_what_each_takes_alone() {
+    all_fixes();
+    let disc_rims = |d: f64, kind: Blend| -> f64 {
+        if kind == Blend::Chamfer {
+            let a = 5.0 - d;
+            return std::f64::consts::PI * a * a
+                + 2.0 * std::f64::consts::PI * (0.25 * a + 1.0 / 24.0);
+        }
+        let kept = |u: f64| {
+            let lift = d - (d * d - u * u).max(0.0).sqrt();
+            2.0 * std::f64::consts::PI
+                * (5.0 - d + u)
+                * ((1.0 - lift).min(1.0) - lift.max(0.0)).max(0.0)
+        };
+        let n: u32 = 200_000;
+        let h = d / f64::from(n);
+        let mut s = kept(0.0) + kept(d);
+        for i in 1..n {
+            s += kept(h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        std::f64::consts::PI * (5.0 - d) * (5.0 - d) + s * h / 3.0
+    };
+    // the turns the fillet and chamfer commands give (`Auto` without one asked) and `Mitre`
+    for turn in [Turn::Auto, Turn::Mitre] {
+        for kind in [Blend::Round, Blend::Chamfer] {
+            for d in [0.75, 1.0, 1.5, 4.0] {
+                let disc = built(|k| create_cylinder(k, Vec3::new(0.0, 0.0, 0.0), 5.0, 1.0));
+                let rims = [
+                    edge_at(&disc, [-5.0, 0.0, 0.0]),
+                    edge_at(&disc, [-5.0, 0.0, 1.0]),
+                ];
+                let options = BlendOptions {
+                    turn,
+                    ..BlendOptions::default()
+                };
+                let out = blend_with(&disc, kind, &rims, &[d], &[], Corners::Filled, options);
+                assert!(out.is_ok(), "{turn:?} {kind:?} {d}: {out:?}");
+                assert!(
+                    disc.check(CheckLevel::All).unwrap().is_valid(),
+                    "{turn:?} {kind:?} {d}"
+                );
+                let want = disc_rims(d, kind);
+                let v = disc.volume(1e-9).unwrap();
+                assert!(
+                    (v - want).abs() <= 1e-6 * want,
+                    "{turn:?} {kind:?} {d}: volume {v}, want {want}"
+                );
+            }
+        }
+    }
+}

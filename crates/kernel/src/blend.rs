@@ -3870,6 +3870,46 @@ mod tests {
         assert!(out.validity().is_empty(), "{:?}", out.validity());
     }
 
+    /// #2784: a disc 10 across and 1 high, both rims rounded (as `solid.fillet` rounds them, its
+    /// turn left to the kernel) or chamfered past half its height. Each rim's blend takes off what
+    /// it takes alone: the side face goes and the two blends meet in a ridge; past the height,
+    /// each rim's blend alone runs on over the other rim. The body is the disc less, at `u` in
+    /// from the blend's foot on the side (`5 - d`), what both keep (the bottom blend keeps `z`
+    /// above `u` for a chamfer, `d - sqrt(d^2 - u^2)` for a round, the top one the mirror), swept
+    /// round the axis (Pappus); a chamfer's in closed form, `pi (5 - d)^2 + 2 pi (0.25 (5 - d) +
+    /// 1/24)`. Below its height it was refused, at and past it it failed inside the blend.
+    #[test]
+    fn both_rims_of_a_disc_past_half_its_height_build_what_each_takes_alone() {
+        let pi = std::f64::consts::PI;
+        let round_volume = |d: f64| {
+            let kept = |u: f64| {
+                let lift = d - (d * d - u * u).max(0.0).sqrt();
+                2.0 * pi * (5.0 - d + u) * ((1.0 - lift).min(1.0) - lift.max(0.0)).max(0.0)
+            };
+            let n: u32 = 200_000;
+            let h = d / f64::from(n);
+            let mut s = kept(0.0) + kept(d);
+            for i in 1..n {
+                s += kept(h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+            }
+            pi * (5.0 - d) * (5.0 - d) + s * h / 3.0
+        };
+        let rims = [Vec3::new(-5.0, 0.0, 0.0), Vec3::new(-5.0, 0.0, 1.0)];
+        for d in [0.75, 1.0, 1.5, 4.0] {
+            let disc = crate::build::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 1.0).unwrap();
+            let (rounded, gone) = fillet_removing(&disc, &rims, d, FilletTurn::Auto).unwrap();
+            assert!(gone.is_empty(), "round {d}: {gone:?}");
+            assert!(rounded.validity().is_empty(), "round {d}: {:?}", rounded.validity());
+            let (got, want) = (crate::measure(&rounded).unwrap().volume, round_volume(d));
+            assert!((got - want).abs() < 1e-6 * want, "round {d}: {got} vs {want}");
+            let chamfered = chamfer(&disc, &rims, d).unwrap();
+            assert!(chamfered.validity().is_empty(), "chamfer {d}: {:?}", chamfered.validity());
+            let want = pi * (5.0 - d) * (5.0 - d) + 2.0 * pi * (0.25 * (5.0 - d) + 1.0 / 24.0);
+            let got = crate::measure(&chamfered).unwrap().volume;
+            assert!((got - want).abs() < 1e-6 * want, "chamfer {d}: {got} vs {want}");
+        }
+    }
+
     /// #22188: `solid.chamfer` 1.5 x 45 deg on a vertical edge meeting a widened recess floor
     /// whose side edge stops short of 1.5 mm while the wall continues past it.
     #[test]
