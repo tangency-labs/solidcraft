@@ -2992,6 +2992,67 @@ fn a_tube_joined_to_a_flared_loft_shells_open_at_both_ends() {
     }
 }
 
+/// #20539: SolidCraft's ruled loft from a circle r 20 about the y axis at y = 0 to a slot
+/// at y = 40 (centres x = ±20, radius 8), the sections as SolidCraft pairs them: the circle
+/// cut where the rays to the slot's four tangent points meet it (angles ±a and pi ± a about
+/// -y from +x, a = atan(8 / 20)), each arc paired with the slot's side or end facing it.
+fn circle_to_slot_loft() -> Body {
+    let axis = [0.0, -1.0, 0.0];
+    let x = [1.0, 0.0, 0.0];
+    let arc = |center: [f64; 3], radius: f64, start: f64, end: f64| crate::sweep::Curve::Arc {
+        center,
+        axis,
+        reference: x,
+        radius,
+        start,
+        end,
+    };
+    let line = |start: [f64; 3], end: [f64; 3]| crate::sweep::Curve::Line { start, end };
+    // a = atan(0.4), pi - a and pi + a: the doubles nearest them
+    let a = 0.380_506_377_112_364_9;
+    let pi_less_a = 2.761_086_276_477_428;
+    let pi_and_a = 3.522_099_030_702_158;
+    let circle = vec![
+        arc([0.0; 3], 20.0, -pi_less_a, -a),
+        arc([0.0; 3], 20.0, -a, a),
+        arc([0.0; 3], 20.0, a, pi_less_a),
+        arc([0.0; 3], 20.0, pi_less_a, pi_and_a),
+    ];
+    let y = 40.0;
+    let slot = vec![
+        line([-20.0, y, -8.0], [20.0, y, -8.0]),
+        arc([20.0, y, 0.0], 8.0, -PI / 2.0, PI / 2.0),
+        line([20.0, y, 8.0], [-20.0, y, 8.0]),
+        arc([-20.0, y, 0.0], 8.0, PI / 2.0, 3.0 * PI / 2.0),
+    ];
+    crate::sweep::loft(&[circle, slot], 1, true).unwrap()
+}
+
+/// #20539: the circle-to-slot loft, read back from its record as SolidCraft keeps it, shelled 2
+/// inward with the slot's end open, passes SMLib's full check and is one closed, sound solid
+/// lighter than the loft. It is refused (the result is not proved valid: SMLib's check finds a
+/// `Bad CurveCusp` on the UV trim of the open rim's edge where the slot's end wall meets its side
+/// wall). That rim edge is trimmed at the tangent vertex between the two walls 1.4e-5 of the
+/// wall's parameter past its boundary, onto its extension, and the drop splits the trim on the
+/// boundary's C0 knot line, leaving a piece 8.3e-7 long with a 1.4e-8 jog: the trim at a
+/// tangent vertex of #19419.
+#[test]
+#[ignore = "fails until the trim of an offset edge at a tangent vertex is fixed (#19419, #20539)"]
+fn a_circle_to_slot_loft_shells_open_at_the_slot() {
+    all_fixes();
+    let (record, _) = circle_to_slot_loft().to_record().unwrap();
+    let (b, o) = Body::from_record(&record, true).unwrap();
+    let outer = volume(&b);
+    shell(&b, &o, &[through(&b, &o, [0.0, 40.0, 0.0])], -2.0).unwrap();
+    let report = b.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    assert_eq!(b.to_record().unwrap().0.shells.len(), 1);
+    assert!(b.is_manifold_solid().unwrap());
+    b.check_solid().unwrap();
+    let shelled = volume(&b);
+    assert!(shelled > 0.0 && shelled < outer, "{shelled} of {outer}");
+}
+
 /// Drafts against closed forms (SolidCraft's `draft_*` cases, on record face indices), the oblique
 /// neutral plane's, and the refusals.
 mod drafts {
