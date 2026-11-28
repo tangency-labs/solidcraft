@@ -162,7 +162,7 @@ pub use solidcore_ops::RoomReason;
 impl Error {
     /// Whether this error is a failed radial-sector search during `make_faceuse`, for which a
     /// union can be retried in reverse order or on rebuilt native operands.
-    pub fn is_radial_sector_failure(&self) -> bool {
+    pub(crate) fn is_radial_sector_failure(&self) -> bool {
         matches!(self, Error::Solidcore(msg) if msg.contains("boolean::merge::p2::make_faceuse") && msg.contains("no radial edge use"))
     }
 }

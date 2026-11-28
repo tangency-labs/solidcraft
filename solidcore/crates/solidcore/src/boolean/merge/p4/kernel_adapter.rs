@@ -336,6 +336,9 @@ pub struct ManifoldKernelAdapter<'a> {
     pub records: crate::topology::topology::NotifyRecords,
     /// `m_bTopologyDeleted`; dependency editing stages update this same flag.
     pub topology_deleted: bool,
+    /// When set, constrain `find_region_of_other_face_with_void` to mated-edge regions and
+    /// the operation's kept void/solid side (used on radial-sector recovery paths).
+    pub(crate) constrain_mated_regions: bool,
     intersector: TopologyIntersector<H>,
     curves: Vec<crate::curve::curve::Curve>,
     extra_curves: Vec<crate::curve::curve::Curve>,
@@ -449,6 +452,10 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
     fn swap_state(&mut self, other: &mut ManifoldKernelAdapter<'_>) {
         std::mem::swap(&mut self.merge, &mut other.merge);
         std::mem::swap(&mut self.topology_deleted, &mut other.topology_deleted);
+        std::mem::swap(
+            &mut self.constrain_mated_regions,
+            &mut other.constrain_mated_regions,
+        );
         std::mem::swap(&mut self.intersector, &mut other.intersector);
         std::mem::swap(&mut self.curves, &mut other.curves);
         std::mem::swap(&mut self.extra_curves, &mut other.extra_curves);
@@ -462,6 +469,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
             merge: MergeState::new(Relations::default()),
             records: crate::topology::topology::NotifyRecords::new(),
             topology_deleted: false,
+            constrain_mated_regions: false,
             keys,
             body_ids: match keys {
                 NotificationKeys::Namespace(n) => {
@@ -1453,6 +1461,9 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         faceuse: FaceuseId,
         required_void: Option<bool>,
     ) -> Result<Option<RegionId>> {
+        if !self.constrain_mated_regions {
+            return self.find_region_of_other_face(k, primary, other, faceuse);
+        }
         p1::find_brep_region_of_other_face_with_void(
             k,
             primary,

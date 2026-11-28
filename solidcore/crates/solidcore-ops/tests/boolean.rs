@@ -5669,13 +5669,19 @@ fn faceted_sphere_plane_split_produces_both_halves() {
 fn coincident_tubes_on_shared_cut_plane_join_cleanly() {
     all_fixes();
     let radius = 4.5;
-    for tilt_deg in [0.0_f64, 1.0_f64] {
+    for (tilt_deg, s, c) in [
+        (0.0_f64, 0.0_f64, 1.0_f64),
+        (
+            1.0_f64,
+            0.017_452_406_437_283_51_f64,
+            0.999_847_695_156_391_3_f64,
+        ),
+    ] {
         let make_pair = || {
             let tube_a = if tilt_deg == 0.0 {
                 solidcore_ops::make_cylinder([0.0, 0.0, -20.0], radius, 20.0).unwrap()
             } else {
                 let raw = solidcore_ops::make_cylinder([0.0, 0.0, -25.0], radius, 30.0).unwrap();
-                let (s, c) = tilt_deg.to_radians().sin_cos();
                 raw.transform(&[
                     [c, 0.0, -s, 0.0],
                     [0.0, 1.0, 0.0, 0.0],

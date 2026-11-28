@@ -95,7 +95,15 @@ mod smlib {
             let first = solidcraft_smlib::Brep::boolean_tagged_owned(a_in, b_in, kind);
             let outcome = match first {
                 Ok(r) => Ok(r),
-                Err(ref err) if op == BoolOp::Union && (ka.is_none() || kb.is_none()) && err.is_radial_sector_failure() => {
+                Err(ref err)
+                    if op == BoolOp::Union
+                        && (ka.is_none() || kb.is_none())
+                        && matches!(
+                            err,
+                            solidcraft_smlib::Error::Solidcore(msg)
+                                if msg.contains("boolean::merge::p2::make_faceuse") && msg.contains("no radial edge use")
+                        ) =>
+                {
                     let retry_a = match ka {
                         Some(s) => Ok(s),
                         None => smlib_operand_ordered(a).map(|(s, _)| s),

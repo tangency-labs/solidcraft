@@ -317,7 +317,7 @@ pub fn find_brep_region_of_other_face(
     other_faceuse: FaceuseId,
     brep_mates: &BTreeMap<EdgeId, EdgeId>,
 ) -> Result<Option<RegionId>> {
-    find_brep_region_of_other_face_with_void(k, brep, other, other_faceuse, brep_mates, None)
+    find_brep_region_of_other_face_inner(k, brep, other, other_faceuse, brep_mates, false, None)
 }
 
 /// Primary regions bordered by every already-mated edge of `edges`, filtered by
@@ -395,6 +395,26 @@ pub(crate) fn find_brep_region_of_other_face_with_void(
     brep_mates: &BTreeMap<EdgeId, EdgeId>,
     required_void: Option<bool>,
 ) -> Result<Option<RegionId>> {
+    find_brep_region_of_other_face_inner(
+        k,
+        brep,
+        other,
+        other_faceuse,
+        brep_mates,
+        true,
+        required_void,
+    )
+}
+
+fn find_brep_region_of_other_face_inner(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &mut Brep,
+    other_faceuse: FaceuseId,
+    brep_mates: &BTreeMap<EdgeId, EdgeId>,
+    constrain_mated: bool,
+    required_void: Option<bool>,
+) -> Result<Option<RegionId>> {
     // `GetSize() == 1` and `GetList()`: the B-rep's region list, not its region records
     // (a region `DeleteFace` merged away keeps its record off the list)
     let listed = crate::topology::brep::p1::regions(brep, None)?;
@@ -404,13 +424,20 @@ pub(crate) fn find_brep_region_of_other_face_with_void(
         }
     }
     let edges = eu::faceuse_edgeuses(other, other_faceuse, false, None)?;
-    let eligible = eligible_mated_regions(brep, other, &edges, brep_mates, required_void)?;
+    let eligible = if constrain_mated {
+        eligible_mated_regions(brep, other, &edges, brep_mates, required_void)?
+    } else {
+        None
+    };
     if let Some(ref set) = eligible {
         if set.len() == 1 {
             return Ok(set.iter().next().copied());
         }
     }
     let is_eligible = |brep: &Brep, r: RegionId| -> Result<bool> {
+        if !constrain_mated {
+            return Ok(true);
+        }
         if let Some(ref set) = eligible {
             return Ok(set.contains(&r));
         }
@@ -2265,12 +2292,13 @@ mod tests {
         mates.insert(oe1, e1);
         mates.insert(oe2.unwrap(), e2);
         assert_eq!(
-            find_brep_region_of_other_face(
+            find_brep_region_of_other_face_with_void(
                 &Kernel::default(),
                 &mut b,
                 &mut other_two,
                 ofu_two,
-                &mates
+                &mates,
+                None,
             )
             .unwrap(),
             Some(r_void)

@@ -111,6 +111,7 @@ pub trait BooleanDriver {
 pub struct DependencyMerge {
     engine: Option<MergeEngine>,
     carry_attributes: bool,
+    constrain_mated_regions: bool,
 }
 
 /// The `SmMerge` members that `ManifoldBoolean` reads and writes. Their owner
@@ -257,6 +258,7 @@ impl DependencyMerge {
         Self {
             engine: Some(engine),
             carry_attributes: false,
+            constrain_mated_regions: false,
         }
     }
 
@@ -272,7 +274,16 @@ impl DependencyMerge {
         Self {
             engine: None,
             carry_attributes: true,
+            constrain_mated_regions: false,
         }
+    }
+
+    /// Constrain `find_region_of_other_face` to mated-edge regions and the operation's kept
+    /// void/solid side when placing faces of the other operand.
+    #[must_use]
+    pub(crate) const fn with_constrain_mated_regions(mut self, yes: bool) -> Self {
+        self.constrain_mated_regions = yes;
+        self
     }
 
     /// The adopted engine, mutably, if any.
@@ -318,6 +329,7 @@ impl BooleanDriver for DependencyMerge {
             options,
         )?;
         let mut engine = MergeEngine::from_merge(&merge)?;
+        engine.intersector.constrain_mated_regions = self.constrain_mated_regions;
         if self.carry_attributes {
             // (not upstream) the operands' attributes go to the merge's objects
             engine.seed_operand_attributes(primary.as_mut(), other.as_mut())?;
