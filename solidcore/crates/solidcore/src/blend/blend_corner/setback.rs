@@ -460,8 +460,10 @@ pub struct SetbackRefusal {
     /// `NoteFitSetBack(dSetBack)`: `Some` where the corner notes one.
     pub fit_setback: Option<f64>,
     /// Not the fork's: the refusal as data, where it is one of a setback asked for that
-    /// stops short of the rails' crossing or does not fit on the corner's edges
-    /// ([`BlendRefusal::SetbackTooShort`], [`BlendRefusal::SetbackTooLong`]).
+    /// stops short of the rails' crossing or does not fit on the corner's edges, or a growth
+    /// stopped by the rounds' rail reach with no certifying fill
+    /// ([`BlendRefusal::SetbackTooShort`], [`BlendRefusal::SetbackTooLong`],
+    /// [`BlendRefusal::SetbackUncertifiedWithinRails`]).
     pub refusal: Option<BlendRefusal>,
 }
 
@@ -1694,8 +1696,9 @@ type Ends = (Vec<Surface>, Vec<(SurfParamType, f64, bool)>);
 /// finds them: each one's surface, and its rails' direction, the rail parameter of its
 /// setback vertex and on which side the corner lies.
 enum Gathered {
-    /// The blends' ends.
-    Ends(Vec<Surface>, Vec<(SurfParamType, f64, bool)>),
+    /// The blends' ends, and each edge's certified rail reach (`BIG_DOUBLE` where no far
+    /// corner cuts either rail of that edge's round).
+    Ends(Vec<Surface>, Vec<(SurfParamType, f64, bool)>, Vec<f64>),
     /// Refused, with its reason (`pGatherWhy`).
     Refused(&'static str),
     /// A setback vertex not on its rail (`DropPoint` found none): the fork's `SM_ERR`, a
@@ -1736,6 +1739,7 @@ fn gather_ends(
     let n = faces.len();
     let mut surfaces: Vec<Surface> = Vec::with_capacity(n);
     let mut sides: Vec<(SurfParamType, f64, bool)> = Vec::with_capacity(n);
+    let mut reaches: Vec<f64> = Vec::new();
     let mut reach = BIG_DOUBLE;
     let mut past = false;
     for (i, &face) in faces.iter().enumerate() {
@@ -1868,6 +1872,7 @@ fn gather_ends(
         } else {
             edge_ivl.max()
         };
+        let mut edge_reach = BIG_DOUBLE;
         for j in 0..2 {
             let Some(r) = pseudo.geom(fg)?.rail(j) else {
                 continue;
@@ -1907,6 +1912,7 @@ fn gather_ends(
                     tol,
                 )?;
                 let fits = length.lower - margin;
+                edge_reach = smin(edge_reach, fits);
                 reach = smin(reach, fits);
                 if setback + corner.ease_dist > fits + tol {
                     past = true;
@@ -1956,11 +1962,12 @@ fn gather_ends(
         }
         surfaces.push(surface);
         sides.push((along, end, side > 0.0));
+        reaches.push(edge_reach);
     }
     if past {
         return Ok(Gathered::PastRails { reach });
     }
-    Ok(Gathered::Ends(surfaces, sides))
+    Ok(Gathered::Ends(surfaces, sides, reaches))
 }
 
 /// The fill's rounds from the blends' ends.
@@ -2033,9 +2040,14 @@ struct Growth<'a> {
     ordered_planar_g1: bool,
     /// The setbacks it grows from (the rule's, or the one asked for).
     base: Vec<f64>,
-    /// The most each may grow to: its room less the rule's quarter radius (unbounded where
-    /// asked for).
+    /// The most each may grow to: for rule setbacks, the lesser of its room less the rule's
+    /// quarter radius and its round's certified rail reach less the ease (at least its base);
+    /// for an asked setback, the least such reach across the corner's edges (at least the
+    /// setback), or `BIG_DOUBLE` where no reach holds it below twice it.
     most: Vec<f64>,
+    /// The least rail reach (less ease) that holds a setback below twice it, where one does
+    /// (#13647).
+    rail_bound: Option<f64>,
 }
 
 impl Growth<'_> {
@@ -2078,7 +2090,7 @@ impl Growth<'_> {
             &self.planes.faces,
             self.tol,
         )? {
-            Gathered::Ends(surfaces, sides) if self.ordered_planar_g1 => {
+            Gathered::Ends(surfaces, sides, _) if self.ordered_planar_g1 => {
                 let vertex = corner
                     .vertex
                     .ok_or_else(|| bad_setup(OP_FILL, FilletSetUp::CornerVertex, None))?;
@@ -2096,7 +2108,7 @@ impl Growth<'_> {
                 )
                 .map(Some)
             }
-            Gathered::Ends(surfaces, sides) => Ok(Some((surfaces, sides))),
+            Gathered::Ends(surfaces, sides, _) => Ok(Some((surfaces, sides))),
             Gathered::Refused(_) | Gathered::Unplaced | Gathered::PastRails { .. } => Ok(None),
         }
     }
@@ -2140,16 +2152,20 @@ impl Growth<'_> {
 /// The fork's growth in `BuildSetBackFill` (37c9e1d; #85 C, the owner's section 28): beside
 /// a curved face, the rule's setbacks, or the one asked for, grow to the least scale at which
 /// the fill is certified, with the real rounds: each trial moves the setback vertices
-/// ([`SetbackSolvers::calc_set_back_vert`] at the scaled setbacks, each held at its room less
-/// a quarter radius) and fills the hole from the least degree up. Twice them first, then the
-/// planar search's bisection on the grid of thousandths (`certified_scale`, the fork's
-/// 20b1c01, where 37c9e1d bisected to `1e-2`): the smallest certifying scale whose neighbour
-/// below fails, in at most 11 trials. A trial is certified only by more than its certificate's
-/// rounding bound (`Probe::rounding_margin`, #2243), so that the corner built afresh there,
-/// as the caller builds it or a caller asking that setback would, is certified too. None up
-/// to twice them: refused, naming none. One asked for that certifies only grown: refused,
-/// naming the setback that builds (or none, where that one does not fit with its ease).
-/// Returns the blends' ends where the setbacks found put them.
+/// ([`SetbackSolvers::calc_set_back_vert`] at the scaled setbacks, each held at its `most`:
+/// its room less a quarter radius, and its rails' certified reach less the ease where a far
+/// corner cuts them, #13647) and fills the hole from the least degree up. Twice them first,
+/// then the planar search's bisection on the grid of thousandths (`certified_scale`, the
+/// fork's 20b1c01, where 37c9e1d bisected to `1e-2`): the smallest certifying scale whose
+/// neighbour below fails, in at most 11 trials. A trial is certified only by more than its
+/// certificate's rounding bound (`Probe::rounding_margin`, #2243), so that the corner built
+/// afresh there, as the caller builds it or a caller asking that setback would, is certified
+/// too. None up to twice them: refused, naming none; where the rails' reach
+/// (`Growth::rail_bound`) held the growth, refused as
+/// [`BlendRefusal::SetbackUncertifiedWithinRails`] naming that reach. One asked for that
+/// certifies only grown: refused, naming the setback that builds, held at its `most` (or
+/// none, where that one does not fit with its ease). Returns the blends' ends where the
+/// setbacks found put them.
 fn grow_curved<S: SetbackSolvers>(
     growth: &Growth<'_>,
     pseudo: &mut FilletBrep,
@@ -2160,6 +2176,34 @@ fn grow_curved<S: SetbackSolvers>(
     hi_scale: f64,
 ) -> Result<core::result::Result<Ends, SetbackRefusal>> {
     if growth.trial(pseudo, corner, solvers, 2.0)?.is_none() {
+        if let Some(reach) = growth.rail_bound {
+            let why = if let Some(a) = asked {
+                format!(
+                    "Fillet Error: no setback from {} up to {} (where a far corner cuts a round) keeps the setback corner's fill no more concave than its faces",
+                    fmt_g(a.setback),
+                    fmt_g(reach)
+                )
+            } else {
+                let tried: Vec<String> = growth
+                    .base
+                    .iter()
+                    .zip(&growth.most)
+                    .map(|(&b, &m)| fmt_g(smin(2.0 * b, m)))
+                    .collect();
+                format!(
+                    "Fillet Error: no setbacks within the rounds' rail reach of {} (where a far corner cuts a round; tried up to: {}) keep the setback corner's fill no more concave than its faces",
+                    fmt_g(reach),
+                    tried.join(", ")
+                )
+            };
+            let refusal = SetbackRefusal::no_room(why, Some(0.0));
+            return Ok(Err(match corner.vertex {
+                Some(vertex) => {
+                    refusal.typed(BlendRefusal::SetbackUncertifiedWithinRails { vertex, reach })
+                }
+                None => refusal,
+            }));
+        }
         let why = if let Some(a) = asked {
             format!(
                 "Fillet Error: no setback up to twice {} keeps the setback corner's fill no more concave than its faces",
@@ -2172,7 +2216,8 @@ fn grow_curved<S: SetbackSolvers>(
     }
     // The planar search's (`certified_scale`, #2382, the fork's 20b1c01): the smallest
     // certifying scale on the grid of thousandths whose neighbour below fails, by bisection
-    // from 1 (the fill at the setbacks themselves, refused) and 2.
+    // from 1 (the fill at the setbacks themselves, refused) and 2. Each trial holds every
+    // setback at its `most`, so a scale past the rails' reach tries the fill at that reach.
     let top = (hi_scale * 1000.0) as i32;
     let hi = bisect_thousandths(1000, top, |i| {
         let at = growth.trial(pseudo, corner, solvers, f64::from(i) / 1000.0)?;
@@ -2218,8 +2263,10 @@ fn grow_curved<S: SetbackSolvers>(
             .as_ref()
             .ok_or_else(|| defect(OP_FILL, WHY_CHECKED))?
             .room;
-        let fits_room = room.iter().all(|&r| hi * a.setback + a.ease < r);
-        let builds = if fits_room { hi * a.setback } else { 0.0 };
+        // the setback the trial at `hi` placed: held at its `most`, the rails' reach (#13647)
+        let grown = growth.most.iter().fold(hi * a.setback, |g, &m| smin(g, m));
+        let fits_room = room.iter().all(|&r| grown + a.ease < r);
+        let builds = if fits_room { grown } else { 0.0 };
         let why = if fits_room {
             format!(
                 "Fillet Error: a setback of {} is too short for the setback corner's fill to stay no more concave than its faces: a setback of {} builds it",
@@ -2230,7 +2277,7 @@ fn grow_curved<S: SetbackSolvers>(
             format!(
                 "Fillet Error: a setback of {} is too short for the setback corner's fill to stay no more concave than its faces, and the {} that would be does not fit on its edges",
                 fmt_g(a.setback),
-                fmt_g(hi * a.setback)
+                fmt_g(grown)
             )
         };
         let refusal = SetbackRefusal::no_room(why, Some(builds));
@@ -2784,6 +2831,7 @@ fn springs_refusal<S: SetbackSolvers>(
         most: vec![BIG_DOUBLE; base.len()],
         base,
         ordered_planar_g1: false,
+        rail_bound: None,
     };
     let fit = largest_clear_scale(&growth, least_scale, |scale| {
         Ok(match growth.place(pseudo, corner, solvers, scale)? {
@@ -2910,9 +2958,9 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     };
 
     // each blend at its end section
-    let (surfaces, sides) =
+    let (surfaces, sides, rail_reaches) =
         match gather_ends(k, target, pseudo, corner, &*solvers, &planes.faces, tol)? {
-            Gathered::Ends(surfaces, sides) => (surfaces, sides),
+            Gathered::Ends(surfaces, sides, reaches) => (surfaces, sides, reaches),
             Gathered::Refused(why) => return Ok(Err(SetbackRefusal::not_built(why))),
             Gathered::Unplaced => {
                 return Err(SolidError::blend(
@@ -3003,10 +3051,11 @@ pub fn build_setback_fill<S: SetbackSolvers>(
                 .setback
                 .as_ref()
                 .ok_or_else(|| defect(OP_FILL, WHY_CHECKED))?;
-            if sb.room.len() != n || sb.setbacks.len() != n {
+            if sb.room.len() != n || sb.setbacks.len() != n || rail_reaches.len() != n {
                 return Err(bad_input(OP_FILL, CornerInput::EventMalformed, None));
             }
             let base = sb.setbacks.clone();
+            let ease = asked.map_or(corner.ease_dist, |a| a.ease);
             let mut most = Vec::with_capacity(n);
             for ((&b, &r), e) in base.iter().zip(&sb.room).zip(&planes.edges) {
                 // the G2 fill's least certifying setback can be far past the G1's twice
@@ -3025,6 +3074,38 @@ pub fn build_setback_fill<S: SetbackSolvers>(
                     room_scale = room_scale.min(m / b);
                 }
             }
+            let hi_scale = if curved || mixed_planar_g1 {
+                2.0
+            } else {
+                room_scale
+            };
+            // the rails' reach bounds the growth as the room does (#13647): each edge's
+            // certified reach from a far corner that cuts its round's rails, less the ease
+            // (the least of them for every edge where the setback is asked for, one setback);
+            // `rail_bound` is the least of those that holds a setback below twice it. Never
+            // below the setback it grows from: `gather_ends` admits that one up to `tol` past
+            // its reach, so the growth's range starts there.
+            let mut rail_bound: Option<f64> = None;
+            if ease.is_finite() {
+                if let Some(a) = asked {
+                    let reach = rail_reaches.iter().copied().fold(BIG_DOUBLE, smin);
+                    let cap = smax(a.setback, reach - ease);
+                    if reach < BIG_DOUBLE && cap < hi_scale * a.setback {
+                        rail_bound = Some(cap);
+                        most.fill(cap);
+                    }
+                } else {
+                    for ((m, &b), &reach) in most.iter_mut().zip(&base).zip(&rail_reaches) {
+                        if reach < BIG_DOUBLE {
+                            let limit = smax(b, reach - ease);
+                            if limit < hi_scale * b && limit <= *m {
+                                rail_bound = Some(rail_bound.map_or(limit, |r| smin(r, limit)));
+                            }
+                            *m = smin(*m, limit);
+                        }
+                    }
+                }
+            }
             let growth = Growth {
                 k,
                 target,
@@ -3033,11 +3114,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
                 ordered_planar_g1: mixed_planar_g1,
                 base,
                 most,
-            };
-            let hi_scale = if curved || mixed_planar_g1 {
-                2.0
-            } else {
-                room_scale
+                rail_bound,
             };
             match grow_curved(&growth, pseudo, corner, solvers, asked, curved, hi_scale)? {
                 // the fill where the grown setbacks put the blends' ends, made as a corner

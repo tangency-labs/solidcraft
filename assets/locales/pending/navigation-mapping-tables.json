@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "prefs.navigation.held_key": "المفتاح المضغوط"
+  },
+  "de": {
+    "prefs.navigation.held_key": "Gedrückte Taste"
+  },
+  "en": {
+    "prefs.navigation.held_key": "Held key"
+  },
+  "he": {
+    "prefs.navigation.held_key": "מקש לחוץ"
+  },
+  "ja": {
+    "prefs.navigation.held_key": "修飾キー"
+  },
+  "ko": {
+    "prefs.navigation.held_key": "누르고 있을 키"
+  },
+  "vi": {
+    "prefs.navigation.held_key": "Phím giữ"
+  },
+  "zh": {
+    "prefs.navigation.held_key": "按住的键"
+  }
+}

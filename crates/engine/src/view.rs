@@ -1187,7 +1187,7 @@ fn build_scene(
         }
     }
     // Isocurve Analysis: the isoparametric curves of each face it shows, on the faces.
-    for line in s.isocurve_lines().iter().flat_map(|lines| lines.iter()) {
+    for line in s.isocurve_lines(solidcraft_doc::display_quality::current()).iter().flat_map(|lines| lines.iter()) {
         sc.lines.push(SceneLine { points: line.points.clone(), color: p.isocurve, alpha: 1.0, width: 1.4, on_top: false });
     }
     for ss in &st.sketches {

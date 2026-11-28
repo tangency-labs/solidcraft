@@ -266,6 +266,25 @@ fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     assert_eq!(named.resolve_component("Design").unwrap(), Some(0));
 }
 
+#[test]
+fn model_parameters_respect_the_document_limit() {
+    for named in [false, true] {
+        let mut doc = Document::new("At the limit");
+        doc.params = (0..MAX_PARAMS - 1)
+            .map(|i| Param { name: format!("p{i}"), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: false })
+            .collect();
+        let create = |doc: &mut Document, name: &str| {
+            if named { doc.new_named_model_param(name, "2 mm", "mm") } else { doc.new_model_param("2 mm", "mm") }
+        };
+        create(&mut doc, "dim").unwrap();
+        let before = doc.clone();
+        assert_eq!(doc.params.len(), MAX_PARAMS);
+        assert!(create(&mut doc, "other").unwrap_err().to_string().contains("too many parameters"));
+        assert_eq!(doc, before);
+        assert_eq!(Document::from_json(&doc.to_json()).unwrap().params.len(), MAX_PARAMS);
+    }
+}
+
 /// 40 x 30 rectangle with its width and height driven by `width` / d2.
 fn plate_doc() -> (Document, u64) {
     let mut doc = Document::new("plate");
@@ -280,9 +299,9 @@ fn plate_doc() -> (Document, u64) {
     sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
-    let d1 = doc.new_model_param("width", "mm");
+    let d1 = doc.new_model_param("width", "mm").unwrap();
     sk.add_constraint(Length { l: l[0], value: 40.0 }, Some(d1)).unwrap();
-    let d2 = doc.new_model_param("30 mm", "mm");
+    let d2 = doc.new_model_param("30 mm", "mm").unwrap();
     sk.add_constraint(Length { l: l[1], value: 30.0 }, Some(d2)).unwrap();
     let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
     doc.add_feature(
@@ -313,6 +332,7 @@ fn plate_doc() -> (Document, u64) {
                 one_sided_direction: None,
                 to_ref: None,
                 from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -428,6 +448,7 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 one_sided_direction: None,
                 to_ref: None,
                 from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -949,6 +970,133 @@ fn a_pattern_reads_the_bodies_its_source_cuts() {
     doc.set_param("w", "4 mm", None, None).unwrap();
     m.evaluate(&doc);
     assert_eq!(summary(&m.state()), from_scratch(&doc));
+}
+
+/// The cap the pattern tests share: a disc with a conical hollow in its top, a bore through it
+/// clear of the hollow, a post in the hollow up to the hollow's wall joined to the disc, and a
+/// circular pattern that holds the bore and the post. The post's own join takes the face its To
+/// Object points at, so a copy of it has to be built where the post was built (#14305).
+fn cap_with_a_pattern(doc: &mut Document, component: u64) {
+    // A disc with a conical hollow in its top.
+    add_in(
+        doc,
+        component,
+        "Body1",
+        serde_json::json!({"type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "20", "height": "20", "operation": "new_body"}),
+    );
+    add_in(
+        doc,
+        component,
+        "Hollow",
+        serde_json::json!({"type": "cone", "base": ["0", "0", "20"], "axis": [0.0, 0.0, -1.0], "radius": "5", "top_radius": "0", "height": "10", "operation": "cut"}),
+    );
+    // A bore through the disc, clear of the hollow.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(15.0, 0.0), 1.0, None, None).unwrap();
+    let bore_sketch =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("Bore sketch")).unwrap();
+    add_in(
+        doc,
+        component,
+        "Bore",
+        serde_json::json!({"type": "extrude", "sketch": bore_sketch, "profiles": {"type": "all"}, "extent": {"distance": "30", "through_all": true}, "operation": "cut"}),
+    );
+    // A post in the hollow, up to the hollow's conical wall, joined to the disc.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(3.0, 0.0), 0.6, None, None).unwrap();
+    let post_sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "18".into() },
+                sketch: sk,
+            },
+            Some("Post sketch"),
+        )
+        .unwrap();
+    add_in(
+        doc,
+        component,
+        "Post",
+        serde_json::json!({"type": "extrude", "sketch": post_sketch, "profiles": {"type": "all"}, "extent": {"convention": "total_distance", "direction": "negative", "distance": "4", "to": [3.0, 0.0, 14.0]}, "operation": "join", "targets": ["Body1"]}),
+    );
+    for f in doc.features.iter_mut().filter(|f| f.name == "Body1") {
+        f.body_names = vec!["Body1".into()];
+    }
+    let bore = doc.find_feature("Bore").map_or(0, |f| f.id);
+    let post = doc.find_feature("Post").map_or(0, |f| f.id);
+    add_in(
+        doc,
+        component,
+        "Pattern",
+        serde_json::json!({"type": "pattern", "features": [bore, post], "pattern": {"type": "circular", "origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0], "count": "4", "angle": "360 deg"}}),
+    );
+}
+
+/// The cap's pattern: the post stands at radius 3 and the bore is cut at radius 15, each at the
+/// four places a circular pattern round the Z axis puts them. The post is read in the hollow it
+/// stands in (17 mm above the base) and the bore in the disc it goes through (10 mm above it).
+fn assert_pattern_posts_and_bores(body: &crate::kernel::Body) {
+    for (x, y) in [(3.0, 0.0), (0.0, 3.0), (-3.0, 0.0), (0.0, -3.0)] {
+        assert!(body.contains(Vec3::new(x, y, 17.0)), "the post stands at ({x}, {y}, 17)");
+    }
+    for (x, y) in [(15.0, 0.0), (0.0, 15.0), (-15.0, 0.0), (0.0, -15.0)] {
+        assert!(!body.contains(Vec3::new(x, y, 10.0)), "the bore is cut at ({x}, {y}, 10)");
+    }
+}
+
+/// A pattern that holds several features builds with all of them (#14305): the bore it holds is
+/// cut at each of its copies, and the post it holds stands at each of its copies. The copy of a
+/// feature that points at a face with its To Object is built where the feature was built, so the
+/// face that the feature's own join took is still there and the copy is that feature's own tool,
+/// moved.
+#[test]
+fn a_pattern_that_holds_several_features_builds_with_all_of_them() {
+    let mut doc = Document::new("cap with a pattern of several features");
+    cap_with_a_pattern(&mut doc, 0);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    // One body: the disc with the hollow in it, the four bores the pattern cut and the four
+    // posts it added.
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 1);
+    // The post stands at each of the four places the pattern puts it and the bore is cut at each
+    // of its four places: a pattern that copies the bores alone leaves the posts out.
+    assert_pattern_posts_and_bores(&st.bodies[0].body);
+}
+
+/// The same pattern in a document with two components: a cold rebuild prefetches each component's
+/// chain in parallel, and a pattern's copies are built against the model as it was before the
+/// feature they copy ran, there as in the sequential loop (#14305).
+///
+/// The prefetch runs here (the document has two components and the evaluation is cold), and it
+/// stops before the pattern: a pattern whose source points at a face with its To Object reads
+/// bodies it cannot name, so it is no relative change and the parallel chain does not take it
+/// (`Feature::reads` in `crates/doc/src/eval.rs`). The sequential loop evaluates the pattern,
+/// against the states its copies are built on, and gives the model the user sees.
+#[test]
+fn a_pattern_in_a_component_of_many_builds_with_all_of_its_features() {
+    let mut doc = Document::new("two components with a pattern of several features");
+    let cap = doc.add_component(Some("Cap"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    cap_with_a_pattern(&mut doc, cap);
+    // A second component, so the document has more than one and the prefetch runs.
+    add_in(
+        &mut doc,
+        other,
+        "Block",
+        serde_json::json!({"type": "box", "corner": ["100", "0", "0"], "length": "10", "width": "10", "height": "10", "operation": "new_body"}),
+    );
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // The same model as an evaluation without the prefetch gives.
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 2);
+    // The same posts and bores as in a document with one component: the pattern copies them all.
+    assert_pattern_posts_and_bores(&st.body("Body1").unwrap().body);
 }
 
 /// A cut of several bodies cuts again only those that changed: the rod, which `w` does not
@@ -2001,6 +2149,7 @@ fn box_fillet_cut_timeline() {
                 one_sided_direction: None,
                 to_ref: None,
                 from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -3122,6 +3271,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 one_sided_direction: None,
                 to_ref: None,
                 from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -3636,6 +3786,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             one_sided_direction: None,
             to_ref: None,
             from_ref: None,
+            extend_to_face: false,
         },
         operation: Operation::NewBody,
         targets: vec![],
@@ -5348,6 +5499,7 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     one_sided_direction: None,
                     to_ref: None,
                     from_ref: None,
+                    extend_to_face: false,
                 },
                 operation: Operation::NewBody,
                 targets: Vec::new(),
@@ -5692,6 +5844,7 @@ fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
                         one_sided_direction: None,
                         to_ref: None,
                         from_ref: None,
+                        extend_to_face: false,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

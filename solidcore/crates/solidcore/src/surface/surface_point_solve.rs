@@ -7,6 +7,7 @@
 //! The file is split over the plan units `surface.surface_point_solve_p1`, `_p2` and
 //! `_p3`; each lives in its own submodule and adds methods to the classes of `p1`.
 
+pub(crate) mod cell_index;
 pub mod p1;
 pub mod p2;
 pub mod p3;

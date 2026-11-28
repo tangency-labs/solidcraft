@@ -1,5 +1,5 @@
-# A GitHub release's Python wheels (solidcraft-*.whl, made by release.yml's python job from the
-# release's own solidcraft-cli) go to TestPyPI when it is published as a pre-release, and to PyPI
+# A GitHub release's Python wheel (solidcraft-*.whl, made by release.yml's python job; it carries no
+# binary and downloads the release's solidcraft-cli on first use) goes to TestPyPI when it is published as a pre-release, and to PyPI
 # when it becomes a full release: `released` fires both when a pre-release is flipped to a release
 # and when a release is published as one, so `published` uploads pre-releases only (a stable
 # publish would otherwise upload twice) and the flip never re-uploads to TestPyPI. A pre-release
@@ -15,6 +15,13 @@
 # from any ref, so a changed copy of this file dispatched from a branch must not reach the upload
 # job. A release event runs from its tag; run it by hand with `--ref v<version>`.
 # A release published before the python job existed has no wheels: nothing is uploaded.
+# Source mode: dispatched with a tag that has no GitHub release, v<release>.post<N> (from a branch
+# that changes only python/), the job builds the pure-Python wheel from python/ at that tag, version
+# <release>.post<N>, with bindings from <release>'s own CLI, and uploads it like a release's. It
+# lets the Python package ship fixes on its own schedule; the CLI it downloads stays <release>'s.
+# Run it from the tag: `gh workflow run pypi.yml --ref v0.51.1.post1 -f tag=v0.51.1.post1`.
+# Uploads skip files the index already has, so a run retried after a partial upload (one file
+# refused, the rest never sent) sends only what is missing.
 name: Python packages
 
 on:
@@ -23,7 +30,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Published release tag whose wheels to upload (e.g. v0.52.0)
+        description: "Published release tag whose wheel to upload (v0.52.0), or a post release tag with no release (v0.51.1.post1: built from python/ at the tag)"
         required: true
 
 permissions:
@@ -35,12 +42,12 @@ concurrency:
 
 jobs:
   wheels:
-    name: Fetch the release's wheels
+    name: Fetch the release's wheel, or build a post release's
     if: vars.PYTHON_PUBLISH == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
-      found: ${{ steps.fetch.outputs.found }}
-      index: ${{ steps.fetch.outputs.index }}
+      found: ${{ steps.result.outputs.found }}
+      index: ${{ steps.result.outputs.index }}
     steps:
       - id: fetch
         env:
@@ -51,7 +58,21 @@ jobs:
           ACTION: ${{ github.event.action }}
           EVENT_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          if [ "$EVENT" = release ]; then
+          # Source mode: a dispatched tag with no GitHub release, v<release>.post<N>, is the Python
+          # package alone, built below from python/ at that tag for the release it names.
+          source=false
+          if [ "$EVENT" != release ] && ! gh release view "$TAG" --json tagName >/dev/null 2>&1; then
+            if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?\.post[0-9]+$'; then
+              echo "::error::$TAG has no GitHub release and is not a post release tag like v0.51.1.post1"
+              exit 1
+            fi
+            source=true
+            base="${TAG%.post*}"
+            prerelease="$(gh release view "$base" --json isPrerelease --jq .isPrerelease)" || {
+              echo "::error::$TAG is a post release of $base, which has no GitHub release"
+              exit 1
+            }
+          elif [ "$EVENT" = release ]; then
             prerelease="$EVENT_PRERELEASE"
           else
             prerelease="$(gh release view "$TAG" --json isPrerelease --jq .isPrerelease)"
@@ -63,14 +84,58 @@ jobs:
           # `released` of a release that is still a pre-release can't happen; never send one to PyPI.
           if [ "$EVENT" = release ] && [ "$ACTION" = released ] && [ "$prerelease" = true ]; then skip=true; fi
           mkdir -p dist
-          if [ "$skip" = false ]; then
-            gh release download "$TAG" --pattern 'solidcraft-*.whl' --dir dist || true
+          if [ "$skip" = false ] && [ "$source" = false ]; then
+            # Only the pure-Python wheel: it downloads the release's solidcraft-cli on first use.
+            gh release download "$TAG" --pattern 'solidcraft-*-py3-none-any.whl' --dir dist || true
           fi
+          {
+            echo "source=$source"
+            echo "base=${base:-}"
+            echo "prerelease=$prerelease"
+            echo "index_value=$index"
+            echo "skip=$skip"
+          } >>"$GITHUB_OUTPUT"
+      - if: steps.fetch.outputs.source == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          path: src
+      - if: steps.fetch.outputs.source == 'true'
+        uses: dtolnay/rust-toolchain@1.99.1
+      - name: Build the post release's wheel from python/ at the tag
+        if: steps.fetch.outputs.source == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          BASE: ${{ steps.fetch.outputs.base }}
+        run: |
+          # The bindings come from the base release's own Linux x86_64 CLI, so they match the CLI
+          # the package downloads (it reads the base version from them).
+          base_version="${BASE#v}"
+          gh release download "$BASE" --pattern "solidcraft-$base_version-linux-x86_64.tar.gz" --dir "$RUNNER_TEMP/base"
+          (cd "$RUNNER_TEMP/base" && gh release download "$BASE" --pattern SHA256SUMS.txt && sha256sum --check --ignore-missing SHA256SUMS.txt)
+          tar -xzf "$RUNNER_TEMP/base/solidcraft-$base_version-linux-x86_64.tar.gz" -C "$RUNNER_TEMP/base"
+          cli="$(find "$RUNNER_TEMP/base" -type f -name solidcraft-cli | head -n 1)"
+          chmod +x "$cli"
+          cd src
+          cargo run -q --release -p xtask -- python --cli "$cli"
+          cargo run -q --release -p xtask -- python wheel --platform any --version "${TAG#v}" --out "$GITHUB_WORKSPACE/dist"
+      - id: result
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          INDEX: ${{ steps.fetch.outputs.index_value }}
+          SOURCE: ${{ steps.fetch.outputs.source }}
+          SKIP: ${{ steps.fetch.outputs.skip }}
+          PRERELEASE: ${{ steps.fetch.outputs.prerelease }}
+        run: |
           if compgen -G 'dist/*.whl' >/dev/null; then found=true; else found=false; fi
-          echo "$TAG: $EVENT ${ACTION:-}, prerelease=$prerelease, skip=$skip, wheels: $found, index: $index"
+          echo "$TAG: $EVENT ${ACTION:-}, prerelease=$PRERELEASE, source=$SOURCE, skip=$SKIP, wheels: $found, index: $INDEX"
           ls -l dist
-          { echo "found=$found"; echo "index=$index"; } >>"$GITHUB_OUTPUT"
-      - if: steps.fetch.outputs.found == 'true'
+          { echo "found=$found"; echo "index=$INDEX"; } >>"$GITHUB_OUTPUT"
+      - if: steps.result.outputs.found == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheels
@@ -96,9 +161,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist
+          skip-existing: true
       - name: Upload to TestPyPI
         if: needs.wheels.outputs.index == 'testpypi'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist
+          skip-existing: true
           repository-url: https://test.pypi.org/legacy/

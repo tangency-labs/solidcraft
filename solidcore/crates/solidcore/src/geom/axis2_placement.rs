@@ -63,6 +63,7 @@ use crate::error::Result;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::tol::are_same;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::det;
 use crate::math::EFF_ZERO;
 
 /// Whether the stored axes of an analytic frame have unit length and are perpendicular.
@@ -331,8 +332,8 @@ impl Axis2Placement {
     pub fn rotate_about_axis(&mut self, angle_radians: f64, axis: Vec3) {
         let a = axis.unitize().unwrap_or(Vec3::X);
 
-        let s = angle_radians.sin();
-        let c = angle_radians.cos();
+        let s = det::sin(angle_radians);
+        let c = det::cos(angle_radians);
         let t = 1.0 - c;
 
         // X axis [1,0,0] rotated about A.

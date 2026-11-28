@@ -81,7 +81,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
 }
 
 /// Builds `solidcraft-cli` with the `ci` profile, as the fast gate does, and returns its path.
-fn build_cli(root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn build_cli(root: &Path) -> Result<PathBuf, String> {
     let mut build = crate::cargo();
     build.args(["build", "-q", "--profile", "ci", "-p", "solidcraft-cli"]);
     crate::run(build, "cargo build --profile ci -p solidcraft-cli")?;
@@ -89,7 +89,7 @@ fn build_cli(root: &Path) -> Result<PathBuf, String> {
     Ok(target.join("ci").join(if cfg!(windows) { "solidcraft-cli.exe" } else { "solidcraft-cli" }))
 }
 
-fn cli_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
+pub(crate) fn cli_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
     let out = Command::new(cli).args(args).output().map_err(|e| format!("python: {}: {e}", cli.display()))?;
     if !out.status.success() {
         return Err(format!("python: solidcraft-cli {} failed:\n{}", args.join(" "), String::from_utf8_lossy(&out.stderr)));
@@ -132,7 +132,7 @@ fn mcp_tools(cli: &Path) -> Result<(String, Vec<Value>), String> {
     Ok((version.ok_or("python: mcp sent no version")?, tools.ok_or("python: mcp sent no tools/list")?))
 }
 
-fn is_planned(c: &Value) -> bool {
+pub(crate) fn is_planned(c: &Value) -> bool {
     !c["planned"].is_null() && c["planned"] != json!(false)
 }
 
@@ -434,6 +434,14 @@ pub fn generate(commands: &[Value], tools: &[Value], version: &str) -> Result<Ve
 /// `beta` likewise `a`, `b`), and a nightly `0.51.0-nightly.20261127.123.1` is
 /// `0.51.0.dev202611271231`, a development release that sorts by date and run.
 pub fn pep440(version: &str) -> Result<String, String> {
+    // A post release of the Python package alone (`0.51.1.post1`, pypi.yml's source mode): already
+    // PEP 440, on top of the release whose CLI it downloads.
+    if let Some((base, n)) = version.split_once(".post")
+        && !n.is_empty()
+        && n.bytes().all(|b| b.is_ascii_digit())
+    {
+        return pep440(base).map(|b| format!("{b}.post{n}")).map_err(|_| format!("python wheel: `{version}` is not a version like 0.51.0.post1"));
+    }
     let (base, pre) = version.split_once('-').unwrap_or((version, ""));
     if base.split('.').count() != 3 || !base.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) {
         return Err(format!("python wheel: `{version}` is not a version like 0.51.0"));
@@ -645,6 +653,9 @@ mod tests {
         assert!(pep440("0.51").is_err());
         assert!(pep440("0.51.0-weird").is_err());
         assert!(pep440("0.51.0-rc.x").is_err());
+        assert_eq!(pep440("0.51.1.post1").unwrap(), "0.51.1.post1");
+        assert!(pep440("0.51.1.post").is_err());
+        assert!(pep440("0.51.post1").is_err());
     }
 
     #[test]
