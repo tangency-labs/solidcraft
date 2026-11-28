@@ -1094,8 +1094,11 @@ mod local_operation {
     /// which the mean-value certifier proves instead (#22037): edge 89 of the four `fc`
     /// cases (bound 6.4e-3, proved 9.0e-7, tolerance 1e-5), and two each of `gen0000`,
     /// `gen0031`, `gen0041` and `gen0070` (bounds 8.5e-4 to 1.9e-2, proved at most 2.6e-6,
-    /// tolerances 1e-5 and 2e-5). A change in the kernel's enclosure shows here.
-    const MEAN_VALUE_CERTIFIED: usize = 12;
+    /// tolerances 1e-5 and 2e-5), and edges 23 and 24 of `gen0050`, whose revolved circle's
+    /// side round the axis is turned on as its torus (#14370; bounds 3.5e-4 and 2.5e-4,
+    /// proved 4.8e-7 and 2.5e-6, tolerances 1e-5 and 2e-5). A change in the kernel's
+    /// enclosure shows here.
+    const MEAN_VALUE_CERTIFIED: usize = 14;
 
     /// The cases whose input model's `check_brep` level 2 reports lines of its own, with
     /// their count: `Solids/nurb_fillet.smb`'s B-spline surface discontinuity across a knot
@@ -1214,7 +1217,7 @@ mod feature_executive {
 /// * **trims on edges**: every trim each written body holds lies on its edge within the
 ///   edge's tolerance ([`crate::trims_on_edges`], rounded interval arithmetic), so each
 ///   added trim is the edge's own.
-mod trim_blocks {
+pub(crate) mod trim_blocks {
     use super::digest;
     use crate::trim_hook::with_hook;
     use crate::trims_on_edges::{certify_brep, TrimCertificate};
@@ -1224,10 +1227,11 @@ mod trim_blocks {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    struct Row {
-        case: &'static str,
-        new: u64,
-        main: u64,
+    /// A row: its case, this branch's output digest and main's with trims cleared.
+    pub(crate) struct Row {
+        pub(crate) case: &'static str,
+        pub(crate) new: u64,
+        pub(crate) main: u64,
     }
 
     fn clear_trims(b: &mut Brep) {
@@ -1238,7 +1242,7 @@ mod trim_blocks {
     }
 
     /// Certifies `rows` of `runner`'s unit (see the module docs): the trims certified.
-    fn certify(runner: &dyn UnitDiff, rows: &[Row]) -> usize {
+    pub(crate) fn certify(runner: &dyn UnitDiff, rows: &[Row]) -> usize {
         let mut trims = 0;
         for row in rows {
             let case = crate::case::regression_case(runner, row.case);

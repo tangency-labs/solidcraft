@@ -85,8 +85,8 @@ impl Model {
     pub fn new(session: &Session) -> Self {
         let state = session.model.state();
         let mut bodies: HashMap<u64, Vec<usize>> = HashMap::new();
-        for (i, body) in state.bodies.iter().enumerate() {
-            bodies.entry(session.doc.model_body_component(body)).or_default().push(i);
+        for (i, component) in session.doc.model_body_components(&state).into_iter().enumerate() {
+            bodies.entry(component).or_default().push(i);
         }
         let mut sketches: HashMap<u64, Vec<usize>> = HashMap::new();
         let mut planes: HashMap<u64, Vec<usize>> = HashMap::new();

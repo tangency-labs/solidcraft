@@ -460,6 +460,9 @@ pub struct BSplineSurface {
 #[derive(Debug, Default)]
 pub(crate) struct NurbSlot(Arc<OnceLock<Surface>>);
 
+/// A [`NurbSlot`]'s cell, as a cache keeps it ([`NurbSlot::cell`]).
+pub(crate) type NurbCell = Arc<OnceLock<Surface>>;
+
 impl NurbSlot {
     /// No NURB (`NULL`).
     pub(crate) fn none() -> Self {
@@ -469,6 +472,18 @@ impl NurbSlot {
     /// The same cell (for an evaluation copy that stands for the same surface object).
     pub(crate) fn shared(&self) -> Self {
         Self(Arc::clone(&self.0))
+    }
+
+    /// Whether `cell` is this slot's own cell ([`NurbSlot::cell`]).
+    pub(crate) fn is_cell(&self, cell: &NurbCell) -> bool {
+        Arc::ptr_eq(&self.0, cell)
+    }
+
+    /// The cell itself, for a cache that keeps what was read from the NURB it holds: while
+    /// the cache holds it, every edit through a slot sharing it detaches first
+    /// ([`Arc::make_mut`]), so the NURB in the cell is never changed, only filled once.
+    pub(crate) fn cell(&self) -> NurbCell {
+        Arc::clone(&self.0)
     }
 
     /// The NURB, if any.

@@ -347,7 +347,7 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
     }
     let state = &mut app.plugin_shaders;
     let (Some(rs), Some(active)) = (state.render.clone(), state.active.as_mut()) else { return };
-    if rs.device_lost.is_lost() {
+    if solidcraft_viewport_egui::window_device(&rs).lost.is_lost() {
         // The shader may be why the driver gave up: turn it off before the app restarts, so the
         // next start does not run it again (the restart also turns it off, `after_loss`).
         let key = active.key.clone();

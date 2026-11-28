@@ -1,0 +1,443 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.03490658503988659,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                45.0,
+                0.0,
+                0.0
+              ],
+              "end": 1.3467032344935257,
+              "radius": 15.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.3467032344935257
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.555555555555556,
+                24.37490107608922,
+                0.0
+              ],
+              "start": [
+                48.333333333333336,
+                14.624940645653536,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 1.7948894190962676,
+              "radius": 24.999999999999993,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.3467032344935257
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -48.333333333333336,
+                14.624940645653536,
+                0.0
+              ],
+              "start": [
+                -5.555555555555556,
+                24.37490107608922,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                -45.0,
+                0.0,
+                0.0
+              ],
+              "end": 4.488295888083319,
+              "radius": 15.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.7948894190962676
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.555555555555556,
+                -24.37490107608922,
+                0.0
+              ],
+              "start": [
+                -48.333333333333336,
+                -14.624940645653536,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": -1.3467032344935257,
+              "radius": 24.999999999999993,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.7948894190962676
+            }
+          },
+          {
+            "line": {
+              "end": [
+                48.333333333333336,
+                -14.624940645653536,
+                0.0
+              ],
+              "start": [
+                5.555555555555556,
+                -24.37490107608922,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.03490658503988659,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                20.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 24.301584610165037,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b4",
+        "b5"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.400352135592233,
+                  -23.693948834599407,
+                  20.0
+                ],
+                [
+                  24.301584610165037,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 23
+            },
+            {
+              "at": [
+                [
+                  5.400352135592233,
+                  -23.693948834599407,
+                  20.0
+                ],
+                [
+                  48.178129913370014,
+                  -13.943988404163727,
+                  20.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  48.178129913370014,
+                  -13.943988404163727,
+                  20.0
+                ],
+                [
+                  48.178129913370014,
+                  13.943988404163724,
+                  20.0
+                ]
+              ],
+              "index": 21
+            },
+            {
+              "at": [
+                [
+                  48.178129913370014,
+                  13.943988404163724,
+                  20.0
+                ],
+                [
+                  5.400352135592234,
+                  23.693948834599407,
+                  20.0
+                ]
+              ],
+              "index": 18
+            },
+            {
+              "at": [
+                [
+                  24.301584610165037,
+                  0.0,
+                  20.0
+                ],
+                [
+                  5.400352135592234,
+                  23.693948834599407,
+                  20.0
+                ]
+              ],
+              "index": 24
+            }
+          ],
+          "points": [
+            [
+              18.977677997611945,
+              -15.136333153737226,
+              19.999999999999986
+            ],
+            [
+              26.78924102448112,
+              -18.818968619381568,
+              20.0
+            ],
+            [
+              59.301584610181806,
+              8.165024212303251e-12,
+              20.0
+            ],
+            [
+              26.789241024481125,
+              18.818968619381565,
+              20.0
+            ],
+            [
+              18.977677997611952,
+              15.136333153737235,
+              20.00000000000001
+            ]
+          ],
+          "tolerance": 6.801735254367727
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ],
+        "turn": "auto"
+      }
+    }
+  ],
+  "case": "22151-fillet-wing-cusps-tangent-chain-r2",
+  "expected": {
+    "body_count": 1,
+    "method": "the Roll-over's corner is a rolling ball's surface between the lines' rounds and the cone; no closed form gives its volume. Graded on the outcome and the body; solidcore-ops' blend test a_wing_through_its_cusps_rolls_over_alike_on_either_side checks that the mirror-image wing removes the same volume to rounding and that no face is a Mixed corner's (the Coons fill this replaced removed 46.650 and 46.625 on the two wings)",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#22151"
+    ],
+    "what": "the right wing of a drafted plate (centre arc R25, wings R15 at x = +-45, tangent lines, extruded 20 at -2 deg) under a drafted boss whose foot circle is the centre arcs' top edge, its cone and the plate's centre-arc sides one face: its four top edges rounded r 2 as one tangent chain. Each straight edge runs tangentially into the boss's concave foot edge, so the top face narrows to zero width at two cusps, where the rounds meet as the blend corner's Roll-over (convex first, then the concave round with the lines' rounds' ends on the cone as one chain)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 41,
+      "faces": 18,
+      "vertices": 25
+    }
+  },
+  "records": "22151-fillet-wing-cusps-tangent-chain-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 16910.51900443613,
+      "body_count": 1,
+      "edges": 41,
+      "faces": 18,
+      "vertices": 25,
+      "volume_mm3": 121980.82277315772
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#22151"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "boolean_tagged",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "the right wing of a drafted plate (centre arc R25, wings R15 at x = +-45, tangent lines, extruded 20 at -2 deg) under a drafted boss whose foot circle is the centre arcs' top edge, its cone and the plate's centre-arc sides one face: its four top edges rounded r 2 as one tangent chain. Each straight edge runs tangentially into the boss's concave foot edge, so the top face narrows to zero width at two cusps, where the rounds meet as the blend corner's Roll-over (convex first, then the concave round with the lines' rounds' ends on the cone as one chain)",
+  "why_not": []
+}

@@ -1313,6 +1313,32 @@ fn files_inside_grant_work_and_escape_is_refused() {
 }
 
 #[test]
+#[cfg(unix)]
+fn reading_a_granted_fifo_without_a_writer_is_refused_without_blocking() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-fifo-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(root.join("pipe")).status().unwrap().success());
+    let folder = Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false };
+    let (tx, rx) = mpsc::channel();
+    // Keep a regression from hanging the test process: no writer ever opens the pipe.
+    let worker = std::thread::spawn(move || {
+        let mut state = state(App::default());
+        state.effect = Effect::Read;
+        state.folders.insert("data".into(), folder);
+        let refused = matches!(
+            state.read_file("data".into(), "pipe".into()),
+            Err(PluginError::PermissionDenied(reason)) if reason.contains("only regular files are supported")
+        );
+        let _ = tx.send(refused);
+    });
+    let refused = rx.recv_timeout(Duration::from_secs(5));
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(refused, Ok(true), "a FIFO must be rejected before opening can block");
+    worker.join().unwrap();
+}
+
+#[test]
 fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-write-order-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -2208,6 +2234,16 @@ fn a_late_cranelift_compile_never_replaces_another_components_code() {
     assert_eq!((cached.tier, Arc::ptr_eq(&cached.bytes, &second)), (Tier::Baseline, true));
 }
 #[test]
+fn preparation_is_reported_only_for_an_uncached_component() {
+    let bytes = importer_component();
+    let mut preparations = 0;
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+}
+
+#[test]
 fn a_component_winch_refuses_is_compiled_with_cranelift_and_runs() {
     // Relaxed SIMD is one of the proposals Wasmtime's Winch does not compile.
     let code = "call $box v128.const i64x2 0 0 v128.const i64x2 0 0 v128.const i64x2 0 0 f32x4.relaxed_madd drop";
@@ -2402,6 +2438,36 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
     assert_eq!(allowed.resolve("library".into(), "part.bin".into()).unwrap(), Some("Part.BIN".into()));
     assert_eq!(allowed.resolve("library".into(), "".into()).unwrap(), Some("".into()));
     assert_eq!(allowed.resolve("library".into(), "absent".into()).unwrap(), None);
+    assert_eq!(allowed.resolve("library".into(), "Part.BIN".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(allowed.resolve("library".into(), "PARTS".into()).unwrap(), None);
+    // One free place in the file budget: the typed spelling takes it. Where the disk opens the file
+    // under that spelling it stays the answer and the run goes on; elsewhere the folder's spelling
+    // does not fit.
+    let mut edge = make();
+    edge.folder_files = (1..MAX_IMPORT_FILES).map(|i| ("library".into(), PathBuf::from(format!("file{i}")))).collect();
+    let answer = edge.resolve("library".into(), "part.bin".into());
+    if root.join("part.bin").is_file() {
+        assert_eq!(answer.unwrap(), Some("part.bin".into()));
+        assert_eq!(edge.size("library".into(), "part.bin".into()).unwrap(), Some(6));
+    } else {
+        assert!(answer.is_err());
+    }
+    let mut importing = make();
+    importing.import = Some(ImportState {
+        dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+        dialog: None,
+        name: "Part.BIN".into(),
+        input_folder: true,
+        read_bytes: 0,
+        files: Default::default(),
+        design: Vec::new(),
+        evaluate: false,
+        scratch: Vec::new(),
+        evaluating: false,
+    });
+    assert_eq!(source::Host::resolve(&mut importing, "part.bin".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(source::Host::resolve(&mut importing, "Part.BIN".into()).unwrap(), Some("Part.BIN".into()));
+    assert_eq!(source::Host::resolve(&mut importing, "absent".into()).unwrap(), None);
     for path in ["../outside", "/outside", ".secret", "parts/../../outside", "C:\\outside", "parts\\..\\outside"] {
         assert!(make().read("library".into(), path.into(), 0, 1).is_err(), "{path}");
     }
