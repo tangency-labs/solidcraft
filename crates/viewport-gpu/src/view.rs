@@ -1827,7 +1827,7 @@ impl SharedGpu {
     fn new(device: &wgpu::Device, tris: &SharedTris) -> Option<SharedGpu> {
         let limit = device.limits().max_buffer_size;
         let index_bytes = (tris.indices.len() * 4) as u64;
-        if tris.vertices.is_empty() || tris.indices.is_empty() {
+        if tris.vertices.is_empty() || tris.indices.is_empty() || upload_refused() {
             return None;
         }
         if tris.vertices.len() as u64 > limit || index_bytes > limit {
@@ -2139,7 +2139,7 @@ fn class_gpu(
     same_vertices: bool,
     uploaded: &mut u64,
 ) -> Option<ClassGpu> {
-    if runs.is_empty() {
+    if runs.is_empty() || upload_refused() {
         return None;
     }
     let same_runs = old.is_some_and(|(_, old_runs)| Arc::ptr_eq(old_runs, runs));
@@ -2518,8 +2518,10 @@ struct GlassSource {
 #[derive(Default, Clone)]
 struct Batches {
     projection: Option<Arc<ground_shadow::Projection>>,
-    /// The last scene upload failed (and was logged): a retry that fails again is not.
-    upload_failed: bool,
+    /// The scene key whose last upload was refused by the device, and why: the same key is not
+    /// retried on every repaint frame (preventing a tight-loop GPU OOM storm), and a later failure
+    /// is not logged again until an upload succeeds.
+    failed_upload: Option<(u64, String)>,
     /// What the last scene taken uploaded.
     uploads: UploadStats,
     /// The blocks' see-through triangles the global glass stream was assembled from (block key,
@@ -2614,8 +2616,9 @@ impl Batches {
     /// Upload a new scene. Planned bodies not yet on the GPU are evaluated there: their
     /// dispatches go into `encoder`, ahead of this frame's render pass. The new scene is built
     /// into a copy and swapped in only when every buffer uploaded: when the device refuses one
-    /// (out of memory), the previous picture stays, the scene is put back to be retried (unless
-    /// a newer one was published meanwhile), the failure is logged once, and the reason returned.
+    /// (out of memory), the previous picture stays, the scene is put back (unless a newer one was
+    /// published meanwhile), the same failing key is not retried on every repaint frame, the
+    /// failure is logged once, and the reason returned.
     fn take(
         &mut self,
         device: &wgpu::Device,
@@ -2652,6 +2655,11 @@ impl Batches {
         if self.key == Some(key) {
             return Ok(());
         }
+        if let Some((failed_key, reason)) = &self.failed_upload
+            && *failed_key == key
+        {
+            return Err(reason.clone());
+        }
         let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) else { return Ok(()) };
         let _ = take_upload_failure();
         let mut next = self.clone();
@@ -2659,7 +2667,7 @@ impl Batches {
         next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut(), model);
         match take_upload_failure() {
             None => {
-                next.upload_failed = false;
+                next.failed_upload = None;
                 *self = next;
                 if let (Some(d), Some(t)) = (donor, taken) {
                     *d = t;
@@ -2667,10 +2675,10 @@ impl Batches {
                 Ok(())
             }
             Some(reason) => {
-                if !self.upload_failed {
+                if self.failed_upload.is_none() {
                     log::error!("scene upload failed, keeping the previous picture: {reason}");
                 }
-                self.upload_failed = true;
+                self.failed_upload = Some((key, reason.clone()));
                 if let Ok(mut pending) = slot.lock()
                     && pending.is_none()
                 {
@@ -2698,10 +2706,16 @@ impl Batches {
             self.uploads = UploadStats::default();
             self.projection = sc.projected_shadow.clone();
             self.shadow_fallback = sc.projected_shadow.as_ref().and_then(|p| upload(device, "sc_shadow_fallback", &p.fallback, TRI_SIZE));
+            if upload_refused() {
+                return;
+            }
             self.planned = match tess {
                 Some((tess, encoder)) => self.planned(device, queue, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
+            if upload_refused() {
+                return;
+            }
             // On a device that draws them indirectly, the meshes go into the arena (only those it
             // lacks are uploaded) and are drawn from it, even one at a time: none is uploaded twice.
             self.arena = if indirect::supported(device) {
@@ -2719,16 +2733,28 @@ impl Batches {
             } else {
                 None
             };
+            if upload_refused() {
+                return;
+            }
             let arena = self.arena.clone();
             self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
+            if upload_refused() {
+                return;
+            }
             self.instance_rows = sc.instance_rows.clone();
             self.hover_cpu = None;
             self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
+            if upload_refused() {
+                return;
+            }
             // The instanced edges, and the lit ones drawn again over them, from one segment
             // buffer: a lit part's edges are the model's (this scene's, or the model scene's for
             // the highlight), uploaded once.
             let mut uploaded = 0;
             let mut shared_edges = |parts: &[edges::Part<'_>], before: Option<&edges::Edges>| {
+                if upload_refused() {
+                    return None;
+                }
                 let (e, up) = edges::Edges::new(device, queue, bgl.edges.as_ref()?, parts, before)?;
                 uploaded += up;
                 Some(e)
@@ -2745,6 +2771,9 @@ impl Batches {
             self.lit_shared_edges = shared_edges(&lit_parts, lit_from);
             let lit_hidden_parts = edges::Part::of_meshes(&sc.lit_instanced_hidden);
             self.lit_shared_hidden = shared_edges(&lit_hidden_parts, lit_from);
+            if upload_refused() {
+                return;
+            }
             let spill = Spill {
                 instanced: self.edges.is_none() && !parts.is_empty(),
                 lit: self.lit_shared_edges.is_none() && !lit_parts.is_empty(),
@@ -2771,10 +2800,16 @@ impl Batches {
             } else {
                 self.instanced(device, &sc.selected_face_instanced, model, arena.as_deref())
             };
+            if upload_refused() {
+                return;
+            }
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
             let mut geometry = 0;
             for block in &sc.blocks {
+                if upload_refused() {
+                    return;
+                }
                 // A block the other scene drawn in this frame holds with the same bytes (a dragged
                 // component's bodies moving between the model scene and the layer) is taken over
                 // rather than uploaded again.
@@ -2793,8 +2828,14 @@ impl Batches {
                 self.blocks.insert(block.key, BlockGpu::update(device, queue, old, block.bytes.clone(), &mut geometry));
                 order.push(block.key);
             }
+            if upload_refused() {
+                return;
+            }
             self.block_order = order;
             let mut own = |label: &str, data: &[u8], stride: usize| {
+                if upload_refused() {
+                    return None;
+                }
                 geometry += data.len() as u64;
                 upload(device, label, data, stride)
             };
@@ -2813,6 +2854,9 @@ impl Batches {
             self.under = own("sc_under", &sc.under, LINE_SIZE);
             self.guide_trans = own("sc_guide_trans", &sc.guide_trans, TRI_SIZE);
             self.guide_lines = own("sc_guide_lines", &sc.guide_lines, LINE_SIZE);
+            if upload_refused() {
+                return;
+            }
             let blocks: Vec<&BlockGpu> = self.block_order.iter().filter_map(|k| self.blocks.get(k)).collect();
             self.lines = joined(blocks.iter().map(|b| &b.lines), own_lines);
             self.hidden = joined(blocks.iter().map(|b| &b.hidden), own_hidden);
@@ -2883,6 +2927,9 @@ impl Batches {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
         for (mesh, m) in meshes.iter().enumerate() {
+            if upload_refused() {
+                break;
+            }
             let count = u32::try_from(m.count()).unwrap_or(u32::MAX);
             if count == 0 {
                 continue;
@@ -2890,6 +2937,9 @@ impl Batches {
             let placements = m.instances.get(..count as usize * INSTANCE_SIZE).unwrap_or_default().to_vec();
             let mut levels = Vec::with_capacity(1 + m.levels.len());
             for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().map(|(t, e)| (t, *e))).enumerate() {
+                if upload_refused() {
+                    break;
+                }
                 let key = Arc::as_ptr(tris) as usize;
                 let shared = || {
                     let scene = donor?;
@@ -3239,6 +3289,9 @@ impl Batches {
         self.chunk_colors.retain(|k, _| live.contains(k.as_slice()));
         let mut out = Vec::with_capacity(chunks.len());
         for (chunk, k) in chunks.iter().zip(chunk_keys) {
+            if upload_refused() {
+                break;
+            }
             if !self.resident.contains_key(&k)
                 && let Some(shared) = donor.as_deref_mut().and_then(|d| d.resident.remove(&k))
             {
@@ -4838,7 +4891,7 @@ fn upload_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, bytes: 
 
 /// `bytes` of `stride` in as many buffers made by `buffer` as the device's limit takes.
 fn batch(device: &wgpu::Device, bytes: &[u8], stride: usize, buffer: impl Fn(&[u8]) -> Option<wgpu::Buffer>) -> Option<Batch> {
-    if bytes.len() < stride || stride == 0 {
+    if bytes.len() < stride || stride == 0 || upload_refused() {
         return None;
     }
     let chunk = buffer_chunk(stride, device.limits().max_buffer_size);
@@ -4910,9 +4963,13 @@ fn spilled_lines(sc: &GpuScene, spill: Spill) -> Option<(Vec<u8>, Vec<u8>)> {
 }
 
 /// [`crate::buffer_init`] for the scene uploads: `None` (as an empty upload) when the device
-/// refused the buffer, with the reason kept for [`take_upload_failure`] so the whole scene's
-/// upload can fail and leave the previous picture in place.
+/// refused the buffer (or already refused an earlier buffer in this upload), with the reason kept
+/// for [`take_upload_failure`] so the whole scene's upload can fail and leave the previous picture
+/// in place without cascading invalid-buffer errors.
 fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
+    if upload_refused() {
+        return None;
+    }
     match crate::buffer_init(device, label, contents, usage) {
         Ok(buffer) => Some(buffer),
         Err(error) => {
@@ -4924,6 +4981,9 @@ fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
 
 /// As [`buffer_init`], written through `queue` ([`crate::buffer_write`]).
 fn buffer_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
+    if upload_refused() {
+        return None;
+    }
     match crate::buffer_write(device, queue, label, contents, usage) {
         Ok(buffer) => Some(buffer),
         Err(error) => {
@@ -6761,6 +6821,89 @@ mod tests {
         batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 3, &slot, None, false).unwrap();
         assert_eq!(batches.key, Some(3));
         assert!(Arc::ptr_eq(&batches.blocks[&7].bytes, &newer.bytes));
+        assert!(slot.lock().unwrap().is_none());
+    }
+
+    /// Once a scene upload has been refused, subsequent buffer uploads short-circuit without
+    /// calling into the device (no cascading invalid-buffer errors), and `Batches::take` does not
+    /// tight-loop retrying the same refused scene key on every repaint frame (#23651).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn upload_short_circuits_after_refusal_and_skips_same_failed_key() {
+        use super::*;
+        let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let _ = take_upload_failure();
+        refused("GPU out of memory".to_string());
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let bad_usage = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::VERTEX;
+        assert!(buffer_init(&device, "sc_short_circuit_init", &[0; 64], bad_usage).is_none());
+        assert!(buffer_write(&device, &queue, "sc_short_circuit_write", &[0; 64], bad_usage).is_none());
+        assert!(upload_with(&device, "sc_short_circuit_upload", &[0; 288], PBR_SIZE, bad_usage).is_none());
+        assert!(upload_write(&device, &queue, "sc_short_circuit_upload_write", &[0; 288], TRI_SIZE).is_none());
+        assert!(pollster::block_on(scope.pop()).is_none(), "short-circuited uploads must not call device.create_buffer");
+        assert_eq!(take_upload_failure().as_deref(), Some("GPU out of memory"));
+
+        // Verify `upload_scene` skips trailing buffers and `glass_cpu`, and `Batches::take` does
+        // not re-attempt the same failed scene key until a different key arrives.
+        let Some((adapter, _)) = crate::select::pick(crate::test_env::policy()) else { return };
+        let limits = wgpu::Limits { max_buffer_size: 3072, ..wgpu::Limits::downlevel_defaults() };
+        let Ok((small_device, small_queue)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() }))
+        else {
+            return;
+        };
+        let block = |runs: usize| SceneBlock {
+            key: 7,
+            bytes: Arc::new(BlockBytes { vertices: Arc::new(vec![0; 3 * TRI_SIZE]), opaque: Arc::new(vec![0..1; runs]), ..BlockBytes::default() }),
+        };
+        let oversized = GpuScene {
+            blocks: vec![block(1024)],
+            tris: vec![0; 3 * TRI_SIZE],
+            shadow: vec![0; 3 * TRI_SIZE],
+            guide_trans: vec![0; 3 * TRI_SIZE],
+            glass: vec![0; 3 * TRI_SIZE],
+            palette: Arc::new(Palette::with_stable(vec![[9, 9, 9, 255]])),
+            ..GpuScene::default()
+        };
+        let valid = GpuScene { blocks: vec![block(1)], palette: Arc::new(Palette::with_stable(vec![[1, 2, 3, 255]])), ..GpuScene::default() };
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let r = Renderer::new(&small_device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false }, None);
+
+        let _ = take_upload_failure();
+        let mut probe = Batches::default();
+        probe.upload_scene(&small_device, &small_queue, &r.uniform, &r.uniform_bgl, 2, &oversized, None, false, None, None);
+        assert!(upload_refused());
+        assert!(probe.tris.is_none(), "trailing sc_tris must be skipped after refusal");
+        assert!(probe.shadow.is_none(), "trailing sc_shadow must be skipped after refusal");
+        assert!(probe.guide_trans.is_none(), "trailing sc_guide_trans must be skipped after refusal");
+        assert!(probe.glass.is_none(), "trailing sc_glass must be skipped after refusal");
+        assert!(probe.glass_cpu.is_empty(), "glass_cpu copy must be skipped after refusal");
+        assert!(probe.palette.is_none(), "palette update must be skipped after refusal");
+        assert!(take_upload_failure().is_some());
+
+        let mut batches = Batches::default();
+        let slot: SceneSlot = Arc::new(Mutex::new(Some(valid.clone())));
+        batches.take(&small_device, &small_queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+        assert_eq!(batches.key, Some(1));
+
+        *slot.lock().unwrap() = Some(oversized);
+        let first_err = batches.take(&small_device, &small_queue, &r.uniform, &r.uniform_bgl, 2, &slot, None, false).unwrap_err();
+        assert_eq!(batches.key, Some(1));
+
+        // Even if the slot now holds a small valid scene, repeating the exact same refused key
+        // must short-circuit without consuming the slot or re-running `upload_scene`.
+        *slot.lock().unwrap() = Some(valid);
+        let second_err = batches.take(&small_device, &small_queue, &r.uniform, &r.uniform_bgl, 2, &slot, None, false).unwrap_err();
+        assert_eq!(second_err, first_err);
+        assert_eq!(batches.key, Some(1));
+        assert!(slot.lock().unwrap().is_some(), "same failed key must not retry or take from slot");
+
+        // A newer key clears the failure and uploads normally.
+        batches.take(&small_device, &small_queue, &r.uniform, &r.uniform_bgl, 3, &slot, None, false).unwrap();
+        assert_eq!(batches.key, Some(3));
         assert!(slot.lock().unwrap().is_none());
     }
 

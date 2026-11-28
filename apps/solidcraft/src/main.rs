@@ -291,11 +291,14 @@ impl eframe::App for App {
             self.solve.apply_preferences(ctx);
             // Closed from the starting page: there is nothing to save yet, so the window closes,
             // and a close the user asked for is no failed start. One the app made itself (a lost
-            // device) still is.
+            // device) still is, unless memory ran out (#23651).
             if ctx.input(|i| i.viewport().close_requested())
                 && let Some(dir) = self.starting.take()
             {
-                startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
+                startup::closed_while_starting(
+                    &dir,
+                    self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none() || device_lost::is_out_of_memory(Some(&g.reason))),
+                );
             }
             if self.solve.ready_to_quit() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -549,9 +552,12 @@ impl eframe::App for App {
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
         // Closed from the start page before the 3D view was ready: as a close from the starting
-        // page, a close the user asked for is no failed start (#1210).
+        // page, a close the user asked for is no failed start (#1210), nor is an OOM loss (#23651).
         if let Some(dir) = self.starting.take() {
-            startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
+            startup::closed_while_starting(
+                &dir,
+                self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none() || device_lost::is_out_of_memory(Some(&g.reason))),
+            );
         }
         // A full-graphics launch closing normally did not fail (a lost device took the record).
         if self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none())
@@ -606,7 +612,8 @@ impl Drop for App {
         if let Some(gpu) = &self.gpu
             && let Some(lost_at) = gpu.lost_at
         {
-            device_lost::restart(gpu.restart_on_software, lost_at, &gpu.reason, &self.unkept);
+            let software = device_lost::restart_on_software(gpu.after_loss, gpu.cpu_renderer, Some(&gpu.reason));
+            device_lost::restart(software, lost_at, &gpu.reason, &self.unkept);
             // The window's GPU surface is still to be dropped, and on a lost device that may
             // never return (#9044).
             device_lost::end();
@@ -698,8 +705,10 @@ fn graphics_restart_args(args: impl IntoIterator<Item = String>) -> Vec<String> 
 /// The window's graphics device, watched for its loss.
 struct LostWatch {
     lost: solidcraft_ui_egui::gpu::DeviceLost,
-    /// Where the next start runs once this device is lost ([`device_lost::restart_on_software`]).
-    restart_on_software: bool,
+    /// Whether this launch already followed a recent non-OOM device loss.
+    after_loss: bool,
+    /// Whether this launch runs on the software renderer.
+    cpu_renderer: bool,
     /// When the loss was seen: the app is closing to start again.
     lost_at: Option<u64>,
     /// Why, as wgpu said it: passed to the next start ([`device_lost::REASON_ENV`]).
@@ -721,6 +730,7 @@ impl App {
     fn watch_device(&mut self) {
         let Some(gpu) = self.gpu.as_mut().filter(|g| g.lost_at.is_none() && g.lost.is_lost()) else { return };
         let reason = gpu.lost.reason().unwrap_or_default();
+        let oom = device_lost::is_out_of_memory(Some(&reason));
         log::error!("graphics: the device was lost ({reason}); closing to start again");
         solidcraft_engine::note!("SolidCraft graphics: the device was lost ({reason}); starting again");
         // A report the next start offers, as it does a crash's, with this run's renderer and log
@@ -730,11 +740,14 @@ impl App {
         gpu.lost_at = Some(device_lost::now_secs());
         gpu.reason = reason;
         self.solve.quit_requested = true;
-        // A full-graphics launch that lost its device failed, even after it proved itself.
-        if let Some(path) = self.safe_graphics_record.take()
-            && let Err(reason) = startup::update_safe_graphics(&path, startup::SafeGraphics::lost_device)
-        {
-            log::warn!("graphics: safe graphics record not saved: {reason}");
+        // A full-graphics launch that lost its device to a driver reset failed, even after it
+        // proved itself. An out-of-memory loss is not a driver failure: clear the trial flag
+        // instead of forcing the next launch onto software rendering (#23651).
+        if let Some(path) = self.safe_graphics_record.take() {
+            let update = if oom { startup::SafeGraphics::closed_normally } else { startup::SafeGraphics::lost_device };
+            if let Err(reason) = startup::update_safe_graphics(&path, update) {
+                log::warn!("graphics: safe graphics record not saved: {reason}");
+            }
         }
     }
 
@@ -1759,23 +1772,27 @@ fn main() -> eframe::Result {
     let backend_note = backend_launch.note;
     // The launch before this one closed because its graphics device was lost (`App::watch_device`).
     let after_loss = device_lost::recent(std::env::var(device_lost::LOST_ENV).ok().as_deref(), device_lost::now_secs());
+    let loss_reason = after_loss.then(|| std::env::var(device_lost::REASON_ENV).ok()).flatten();
+    let loss_oom_flag = after_loss.then(|| std::env::var(device_lost::OOM_ENV).ok()).flatten();
+    let after_oom_loss = after_loss && device_lost::was_out_of_memory(loss_oom_flag.as_deref(), loss_reason.as_deref());
+    let after_driver_loss = after_loss && !after_oom_loss;
     // The launch before closed itself and couldn't keep every unsaved change (`App::on_exit`).
     let unkept = std::env::var(startup::UNKEPT_ENV).ok();
     if let Some(designs) = unkept.as_deref().filter(|u| !u.trim().is_empty()) {
         log::warn!("recovery: the last launch couldn't keep unsaved changes of {designs}");
     }
     if after_loss {
-        let reason = std::env::var(device_lost::REASON_ENV).ok();
-        if let Some(reason) = device_lost::reason(reason.as_deref()) {
+        if let Some(reason) = device_lost::reason(loss_reason.as_deref()) {
             log::warn!("graphics: the last launch lost its device ({reason})");
         }
-        notes.push(device_lost::note(cpu_renderer, reason.as_deref(), unkept.as_deref()));
+        notes.push(device_lost::note(cpu_renderer, after_oom_loss, loss_reason.as_deref(), unkept.as_deref()));
     }
     // Safe graphics mode: after a launch that failed to come up or lost its device, or when asked
     // for, this one starts on the plain path (`startup::SafeGraphics`). Decided and saved before
-    // any graphics device is created, so a launch that dies in the driver counts.
+    // any graphics device is created, so a launch that dies in the driver counts. An out-of-memory
+    // loss does not force safe graphics / software rendering (#23651).
     let tracked = control_port.is_none();
-    let previous_failed = failed_starts > 0 || after_loss;
+    let previous_failed = failed_starts > 0 || after_driver_loss;
     let safe_graphics = match backend_path_for_safe.as_ref() {
         Some(path) => match startup::update_safe_graphics(path, |record| record.begin(previous_failed, tracked, safe_mode)) {
             Ok(reason) => reason,
@@ -1991,7 +2008,8 @@ fn main() -> eframe::Result {
             // pictures drawn on it look (`gpu::window_device`). egui draws 1x (`multisampling`).
             let gpu = cc.wgpu_render_state.as_ref().map(|rs| LostWatch {
                 lost: solidcraft_ui_egui::gpu::watch_window(rs, 1).lost,
-                restart_on_software: device_lost::restart_on_software(after_loss, cpu_renderer),
+                after_loss: after_driver_loss,
+                cpu_renderer,
                 lost_at: None,
                 reason: String::new(),
             });
