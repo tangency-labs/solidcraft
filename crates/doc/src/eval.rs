@@ -855,6 +855,9 @@ fn fillet_fitted(
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
     #[cfg(test)]
     cost_tests::count(|c| c.blends += 1);
+    if fit == crate::FilletFit::KeepEdge {
+        return kernel::fillet_keep_edge(body, edges, r).map(|b| (b, None, Vec::new()));
+    }
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
         // SMLib's refusal already computes the largest fitting radius from the cause's own

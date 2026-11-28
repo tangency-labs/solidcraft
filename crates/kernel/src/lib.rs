@@ -202,6 +202,7 @@ pub use blend::chamfer_sides_max_why;
 pub use blend::fillet_g2;
 pub use blend::fillet_g2_corners;
 pub use blend::fillet_g2_with_g2_corners;
+pub use blend::fillet_keep_edge;
 pub use blend::fillet_least_setback;
 pub use blend::fillet_max;
 pub use blend::fillet_max_each;

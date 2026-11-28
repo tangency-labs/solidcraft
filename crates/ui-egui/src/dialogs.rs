@@ -10189,6 +10189,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     FilletFit::Exact => None,
                     FilletFit::Reduce => Some("reduce"),
                     FilletFit::Taper => Some("taper"),
+                    FilletFit::KeepEdge => Some("keep_edge"),
                 };
                 if let Some(mode) = mode {
                     d.extra.insert("fit".into(), json!(mode));

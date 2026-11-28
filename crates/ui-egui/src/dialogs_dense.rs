@@ -160,7 +160,12 @@ fn fillet_corner_tip() -> String {
 /// What `solid.fillet` does with a radius too large for the faces beside an edge (`fit`): stop
 /// and say so (the default), round every edge with the largest radius that fits, or keep the
 /// radius and narrow it only where the faces run out.
-const FILLET_FITS: [(&str, &str); 3] = [("ui.fillet_fit_exact", "exact"), ("ui.fillet_fit_reduce", "reduce"), ("ui.fillet_fit_taper", "taper")];
+const FILLET_FITS: [(&str, &str); 4] = [
+    ("ui.fillet_fit_exact", "exact"),
+    ("ui.fillet_fit_reduce", "reduce"),
+    ("ui.fillet_fit_taper", "taper"),
+    ("ui.fillet_fit_keep_edge", "keep_edge"),
+];
 
 /// How two rounds turn where they meet at a sharp corner edge (`turn`): swept round the edge
 /// where the rolling ball can pass it and mitred elsewhere (the default, `auto`, not sent), in a
@@ -289,7 +294,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
     let t = Tokens::get();
     let before = extra.get("fit").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_fit", |ui| extra_choice(ui, extra, "fi_fit", "fit", &FILLET_FITS)));
-    row.response.backing_on_hover_text(tr("ui.fillet_fit_tip"));
+    row.response.backing_on_hover_text(format!("{}\n{}", tr("ui.fillet_fit_tip"), tr("ui.fillet_fit_keep_edge_tip")));
     let fit = row.inner;
     if extra.get("fit") != before.as_ref() {
         settle_fillet_options(extra, "fit", setback);

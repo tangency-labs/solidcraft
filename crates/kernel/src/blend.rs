@@ -10,6 +10,9 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
+mod keep_edge;
+pub use keep_edge::fillet_keep_edge;
+
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Curve, Loop, OrientedEdge, Shell, Surface};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};

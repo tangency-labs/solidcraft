@@ -208,7 +208,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); ",
             "setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); ",
             "turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); ",
-            "fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)",
+            "fit?: exact|reduce|taper|keep_edge (keep_edge: a concave edge whose flat wall is lower than the radius is rounded by a round tangent to the floor only, ending on the wall's top edge, so the top face and its edge stay as they are; the wall needs a straight top edge parallel to the edge and each end square to the edge or an upright face bounding the floor, such as a ring's cylinder; every other edge is rounded as usual; constant radius only; exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)",
         )),
     CommandSpec::new("solid.chamfer", "Chamfer", crate::checked!("solid.chamfer", chamfer)).begins_edit()
         .at("SOLID", "MODIFY")
@@ -3031,10 +3031,11 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some("exact") => solidcraft_doc::FilletFit::Exact,
         Some("reduce") => solidcraft_doc::FilletFit::Reduce,
         Some("taper") => solidcraft_doc::FilletFit::Taper,
-        Some(o) => return Err(bad(cmd, format!("unknown fit `{o}` (exact, reduce or taper)"))),
+        Some("keep_edge") => solidcraft_doc::FilletFit::KeepEdge,
+        Some(o) => return Err(bad(cmd, format!("unknown fit `{o}` (exact, reduce, taper or keep_edge)"))),
     };
     if !fit.is_exact() && !style.is_constant() {
-        return Err(bad(cmd, "`fit: reduce` and `fit: taper` take a constant radius"));
+        return Err(bad(cmd, "`fit: reduce`, `fit: taper` and `fit: keep_edge` take a constant radius"));
     }
     // What fills the corners where three blended edges meet.
     let corner = match str_(p, "corner").map(str::to_ascii_lowercase).as_deref() {
