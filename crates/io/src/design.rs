@@ -2114,6 +2114,11 @@ mod tests {
         put("vendor/README.md", "updated notes\n");
         assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()));
 
+        // An edit to a Rust file's comments alone keeps the digest (#23132).
+        put("crates/doc/src/lib.rs", "/// The crate's name.\npub const CRATE: &str = \"doc\"; // noted\n");
+        assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false).as_deref(), Some(base.as_str()), "a comment computes no model");
+        put("crates/doc/src/lib.rs", "pub const CRATE: &str = \"doc\";\n");
+
         // Every model-computing input invalidates the digest when changed.
         for (rel, altered, original) in [
             ("crates/doc/src/lib.rs", "pub const CRATE: &str = \"doc_v2\";\n".to_string(), "pub const CRATE: &str = \"doc\";\n".to_string()),
@@ -2239,6 +2244,59 @@ mod tests {
             commit(&root, "curve edited");
             assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(curve.as_str()), "an edit to it");
             let _ = fs::remove_dir_all(&root);
+        }
+
+        /// An edit to comments alone, committed or not, keeps the digest: the model it computes is
+        /// the same, so every saved cache stays valid after an update (#23132). An edit to code,
+        /// a string literal that looks like a comment included, moves it.
+        #[test]
+        fn comments_alone_keep_the_digest() {
+            let root = repo("comments");
+            let clean = build_script::evaluation_source(&root).expect("a clean digest");
+            let documented = "//! The kernel.\n\n/// Does nothing.\npub fn x() {} // yet\n/* a /* nested */ note */\n";
+            write(&root, "crates/kernel/src/lib.rs", documented);
+            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "an uncommitted comment");
+            commit(&root, "comments");
+            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "a committed comment");
+            write(&root, "solidcore/crates/solidcore/src/lib.rs", "/// The kernel.\npub fn kernel() {}\n");
+            commit(&root, "kernel comment");
+            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "a comment in the kernel");
+            write(&root, "crates/kernel/src/lib.rs", "pub fn x() { let _ = \"// yet\"; }\n");
+            let literal = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(literal, clean, "a string literal is code, though it reads as a comment");
+            commit(&root, "literal");
+            let literal = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(literal, clean, "and so is the commit of it");
+            write(&root, "crates/kernel/src/lib.rs", "pub fn x() { let _ = \"// now\"; }\n");
+            commit(&root, "literal edited");
+            assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(literal.as_str()), "an edit to the literal");
+            write(&root, "crates/kernel/Cargo.toml", "# a comment in TOML is hashed as it is\n");
+            commit(&root, "manifest");
+            let manifest = build_script::evaluation_source(&root).expect("a digest");
+            write(&root, "crates/kernel/Cargo.toml", "# edited\n");
+            commit(&root, "manifest edited");
+            assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(manifest.as_str()), "only Rust files are read without comments");
+            let _ = fs::remove_dir_all(&root);
+        }
+
+        /// What the digest reads of a Rust file: comments and spacing go, literals stay as written.
+        #[test]
+        fn rust_code_drops_comments_and_keeps_literals() {
+            let code = build_script::rust_code;
+            assert_eq!(code("/// Doc.\nfn f() {} // end\n"), "fn f() {}");
+            assert_eq!(code("//! Crate.\n/** Block doc. */ fn f() {}"), "fn f() {}");
+            assert_eq!(code("a /* one /* two */ still */ b"), "a b");
+            assert_eq!(code("a/*x*/b"), "a b", "a comment between tokens still separates them");
+            assert_eq!(code("let  s =\n\t\"a  // b\";"), "let s = \"a  // b\";");
+            assert_eq!(code("let s = \"a \\\" /* b */\";"), "let s = \"a \\\" /* b */\";", "an escaped quote");
+            assert_eq!(code("let s = r#\"a \" // b\"#; // c"), "let s = r#\"a \" // b\"#;");
+            assert_eq!(code("let s = br\"/* x */\";"), "let s = br\"/* x */\";");
+            assert_eq!(code("let r#type = 1; // c"), "let r#type = 1;", "a raw identifier");
+            assert_eq!(code("let c = '\"'; // c\nlet d = '/';"), "let c = '\"'; let d = '/';");
+            assert_eq!(code("let q = '\\''; // c"), "let q = '\\'';");
+            assert_eq!(code("fn f<'a>(x: &'a str) {} // c"), "fn f<'a>(x: &'a str) {}", "a lifetime is not a character");
+            assert_eq!(code("let e = '\u{e9}'; let u = \"\u{2014}\"; // c"), "let e = '\u{e9}'; let u = \"\u{2014}\";");
+            assert_ne!(code("fn f() { 1 }"), code("fn f() { 2 }"));
         }
 
         /// A working tree with uncommitted changes has a digest of its own, and the committed one comes
