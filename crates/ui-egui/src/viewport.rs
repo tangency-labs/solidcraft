@@ -1262,6 +1262,8 @@ fn sketch_scene_keys(app: &SolveApp, proj: &Proj, model_key: u64) -> (u64, Optio
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
     app.preferences.sketch_halo.hash(&mut h);
     app.preferences.dimension_rim.hash(&mut h);
+    // Sketches of other components fade while one is active, when the preference says so.
+    app.preferences.fade_other_component_sketches.hash(&mut h);
     // The grid previews the plane Create Sketch would take (#6975).
     let preview_plane = previewed_sketch_plane(app);
     preview_plane.map(|p| [p.origin, p.x, p.y].map(|v| [v.x, v.y, v.z].map(f64::to_bits))).hash(&mut h);
@@ -1348,6 +1350,71 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
     } else {
         rgba(c)
     }
+}
+
+/// Something in the design that can lie outside what you are working in ([`outside_work`]).
+pub(crate) enum WorkItem<'a> {
+    /// A component (0: the design itself) as a Browser row shows it.
+    Component(u64),
+    /// A body, with the active placement's bodies when one is active ([`active_body_names`]).
+    Body(&'a solidcraft_engine::doc::ModelBody, &'a Option<ActiveBodyNames>),
+    /// A placement of a component, by its path, as a Browser row shows it.
+    Placement(&'a [u64]),
+    /// A sketch, by its feature id.
+    Sketch(u64),
+}
+
+/// Is `item` outside what you are working in? With a component active, everything outside it
+/// is: the view draws such bodies and sketches faded ([`faded_colour`]) and the Browser dims
+/// their rows. With a placement active, bodies and placements outside that placement are. What
+/// you work on always stays lit: the sketch being edited, and the body whose face it sits on,
+/// even when that body belongs to another component. Sketches fade only with the
+/// `fade_other_component_sketches` preference (on by default).
+pub(crate) fn outside_work(app: &SolveApp, item: WorkItem) -> bool {
+    let s = &app.session;
+    let outside_component = |component: u64| s.active_component != 0 && !s.doc.component_within(component, s.active_component);
+    match item {
+        WorkItem::Component(id) => id != s.active_component && outside_component(id),
+        // A placement inside the active one, or one holding it, is on the way to what you work in.
+        WorkItem::Placement(path) => s.active_occurrence_path.as_ref().is_some_and(|p| !path.starts_with(p) && !p.starts_with(path)),
+        WorkItem::Body(b, active_bodies) => {
+            let outside = match active_bodies {
+                Some(names) => !names.contains(&b.name),
+                None => outside_component(b.component),
+            };
+            outside && !edited_sketch_host(app, b)
+        }
+        WorkItem::Sketch(sid) => {
+            app.preferences.fade_other_component_sketches
+                && crate::sketch_view::active_sketch(app) != Some(sid)
+                && s.doc.feature(sid).is_some_and(|f| outside_component(f.component))
+        }
+    }
+}
+
+/// Is `b` the body whose face the sketch being edited is attached to: the body you are drawing
+/// on, so [`outside_work`] keeps it lit. Only the placement the sketch sits on counts, not the
+/// other placements of the same body. False with no sketch open, or one on a plane.
+fn edited_sketch_host(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool {
+    let Some(sid) = crate::sketch_view::active_sketch(app) else { return false };
+    let Some(solidcraft_engine::doc::FeatureKind::Sketch { plane, .. }) = app.session.doc.feature(sid).map(|f| &f.kind) else {
+        return false;
+    };
+    let Some(anchor) = solidcraft_engine::doc::face_anchor::plane_face_anchor(plane) else { return false };
+    // The definition first: naming the placement scans the design, so only a body that could be
+    // the host pays for it.
+    b.definition_name() == anchor.target.body
+        && app.session.doc.world_body_name(&app.session.model.state(), &anchor.target.body, anchor.component, &anchor.path) == b.name
+}
+
+/// How opaque the view draws what lies outside what you are working in ([`outside_work`]).
+const OUTSIDE_WORK_OPACITY: f32 = 0.35;
+
+/// The colour of something outside what you are working in, body or sketch: its own colour,
+/// at [`OUTSIDE_WORK_OPACITY`] of its opacity, so every theme keeps its hues.
+pub(crate) fn faded_colour(c: [u8; 4]) -> [u8; 4] {
+    let [r, g, b, a] = c;
+    [r, g, b, (f32::from(a) * OUTSIDE_WORK_OPACITY).round().clamp(0.0, 255.0) as u8]
 }
 
 pub(crate) type ActiveBodyNames = std::sync::Arc<std::collections::HashSet<String>>;
@@ -1451,12 +1518,7 @@ pub(crate) fn body_shown(app: &SolveApp, name: &str) -> bool {
 
 /// With a component active, bodies outside it are drawn faded.
 pub(crate) fn body_faded(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, active_bodies: &Option<ActiveBodyNames>) -> bool {
-    let s = &app.session;
-    if let Some(names) = active_bodies {
-        !names.contains(&b.name)
-    } else {
-        s.active_component != 0 && !s.doc.component_within(b.component, s.active_component)
-    }
+    outside_work(app, WorkItem::Body(b, active_bodies))
 }
 
 /// How many times the viewport's pixels to draw this frame each way (#1288; 1: off): the
@@ -3340,7 +3402,7 @@ fn body_scene(
         // Ghost Frame Members: see-through in the plain body colour, whatever its appearance.
         let ghosted = !faded && frame_ghosted(app, b);
         let base = if ghosted { tk.body } else { resolved.component.or(resolved.body).unwrap_or(tk.body) };
-        let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
+        let col = if faded { faded_colour(c4(base)) } else { c4(base) };
         set_palette_color(&mut arena, &mut sc.palette, slots.body, col);
         // Appearances: the body's opacity, and faces with looks of their own.
         let opacity = if ghosted { FRAME_GHOST_OPACITY } else { resolved.opacity };
@@ -3854,6 +3916,9 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // Sampled here, past the display cache: the open sketch as a typed value leaves it, or a
         // failed sketch no world state holds.
         let here = failed || (active && typed.is_some());
+        // A sketch of another component than the active one is drawn faded, as that component's
+        // bodies are, so the active component's own sketches stand out.
+        let faded = outside_work(app, WorkItem::Sketch(sid));
         // Its curves are sampled before its profiles, which share their budget: past it a fill
         // goes missing rather than a curve.
         let mut typed_curves: std::collections::HashMap<usize, Vec<Vec<Vec3>>> = if here {
@@ -3868,7 +3933,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let lift = if lies_on_section(app, ss.plane.origin, ss.plane.normal()) { Vec3::ZERO } else { ss.plane.normal() * 0.01 };
         let hidden = failed || app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile;
         let profiles = if hidden { &[][..] } else { &ss.profiles[..] };
-        let profile_fill = sc.color(c4(tk.profile_fill));
+        let profile_fill = sc.color(if faded { faded_colour(c4(tk.profile_fill)) } else { c4(tk.profile_fill) });
         for (index, profile) in profiles.iter().enumerate() {
             let (sampled, cached);
             let display = if here {
@@ -3909,9 +3974,10 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         for (k, (pts, col, cons)) in lines.into_iter().enumerate() {
             let conflicting = owners.get(k).is_some_and(|&curve| conflict.curve(curve));
             let segs = sketch_segments(&pts, sketch_line_mode(col, cons), unit);
-            let haloed = (app.preferences.sketch_halo && !active && col != colors::SKETCH_PROJECTED && col != colors::SKETCH_LOST)
-                || (app.preferences.dimension_rim && col == colors::SKETCH_FIXED);
+            let haloed = (app.preferences.sketch_halo && !active && !faded && col != colors::SKETCH_PROJECTED && col != colors::SKETCH_LOST)
+                || (app.preferences.dimension_rim && !faded && col == colors::SKETCH_FIXED);
             let colour = if conflicting { c4(tk.sketch_conflict) } else { sketch_color(&tk, col) };
+            let colour = if faded { faded_colour(colour) } else { colour };
             strokes.push((segs, sc.color(colour), if cons { 1.2 } else { 2.0 }, haloed));
         }
         // Active sketches retain their existing through-body display. Inactive sketches

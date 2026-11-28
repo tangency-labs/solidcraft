@@ -78,6 +78,121 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
     solidcraft_theme::set_vision(original_vision);
 }
 
+/// With a component active, a finished sketch of another component is drawn faded, in the colour
+/// its bodies fade to; the active component's own sketch keeps its colour. With the design itself
+/// active, or with the preference off (the old look), nothing fades (#12896).
+#[test]
+fn sketches_of_other_components_fade_while_a_component_is_active() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    let a = app.run("component.create", json!({"name": "A"})).unwrap()["component"].as_u64().unwrap();
+    let sketch_a = app.run("sketch.create", json!({"plane": "XY", "name": "In A"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = app.run("component.create", json!({"name": "B"})).unwrap()["component"].as_u64().unwrap();
+    let sketch_b = app.run("sketch.create", json!({"plane": "XY", "name": "In B"})).unwrap()["sketch"].as_u64().unwrap();
+    app.run("sketch.line", json!({"points": [[0, 20], [10, 20]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    assert_eq!(app.session.active_component, b);
+    assert!(app.preferences.fade_other_component_sketches, "on by default");
+
+    let faded = |app: &SolveApp, sketch: u64| super::outside_work(app, super::WorkItem::Sketch(sketch));
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let finished = super::c4(solidcraft_theme::Tokens::get().sketch_fixed);
+    let greyed = super::faded_colour(finished);
+    assert_eq!(greyed[..3], finished[..3], "faded keeps the theme's hue");
+    assert!(greyed[3] < finished[3], "and is faint");
+    // Lines in the finished colour and in the faded one.
+    let counts = |app: &SolveApp| {
+        let scene = super::build_sketch_scene(app, &super::projection(app, rect));
+        let (lines, _) = scene.lines.as_chunks::<{ crate::gpu::LINE_SIZE }>();
+        let count = |c: [u8; 4]| lines.iter().filter(|line| line_color(&scene, *line) == c).count();
+        (count(finished), count(greyed))
+    };
+
+    assert!(faded(&app, sketch_a) && !faded(&app, sketch_b));
+    let (full, faint) = counts(&app);
+    assert!(full > 0 && faint > 0, "B's sketch in its colour, A's faded: {full} and {faint}");
+
+    let projection = super::projection(&app, rect);
+    let key = super::sketch_scene_key(&app, &projection);
+    crate::prefs::set(&mut app, &json!({"fade_other_component_sketches": false})).unwrap();
+    assert_ne!(super::sketch_scene_key(&app, &projection), key, "changing the preference rebuilds the sketch scene");
+    assert!(!faded(&app, sketch_a));
+    assert_eq!(counts(&app), (full + faint, 0), "off: every sketch in its own colour, as before");
+    crate::prefs::set(&mut app, &json!({"fade_other_component_sketches": true})).unwrap();
+
+    app.run("component.activate", json!({"component": a})).unwrap();
+    assert!(!faded(&app, sketch_a) && faded(&app, sketch_b), "the fade follows the active component");
+
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    assert!(!faded(&app, sketch_a) && !faded(&app, sketch_b));
+    assert_eq!(counts(&app), (full + faint, 0), "with the design itself active nothing fades");
+}
+
+/// Drawing on another component's body keeps that body lit: while a sketch of the active
+/// component is edited on a face of B's box, the box is not faded, though it lies outside the
+/// active component; once the sketch is finished, it fades again (#12896).
+#[test]
+fn the_body_a_sketch_is_drawn_on_stays_lit_while_the_sketch_is_edited() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("component.create", json!({"name": "B"})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    let a = app.run("component.create", json!({"name": "A"})).unwrap()["component"].as_u64().unwrap();
+    assert_eq!(app.session.active_component, a);
+    let base = |app: &SolveApp| {
+        let world = app.session.world_state().unwrap();
+        let body = world.bodies.iter().find(|b| b.name == "Base").cloned().expect("B's box");
+        super::body_faded(app, &body, &super::active_body_names(app))
+    };
+    assert!(base(&app), "B's box lies outside the active component A");
+
+    let sketch = app.run("sketch.create", json!({"plane": {"face": [10, 10, 10]}, "name": "On B", "project_edges": false})).unwrap()["sketch"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(crate::sketch_view::active_sketch(&app), Some(sketch));
+    assert!(!base(&app), "the body being drawn on stays lit");
+    assert!(!super::outside_work(&app, super::WorkItem::Sketch(sketch)), "and so does the sketch being edited");
+
+    app.run("sketch.line", json!({"points": [[2, 2], [8, 2]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    assert!(base(&app), "finished, the box fades with the rest of B");
+    assert!(!super::outside_work(&app, super::WorkItem::Sketch(sketch)), "A's own sketch never fades while A is active");
+}
+
+/// With two placements of B, drawing on the second one's box keeps that box lit and leaves the
+/// first placement's box faded: the host is the placement the sketch sits on, not every body
+/// with its definition name (#12896 review).
+#[test]
+fn only_the_placement_a_sketch_is_drawn_on_stays_lit() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let b = app.run("component.create", json!({"name": "B"})).unwrap()["component"].as_u64().unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    app.run("occurrence.copy", json!({"component": b, "translate": [40, 0, 0]})).unwrap();
+    app.run("component.create", json!({"name": "A"})).unwrap();
+    // B's two boxes, the first at x 0..20 and the copy at x 40..60, each faded or not.
+    let boxes = |app: &SolveApp| {
+        let world = app.session.world_state().unwrap();
+        let active = super::active_body_names(app);
+        let mut found: Vec<(f64, bool)> = world
+            .bodies
+            .iter()
+            .filter(|body| body.definition_name() == "Base")
+            .map(|body| (body.mesh_bounds().min.x, super::body_faded(app, body, &active)))
+            .collect();
+        found.sort_by(|l, r| l.0.total_cmp(&r.0));
+        found.into_iter().map(|(_, faded)| faded).collect::<Vec<_>>()
+    };
+    assert_eq!(boxes(&app), [true, true], "both of B's boxes lie outside the active component A");
+
+    app.run("sketch.create", json!({"plane": {"face": [50, 10, 10]}, "name": "On the copy", "project_edges": false})).unwrap();
+    assert_eq!(boxes(&app), [true, false], "only the copy being drawn on is lit");
+}
+
 #[test]
 fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))
