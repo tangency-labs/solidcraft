@@ -41,97 +41,6 @@ use std::sync::Arc;
 
 use epaint::mutex::RwLock;
 
-/// SolidCraft: what [`set_startup_hook`] is told before each step of getting the graphics
-/// device and the window's surface up, so a crash inside the driver (with no Rust panic) can
-/// still say which step it died in. `detail` is empty except for [`STEP_ADAPTER_CHOSEN`].
-pub type StartupHook = fn(step: &'static str, detail: &str);
-
-static STARTUP_HOOK: std::sync::OnceLock<StartupHook> = std::sync::OnceLock::new();
-
-/// SolidCraft: the steps [`StartupHook`] is told about, in order.
-pub const STEP_INSTANCE: &str = "graphics instance";
-pub const STEP_SURFACE: &str = "window surface";
-pub const STEP_ADAPTER: &str = "adapter request";
-/// The adapter was picked; `detail` names it, its backend and driver.
-pub const STEP_ADAPTER_CHOSEN: &str = "adapter chosen";
-pub const STEP_DEVICE: &str = "device creation";
-pub const STEP_RENDERER: &str = "egui renderer (shader compile)";
-pub const STEP_SURFACE_CONFIGURE: &str = "surface configure";
-pub const STEP_FIRST_PRESENT: &str = "first frame (present)";
-
-/// SolidCraft: install the startup hook (once; later calls are ignored).
-pub fn set_startup_hook(hook: StartupHook) {
-    let _ = STARTUP_HOOK.set(hook);
-}
-
-pub(crate) fn startup_step(step: &'static str, detail: &str) {
-    if let Some(hook) = STARTUP_HOOK.get() {
-        hook(step, detail);
-    }
-}
-
-/// SolidCraft: a frame whose texture took at least this long to acquire stalled. wgpu waits at
-/// most a second for the swap chain's next image, and D3D12 then goes on as if it had come: a
-/// hung GPU shows as frames that each wait that second and never reach the screen, a white
-/// window with nothing reported (#3321).
-pub const STALLED_ACQUIRE: std::time::Duration = std::time::Duration::from_millis(950);
-
-static STALLED_FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-/// SolidCraft: how many of the main window's frames in a row stalled acquiring their texture
-/// ([`STALLED_ACQUIRE`]). Other viewports (the agent chat's window) don't count: a frame on time
-/// there would start a stalled main window's count over.
-pub fn stalled_frames() -> u32 {
-    STALLED_FRAMES.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-/// The frames in a row that stalled, after one whose texture took `elapsed`. Only the `winit`
-/// painter acquires textures.
-#[cfg_attr(not(feature = "winit"), allow(dead_code))]
-fn count_stall(stalled: u32, elapsed: std::time::Duration) -> u32 {
-    if elapsed >= STALLED_ACQUIRE {
-        stalled.saturating_add(1)
-    } else {
-        0
-    }
-}
-
-/// The main window's acquire took `elapsed`; `frame`: it gave a texture to draw to, so its surface
-/// works again, if it didn't. An acquire that gives none (`Outdated`, `Validation`) still counts
-/// as a stall if it waited, but doesn't end the time without a texture ([`refused_for`]): a
-/// surface that configures, gives no frame and is refused again would otherwise start that time
-/// over each round (#3321 review).
-#[cfg_attr(not(feature = "winit"), allow(dead_code))]
-pub(crate) fn note_acquire(elapsed: std::time::Duration, frame: bool) {
-    let stalled = count_stall(stalled_frames(), elapsed);
-    STALLED_FRAMES.store(stalled, std::sync::atomic::Ordering::Relaxed);
-    if frame && let Ok(mut since) = REFUSED_SINCE.lock() {
-        *since = None;
-    }
-}
-
-static REFUSED_SINCE: std::sync::Mutex<Option<web_time::Instant>> = std::sync::Mutex::new(None);
-
-/// SolidCraft: how long the main window has gone without acquiring a texture because its surface
-/// refuses its configuration (or waits for a refused one's retry, #1935); `None` while it gets
-/// textures. Those frames are skipped before the acquire, so they never count as stalled: a
-/// surface refused for good after a GPU reset leaves a blank window with nothing else to show
-/// for it (#3321).
-pub fn refused_for() -> Option<std::time::Duration> {
-    REFUSED_SINCE.lock().ok().and_then(|since| *since).map(|since| since.elapsed())
-}
-
-/// The main window skipped a frame at `now` on a refused configure. That frame ends the stalled
-/// streak: stalls before and after a refusal aren't frames in a row ([`refused_for`] counts
-/// the refusal itself).
-#[cfg_attr(not(feature = "winit"), allow(dead_code))]
-pub(crate) fn note_refused(now: web_time::Instant) {
-    STALLED_FRAMES.store(0, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(mut since) = REFUSED_SINCE.lock() {
-        since.get_or_insert(now);
-    }
-}
-
 /// An error produced by egui-wgpu.
 #[derive(thiserror::Error, Debug)]
 pub enum WgpuError {
@@ -146,10 +55,6 @@ pub enum WgpuError {
 
     #[error(transparent)]
     RequestDeviceError(#[from] wgpu::RequestDeviceError),
-
-    /// SolidCraft: pipeline validation must return to the startup retry.
-    #[error("Could not create the egui renderer: {0}")]
-    CreateRendererError(wgpu::Error),
 
     #[error(transparent)]
     CreateSurfaceError(#[from] wgpu::CreateSurfaceError),
@@ -195,93 +100,6 @@ impl SurfaceConfig {
     };
 }
 
-/// SolidCraft: whether a device was lost (the driver reset it, Windows' TDR among others, #4172).
-///
-/// A lost device can't be used again. wgpu only learns of the loss when a call into the driver
-/// fails: from then on every call on the device fails quietly, and the device's lost callback
-/// marks this. But a queue write that is the first call to meet the loss panics inside wgpu
-/// (`PendingWrites::activate`), so the painter survives that panic ([`DeviceLost::survive`]),
-/// which probes the device to tell a loss from any other panic.
-#[derive(Clone, Debug, Default)]
-pub struct DeviceLost {
-    lost: Arc<std::sync::atomic::AtomicBool>,
-    reason: Arc<std::sync::Mutex<Option<String>>>,
-}
-
-impl DeviceLost {
-    /// Watch `device`: its lost callback marks the loss. A device has one lost callback, so this
-    /// replaces any set before.
-    pub fn watch(device: &wgpu::Device) -> Self {
-        let lost = Self::default();
-        let seen = lost.clone();
-        device.set_device_lost_callback(move |reason, message| {
-            seen.mark(&format!("{reason:?}: {message}"));
-        });
-        lost
-    }
-
-    /// Mark the device lost, for `reason` (the first reason is kept).
-    pub fn mark(&self, reason: &str) {
-        if let Ok(mut kept) = self.reason.lock() {
-            kept.get_or_insert_with(|| reason.to_owned());
-        }
-        self.lost.store(true, std::sync::atomic::Ordering::Release);
-    }
-
-    /// The device was lost.
-    pub fn is_lost(&self) -> bool {
-        self.lost.load(std::sync::atomic::Ordering::Acquire)
-    }
-
-    /// Why the device was lost, as wgpu said it.
-    pub fn reason(&self) -> Option<String> {
-        self.reason.lock().ok().and_then(|r| r.clone())
-    }
-
-    /// The flag [`DeviceLost::is_lost`] reads, for others drawing on the same device.
-    pub fn flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
-        self.lost.clone()
-    }
-
-    /// Whether the device is lost, asking the driver first, so a loss it reports is marked here
-    /// rather than met by the next upload.
-    ///
-    /// The probe opens a command list, as the upload would: a queue write's first call into the
-    /// driver is `begin_encoding`, and on D3D12 that is where a reset device says so. An empty
-    /// submission only signals a fence: #6528 met a reset D3D12 device in the upload right after
-    /// one. wgpu handles a failed `begin_encoding` in a command encoder's `finish` (it loses the
-    /// device, and the lost callback marks it); only its queue writes unwrap it.
-    pub fn probe(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
-        if self.is_lost() {
-            return true;
-        }
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("device lost probe"),
-        });
-        encoder.insert_debug_marker("device lost probe");
-        queue.submit([encoder.finish()]);
-        self.is_lost()
-    }
-
-    /// Run `draw`, GPU work on this device, and survive a panic it meets once the device is lost:
-    /// `None` then. The driver resets a device at any moment, and a queue write (or the present)
-    /// can be the first call to meet it, which panics inside wgpu (`PendingWrites::activate`
-    /// unwraps `Lost`, #10240). After such a panic the probe meets the loss and marks it. Any
-    /// other panic carries on unwinding.
-    pub fn survive<R>(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        draw: impl FnOnce() -> R,
-    ) -> Option<R> {
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(draw)) {
-            Ok(drawn) => Some(drawn),
-            Err(_) if self.probe(device, queue) => None,
-            Err(panic) => std::panic::resume_unwind(panic),
-        }
-    }
-}
-
 /// Access to the render state for egui.
 #[derive(Clone)]
 pub struct RenderState {
@@ -307,19 +125,8 @@ pub struct RenderState {
     /// The target texture format used for presenting to the window.
     pub target_format: wgpu::TextureFormat,
 
-    /// Effective sample count after backend compatibility handling.
-    /// Custom paint callbacks must use this, rather than the requested setting.
-    pub msaa_samples: u32,
-
-    /// SolidCraft: the MSAA sample counts this device can render the target (and depth) format
-    /// with, ascending, always starting with 1.
-    pub msaa_supported: Vec<u32>,
-
     /// Egui renderer responsible for drawing the UI.
     pub renderer: Arc<RwLock<Renderer>>,
-
-    /// SolidCraft: the device was lost; the painter draws nothing more (#4172).
-    pub device_lost: DeviceLost,
 }
 
 async fn request_adapter(
@@ -404,7 +211,6 @@ impl RenderState {
                 wgpu::Backends::all()
             };
 
-            startup_step(STEP_ADAPTER, ""); // SolidCraft
             instance.enumerate_adapters(backends).await
         };
 
@@ -422,36 +228,20 @@ impl RenderState {
                         request_adapter(instance, power_preference, compatible_surface, &[]).await
                     }
                     #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let selected = _native_adapter_selector
-                            .map(|select| select(&available_adapters, compatible_surface))
-                            .transpose()
-                            .map_err(WgpuError::CustomNativeAdapterSelectionError)?
-                            .flatten();
-                        if let Some(adapter) = selected {
-                            Ok(adapter)
-                        } else {
-                            request_adapter(
-                                instance,
-                                power_preference,
-                                compatible_surface,
-                                &available_adapters,
-                            )
-                            .await
-                        }
+                    if let Some(native_adapter_selector) = _native_adapter_selector {
+                        native_adapter_selector(&available_adapters, compatible_surface)
+                            .map_err(WgpuError::CustomNativeAdapterSelectionError)
+                    } else {
+                        request_adapter(
+                            instance,
+                            power_preference,
+                            compatible_surface,
+                            &available_adapters,
+                        )
+                        .await
                     }
                 }?;
 
-                // SolidCraft: name the adapter before the driver is asked for a device.
-                let info = adapter.get_info();
-                startup_step(
-                    STEP_ADAPTER_CHOSEN,
-                    &format!(
-                        "{:?} {} ({:?}, driver {} {})",
-                        info.backend, info.name, info.device_type, info.driver, info.driver_info
-                    ),
-                );
-                startup_step(STEP_DEVICE, "");
                 let (device, queue) = {
                     profiling::scope!("request_device");
                     adapter
@@ -468,8 +258,6 @@ impl RenderState {
                 queue,
             }) => (instance, adapter, device, queue),
         };
-        // SolidCraft: a device the driver loses stops the painter, not the app (#4172).
-        let device_lost = DeviceLost::watch(&device);
 
         log_adapter_info(&adapter.get_info());
 
@@ -482,44 +270,7 @@ impl RenderState {
         };
         let target_format = crate::preferred_framebuffer_format(&surface_formats)?;
 
-        // SolidCraft: the OpenGL resolve path can present an entirely black frame with MSAA
-        // (notably Mesa/llvmpipe). Decide after selecting the real surface adapter,
-        // before creating either pipelines or attachments; no second GPU probe.
-        // A sample count the device doesn't support for the target or depth format fails
-        // pipeline validation (a panic at start): fall back to the largest supported one.
-        let msaa_supported =
-            supported_msaa_samples(&adapter, &device, target_format, options.depth_stencil_format);
-        let wanted = effective_msaa_samples(adapter.get_info().backend, options.msaa_samples);
-        let msaa_samples = clamp_msaa_samples(&msaa_supported, wanted);
-        if msaa_samples != wanted {
-            log::warn!(
-                "MSAA {wanted}x is not supported for {target_format:?} on this device (supported: {msaa_supported:?}); using {msaa_samples}x"
-            );
-        }
-        let options = RendererOptions {
-            msaa_samples,
-            ..options
-        };
-        startup_step(STEP_RENDERER, ""); // SolidCraft
-        // SolidCraft: capture errors on the real surface/device, including driver shader
-        // compilation failures, before wgpu's default uncaptured-error handler can panic.
-        // Await every scope (also on WebGPU); an invalid renderer is never handed to eframe.
-        let scopes = [
-            wgpu::ErrorFilter::OutOfMemory,
-            wgpu::ErrorFilter::Internal,
-            wgpu::ErrorFilter::Validation,
-        ]
-        .map(|filter| device.push_error_scope(filter));
         let renderer = Renderer::new(&device, target_format, options);
-        let mut failed = None;
-        for scope in scopes.into_iter().rev() {
-            if let Some(error) = scope.pop().await {
-                failed.get_or_insert(error);
-            }
-        }
-        if let Some(error) = failed {
-            return Err(WgpuError::CreateRendererError(error));
-        }
 
         // On wasm, depending on feature flags, wgpu objects may or may not implement sync.
         // It doesn't make sense to switch to Rc for that special usecase, so simply disable the lint.
@@ -532,10 +283,7 @@ impl RenderState {
             device,
             queue,
             target_format,
-            msaa_samples: options.msaa_samples,
-            msaa_supported,
             renderer: Arc::new(RwLock::new(renderer)),
-            device_lost,
         })
     }
 }
@@ -805,156 +553,6 @@ pub fn parse_vendor_id(vendor_id: u32) -> &'static str {
     }
 }
 
-/// Selected-adapter policy shared by egui pipelines, attachments and host callbacks.
-pub fn effective_msaa_samples(backend: wgpu::Backend, requested: u32) -> u32 {
-    if backend == wgpu::Backend::Gl { 1 } else { requested.max(1) }
-}
-
-/// SolidCraft: the MSAA sample counts `device` can render `target_format` and
-/// `depth_stencil_format` with (ascending, always starting with 1). Without
-/// [`wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`] the device allows only the counts
-/// WebGPU guarantees for a format (1 and 4), whatever the adapter could do.
-pub fn supported_msaa_samples(
-    adapter: &wgpu::Adapter,
-    device: &wgpu::Device,
-    target_format: wgpu::TextureFormat,
-    depth_stencil_format: Option<wgpu::TextureFormat>,
-) -> Vec<u32> {
-    let features = device.features();
-    let flags = |format: wgpu::TextureFormat| {
-        if features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
-            adapter.get_texture_format_features(format).flags
-        } else {
-            format.guaranteed_format_features(features).flags
-        }
-    };
-    let target = flags(target_format);
-    let depth = depth_stencil_format.map(flags);
-    msaa_counts(target, depth)
-}
-
-/// The sample counts both the colour target and the depth buffer support. A multisampled colour
-/// target must also resolve into the single-sampled surface.
-fn msaa_counts(
-    target: wgpu::TextureFormatFeatureFlags,
-    depth: Option<wgpu::TextureFormatFeatureFlags>,
-) -> Vec<u32> {
-    let resolves = target.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE);
-    [1, 2, 4, 8, 16]
-        .into_iter()
-        .filter(|&n| {
-            n == 1
-                || (resolves
-                    && target.sample_count_supported(n)
-                    && depth.is_none_or(|d| d.sample_count_supported(n)))
-        })
-        .collect()
-}
-
-/// SolidCraft: the largest of the `supported` sample counts that is at most `requested` (1 when
-/// none is).
-pub fn clamp_msaa_samples(supported: &[u32], requested: u32) -> u32 {
-    supported
-        .iter()
-        .copied()
-        .filter(|&n| n <= requested.max(1))
-        .max()
-        .unwrap_or(1)
-}
-
-#[cfg(test)]
-mod msaa_tests {
-    #[test]
-    fn gl_saved_multisampling_is_clamped_and_native_backends_keep_it() {
-        for requested in [0, 1, 2, 4, 8] {
-            assert_eq!(super::effective_msaa_samples(wgpu::Backend::Gl, requested), 1);
-            for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Dx12, wgpu::Backend::Metal, wgpu::Backend::BrowserWebGpu] {
-                assert_eq!(super::effective_msaa_samples(backend, requested), requested.max(1));
-            }
-        }
-    }
-
-    #[test]
-    fn unsupported_sample_counts_fall_back_to_the_largest_supported_one() {
-        use wgpu::TextureFormatFeatureFlags as F;
-        // WebGPU's guarantee for Bgra8Unorm without adapter-specific features: 1 and 4 (a
-        // saved 8x failed pipeline validation at start).
-        let guaranteed = F::MULTISAMPLE_X4 | F::MULTISAMPLE_RESOLVE;
-        let supported = super::msaa_counts(guaranteed, Some(F::MULTISAMPLE_X4));
-        assert_eq!(supported, [1, 4]);
-        assert_eq!(super::clamp_msaa_samples(&supported, 8), 4);
-        assert_eq!(super::clamp_msaa_samples(&supported, 2), 1);
-        assert_eq!(super::clamp_msaa_samples(&supported, 0), 1);
-        // The depth buffer limits it too, and a target that can't resolve can't multisample.
-        let adapter = F::MULTISAMPLE_X2 | F::MULTISAMPLE_X4 | F::MULTISAMPLE_X8 | F::MULTISAMPLE_RESOLVE;
-        assert_eq!(super::msaa_counts(adapter, None), [1, 2, 4, 8]);
-        assert_eq!(super::msaa_counts(adapter, Some(F::MULTISAMPLE_X4)), [1, 4]);
-        assert_eq!(super::msaa_counts(F::MULTISAMPLE_X4, None), [1]);
-        assert_eq!(super::clamp_msaa_samples(&[], 8), 1);
-    }
-
-    /// Frames that each waited out wgpu's one-second acquire count up; one on time starts over
-    /// (#3321).
-    #[test]
-    fn frames_that_wait_out_the_acquire_count_as_stalled() {
-        use std::time::Duration;
-        let second = Duration::from_millis(1000);
-        let stalled = (0..3).fold(0, |n, _| super::count_stall(n, second));
-        assert_eq!(stalled, 3);
-        assert_eq!(super::count_stall(stalled, Duration::from_millis(16)), 0);
-        // A slow frame isn't a stall: the image came before the timeout.
-        assert_eq!(super::count_stall(0, Duration::from_millis(400)), 0);
-        assert_eq!(super::count_stall(u32::MAX, second), u32::MAX);
-    }
-
-    /// Four stalls, then frames skipped on a refused configure, then one stall: one in a row,
-    /// not five (CodeRabbit on #4016). Only this test drives the main window's counters.
-    #[test]
-    fn a_refused_configure_ends_the_stalled_streak() {
-        use std::time::Duration;
-        let second = Duration::from_millis(1000);
-        (0..4).for_each(|_| super::note_acquire(second, true));
-        assert_eq!(super::stalled_frames(), 4);
-        super::note_refused(web_time::Instant::now());
-        assert_eq!(super::stalled_frames(), 0);
-        assert!(super::refused_for().is_some());
-        // An acquire that gives no texture (`Outdated`, `Validation`) doesn't end the time
-        // without one (#3321 review); one that does, does.
-        super::note_acquire(Duration::from_millis(16), false);
-        assert!(super::refused_for().is_some(), "no texture yet");
-        super::note_acquire(second, true);
-        assert_eq!(super::stalled_frames(), 1);
-        assert!(super::refused_for().is_none(), "a texture ends the refusal");
-        super::note_acquire(Duration::from_millis(16), true);
-        assert_eq!(super::stalled_frames(), 0);
-    }
-}
-
-/// SolidCraft: run `f` with `device`'s errors captured, and the first error it caused. Uncaptured,
-/// an error goes to the device's handler, which panics by default: a surface the driver can't
-/// reconfigure (D3D12 "Failed to wait for GPU to come idle", #1935) crashed the app. Native error
-/// scopes resolve at once; on the web the scope still keeps the error from the handler.
-pub fn capture_errors<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> (T, Option<wgpu::Error>) {
-    let scopes = [
-        wgpu::ErrorFilter::OutOfMemory,
-        wgpu::ErrorFilter::Internal,
-        wgpu::ErrorFilter::Validation,
-    ]
-    .map(|filter| device.push_error_scope(filter));
-    let value = f();
-    let mut failed = None;
-    for scope in scopes.into_iter().rev() {
-        let mut popped = std::pin::pin!(scope.pop());
-        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
-        if let std::task::Poll::Ready(Some(error)) =
-            std::future::Future::poll(popped.as_mut(), &mut cx)
-        {
-            failed.get_or_insert(error);
-        }
-    }
-    (value, failed)
-}
-
 /// SolidCraft: the surface size for a window of `width` x `height` pixels on a device whose
 /// textures are at most `max_side` on a side, and the scale it is drawn at. A window that fits is
 /// unchanged (scale 1); a larger one shrinks uniformly, keeping its aspect ratio, so the image
@@ -973,21 +571,4 @@ pub fn clamp_surface_extent(width: u32, height: u32, max_side: u32) -> (u32, u32
     };
     let scale_f32 = scale as f32;
     (fit(width), fit(height), scale_f32)
-}
-
-#[cfg(test)]
-mod device_lost_tests {
-    /// A loss is marked once, with the first reason, and every clone (and the shared flag) sees it.
-    #[test]
-    fn a_marked_loss_is_seen_by_every_clone() {
-        let lost = super::DeviceLost::default();
-        let painter = lost.clone();
-        let flag = lost.flag();
-        assert!(!painter.is_lost() && lost.reason().is_none());
-        lost.mark("Unknown: Device lost");
-        lost.mark("Destroyed: ");
-        assert!(painter.is_lost());
-        assert!(flag.load(std::sync::atomic::Ordering::Acquire));
-        assert_eq!(painter.reason().as_deref(), Some("Unknown: Device lost"));
-    }
 }

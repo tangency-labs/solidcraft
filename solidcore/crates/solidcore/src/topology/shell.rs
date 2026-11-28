@@ -1634,21 +1634,22 @@ where
                 .set_class_object(PointClassType::Unknown, None);
             return Ok(());
         };
-        // Upstream compares every candidate against the INITIAL ray parameter,
-        // even after selecting a different solution.
-        let initial_parameter = chosen.start.solution_value;
+        let mut min_distance = chosen.start.solution_value;
         for candidate in iter {
-            if candidate.start.solution_value - initial_parameter < EFF_ZERO_SQRT {
-                if candidate.num_variables < chosen.num_variables {
-                    chosen = candidate;
-                    continue;
-                }
-                if candidate.num_variables > chosen.num_variables {
-                    continue;
-                }
-            }
-            if candidate.start.param(0)? < chosen.start.param(0)? {
+            let distance = candidate.start.solution_value;
+            if distance < min_distance - EFF_ZERO_SQRT {
                 chosen = candidate;
+                min_distance = distance;
+            } else if distance - min_distance < EFF_ZERO_SQRT {
+                if distance < min_distance {
+                    min_distance = distance;
+                }
+                if candidate.num_variables < chosen.num_variables
+                    || (candidate.num_variables == chosen.num_variables
+                        && distance < chosen.start.solution_value)
+                {
+                    chosen = candidate;
+                }
             }
         }
         let parameter = chosen.start.solution_value;

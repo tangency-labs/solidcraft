@@ -590,6 +590,42 @@ fn screw_sweep_joined_walls_are_the_pieces_solid() {
     assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
+/// A screw sweep's walls go into the record as their definitions (`sweep` faces on their nets)
+/// and come back with them as their labels: a body built from the record writes the very same
+/// record again, and its volume is the sweep's own.
+#[test]
+fn screw_sweep_walls_cross_the_record_as_their_definitions() {
+    use solidcore_record::brep::Surface;
+    let thread = polygon(&[[7.2, 0.0, 0.5], [8.5, 0.0, 0.0], [8.5, 0.0, 1.0]]);
+    let options = ScrewSweepOptions {
+        law: None,
+        tolerance: 1e-5,
+        walls: ScrewWalls::Joined,
+    };
+    let made = screw_sweep_with(&thread, [0.0; 3], Z, 1.25, 3.0, &options).unwrap();
+    let (record, _) = made.to_record().unwrap();
+    let sweeps = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, Surface::Sweep { .. }))
+        .count();
+    assert!(sweeps >= 2, "the flanks are sweep faces: {sweeps}");
+    assert!(
+        record
+            .faces
+            .iter()
+            .filter(|f| matches!(f.surface, Surface::Sweep { .. }))
+            .all(|f| f.nurbs.is_some()),
+        "each on its net"
+    );
+    record.validate().unwrap();
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    let (again, _) = back.to_record().unwrap();
+    assert_eq!(again, record, "the record written again is the same");
+    let (v0, v1) = (made.volume(1e-8).unwrap(), back.volume(1e-8).unwrap());
+    assert!(rel(v0, v1) < 1e-12, "made {v0}, read back {v1}");
+}
+
 /// #22577: a thread's V along a whole rod, pitch 1.25 at SolidCraft's tolerance (a
 /// ten-thousandth of the pitch). 1000 turns are within the turns' bound but take more spans
 /// than the kernel allows (eight a half turn at this tolerance), and the refusal is the
@@ -2313,4 +2349,232 @@ fn a_profile_bezier_that_turns_sharply_at_its_end_cuts_through_its_plate() {
     assert!(cut.check(CheckLevel::All).unwrap().is_valid());
     let v = cut.volume(1e-10).unwrap();
     assert!((v - 12880.7424621202).abs() <= 1e-6, "{v}");
+}
+
+/// A closed `2a` x `2b` rounded rectangle (corner radius `r`) about the origin in z = 0, from
+/// the middle of its bottom line.
+fn rounded_rectangle(a: f64, b: f64, r: f64) -> Vec<Curve> {
+    let arc = |c: [f64; 3], reference: [f64; 3]| Curve::Arc {
+        center: c,
+        axis: Z,
+        reference,
+        radius: r,
+        start: 0.0,
+        end: FRAC_PI_2,
+    };
+    let (x, y) = (a - r, b - r);
+    vec![
+        line([0.0, -b, 0.0], [x, -b, 0.0]),
+        arc([x, -y, 0.0], [0.0, -1.0, 0.0]),
+        line([a, -y, 0.0], [a, y, 0.0]),
+        arc([x, y, 0.0], [1.0, 0.0, 0.0]),
+        line([x, b, 0.0], [-x, b, 0.0]),
+        arc([-x, y, 0.0], [0.0, 1.0, 0.0]),
+        line([-a, y, 0.0], [-a, -y, 0.0]),
+        arc([-x, -y, 0.0], [-1.0, 0.0, 0.0]),
+        line([-x, -b, 0.0], [0.0, -b, 0.0]),
+    ]
+}
+
+/// A `2w` x `h` rectangle in the plane x = 0 standing on z = 0, centred on y = `y`.
+fn across(y: f64, w: f64, h: f64) -> Vec<Curve> {
+    polygon(&[
+        [0.0, y - w, 0.0],
+        [0.0, y + w, 0.0],
+        [0.0, y + w, h],
+        [0.0, y - w, h],
+    ])
+}
+
+/// A closed sweep's solid: exact (relative 1e-9) and valid, and the route it took.
+fn closed_sweep(name: &str, profile: &[Curve], path: &[Curve], want: f64) -> (Body, SweepRoute) {
+    let (b, _, route) = sweep_placed(profile, path, SweepFrame::Follow, true)
+        .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+    let got = b.volume(1e-8).unwrap();
+    assert!(rel(got, want) < 1e-9, "{name}: volume {got} vs {want}");
+    assert!(
+        b.check(CheckLevel::All).unwrap().is_valid(),
+        "{name}: valid"
+    );
+    (b, route)
+}
+
+/// A 4 x 1 rectangle swept round a closed 40 x 20 rounded rectangle of corner radius 2,
+/// 2 each side of the path, so its inner edge lies on the corner arcs' centres: at each corner
+/// the inner wall closes to that edge (zero inner radius) and the walls either side end on
+/// it. A solid of the profile's area times the path's length (Pappus: the centroid on the
+/// path), `4 (2 (40 - 4) + 2 (20 - 4) + 4 pi)`, with the walls of the 4 profile edges along
+/// the 9 pieces less the 4 corners' inner walls: 32 faces. Its neighbours: inner radius 1e-6
+/// either way, the outside one still a solid; 0.1 past the centres the inner wall turns back
+/// through itself, and that stays with the curve sweep.
+#[test]
+fn a_closed_sweep_whose_inner_edge_lies_on_the_corner_centres_is_a_solid() {
+    rig_fixes();
+    let path = rounded_rectangle(20.0, 10.0, 2.0);
+    let length = 2.0 * (40.0 - 4.0) + 2.0 * (20.0 - 4.0) + 4.0 * PI;
+    let (b, route) = closed_sweep(
+        "on the centres",
+        &across(-10.0, 2.0, 1.0),
+        &path,
+        4.0 * length,
+    );
+    assert_eq!(route, SweepRoute::Segments);
+    assert!(rel(4.0 * length, 466.265_48) < 1e-8);
+    assert_eq!(faces(&b), 32);
+    for w in [1.9, 1.999_999] {
+        let want = 2.0 * w * length;
+        closed_sweep(
+            &format!("half width {w}"),
+            &across(-10.0, w, 1.0),
+            &path,
+            want,
+        );
+    }
+    let past = sweep_placed(&across(-10.0, 2.1, 1.0), &path, SweepFrame::Follow, true);
+    // past the centres the curve sweep answers as it always did: the exact route is only the
+    // fallback where the curve sweep refuses
+    assert!(
+        past.as_ref().map_or(true, |(_, _, r)| *r
+            == SweepRoute::Curve(SweepFrame::Follow)),
+        "{:?}",
+        past.as_ref().map(|(_, _, r)| r)
+    );
+}
+
+/// Corner radii 0.5 to 5 with the profile's inner edge on the corner centres (half width the
+/// corner radius, height 1): `2 r L` with `L = 2 (40 - 2 r) + 2 (20 - 2 r) + 2 pi r`.
+#[test]
+fn closed_sweeps_to_the_corner_centres_at_every_corner_radius_are_solids() {
+    rig_fixes();
+    for r in [0.5, 1.0, 3.0, 5.0] {
+        let length = 2.0 * (40.0 - 2.0 * r) + 2.0 * (20.0 - 2.0 * r) + TAU * r;
+        let path = rounded_rectangle(20.0, 10.0, r);
+        closed_sweep(
+            &format!("radius {r}"),
+            &across(-10.0, r, 1.0),
+            &path,
+            2.0 * r * length,
+        );
+    }
+}
+
+/// A 4 x 1 profile whose two outer corners are rounded (radius `p` = 0.25), its inner edge on
+/// the corner centres of the rounded rectangle above. Along the lines it sweeps its area
+/// `A = 4 - 2 (1 - pi/4) p^2`, round the 4 quarter corners (one turn in all) its first moment
+/// about the corner centres: the rectangle's `4 * 2 = 8` less each spandrel's, the spandrel's
+/// area times 4 (its outer side) less its moment about that side, `p^3 (5/6 - pi/4)` (the
+/// square's `p^3 / 2` less the quarter disc's `(pi p^2 / 4) (p - 4 p / (3 pi))`).
+#[test]
+fn closed_sweep_of_a_profile_with_rounded_corners_to_the_corner_centres_is_a_solid() {
+    rig_fixes();
+    let p = 0.25;
+    let (y0, y1, h) = (-8.0, -12.0, 1.0);
+    // inner edge at y = -8 (the centres), outer at y = -12 with its corners rounded
+    let fillet = |c: [f64; 3], reference: [f64; 3]| Curve::Arc {
+        center: c,
+        axis: [1.0, 0.0, 0.0],
+        reference,
+        radius: p,
+        start: 0.0,
+        end: FRAC_PI_2,
+    };
+    let profile = vec![
+        line([0.0, y0, 0.0], [0.0, y0, h]),
+        line([0.0, y0, h], [0.0, y1 + p, h]),
+        fillet([0.0, y1 + p, h - p], [0.0, 0.0, 1.0]),
+        line([0.0, y1, h - p], [0.0, y1, p]),
+        fillet([0.0, y1 + p, p], [0.0, -1.0, 0.0]),
+        line([0.0, y1 + p, 0.0], [0.0, y0, 0.0]),
+    ];
+    let spandrel = (1.0 - PI / 4.0) * p * p;
+    let area = 4.0 * h - 2.0 * spandrel;
+    let moment = 4.0 * h * 2.0 - 2.0 * (spandrel * 4.0 - p * p * p * (5.0 / 6.0 - PI / 4.0));
+    let lines = 2.0 * (40.0 - 4.0) + 2.0 * (20.0 - 4.0);
+    let path = rounded_rectangle(20.0, 10.0, 2.0);
+    closed_sweep(
+        "rounded profile",
+        &profile,
+        &path,
+        area * lines + TAU * moment,
+    );
+}
+
+/// Other closed paths with the profile's inner edge on the arcs' centres: a circle of radius 3
+/// (whole, and in two halves) and an equilateral triangle of side 10 rounded by radius 2 (its
+/// three arcs turning a third of a turn each). A `2 r` x 1 rectangle: along the lines its area
+/// `2 r`, round the arcs (one turn in all) its moment `2 r^2` about the centres.
+#[test]
+fn closed_sweeps_round_circles_and_rounded_polygons_to_the_centres_are_solids() {
+    rig_fixes();
+    let r = 3.0;
+    let profile = across(-r, r, 1.0);
+    let half = |reference: [f64; 3]| Curve::Arc {
+        center: [0.0; 3],
+        axis: Z,
+        reference,
+        radius: r,
+        start: 0.0,
+        end: PI,
+    };
+    let whole = [circle([0.0; 3], Z, [0.0, -1.0, 0.0], r)];
+    closed_sweep("circle", &profile, &whole, TAU * 2.0 * r * r);
+    let halves = [half([0.0, -1.0, 0.0]), half([0.0, 1.0, 0.0])];
+    closed_sweep("two halves", &profile, &halves, TAU * 2.0 * r * r);
+
+    // The triangle's corners (0, 0), (s, 0), (s/2, s sqrt 3 / 2), the path r outside it from
+    // the middle of its bottom side.
+    let (s, r) = (10.0, 2.0);
+    let corner = [[0.0, 0.0], [s, 0.0], [s / 2.0, s * 3f64.sqrt() / 2.0]];
+    let out = |i: usize, deg: f64| {
+        let (c, t) = (corner[i % 3], deg.to_radians());
+        [c[0] + r * t.cos(), c[1] + r * t.sin(), 0.0]
+    };
+    let turn = |i: usize, deg: f64| Curve::Arc {
+        center: [corner[i][0], corner[i][1], 0.0],
+        axis: Z,
+        reference: [deg.to_radians().cos(), deg.to_radians().sin(), 0.0],
+        radius: r,
+        start: 0.0,
+        end: TAU / 3.0,
+    };
+    let path = vec![
+        line([s / 2.0, -r, 0.0], out(1, -90.0)),
+        turn(1, -90.0),
+        line(out(1, 30.0), out(2, 30.0)),
+        turn(2, 30.0),
+        line(out(2, 150.0), out(0, 150.0)),
+        turn(0, 150.0),
+        line(out(0, 270.0), [s / 2.0, -r, 0.0]),
+    ];
+    let profile = polygon(&[
+        [s / 2.0, -2.0 * r, 0.0],
+        [s / 2.0, 0.0, 0.0],
+        [s / 2.0, 0.0, 1.0],
+        [s / 2.0, -2.0 * r, 1.0],
+    ]);
+    closed_sweep(
+        "rounded triangle",
+        &profile,
+        &path,
+        2.0 * r * 3.0 * s + TAU * 2.0 * r * r,
+    );
+}
+
+/// The profile with a 2 x 0.5 hole about the path, round the same rounded rectangle: each
+/// loop sweeps a tube closing on itself, and the hole's is taken from the outline's. Its area
+/// `4 - 1` times the path's length (both loops' centroids on the path).
+#[test]
+fn a_ring_swept_round_a_closed_path_to_the_corner_centres_is_a_solid() {
+    rig_fixes();
+    let path = rounded_rectangle(20.0, 10.0, 2.0);
+    let length = 2.0 * (40.0 - 4.0) + 2.0 * (20.0 - 4.0) + 4.0 * PI;
+    let mut profile = across(-10.0, 2.0, 1.0);
+    profile.extend(polygon(&[
+        [0.0, -11.0, 0.25],
+        [0.0, -11.0, 0.75],
+        [0.0, -9.0, 0.75],
+        [0.0, -9.0, 0.25],
+    ]));
+    let (_, route) = closed_sweep("ring", &profile, &path, 3.0 * length);
+    assert_eq!(route, SweepRoute::Segments);
 }

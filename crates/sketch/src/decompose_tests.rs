@@ -39,7 +39,7 @@ struct Placed {
 
 /// A constraint pushed without validation (hostile and oversized inputs).
 fn raw(kind: ConstraintKind) -> Constraint {
-    Constraint { id: "k".into(), kind, param: None, driven: false, text: None }
+    Constraint { id: "k".into(), kind, param: None, driven: false, driven_param: None, text: None }
 }
 
 /// A point pushed past the sketch's own size cap.

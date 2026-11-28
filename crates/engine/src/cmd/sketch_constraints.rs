@@ -448,29 +448,86 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.toggle_driven";
     let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a dimension id"))?.to_string();
     let want = crate::params::bool_(p, "driven");
-    if let Some(reply) = super::sketch_3d::toggle_driven_3d(s, p, cmd, &cid, want)? {
+    let driven_name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+    if s.sheet_sketching() && driven_name.is_some() {
+        return Err(bad(cmd, "a sheet sketch dimension cannot define a parameter"));
+    }
+    if let Some(reply) = super::sketch_3d::toggle_driven_3d(s, p, cmd, &cid, want, driven_name.as_deref())? {
         return Ok(reply);
     }
     let mut before = None;
-    let (driven, info) = edit(s, p, cmd, true, |sk, doc| {
+    let ((driven, param_out), info) = edit(s, p, cmd, true, |sk, doc| {
         let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
         let v = c.kind.value().ok_or_else(|| bad(cmd, format!("`{cid}` is not a dimension")))?;
         let driven = want.unwrap_or(!c.driven);
         if driven == c.driven {
-            return Ok(driven);
+            if driven && let Some(ref dname) = driven_name {
+                if c.driven_param.as_deref() == Some(dname.as_str()) {
+                    return Ok((true, Some(dname.clone())));
+                }
+                if let Some(old) = c.driven_param.as_deref() {
+                    doc.rename_param(old, dname)?;
+                    if let Some(slot) = sk.constraints.iter_mut().find(|c| c.id == cid) {
+                        slot.driven_param = Some(dname.clone());
+                    }
+                    return Ok((true, Some(dname.clone())));
+                }
+                if let Some(why) = solidcraft_doc::Document::param_name_problem(dname) {
+                    return Err(bad(cmd, format!("name: {why}")));
+                }
+                if doc.param(dname).is_some()
+                    || doc.text_param(dname).is_some()
+                    || doc.is_driven_param(dname)
+                    || doc.features.iter().any(|f| f.param_names.iter().any(|x| x == dname))
+                {
+                    return Err(bad(cmd, format!("name: there is already a parameter `{dname}`")));
+                }
+                if let Some(slot) = sk.constraints.iter_mut().find(|c| c.id == cid) {
+                    slot.driven_param = Some(dname.clone());
+                }
+                return Ok((true, Some(dname.clone())));
+            }
+            return Ok((driven, None));
         }
         let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
         if driven {
+            let old_param = slot.param.take();
             slot.driven = true;
-            slot.param = None;
-        } else {
-            let (unit, e) =
-                if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
-            slot.driven = false;
-            slot.param = Some(doc.new_model_param(&e, &unit)?);
-            before = None;
+            if let Some(ref dname) = driven_name {
+                if let Some(why) = solidcraft_doc::Document::param_name_problem(dname) {
+                    return Err(bad(cmd, format!("name: {why}")));
+                }
+                let reusing_own = old_param.as_deref() == Some(dname.as_str()) && doc.param(dname).is_some_and(|p| p.model);
+                if !reusing_own
+                    && (doc.param(dname).is_some()
+                        || doc.text_param(dname).is_some()
+                        || doc.is_driven_param(dname)
+                        || doc.features.iter().any(|f| f.param_names.iter().any(|x| x == dname)))
+                {
+                    return Err(bad(cmd, format!("name: there is already a parameter `{dname}`")));
+                }
+                if reusing_own {
+                    doc.params.retain(|p| p.name != *dname);
+                }
+                slot.driven_param = Some(dname.clone());
+                return Ok((true, Some(dname.clone())));
+            }
+            slot.driven_param = None;
+            return Ok((true, None));
         }
-        Ok(driven)
+        let (unit, e) =
+            if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
+        let old_driven = slot.driven_param.take();
+        slot.driven = false;
+        slot.param = Some(match old_driven {
+            Some(old_name) => {
+                doc.params.push(solidcraft_doc::Param { name: old_name.clone(), expr: e, unit, comment: String::new(), model: true });
+                old_name
+            }
+            None => doc.new_model_param(&e, &unit)?,
+        });
+        before = None;
+        Ok((false, None))
     })?;
     if !driven {
         // Making it driving must not over-constrain: compare with the sketch without it.
@@ -486,7 +543,7 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.doc_mut().prune_model_params();
-    reply(cmd, ToggleDrivenResult { constraint: cid, driven, sketch: info, created: None, param_warnings: Vec::new() })
+    reply(cmd, ToggleDrivenResult { constraint: cid, driven, param: param_out, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// What a radius / diameter toggle acts on.
@@ -643,7 +700,7 @@ fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
             dimension: c.kind.is_dimension(),
             driven: c.driven,
             value: c.kind.value(),
-            param: c.param.clone(),
+            param: c.param.clone().or_else(|| c.driven_param.clone()),
             at: anchor(&ss.sketch, &c.kind).map(|a| [a.x, a.y]),
             failing: failing.contains(&c.id),
             // Implied by the others (it removes no freedom) but holding: shown dimmed.

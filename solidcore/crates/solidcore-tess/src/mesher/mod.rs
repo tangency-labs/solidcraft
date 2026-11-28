@@ -214,6 +214,7 @@ fn kind(s: &brep::Surface) -> &'static str {
         brep::Surface::RationalSpline { .. } => "rational spline",
         brep::Surface::PlacedRevolution { .. } => "revolution",
         brep::Surface::Blend { .. } => "blend",
+        brep::Surface::Sweep { .. } => "sweep",
     }
 }
 

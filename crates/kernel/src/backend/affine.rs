@@ -105,6 +105,10 @@ impl Affine for Solidcore {
         ops::rect_of_aspect(bl, br, top_left, aspect)
     }
 
+    fn plane_onto_line(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3], at: [f64; 3], dir: [f64; 3]) -> Option<([f64; 3], [[f64; 3]; 2])> {
+        ops::plane_onto_line(origin, x, y, at, dir)
+    }
+
     fn fit_aspect(&self, bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {
         ops::fit_aspect(bl, br, tl, aspect)
     }

@@ -476,6 +476,9 @@ impl crate::Feature {
                 for n in sketch.dimension_params_mut().into_iter().flatten() {
                     mapped_name(n, parameters);
                 }
+                for n in sketch.driven_dimension_params_mut().into_iter().flatten() {
+                    mapped_name(n, parameters);
+                }
                 for e in sketch.text_exprs_mut() {
                     *e = clone_expression(e, parameters);
                 }

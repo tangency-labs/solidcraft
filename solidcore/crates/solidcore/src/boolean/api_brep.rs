@@ -1547,6 +1547,7 @@ pub fn tessellate_boundaries(
 mod tests {
     use super::*;
     use crate::geom::context::MarkType;
+    use crate::math::det;
 
     /// A geometry curve over a cubic NURB on `knots` with the control points `pts`.
     fn cubic(pts: &[[f64; 3]], knots: Vec<f64>) -> crate::curve::curve::p2::Curve {
@@ -1785,12 +1786,12 @@ mod tests {
         // two Hermite spans of the quarter (ends and tangents on the circle)
         let along = |a0: f64, dz: f64| {
             let h = half_pi / 2.0;
-            let t = 4.0 / 3.0 * (h / 4.0).tan();
+            let t = 4.0 / 3.0 * det::tan(h / 4.0);
             let mut pts = vec![];
             for i in 0..2 {
                 let (a, b) = (a0 + h * f64::from(i), a0 + h * f64::from(i + 1));
-                let p = |u: f64| [r * u.cos(), r * u.sin()];
-                let d = |u: f64| [-r * u.sin(), r * u.cos()];
+                let p = |u: f64| [r * det::cos(u), r * det::sin(u)];
+                let d = |u: f64| [-r * det::sin(u), r * det::cos(u)];
                 let (pa, pb, da, db) = (p(a), p(b), d(a), d(b));
                 if i == 0 {
                     pts.push([pa[0], pa[1], dz]);
@@ -1810,7 +1811,7 @@ mod tests {
         let off_circle = (0..=2000)
             .map(|i| {
                 let p = b.evaluate_point(&k, f64::from(i) / 1000.0).unwrap();
-                ((p.x.hypot(p.y) - r).powi(2) + p.z * p.z).sqrt()
+                (det::powi(det::hypot(p.x, p.y) - r, 2) + p.z * p.z).sqrt()
             })
             .fold(0.0, f64::max);
         assert!(off_circle >= rise);

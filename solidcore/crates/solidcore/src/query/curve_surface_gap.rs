@@ -29,6 +29,7 @@
 //! continue, and a piece the bisection cannot close all give `None`: the gap is then not
 //! enclosed.
 
+use crate::math::det;
 use core::cell::{Cell, RefCell};
 use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use std::sync::Arc;
@@ -2046,7 +2047,8 @@ fn nurbs_uv_box(n: &NurbsCurve) -> Option<[[f64; 2]; 2]> {
         }
     }
     let big = b.iter().flatten().fold(0.0_f64, |m, x| m.max(x.abs()));
-    let pad = (Ivl::from(big) * Ivl::from(2f64.powi(-40)) + Ivl::from(2f64.powi(-1000))).hi;
+    let pad =
+        (Ivl::from(big) * Ivl::from(det::powi(2f64, -40)) + Ivl::from(det::powi(2f64, -1000))).hi;
     for [lo, hi] in &mut b {
         *lo = (Ivl::from(*lo) - Ivl::from(pad)).lo;
         *hi = (Ivl::from(*hi) + Ivl::from(pad)).hi;
@@ -3178,10 +3180,31 @@ fn row_piece_gap_bound(
             .map(|i| hom(raw(&net.pw, i)?))
             .collect::<Option<Vec<_>>>()?
     };
-    // (the row restricted to `[u_lo, u_hi]`: each segment it meets, cut to its part there,
-    // and the piece's distinct knots)
+    // (a trim whose end is a rounding off one of the row's knots, as a trim along a piece
+    // between two of a screw wall's stations can be, is compared as the trim between those
+    // knots, and the bound adds the row's speed times how far an end moved: `W(s)` and the
+    // moved trim's `W'(s)` are both linear in `s`, so `|W(s) - W'(s)|` is at most the larger
+    // end move, and both lie on the row between the outermost of their ends, where
+    // `|S(W) - S(W')|` is at most the row's speed there ([`row_speed`]) times that. Cut at the
+    // trim's own ends, the piece would start or end with a segment a rounding wide, and its
+    // segments would no longer face the curve's)
     let mut breaks = net.u.clone();
     breaks.dedup();
+    let (trim_lo, trim_hi) = (u_lo, u_hi);
+    let snapped = |u: f64| -> f64 {
+        breaks
+            .iter()
+            .copied()
+            .find(|&r| r != u && (r - u).abs() <= ROW_KNOT_SNAP * r.abs().max(1.0))
+            .unwrap_or(u)
+    };
+    let (u_lo, u_hi) = (snapped(u_lo), snapped(u_hi));
+    if !(nu0 <= u_lo && u_lo < u_hi && u_hi <= nu1) {
+        return None;
+    }
+    let slip = (u_lo - trim_lo).abs().max((u_hi - trim_hi).abs());
+    // (the row restricted to `[u_lo, u_hi]`: each segment it meets, cut to its part there,
+    // and the piece's distinct knots)
     let mut piece: Vec<[Ivl; 4]> = Vec::new();
     let mut piece_knots = vec![u_lo];
     for (j, pair) in breaks.windows(2).enumerate() {
@@ -3286,7 +3309,67 @@ fn row_piece_gap_bound(
         let lip = row_lipschitz(&curve, &cn.u, p)?;
         worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(shift)).hi;
     }
+    if slip > 0.0 {
+        let reach = [trim_lo.min(u_lo), trim_hi.max(u_hi)];
+        let speed = row_speed(&row, &breaks, p, reach)?;
+        worst = (Ivl::from(worst) + Ivl::from(speed) * Ivl::from(slip)).hi;
+    }
     worst.is_finite().then_some(Ok(worst))
+}
+
+/// How far, relative to the knot (and at least absolutely), an end of a trim along a row may
+/// be from one of the row's knots and still be compared as the trim from that knot
+/// ([`row_piece_gap_bound`]): a few roundings. The bound counts the move, so any value would be
+/// sound; this only says where the move is tried.
+const ROW_KNOT_SNAP: f64 = 64.0 * f64::EPSILON;
+
+/// Not upstream: an upper bound on the speed `|r'|` of the row `row` (its homogeneous control
+/// points, enclosed: a chain of rational Bézier segments of degree `p` over the distinct knots
+/// `breaks`) over the segments that meet `[a, b]`, as [`row_lipschitz`] bounds a chain's:
+/// `2p w_max diam / ((r_1 - r_0) w_min)` on a segment over `[r_0, r_1]`. `None` for data not
+/// of that shape (a weight not positive) or a bound that is not finite.
+fn row_speed(row: &[[Ivl; 4]], breaks: &[f64], p: usize, [a, b]: [f64; 2]) -> Option<f64> {
+    let mut most = 0.0_f64;
+    for (j, pair) in breaks.windows(2).enumerate() {
+        let &[r0, r1] = pair else {
+            return None;
+        };
+        if r1 < a || r0 > b {
+            continue;
+        }
+        let seg = row.get(j * p..=j * p + p)?;
+        let span = Ivl::from(r1) - Ivl::from(r0);
+        if !span.is_positive() {
+            return None;
+        }
+        let (mut w_max, mut w_min) = (0.0_f64, f64::INFINITY);
+        let mut points = Vec::new();
+        for &[x, y, z, w] in seg {
+            if !w.is_positive() {
+                return None;
+            }
+            w_max = w_max.max(w.hi);
+            w_min = w_min.min(w.lo);
+            points.push(V3 {
+                x: x / w,
+                y: y / w,
+                z: z / w,
+            });
+        }
+        if w_min.is_nan() || w_min <= 0.0 {
+            return None;
+        }
+        let mut diam = 0.0_f64;
+        for x in &points {
+            for y in &points {
+                diam = diam.max(norm_upper(minus(*x, *y))?);
+            }
+        }
+        let speed = Ivl::from(2.0 * p as f64) * Ivl::from(w_max) * Ivl::from(diam)
+            / (span * Ivl::from(w_min));
+        most = most.max(speed.hi);
+    }
+    most.is_finite().then_some(most)
 }
 
 /// `s a + t b` of two homogeneous points, enclosed: one step of de Casteljau for
@@ -5986,23 +6069,32 @@ fn bound_trim_pair(
                 }
             }
         }
-        // (#22273, #22820: at equal parameters — and for `fitted` callers that treat all bounds
-        // `<= enough` identically, since a same-parameter bound also bounds Hausdorff distance —
-        // where those cases give no bound or one above the cutoffs, a trim along a piece of a
-        // row is bounded on that piece ([`row_piece_pair_bound`], the same slack and residual
-        // added): a full row's check of a trim along a piece of it compares the piece's ends
-        // with the row's. The smaller of the two certified bounds is the answer where it meets
-        // the cutoffs)
-        if !fitted || any_within_enough {
-            if let Some(piece) = row_piece_pair_bound(k, to_surface, cn, c_slack, wn, net, range)? {
-                let bound = structured.map_or(piece, |s| s.min(piece));
-                if meets(bound) {
-                    return Ok(TrimBoundOutcome::Proved(bound));
-                }
+        // (#22273, #22820: where those cases give no bound or one above the cutoffs, a trim
+        // along a piece of a row is bounded on that piece ([`row_piece_pair_bound`], the same
+        // slack and residual added): a full row's check of a trim along a piece of it compares
+        // the piece's ends with the row's. The smaller of the two certified bounds (`structured`
+        // includes #23142's ruling bound) is the answer where it meets the cutoffs. The piece's
+        // bound is at equal parameters, and it is a certified bound on the gap as sets too:
+        // that gap is taken over the reparametrisations `ψ`, and the identity is one of them
+        // where the curve and the trim share `range`, as the piece's bound asks. So it is taken
+        // for a fitted trim as for one at equal parameters, whatever `any_within_enough`
+        // (#22820 took it for a fitted trim only where that is set, and the stitch cover does
+        // not set it, so it bisected every flank trim). For a fitted trim it can be tighter
+        // than the bound bisection stops at (`topology.brep_mirror` mat0019, mat0032 and
+        // mat0049's edge 42, through the mirror's move cover, which sets `any_within_enough`
+        // since #22820). A screw sweep's joined flank holds such a trim, along half a turn of
+        // its row, for each cylinder piece beside it, and each was bisected down to just under
+        // its tolerance without it: stress corpus S0252, a modelled M100x6 thread, 22 turns)
+        if let Some(piece) = row_piece_pair_bound(k, to_surface, cn, c_slack, wn, net, range)? {
+            let bound = structured.map_or(piece, |s| s.min(piece));
+            if meets(bound) {
+                return Ok(TrimBoundOutcome::Proved(bound));
             }
         }
     }
-    if !fitted {
+    if fitted {
+        k.work_counters.add_fitted_trim_bisection();
+    } else {
         k.work_counters.add_same_parameter_bisection();
     }
     // (#22467: pure exact-input memoisation of `bound_trim_pair` for NURBS-evaluated move pairs.
@@ -6655,7 +6747,7 @@ fn recentre(cn: &NurbsCurve) -> Option<[f64; 3]> {
     let [l0, l1, l2] = lo;
     let [h0, h1, h2] = hi;
     let t = [0.5 * (l0 + h0), 0.5 * (l1 + h1), 0.5 * (l2 + h2)];
-    let size = ((h0 - l0).powi(2) + (h1 - l1).powi(2) + (h2 - l2).powi(2)).sqrt();
+    let size = (det::powi(h0 - l0, 2) + det::powi(h1 - l1, 2) + det::powi(h2 - l2, 2)).sqrt();
     let far = t.iter().fold(0.0_f64, |m, c| m.max(c.abs()));
     (far.is_finite() && size.is_finite() && far > size).then_some(t)
 }
@@ -7513,7 +7605,7 @@ mod tests {
             |t| Some(if (0.7..=0.71).contains(&t) { 1.0 } else { 0.5 }),
             |t| (!(0.3..0.4).contains(&t)).then_some(0.5),
             |t| (!(0.3..0.4).contains(&t)).then_some(if t > 0.9 { 2.0 } else { 0.5 }),
-            |t| Some(0.75 - 1.0e-4 * (40.0 * t).sin()),
+            |t| Some(0.75 - 1.0e-4 * det::sin(40.0 * t)),
             |_| Some(0.75),
         ];
         let cuts: Vec<f64> = (1..1000).map(|i| f64::from(i) / 1000.0 + 1.0e-7).collect();
@@ -8129,8 +8221,8 @@ mod tests {
         let (t0, t1) = (base.u[base.p], base.u[base.n]);
         let th = deg.to_radians();
         let (a, b) = (
-            Point3::new(r * th.cos(), -r * th.sin(), 0.0),
-            Point3::new(r * th.cos(), r * th.sin(), 0.0),
+            Point3::new(r * det::cos(th), -r * det::sin(th), 0.0),
+            Point3::new(r * det::cos(th), r * det::sin(th), 0.0),
         );
         let chord = Curve::from(
             Line::create_line_segment(
@@ -8141,7 +8233,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let sagitta = r * (1.0 - th.cos());
+        let sagitta = r * (1.0 - det::cos(th));
         let g = curve_piece_gap_bound(
             &k,
             &arc,
@@ -9333,7 +9425,7 @@ mod tests {
                 let c = curve.evaluate_point(k, t).unwrap();
                 let w = trim.evaluate_point(k, t).unwrap();
                 let p = s.evaluate_point(k, Point2::new(w.x, w.y)).unwrap();
-                ((c.x - p.x).powi(2) + (c.y - p.y).powi(2) + (c.z - p.z).powi(2)).sqrt()
+                (det::powi(c.x - p.x, 2) + det::powi(c.y - p.y, 2) + det::powi(c.z - p.z, 2)).sqrt()
             })
             .fold(0.0, f64::max)
     }
@@ -9512,6 +9604,87 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A trim along a piece of a row whose ends are a rounding off the row's knots, as a screw
+    /// sweep's flank holds one along each half turn beside a cylinder piece (stress corpus
+    /// S0252, a modelled M100x6 thread): the quarter of a cylinder's end circle between two of
+    /// its row's knots, under the iso line from an ulp before the first knot to an ulp past
+    /// the second. It is proved on that piece of the row by its control points at once, the
+    /// ends' move counted: at equal parameters and as sets (where the stitch's and a move's
+    /// covers ask), no bisection runs, and the bound at equal parameters is at least the gap
+    /// sampled there. Cut at the trim's own ends, the piece began and ended with a segment an
+    /// ulp wide, its segments no longer faced the circle's, and each trim was bisected down to
+    /// just under its tolerance.
+    #[test]
+    fn a_trim_along_a_piece_of_a_row_a_rounding_off_its_knots_is_proved_on_the_piece() {
+        let (k, s, net, row) = side_row();
+        let v1 = net.v[net.v.len() - 1];
+        // (the row's first two interior knots, and the circle's parameters there: its knots
+        // are the row's over the last)
+        let mut knots = net.u.clone();
+        knots.dedup();
+        let (k1, k2, last) = (knots[1], knots[2], knots[knots.len() - 1]);
+        let range = [k1 / last, k2 / last];
+        let mut piece = Curve::from(row)
+            .create_by_split_curve(&k, range[0])
+            .unwrap();
+        let _rest = piece.create_by_split_curve(&k, range[1]).unwrap();
+        let c = NurbCurve::new(
+            vec![
+                CPoint::new(k1.next_down(), v1, 0.0, 1.0),
+                CPoint::new(k2.next_up(), v1, 0.0, 1.0),
+            ],
+            1,
+            vec![range[0], range[0], range[1], range[1]],
+        )
+        .unwrap();
+        let along = Curve::from(BSplineCurve::from_nurb(c, 2, false));
+        let (same, fitted) = (
+            k.work_counters.same_parameter_bisections(),
+            k.work_counters.fitted_trim_bisections(),
+        );
+        let at_equal = trim_same_parameter_gap_bound_within(
+            &k,
+            &s,
+            &piece,
+            &along,
+            range,
+            1e-8,
+            [1e-5, 1e-5],
+            Some(MAX_PIECES),
+        )
+        .unwrap()
+        .unwrap();
+        let as_sets = trim_image_gap_bound_within(
+            &k,
+            &s,
+            &piece,
+            &along,
+            range,
+            1e-8,
+            [1e-5, f64::INFINITY],
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            (
+                k.work_counters.same_parameter_bisections(),
+                k.work_counters.fitted_trim_bisections()
+            ),
+            (same, fitted),
+            "a bound was bisected"
+        );
+        assert!(
+            at_equal <= 1e-9 && as_sets <= 1e-9,
+            "{at_equal:e}, {as_sets:e}"
+        );
+        let sampled = sampled_same_parameter_gap(&k, &s, &piece, &along, range);
+        assert!(
+            at_equal >= sampled,
+            "{at_equal:e} under the sampled {sampled:e}"
+        );
     }
 
     /// #22273 review: a trim along a piece of a row that keeps the whole row's structure. The
@@ -9856,7 +10029,7 @@ mod tests {
         use crate::nurbs::srf_basic::Surface as NurbSurface;
         use crate::surface::offset_surface::OffsetSurface;
         let k = Kernel::default();
-        let (tilt, d) = (10.0_f64.to_radians().tan(), 5.0);
+        let (tilt, d) = (det::tan(10.0_f64.to_radians()), 5.0);
         let rows = [
             [[0.0, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 1.0, 0.0]],
             [[1.0, 0.0, 0.0], [1.0, 0.5, 0.0], [1.0, 1.0, 0.0]],

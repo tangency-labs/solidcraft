@@ -1235,6 +1235,106 @@ fn dimension_tool_escape_drops_picks_then_the_tool() {
     assert!(!crate::drawing_workspace::placing_dimension(&h.app));
 }
 
+/// A dimension's record without its id: two placed alike have the same one.
+fn record_of(read: &Value) -> Value {
+    let mut record = read["record"].clone();
+    record.as_object_mut().unwrap().remove("id");
+    record
+}
+
+/// Enter places the dimension the picks make where its preview is, as a click there does (#22661):
+/// the plate's bottom edge, then Enter with the pointer above the view, off every edge. It is the
+/// same dimension a click at that place adds, the picks are gone and the tool is still in hand.
+#[test]
+fn dimension_tool_enter_places_the_dimension_where_its_preview_is() {
+    use crate::drawing_workspace::dimension::picked_shapes;
+    let (mut h, _) = holed_plate_dimensioning();
+    let mut before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 125.0, 175.0);
+    h.step(&json!({"move": on_screen(140.0, 160.0)})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    let by_enter = added_dimension(&mut h, &before);
+    assert!(picked_shapes(&h.app).is_empty(), "the tool starts again");
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool is still in hand");
+    before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 125.0, 175.0);
+    click_paper(&mut h, 140.0, 160.0);
+    let by_click = added_dimension(&mut h, &before);
+    assert_eq!(record_of(&by_enter), record_of(&by_click), "Enter places what a click there places");
+}
+
+/// Where the engine won't place the dimension, Enter does what a click does: it adds nothing, keeps
+/// the pick and says why in the engine's words (#20181). The rod's outline, with the pointer inside
+/// the rod's length.
+#[test]
+fn dimension_tool_enter_where_it_cannot_place_adds_nothing_and_says_why() {
+    use crate::drawing_workspace::dimension::{picked_shapes, refusal};
+    let mut h = rod_dimensioning();
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 140.0, 183.0);
+    h.step(&json!({"move": on_screen(140.0, 190.0)})).unwrap();
+    h.frames(2);
+    assert!(refusal(&h.app).is_some(), "the panel already says why");
+    // The status bar is cleared first, so the reason below is the one Enter gives.
+    h.app.status = None;
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing is placed");
+    assert_eq!(picked_shapes(&h.app).len(), 1, "the pick stays");
+    let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+    assert!(status.contains("past one of them"), "{status}");
+    // The message log holds the reason once: `run` reports it, and nothing writes it again.
+    let logged: u32 = h.app.messages.iter().filter(|m| m.text.contains("past one of them")).map(|m| m.count).sum();
+    assert_eq!(logged, 1, "the reason is logged once");
+}
+
+/// Enter places nothing without a pick, and leaves a focused button its own Enter: the tool takes
+/// it only while a placeable preview shows and the keyboard is free.
+#[test]
+fn dimension_tool_enter_without_a_dimension_changes_nothing() {
+    let (mut h, _) = holed_plate_dimensioning();
+    let count = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    let before = count(&h);
+    h.step(&json!({"move": on_screen(140.0, 160.0)})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(count(&h), before, "no pick, nothing placed");
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool is still in hand");
+
+    click_paper(&mut h, 125.0, 175.0);
+    h.step(&json!({"move": on_screen(140.0, 160.0)})).unwrap();
+    h.frames(2);
+    // Give the tool's Cancel button the keyboard through egui's accessibility Focus request, the way
+    // a screen reader or Tab hands it over. Tab alone reached no button in this harness.
+    h.ctx.enable_accesskit();
+    h.frames(2);
+    let cancel = h.app.tr("ui.cancel").to_owned();
+    let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+    let node = tree
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == egui::accesskit::Role::Button && !n.is_disabled() && n.label() == Some(cancel.as_str()))
+        .map(|(id, _)| *id)
+        .expect("the tool shows its Cancel button");
+    h.app.synthetic.push(egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+        action: egui::accesskit::Action::Focus,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node: node,
+        data: None,
+    }));
+    h.frames(2);
+    let focused = h.ctx.memory(|m| m.focused());
+    // egui counts any focused widget as wanting the keyboard, so the check is that a button, not a text field, has it.
+    assert!(focused.is_some() && !h.ctx.text_edit_focused(), "Cancel has the keyboard, focused {focused:?}");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(count(&h), before, "the focused button takes Enter, not the tool");
+    assert!(!crate::drawing_workspace::placing_dimension(&h.app), "Enter on the focused Cancel closes the tool, as a click on it does");
+}
+
 /// Paper millimetres (`x`, `y`) of the A3 sheet on screen.
 fn on_screen(x: f64, y: f64) -> [f32; 2] {
     let paper = crate::scenario::rect_of("sheet:paper").unwrap();
