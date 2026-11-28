@@ -180,6 +180,7 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::query::r#loop::{contains_uv_point_with_topology, UvContainment, WalkExclusion};
 use crate::surface::surface::p1::{
     get_surface_cache_with_face, get_trim_surface_cache, make_surface_cache, make_trim_srf_cache,
@@ -1126,9 +1127,45 @@ fn point_classify_with_topology(
 
     // No Work: TargetPoint outside of Face->UVDomain
     let scaled_zero = EFF_ZERO_SQRT * (1.0 + face_uv_domain.size().length());
+    // Not upstream: a closed surface repeats a UV point every period, and a solve may name the
+    // seam's far side. A drop the face stops short of is the same point as one whole period
+    // away on the face's own chart, so classify that point but keep the stored drop (#23204).
+    let mut uv = uv;
     if !face_uv_domain.contains_point(uv, scaled_zero) {
-        // TargetPoint is outside of Face
-        return Ok(());
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(());
+        };
+        let nat_domain = surface.natural_uv_domain_with_nurb(k)?;
+        let mut on_chart = None;
+        for (axis, period) in [
+            (SurfParamType::U, nat_domain.x_length()),
+            (SurfParamType::V, nat_domain.y_length()),
+        ] {
+            if !period.is_finite() || period <= 0.0 {
+                continue;
+            }
+            if !surface.is_closed(k, &nat_domain, axis, None, false)?.0 {
+                continue;
+            }
+            for n in [1.0, -1.0] {
+                let candidate = match axis {
+                    SurfParamType::U => Point2::new(uv.x + n * period, uv.y),
+                    _ => Point2::new(uv.x, uv.y + n * period),
+                };
+                if face_uv_domain.contains_point(candidate, scaled_zero) {
+                    on_chart = Some(candidate);
+                    break;
+                }
+            }
+            if on_chart.is_some() {
+                break;
+            }
+        }
+        let Some(point) = on_chart else {
+            // TargetPoint is outside of Face
+            return Ok(());
+        };
+        uv = point;
     }
 
     // locals

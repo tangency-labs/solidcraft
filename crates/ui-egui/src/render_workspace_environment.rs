@@ -130,7 +130,7 @@ pub(super) fn ring_input(app: &mut SolveApp, ui: &mut egui::Ui, viewport: egui::
         && pressed
         && ui.is_enabled()
         && response.contains_pointer()
-        && !egui::Popup::is_any_open(ui.ctx())
+        && !(egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx()))
         && app.dialog.is_none()
         && let Some(origin) = origin.filter(|p| !crate::shell::covered(app, *p) && hit(*p))
         && let Some(start) = pointer_angle(origin, ring.center, ring.radius)

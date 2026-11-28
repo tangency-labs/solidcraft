@@ -215,6 +215,7 @@ mod tests {
     use crate::geom::attribute::ObjectKey;
     use crate::geom::object::ObjectRef;
     use crate::geom::vector2d::Point2;
+    use crate::math::det;
     use crate::math::Vec3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -456,7 +457,7 @@ mod tests {
         let k0 = Kernel::default();
         let frame = Axis2Placement::IDENTITY;
         let cone = Cone::create_canonical(&k0, &frame, 2.0, 1.0, 3.0, false, false).unwrap();
-        let cone_cos = (cone.semi_angle_deg() * std::f64::consts::PI / 180.0).cos();
+        let cone_cos = det::cos(cone.semi_angle_deg() * std::f64::consts::PI / 180.0);
         let cylinder = Cone::create_canonical_cylinder(&k0, &frame, 1.5).unwrap();
         let sphere = Sphere::create_canonical(&k0, &frame, 2.0).unwrap();
         let torus =

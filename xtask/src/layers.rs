@@ -44,8 +44,6 @@ pub const TABLE: &[(&str, Class)] = &[
     ("geom", Class::Layer(0)),
     // the kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md); solidcore-record only
     ("kernel-api", Class::Layer(0)),
-    // 3D mouse descriptors and reports (no workspace dependencies; the apps read the device)
-    ("space-mouse", Class::Layer(0)),
     // the derive macros (proc-macro, no workspace dependencies)
     ("derive", Class::Standalone),
     // the 3Dconnexion driver's client API on macOS (no workspace dependencies)
@@ -91,6 +89,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("format", Class::Shared),
     // the token contract UI components draw with: light and dark tokens, colour vision, tab accents, theme state (#13304)
     ("theme", Class::Shared),
+    // 3D mouse descriptors, reports and calibration (no workspace dependencies; the apps read the device); shared so FieldCraft reads devices the same way, through the kit (#23205)
+    ("space-mouse", Class::Shared),
     // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
     ("ui-kit", Class::Shared),
     // the app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values (#17363)
@@ -107,6 +107,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("viewport-gpu", Class::Shared),
     // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
     ("viewport-egui", Class::Shared),
+    // SolidCraft's own window painter and runner on a stock egui-wgpu and egui-winit (no eframe)
+    ("window-gpu", Class::Shared),
     // the views of a design as plain data: kinds, the set a design keeps open, the saved form (no UI toolkit)
     ("views", Class::Shared),
     // apps and tooling

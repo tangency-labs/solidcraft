@@ -1755,6 +1755,65 @@ fn a_tube_swept_round_a_corner_reads_closed_whatever_its_second_legs_direction()
     }
 }
 
+/// A STEP writer may omit both periodic seams of a complete ring torus.
+#[test]
+fn a_ring_torus_without_bounds_is_a_closed_solid() {
+    let mut w = W::default();
+    let a = w.axis([3.0, -4.0, 2.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},11.,1.)"));
+    let face = w.face(&[], torus, true);
+    let shell = closed_shell(&mut w, &[face]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('ring',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 1, 2, 1]);
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let volume = body.mass_properties(1e-9).unwrap().volume;
+    let expected = 22.0 * std::f64::consts::PI.powi(2);
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} vs {expected}");
+}
+
+#[test]
+fn an_unbounded_inward_torus_bounds_a_void() {
+    let mut w = W::default();
+    let faces = box_faces(&mut w, [-5.0; 3], [5.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let outer = closed_shell(&mut w, &faces);
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},3.,1.)"));
+    let face = w.face(&[], torus, false);
+    let inner = closed_shell(&mut w, &[face]);
+    let void = w.add(format!("ORIENTED_CLOSED_SHELL('',*,#{inner},.T.)"));
+    let solid = w.add(format!("BREP_WITH_VOIDS('',#{outer},(#{void}))"));
+    let s = one_solid(&w.file(&[solid]));
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let volume = body.mass_properties(1e-9).unwrap().volume;
+    let expected = 1000.0 - 6.0 * std::f64::consts::PI.powi(2);
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} vs {expected}");
+}
+
+#[test]
+fn missing_torus_seams_are_only_inferred_for_a_ring_without_bounds() {
+    for (major, vertex_bound) in [(1.0, false), (0.5, false), (3.0, true)] {
+        let mut w = W::default();
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},1.)", real(major)));
+        let mut bounds = Vec::new();
+        if vertex_bound {
+            let v = w.vertex([major + 1.0, 0.0, 0.0]);
+            let l = w.add(format!("VERTEX_LOOP('',#{v})"));
+            bounds.push(w.add(format!("FACE_BOUND('',#{l},.T.)")));
+        }
+        let face = w.face(&bounds, torus, true);
+        let shell = closed_shell(&mut w, &[face]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+        let r = read_solids(&w.file(&[solid]));
+        assert!(r.solids.is_empty());
+        assert_eq!(r.failures.len(), 1);
+        assert!(r.failures[0].message.contains("without an edge loop"));
+    }
+}
+
 /// A ball whose one face is bounded by two vertex loops, at its poles: the whole sphere, closed
 /// by a meridian seam from pole to pole.
 #[test]

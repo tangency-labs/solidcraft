@@ -6393,7 +6393,7 @@
   "ui.drawing_detail.step_size": "Clique para definir o tamanho da região.",
   "ui.drawing_detail.title": "Vista de detalhe",
   "ui.drawing_dimension_tool.pick": "Clique em uma aresta numa vista de desenho.",
-  "ui.drawing_dimension_tool.place": "Clique na folha para posicionar a cota.",
+  "ui.drawing_dimension_tool.place": "Clique na folha ou pressione Enter para posicionar a cota.",
   "ui.drawing_export.all_sheets": "Todas as folhas",
   "ui.drawing_export.dxf": "DXF (linhas)",
   "ui.drawing_export.dxf_note": "A folha exibida, suas linhas em milímetros, uma camada para cada tipo de linha. Vistas sombreadas e imagens são omitidas.",

@@ -816,6 +816,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     }
     let Some(mut t) = app.tool.take() else { return };
+    // A pick whose curve the Undo button took away goes before the boxes are decided (#23086).
+    if crate::sketch_tools::drop_gone_picks(app, &mut t) {
+        app.set_tool_hint(crate::tools::hint(t.cmd));
+    }
     t.classic = app.preferences.construction_line_classic;
     t.arc_modes = app.preferences.sketch_arc_tangent_snap;
     sync(&mut t);
@@ -983,7 +987,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
         let bounds = egui::Rect::from_points(&points);
-        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
+        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
     } else {
         None
     };
@@ -1131,7 +1135,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                     if focus && i == 0 {
                         r.request_focus();
                     }
-                    any_focused |= r.has_focus() || r.lost_focus();
+                    // `Response::has_focus` is false while the window is not the focused one, which
+                    // would drop a script's Enter (`ui.key`) sent from another window.
+                    any_focused |= ui.memory(|m| m.has_focus(r.id)) || r.has_focus() || r.lost_focus() || focus;
                     if has_focus && ui.is_sizing_pass() {
                         ui.ctx().data_mut(|d| d.insert_temp(refocus, Some(id)));
                     }
@@ -1157,7 +1163,14 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     // A box waiting before the first click only places on Enter once it has the keyboard.
     let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
-    (enter && (any_focused || nothing)).then_some(e)
+    let other_focused = ui.ctx().memory(|m| m.focused().is_some_and(|id| !(0..t.dims.len()).any(|i| id == egui::Id::unique(("sc_dim", i)))));
+    let eligible = any_focused || nothing || (!t.pts.is_empty() && !other_focused);
+    if enter && eligible {
+        let hover = t.hover.clone().or_else(|| t.pts.last().map(|(p, id)| (*p + Vec2::X, id.clone())));
+        hover.map(|h| shown(app, t, &h))
+    } else {
+        None
+    }
 }
 
 /// Place measured rectangle fields nearest their edge anchors, keeping the pointer and
@@ -1330,7 +1343,10 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
 
 /// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
 /// the drawing area's edge when the polygon fills the view; keep the boxes separate even then.
-fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
+/// The stack also keeps off `pointer` (when given): while the pointer rests on a box the tool has
+/// no hover and the preview stays tiny at the first point, so a box left there would take the
+/// click meant for the polygon. Where no side clears both, the pointer is not considered.
+fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let size =
         vec2(sizes.iter().map(|s| s.x).fold(0.0, f32::max), sizes.iter().map(|s| s.y).sum::<f32>() + gap * sizes.len().saturating_sub(1) as f32);
     let candidates = [
@@ -1340,10 +1356,13 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
         egui::pos2(bounds.right() + gap, bounds.center().y - size.y * 0.5),
     ];
     let inside = |pos: Pos2| view.map_or(pos, |view| view.clamp(egui::Rect::from_min_size(pos, size)).min);
+    let clear = |pos: &Pos2| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5));
+    let off_pointer = |pos: &Pos2| pointer.is_none_or(|pointer| !egui::Rect::from_min_size(*pos, size).expand(2.0).contains(pointer));
     let start = candidates
         .into_iter()
         .map(inside)
-        .find(|pos| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5)))
+        .find(|pos| clear(pos) && off_pointer(pos))
+        .or_else(|| candidates.into_iter().map(inside).find(clear))
         .unwrap_or_else(|| inside(candidates[0]));
     let mut y = start.y;
     sizes
