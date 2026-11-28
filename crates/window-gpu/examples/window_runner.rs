@@ -10,13 +10,12 @@ struct Demo {
 
 impl App for Demo {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &Frame<'_>) {
-        egui::CentralPanel::default().show(ui, |ui| {
-            let adapter = frame.render_state().map(|rs| rs.adapter.get_info());
-            ui.label(format!("Adapter: {}", adapter.map_or_else(|| "none yet".to_owned(), |a| format!("{:?} {}", a.backend, a.name))));
-            if ui.button(format!("Clicked {} times", self.clicks)).clicked() {
-                self.clicks += 1;
-            }
-        });
+        // The runner's `ui` is the whole window already.
+        let adapter = frame.render_state().map(|rs| rs.adapter.get_info());
+        ui.label(format!("Adapter: {}", adapter.map_or_else(|| "none yet".to_owned(), |a| format!("{:?} {}", a.backend, a.name))));
+        if ui.button(format!("Clicked {} times", self.clicks)).clicked() {
+            self.clicks += 1;
+        }
     }
 }
 
