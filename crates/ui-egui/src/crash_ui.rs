@@ -1,5 +1,8 @@
 //! The Crash Reports window (Help > Crash Reports…): the reports `solidcraft_engine::crash`
 //! keeps on this computer, each with a reviewed issue draft. It opens by itself after a crash.
+//! After a graphics failure (a lost device, a start that died in the graphics driver) it also
+//! offers to start again on another graphics API ([`retry_api`]), the Graphics preference's
+//! choice, through the same restart as Preferences › Graphics.
 
 use solidcraft_engine::crash::{self, Summary};
 
@@ -24,6 +27,8 @@ pub struct CrashUi {
     expanded: std::collections::BTreeSet<String>,
     dir: Option<String>,
     note: String,
+    /// The graphics API this start offers to try after a graphics failure ([`retry_api`]).
+    pub retry: Option<&'static str>,
 }
 
 impl CrashUi {
@@ -84,6 +89,7 @@ fn kind_label(kind: &str) -> &'static str {
         "command_panic" => "crash.kind_command",
         "kernel_panic_recovered" => "crash.kind_kernel",
         "unclean_exit" => "crash.kind_unclean",
+        "device_lost" => "crash.kind_device_lost",
         _ => "crash.kind_internal",
     })
 }
@@ -153,10 +159,49 @@ pub fn announce(app: &mut SolveApp, fresh: &[Summary]) {
     if crashes == 0 {
         return;
     }
+    // The API this start draws with on a hardware adapter (safe mode's software one doesn't count).
+    let software = app.help.gpu.as_deref().is_some_and(|g| g.trim_end().ends_with("Cpu)")) || app.blur.software_adapter();
+    let running = app.services.graphics_backend.filter(|_| app.viewport.gpu.is_some() && !software);
+    app.crashes.retry = retry_api(fresh, crate::prefs::GRAPHICS_BACKENDS, running);
     app.crashes.open = true;
     app.crashes.refresh();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     app.set_status(locale.text("crash.previous_session"), true);
+}
+
+/// The graphics API to offer after the graphics failed in a run these new reports are about: the
+/// first of `choices` (the Graphics preference's, for this platform) that is not the API that
+/// failed, nor the one this start already draws with on the GPU (`running`), in the order that
+/// most often works where another failed: Direct3D 12 on Windows, then Vulkan; OpenGL on Linux.
+/// None without a graphics failure, or with nothing else to try (macOS has Metal alone).
+pub fn retry_api(fresh: &[Summary], choices: &[&'static str], running: Option<&str>) -> Option<&'static str> {
+    let failed = fresh.iter().find(|r| r.graphics_failure)?;
+    let failed_api = failed.renderer.as_deref().and_then(crash::graphics).and_then(|g| g.api_id());
+    let order: &[&str] = if choices.contains(&"dx12") { &["dx12", "vulkan", "gl"] } else { &["gl", "vulkan"] };
+    order.iter().filter_map(|want| choices.iter().find(|c| *c == want).copied()).find(|api| Some(*api) != failed_api && Some(*api) != running)
+}
+
+/// The note and button offering [`CrashUi::retry`]: saves the choice as Preferences › Graphics
+/// does, then restarts through the normal unsaved-design prompts. Nothing when this launch can't
+/// restart itself or a developer override fixes the API.
+fn retry_offer(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let Some(api) = app.crashes.retry else { return };
+    if crate::prefs::check_graphics_restart(app).is_err() {
+        return;
+    }
+    let name = crate::prefs::graphics_backend_label(api);
+    let note = solidcraft_ui_text::format("crash.graphics_retry_note", &[("api", &name)]);
+    ui_kit::text(ui, &note, ui_kit::Text::Note("graphics_retry"));
+    let label = solidcraft_ui_text::format("crash.graphics_retry", &[("api", &name)]);
+    let response = ui_kit::icon_label_button(ui, &label, "refresh", true, false);
+    crate::scenario::publish_target("crash:graphics_retry", response.rect);
+    if response.clicked() {
+        let started = crate::prefs::set_graphics_backend(app, api).and_then(|()| crate::prefs::request_graphics_restart(app));
+        match started {
+            Ok(()) => app.crashes.retry = None,
+            Err(e) => app.crashes.note = e,
+        }
+    }
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
@@ -172,6 +217,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_10;
             let intro = ui_kit::text(ui, solidcraft_ui_text::tr("crash.intro"), ui_kit::Text::Hint("intro"));
             crate::scenario::publish_rect("dialog:note:intro", intro.rect);
+            retry_offer(app, ui);
             if let Some(d) = app.crashes.dir.clone() {
                 // A long path is cut short (hover shows it all): it must not widen the card.
                 ui_kit::path_chip(ui, &d, |ui| {
@@ -422,6 +468,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    fn summary(kind: &str, renderer: Option<&str>, graphics_failure: bool) -> solidcraft_engine::crash::Summary {
+        solidcraft_engine::crash::Summary {
+            id: "20261127-100000-0000000000000001".into(),
+            kind: kind.into(),
+            time: "2026-11-27T10:00:00Z".into(),
+            message: "The graphics device was lost".into(),
+            command: None,
+            count: 1,
+            version: "0.51.0".into(),
+            path: String::new(),
+            replayable: false,
+            renderer: renderer.map(str::to_string),
+            graphics_failure,
+        }
+    }
+
+    /// After a graphics failure the next start offers the API that most often works instead: never
+    /// the one that failed, nor the one it already draws with; nothing after other crashes, or
+    /// where there is no other API.
+    #[test]
+    fn a_graphics_failure_offers_another_graphics_api() {
+        let windows = &["auto", "dx12", "vulkan", "gl"];
+        let linux = &["auto", "vulkan", "gl"];
+        let vulkan = Some("Renderer: Vulkan Intel(R) UHD Graphics 620 (IntegratedGpu, driver Intel 31.0)");
+        let dx12 = Some("Renderer: Dx12 Intel(R) UHD Graphics 620 (IntegratedGpu, driver Intel 31.0)");
+        let lost = [summary("device_lost", vulkan, true)];
+        assert_eq!(super::retry_api(&lost, windows, None), Some("dx12"));
+        assert_eq!(super::retry_api(&lost, linux, None), Some("gl"));
+        assert_eq!(super::retry_api(&[summary("unclean_exit", dx12, true)], windows, None), Some("vulkan"), "D3D12 itself failed");
+        assert_eq!(super::retry_api(&lost, windows, Some("dx12")), Some("gl"), "already on D3D12 hardware: the next one");
+        assert_eq!(super::retry_api(&[summary("unclean_exit", None, true)], windows, None), Some("dx12"), "the failed API unknown");
+        assert_eq!(super::retry_api(&[summary("unclean_exit", vulkan, false)], windows, None), None, "not a graphics failure");
+        assert_eq!(super::retry_api(&lost, &["auto", "metal"], None), None, "macOS has nothing else");
+    }
+
+    /// The offer is a note and a button in the window that opens after the failure; the button
+    /// saves the API as Preferences › Graphics does and restarts. Without the failure, no offer.
+    #[test]
+    fn the_offer_after_a_graphics_failure_saves_the_api_and_restarts() {
+        let d = std::env::temp_dir().join(format!("solidcraft-crash-ui-retry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.crashes.folder = Some(d.clone());
+        std::fs::write(d.join("graphics.json"), br#"{"backend":"auto"}"#).unwrap();
+        h.app.services.graphics_path = Some(d.join("graphics.json").to_string_lossy().into_owned());
+        h.app.services.graphics_restart = Some(("solidcraft".into(), Vec::new()));
+        let want = super::retry_api(
+            &[summary("device_lost", Some("Renderer: Vulkan Test GPU (IntegratedGpu, driver 1)"), true)],
+            crate::prefs::GRAPHICS_BACKENDS,
+            None,
+        );
+        super::announce(&mut h.app, &[summary("device_lost", Some("Renderer: Vulkan Test GPU (IntegratedGpu, driver 1)"), true)]);
+        assert_eq!(h.app.crashes.retry, want);
+        h.frames(4);
+        let Some(api) = want else {
+            // macOS: Metal alone, nothing to offer.
+            assert!(crate::scenario::rect_of("crash:graphics_retry").is_none());
+            let _ = std::fs::remove_dir_all(&d);
+            return;
+        };
+        let label = format!("Start with {}", crate::prefs::graphics_backend_label(api));
+        assert!(h.widget(&label).is_some(), "the button names the API");
+        h.step(&json!({"widget": label})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.graphics_backend, api);
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(d.join("graphics.json")).unwrap()).unwrap();
+        assert_eq!(saved["backend"], json!(api), "saved as Preferences › Graphics saves it");
+        assert!(crate::update::take_launch(&mut h.app).is_some(), "and the restart is under way");
+        // Another crash, not the graphics: no offer.
+        let mut h = crate::scenario::Harness::new();
+        h.app.crashes.folder = Some(d.clone());
+        h.app.services.graphics_restart = Some(("solidcraft".into(), Vec::new()));
+        super::announce(&mut h.app, &[summary("command_panic", None, false)]);
+        assert_eq!(h.app.crashes.retry, None);
+        h.frames(4);
+        assert!(crate::scenario::rect_of("crash:graphics_retry").is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn recovered_and_commandless_titles_keep_the_original_diagnostic() {
         let d = folder("titles");
@@ -454,6 +581,8 @@ mod tests {
             version: String::new(),
             path: String::new(),
             replayable: false,
+            renderer: None,
+            graphics_failure: false,
         };
         super::announce(&mut h.app, &[quiet]);
         assert!(!h.app.crashes.open);
