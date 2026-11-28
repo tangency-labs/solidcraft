@@ -1493,6 +1493,43 @@ fn selected<'a>(state: &'a ModelState, bodies: &[String]) -> Result<Vec<&'a soli
     Ok(sel)
 }
 
+/// Names for flat STEP export by placed body name and persistent face reference.
+pub type StepFaceNames = std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>;
+
+/// Resolve face references on the exported bodies before writing anything.
+pub fn export_named_step(state: &ModelState, bodies: &[String], names: &StepFaceNames, file_name: String, meta: &Metadata) -> Result<Vec<u8>> {
+    let selected = selected(state, bodies)?;
+    let by_body: std::collections::BTreeMap<_, _> = selected.iter().enumerate().map(|(i, b)| (b.name.as_str(), i)).collect();
+    let mut resolved = std::collections::BTreeMap::new();
+    for (body, wanted) in names {
+        let index = *by_body.get(body.as_str()).ok_or_else(|| IoError::Invalid(format!("STEP face names: body {body} is outside the export")))?;
+        let placed = selected.get(index).ok_or(IoError::Empty)?;
+        let refs = solidcraft_doc::naming::face_names(placed);
+        let mut seen = std::collections::BTreeSet::new();
+        for (face, reference) in refs.iter().enumerate() {
+            if let Some(label) = wanted.get(reference) {
+                if label.trim().is_empty() || reference.is_empty() || !seen.insert(reference) {
+                    return Err(IoError::Invalid(format!("STEP face names: empty name or ambiguous reference on {body}, face {reference}")));
+                }
+                resolved.insert((index, face), label);
+            }
+        }
+        if let Some(missing) = wanted.keys().find(|key| !seen.contains(key)) {
+            return Err(IoError::Invalid(format!("STEP face names: body {body} has no face {missing}")));
+        }
+    }
+    let bodies: Vec<_> = selected.iter().map(|b| solidcraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
+    let out = solidcraft_kernel::step_export_bodies_with_face_names(&bodies, &step_header(file_name, meta), |body, face| {
+        resolved.get(&(body, face)).map(|s| (*s).clone()).unwrap_or_default()
+    })?;
+    for ((body, face), label) in resolved {
+        if out.face_ids.get(body).and_then(|ids| ids.get(face)).copied().unwrap_or(0) == 0 {
+            return Err(IoError::Invalid(format!("STEP face names: the face named {label} belongs to no exported shell")));
+        }
+    }
+    Ok(out.text.into_bytes())
+}
+
 /// The OBJ export of the given bodies of a model (all when `bodies` is empty): the mesh file
 /// and the material library beside it, with the colour of each body. `mtl_name` is the name
 /// the `mtllib` line writes (the library's file name beside the mesh file).

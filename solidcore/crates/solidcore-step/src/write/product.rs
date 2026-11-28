@@ -213,6 +213,21 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
 ///
 /// As [`products`].
 pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &Header) -> Result<Exported> {
+    products_with_face_names(products, root, header, |_, _, _| String::new())
+}
+
+/// Write AP242 products, naming each ADVANCED_FACE from its product, body and record face index.
+/// An empty string leaves a face unnamed. Several faces can have the same name.
+///
+/// # Errors
+///
+/// As [`products`].
+pub fn products_with_face_names(
+    products: &[ExportProduct],
+    root: usize,
+    header: &Header,
+    face_name: impl Fn(usize, usize, usize) -> String,
+) -> Result<Exported> {
     if products.is_empty() || root >= products.len() {
         return Err(ExportError::Nothing);
     }
@@ -337,9 +352,9 @@ pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &
         // position), and a file whose bodies are all as accurate is written as it was.
         let (mut solid_runs, mut sheet_runs): (Vec<(u64, Vec<u64>)>, Vec<(u64, Vec<u64>)>) = (Vec::new(), Vec::new());
         let mut product_faces = Vec::new();
-        for b in &p.bodies {
+        for (bi, b) in p.bodies.iter().enumerate() {
             let before = w.non_finite();
-            let written = topology::brep(&mut GeomWriter::new(&mut w), b.record, &b.name)
+            let written = topology::brep_with_face_names(&mut GeomWriter::new(&mut w), b.record, &b.name, &|fi| face_name(pi, bi, fi))
                 .map_err(|reason| ExportError::Body { name: b.name.clone(), reason })?;
             if w.non_finite() != before {
                 return Err(ExportError::NotFinite { name: b.name.clone() });
@@ -569,10 +584,19 @@ pub fn bodies(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<String> {
 ///
 /// As [`products`].
 pub fn bodies_with_face_ids(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<Exported> {
+    bodies_with_face_names(bodies, header, |_, _| String::new())
+}
+
+/// Write a flat part with an optional name for each source body and face index.
+///
+/// # Errors
+///
+/// As [`products`].
+pub fn bodies_with_face_names(bodies: Vec<ExportBody<'_>>, header: &Header, face_name: impl Fn(usize, usize) -> String) -> Result<Exported> {
     let name =
         if header.file_name.is_empty() { "Part".to_string() } else { strip_suffix(strip_suffix(&header.file_name, ".step"), ".stp").to_string() };
     let p = ExportProduct { name, bodies, children: Vec::new() };
-    products_with_face_ids(&[p], 0, header)
+    products_with_face_names(&[p], 0, header, |_, body, face| face_name(body, face))
 }
 
 /// `name` without every trailing `suffix`, compared without regard to ASCII case.
@@ -778,6 +802,38 @@ mod tests {
             .collect();
         layers.sort();
         assert_eq!(layers, vec![("Frame/Rails".to_string(), vec![solid("B")]), ("Panels".to_string(), vec![solid("A"), solid("E")])]);
+    }
+
+    #[test]
+    fn exported_face_names_follow_record_faces_and_keep_body_names() {
+        let mut record = box_record();
+        let solidcore_record::brep::Shell::Faces { faces, .. } = &mut record.shells[0] else { panic!("box shell") };
+        faces.reverse();
+        let list = [
+            ExportProduct {
+                name: "Root".into(),
+                bodies: vec![body("Air", &record), body("Steel", &record)],
+                children: vec![(1, IDENTITY, String::new())],
+            },
+            ExportProduct { name: "Insert".into(), bodies: vec![body("Magnet", &record)], children: vec![] },
+        ];
+        let header = Header::default();
+        let original = products_with_face_ids(&list, 0, &header).unwrap();
+        let written = products_with_face_names(&list, 0, &header, |product, body, face| match (product, body, face) {
+            (0, 0, 2 | 4) => "outer".into(),
+            (1, 0, 1) => "probe's face".into(),
+            _ => String::new(),
+        })
+        .unwrap();
+        let ids = &original.face_ids;
+        let mut expected = original.text;
+        for (id, encoded) in [(ids[0][0][2], "outer"), (ids[0][0][4], "outer"), (ids[1][0][1], "probe''s face")] {
+            let prefix = format!("#{id}=ADVANCED_FACE(''");
+            assert!(expected.contains(&prefix));
+            expected = expected.replace(&prefix, &format!("#{id}=ADVANCED_FACE('{encoded}'"));
+        }
+        assert_eq!(written.face_ids, *ids);
+        assert_eq!(written.text, expected);
     }
 
     #[test]

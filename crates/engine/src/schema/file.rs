@@ -99,6 +99,9 @@ pub(crate) fn export_writer(value: Option<&Value>, format: Format) -> Result<Opt
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportStepParams {
+    /// Per-export names by placed body and persistent face reference. Each name can appear on several faces.
+    #[serde(default)]
+    pub face_names: solidcraft_io::StepFaceNames,
     /// The file to write.
     pub path: String,
     /// The bodies to export, by name. Default: every body.
