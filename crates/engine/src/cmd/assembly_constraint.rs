@@ -167,6 +167,66 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     super::edit_joint(s, &Value::Object(q), false)
 }
 
+/// Constraints one Combine placement takes at most (#23542).
+pub(crate) const MAX_COMBINE_PLACEMENT: usize = 32;
+
+/// A Combine's `placement` (#23542): its rules between a reference on the target (`target`, side a
+/// as `assembly.constraint.create` takes it) and one on the tool (`tool`, side b, which moves),
+/// checked and faced as `create` checks and faces a constraint. Each joint's facing is kept as
+/// `create` keeps it: the rule's (a mate against, a flush along) or the way the references face now,
+/// turned over by `flip`. `None` when no placement is given.
+pub(crate) fn combine_placement(s: &Session, p: &Value, tools: usize, cmd: &str) -> Result<Vec<solidcraft_doc::CombineConstraint>> {
+    let Some(v) = p.get("placement").filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
+    let items = v
+        .as_array()
+        .filter(|a| !a.is_empty() && a.len() <= MAX_COMBINE_PLACEMENT)
+        .ok_or_else(|| bad(cmd, format!("`placement` must list 1…{MAX_COMBINE_PLACEMENT} constraints")))?;
+    if tools != 1 {
+        return Err(bad(cmd, format!("`placement` places one tool, and `tools` lists {tools}: combine each tool on its own")));
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let at = |e: String| bad(cmd, format!("placement {}: {e}", i + 1));
+        if !item.is_object() {
+            return Err(at("a constraint must be an object".into()));
+        }
+        let c = str_(item, "type").and_then(Constraint::parse).ok_or_else(|| at(CONSTRAINT_MESSAGE.into()))?;
+        let target = origin_param(s, item.get("target"), cmd).map_err(|e| at(e.to_string()))?;
+        let tool = origin_param(s, item.get("tool"), cmd).map_err(|e| at(e.to_string()))?;
+        let rule = kept(c, &target, &tool, cmd).map_err(|e| at(e.to_string()))?;
+        if c == Constraint::Distance && item.get("offset").is_none_or(Value::is_null) {
+            return Err(at("distance needs `offset`".into()));
+        }
+        if c == Constraint::Angle && item.get("angle").is_none_or(Value::is_null) {
+            return Err(at("angle needs `angle`".into()));
+        }
+        // A number is kept with its unit, an expression as it was typed.
+        let typed = |key: &str, angle: bool| -> Result<Option<solidcraft_doc::Expr>> {
+            match item.get(key).filter(|v| !v.is_null()) {
+                None => Ok(None),
+                Some(v) => {
+                    value(s, v, angle, cmd).map_err(|e| at(e.to_string()))?;
+                    Ok(Some(match v {
+                        Value::String(t) => t.trim().into(),
+                        n => format!("{n} {}", if angle { "deg" } else { "mm" }).into(),
+                    }))
+                }
+            }
+        };
+        let (offset, angle) = (typed("offset", false)?, typed("angle", true)?);
+        let flip = match item.get("flip") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => return Err(at("`flip` must be true or false".into())),
+        };
+        let (a, b) = if rule.swap { (&tool, &target) } else { (&target, &tool) };
+        check_round(s, c, b, cmd).map_err(|e| at(e.to_string()))?;
+        let flip = facing(s, &rule, a, b, flip, cmd).map_err(|e| at(e.to_string()))?;
+        out.push(solidcraft_doc::CombineConstraint { rule: c, target: Box::new(target), tool: Box::new(tool), offset, angle, flip });
+    }
+    Ok(out)
+}
+
 /// The rule's default name: `Mate1`, `Point on axis2`…, the first number no joint's name has.
 fn default_name(s: &Session, c: Constraint) -> String {
     let word = c.name().replace('_', " ");

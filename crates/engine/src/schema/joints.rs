@@ -766,6 +766,32 @@ impl JsonSchema for ConstraintTypeParam {
     }
 }
 
+/// One constraint of a Combine's `placement` (#23542): a rule between a reference on the target
+/// and one on the tool, as `assembly.constraint.create` takes its `a` and `b`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct CombineConstraintParam {
+    /// The rule, as assembly.constraint.create takes it.
+    #[serde(rename = "type")]
+    pub kind: ConstraintTypeParam,
+    /// The reference on the target, which stays: a joint origin as joint.create takes a side.
+    pub target: JointOriginArg,
+    /// The reference on the tool, which moves.
+    pub tool: JointOriginArg,
+    /// The gap from the target's reference to the tool's, in mm or an expression (needed for
+    /// distance; a tangent's is on top of the radius). Default: 0.
+    #[serde(default)]
+    pub offset: Option<JointValue>,
+    /// An angle rule's angle, in degrees or an expression (needed for angle).
+    #[serde(default)]
+    pub angle: Option<JointValue>,
+    /// Turn the tool over: its reference along the target's instead of the way the rule puts it.
+    /// Default: a mate is against, a flush along, the others as the bodies face now.
+    #[serde(default)]
+    pub flip: Option<bool>,
+}
+
 /// Constrain two parts by a geometric rule between a reference on each: the rule is kept as a
 /// joint of the kind it needs (a mate is planar), made where the parts are, so b moves no further
 /// than the rule needs and keeps every motion it leaves free. Several constraints between one pair

@@ -780,6 +780,13 @@ pub struct CombineParams {
     /// With `offset_edges: round`: the radius of the rounds. Default: the offset's size.
     #[serde(default)]
     pub offset_radius: Option<LengthExpr>,
+    /// Where the one tool goes against the target: 1 to 32 assembly constraints between a
+    /// reference on the target and one on the tool. The boolean uses a copy of the tool moved to
+    /// where they put it, worked out again on every rebuild; the tool body stays where it is.
+    /// Needs exactly one tool. Default: the tool is combined where it is.
+    #[serde(default)]
+    #[schemars(length(min = 1, max = 32))]
+    pub placement: Option<Vec<super::joints::CombineConstraintParam>>,
     /// Move the result into a new component, made for it. Default: false.
     #[serde(default)]
     pub new_component: Option<bool>,

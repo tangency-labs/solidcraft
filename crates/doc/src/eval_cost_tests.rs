@@ -1436,6 +1436,7 @@ fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are
         offset_edges: OffsetEdges::Sharp,
         offset_faces: Vec::new(),
         offset_radius: None,
+        placement: Vec::new(),
     };
     let combine = doc.add_feature(kind, None).unwrap();
     model.evaluate(&doc);
@@ -4408,6 +4409,7 @@ fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
                 offset_edges: OffsetEdges::Sharp,
                 offset_faces: Vec::new(),
                 offset_radius: None,
+                placement: Vec::new(),
             },
             None,
         )

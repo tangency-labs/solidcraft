@@ -6854,6 +6854,86 @@ fn combine_cut_offset_round_edges() {
     assert_eq!(saved["offset_edges"], "round", "{saved}");
 }
 
+/// A 100 × 60 × 10 plate with a 4 mm pilot hole at (`hx`, 20), and a 10 mm pin 30 tall standing far
+/// off at (200, 200). The pin is kept, so a Combine cut with a placement shows where its copy went.
+fn plate_and_far_pin() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "hx", "expression": "30 mm"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 2, "height": 12, "base": ["hx", 20, -1], "operation": "cut", "targets": ["Plate"], "name": "Pilot"}),
+    );
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "base": [200, 200, 0], "body_name": "Pin"}));
+    s
+}
+
+/// The placement of a Combine cut against the pilot hole's wall and the plate's top face (#23542).
+fn pin_into_pilot() -> Value {
+    json!([
+        {"type": "concentric", "target": {"circle": [32, 20, 5]}, "tool": {"circle": [205, 200, 15]}},
+        {"type": "flush", "target": {"face": [80, 50, 10]}, "tool": {"face": [200, 200, 30]}}
+    ])
+}
+
+/// A Combine's placement moves its tool against the target by assembly constraints (#23542): the
+/// pin, standing 200 mm off, is made concentric with the pilot hole and flush with the plate's top,
+/// so it cuts its 10 mm hole through the plate there, π·5²·10 out of 60000 mm³ in all. The pin
+/// itself stays where it stands, and the cut follows the pilot hole when `hx` moves it.
+#[test]
+fn combine_placement_puts_the_tool_against_the_target() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+    let mut s = plate_and_far_pin();
+    let p = json!({"target": "Plate", "tools": ["Pin"], "operation": "cut", "keep_tools": true, "placement": pin_into_pilot()});
+    run(&mut s, "solid.combine", p);
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.model.state().body(name).unwrap().body).unwrap().volume;
+    let class = |s: &Session, at: Vec3| s.model.state().body("Plate").unwrap().body.classify_point(at).unwrap();
+    let want = 60000.0 - PI * 25.0 * 10.0;
+    assert!(rel(vol(&s, "Plate"), want) < 1e-6, "{} vs {want}", vol(&s, "Plate"));
+    assert!(rel(vol(&s, "Pin"), PI * 25.0 * 30.0) < 1e-9, "the pin is not cut or moved");
+    let pin = solidcraft_kernel::measure(&s.model.state().body("Pin").unwrap().body).unwrap();
+    assert!((pin.centroid - Vec3::new(200.0, 200.0, 15.0)).len() < 1e-6, "the pin stays where it stands: {:?}", pin.centroid);
+    // The 10 mm hole is round the pilot: 4.5 mm off its axis is cut, 5.5 mm is not.
+    assert_eq!(class(&s, Vec3::new(34.5, 20.0, 5.0)), PointClass::Outside);
+    assert_eq!(class(&s, Vec3::new(35.5, 20.0, 5.0)), PointClass::Inside);
+    // The cut follows the pilot hole.
+    run(&mut s, "parameters.change", json!({"name": "hx", "expression": "60 mm"}));
+    assert!(rel(vol(&s, "Plate"), want) < 1e-6, "{} vs {want}", vol(&s, "Plate"));
+    assert_eq!(class(&s, Vec3::new(64.5, 20.0, 5.0)), PointClass::Outside);
+    assert_eq!(class(&s, Vec3::new(34.5, 20.0, 5.0)), PointClass::Inside, "the old place is solid again");
+    // Saved with the feature, and older keys alone read as before.
+    let saved = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved["placement"].as_array().map(Vec::len), Some(2), "{saved}");
+    assert_eq!(saved["placement"][1]["type"], "flush", "{saved}");
+}
+
+/// A placement places one tool; rules that disagree are refused, naming the one that can't be met;
+/// a rule whose references don't fit it is refused as `assembly.constraint.create` refuses it.
+#[test]
+fn combine_placement_refusals() {
+    let mut s = plate_and_far_pin();
+    run(&mut s, "solid.box", json!({"corner": [300, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Other"}));
+    let refused = |s: &mut Session, p: Value| s.execute("solid.combine", &p).expect_err(&p.to_string()).to_string();
+    let e = refused(&mut s, json!({"target": "Plate", "tools": ["Pin", "Other"], "operation": "cut", "placement": pin_into_pilot()}));
+    assert!(e.contains("places one tool"), "{e}");
+    // The pin's top flush with the plate's top and with its bottom: 10 mm apart.
+    let mut both = pin_into_pilot();
+    if let Some(a) = both.as_array_mut() {
+        a.push(json!({"type": "flush", "target": {"face": [80, 50, 0]}, "tool": {"face": [200, 200, 30]}}));
+    }
+    let e = refused(&mut s, json!({"target": "Plate", "tools": ["Pin"], "operation": "cut", "placement": both}));
+    assert!(e.contains("disagree") && e.contains("flush 3"), "{e}");
+    let e = refused(
+        &mut s,
+        json!({"target": "Plate", "tools": ["Pin"], "placement": [{"type": "insert", "target": {"face": [80, 50, 10]}, "tool": {"face": [200, 200, 30]}}]}),
+    );
+    assert!(e.contains("placement 1") && e.contains("insert needs"), "{e}");
+    let e = refused(&mut s, json!({"target": "Plate", "tools": ["Pin"], "placement": []}));
+    assert!(e.contains("placement"), "{e}");
+}
+
 /// A 40 × 40 × 20 block, a 10 mm square pin from z 5 to 35 standing in it (its pocket is 15
 /// deep), and the block's volume after `params` (a Combine cut of the pin, kept) from 32000 mm³.
 fn pin_pocket(extra: &[(&str, [f64; 3], [f64; 3])], params: Value) -> (Session, f64) {

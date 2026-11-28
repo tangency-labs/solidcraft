@@ -2570,6 +2570,7 @@ fn primitives_and_combine() {
             offset_edges: OffsetEdges::Sharp,
             offset_faces: Vec::new(),
             offset_radius: None,
+            placement: Vec::new(),
         },
         None,
     )
@@ -3190,6 +3191,7 @@ fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
                 offset_edges: OffsetEdges::Sharp,
                 offset_faces: Vec::new(),
                 offset_radius: None,
+                placement: Vec::new(),
             },
             None,
         )
@@ -3289,6 +3291,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
             offset_edges: OffsetEdges::Sharp,
             offset_faces: Vec::new(),
             offset_radius: None,
+            placement: Vec::new(),
         },
         None,
     )
@@ -3345,6 +3348,7 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
                 offset_edges: OffsetEdges::Sharp,
                 offset_faces: Vec::new(),
                 offset_radius: None,
+                placement: Vec::new(),
             },
             None,
         )

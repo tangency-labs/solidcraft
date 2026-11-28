@@ -10610,8 +10610,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius, placement } => {
             let mut d = start("solid.combine")?;
+            // The tool's placement (#23542) goes back as it was saved.
+            if !placement.is_empty() {
+                d.extra.insert("placement".into(), serde_json::to_value(placement).ok()?);
+            }
             d.kind = Kind::Combine {
                 operation: op_index(operation).max(1),
                 keep_tools: *keep_tools,
