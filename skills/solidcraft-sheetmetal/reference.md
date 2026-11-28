@@ -35,8 +35,10 @@ includes every profile and fills those holes; explicit profile picks select only
 Contour: `sketch`, `curves` (an open chain of lines and tangent arcs), `distance`, `rule?`, `flip?`, `reverse?`.
 Edge: `edges`, `height`, `angle?` (default 90°), `radius?` (default: the rule's), `height_from?`
 (`outer`|`inner`|`tangent`), `position?` (`inside`|`outside`|`middle`|`material_outside`|
-`tangent`), `flip?`, `body?`, `corner_relief_shape?`, `corner_relief?`, `then?`, `name?`,
-`body_name?`.
+`tangent`), `start_setback?`, `end_setback?` (lengths: the flange and its bend stop that far
+short of each end of the edge), `start_extension?`, `end_extension?` (lengths: the flange's flat
+runs that far past its bend's ends), `flip?`, `body?`, `corner_relief_shape?`, `corner_relief?`,
+`then?`, `name?`, `body_name?`.
 
 An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 `{point:[x,y,z], angle?, height?, segments?}` for an edge with its own values. `then` lists up to

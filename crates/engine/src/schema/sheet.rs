@@ -567,6 +567,20 @@ pub struct FlangeParams {
     /// face; below 90° the bend's end on that face). Default: inside.
     #[serde(default)]
     pub position: Option<FlangePosition>,
+    /// Edge: how far each flange, its bend with it, stops short of its edge's start (met first
+    /// walking along the edge with the sheet on the left). Default: 0.
+    #[serde(default)]
+    pub start_setback: Option<LengthExpr>,
+    /// Edge: how far each flange stops short of its edge's end. Default: 0.
+    #[serde(default)]
+    pub end_setback: Option<LengthExpr>,
+    /// Edge: how far each flange's flat runs on past its bend's start; the bend stays as long as
+    /// the edge. Default: 0.
+    #[serde(default)]
+    pub start_extension: Option<LengthExpr>,
+    /// Edge: how far each flange's flat runs on past its bend's end. Default: 0.
+    #[serde(default)]
+    pub end_extension: Option<LengthExpr>,
     /// Edge: the sheet metal body. Default: the sheet with an edge nearest the first point.
     #[serde(default)]
     pub body: Option<String>,

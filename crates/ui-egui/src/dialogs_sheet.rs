@@ -418,6 +418,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 position: usize,
                 /// Edge flanges: where the height is measured from (index into `HEIGHT_FROM`).
                 height_from: usize,
+                /// Edge flanges: the start and end set-backs, then the start and end extensions
+                /// (`FLANGE_ENDS`); empty for none.
+                ends: Box<[String; 4]>,
                 /// Contour flange: which side of the sheet thickness the contour follows.
                 orientation: usize,
                 /// Contour flange: split its width equally across the sketch plane.
@@ -558,6 +561,15 @@ impl Sm {
     }
 }
 
+/// An edge flange's end inputs, in the order of `Sm::Flange::ends`: the command's key and the row's
+/// label.
+pub const FLANGE_ENDS: [(&str, &str); 4] = [
+    ("start_setback", "Start Set-back"),
+    ("end_setback", "End Set-back"),
+    ("start_extension", "Start Extension"),
+    ("end_extension", "End Extension"),
+];
+
 fn new_flange(app: &SolveApp, ty: usize) -> Sm {
     Sm::Flange {
         ty,
@@ -566,6 +578,7 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         radius: String::new(),
         position: 0,
         height_from: 0,
+        ends: Box::default(),
         orientation: 1,
         symmetric: false,
         flip: false,
@@ -973,6 +986,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             radius,
             position,
             height_from,
+            ends,
             orientation,
             symmetric,
             flip,
@@ -1080,6 +1094,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                     }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+                        for ((_, label), value) in FLANGE_ENDS.iter().zip(ends.iter_mut()) {
+                            enter |= hint_row(ui, label, value, solidcraft_ui_text::tr_label("none"));
+                        }
                         // The relief beside the bends' ends: the rule's unless set here.
                         choice_row(ui, "Bend Relief Shape", "sm_flange_bend_relief", bend_relief, &FLANGE_BEND_RELIEF_LABELS);
                         // The relief at the corners these flanges make: the rule's unless set here.
@@ -1921,6 +1938,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             radius,
             position,
             height_from,
+            ends,
             orientation,
             symmetric,
             flip,
@@ -1941,6 +1959,9 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                     let mut p = json!({"type": "edge", "edges": flange_edges_segmented(inputs, own, segments)?, "height": height, "angle": angle,
                         "position": POSITIONS.get(*position).copied().unwrap_or("inside")});
                     put(&mut p, &[("radius", radius)]);
+                    for ((key, _), value) in FLANGE_ENDS.iter().zip(ends.iter()) {
+                        put(&mut p, &[(key, value)]);
+                    }
                     if let Some(from) = HEIGHT_FROM.get(*height_from).filter(|_| *height_from > 0) {
                         p["height_from"] = json!(from);
                     }
@@ -2260,6 +2281,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             height_from,
             bend_relief_shape,
             corners,
+            start_setback,
+            end_setback,
+            start_extension,
+            end_extension,
             ..
         } => {
             if let Some(b) = body {
@@ -2309,6 +2334,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .as_deref()
                     .and_then(|name| HEIGHT_FROM.iter().position(|h| h.eq_ignore_ascii_case(name.trim())))
                     .unwrap_or(0),
+                ends: Box::new([start_setback, end_setback, start_extension, end_extension].map(|e| e.as_deref().map(str::to_string).unwrap_or_default())),
                 orientation: 1,
                 symmetric: false,
                 flip: *flip,

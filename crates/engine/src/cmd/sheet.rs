@@ -67,7 +67,10 @@ pub static COMMANDS: &[CommandSpec] = &[
          the inner virtual sharp, or past 90 deg the line square to the flange touching the bend's outside (tangent; up to 90 deg the outer sharp)), \
          position?: inside|outside|middle|material_outside|tangent (where the bend starts: the outer virtual sharp on the edge (default), \
          the bend starting at the edge (bend_outside is the same), half way, the inner virtual sharp on the edge, \
-         or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
+         or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), \
+         start_setback?, end_setback? (how far each flange, its bend with it, stops short of its edge's start and end, the start met first walking along the edge with the sheet on the left; \
+         the rule's bend relief is cut beside each end it stops short of; default 0), \
+         start_extension?, end_extension? (how far each flange's flat runs on past its bend's start and end, the bend staying as long as the edge; default 0), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
          the relief at the corners these flanges make (default: the rule's); \
          bend_relief_shape?: rectangular|obround|tear (the relief beside a bend's end where the sheet runs on past it; default: the rule's); \
          then?: [{angle?, height, flip?}] further bends (at most 16), each a flange on the far edge of the one before, flip: true turns that bend the other way (edge only); \
@@ -505,6 +508,9 @@ const RULE_ONLY: &[&str] = &[
 /// The rule values an edge flange may set for itself: the corner relief and the bend relief's shape.
 const EDGE_RELIEF: [&str; 3] = ["corner_relief", "corner_relief_shape", "bend_relief_shape"];
 
+/// The edge flange's inputs that set where its ends stand on its edge.
+const SET_BACKS: [&str; 4] = ["start_setback", "end_setback", "start_extension", "end_extension"];
+
 fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.flange";
     let nested = p.get("base").filter(|b| b.is_object());
@@ -526,6 +532,11 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if ty != "edge" && p.get("then").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`then` (further bends) is only for edge flanges"));
+    }
+    if ty != "edge"
+        && let Some(key) = SET_BACKS.iter().find(|k| p.get(**k).is_some_and(|v| !v.is_null()))
+    {
+        return Err(bad(cmd, format!("`{key}` is only for edge flanges (it sets where an edge flange's ends stand on its edge)")));
     }
     if ty != "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "segments is only for edge flanges (a base or contour flange has no edge to divide)"));
@@ -639,6 +650,12 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(c) = &corner_relief {
                 check_expr(s, c, Kind::Length, cmd, "corner_relief")?;
             }
+            let [start_setback, end_setback, start_extension, end_extension] = SET_BACKS.map(|key| expr(p, key));
+            for (key, value) in SET_BACKS.iter().zip([&start_setback, &end_setback, &start_extension, &end_extension]) {
+                if let Some(v) = value {
+                    check_expr(s, v, Kind::Length, cmd, key)?;
+                }
+            }
             let flip = bool_(p, "flip").unwrap_or(false);
             let mut before = surface_panel_counts(s);
             let mut reply = add_feature(
@@ -657,6 +674,10 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     height_from: height_from.clone(),
                     bend_relief_shape: bend_relief_shape.clone(),
                     corners,
+                    start_setback,
+                    end_setback,
+                    start_extension,
+                    end_extension,
                 },
             )?;
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
@@ -682,6 +703,10 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         height_from: height_from.clone(),
                         bend_relief_shape: bend_relief_shape.clone(),
                         corners: Vec::new(),
+                        start_setback: None,
+                        end_setback: None,
+                        start_extension: None,
+                        end_extension: None,
                     },
                 )?;
             }

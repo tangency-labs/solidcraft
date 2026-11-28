@@ -1359,6 +1359,45 @@ fn flange_dialog_measures_the_height_from_the_chosen_datum() {
     }
 }
 
+/// The Flange dialog's set-back and extension rows: empty (the default) asks for nothing, a length
+/// reaches the feature, Edit Feature shows it again, and in an inch design a bare number is inches.
+#[test]
+fn flange_dialog_set_backs_and_extensions_reach_the_feature_and_come_back() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.session.selection = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+    h.app.start("sheet.flange");
+    h.frames(3);
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    for (key, _) in FLANGE_ENDS {
+        assert!(c[0].1.get(key).is_none(), "{key}: {}", c[0].1);
+    }
+    if let Some(Kind::Sheet(Sm::Flange { ends, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        ends[0] = "2 mm".into();
+        ends[3] = "4 mm".into();
+    }
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let saved = serde_json::to_value(h.app.session.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+    assert_eq!((saved["start_setback"].as_str(), saved["end_extension"].as_str()), (Some("2 mm"), Some("4 mm")), "{saved}");
+    assert!(saved.get("end_setback").is_none() && saved.get("start_extension").is_none(), "{saved}");
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let e = edit_dialog(&h.app, id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { ends, .. }) if ends[0] == "2 mm" && ends[1].is_empty() && ends[3] == "4 mm"));
+    h.app.run("document.units", json!({"units": "in"})).unwrap();
+    let mut e = edit_dialog(&h.app, id, None).unwrap();
+    if let Kind::Sheet(Sm::Flange { ends, .. }) = &mut e.kind {
+        ends[1] = "0.125".into();
+    }
+    let c = apply_commands(&h.app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["end_setback"], json!("0.125 in"), "{}", c[0].1);
+    assert_eq!(c[0].1["params"]["start_setback"], json!("2 mm"), "{}", c[0].1);
+}
+
 /// The Flange dialog's Bend Position offers material outside and tangent, and Edit Feature shows them again.
 #[test]
 fn flange_dialog_offers_material_outside_and_tangent_bend_positions() {

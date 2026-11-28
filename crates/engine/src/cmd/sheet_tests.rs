@@ -11694,3 +11694,98 @@ fn a_fold_builds_with_an_outline_vertex_a_hair_beside_the_zone_edge() {
         assert!(rel(v, plain) < 1e-9, "vertex {d:e} beside the zone's edge: volume {v}, {plain} without it");
     }
 }
+
+/// Our .063 rule (T 1.6002, R 0.889, K 0.48) on a 100 × 60 base, a 90° flange 17.5962 high on the
+/// edge y = 0 (a 15.107 leg).
+fn a063_flange(s: &mut Session, position: &str, ends: [f64; 4]) -> Result<Value, String> {
+    run(
+        s,
+        "sheet.manage_rules",
+        json!({"name": "A063", "thickness": "1.6002 mm", "k_factor": 0.48, "bend_radius": "0.889 mm", "relief_width": "0.8 mm", "relief_depth": "1 mm", "active": true}),
+    );
+    base(s, 100.0, 60.0);
+    let mut p = json!({"edges": [[50, 0, 1.6002]], "height": "17.5962 mm", "position": position});
+    for (key, v) in ["start_setback", "end_setback", "start_extension", "end_extension"].iter().zip(ends) {
+        if v != 0.0 {
+            p[*key] = json!(format!("{v} mm"));
+        }
+    }
+    s.execute("sheet.flange", &p).map_err(|e| e.to_string())
+}
+
+#[test]
+fn edge_flange_set_backs_and_extensions_match_freecad() {
+    // FreeCAD's SMBendWall (gap1, gap2, extend1, extend2 on the same part, run as a separate
+    // program): the volume, the least and greatest x and the flat's area.
+    let cases: [(&str, [f64; 4], f64, (f64, f64), f64); 7] = [
+        ("outside", [0.0; 4], 12443.192, (0.0, 100.0), 7770.996),
+        ("outside", [0.5, 0.5, 0.0, 0.0], 12414.772, (0.0, 100.0), 7753.286),
+        ("outside", [0.0, 0.0, 2.4892, 2.4892], 12563.541, (-2.4892, 102.4892), 7846.205),
+        ("outside", [0.0, 0.0, 4.0, 0.0], 12539.889, (-4.0, 100.0), 7831.424),
+        ("outside", [1.0, 0.0, 3.0, 0.0], 12487.295, (-2.0, 100.0), 7798.607),
+        ("inside", [2.0, 2.0, 0.0, 0.0], 11938.19, (0.0, 100.0), 7455.61),
+        ("inside", [0.0, 0.0, 2.4892, 2.4892], 12165.219, (-2.4892, 102.4892), 7597.285),
+    ];
+    for (position, ends, vol, (x0, x1), area) in cases {
+        let what = format!("{position} {ends:?}");
+        let mut s = Session::default();
+        a063_flange(&mut s, position, ends).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert!((volume(&mut s) - vol).abs() < 1e-3, "{what}: volume {} want {vol}", volume(&mut s));
+        let b = bbox(&mut s);
+        let (lo, hi) = (b["min"][0].as_f64().unwrap_or(f64::NAN), b["max"][0].as_f64().unwrap_or(f64::NAN));
+        assert!((lo - x0).abs() < 1e-6 && (hi - x1).abs() < 1e-6, "{what}: x {lo}..{hi} want {x0}..{x1}");
+        let got = flat_area(&flat(&mut s));
+        assert!((got - area).abs() < 1e-3, "{what}: flat area {got} want {area}");
+    }
+}
+
+#[test]
+fn an_extension_adds_only_its_strip_of_flat_leg_and_a_set_back_shortens_the_bend() {
+    let (t, leg) = (1.6002, 15.107);
+    let mut plain = Session::default();
+    a063_flange(&mut plain, "inside", [0.0; 4]).unwrap_or_default();
+    let (v0, a0) = (volume(&mut plain), flat_area(&flat(&mut plain)));
+    for e in [0.5, 3.0] {
+        let mut s = Session::default();
+        a063_flange(&mut s, "inside", [0.0, 0.0, e, 0.0]).unwrap_or_default();
+        assert!((flat_area(&flat(&mut s)) - (a0 + e * leg)).abs() < 1e-6, "extension {e}");
+        assert!(rel(volume(&mut s), v0 + e * leg * t) < 1e-9, "extension {e}");
+    }
+    let mut gap = Session::default();
+    a063_flange(&mut gap, "inside", [0.0, 3.0, 0.0, 0.0]).unwrap_or_default();
+    let bends = flat(&mut gap)["bends"].clone();
+    let length = bends[0]["length_mm"].as_f64().or_else(|| bends[0]["length"].as_f64()).unwrap_or(f64::NAN);
+    assert!((length - 97.0).abs() < 1e-6, "the bend stops 3 mm short: {bends}");
+    let saved = serde_json::to_value(gap.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+    assert_eq!(saved["end_setback"], "3 mm");
+    assert!(saved.get("start_setback").is_none() && saved.get("start_extension").is_none(), "{saved}");
+}
+
+#[test]
+fn flange_set_backs_follow_parameters_and_bad_ones_are_refused() {
+    let mut s = Session::default();
+    a063_flange(&mut s, "outside", [0.0, 0.0, 2.4892, 2.4892]).unwrap_or_default();
+    let width = |s: &mut Session| {
+        let b = bbox(s);
+        b["max"][0].as_f64().unwrap_or(f64::NAN) - b["min"][0].as_f64().unwrap_or(f64::NAN)
+    };
+    assert!((width(&mut s) - 104.9784).abs() < 1e-6);
+    let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
+    assert_eq!(names.len(), 4, "{names:?}");
+    for name in names.iter().skip(2) {
+        run(&mut s, "parameters.change", json!({"name": name, "expression": "1 mm"}));
+    }
+    assert!((width(&mut s) - 102.0).abs() < 1e-6, "{}", width(&mut s));
+    let features = s.doc.features.len();
+    for (p, why) in [
+        (json!({"edges": [[50, 60, 1.6002]], "height": 20, "start_setback": "-1 mm"}), "zero or more"),
+        (json!({"edges": [[50, 60, 1.6002]], "height": 20, "end_extension": "-1 mm"}), "zero or more"),
+        (json!({"edges": [[50, 60, 1.6002]], "height": 20, "start_setback": "60 mm", "end_setback": "40 mm"}), "no length"),
+        (json!({"edges": [[50, 60, 1.6002]], "height": 20, "start_setback": "banana"}), "start_setback"),
+        (json!({"type": "base", "sketch": "Base", "start_setback": "5 mm"}), "only for edge flanges"),
+    ] {
+        let error = s.execute("sheet.flange", &p).unwrap_err().to_string();
+        assert!(error.contains(why), "{p}: {error}");
+        assert_eq!(s.doc.features.len(), features, "{p}");
+    }
+}

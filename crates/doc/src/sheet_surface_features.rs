@@ -1132,7 +1132,8 @@ impl SurfaceSheet {
         from: HeightFrom,
         flip: bool,
     ) -> Result<(usize, Vec<SquareSides>)> {
-        let (made, square) = self.flanges_on(edge, &[(WHOLE_EDGE.0, WHOLE_EDGE.1, height, angle, flip)], radius, position, from)?;
+        let (made, square) =
+            self.flanges_on(edge, &[(WHOLE_EDGE.0, WHOLE_EDGE.1, height, angle, flip)], radius, position, FlangeEnds::default(), from)?;
         let joint = made.first().copied().ok_or_else(|| DocError::Invalid("the flange has no bend".into()))?;
         Ok((joint, square))
     }
@@ -1161,8 +1162,11 @@ impl SurfaceSheet {
         runs: &[(f64, f64, f64, f64, bool)],
         radius: f64,
         position: &str,
+        ends: FlangeEnds,
         from: HeightFrom,
     ) -> Result<(Vec<usize>, Vec<SquareSides>)> {
+        ends.check()?;
+        let ends = FlangeEnds { setback: (ends.setback.1, ends.setback.0), extension: (ends.extension.1, ends.extension.0) };
         if runs.iter().any(|&(_, _, _, angle, _)| !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6)) {
             return err("the flange angle must be between 0 and 180°");
         }
@@ -1228,16 +1232,23 @@ impl SurfaceSheet {
             let (p, q) = self.moved_ends(edge.panel, (a, b, d), by, start);
             let (r0, r1) = self.round_ends(edge.panel, (a, b, d), start);
             let junction = (hi < WHOLE_EDGE.1, lo > WHOLE_EDGE.0);
-            let (x0, x1) = (point(hi), point(lo));
+            let own = FlangeEnds {
+                setback: (if junction.0 { 0.0 } else { ends.setback.0 }, if junction.1 { 0.0 } else { ends.setback.1 }),
+                extension: (if junction.0 { 0.0 } else { ends.extension.0 }, if junction.1 { 0.0 } else { ends.extension.1 }),
+            };
+            let set = (own.setback.0 > 0.0, own.setback.1 > 0.0);
+            let (x0, x1) = (if set.0 { a + d * own.setback.0 } else { point(hi) }, if set.1 { b - d * own.setback.1 } else { point(lo) });
+            let cut = (junction.0 || set.0, junction.1 || set.1);
             plans.push(FlangeRun {
                 angle,
+                ends: own,
                 toward,
                 sharp,
                 leg,
                 by,
                 junction,
-                anchor: (if junction.0 { x0 + out * by } else { p }, if junction.1 { x1 + out * by } else { q }),
-                strip: (if junction.0 { x0 } else { a + d * r0.unwrap_or(0.0) }, if junction.1 { x1 } else { b + d * r1.unwrap_or(0.0) }),
+                anchor: (if cut.0 { x0 + out * by } else { p }, if cut.1 { x1 + out * by } else { q }),
+                strip: (if cut.0 { x0 } else { a + d * r0.unwrap_or(0.0) }, if cut.1 { x1 } else { b + d * r1.unwrap_or(0.0) }),
             });
         }
         let mut made = Vec::with_capacity(plans.len());
@@ -1270,7 +1281,15 @@ impl SurfaceSheet {
             // junction, where the next stretch's flange stands beside it). The bend carries them
             // through its zone; the flat follows from that, whatever its rule.
             let (k0, k1) = slants;
-            let (k0, k1) = (if run.junction.0 { 0.0 } else { k0 }, if run.junction.1 { 0.0 } else { k1 });
+            let square_at = |end: usize| {
+                let (j, s, e) = if end == 0 {
+                    (run.junction.0, run.ends.setback.0, run.ends.extension.0)
+                } else {
+                    (run.junction.1, run.ends.setback.1, run.ends.extension.1)
+                };
+                j || s > 0.0 || e > 0.0
+            };
+            let (k0, k1) = (if square_at(0) { 0.0 } else { k0 }, if square_at(1) { 0.0 } else { k1 });
             let depth = run.leg.max(0.0) + run.sharp;
             let at = |y: f64| (-k0 * y, len - k1 * y);
             let ((p0, p1), (q0, q1)) = (at(0.0), at(-depth));
@@ -1281,7 +1300,20 @@ impl SurfaceSheet {
             let (q0, q1) = if crossing { (p0, p1) } else { (q0, q1) };
             let n = self.add_panel("flange", &edge, origin, d, len, depth, bend);
             if let Some(panel) = self.sheet.panels.get_mut(n) {
-                let corners = [Vec2::new(p0, 0.0), Vec2::new(q0, -depth), Vec2::new(q1, -depth), Vec2::new(p1, 0.0)];
+                let (e0, e1) = run.ends.extension;
+                let tangent = -run.sharp.min(depth);
+                let mut corners = vec![Vec2::new(p0, 0.0)];
+                if e0 > 0.0 {
+                    corners.extend([Vec2::new(p0, tangent), Vec2::new(p0 - e0, tangent), Vec2::new(q0 - e0, -depth)]);
+                } else {
+                    corners.push(Vec2::new(q0, -depth));
+                }
+                if e1 > 0.0 {
+                    corners.extend([Vec2::new(q1 + e1, -depth), Vec2::new(p1 + e1, tangent), Vec2::new(p1, tangent)]);
+                } else {
+                    corners.push(Vec2::new(q1, -depth));
+                }
+                corners.push(Vec2::new(p1, 0.0));
                 panel.region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
             }
             let joint = self.sheet.joints.len() - 1;
@@ -3569,6 +3601,7 @@ pub(crate) const SLIVER: f64 = 1e-8;
 /// anchor's ends; and the ends, on the edge's line, of the strip the edge's move takes or adds.
 struct FlangeRun {
     angle: f64,
+    ends: FlangeEnds,
     toward: bool,
     sharp: f64,
     leg: f64,
@@ -3576,6 +3609,29 @@ struct FlangeRun {
     junction: (bool, bool),
     anchor: (Vec2, Vec2),
     strip: (Vec2, Vec2),
+}
+
+/// How an edge flange's ends stand against its edge's ends: at the edge's start (met first walking
+/// along it with the sheet on the left, seen from the sheet's top face; the edge's `b` in the
+/// panel's chart, which is drawn on the other face) and at its end. A set-back stops the flange, its
+/// bend with it, that far short of the edge's end; the panel keeps its edge beyond and the bend
+/// relief is cut beside the bend's end. An extension carries the flange's flat past the bend's end
+/// that far, from the bend's tangent line out; the bend stays as long as the edge.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FlangeEnds {
+    pub setback: (f64, f64),
+    pub extension: (f64, f64),
+}
+
+impl FlangeEnds {
+    fn check(&self) -> Result<()> {
+        for v in [self.setback.0, self.setback.1, self.extension.0, self.extension.1] {
+            if !(v.is_finite() && v >= 0.0) {
+                return err("a flange's set-backs and extensions must be zero or more");
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A flange [`SurfaceSheet::flanges_on`] laid on with square sides, because the sides it carries on

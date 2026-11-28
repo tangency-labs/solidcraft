@@ -1344,6 +1344,10 @@ pub(super) fn sheet_eval(
             corner_relief,
             bend_relief_shape,
             corners,
+            start_setback,
+            end_setback,
+            start_extension,
+            end_extension,
         } if surface_flange_sheet(st, body, f, edges).is_some() => {
             if corners.len() > 2000 {
                 return Err(DocError::Invalid("at most 2000 flange corner choices are supported".into()));
@@ -1367,6 +1371,16 @@ pub(super) fn sheet_eval(
                 Some(name) => sheet::HeightFrom::parse(name)
                     .ok_or_else(|| DocError::Invalid(format!("unknown flange height datum `{name}` (outer, inner or tangent)")))?,
                 None => sheet::HeightFrom::Outer,
+            };
+            let length = |e: &Option<crate::Expr>| -> Result<f64> {
+                match e {
+                    Some(e) => val(vals, e, Kind::Length),
+                    None => Ok(0.0),
+                }
+            };
+            let ends = crate::sheet_surface_features::FlangeEnds {
+                setback: (length(start_setback)?, length(end_setback)?),
+                extension: (length(start_extension)?, length(end_extension)?),
             };
             // Each edge's own height and angle, else the feature's, and the stretches it bends in:
             // the whole edge, or each run of its segments (see `segment_runs`). Every segment is
@@ -1448,7 +1462,7 @@ pub(super) fn sheet_eval(
             let mut square = Vec::with_capacity(picks.len());
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
                 // One bend for each run: a split edge's butt where its runs meet.
-                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, ends, from).map_err(named(k))?;
                 square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {

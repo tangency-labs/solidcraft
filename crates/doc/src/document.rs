@@ -2355,6 +2355,23 @@ pub enum FeatureKind {
         /// Corner choices for these flanges, identified by their named source rims.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         corners: Vec<crate::CornerJoinParams>,
+        /// How far each flange, its bend with it, stops short of its edge's start (met first
+        /// walking along the edge with the sheet on the left) and of its end. None is none.
+        /// Walked last, so the inputs before them keep their names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Start set-back")]
+        start_setback: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End set-back")]
+        end_setback: Option<Expr>,
+        /// How far each flange's flat runs on past its bend's start and end, from the bend's
+        /// tangent line out; the bend stays as long as the edge. None is none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Start extension")]
+        start_extension: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End extension")]
+        end_extension: Option<Expr>,
     },
     /// A corner shared by two bends, saved by their source-edge identities.
     SheetCornerJoin {

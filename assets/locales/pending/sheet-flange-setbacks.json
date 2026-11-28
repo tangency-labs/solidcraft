@@ -1,0 +1,38 @@
+{
+  "en": {
+    "Start Set-back": "Start Set-back",
+    "End Set-back": "End Set-back",
+    "Start Extension": "Start Extension",
+    "End Extension": "End Extension"
+  },
+  "ar": {
+    "Start Set-back": "تراجع البداية",
+    "End Set-back": "تراجع النهاية",
+    "Start Extension": "توسيع البداية",
+    "End Extension": "توسيع النهاية"
+  },
+  "he": {
+    "Start Set-back": "נסיגה בהתחלה",
+    "End Set-back": "נסיגה בסוף",
+    "Start Extension": "הרחבה בהתחלה",
+    "End Extension": "הרחבה בסוף"
+  },
+  "ja": {
+    "Start Set-back": "始端セットバック",
+    "End Set-back": "終端セットバック",
+    "Start Extension": "始端延長",
+    "End Extension": "終端延長"
+  },
+  "vi": {
+    "Start Set-back": "Lùi vào ở đầu",
+    "End Set-back": "Lùi vào ở cuối",
+    "Start Extension": "Kéo dài ở đầu",
+    "End Extension": "Kéo dài ở cuối"
+  },
+  "zh": {
+    "Start Set-back": "起点后退距离",
+    "End Set-back": "终点后退距离",
+    "Start Extension": "起点延伸",
+    "End Extension": "终点延伸"
+  }
+}

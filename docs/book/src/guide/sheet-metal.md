@@ -190,6 +190,25 @@ flat. A relief that can't be cut (a width under 0.01 mm, one as wide as the base
 bend, or a slot that would cut the base apart) is left out, and the flange feature reports a
 warning saying where.
 
+An edge flange can also stand short of its edge's ends, or run past them. `start_setback` and
+`end_setback` (Start Set-back and End Set-back under Advanced in the Flange dialog) stop the
+flange, its bend with it, that far short of each end of its edge. The base keeps its edge
+beyond, and the bend relief above is cut beside each end that stops short where the base runs on
+past it. `start_extension` and `end_extension` carry the flange's flat on past its bend's ends,
+from the bend's tangent line out, and the bend stays as long as its edge: a wall extended by
+R + T reaches past a neighbouring wall's outside. The start is the end you reach first walking
+along the edge with the sheet on your left, seen from the sheet's top face. All four are length
+expressions, apply to every edge of the feature and to the ends of the edge, not to the
+junctions between its segments, and are left off the further bends of `then`. They are zero or
+more.
+
+```json
+{"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"position":"outside",
+ "start_setback":"2 mm","end_setback":"2 mm"}}
+{"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"position":"outside",
+ "start_extension":"4 mm","end_extension":"4 mm"}}
+```
+
 Where a cut-out has taken part of an edge away (a corner cut off the plate, a notch in the
 middle of an edge), an edge flange picked on that edge runs along the stretch the cut-outs
 leave nearest the pick, and takes its setback off that stretch only. The base on the other
