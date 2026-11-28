@@ -159,14 +159,14 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
             })
             .unwrap_or_else(|| panic!("{case}: missing text"));
         if galley.galley.rows.len() == 1 {
-            // #22642: what must read centred in the frame is the capitals' ink, not the row box
+            // #23381: what must read centred in the frame is the capitals' ink, not the row box
             // around it: the font's capitals sit low in the row box (ascent exceeds cap height,
             // a descent hangs under the baseline), so the row box is placed high by the measured
             // offset and the ink lands in the middle. egui pixel-snaps glyph positions, so the
-            // tolerance is half a device pixel plus a point of rounding.
+            // limit is the issue's: half a point, which is half a device pixel at this DPR.
             let ink = galley.pos.y + galley.galley.mesh_bounds.center().y;
             assert!(
-                (ink - rect.center().y).abs() <= 0.6,
+                (ink - rect.center().y).abs() <= 0.5,
                 "{case}: capital ink centre {ink} is {} pt off the field centre {}",
                 ink - rect.center().y,
                 rect.center().y

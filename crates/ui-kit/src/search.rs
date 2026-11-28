@@ -421,7 +421,7 @@ mod tests {
 
     #[test]
     fn keycap_glyphs_read_centred_in_their_pills() {
-        // #22642: the glyph's row box was centred in the chip, but the font's capitals sit low
+        // #23381: the glyph's row box was centred in the chip, but the font's capitals sit low
         // in their row box, so the glyph read low in the pill. Its ink must sit in the middle.
         let ctx = crate::test_support::context();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 100.0))), ..Default::default() };
@@ -437,7 +437,7 @@ mod tests {
             })
             .expect("the cap's glyph");
         // The cap's box is centred on the given right-hand point; so must the glyph's ink be.
-        assert!((ink - 60.0).abs() <= 0.6, "the cap's ink centre {ink} is {} pt off the pill centre", ink - 60.0);
+        assert!((ink - 60.0).abs() <= 0.5, "the cap's ink centre {ink} is {} pt off the pill centre", ink - 60.0);
     }
 
     #[test]

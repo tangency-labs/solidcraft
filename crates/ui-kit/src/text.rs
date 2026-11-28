@@ -51,7 +51,7 @@ pub(super) fn paint_text_aligned(ui: &Ui, rect: egui::Rect, text: &str, font: eg
     }
     // Optical centring: egui centres the row box, but this font's capitals sit low in it (the
     // ascent exceeds the cap height, and a descent hangs under the baseline), so the row box
-    // goes up by the measured offset and the ink reads centred (#22642).
+    // goes up by the measured offset and the ink reads centred (#23381).
     let rise = egui::cap_ink_rise(ui.painter(), &font);
     let shown = if middle { ellipsize_middle(ui, text, font, rect.width().max(0.0)) } else { text.to_owned() };
     let mut job = egui::text::LayoutJob::single_section(shown, format);
@@ -66,7 +66,7 @@ pub(super) fn paint_text_aligned(ui: &Ui, rect: egui::Rect, text: &str, font: eg
     painter.galley(at, galley, ink);
 }
 
-/// Where to paint `galley` so its capitals read centred on `centre` (#22642): egui's geometric
+/// Where to paint `galley` so its capitals read centred on `centre` (#23381): egui's geometric
 /// centre of the row box, lifted by [`egui::galley_cap_ink_rise`].
 pub(crate) fn centred_in(painter: &egui::Painter, galley: &egui::Galley, centre: egui::Pos2) -> egui::Pos2 {
     centre - galley.size() / 2.0 - egui::vec2(0.0, egui::galley_cap_ink_rise(painter, galley))

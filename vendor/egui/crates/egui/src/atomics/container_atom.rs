@@ -602,7 +602,7 @@ impl<'atom> SizedContainerAtom<'atom> {
                     // text is lifted so a capital's ink reads centred in the row box rather
                     // than low in it (see `galley_cap_ink_rise`). [`crate::TextEdit`] lifts
                     // its own text the same way, so the hint, prefix and suffix atoms here
-                    // keep its baseline (SolidCraft #22642).
+                    // keep its baseline (SolidCraft #23381).
                     let mut pos = item_rect.min;
                     if sized.align.y() == Align::Center {
                         pos.y -= galley_cap_ink_rise(ui.painter(), &galley);

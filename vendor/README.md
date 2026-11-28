@@ -124,7 +124,7 @@ SolidCraft changes to egui and eframe:
 - `crates/egui/src/widgets/text_edit/{builder.rs,mod.rs}`, `crates/egui/src/widgets/mod.rs`,
   `crates/egui/src/atomics/container_atom.rs`, `crates/egui/src/lib.rs`: a vertically centred
   `TextEdit` lifts its single row of text so the middle of a capital's ink lands in the middle of
-  the field, not the middle of the font's row box (SolidCraft #22642). A row box is not where
+  the field, not the middle of the font's row box (SolidCraft #23381). A row box is not where
   capitals sit: the ascent exceeds the cap height and a descent hangs below the baseline, so
   centring the row box puts the text low in the frame — 1.5 pt with egui's own font. The lift
   comes from `cap_ink_rise`; it lays out one fixed probe glyph, so it follows the font, its size
