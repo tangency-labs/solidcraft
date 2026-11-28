@@ -676,8 +676,17 @@ fn blend_failure(
 /// Not upstream (#16404): a failure that gives no other reason (an unsupported corner or step,
 /// a step of the executive failing, a bare status) where the corners step found a face beside a blended edge closing to a point
 /// is that face: no blend of any size fits there. A refusal that names its own reason (a blend
-/// too large, no room, a setback too short) keeps it.
+/// too large, no room, a setback too short, or the picked chain's Mixed corner) keeps it.
 fn narrowed(s: &FilletSession<'_>, error: Error) -> Error {
+    // The picked chain's zero-width cusp (#22151) takes precedence over a face
+    // narrowing noted at another endpoint (#16404). Keep its reason and location;
+    // generic unsupported corners (including the hole-rim chamfer) still use the
+    // face diagnosis below. The corner check has already run in create_corners.
+    if matches!(&error, Error::CornerUnsupported { .. })
+        && s.error_info().comment == solidcore::blend::blend_corner::mixed::MIXED_ROUNDS_NOT_BUILT
+    {
+        return error;
+    }
     match (s.narrowing_vertex(), &error) {
         (
             Some(p),
