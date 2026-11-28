@@ -321,9 +321,10 @@ pub(crate) fn surface(s: &BSurface) -> W<Option<(SolvedSurfaceGeometry, Chart)>>
             )?;
             solved(SolvedSurfaceGeometry::Nurbs(n), Chart::IDENTITY)
         }
-        BSurface::BallPatch { .. } | BSurface::Blend { .. } | BSurface::PlacedRevolution { .. } => {
-            Ok(None)
-        }
+        BSurface::BallPatch { .. }
+        | BSurface::Blend { .. }
+        | BSurface::Sweep { .. }
+        | BSurface::PlacedRevolution { .. } => Ok(None),
     }
 }
 
