@@ -574,6 +574,7 @@ pub(super) fn placement_local_feature(doc: &Document, f: &Feature, before: &Mode
             height_from: _,
             bend_relief_shape: _,
             corners: _,
+            offset: _,
         }
         | FeatureKind::SheetHem { edges: _, length: _, gap: _, flip: _, body } => {
             no_face_attachments(f)
