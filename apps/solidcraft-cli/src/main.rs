@@ -1600,12 +1600,10 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         (None, None) => {
             let auto = !args.iter().any(|a| a == "--headless");
             if auto && let Some(port) = discover_app() {
-                if render_gpu {
-                    return Err(format!(
-                        "mcp: --render-gpu installs a headless image host; a connected application owns its own device (running app found at 127.0.0.1:{port}; pass --headless to start a headless session)"
-                    ));
-                }
                 solidcraft_engine::note!("solidcraft mcp: bridged to the running app at 127.0.0.1:{port} (--headless starts a session of its own)");
+                if render_gpu {
+                    solidcraft_engine::note!("solidcraft mcp: --render-gpu is ignored while bridged to the running app");
+                }
                 let remote = solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token")).with_param_check(param_check);
                 return serve_mcp(Box::new(remote), scope, options);
             }
@@ -1614,9 +1612,9 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             if render_gpu {
                 headless.session.register_render_job_host(solidcraft_gpu::path::host().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             }
-            if auto && !render_gpu {
+            if auto {
                 // The app may start after the agent: look for it again until there is work here.
-                Box::new(solidcraft_mcp::Auto::new(headless, Box::new(discover_app), flag(args, "--token")))
+                Box::new(solidcraft_mcp::Auto::new(headless, Box::new(discover_app), flag(args, "--token")).with_render_gpu(render_gpu))
             } else {
                 Box::new(headless)
             }

@@ -87,17 +87,23 @@ fn mcp_rejects_unknown_flags_and_missing_values() {
 }
 
 #[test]
-fn mcp_render_gpu_rejects_auto_discovered_running_app() {
+fn mcp_render_gpu_bridges_to_auto_discovered_running_app_with_note() {
     let dir = Scratch::new("mcp-render-gpu");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::fs::write(dir.0.join("current.port"), format!("{port}\n")).unwrap();
     let output = cli().args(["mcp", "--render-gpu"]).env("SOLIDCRAFT_CONTROL_DIR", &dir.0).stdin(Stdio::null()).output().unwrap();
     drop(listener);
-    assert_eq!(output.status.code(), Some(1));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("connected application owns its own device"), "{stderr}");
-    assert!(stderr.contains("--headless"), "{stderr}");
+    assert!(stderr.contains("bridged to the running app"), "{stderr}");
+    assert!(stderr.contains("--render-gpu is ignored while bridged"), "{stderr}");
+
+    // Explicit --connect + --render-gpu is still refused.
+    let explicit = cli().args(["mcp", "--connect", "127.0.0.1:1234", "--render-gpu"]).stdin(Stdio::null()).output().unwrap();
+    assert_eq!(explicit.status.code(), Some(1));
+    let explicit_stderr = String::from_utf8_lossy(&explicit.stderr);
+    assert!(explicit_stderr.contains("connected application owns its own device"), "{explicit_stderr}");
 }
 
 #[test]
