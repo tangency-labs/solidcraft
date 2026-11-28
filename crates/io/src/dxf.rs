@@ -13,6 +13,7 @@ use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 // Shared X2 model; the partial reader below consumes the real metadata API.
 use crate::{DxfEntityWeight, DxfFile, DxfLayerId, DxfLinetype, DxfShape, DxfStandardWeight, IoError, Result};
 
+mod binary;
 mod source_import;
 mod text_entity;
 mod text_value;
@@ -29,8 +30,9 @@ impl ParsedDxf {
         if text.len() > MAX_DRAWING_BYTES {
             return Err(IoError::Invalid("the DXF file is too large".into()));
         }
+        // A binary DXF is read from its bytes (`dxf_text_from_bytes`); its text alone has lost them.
         if text.starts_with("AutoCAD Binary DXF") {
-            return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
+            return Err(IoError::Invalid("a binary DXF is read from its file, not as text: give its path".into()));
         }
         // A DWG renamed or picked as a drawing would otherwise read as "no ENTITIES section".
         if crate::is_dwg(text.as_bytes()) {
@@ -1339,6 +1341,10 @@ fn layered_declare_layer(record: &Ent, types: &LayeredLinetypes, file: &mut DxfF
 pub fn read_dxf(text: &str) -> Result<Vec<Geom2>> {
     read_dxf_file_with_profile(text, DxfReadProfile::SketchImport)?.sketch_geometry()
 }
+
+/// The DXF file's bytes as text for [`read_dxf`] and [`read_dxf_file`]: a binary DXF read into
+/// its ASCII groups, any other file as text.
+pub use binary::dxf_text_from_bytes;
 
 /// Borrow record boundaries from the already admitted token stream. Both
 /// entity admission and serialization tests use these same boundaries.

@@ -1556,6 +1556,10 @@ pub struct PrefsWindow {
     /// The Profile operations preference the profiler last followed: applied when it changes,
     /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
     applied_profile: Option<bool>,
+    /// The display quality this window's frame set up its views with ([`apply`]), so a result
+    /// waiting for it is adopted by what this window set, not by what the process-wide level
+    /// reads (another window in the process may have set it since).
+    drawn_quality: Option<solidcraft_engine::doc::display_quality::DisplayQuality>,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
     window_theme: Option<egui::SystemTheme>,
     /// Last observed OS tone, independent of the selected theme's tone.
@@ -2195,6 +2199,12 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
     }
 }
 
+/// The display quality this window's views are drawn at this frame: what its last [`apply`] set
+/// (the process-wide level before the first).
+pub(crate) fn drawn_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::DisplayQuality {
+    app.prefs_window.drawn_quality.unwrap_or_else(solidcraft_engine::doc::display_quality::current)
+}
+
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     crate::plugins::sync_policy(app);
@@ -2215,9 +2225,9 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_sketch_limit(&app.preferences);
     apply_tolerance_heal(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
-    solidcraft_engine::doc::display_quality::set_current(
-        solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
-    );
+    let quality = solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
+    solidcraft_engine::doc::display_quality::set_current(quality);
+    app.prefs_window.drawn_quality = Some(quality);
     // The view's up axis follows the preference (set in the dialog, by ui.prefs or loaded).
     if app.prefs_window.applied_up.as_deref() != Some(app.preferences.up_axis.as_str()) {
         up_axis_changed(app);
@@ -2345,7 +2355,7 @@ pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
 pub fn set_autosave(app: &mut SolveApp) {
     let m = app.autosave_minutes;
     if let Some(a) = app.autosave.as_mut() {
-        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::from_secs(u64::MAX / 4) };
+        a.interval = if m > 0.0 { std::time::Duration::from_secs_f64(m * 60.0) } else { std::time::Duration::MAX };
     }
 }
 
@@ -11391,6 +11401,40 @@ mod tests {
     }
 
     #[test]
+    fn a_keyboard_opened_saved_layout_menu_owns_keys_and_returns_focus() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        let before = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let list_focus = h.ctx.memory(|memory| memory.focused()).expect("clicking the saved tile focuses its list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some());
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "Down/Enter choose Delete within the menu");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "cancelling the confirmation keeps Preferences open");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "cancelling the confirmation restores the actual saved-layout list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some(), "the restored list accepts Shift+F10");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "closing the menu keeps Preferences open");
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_none(), "Escape closes only the tile menu");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "menu Escape restores the same list focus");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        let replace = crate::scenario::rect_of("prefs:panel_layout:menu_replace").expect("the next keyboard visit opens the menu");
+        let focused = h.ctx.memory(|memory| memory.focused()).and_then(|id| h.ctx.read_response(id)).expect("the reopened menu has a focused row");
+        assert!(replace.contains(focused.rect.center()), "the reopened menu focuses Replace rather than stale Delete: {:?}", focused.rect);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "closing the menu restores the list for the next keyboard visit");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+    }
+
+    #[test]
     fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
         let mut h = layout_page_with_a_saved_layout();
         let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
@@ -14226,16 +14270,25 @@ pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => "ui.ground_shadow_ellipse",
     };
     let mut mode = before;
+    let items: Vec<_> = ["off", "ellipse", "projected"]
+        .into_iter()
+        .map(|value| {
+            let mut item = ui_kit::Item::action(value, app.tr(label(value)), "");
+            item.checked = Some(mode == value);
+            item.radio = true;
+            item.aliases.push(format!("view:ground_shadow:{value}"));
+            item
+        })
+        .collect();
+    let was_open = ui_kit::dropdown_is_open(ui, "ground_shadow_mode");
     let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
-        for value in ["off", "ellipse", "projected"] {
-            let mut row = ui_kit::NavigationMenuRow::new(value, app.tr(label(value)), "");
-            row.selected = mode == value;
-            let choice = row.show(ui);
-            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
-            if choice.clicked() {
-                mode = value;
-                ui.close();
-            }
+        if let Some(picked) = ui_kit::Menu::items(ui, ui.make_persistent_id("ground_shadow_choices"), &items, !was_open).picked {
+            mode = match picked.id.as_str() {
+                "off" => "off",
+                "projected" => "projected",
+                _ => "ellipse",
+            };
+            ui.close();
         }
     });
     crate::scenario::publish_target("prefs:ground_shadow_style", response.rect);
@@ -15161,7 +15214,6 @@ mod settings_search_tests {
             for (query, native) in [
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
                 ("Preview panel placement while dragging", Some((Role::CheckBox, "prefs:live_panel_drag_preview"))),
-                ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
                 ("Position", None),

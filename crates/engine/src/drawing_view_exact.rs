@@ -891,4 +891,102 @@ mod tests {
         assert_eq!(parallel.covered, serial.covered);
         assert_eq!(parallel.uncertain, serial.uncertain);
     }
+
+    /// A quarter turn and the quarter back along the same circle do not join. They stay two arcs,
+    /// not one arc of sweep 0.
+    #[test]
+    fn opposing_arcs_on_one_circle_do_not_join() {
+        let c = Vec2::new(0.0, 0.0);
+        let mut path = vec![Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: FRAC_PI_2 }];
+        joined(&mut path, Seg2::Arc { center: c, radius: 5.0, start: FRAC_PI_2, sweep: -FRAC_PI_2 });
+        assert_eq!(
+            path,
+            vec![
+                Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: FRAC_PI_2 },
+                Seg2::Arc { center: c, radius: 5.0, start: FRAC_PI_2, sweep: -FRAC_PI_2 },
+            ]
+        );
+    }
+
+    /// An opposing arc does not shorten the one it meets. Half a turn, then a quarter back on the
+    /// same circle, stays two arcs and the first sweep is still half a turn.
+    #[test]
+    fn an_opposing_arc_does_not_shorten_the_first() {
+        let c = Vec2::new(0.0, 0.0);
+        let half = std::f64::consts::PI;
+        let mut path = vec![Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: half }];
+        joined(&mut path, Seg2::Arc { center: c, radius: 5.0, start: half, sweep: -FRAC_PI_2 });
+        assert_eq!(
+            path,
+            vec![Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: half }, Seg2::Arc { center: c, radius: 5.0, start: half, sweep: -FRAC_PI_2 },]
+        );
+    }
+
+    /// Sweeps of opposite sign do not continue each other, and a sweep of zero does not continue,
+    /// even on one circle when the second arc starts where the first ends.
+    #[test]
+    fn opposing_sweeps_do_not_continue() {
+        let c = Vec2::new(0.0, 0.0);
+        let arc = |start: f64, sweep: f64| (c, 5.0, start, sweep);
+        assert_eq!(
+            [
+                continues(arc(0.0, FRAC_PI_2), arc(FRAC_PI_2, -FRAC_PI_2)),
+                continues(arc(0.0, std::f64::consts::PI), arc(std::f64::consts::PI, -FRAC_PI_2)),
+                continues(arc(0.0, FRAC_PI_2), arc(FRAC_PI_2, 0.0)),
+            ],
+            [false, false, false]
+        );
+    }
+
+    /// Joining a sweep to one of the opposite sign, or to a zero sweep, is refused: not sweep 0
+    /// and not a shortened sweep.
+    #[test]
+    fn joined_sweep_of_opposing_or_zero_sweeps_is_none() {
+        assert_eq!(
+            [joined_sweep(FRAC_PI_2, -FRAC_PI_2), joined_sweep(std::f64::consts::PI, -FRAC_PI_2), joined_sweep(FRAC_PI_2, 0.0)],
+            [None, None, None]
+        );
+    }
+
+    /// Quarters of one sense still join. Two of sweep +pi/2 become one arc of sweep pi, and two of
+    /// sweep -pi/2 become one arc of sweep -pi.
+    #[test]
+    fn same_direction_quarters_still_join_into_half_a_turn() {
+        let c = Vec2::new(0.0, 0.0);
+        let mut path = Vec::new();
+        joined(&mut path, Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: FRAC_PI_2 });
+        joined(&mut path, Seg2::Arc { center: c, radius: 5.0, start: FRAC_PI_2, sweep: FRAC_PI_2 });
+        assert_eq!(path, vec![Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: std::f64::consts::PI }]);
+        let mut path = Vec::new();
+        joined(&mut path, Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: -FRAC_PI_2 });
+        joined(&mut path, Seg2::Arc { center: c, radius: 5.0, start: -FRAC_PI_2, sweep: -FRAC_PI_2 });
+        assert_eq!(path, vec![Seg2::Arc { center: c, radius: 5.0, start: 0.0, sweep: -std::f64::consts::PI }]);
+    }
+
+    /// A sum within 1e-9 of one full turn, on either side and in either sense, is exactly +2pi or -2pi.
+    /// In f64 both `|(TAU + 1e-9) - TAU|` and `|(TAU - 1e-9) - TAU|` are 1.000000082740371e-9,
+    /// which is greater than 1e-9.
+    #[test]
+    fn a_sum_within_1e_9_of_one_turn_is_exactly_one_turn() {
+        let tau = std::f64::consts::TAU;
+        assert_eq!(
+            [
+                joined_sweep(tau / 2.0, tau / 2.0 - 1e-9),
+                joined_sweep(tau / 2.0, tau / 2.0 + 1e-9),
+                joined_sweep(-tau / 2.0, -tau / 2.0 + 1e-9),
+                joined_sweep(-tau / 2.0, -tau / 2.0 - 1e-9),
+            ],
+            [Some(tau), Some(tau), Some(-tau), Some(-tau)]
+        );
+    }
+
+    /// A sum clearly past one turn stays refused. A sum clearly short of the 1e-9 window is kept
+    /// as that sum, not snapped to a full turn.
+    #[test]
+    fn a_sum_clearly_past_one_turn_is_refused_and_one_clearly_short_is_kept() {
+        let tau = std::f64::consts::TAU;
+        assert_eq!(joined_sweep(tau / 2.0, tau / 2.0 + 1e-8), None);
+        let sum = tau / 2.0 + (tau / 2.0 - 1e-8);
+        assert_eq!(joined_sweep(tau / 2.0, tau / 2.0 - 1e-8), Some(sum));
+    }
 }
