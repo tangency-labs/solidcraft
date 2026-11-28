@@ -28,6 +28,7 @@ use super::surface::{Analytic, S3};
 use super::trim::Trim;
 use super::vec::V3;
 use super::CurveAccuracy;
+use crate::math::det;
 use crate::math::Vec3;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -130,19 +131,20 @@ pub(crate) fn silhouettes(
             if rho <= 1e-12 {
                 return;
             }
-            let c = half.tan() * da / rho;
+            let c = det::tan(half) * da / rho;
             if c.abs() > 1. {
                 return;
             }
-            let phid = d2.atan2(d1);
+            let phid = det::atan2(d2, d1);
             let (h0, h1) = extent(parts, apex, a);
-            let (t0, t1) = (h0.max(0.) / half.cos(), h1.max(0.) / half.cos());
+            let (t0, t1) = (h0.max(0.) / det::cos(half), h1.max(0.) / det::cos(half));
             if !(t1 > t0) {
                 return;
             }
             for sign in [1., -1.] {
-                let phi = phid + sign * c.acos();
-                let g = a * half.cos() + (e1 * phi.cos() + e2 * phi.sin()) * half.sin();
+                let phi = phid + sign * det::acos(c);
+                let g =
+                    a * det::cos(half) + (e1 * det::cos(phi) + e2 * det::sin(phi)) * det::sin(half);
                 push(
                     C3::Line {
                         a: apex + g * t0,
@@ -461,7 +463,7 @@ pub(crate) fn closest_param(c: &C3, p: Vec3) -> Option<f64> {
         }
         C3::Arc { o, x, y, r, range } => {
             let w = p - *o;
-            let t = (w.dot(*y) / r[1]).atan2(w.dot(*x) / r[0]);
+            let t = det::atan2(w.dot(*y) / r[1], w.dot(*x) / r[0]);
             // The turn of t that falls in the range, if any.
             let k = ((range[0] - t) / TAU).ceil();
             let t = t + k * TAU;

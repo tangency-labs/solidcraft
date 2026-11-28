@@ -256,6 +256,8 @@ surface_match
   remap_bodies: body
 surface_fair
   remap_bodies: body
+surface_morph
+  remap_bodies: base, body, control
 unstitch
   remap_bodies: body
 reverse_normal

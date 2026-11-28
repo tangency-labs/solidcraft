@@ -13,10 +13,10 @@
 //!
 //! Deviations: no upstream counterpart. No recursion.
 
-use crate::kernel::Kernel;
-use crate::math::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
+use crate::kernel::Kernel;
+use crate::math::{det, Vec3};
 use crate::prism::profile::{Loop2, Region2, Seg2};
 use crate::{Brep, Result};
 
@@ -145,7 +145,7 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
     };
     if !original.is_finite()
         || original <= 0.
-        || (volume - original).abs() > area * tolerance + epsilon * size.powi(2)
+        || (volume - original).abs() > area * tolerance + epsilon * det::powi(size, 2)
     {
         return Ok(None);
     }

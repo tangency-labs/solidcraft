@@ -1195,6 +1195,8 @@ struct TabsRig {
     focused: std::cell::Cell<bool>,
     /// The first design's sub-tabs are folded into its tab.
     collapsed: std::cell::Cell<bool>,
+    /// A double-click renames ([`TabStrip::double_click_renames`]); on unless a test turns it off.
+    renames: std::cell::Cell<bool>,
 }
 
 impl TabsRig {
@@ -1229,6 +1231,7 @@ impl TabsRig {
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
             collapsed: std::cell::Cell::new(false),
+            renames: std::cell::Cell::new(true),
         };
         rig.frame(Vec::new());
         rig
@@ -1290,7 +1293,7 @@ impl TabsRig {
             shown_selected: Some(0),
             pop_out: self.pop_out,
             title_bar: false,
-            double_click_renames: true,
+            double_click_renames: self.renames.get(),
             rename: None,
             menu: &TAB_MENU,
             close_name: "Close tab",
@@ -1342,6 +1345,18 @@ impl TabsRig {
         let mut actions = self.frame(vec![egui::Event::PointerMoved(at)]);
         actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)]));
         actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)]));
+        actions
+    }
+
+    /// Two clicks at `at` close enough together to be a double-click.
+    fn double_press(&self, at: Pos2) -> Vec<TabAction> {
+        self.time.set(self.time.get() + 1.0);
+        let event = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = self.frame(vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..2 {
+            actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)]));
+            actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)]));
+        }
         actions
     }
 
@@ -1739,6 +1754,23 @@ fn the_chevron_folds_a_designs_sub_tabs_into_its_tab() {
     rig.pop_out = true;
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("t:vcollapse").is_none(), "a pop-out's strip has no chevron");
+}
+
+/// A double-click on a sub-tab shows the view (its first click) and then asks to rename it through
+/// the view menu's Rename row, in both sub-tab styles; with double-click renaming off, both clicks
+/// only show the view, as before.
+#[test]
+fn a_double_click_on_a_sub_tab_renames_its_view() {
+    for clear in [false, true] {
+        for renames in [true, false] {
+            let mut rig = TabsRig::with(Some(true));
+            rig.clear = clear;
+            rig.renames.set(renames);
+            rig.frame(Vec::new());
+            let second = if renames { TabAction::ViewMenu { view: 1, id: "vrename".into() } } else { TabAction::SelectView(1) };
+            assert_eq!(rig.double_press(rig.at("t:view:1")), vec![TabAction::SelectView(1), second], "clear={clear}, renames={renames}");
+        }
+    }
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.

@@ -1,5 +1,6 @@
 //! Closed mesh fixtures use explicit input triangles, independent of a display tessellator.
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::surface::face_surface::{face_surface, record_face};
@@ -75,7 +76,7 @@ fn circular_points(center: Vec2, radius: f64, count: usize, phase: f64) -> Vec<V
     (0..count)
         .map(|i| {
             let angle = (i as f64 + phase) * TAU / count as f64;
-            center + Vec2::new(angle.cos(), angle.sin()) * radius
+            center + Vec2::new(det::cos(angle), det::sin(angle)) * radius
         })
         .collect()
 }
@@ -83,9 +84,9 @@ fn circular_points(center: Vec2, radius: f64, count: usize, phase: f64) -> Vec<V
 fn move_mesh(mesh: &mut TriMesh, angle: f64, offset: Vec3, f32_input: bool) {
     let normal = normalize(Vec3::new(1., 2., 3.)).unwrap();
     for p in &mut mesh.positions {
-        let q = *p * angle.cos()
-            + normal.cross(*p) * angle.sin()
-            + normal * (normal.dot(*p) * (1. - angle.cos()))
+        let q = *p * det::cos(angle)
+            + normal.cross(*p) * det::sin(angle)
+            + normal * (normal.dot(*p) * (1. - det::cos(angle)))
             + offset;
         *p = if f32_input {
             Vec3::new(
@@ -375,7 +376,7 @@ fn notch() -> Vec<Vec2> {
     let mut points = vec![Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(20., 12.)];
     points.extend((0..=48).map(|i| {
         let angle = -f64::from(i) * PI / 48.;
-        Vec2::new(10. + 4. * angle.cos(), 12. + 4. * angle.sin())
+        Vec2::new(10. + 4. * det::cos(angle), 12. + 4. * det::sin(angle))
     }));
     points.push(Vec2::new(0., 12.));
     points
@@ -471,8 +472,8 @@ fn phase_shifted_stepped_cylinder() -> TriMesh {
         for i in 0..n {
             let angle = (i as f64 + phase) * TAU / n as f64;
             positions.push(Vec3::new(
-                f64::from((radius * angle.cos()) as f32),
-                f64::from((radius * angle.sin()) as f32),
+                f64::from((radius * det::cos(angle)) as f32),
+                f64::from((radius * det::sin(angle)) as f32),
                 z,
             ));
         }
@@ -616,8 +617,8 @@ fn octahedron(radius: f64) -> TriMesh {
             let b = f64::from(i + 1) * PI / 2.;
             faces.push(vec![
                 Vec3::new(0., 0., z),
-                Vec3::new(radius * a.cos(), radius * a.sin(), 0.),
-                Vec3::new(radius * b.cos(), radius * b.sin(), 0.),
+                Vec3::new(radius * det::cos(a), radius * det::sin(a), 0.),
+                Vec3::new(radius * det::cos(b), radius * det::sin(b), 0.),
             ]);
         }
     }
@@ -831,7 +832,7 @@ fn a_fitted_hole_that_crosses_a_near_wall_keeps_its_source_facets() {
     let result = reconstruct(&mut k, &mesh.positions, &mesh.triangles, 0.05).unwrap();
     assert_eq!(result.kind, ReconstructionKind::Faceted);
     assert_eq!(result.body.face_list().len(), 18);
-    let expected = (4. - 6. * 1.02f64.powi(2) * (PI / 6.).sin()) * 3.;
+    let expected = (4. - 6. * det::powi(1.02f64, 2) * det::sin(PI / 6.)) * 3.;
     assert_volume(&mut k, &mut { result.body }, expected, 1e-7);
 }
 
@@ -992,8 +993,8 @@ fn rotated_f32_parallel_shoulders_keep_their_analytic_contacts() {
         for i in 0..n {
             let angle = (i as f64 + phase) * TAU / n as f64;
             mesh.positions.push(Vec3::new(
-                f64::from((radius * angle.cos()) as f32),
-                f64::from((radius * angle.sin()) as f32),
+                f64::from((radius * det::cos(angle)) as f32),
+                f64::from((radius * det::sin(angle)) as f32),
                 z,
             ));
         }
@@ -1051,20 +1052,24 @@ fn bored_block(crossing: bool) -> TriMesh {
     // A point of the X bore's wall from its length round the bore and its x.
     let on_x_bore = |p: Vec2| {
         let angle = p.x / big;
-        Vec3::new(p.y, 20. + big * angle.cos(), x_axis_z + big * angle.sin())
+        Vec3::new(
+            p.y,
+            20. + big * det::cos(angle),
+            x_axis_z + big * det::sin(angle),
+        )
     };
     // Each angle round the X bore, with the half length along X of the opening there, if any.
     let mut angles: Vec<(f64, Option<f64>)> = (0..=192)
         .map(|i| {
             let angle = f64::from(i) * TAU / 192.;
-            let across = big * angle.sin();
-            let opening =
-                (crossing && across.abs() < small).then(|| (small.powi(2) - across.powi(2)).sqrt());
+            let across = big * det::sin(angle);
+            let opening = (crossing && across.abs() < small)
+                .then(|| (det::powi(small, 2) - det::powi(across, 2)).sqrt());
             (angle, opening)
         })
         .collect();
     if crossing {
-        let tip = (small / big).asin();
+        let tip = det::asin(small / big);
         angles.extend([tip, PI - tip, PI + tip, TAU - tip].map(|angle| (angle, Some(0.))));
         angles.sort_by(|a, b| a.0.total_cmp(&b.0));
     }
@@ -1176,8 +1181,11 @@ fn bored_block(crossing: bool) -> TriMesh {
 fn crossing_cylinders_volume(big: f64, small: f64) -> f64 {
     let steps = 2000;
     let h = FRAC_PI_2 / f64::from(steps);
-    let f =
-        |u: f64| small.powi(2) * u.cos().powi(2) * (big.powi(2) - (small * u.sin()).powi(2)).sqrt();
+    let f = |u: f64| {
+        det::powi(small, 2)
+            * det::powi(det::cos(u), 2)
+            * (det::powi(big, 2) - det::powi(small * det::sin(u), 2)).sqrt()
+    };
     let sum: f64 = (0..=steps)
         .map(|i| {
             let weight = if i == 0 || i == steps {

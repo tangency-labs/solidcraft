@@ -3316,6 +3316,7 @@ mod face_snap_tests {
                 .map(|f| match f.surface {
                     Surface::Cone { .. } => "cone",
                     Surface::Blend { .. } => "blend",
+                    Surface::Sweep { .. } => "sweep",
                     Surface::BallPatch { .. } => "ball",
                     Surface::PlacedRevolution { .. } => "revolution",
                     _ => "other",

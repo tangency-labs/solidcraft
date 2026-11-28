@@ -14646,6 +14646,24 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 /// of nested ones; perforated plates and perfboard grids need a few thousand (#3042).
 const MAX_INSTANCES: usize = 10_000;
 
+const PATTERN_SPACING_COORDINATE_RANGE: &str = "A pattern copy would lie beyond the supported coordinate range. Reduce the spacing or count.";
+const PATTERN_CIRCULAR_COORDINATE_RANGE: &str = "A pattern copy would lie beyond the supported coordinate range. Adjust the axis, angle, or count.";
+
+/// Move a copy using the same record checks as any other transform, with advice for the pattern
+/// whose copy fails the coordinate ceiling.
+fn transform_pattern_copy(kind: &FeatureKind, body: &Body, matrix: Mat) -> Result<Body> {
+    kernel::transform_matrix(body, matrix).map_err(|e| match (e, kind) {
+        (kernel::KernelError::CoordinateCeiling, FeatureKind::Pattern { pattern, .. }) => {
+            let message = match pattern {
+                crate::PatternKind::Rectangular { .. } | crate::PatternKind::Path { .. } => PATTERN_SPACING_COORDINATE_RANGE,
+                crate::PatternKind::Circular { .. } => PATTERN_CIRCULAR_COORDINATE_RANGE,
+            };
+            DocError::Invalid(message.into())
+        }
+        (e, _) => e.into(),
+    })
+}
+
 /// Prepared source body and per-instance transforms for one source body of a body pattern.
 struct PreparedPatternBody {
     mb: ModelBody,
@@ -14801,7 +14819,7 @@ fn pattern_bodies(
     let run_one = |&(s, k): &(usize, usize)| -> Result<Body> {
         let Some(Ok(p)) = prepared.get(s) else { return Err(DocError::Invalid("pattern body".into())) };
         let Some(&local) = p.locals.get(k) else { return Err(DocError::Invalid("pattern transform".into())) };
-        Ok(kernel::transform_matrix(&p.mb.body, local)?)
+        transform_pattern_copy(&f.kind, &p.mb.body, local)
     };
     let mut transformed = if jobs.len() > 1 {
         kernel::map_on_threads(&jobs, 16, run_one)
@@ -16799,7 +16817,7 @@ fn replay(
                 let start = copies.len();
                 for t in &tools {
                     let recipe = t.recipe.map(|r| moved_recipe(r, m, src.id, first + k + 1));
-                    copies.push(t.copied(kernel::transform_matrix(&t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
+                    copies.push(t.copied(transform_pattern_copy(&f.kind, &t.body, *m)?, src.id, first + k + 1).with_recipe(recipe));
                 }
                 instances.push(start..copies.len());
             }
@@ -17163,7 +17181,7 @@ fn replay(
             for (k, m) in mats.iter().enumerate() {
                 for (mb, at) in made.iter().zip(&made_in) {
                     let m = at.map_or(*m, |at| crate::mat_mul(m, &at));
-                    let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, m)?, first + k + 1);
+                    let moved = moved_copy(mb, transform_pattern_copy(&f.kind, &mb.body, m)?, first + k + 1);
                     let name = copy_body_name(st, f, output, &mb.name);
                     st.bodies.push(ModelBody::traced_new(name, moved, f.id));
                     output += 1;
@@ -18996,6 +19014,7 @@ fn eval_feature_kind(
         | FeatureKind::SurfaceNetwork { .. }
         | FeatureKind::SurfaceMatch { .. }
         | FeatureKind::SurfaceFair { .. }
+        | FeatureKind::SurfaceMorph { .. }
         | FeatureKind::SurfaceOffset { .. }
         | FeatureKind::SurfaceMidsurface { .. }
         | FeatureKind::SurfaceRuled { .. }

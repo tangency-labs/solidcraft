@@ -42,6 +42,7 @@
 //! - Cancellation: `offset_cancellable` (crate-private) passes a cancel token (#2136, #2372) to its profile offsets; `offset` and `offset_with` pass none.
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
+use crate::math::det;
 use crate::math::{max2, Vec3};
 use crate::nurbs::crv_basic::{ConicType, Curve};
 use crate::nurbs::crv_fit::p1::interp_knot_vector;
@@ -452,7 +453,7 @@ impl Surface {
         }
 
         let mut f1 = 1.0 / tol;
-        f1 = f1.powf(exp);
+        f1 = det::powf(f1, exp);
         let pq = pp.max(qq);
         let f2 = 2.0 * pq as f64;
 
@@ -1037,7 +1038,7 @@ mod tests {
         let s = grid(5, 5, |x, y| 300.0 * (x * x - y * y) + 100.0 * x * y);
         let tol: f64 = 1e-4;
         // The sample count of some patch exceeds `slm`.
-        let f1 = (1.0 / tol).powf(0.34);
+        let f1 = det::powf(1.0 / tol, 0.34);
         let big = decompose_to_bez(&s).unwrap().iter().flatten().any(|b| {
             let mut b = b.clone();
             b.reparam_to_interval(UNIT_SQUARE, Direction::UV).unwrap();

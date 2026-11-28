@@ -1503,7 +1503,7 @@ pub struct TabStrip<'a> {
     /// The tabs are part of the window's title bar: a double click maximizes it (unless it
     /// renames). Dragging a tab never moves the window; only empty bar space does.
     pub title_bar: bool,
-    /// A double click on the selected tab renames it.
+    /// A double click on the selected tab renames it, and one on a view's sub-tab renames the view.
     pub double_click_renames: bool,
     pub rename: Option<TabRename<'a>>,
     pub menu: &'a [crate::Item],
@@ -2329,7 +2329,8 @@ fn start_view_drag(ui: &egui::Ui, response: &egui::Response, tab: Rect, from: us
 }
 
 /// One view's sub-tab in `vr`: icon, label, the shown view's underline and close button; a click
-/// shows it, a middle click closes it, a right click opens its menu, a drag starts a move.
+/// shows it, a double-click renames it (with [`TabStrip::double_click_renames`]), a middle click
+/// closes it, a right click opens its menu, a drag starts a move.
 fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: Rect, pen: &mut Pen) {
     let t = Tokens::get();
     let h = strip.handles;
@@ -2450,6 +2451,10 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     } else if resp.secondary_clicked() || (resp.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10))) {
         claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
+    } else if resp.double_clicked() && !dragged && strip.double_click_renames {
+        // The first click of the two showed the view; the second names it, as on a design's tab,
+        // through the view menu's Rename row, as F2 and the clear sub-tabs do.
+        pen.actions.push(TabAction::ViewMenu { view: k, id: strip.view_rename_row.into() });
     } else if resp.clicked() && !dragged {
         resp.request_focus();
         pen.actions.push(TabAction::SelectView(k));
@@ -2686,7 +2691,8 @@ fn draw_clear_view(
         clear_view_navigation(ui, k, visible);
     }
     let key = |key| response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
-    if !remote && (response.double_clicked() || key(egui::Key::F2)) {
+    // A double-click renames with `double_click_renames`; F2 always does.
+    if !remote && ((response.double_clicked() && strip.double_click_renames) || key(egui::Key::F2)) {
         pen.actions.push(TabAction::ViewMenu { view: k, id: strip.view_rename_row.into() });
     } else if !remote && key(egui::Key::Space) {
         pen.actions.push(TabAction::LiftView { view: k, origin: rect });
