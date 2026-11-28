@@ -4359,3 +4359,88 @@ fn coil_plane_pick_replaces_the_previous_point_placement_and_clears_to_origin() 
         assert_eq!(h.app.session.doc.to_json(), authored);
     }
 }
+
+/// Replacing a saved Coil placement must not leave an invisible base to restore on Clear.
+#[test]
+fn editing_a_coil_plane_then_clearing_profile_uses_the_origin() {
+    for boxed in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":50,"name":"Plane1"})).unwrap();
+        h.app
+            .run("solid.coil", json!({"name":"Coil","base":[7,8,9],"axis":[0,0,1],"diameter":40,"revolutions":2,"pitch":8,"section_size":3}))
+            .unwrap();
+        let feature = h.app.session.doc.find_feature("Coil").unwrap().id;
+        let authored = h.app.session.doc.to_json();
+        let mut d = for_feature(&h.app, feature, None).unwrap();
+        d.preview_enabled = false;
+        assert_eq!(coil_plane_coordinates(&h, &d.extra["base"]), [7.0, 8.0, 9.0]);
+        assert_eq!(coil_plane_coordinates(&h, &d.extra["axis"]), [0.0, 0.0, 1.0]);
+        for commands in [preview_commands(&h.app, &d).unwrap(), apply_commands(&h.app, &d).unwrap()] {
+            assert_eq!(commands[0].0, "timeline.redefine");
+            let p = &commands[0].1["params"];
+            assert_eq!(coil_plane_coordinates(&h, &p["base"]), [7.0, 8.0, 9.0], "an unchanged edit retains saved placement");
+            assert_eq!(coil_plane_coordinates(&h, &p["axis"]), [0.0, 0.0, 1.0]);
+        }
+        d.active = 0;
+        let plane = Sel::Plane { name: "Plane1".into() };
+        if boxed {
+            d.take_box(&h.app.session, vec![plane], false);
+        } else {
+            d.pick(&h.app.session, plane);
+        }
+        d.extra.insert("axis".into(), json!("Y"));
+        for commands in [preview_commands(&h.app, &d).unwrap(), apply_commands(&h.app, &d).unwrap()] {
+            let p = &commands[0].1["params"];
+            assert_eq!(coil_plane_coordinates(&h, &p["base"]), [0.0, 0.0, 50.0]);
+            assert_eq!(p["axis"], json!("Y"));
+        }
+        h.app.dialog = Some(d);
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:clear:Profile"}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(d.inputs[0].items.is_empty());
+        for commands in [preview_commands(&h.app, d).unwrap(), apply_commands(&h.app, d).unwrap()] {
+            assert_eq!(commands[0].0, "timeline.redefine");
+            let p = &commands[0].1["params"];
+            assert!(p.get("base").is_none(), "clearing the replacement plane must not resurrect the saved base, boxed={boxed}: {p}");
+            assert_eq!(p["axis"], json!("Y"), "typed Direction survives placement clearing");
+        }
+        assert_eq!(h.app.session.doc.to_json(), authored, "building preview and OK commands does not author a change");
+    }
+}
+
+/// An explicit Axis continues to supply its own origin after the edited Profile is cleared.
+#[test]
+fn editing_a_coil_plane_then_clearing_profile_keeps_the_explicit_axis() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":50,"name":"Plane1"})).unwrap();
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[20,10,-20]},"b":{"point":[40,10,-20]},"name":"CoilAxis"})).unwrap();
+    h.app.run("solid.coil", json!({"name":"Coil","base":[7,8,9],"axis":[0,0,1],"diameter":40,"revolutions":2,"pitch":8,"section_size":3})).unwrap();
+    let feature = h.app.session.doc.find_feature("Coil").unwrap().id;
+    let authored = h.app.session.doc.to_json();
+    let mut d = for_feature(&h.app, feature, None).unwrap();
+    d.preview_enabled = false;
+    assert_eq!(coil_plane_coordinates(&h, &d.extra["base"]), [7.0, 8.0, 9.0]);
+    assert_eq!(coil_plane_coordinates(&h, &d.extra["axis"]), [0.0, 0.0, 1.0]);
+    d.active = 0;
+    d.pick(&h.app.session, Sel::Plane { name: "Plane1".into() });
+    d.active = 1;
+    d.pick(&h.app.session, Sel::Axis { name: "CoilAxis".into() });
+    h.app.dialog = Some(d);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:clear:Profile"}})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs[0].items.is_empty());
+    assert_eq!(d.inputs[1].items, vec![Sel::Axis { name: "CoilAxis".into() }]);
+    for commands in [preview_commands(&h.app, d).unwrap(), apply_commands(&h.app, d).unwrap()] {
+        assert_eq!(commands[0].0, "timeline.redefine");
+        let p = &commands[0].1["params"];
+        assert_eq!(p["axis"], json!("CoilAxis"), "the explicit Axis remains linked");
+        assert_eq!(coil_plane_coordinates(&h, &p["base"]), [20.0, 10.0, -20.0]);
+    }
+    assert_eq!(h.app.session.doc.to_json(), authored);
+}

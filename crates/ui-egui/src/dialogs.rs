@@ -2350,6 +2350,7 @@ impl Dialog {
         }
         // A new placement plane replaces the saved direction; the Direction field can override it afterward.
         if self.active == 0 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }) && matches!(sel, Sel::Plane { .. }) {
+            self.extra.remove("base");
             self.extra.remove("axis");
             if let Kind::Primitive { at, .. } = &mut self.kind {
                 *at = None;
@@ -2540,6 +2541,7 @@ impl Dialog {
             && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. })
             && self.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. }))
         {
+            self.extra.remove("base");
             self.extra.remove("axis");
             if let Kind::Primitive { at, .. } = &mut self.kind {
                 *at = None;
