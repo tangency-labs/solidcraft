@@ -42,12 +42,19 @@ BASENAME="solidcraft-$VERSION-linux-$ARCH"
 
 echo "==> SolidCraft $VERSION for Linux $ARCH ($FORMATS)"
 
+# Release CI opts in to an embedded dependency record for cargo audit bin. Local builds
+# keep using ordinary Cargo unless explicitly requested.
+CARGO_BUILD=(cargo build)
+if [ "${SOLIDCRAFT_AUDITABLE:-0}" = 1 ]; then
+  CARGO_BUILD=(cargo auditable build)
+fi
+
 if [ "$SKIP_BUILD" = 0 ]; then
   if [ -n "${CROSS_TARGET:-}" ]; then
-    (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli --target "$CROSS_TARGET")
+    (cd "$ROOT" && "${CARGO_BUILD[@]}" --release --locked -p solidcraft -p solidcraft-cli --target "$CROSS_TARGET")
     BIN="$CARGO_TARGET_DIR/$CROSS_TARGET/release"
   else
-    (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli)
+    (cd "$ROOT" && "${CARGO_BUILD[@]}" --release --locked -p solidcraft -p solidcraft-cli)
     BIN="$CARGO_TARGET_DIR/release"
   fi
 else
@@ -65,6 +72,14 @@ rm -rf "$WORK"
 install -Dm755 "$BIN/solidcraft" "$STAGE/usr/bin/solidcraft"
 install -Dm755 "$BIN/solidcraft-cli" "$STAGE/usr/bin/solidcraft-cli"
 strip "$STAGE/usr/bin/solidcraft" "$STAGE/usr/bin/solidcraft-cli" 2>/dev/null || true
+if [ "${SOLIDCRAFT_AUDITABLE:-0}" = 1 ]; then
+  for exe in solidcraft solidcraft-cli; do
+    if ! readelf --wide --section-headers "$STAGE/usr/bin/$exe" | grep -F '.dep-v0' >/dev/null; then
+      echo "error: $exe has no dependency audit metadata after stripping" >&2
+      exit 1
+    fi
+  done
+fi
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
 # solidcraft:// links: a hidden entry of their own, so the visible one opens files as it always has.
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.workshop-links.desktop" "$STAGE/usr/share/applications/$APP_ID.workshop-links.desktop"
