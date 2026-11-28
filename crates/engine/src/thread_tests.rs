@@ -3212,4 +3212,14 @@ fn a_thread_through_an_earlier_cross_hole_keeps_its_length() {
             assert!((lo - want.0).abs() < 1e-6 && (hi - want.1).abs() < 1e-6, "{thread}: thread spans x {lo}..{hi}, not {want:?}");
         }
     }
+    // Both pieces picked: one thread, the whole bore.
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "solid.cylinder", cross);
+    let faces = json!([{"body": "Block", "point": [0.5, 2.1, 0]}, {"body": "Block", "point": [20, 2.1, 0]}]);
+    run(&mut s, "solid.thread", json!({"faces": faces, "designation": "M5"}));
+    let st = s.model.state();
+    assert_eq!(st.threads.len(), 1, "{:?}", st.threads);
+    let length = (st.threads[0].end - st.threads[0].start).abs();
+    assert!((length - 30.0).abs() < 1e-6, "{length}");
 }
