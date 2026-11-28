@@ -159,6 +159,32 @@ pub(crate) fn det3(m: &[[f64; 4]; 3]) -> f64 {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
+/// The axis and radians of a turn followed by a turn about a fixed world axis.
+/// Collinear turns retain the first axis and the full signed angle (including winding).
+pub fn compose_turn(first: Vec3, radians: f64, world: Vec3, turn: f64) -> Option<(Vec3, f64)> {
+    if !radians.is_finite() || !turn.is_finite() {
+        return None;
+    }
+    let (_, a) = first.length_and_unit()?;
+    let (_, b) = world.length_and_unit()?;
+    if a == b || a == -b {
+        let sum = radians + if a == b { turn } else { -turn };
+        return sum.is_finite().then_some((a, sum));
+    }
+    if radians == 0.0 {
+        return Some((b, turn));
+    }
+    // Quaternion product: the new world turn acts last, hence multiplies on the left.
+    let (s, c) = (radians * 0.5).sin_cos();
+    let (t, d) = (turn * 0.5).sin_cos();
+    let (u, v) = (a * s, b * t);
+    let vector = u * d + v * c + v.cross(u);
+    Some(match vector.length_and_unit() {
+        Some((len, axis)) => (axis, 2.0 * len.atan2(c * d - v.dot(u))),
+        None => (b, 0.0),
+    })
+}
+
 /// An affine 3D transform stored as upstream's row-vector 4×4 matrix
 /// (`SmTransform::m_adT`): `out = [p.x p.y p.z 1] * m`.
 ///
@@ -176,6 +202,12 @@ impl Default for Transform {
 }
 
 impl Transform {
+    /// Signed volume scale of the linear part. A reflection reverses its sign.
+    #[must_use]
+    pub fn linear_determinant(&self) -> f64 {
+        self.x_axis().triple_product(self.y_axis(), self.z_axis())
+    }
+
     /// The identity transform.
     pub const IDENTITY: Self = Self {
         m: [
@@ -1451,6 +1483,19 @@ pub fn left_side_inside_circle_2d(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transform_face_turn_composition_respects_world_order_and_winding() {
+        let (axis, angle) = compose_turn(Vec3::X, HALF_PI, Vec3::Y, HALF_PI).unwrap();
+        let combined = Transform::rotation(Point3::ZERO, axis, angle).unwrap();
+        // X takes Y to Z, then Y takes Z to X. Reversing the two turns gives Z.
+        assert!((combined.transform_vector(Vec3::Y) - Vec3::X).length() < 1e-10);
+        assert_eq!(
+            compose_turn(Vec3::Z, TWO_PI, -Vec3::Z, HALF_PI),
+            Some((Vec3::Z, TWO_PI - HALF_PI))
+        );
+        assert_eq!(compose_turn(Vec3::X, 0.0, Vec3::ZERO, HALF_PI), None);
+    }
 
     /// Rounding below `noise` along a world axis is dropped and the axes come back unit; a plane
     /// tilted for real, and one with nothing to drop, keep their axes; parallel, empty or

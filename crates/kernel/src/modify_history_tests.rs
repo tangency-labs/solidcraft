@@ -329,6 +329,32 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
+#[test]
+fn transform_face_tracks_the_retrimmed_cap_and_the_stationary_floor() {
+    let b = cube();
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let floor = Vec3::new(20.0, 15.0, 0.0);
+    let raised = crate::transform_face(&b, top, Vec3::Z * 2.0, top, Vec3::Z, 0.0).unwrap();
+    let h = verified(&raised, &b, Reach { made: 0.0, moved: 2.1 });
+    for (before, after, change) in [(top, top + Vec3::Z * 2.0, Change::Modified), (floor, floor, Change::Kept)] {
+        let i = raised.face_at_point(after).unwrap().unwrap();
+        assert_eq!(h.faces[i].origins, [face(b.face_at_point(before).unwrap().unwrap())]);
+        assert_eq!(h.faces[i].change, change);
+    }
+}
+
+#[test]
+fn transform_face_noop_records_identity_over_the_rounded_input() {
+    let b = cube();
+    let rounded = crate::fillet(&b, &[Vec3::new(20.0, 30.0, 20.0)], 5.0).unwrap();
+    assert!(rounded.rounds().is_some() && rounded.face_count() > b.face_count());
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let slide = crate::transform_face(&rounded, top, Vec3::X, top, Vec3::Z, 0.0).unwrap();
+    assert!(slide.same(&rounded));
+    assert_eq!(slide.history(), Some(&History::identity(&rounded)));
+    assert!(slide.rounds().is_none());
+}
+
 /// A narrow annular end must be picked on its exact trims, independently of the body's length
 /// (and hence the chord tolerance of the old picking mesh).
 #[test]

@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{DeleteFaceParams, OffsetFaceParams};
+use super::{DeleteFaceParams, OffsetFaceParams, TransformFaceParams};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -151,4 +151,120 @@ fn face_edits_reply_with_their_schemas() {
     assert!(r["param_warnings"].to_string().contains("heel"), "{r}");
     let error = holed_plate(ParamCheck::Strict).execute("face.delete", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`heel`"), "{error}");
+}
+
+const TRANSFORM_FACE: &str = "solid.transform_face";
+
+#[test]
+fn transform_face_schema_and_reply_cover_each_input_form() {
+    assert_keys(
+        input_schema_for::<TransformFaceParams>(),
+        &["angle", "axis", "body", "body_name", "body_names", "face", "name", "origin", "participants", "translate"],
+    );
+    let schema = input_schema_for::<TransformFaceParams>();
+    let output = output_schema_for::<FeatureResult>();
+    let mut s = cube(ParamCheck::Warn);
+    let faces = s.execute("model.faces", &json!({"body": "Box"})).unwrap();
+    let name = faces["faces"].as_array().unwrap().iter().find(|f| f["point"][2].as_f64() == Some(20.0)).unwrap()["name"].as_str().unwrap();
+    for p in [
+        json!({"face": [10,10,20], "translate": [0,0,0]}),
+        json!({"face": {"x":10,"y":10,"z":20}, "angle": 0, "axis":" x "}),
+        json!({"face":{"point":[10,10,20]}, "translate":{"x":0,"y":"0 mm","z":0}, "axis":{"x":0,"y":2,"z":0}, "origin":{"x":0,"y":0,"z":20}}),
+        json!({"face": name, "body": "Box", "angle": "0 deg", "axis": [2,0,0], "origin": ["2 * 1 mm",0,20], "translate": [0,0,"2 mm"], "name": "Lift"}),
+    ] {
+        assert!(conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+        assert!(crate::schema::issues(TRANSFORM_FACE, &p).is_empty(), "{p}");
+        let out = s.execute(TRANSFORM_FACE, &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(output.as_value(), output.as_value(), &out), "{out}");
+        assert!(out.get("param_warnings").is_none(), "{out}");
+        if p["face"].is_string() {
+            assert_eq!(out["changed_bodies"], json!(["Box"]));
+            assert_eq!(s.doc.feature(out["feature"].as_u64().unwrap()).unwrap().face_names, [name]);
+        }
+    }
+}
+
+#[test]
+fn transform_face_rejects_bad_shapes_and_dimensions_before_adding() {
+    let schema = input_schema_for::<TransformFaceParams>();
+    let base = json!({"face":[10,10,20],"angle":0});
+    let with = |key: &str, value: Value| {
+        let mut p = base.clone();
+        p[key] = value;
+        p
+    };
+    let shapes = [
+        json!({"angle":0}),
+        json!({"face":[10,10,20]}),
+        with("face", Value::Null),
+        with("face", json!([[10, 10, 20], [5, 5, 0]])),
+        with("face", json!({"point":[10,10]})),
+        with("face", json!("")),
+        with("body", Value::Null),
+        with("body", json!(["Box"])),
+        with("translate", Value::Null),
+        with("translate", json!([0, 0])),
+        with("translate", json!([true, 0, 0])),
+        with("angle", Value::Null),
+        with("angle", json!(false)),
+        with("angle", json!("")),
+        with("origin", Value::Null),
+        with("origin", json!({"x":0, "z":0})),
+        with("origin", json!([0, 0, 0, 0])),
+        with("axis", Value::Null),
+        with("axis", json!([1, "0 mm", 0])),
+        with("axis", json!([1, 0])),
+        with("copy", json!(true)),
+        with("matrix", json!([])),
+        with("scale", json!(1)),
+        with("bodies", json!(["Box"])),
+        with("faces", json!([[10, 10, 20]])),
+        with("name", json!(10)),
+        with("body_name", json!(false)),
+        with("body_names", json!([0])),
+        with("participants", json!([false])),
+    ];
+    for p in &shapes {
+        assert!(!conforms(schema.as_value(), schema.as_value(), p), "{p}");
+        assert!(!crate::schema::issues(TRANSFORM_FACE, p).is_empty(), "{p}");
+    }
+    let no_motion = json!({"face":[10,10,20],"origin":[0,0,0],"axis":"Z"});
+    assert!(!conforms(schema.as_value(), schema.as_value(), &no_motion));
+    let values = [
+        no_motion,
+        with("angle", json!("2 mm")),
+        with("angle", json!("asin(2)")),
+        with("origin", json!([0, "4 deg", 0])),
+        with("translate", json!([0, 0, "1 rad"])),
+        with("translate", json!([0, "unknown_length + 2 mm", 0])),
+        with("axis", json!("north")),
+        with("axis", json!([0, 0, 0])),
+        with("face", json!([10, 10, 10])),
+        with("face", json!("no such face")),
+        with("body", json!("no such body")),
+    ];
+    for level in [ParamCheck::Off, ParamCheck::Strict] {
+        let mut s = cube(level);
+        let before = s.doc.features.len();
+        for p in shapes.iter().chain(&values) {
+            assert!(s.execute(TRANSFORM_FACE, p).is_err(), "{level:?}: {p}");
+            assert_eq!(s.doc.features.len(), before, "{level:?}: {p}");
+        }
+    }
+}
+
+#[test]
+fn transform_face_nested_constructor_checks_the_local_face_and_owner() {
+    let mut s = cube(ParamCheck::Off);
+    s.execute("solid.box", &json!({"corner":[50,0,0],"length":10,"width":10,"height":10,"body_name":"Other"})).unwrap();
+    let before = s.doc.features.len();
+    let cmd = crate::cmd::find_command(TRANSFORM_FACE).unwrap();
+    for p in [
+        json!({"body":"Other","face":[10,10,20],"angle":0}),
+        json!({"body":"Box","face":[10,10,10],"angle":0}),
+        json!({"body":"Box","face":[10,10,20],"translate":["1 deg",0,0]}),
+    ] {
+        assert!(cmd.run_nested(&mut s, &p).is_err(), "{p}");
+        assert_eq!(s.doc.features.len(), before, "{p}");
+    }
 }

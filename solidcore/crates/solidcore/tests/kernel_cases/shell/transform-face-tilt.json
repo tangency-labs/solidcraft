@@ -1,0 +1,26 @@
+{
+  "area": "shell",
+  "case": "transform-face-tilt",
+  "sources": ["#15550"],
+  "what": "Turn the top of a 10 mm cube 45 degrees about the X line at y=0, z=10, then lift it 2 mm. Its four side planes stay put and the roof becomes z=12+y. The 100 mm² base times the mean height of 17 mm gives 1700 mm³.",
+  "bodies": {"b2": {"trusted": true, "keeping_splines": false}},
+  "records": "transform-face-tilt.bodies.json.gz",
+  "calls": [
+    {
+      "op": "transform_face",
+      "inputs": ["b2"],
+      "outputs": ["b3"],
+      "params": {
+        "face": {"kind": "face", "points": [[5, 5, 10]], "tolerance": 0.001, "picked": [{"index": 0, "at": []}]},
+        "translate": [0, 0, 2],
+        "origin": [0, 0, 10],
+        "axis": [1, 0, 0],
+        "angle": 0.7853981633974483
+      }
+    }
+  ],
+  "result": [{"body": "Block", "made": "b3"}],
+  "expected": {"source": "analytic", "body_count": 1, "faces": 6, "edges": 12, "vertices": 8, "volume_mm3": 1700, "tolerance": {"rel": 1e-9}},
+  "expressible": true,
+  "operation_expressible": true
+}

@@ -448,7 +448,15 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
             CommandGroup {
                 label: "Faces",
-                ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
+                ids: &[
+                    "solid.press_pull",
+                    "solid.draft",
+                    "solid.offset_face",
+                    "solid.transform_face",
+                    "solid.replace_face",
+                    "solid.split_face",
+                    "face.delete",
+                ],
             },
             CommandGroup {
                 label: "Bodies",
@@ -2069,6 +2077,7 @@ mod tests {
                 "solid.press_pull",
                 "solid.draft",
                 "solid.offset_face",
+                "solid.transform_face",
                 "solid.replace_face",
                 "solid.split_face",
                 "face.delete",

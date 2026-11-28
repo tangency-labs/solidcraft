@@ -230,12 +230,17 @@ fn picked_faces(call: &'static str, body: &Body, points: &[[f64; 3]], tolerance:
     Ok(once)
 }
 
-/// A copy of `body` for an operation to work on (`SmApiBrepCopy`): solidcore-ops' offsets
-/// change the body they are given.
-fn working_copy(call: &'static str, body: &Body) -> Result<Body> {
+fn require_finished(call: &'static str, body: &Body) -> Result<()> {
     if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
+    Ok(())
+}
+
+/// A copy of `body` for an operation to work on (`SmApiBrepCopy`): solidcore-ops' offsets
+/// change the body they are given.
+fn working_copy(call: &'static str, body: &Body) -> Result<Body> {
+    require_finished(call, body)?;
     ops_as(call, &[("brep", body)], offset_error, || body.copy())
 }
 
@@ -284,6 +289,17 @@ pub(crate) fn offset_faces(body: &Body, points: &[[f64; 3]], tolerance: f64, dis
     let order = w.own_order();
     ops_as(CALL, &[("brep", body)], offset_error, || solidcore_ops::offset::offset_faces(&w, &order, &picked, distance))?;
     Ok(w)
+}
+
+/// Retrim the face numbered `face` in the tagged operand, carrying that order through the copy.
+pub(crate) fn transform_face(body: &Body, face: usize, translate: [f64; 3], origin: [f64; 3], axis: [f64; 3], angle: f64) -> Result<(Body, bool)> {
+    const CALL: &str = "smlib_transform_face";
+    require_finished(CALL, body)?;
+    ops_as(CALL, &[("brep", body)], offset_error, || {
+        let (w, order) = body.copy_with_order(&body.own_order())?;
+        let changed = solidcore_ops::offset::transform_face(&w, &order, face, translate, origin, axis, angle)?;
+        Ok((w, changed))
+    })
 }
 
 /// `smlib_thicken`: a sheet thickened by `thickness` along its normals, or (symmetric) moved back

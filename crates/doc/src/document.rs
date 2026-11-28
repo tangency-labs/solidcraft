@@ -1705,6 +1705,21 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
+    /// Rotate one face's supporting surface about its pivot, then translate it and retrim its neighbours.
+    TransformFace {
+        face: FacePick,
+        body: BodyName,
+        #[walk(length = ["X distance", "Y distance", "Z distance"])]
+        translate: [Expr; 3],
+        rotate_axis: Dir,
+        /// Without an explicit pivot, turn about the resolved face pick.
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        origin: Option<PointExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+    },
     /// Remove faces (at the given points) and heal the gap from the neighbouring planes, as when
     /// a fillet, chamfer, hole or boss is taken off. A picked face brings the rest of its surface
     /// (both halves of a hole's wall).
@@ -4418,6 +4433,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "MoveFeature",
             FeatureKind::Scale { .. } => "ScaleFeature",
             FeatureKind::OffsetFace { .. } => "OffsetFacesFeature",
+            FeatureKind::TransformFace { .. } => "TransformFaceFeature",
             FeatureKind::DeleteFace { .. } => "DeleteFaceFeature",
             FeatureKind::SurfaceOffset { .. } => "OffsetSurfaceFeature",
             FeatureKind::SurfaceMidsurface { .. } => "MidsurfaceFeature",
@@ -4521,6 +4537,7 @@ impl FeatureKind {
             FeatureKind::SplitFace { .. } => "split_face",
             FeatureKind::Scale { .. } => "scale",
             FeatureKind::OffsetFace { .. } => "offset_face",
+            FeatureKind::TransformFace { .. } => "transform_face",
             FeatureKind::DeleteFace { .. } => "delete_face",
             FeatureKind::BoundingSolid { .. } => "bounding_solid",
             FeatureKind::Pipe { .. } => "pipe",
@@ -4624,6 +4641,7 @@ impl FeatureKind {
             "MoveFeature" => "move",
             "ScaleFeature" => "scale",
             "OffsetFacesFeature" => "offset_face",
+            "TransformFaceFeature" => "transform_face",
             "DeleteFaceFeature" => "delete_face",
             "OffsetSurfaceFeature" => "surface_offset",
             "MidsurfaceFeature" => "surface_midsurface",
@@ -4727,6 +4745,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "Move",
             FeatureKind::Scale { .. } => "Scale",
             FeatureKind::OffsetFace { .. } => "OffsetFace",
+            FeatureKind::TransformFace { .. } => "TransformFace",
             FeatureKind::DeleteFace { .. } => "DeleteFace",
             FeatureKind::SurfaceOffset { .. } => "OffsetSurface",
             FeatureKind::SurfaceMidsurface { .. } => "Midsurface",
@@ -5807,7 +5826,12 @@ impl Document {
         // Borrowed names: every command that changes the design asks, and most rename nothing.
         fn names(d: &Document) -> std::collections::BTreeSet<&str> {
             let stored = d.params.iter().map(|p| p.name.as_str()).chain(d.text_params.iter().map(|p| p.name.as_str()));
-            stored.chain(d.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str))).collect()
+            let feature_inputs = d.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str));
+            let driven = d.features.iter().flat_map(|f| match &f.kind {
+                FeatureKind::Sketch { sketch, .. } => sketch.driven_dimension_params().into_iter().map(String::as_str).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            });
+            stored.chain(feature_inputs).chain(driven).collect()
         }
         let (before, after) = (names(previous), names(self));
         let mut gone = before.difference(&after);
@@ -6784,6 +6808,9 @@ impl Document {
         if comment.is_some_and(|c| c.len() > 4096) {
             return Err(DocError::Invalid("comment too long".into()));
         }
+        if self.is_driven_param(name) {
+            return Err(DocError::Invalid(format!("`{name}` is a read-only driven dimension parameter and cannot be edited")));
+        }
         if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
             return Err(DocError::Invalid(format!("`{name}` is a feature's parameter")));
         }
@@ -6819,6 +6846,7 @@ impl Document {
         if let Some(e) = errors.get(name) {
             return Err(DocError::Expr(e.clone()));
         }
+        next.check_driven_timeline()?;
         *self = next;
         Ok(())
     }
@@ -7023,7 +7051,7 @@ impl Document {
         self.apply_equation_values(vals, sk)?;
         self.apply_pattern_values(vals, sk)?;
         for c in &mut sk.constraints {
-            if let Some(p) = &c.param {
+            if let (Some(p), false) = (&c.param, c.driven) {
                 let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
                 let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;
                 c.kind.set_value(v);

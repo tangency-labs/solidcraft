@@ -2507,3 +2507,117 @@ fn issue_21104_cylinder_sunk_the_contact_tolerance_on_its_seam_unions_as_tangent
         );
     }
 }
+
+/// A Ø12 x 2 disk seated inside a Ø12.4 x 4.2 pocket (0.2 mm radial clearance, top coplanar at
+/// z = 5.0) far from the origin at (688.2, 656.8): rays fired from points on the disk along +x
+/// hit both the cylindrical pocket wall (large cylinder `u` parameter on the lower half of the
+/// circle) and the far outer planar face of the housing (smaller planar `u` parameter).
+///
+/// `SmBrep::RayFire` keeps the nearest intersection along the ray instead of letting a farther
+/// face with a smaller `param(0)` overwrite it, so point classification returns void (outside)
+/// everywhere inside the pocket and `boolean_intersection` is empty in both operand orders, at
+/// multiple disk seam angles, and at both identity and 180° Z rotation — while a disk truly
+/// embedded in a solid block still intersects to its full volume.
+#[test]
+fn ray_fire_selects_nearest_hit_over_farther_face_with_smaller_u_param() {
+    use solidcore::error::EntityRef;
+    use solidcore::intersect::point_class::PointClassType;
+    use solidcore::query::brep::BrepQuery;
+
+    let (cx, cy) = (688.2, 656.8);
+    let make_housing = |k: &mut Kernel, with_pocket: bool, rot180: bool| -> Brep {
+        let block =
+            api::create_box(k, Point3::new(cx - 25.0, cy - 25.0, 0.0), 450.0, 50.0, 5.0).unwrap();
+        let mut body = if with_pocket {
+            let pocket = api::create_cylinder(k, Point3::new(cx, cy, 0.8), 6.2, 5.2).unwrap();
+            boolean_difference(k, block, pocket).unwrap()
+        } else {
+            block
+        };
+        if rot180 {
+            let rot = Axis2Placement::new(
+                Point3::ZERO,
+                Vec3::new(-1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            );
+            solidcore::topology::brep::p5::transform(k, &mut body, &rot, None, false).unwrap();
+        }
+        body
+    };
+    let make_disk = |k: &mut Kernel, seam_deg: f64, rot180: bool| -> Brep {
+        let mut disk = api::create_cylinder(k, Point3::ZERO, 6.0, 2.0).unwrap();
+        let rad = seam_deg.to_radians();
+        let (s, c) = rad.sin_cos();
+        let (dx, dy) = if rot180 { (-cx, -cy) } else { (cx, cy) };
+        let place = Axis2Placement::new(
+            Point3::new(dx, dy, 3.0),
+            Vec3::new(c, s, 0.0),
+            Vec3::new(-s, c, 0.0),
+        );
+        solidcore::topology::brep::p5::transform(k, &mut disk, &place, None, false).unwrap();
+        disk
+    };
+
+    for rot180 in [false, true] {
+        let mut k = Kernel::default();
+        let mut housing = make_housing(&mut k, true, rot180);
+        let query = BrepQuery::of_brep(&housing);
+        let (dx, dy) = if rot180 { (-cx, -cy) } else { (cx, cy) };
+        // Probe points inside the Ø12 x 2 disk envelope around the full circle, including the
+        // lower half (y < dy) where the cylindrical pocket wall has large `u` and the coplanar
+        // top plane z = 5.0.
+        for z in [3.05, 4.0, 4.95, 5.0] {
+            for deg in [0.0_f64, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0] {
+                let (s, c) = deg.to_radians().sin_cos();
+                let pt = Point3::new(dx + 5.9 * c, dy + 5.9 * s, z);
+                let pc = query
+                    .point_3d_classify(&k, &mut housing, pt, solidcore::math::EFF_ZERO, false)
+                    .unwrap();
+                assert_eq!(
+                    pc.point_class(),
+                    PointClassType::Region,
+                    "rot180={rot180} z={z} deg={deg}: {pc:?}"
+                );
+                let Some(EntityRef::Region(r)) = pc.object() else {
+                    panic!("rot180={rot180} z={z} deg={deg}: missing region in {pc:?}");
+                };
+                assert!(
+                    housing.region(r).unwrap().is_void() != 0,
+                    "rot180={rot180} z={z} deg={deg}: pocket point classified inside solid"
+                );
+            }
+        }
+
+        // Boolean intersection of pocket-seated disk and housing must be empty in both orders and
+        // for multiple disk seam orientations.
+        for seam_deg in [0.0, 90.0, 180.0, 270.0] {
+            for disk_first in [true, false] {
+                let housing = make_housing(&mut k, true, rot180);
+                let disk = make_disk(&mut k, seam_deg, rot180);
+                let (a, b) = if disk_first {
+                    (disk, housing)
+                } else {
+                    (housing, disk)
+                };
+                let inter = boolean_intersection(&mut k, a, b).unwrap();
+                assert_eq!(
+                    counts(&inter),
+                    [0, 0, 0],
+                    "rot180={rot180} seam={seam_deg} disk_first={disk_first}: pocket disk must not overlap housing"
+                );
+            }
+        }
+
+        // Contrast: the same disk embedded in a solid housing (no pocket) intersects to its exact
+        // full volume π * 6^2 * 2.
+        let solid_housing = make_housing(&mut k, false, rot180);
+        let disk = make_disk(&mut k, 180.0, rot180);
+        let mut inter = boolean_intersection(&mut k, disk, solid_housing).unwrap();
+        let want = PI * 36.0 * 2.0;
+        let got = volume_of(&k, &mut inter);
+        assert!(
+            (got - want).abs() <= VOLUME_REL_TOL * want,
+            "rot180={rot180}: embedded disk got {got} vs {want}"
+        );
+    }
+}

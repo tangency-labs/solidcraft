@@ -213,6 +213,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
+        D::TransformFace { translate, origin, .. } => translate.iter_mut().chain(origin).collect(),
         D::MeshConvert { tolerance } => vec![tolerance],
         D::MeshSectionStack { from, to, spacing, .. } => vec![spacing, from, to],
         D::Thread { length, options, .. } => {

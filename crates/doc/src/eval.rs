@@ -1365,6 +1365,20 @@ impl KeptSeparate {
 }
 
 impl ModelState {
+    /// Measured values of every named driven sketch dimension solved up to this state (#14426).
+    pub fn driven_params(&self) -> BTreeMap<String, Value> {
+        let mut out = BTreeMap::new();
+        for ss in &self.sketches {
+            for (_, name, val, is_angle) in ss.sketch.driven_dimensions() {
+                if let Some(v) = val.filter(|v| v.is_finite()) {
+                    let value = if is_angle { Value::angle(v) } else { Value::length(v) };
+                    out.insert(name.to_string(), value);
+                }
+            }
+        }
+        out
+    }
+
     /// This state with `bodies` in place of its own, the rest copied: a picture of some of a
     /// model's bodies (the bodies of a design being opened that are meshed so far) without
     /// copying every body of the model first and then dropping them.
@@ -2819,6 +2833,53 @@ pub(crate) fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTr
     (vals, perr)
 }
 
+/// Parameter values and errors available to feature `feature_index` given the evaluated prefix
+/// state `st` (#14426). Only driven sketch dimensions from sketches evaluated strictly earlier
+/// (`owner.feature_index < feature_index`) are available; same-sketch and forward references
+/// produce explicit errors.
+fn evaluation_values_for_state(
+    doc: &Document,
+    feature_index: usize,
+    st: &ModelState,
+    defs: &[expr::ParamDef],
+    driven_meta: &[crate::DrivenParam],
+) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+    let solved = st.driven_params();
+    let mut available = BTreeMap::new();
+    let mut unavailable = BTreeMap::new();
+    for d in driven_meta {
+        if d.feature_index == feature_index {
+            unavailable.insert(
+                d.name.clone(),
+                format!("circular reference: driven dimension `{}` cannot be used in the sketch `{}` that defines it", d.name, d.feature_name),
+            );
+        } else if d.feature_index > feature_index {
+            unavailable.insert(
+                d.name.clone(),
+                format!(
+                    "forward reference: driven dimension `{}` (from `{}`) cannot be used before `{}` in the timeline",
+                    d.name, d.feature_name, d.feature_name
+                ),
+            );
+        } else if let Some(&v) = solved.get(&d.name) {
+            available.insert(d.name.clone(), v);
+        } else {
+            unavailable.insert(
+                d.name.clone(),
+                format!("driven dimension `{}` (from `{}`) is unavailable because `{}` was not evaluated", d.name, d.feature_name, d.feature_name),
+            );
+        }
+    }
+    let doc_len = expr::unit_info(doc.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
+    let (mut vals, perr) = expr::eval_params_with_driven(defs, &available, &unavailable, doc_len);
+    if let Some((Kind::Length, scale)) = expr::unit_info(doc.units.trim())
+        && scale != 1.0
+    {
+        vals.insert(DESIGN_LEN.into(), Value::num(scale));
+    }
+    (vals, perr)
+}
+
 /// Indices of construction features in `doc.features`, computed once per pass so
 /// [`construct_digest`] never rescans the full timeline for every feature.
 fn construction_indices(doc: &Document) -> Vec<usize> {
@@ -3657,6 +3718,26 @@ fn whole_extrude_sketch_key(f: &Feature, st: &ModelState) -> Option<(u64, u64)> 
     Some((sketch.0, h.finish()))
 }
 
+fn hash_thread_info(t: &crate::ThreadInfo, h: &mut impl Hasher) {
+    let crate::ThreadInfo { feature, body, designation, major_diameter, radius, pitch, internal, axis_point, axis, start, end, form, hand, starts } =
+        t;
+    feature.hash(h);
+    body.hash(h);
+    designation.hash(h);
+    major_diameter.to_bits().hash(h);
+    radius.to_bits().hash(h);
+    pitch.to_bits().hash(h);
+    internal.hash(h);
+    (axis_point.x.to_bits(), axis_point.y.to_bits(), axis_point.z.to_bits()).hash(h);
+    let axis = axis.vec();
+    (axis.x.to_bits(), axis.y.to_bits(), axis.z.to_bits()).hash(h);
+    start.to_bits().hash(h);
+    end.to_bits().hash(h);
+    form.hash(h);
+    hand.hash(h);
+    starts.hash(h);
+}
+
 impl EvalKey {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -3682,6 +3763,13 @@ impl EvalKey {
         let read = f.reads(doc, st);
         let profile_key = read.as_ref().and_then(|_| whole_extrude_sketch_key(f, st));
         let sketch_key = |id: &u64| profile_key.filter(|(s, _)| s == id).map(|(_, key)| key).or_else(|| st.sketch_keys.get(id).copied());
+        let body_names_set: Option<std::collections::HashSet<&str>> =
+            (read.as_ref().is_some_and(|r| !r.import) && f.body_names.len() > 4 && !st.bodies.is_empty())
+                .then(|| st.bodies.iter().map(|b| b.name.as_str()).collect());
+        let has_body = |n: &str| match &body_names_set {
+            Some(set) => set.contains(n),
+            None => st.body(n).is_some(),
+        };
         let reads = read.map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             if read.import {
@@ -3713,13 +3801,16 @@ impl EvalKey {
             }
             st.body_counter.hash(&mut h);
             // A body numbered from the counter skips the numbers reserved past it.
-            if f.body_names.is_empty() || f.body_names.iter().any(|n| n.is_empty() || st.body(n).is_some()) {
+            if f.body_names.is_empty() || f.body_names.iter().any(|n| n.is_empty() || has_body(n)) {
                 for n in st.reserved_body_names.iter().filter(|n| crate::is_counted_body_name(n)) {
                     n.hash(&mut h);
                 }
             }
             // A cut drops the threads of bodies it removes.
-            serde_json::to_string(&st.threads).unwrap_or_default().hash(&mut h);
+            st.threads.len().hash(&mut h);
+            for t in &st.threads {
+                hash_thread_info(t, &mut h);
+            }
             (h.finish(), read)
         });
         // An import's key of what it reads holds whatever bodies come before it already
@@ -3751,12 +3842,20 @@ impl EvalKey {
             }
             // A body takes the name the feature stores for it only while no other body has it.
             for n in &f.body_names {
-                (n, st.body(n).is_some()).hash(&mut h);
+                (n, has_body(n)).hash(&mut h);
             }
             // A cut drops the threads of bodies it removes.
-            for t in st.threads.iter().filter(|t| names.contains(&t.body.as_str())) {
-                serde_json::to_string(t).unwrap_or_default().hash(&mut h);
+            let read_names_set: Option<std::collections::HashSet<&str>> =
+                (names.len() > 4 && !st.threads.is_empty()).then(|| names.iter().copied().collect());
+            let mut thread_count = 0usize;
+            for t in st.threads.iter().filter(|t| match &read_names_set {
+                Some(set) => set.contains(t.body.as_str()),
+                None => names.contains(&t.body.as_str()),
+            }) {
+                hash_thread_info(t, &mut h);
+                thread_count += 1;
             }
+            thread_count.hash(&mut h);
             h.finish()
         });
         EvalKey { whole, reached, reads, relative }
@@ -6428,11 +6527,15 @@ impl Model {
             }
         }
         // The fingerprints from the first stored sketch on.
-        let vals = evaluation_values(doc).0;
+        let driven_meta = doc.driven_params();
+        let has_driven = !driven_meta.is_empty();
+        let param_defs = if has_driven { doc.param_defs() } else { Vec::new() };
+        let base_vals =
+            if has_driven { evaluation_values_for_state(doc, 0, &self.empty, &param_defs, &driven_meta).0 } else { evaluation_values(doc).0 };
         let steps = ImportDigests::of(doc, &self.import_digests, self.heals());
         let constructions = construction_indices(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
-        let mut stepper = CaptureStepper::new(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &base_vals);
         let mut resolved_joints = BTreeMap::new();
         let mut prev_state = self.empty.clone();
         if stepper.is_some() {
@@ -6445,7 +6548,9 @@ impl Model {
                     && let Some(r) = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && r.error.is_none())
                 {
                     if let Some(s) = stepper.as_mut() {
-                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                        let step_vals = has_driven.then(|| evaluation_values_for_state(doc, i, &prev_state, &param_defs, &driven_meta).0);
+                        let vals = step_vals.as_ref().unwrap_or(&base_vals);
+                        s.advance(&mut resolved_joints, vals, f, &prev_state, &r.state);
                     }
                     prev_state = r.state.clone();
                 }
@@ -6458,12 +6563,14 @@ impl Model {
                 s.flush_for_feature(f, &before);
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
-            prev_fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, i >= marker, &steps, Some(&before), &constructions);
+            let step_vals = has_driven.then(|| evaluation_values_for_state(eval_doc, i, &before, &param_defs, &driven_meta).0);
+            let vals = step_vals.as_ref().unwrap_or(&base_vals);
+            prev_fp = chain_fingerprint(eval_doc, vals, f, prev_fp, i >= marker, &steps, Some(&before), &constructions);
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
                 r.refingerprint(prev_fp, &mut self.import_layouts);
                 if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
                     if let Some(s) = stepper.as_mut() {
-                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                        s.advance(&mut resolved_joints, vals, f, &prev_state, &r.state);
                     }
                     prev_state = r.state.clone();
                 }
@@ -6512,7 +6619,11 @@ impl Model {
         if self.results.len() != doc.features.len() || self.is_stale() {
             return false;
         }
-        let vals = evaluation_values(doc).0;
+        let driven_meta = doc.driven_params();
+        let has_driven = !driven_meta.is_empty();
+        let param_defs = if has_driven { doc.param_defs() } else { Vec::new() };
+        let base_vals =
+            if has_driven { evaluation_values_for_state(doc, 0, &self.empty, &param_defs, &driven_meta).0 } else { evaluation_values(doc).0 };
         // as the next evaluation would fingerprint them: under the preference as it is now
         let steps = ImportDigests::of(doc, &self.import_digests, kernel::heals_tolerance_defects());
         let constructions = construction_indices(doc);
@@ -6520,14 +6631,16 @@ impl Model {
         let mut prev = 0;
         // The model each feature starts from (which components the bodies it names are in).
         let mut state = self.empty.clone();
-        let mut stepper = CaptureStepper::new(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &base_vals);
         let mut resolved_joints = BTreeMap::new();
         doc.features.iter().zip(&self.results).enumerate().all(|(i, (f, r))| {
             if let Some(s) = stepper.as_mut() {
                 s.flush_for_feature(f, &state);
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
-            prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &steps, Some(&state), &constructions);
+            let step_vals = has_driven.then(|| evaluation_values_for_state(eval_doc, i, &state, &param_defs, &driven_meta).0);
+            let vals = step_vals.as_ref().unwrap_or(&base_vals);
+            prev = chain_fingerprint(eval_doc, vals, f, prev, i >= marker, &steps, Some(&state), &constructions);
             let posed = !pose_only(f) || self.poses.get(&f.id) == Some(&placement_digest(eval_doc, f, Some(&state)));
             if !r.skipped {
                 let prev_state = state.clone();
@@ -6537,7 +6650,7 @@ impl Model {
                     && !f.suppressed
                     && let Some(s) = stepper.as_mut()
                 {
-                    s.advance(&mut resolved_joints, &vals, f, &prev_state, &state);
+                    s.advance(&mut resolved_joints, vals, f, &prev_state, &state);
                 }
             }
             r.id == f.id && r.fingerprint == prev && posed
@@ -6629,8 +6742,11 @@ impl Model {
         self.placement_inputs = None;
         self.fingerprinted = None;
         self.placement_local = true;
-        let (vals, perr) = evaluation_values(doc);
-        self.param_errors = perr;
+        let driven_meta = doc.driven_params();
+        let has_driven = !driven_meta.is_empty();
+        let param_defs = if has_driven { doc.param_defs() } else { Vec::new() };
+        let (base_vals, base_perr) =
+            if has_driven { evaluation_values_for_state(doc, 0, &self.empty, &param_defs, &driven_meta) } else { evaluation_values(doc) };
         self.frame_bodies.lock().unwrap_or_else(|e| e.into_inner()).next_generation();
         let mut prev_fp = 0u64;
         // The names the design must not use again travel with the state (#4957).
@@ -6646,16 +6762,16 @@ impl Model {
         // read once: the context, the fingerprints and the model's record agree
         let heal = kernel::heals_tolerance_defects();
         self.heal_off = !heal;
-        let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
-        let shared_ctx = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
+        let base_ctx = context_digest(doc, &base_vals) ^ validation_digest(validation) ^ heal_digest(heal);
+        let base_shared_ctx = shared_context_digest(doc, &base_vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
-        self.context = ctx;
+        self.context = base_ctx;
         let prev_import_digests = std::mem::take(&mut self.import_digests);
         self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
         let mut import_layouts: BTreeMap<_, _> =
-            doc.features.iter().filter_map(|f| Some((f.id, ImportLayout::of(doc, &vals, f, shared_ctx, &self.import_digests)?))).collect();
-        let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == ctx).cloned().collect();
+            doc.features.iter().filter_map(|f| Some((f.id, ImportLayout::of(doc, &base_vals, f, base_shared_ctx, &self.import_digests)?))).collect();
+        let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == base_ctx).cloned().collect();
         // Per-component ancestor-chain digests and feature->component map, built once per pass.
         let component_digests = ComponentDigests::of(doc);
         let feature_component = &component_digests.feature_component;
@@ -6676,7 +6792,7 @@ impl Model {
             .collect();
         let prepared_imports = parallel::prefetch_imports(
             doc,
-            &vals,
+            &base_vals,
             &self.results,
             &subset_imports,
             &prev_import_digests,
@@ -6684,17 +6800,17 @@ impl Model {
             &self.cache,
             &primed,
             &rolled_results,
-            ctx,
+            base_ctx,
             previous_context,
-            shared_ctx,
+            base_shared_ctx,
             self.no_cache,
             prefetch_limit,
             watched.cancelled(),
         );
         let prefetched = parallel::prefetch_components(
             doc,
-            &vals,
-            &self.param_errors,
+            &base_vals,
+            &base_perr,
             &self.results,
             &subset_imports,
             &self.empty,
@@ -6708,11 +6824,11 @@ impl Model {
             &prepared_imports,
             validation,
             heal,
-            ctx,
+            base_ctx,
             previous_context,
-            shared_ctx,
+            base_shared_ctx,
             self.no_cache,
-            prefetch_limit,
+            if has_driven { 0 } else { prefetch_limit },
             watched.cancelled(),
         );
         let mut poses = std::collections::HashMap::new();
@@ -6729,7 +6845,7 @@ impl Model {
         let mut checks = overlap::Checks::new(validation);
         let has_capture = doc.has_capture_position_timeline();
         self.placement_local &= !has_capture;
-        let mut stepper = CaptureStepper::new(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &base_vals);
         let mut resolved_joints: BTreeMap<u64, crate::CapturedJoint> = BTreeMap::new();
         let mut start = 0;
         let mut back: Option<overlap::Refused> = None;
@@ -6776,6 +6892,19 @@ impl Model {
                     s.flush_for_feature(f, &state);
                 }
                 let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
+                let step_eval = has_driven.then(|| evaluation_values_for_state(eval_doc, i, &state, &param_defs, &driven_meta));
+                let (vals, perr) = match &step_eval {
+                    Some((v, e)) => (v, e),
+                    None => (&base_vals, &base_perr),
+                };
+                let (ctx, shared_ctx) = if has_driven {
+                    (
+                        context_digest(eval_doc, vals) ^ validation_digest(validation) ^ heal_digest(heal),
+                        shared_context_digest(eval_doc, vals) ^ validation_digest(validation) ^ heal_digest(heal),
+                    )
+                } else {
+                    (base_ctx, base_shared_ctx)
+                };
                 let (reuse_in, prev_fp_in) = (reuse, prev_fp);
                 if let Some(r) = out.last()
                     && let Some(e) = &r.error
@@ -6796,11 +6925,11 @@ impl Model {
                     }
                     None
                 } else {
-                    rolled.filter(|(context, _, _)| *context == ctx).map(|(_, comp, r)| (comp, r))
+                    rolled.filter(|(context, _, _)| *context == base_ctx).map(|(_, comp, r)| (comp, r))
                 };
                 // Opening was cancelled: the rest is skipped and the result discarded.
                 let cancelled = watched.step(i);
-                let mut fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state), &constructions);
+                let mut fp = chain_fingerprint(eval_doc, vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state), &constructions);
                 prev_fp = fp;
                 let pose = pose_only(f).then(|| placement_digest(eval_doc, f, Some(&state)));
                 if let Some(pose) = pose {
@@ -6846,7 +6975,7 @@ impl Model {
                         && old.error.is_none()
                         && let (Some(s), Some(before_reuse)) = (stepper.as_mut(), before_reuse.as_ref())
                     {
-                        s.advance(&mut resolved_joints, &vals, f, before_reuse, &state);
+                        s.advance(&mut resolved_joints, vals, f, before_reuse, &state);
                     }
                     continue;
                 }
@@ -6912,7 +7041,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let mut key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &constructions, &component_digests);
+                let mut key = EvalKey::new(eval_doc, vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &constructions, &component_digests);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -6970,7 +7099,7 @@ impl Model {
                         state: state.clone(),
                     });
                     if ok && let (Some(s), Some(before_cache)) = (stepper.as_mut(), before_cache.as_ref()) {
-                        s.advance(&mut resolved_joints, &vals, f, before_cache, &state);
+                        s.advance(&mut resolved_joints, vals, f, before_cache, &state);
                     }
                     continue;
                 }
@@ -7003,16 +7132,17 @@ impl Model {
                     let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
                     out.push(FeatureResult { state: state.clone(), unkept: false, unkept_error: false, warning, ..r.clone() });
                     if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
-                        s.advance(&mut resolved_joints, &vals, f, before_rolled, &state);
+                        s.advance(&mut resolved_joints, vals, f, before_rolled, &state);
                     }
                     continue;
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
                 // model as it is now. Never in place of a result a check refused.
                 let (mut hit_relative, reused) = {
-                    let reads = key.reads.as_ref().filter(|_| {
-                        !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
-                    });
+                    let reads = key
+                        .reads
+                        .as_ref()
+                        .filter(|_| !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !perr.contains_key(n)));
                     let relative = reads.and(key.relative);
                     let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
                     let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
@@ -7026,13 +7156,14 @@ impl Model {
                 // that digest so it evaluates unhealed and its check can heal and settle it anew.
                 if reused.is_none() && self.import_digests.has_digest_only_heal(f.id) {
                     self.import_digests.heals.remove(&f.id);
-                    fp = chain_fingerprint(eval_doc, &vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state), &constructions);
+                    fp = chain_fingerprint(eval_doc, vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state), &constructions);
                     prev_fp = fp;
-                    key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &constructions, &component_digests);
+                    key = EvalKey::new(eval_doc, vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &constructions, &component_digests);
                 }
-                let reads = key.reads.as_ref().filter(|_| {
-                    !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
-                });
+                let reads = key
+                    .reads
+                    .as_ref()
+                    .filter(|_| !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !perr.contains_key(n)));
                 let relative = reads.and(key.relative);
                 let prefetched_use = if reused.is_none() {
                     relative.and_then(|k| prefetched.get(f.id, k)).and_then(|p| state.with_relative(&p.cached.state, f.id).map(|next| (next, p)))
@@ -7080,7 +7211,7 @@ impl Model {
                 // feature names, when it names one and the face is there).
                 let renamed;
                 let mut frame_error: Option<String> = None;
-                let f = match if cached.is_some() { Ok(None) } else { with_named_face_points(eval_doc, &vals, &state, f) } {
+                let f = match if cached.is_some() { Ok(None) } else { with_named_face_points(eval_doc, vals, &state, f) } {
                     Ok(Some((g, notes))) => {
                         if !notes.is_empty() {
                             warning = Some(notes.join("; "));
@@ -7096,7 +7227,7 @@ impl Model {
                     }
                 };
                 // A parameter with an error fails the features using it, with that error.
-                let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
+                let bad_param = param_names(f).into_iter().find_map(|n| perr.get(&n).map(|e| format!("parameter `{n}`: {e}")));
                 // The bodies whose check runs beside the features after this one.
                 let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
@@ -7123,7 +7254,7 @@ impl Model {
                             let meshes = prepared_meshes.as_ref().filter(|(id, _)| *id == f.id).map(|(_, meshes)| meshes);
                             let r = eval_feature(
                                 eval_doc,
-                                &vals,
+                                vals,
                                 f,
                                 &mut next,
                                 &mut warning,
@@ -7244,20 +7375,20 @@ impl Model {
                 let error = match r {
                     Ok(()) => {
                         // Copies are named after their sources through the instance transforms.
-                        let mats = own_copies(eval_doc, &vals, &state, f).unwrap_or_default();
+                        let mats = own_copies(eval_doc, vals, &state, f).unwrap_or_default();
                         // Copies made through a pattern or mirror among the sources come after (#395).
                         // A Pattern of components places occurrences in reconcile, not here (#12116).
                         let mats = match &f.kind {
                             FeatureKind::Pattern { features, bodies, components, .. } if bodies.is_empty() && components.is_empty() => {
-                                copy_instances(eval_doc, &vals, &state, f, features, &mats).unwrap_or(mats)
+                                copy_instances(eval_doc, vals, &state, f, features, &mats).unwrap_or(mats)
                             }
                             FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
-                                copy_instances(eval_doc, &vals, &state, f, features, &mats).unwrap_or(mats)
+                                copy_instances(eval_doc, vals, &state, f, features, &mats).unwrap_or(mats)
                             }
                             _ => mats,
                         };
                         // A revolve axis origin that follows parameters names its faces from its values.
-                        let named = naming_feature(&vals, f);
+                        let named = naming_feature(vals, f);
                         next.stamp(eval_doc, &state, &named, stamp_key, mats);
                         // Evaluated again only for what came before it (a mirror moved by a drag).
                         if let Some(old) = self.results.get(i).filter(|old| old.id == f.id) {
@@ -7280,7 +7411,7 @@ impl Model {
                         }
                         state = Arc::new(next);
                         if let Some(s) = stepper.as_mut() {
-                            s.advance(&mut resolved_joints, &vals, f, &before, &state);
+                            s.advance(&mut resolved_joints, vals, f, &before, &state);
                         }
                         // A window opening the design can show what is built so far.
                         watched.offer_with(i + 1, || {
@@ -7360,6 +7491,14 @@ impl Model {
             }
             // Main's evaluate loop ends the pass here; Pattern-of-components reconcile runs from Session::refresh.
             break;
+        }
+        if has_driven {
+            let (_, mut final_perr) = evaluation_values_for_state(doc, doc.features.len(), &state, &param_defs, &driven_meta);
+            let (timeline_errs, _) = doc.driven_timeline_violations();
+            final_perr.extend(timeline_errs);
+            self.param_errors = final_perr;
+        } else {
+            self.param_errors = base_perr;
         }
         self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
@@ -7953,6 +8092,9 @@ impl Model {
     /// solve: the solved copies the states keep of it take the new name as the design's sketch
     /// did ([`crate::params::rename_param_in_sketch`]), and their cache keys follow.
     pub fn rename_param(&mut self, previous: &Document, doc: &Document, old: &str, new: &str) -> bool {
+        if previous.has_driven_params() || doc.has_driven_params() {
+            return false;
+        }
         if self.results.len() != doc.features.len() || self.results.iter().zip(&doc.features).any(|(r, f)| r.id != f.id || r.stale) {
             return false;
         }
@@ -8086,10 +8228,14 @@ impl Model {
         if start == self.results.len().min(doc.features.len()) {
             return;
         }
-        let (vals, _) = evaluation_values(doc);
+        let driven_meta = doc.driven_params();
+        let has_driven = !driven_meta.is_empty();
+        let param_defs = if has_driven { doc.param_defs() } else { Vec::new() };
+        let base_vals =
+            if has_driven { evaluation_values_for_state(doc, 0, &self.empty, &param_defs, &driven_meta).0 } else { evaluation_values(doc).0 };
         let constructions = construction_indices(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
-        let mut stepper = CaptureStepper::new(doc, &vals);
+        let mut stepper = CaptureStepper::new(doc, &base_vals);
         let mut resolved_joints = BTreeMap::new();
         if stepper.is_some() {
             let mut prev_state = self.empty.clone();
@@ -8099,7 +8245,9 @@ impl Model {
                 }
                 if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
                     if let Some(s) = stepper.as_mut() {
-                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                        let step_vals = has_driven.then(|| evaluation_values_for_state(doc, i, &prev_state, &param_defs, &driven_meta).0);
+                        let vals = step_vals.as_ref().unwrap_or(&base_vals);
+                        s.advance(&mut resolved_joints, vals, f, &prev_state, &r.state);
                     }
                     prev_state = r.state.clone();
                 }
@@ -8114,7 +8262,9 @@ impl Model {
                 s.flush_for_feature(f, &before);
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
-            prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before), &constructions);
+            let step_vals = has_driven.then(|| evaluation_values_for_state(eval_doc, i, &before, &param_defs, &driven_meta).0);
+            let vals = step_vals.as_ref().unwrap_or(&base_vals);
+            prev = chain_fingerprint(eval_doc, vals, f, prev, i >= marker, &self.import_digests, Some(&before), &constructions);
             r.refingerprint(prev, &mut self.import_layouts);
             let prev_state = before;
             before = r.state.clone();
@@ -8124,7 +8274,7 @@ impl Model {
                 && r.error.is_none()
                 && let Some(s) = stepper.as_mut()
             {
-                s.advance(&mut resolved_joints, &vals, f, &prev_state, &before);
+                s.advance(&mut resolved_joints, vals, f, &prev_state, &before);
             }
         }
     }
@@ -16587,7 +16737,9 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
         };
         let body = f.kind.thread_target_body(k).or_else(|| f.kind.face_body());
         // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
-        let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
+        let hit = if let FeatureKind::TransformFace { body, .. } = &f.kind {
+            crate::name_lookup::locate_owned_face(input, body, n, from)
+        } else if matches!(f.kind, FeatureKind::Thread { .. }) {
             crate::name_lookup::locate_thread_face_on_body(input, body, n, from)
         } else if matches!(f.kind, FeatureKind::Extrude { .. }) {
             // An extrude's faces are its From and To faces: only where they lie counts (#22281).
@@ -16604,6 +16756,18 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
+                }
+                if matches!(f.kind, FeatureKind::TransformFace { .. }) {
+                    let owner = input.bodies.get(hit.body).ok_or_else(|| DocError::reselect(n.as_str()))?;
+                    // Keep the saved pivot if it still picks this face. Otherwise a boundary
+                    // shared with another face must not silently redirect the native operation.
+                    if owner.body.face_at_point(*p)? != Some(hit.face) {
+                        *p = hit.pick_point(input, *p);
+                        if owner.body.face_at_point(*p)? != Some(hit.face) {
+                            return Err(DocError::reselect(n.as_str()));
+                        }
+                    }
+                    continue;
                 }
                 match (k, hole_axis) {
                     (0, Some(axis)) => match hit.along(input, from, axis) {
@@ -16766,6 +16930,95 @@ fn moved_blend(src: &Feature, m: &Mat) -> Feature {
         }
     }
     copy
+}
+
+/// One face's evaluated motion, in the frame of its owning body.
+#[derive(Clone, Copy)]
+struct FaceMotion {
+    at: Vec3,
+    translate: Vec3,
+    origin: Vec3,
+    axis: Vec3,
+    angle: f64,
+}
+
+impl FaceMotion {
+    fn resolve(
+        vals: &BTreeMap<String, Value>,
+        at: Vec3,
+        translate: &[expr::Expr; 3],
+        axis: Vec3,
+        origin: Option<&crate::PointExpr>,
+        angle: Option<&expr::Expr>,
+    ) -> Result<Self> {
+        let [x, y, z] = translate;
+        Ok(Self {
+            at,
+            translate: Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?),
+            origin: origin.map(|p| point(vals, p)).transpose()?.unwrap_or(at),
+            axis,
+            angle: angle.map(|a| val(vals, a, Kind::Angle)).transpose()?.unwrap_or(0.0),
+        })
+    }
+
+    fn copied(self, m: &Mat) -> Self {
+        Self {
+            at: crate::apply_point(m, self.at),
+            translate: crate::apply_vector(m, self.translate),
+            origin: crate::apply_point(m, self.origin),
+            axis: crate::apply_vector(m, self.axis),
+            // A rotation axis is axial: reflecting a turn reverses its sense about the copied direction.
+            angle: if crate::assembly::linear_determinant(m) < 0.0 { -self.angle } else { self.angle },
+        }
+    }
+
+    fn apply(self, owner: &mut ModelBody) -> Result<()> {
+        let result = kernel::transform_face(&owner.body, self.at, self.translate, self.origin, self.axis, self.angle)?;
+        if !result.same_shape(&owner.body) {
+            *owner = owner.remade(Traced::step(result, &[&owner.traced()]));
+        }
+        Ok(())
+    }
+}
+
+/// New bodies built by replaying `seed`'s creator, grouped by pattern instance. Names and
+/// positions alone cannot distinguish a copy from an unrelated coincident body.
+fn replayed_face_owners(st: &ModelState, pattern: u64, seed: &ModelBody) -> Vec<(usize, usize)> {
+    use crate::lineage::{Made, Operand};
+    let mut copies = Vec::new();
+    for (i, body) in st.bodies.iter().enumerate().filter(|(_, b)| b.feature == pattern) {
+        let Made::Traced(lineage) = &body.made else { continue };
+        for operand in &lineage.operands {
+            match operand.as_ref() {
+                Operand::CopiedTool { feature, instance, .. } if *feature == seed.feature => copies.push((*instance, i)),
+                Operand::Copy { body, instance } if body == &seed.name => copies.push((*instance, i)),
+                _ => {}
+            }
+        }
+    }
+    copies.sort_unstable();
+    copies.dedup();
+    copies
+}
+
+/// The native edit checks the face on a single output. For a multi-body constructor, check
+/// which of this instance's outputs contains the picked point before applying the edit.
+fn replayed_face_owner(st: &ModelState, copies: &[(usize, usize)], at: Vec3) -> Result<usize> {
+    if let [(_, i)] = copies {
+        return Ok(*i);
+    }
+    let mut hit = None;
+    for &(_, i) in copies {
+        if let Some(b) = st.bodies.get(i)
+            && b.body.face_at_point(at)?.is_some()
+        {
+            if hit.is_some() {
+                return Err(DocError::Invalid(format!("more than one copied body contains the face at {at}")));
+            }
+            hit = Some(i);
+        }
+    }
+    hit.ok_or_else(|| DocError::Invalid(format!("no copied body contains the face at {at}")))
 }
 
 /// Exact box of a cut tool, grown by twice its tolerance plus `extra_tol`: tools whose boxes are
@@ -17351,6 +17604,61 @@ fn replay(
             }
             continue;
         }
+        if let FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle } = &src.kind {
+            if let Some(batch) = pending.take() {
+                flush_cut_batch(doc, vals, f, st, named_from.as_ref(), own, batch, &mut missed, &mut total, warning, sources)?;
+            }
+            // Use the pick as resolved *before* this edit changed its supporting surface.
+            let at = match st.named_faces.get(&src.id).and_then(|p| p.first()) {
+                Some(at) => *at,
+                None => match with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)? {
+                    Some((Feature { kind: FeatureKind::TransformFace { face, .. }, .. }, _)) => face.0,
+                    _ => face.0,
+                },
+            };
+            let motion = FaceMotion::resolve(vals, at, translate, rotate_axis.0, origin.as_ref(), angle.as_ref())?;
+            let (seed, owner) =
+                st.bodies.iter().enumerate().find(|(_, b)| b.name == *body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let frame = body_in(doc, own, owner);
+            let maker = plan.iter().find(|(g, _, start)| g.id == owner.feature && start == first).map(|(g, _, _)| *g);
+            let whole_body = maker.is_some_and(|g| matches!(g.kind, FeatureKind::Move { copy: true, .. } | FeatureKind::FrameMember { .. }));
+            // These producers copy the current body, not its construction tool. An edit that
+            // has already run on it is already present on its rigid copies.
+            if whole_body && st.named_faces.contains_key(&src.id) {
+                continue;
+            }
+            let copies = maker.map_or_else(Vec::new, |_| replayed_face_owners(st, f.id, owner));
+            // For a rebuilt tool, start in its constructor's frame and use the same instance
+            // transform as build_replay_copies. A whole-body copy instead starts in the pattern frame.
+            let in_tool = if whole_body { frame } else { maker.and_then(|g| body_in(doc, g.component, owner)) };
+            let tool_frame = maker.and_then(|g| tools_component(doc, g)).and_then(|c| component_in(doc, own, c));
+            let tool_motion = in_tool.as_ref().map_or(motion, |at| motion.copied(at));
+            let new_body = whole_body || maker.and_then(feature_operation) == Some(Operation::NewBody);
+            for (k, m) in mats.iter().enumerate() {
+                let instance = first + k + 1;
+                let start = copies.partition_point(|(n, _)| *n < instance);
+                let end = copies.partition_point(|(n, _)| *n <= instance);
+                let (i, moved) = match copies.get(start..end).unwrap_or_default() {
+                    [] if !new_body => (
+                        seed,
+                        motion.copied(&match frame {
+                            Some(at) => moved_in(m, &at)?,
+                            None => *m,
+                        }),
+                    ),
+                    candidates => {
+                        let moved = tool_motion.copied(&match tool_frame {
+                            Some(at) => moved_in(m, &at)?,
+                            None => *m,
+                        });
+                        (replayed_face_owner(st, candidates, moved.at)?, moved)
+                    }
+                };
+                let target = st.bodies.get_mut(i).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+                moved.apply(target)?;
+            }
+            continue;
+        }
         // A Draft repeats at the copied faces of the body they lie on, about the copied neutral
         // plane and pull direction (#18048).
         if matches!(src.kind, FeatureKind::Draft { .. }) {
@@ -17623,6 +17931,7 @@ fn picked_body(doc: &Document, st: &ModelState, src: &Feature) -> Option<usize> 
             (body.as_deref(), st.blend_edges.get(&src.id).and_then(|e| e.first().copied()).or(edges.first().map(|e| e.0)))
         }
         FeatureKind::OffsetFace { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
+        FeatureKind::TransformFace { face, body, .. } => (Some(body.as_ref()), Some(face.0)),
         FeatureKind::Draft { faces, body, .. } => (body.as_deref(), faces.first().map(|q| q.0)),
         FeatureKind::Hole { position, points: None, .. } => (
             match src.participants.as_slice() {
@@ -20610,6 +20919,14 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle } => {
+            let owner = st.bodies.iter_mut().find(|b| b.name == *body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            FaceMotion::resolve(vals, face.0, translate, rotate_axis.0, origin.as_ref(), angle.as_ref())?.apply(owner)?;
+            // Also record point-only picks from documents without a stored name: a copied
+            // body can already carry this completed edit when its creator is replayed.
+            st.named_faces.entry(f.id).or_insert_with(|| vec![face.0]);
+            Ok(())
+        }
         FeatureKind::DeleteFace { faces, body, heal } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
@@ -21499,6 +21816,11 @@ fn extrude_normal(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64
 /// (the outside of a shaft, the inside of a bore): a hub that sits on its shaft with no play has
 /// its bore on the shaft's own surface, and the bore's pick would otherwise take the shaft's name.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
+    if let FeatureKind::TransformFace { body, face, .. } = kind {
+        let owner = st.body(body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+        let name = owner.body.face_at_point(face.0)?.and_then(|i| crate::naming::face_names(owner).get(i).cloned());
+        return Ok(vec![name.filter(|s| !s.is_empty()).ok_or_else(|| DocError::Invalid(format!("no named face of `{body}` at {}", face.0)))?]);
+    }
     let pts = kind.face_points();
     if let FeatureKind::ShaftSpline { shaft, shaft_start, bore, bore_start, .. } = kind {
         // In the order the geometry walk gives the points: each round face, then the face its teeth start from.
@@ -23094,6 +23416,30 @@ mod named_face_lookup_tests {
         }
         let moved = crate::name_lookup::locate_face_on_body(&st, Some("Part1"), &name, top).unwrap();
         assert_eq!(moved.body, 2);
+    }
+
+    #[test]
+    fn transform_face_will_not_follow_a_name_onto_another_body() {
+        let st = parts(2);
+        let p = Vec3::new(5.0, 5.0, 10.0);
+        let mut doc = Document::new("Owned face");
+        let id = doc
+            .add_feature(
+                FeatureKind::TransformFace {
+                    face: p.into(),
+                    body: "Part0".into(),
+                    translate: crate::point_expr(Vec3::Z),
+                    rotate_axis: Vec3::Z.into(),
+                    origin: None,
+                    angle: None,
+                },
+                None,
+            )
+            .unwrap();
+        let other = name_at(&st, "Part1", Vec3::new(25.0, 5.0, 10.0));
+        assert!(crate::naming::locate_face(&st, &other, p).is_some());
+        doc.feature_mut(id).unwrap().face_names = vec![other];
+        assert!(with_named_face_points(&doc, &BTreeMap::new(), &st, doc.feature(id).unwrap()).is_err());
     }
 
     /// A copy of a body has its source's face names. Over every body the name finds the face on
