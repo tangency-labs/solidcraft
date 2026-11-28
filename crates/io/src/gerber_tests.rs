@@ -257,12 +257,102 @@ fn unreadable_files_are_refused_with_a_reason() {
     // Coordinates past a kilometre or with absurd digit counts.
     assert!(refusal("%FSLAX66Y66*%%MOIN*%G01*X0Y0D02*X999999999999D01*M02*").contains("kilometre"));
     assert!(refusal("%FSLAX46Y46*%%MOMM*%X99999999999999999999999Y1D02*M02*").contains("digits"));
-    // More than 6 decimals, X and Y in different formats, incremental mode by G91.
+    // More than 6 decimals, X and Y in different formats. (Incremental mode by G91 is read:
+    // `g91_switches_to_incremental_coordinates_and_g90_back`.)
     assert!(refusal("%FSLAX17Y17*%%MOMM*%X1Y1D02*M02*").contains("at most 6 decimals"));
     assert!(refusal("%FSLAX46Y36*%").contains("different numbers of digits"));
-    assert!(refusal("%FSLAX46Y46*%G91*").contains("G91"));
     let big = " ".repeat(MAX_DRAWING_BYTES + 1);
     assert!(refusal(&big).contains("too large"));
+}
+
+#[test]
+fn g91_switches_to_incremental_coordinates_and_g90_back() {
+    let o = read("%FSLAX46Y46*%%MOMM*%G01*X1000000Y0D02*G91*X1000000Y0D01*X0Y1000000D01*G90*X0Y0D01*M02*");
+    assert_eq!(o.geom, vec![Geom2::Line(p(1.0, 0.0), p(2.0, 0.0)), Geom2::Line(p(2.0, 0.0), p(2.0, 1.0)), Geom2::Line(p(2.0, 1.0), p(0.0, 0.0))]);
+    assert!(has_warning(&o, "G91"), "{:?}", o.warnings);
+    // G91 written in the same block as the draw it applies to, and an arc by its offsets.
+    let o = read("%FSLAX46Y46*%%MOMM*%G75*X1000000Y0D02*G91G03X-2000000Y0I-1000000J0D01*M02*");
+    assert_eq!(o.geom, vec![Geom2::Arc { c: p(0.0, 0.0), a: p(1.0, 0.0), b: p(-1.0, 0.0) }]);
+    // A circle by its offsets alone straight after G91 → G90 ends where it starts (X = 12 mm,
+    // reached incrementally), not at the last raw X (2 mm).
+    let o = read("%FSLAX46Y46*%%MOMM*%G75*G01*X10000000Y0D02*G91*X2000000Y0D01*G90*G03I-1000000J0D01*M02*");
+    assert_eq!(o.geom, vec![Geom2::Line(p(10.0, 0.0), p(12.0, 0.0)), Geom2::Circle(p(11.0, 0.0), 1.0)]);
+    // A block of offsets alone that is skipped (D04 selects nothing) leaves the next operation's
+    // own X as it is: from (1, 0) the line goes to (2, 1).
+    let o = read("%FSLAX46Y46*%%MOMM*%G01*X1000000Y0D02*I1000000D04*X2000000Y1000000D01*M02*");
+    assert_eq!(o.geom, vec![Geom2::Line(p(1.0, 0.0), p(2.0, 1.0))]);
+}
+
+#[test]
+fn step_and_repeat_places_its_block_at_every_position() {
+    // A 1 mm line, three across 10 mm apart and two up 5 mm apart.
+    let o = read("%FSLAX46Y46*%%MOMM*%G01*%SRX3Y2I10J5*%X0Y0D02*X1000000Y0D01*%SR*%M02*");
+    let mut starts: Vec<(f64, f64)> = o
+        .geom
+        .iter()
+        .map(|g| {
+            if let Geom2::Line(a, b) = g {
+                assert!((b.x - a.x - 1.0).abs() < 1e-12);
+                (a.x, a.y)
+            } else {
+                panic!("{g:?}")
+            }
+        })
+        .collect();
+    starts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(starts, vec![(0.0, 0.0), (0.0, 5.0), (10.0, 0.0), (10.0, 5.0), (20.0, 0.0), (20.0, 5.0)]);
+    assert!(o.warnings.is_empty(), "{:?}", o.warnings);
+    // Distances in inches; what comes after the block's end is drawn once; a block left open at
+    // the end is placed anyway, with a warning.
+    let o = read("%FSLAX24Y24*%%MOIN*%G01*%SRX2Y1I1J0*%X0Y0D02*X10000Y0D01*%SR*%X0Y10000D02*X10000Y10000D01*M02*");
+    assert_eq!(o.geom.len(), 3, "{:?}", o.geom);
+    assert!(o.geom.contains(&Geom2::Line(p(25.4, 0.0), p(50.8, 0.0))), "{:?}", o.geom);
+    let o = read("%FSLAX46Y46*%%MOMM*%G01*%SRX2Y1I3J0*%X0Y0D02*X1000000Y0D01*M02*");
+    assert_eq!(o.geom.len(), 2);
+    assert!(has_warning(&o, "step and repeat"), "{:?}", o.warnings);
+    // An image layer: two pads 5 mm apart cover twice one pad.
+    let l = layer("%ADD10C,1*%D10*%SRX2Y1I5J0*%X0Y0D03*%SR*%");
+    assert_eq!(l.loops.len(), 2, "{:?}", l.loops);
+    let total: f64 = l.loops.iter().map(|x| loop_area(x).abs()).sum();
+    assert!((total - 2.0 * std::f64::consts::PI * 0.25).abs() < 1e-9, "{total}");
+    // A grid too big for the reader is refused, not filled.
+    assert!(refusal("%FSLAX46Y46*%%MOMM*%G01*%SRX99999Y99999I1J1*%X0Y0D02*X1000000Y0D01*%SR*%M02*").contains("step and repeat"));
+    assert!(refusal("%FSLAX46Y46*%%MOMM*%G01*%SRX9Y1I999999J1*%X0Y0D02*X1000000Y0D01*%SR*%M02*").contains("kilometre"));
+    // The limit holds for the whole layer, not per block. A region of 1001 segments repeated so
+    // often that it makes three quarters of the limit is within it alone; a second such block
+    // passes the limit and is refused before its copies are made (read without the area build).
+    let mut region = String::from("%ADD10C,1*%D10*G01*G36*X0Y0D02*");
+    for k in 1..=1000 {
+        region.push_str(&format!("X{}Y{}D01*", k * 1000, (k % 2) * 1000));
+    }
+    region.push_str("X0Y0D01*G37*");
+    let block = format!("%SRX{}Y1I10J0*%{region}%SR*%", MAX_ENTITIES * 3 / 4 / 1001);
+    assert!(super::read(&format!("{LAYER_HEAD}{block}M02*"), true).is_ok());
+    match super::read(&format!("{LAYER_HEAD}{block}{block}M02*"), true) {
+        Ok(r) => panic!("expected a refusal, got {} objects", r.items.len()),
+        Err(e) => assert!(e.to_string().contains("step and repeat"), "{e}"),
+    }
+    // One count for every segment of the layer, in a block or not. A region of 6/10 of the limit
+    // drawn once and one of 1/4 repeated twice are 11/10 of it: refused before the copy is made
+    // (counting the block's 1/2 alone would let it pass). The large region and the block alone,
+    // or the large region with 1/5 repeated twice (the limit exactly), stay within it.
+    let region = |n: usize| {
+        let mut r = String::from("G36*X0Y0D02*");
+        for k in 1..n {
+            r.push_str(&format!("X{}Y{}D01*", k * 1000, (k % 2) * 1000));
+        }
+        r.push_str("X0Y0D01*G37*");
+        r
+    };
+    let (big, half, less) = (region(MAX_ENTITIES * 6 / 10), region(MAX_ENTITIES / 4), region(MAX_ENTITIES / 5));
+    let head = format!("{LAYER_HEAD}%ADD10C,1*%D10*G01*");
+    assert!(super::read(&format!("{head}{big}M02*"), true).is_ok());
+    assert!(super::read(&format!("{head}%SRX2Y1I10J0*%{half}%SR*%M02*"), true).is_ok());
+    assert!(super::read(&format!("{head}{big}%SRX2Y1I10J0*%{less}%SR*%M02*"), true).is_ok());
+    match super::read(&format!("{head}{big}%SRX2Y1I10J0*%{half}%SR*%M02*"), true) {
+        Ok(r) => panic!("expected a refusal, got {} objects", r.items.len()),
+        Err(e) => assert!(e.to_string().contains("step and repeat"), "{e}"),
+    }
 }
 
 #[test]
