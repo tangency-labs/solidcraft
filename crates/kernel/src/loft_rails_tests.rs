@@ -390,6 +390,24 @@ fn sections_of_an_arc_and_a_line_take_four_rails() {
     assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
 }
 
+#[test]
+fn three_polyline_rails_crossing_a_section_between_their_points_take_the_loft() {
+    let r = |z: f64| 10.0 + 5.0 * bulge(z);
+    let half = |z: f64| (at(z), vec![Seg2::Arc { center: Vec2::ZERO, radius: r(z), start: 0.0, sweep: PI }]);
+    let sections = [half(0.0), half(20.0), half(40.0)];
+    let rails: Vec<Vec<Vec3>> = [0.0, PI / 2.0, PI]
+        .iter()
+        .map(|&a| {
+            let zs = std::iter::once(0.0).chain((0..80).map(|i| 0.25 + f64::from(i) * 0.5)).chain(std::iter::once(40.0));
+            zs.map(|z| Vec3::new(r(z) * a.cos(), r(z) * a.sin(), z)).collect()
+        })
+        .collect();
+    loft_sheet_with_rails(&sections, &[rails[0].clone(), rails[2].clone()], RailFit::Scale).unwrap();
+    let b = loft_sheet_with_rails(&sections, &rails, RailFit::Scale).unwrap();
+    let worst = rails.iter().flatten().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "a rail is {worst} mm off the sheet");
+}
+
 /// A cubic section and an arc section, guided by three rails (from the cubic's ends and its top to
 /// the arc's ends and top): the cubic is not a line, so it may not take the arc's weights. Either
 /// the loft is refused as curves that do not pair, or it passes through the drawn cubic.
