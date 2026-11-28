@@ -280,6 +280,12 @@ pub enum SweepFailure {
     /// The surface an edge sweeps has no boundary curves left to trim it.
     /// [`ErrorKind::Degenerate`].
     SweptFaceWithoutBoundary,
+    /// A wall an exact path sweep builds has a natural boundary within tolerance of
+    /// singular but not exactly singular, which surface test 5 refuses (a corner arc
+    /// whose inner radius is inside the approximation tolerance). A caller sweeping a
+    /// closed path of lines and arcs builds that wall piece by piece at the true offset.
+    /// [`ErrorKind::Degenerate`].
+    SweptWallNearlySingular,
     /// The plane a line perpendicular to the axis sweeps and the revolution of that line
     /// have normals whose cosine is `dot`, below 0.8 in size, at their domains' first
     /// corners. [`ErrorKind::Degenerate`].
@@ -341,7 +347,8 @@ impl SweepFailure {
             | Self::SweepTooShort { .. }
             | Self::SweptBodyNotManifoldSolid
             | Self::SweptFaceWithoutBoundary
-            | Self::SweptSurfaceNormalsDisagree { .. } => SM_ERR,
+            | Self::SweptSurfaceNormalsDisagree { .. }
+            | Self::SweptWallNearlySingular => SM_ERR,
             Self::BrepWithoutInfiniteRegion { .. }
             | Self::EdgeWithoutCurve { .. }
             | Self::FaceCopyByFullTurn
@@ -393,7 +400,8 @@ impl SweepFailure {
             | Self::RevolutionSweepsNoFace
             | Self::SweptEdgeCurveDropped
             | Self::SweptFaceWithoutBoundary
-            | Self::SweptSurfaceNormalsDisagree { .. } => ErrorKind::Degenerate,
+            | Self::SweptSurfaceNormalsDisagree { .. }
+            | Self::SweptWallNearlySingular => ErrorKind::Degenerate,
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::ProfileCurveStepFailed { .. } => ErrorKind::Failed,
             Self::RailPastStationCap { .. } => ErrorKind::NotWithinTolerance,
@@ -572,6 +580,9 @@ impl core::fmt::Display for SweepFailure {
             ),
             Self::SweptFaceWithoutBoundary => {
                 f.write_str("the surface the edge sweeps has no boundary curves")
+            }
+            Self::SweptWallNearlySingular => {
+                f.write_str("a swept wall is within tolerance of singular at its boundary")
             }
             Self::SweptEdgeCurveDropped => {
                 f.write_str("the face builder dropped the swept edge's own curve")
@@ -833,6 +844,11 @@ mod tests {
             ),
             (
                 SweepFailure::SweptFaceWithoutBoundary,
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                SweepFailure::SweptWallNearlySingular,
                 SM_ERR,
                 ErrorKind::Degenerate,
             ),

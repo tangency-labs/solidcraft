@@ -243,13 +243,51 @@ pub fn create_rotational_sweep(
     angle_deg: f64,
     cap_ends: bool,
 ) -> Result<Brep> {
+    rotational_sweep(k, curves_to_sweep, base_pt, axis, angle_deg, cap_ends, None)
+}
+
+/// [`create_rotational_sweep`] for one arc of a closed path of lines and arcs
+///. `feature_scale` is that arc's radius. A plain revolve does not call this.
+///
+/// # Errors
+///
+/// Those of [`create_rotational_sweep`].
+pub(crate) fn create_rotational_sweep_at_scale(
+    k: &mut Kernel,
+    curves_to_sweep: &[Option<&Curve>],
+    base_pt: Point3,
+    axis: Vec3,
+    angle_deg: f64,
+    cap_ends: bool,
+    feature_scale: f64,
+) -> Result<Brep> {
+    rotational_sweep(
+        k,
+        curves_to_sweep,
+        base_pt,
+        axis,
+        angle_deg,
+        cap_ends,
+        Some(feature_scale),
+    )
+}
+
+fn rotational_sweep(
+    k: &mut Kernel,
+    curves_to_sweep: &[Option<&Curve>],
+    base_pt: Point3,
+    axis: Vec3,
+    angle_deg: f64,
+    cap_ends: bool,
+    feature_scale: Option<f64>,
+) -> Result<Brep> {
     crate::profile::profile_scope!(k, "sweep::rotational");
     // Sweep copies of the inputs: CreateRotationalSweep consumes the curves.
     let curve_copies = copy_curves_for_consuming_sweep(k, curves_to_sweep)?;
 
     let mut curve_copies: Vec<Option<Curve>> = curve_copies.into_iter().map(Some).collect();
-    build(k, |pc, model| {
-        pc.create_partial_rotational_sweep(
+    build(k, |pc, model| match feature_scale {
+        Some(scale) => pc.create_partial_rotational_sweep_at_scale(
             model,
             PrimitiveModel::MAIN,
             &mut curve_copies,
@@ -257,7 +295,17 @@ pub fn create_rotational_sweep(
             axis,
             angle_deg,
             repeated(1, cap_ends),
-        )
+            scale,
+        ),
+        None => pc.create_partial_rotational_sweep(
+            model,
+            PrimitiveModel::MAIN,
+            &mut curve_copies,
+            base_pt,
+            axis,
+            angle_deg,
+            repeated(1, cap_ends),
+        ),
     })
 }
 

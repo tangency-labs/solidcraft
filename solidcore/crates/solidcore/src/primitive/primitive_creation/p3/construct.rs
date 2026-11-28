@@ -26,6 +26,8 @@
 //! Not upstream (tangency-labs/solidcore#2192, WR-675): a sweep along a closed path
 //! whose end sections lie on its start sections (`sweep_ends_coincide`) is not capped,
 //! so the stitch joins its side faces' end edges to their start edges.
+//! Not upstream: an exact path sweep whose face boundary is only approximately
+//! singular refuses, and the closed path is built piece by piece at the true offset.
 //! Not upstream (the SolidCraft fork's tangency-labs/smlib 5d3939e, WR-523, #1450):
 //! [`PrimitiveCreation::create_curve_sweep_with_placements`] reports the rigid motions
 //! carrying the profile onto the first, middle and last sections.
@@ -51,6 +53,7 @@ use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::Curve;
 use crate::error::primitive::PrimitiveFailure;
+use crate::error::sweep::SweepFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -67,7 +70,7 @@ use crate::surface::surface::{
 };
 use crate::sweep::skin_ends::{end_tangents_of, skinned_surface_with_end_tangents, SkinEnd};
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef};
-use crate::topology::{BrepId, EdgeuseId, FaceId};
+use crate::topology::{Brep, BrepId, EdgeuseId, FaceId};
 
 use super::skin_sources::{layer_sources, LoopSpans, NotTraced, Segment, SkinSources, SkinTrace};
 
@@ -1009,6 +1012,8 @@ impl PrimitiveCreation {
                     };
                     (net, fitted)
                 };
+                // The fitted net is a different surface; only the exact path net is refused below.
+                let exact_path = definition.is_some();
                 // Compare complete sections before the surface is split into faces.
                 // A closed sweep's individual path pieces need not close on themselves.
                 if closed_sections {
@@ -1027,6 +1032,18 @@ impl PrimitiveCreation {
                 let domain = surface.natural_uv_domain_if_built();
                 let mut made = Vec::new();
                 ignore_status(a.surface_faces(brep, surface, domain, &mut made))?;
+                // a corner arc whose inner radius is inside the approximation tolerance
+                // leaves a boundary close to a point. Surface test 5 refuses that, and moving
+                // the straight walls onto the bend's centre changes the volume. Refuse here;
+                // the exact piece sweep keeps the true offset.
+                if exact_path {
+                    let near = a.with_primitive_brep(brep, |k, model| {
+                        boundary_only_approximately_singular(k, model, &made)
+                    })?;
+                    if near {
+                        return Err(SolidError::sweep(OP, SweepFailure::SweptWallNearlySingular));
+                    }
+                }
                 let first = side_faces.len();
                 side_faces.extend(made);
                 groups.push(first..side_faces.len());
@@ -1174,6 +1191,25 @@ fn join_collinear_lines(composite: CompositeCurve, tol: f64) -> Result<Composite
         Some(&senses),
         Some(&gaps),
     )
+}
+
+/// Whether a face of an exact path sweep fails surface test 5: a natural boundary is
+/// approximately singular and not exactly singular (`assert_test_surface5`).
+fn boundary_only_approximately_singular(
+    k: &crate::kernel::Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+) -> Result<bool> {
+    for &face in faces {
+        let Some(surface) = crate::topology::face::p2::surface(b, face)? else {
+            continue;
+        };
+        let sing = surface.get_singularities(k, false, false)?;
+        if sing.approx_singular.wrapping_sub(sing.singular) != 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The rigid motions carrying the profile as given onto the sweep's sections placed
