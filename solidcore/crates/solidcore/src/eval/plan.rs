@@ -30,6 +30,7 @@
     clippy::many_single_char_names
 )]
 
+use crate::math::det;
 use super::vec::VecExt as _;
 use crate::math::Vec3;
 
@@ -226,7 +227,7 @@ impl EvalSurface {
                 let [u, v] = self.wrap([u, v]);
                 let (s, a) = if *swap { (v, u) } else { (u, v) };
                 let (c, dc) = profile.eval(s)?;
-                let (sin, cos) = a.sin_cos();
+                let (sin, cos) = det::sin_cos(a);
                 let rot = |x: Vec3| x * cos + axis.cross(x) * sin + *axis * (axis.dot(x) * (1.0 - cos));
                 let r = c - *origin;
                 let p = *origin + rot(r);
@@ -481,7 +482,8 @@ fn basis_ders_into(knots: &[f64], span: usize, p: usize, t: f64, ders: &mut [[f6
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::math::det;
+use super::*;
 
     fn close(a: Vec3, b: Vec3, tol: f64) -> bool {
         a.dist(b) <= tol
@@ -513,9 +515,9 @@ mod tests {
         };
         for &(u, v) in &[(0.0, 0.0), (0.5, 1.0), (1.0, 4.0), (0.25, 6.0)] {
             let (p, n) = s.eval(u, v);
-            assert!(close(p, Vec3::new(2.0 * v.cos(), 2.0 * v.sin(), 5.0 * u), 1e-12), "{p:?}");
+            assert!(close(p, Vec3::new(2.0 * det::cos(v), 2.0 * det::sin(v), 5.0 * u), 1e-12), "{p:?}");
             // S_u = +Z, S_v = tangential: the normal points inward (−radial) for this profile.
-            assert!(close(n, Vec3::new(-v.cos(), -v.sin(), 0.0), 1e-12), "{n:?}");
+            assert!(close(n, Vec3::new(-det::cos(v), -det::sin(v), 0.0), 1e-12), "{n:?}");
         }
     }
 
@@ -648,8 +650,8 @@ mod tests {
             let s = j as f64 / (nv - 1) as f64;
             for i in 0..nu {
                 let t = std::f64::consts::TAU * (i as f64 / (nu - 1) as f64);
-                let r = 10.0 + 0.4 * (24.0 * t + 0.6 * s).sin() + 0.3 * (3.0 * t + 0.2 * s).sin();
-                ctrl.push([r * t.cos(), r * t.sin(), 30.0 * s, 1.0]);
+                let r = 10.0 + 0.4 * det::sin(24.0 * t + 0.6 * s) + 0.3 * det::sin(3.0 * t + 0.2 * s);
+                ctrl.push([r * det::cos(t), r * det::sin(t), 30.0 * s, 1.0]);
             }
         }
         let surf = EvalSurface::nurbs([3, 3], [ku, kv], [nu, nv], ctrl);

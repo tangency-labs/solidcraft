@@ -11,6 +11,7 @@
 use super::profile::{self, Loop2, Region2, Seg2};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
+use crate::math::det;
 use crate::math::{Transform, Vec2, Vec3};
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -176,10 +177,10 @@ fn finite2(p: Vec2) -> bool {
     p.x.is_finite() && p.y.is_finite()
 }
 fn polar(t: f64) -> Vec2 {
-    Vec2::new(t.cos(), t.sin())
+    Vec2::new(det::cos(t), det::sin(t))
 }
 fn angle(p: Vec2) -> f64 {
-    p.y.atan2(p.x)
+    det::atan2(p.y, p.x)
 }
 fn seg_ends(s: &Seg2) -> (Vec2, Vec2) {
     (s.start(), s.end())

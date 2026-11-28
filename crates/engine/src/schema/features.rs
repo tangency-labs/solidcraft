@@ -17,9 +17,9 @@ use super::config::NameList;
 use super::motion::require;
 use super::types::{
     AngleExpr, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs,
-    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr,
+    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromObject, GeoRefParam, IdOrName, LengthExpr,
     NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
-    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ThreadFromPoint, ToObject, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -67,6 +67,31 @@ pub struct BoxParams {
     /// Names for the new bodies, in order.
     #[serde(default)]
     pub body_names: Option<StringList>,
+}
+
+/// Create complementary fingers on intersecting pairs of selected plates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FingerJointParams {
+    /// Two to 32 distinct body names in processing order. Default: the selected bodies.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// The number of alternating finger/slot pairs, producing 2 * count + 1 segments. Default: 3.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 64))]
+    pub count: Option<u64>,
+    /// The gap between complementary fingers, as a length expression. Default: 0 mm.
+    #[serde(default)]
+    pub clearance: Option<LengthExpr>,
+    /// Start and end with fingers instead of slots. Default: false.
+    #[serde(default)]
+    pub inverted: Option<bool>,
+    /// Additional length for each end segment, as a length expression. Default: 0 mm.
+    #[serde(default)]
+    pub edge_offset: Option<LengthExpr>,
+    /// The feature's name in the timeline.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Extrude sketch profiles (or a planar body face) into a solid.
@@ -122,9 +147,14 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub extent: Option<ExtentKeyword>,
     /// Draft angle of the side walls (positive: outward, so the far end is larger along the
-    /// extrusion direction; negative: inward, so the far end is smaller).
+    /// extrusion direction; negative: inward, so the far end is smaller). With `direction:
+    /// symmetric` it drafts both halves from the start plane; with `distance2`, the first side.
     #[serde(default)]
     pub taper: Option<AngleExpr>,
+    /// With `distance2`: the second side's draft angle, from the start plane the same way
+    /// (positive: that side's far end is larger). Default: `taper`.
+    #[serde(default)]
+    pub taper2: Option<AngleExpr>,
     /// Which way to extrude. Default: positive.
     #[serde(default)]
     pub direction: Option<DirectionParam>,
@@ -155,10 +185,11 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]
     pub convention: Option<ConventionParam>,
-    /// Extrude up to this face, vertex or point (To Object).
+    /// Extrude up to this face, vertex or point (To Object), or up to a plane or a construction
+    /// point, followed when it moves.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "ToPoint")]
-    pub to: Option<ToPoint>,
+    #[schemars(with = "ToObject")]
+    pub to: Option<ToObject>,
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
@@ -169,11 +200,17 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
-    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
-    /// face, and a distance moves it along the extrusion.
+    /// With `to` a face: carry the face's surface on past its edges (a plane without end; a
+    /// cylinder, cone, sphere or torus along its surface), so a profile wider than the face, or
+    /// over a bore in it, ends on it instead of being refused. Default: false.
+    #[serde(default)]
+    pub extend_to_face: Option<bool>,
+    /// Start at this face or point (From Object), or at a plane or a construction point,
+    /// followed when it moves. On a flat face or a plane at a slant the start follows its slope,
+    /// and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "FromPoint")]
-    pub from: Option<FromPoint>,
+    #[schemars(with = "FromObject")]
+    pub from: Option<FromObject>,
     /// How the extrusion combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<ExtrudeOperation>,
@@ -242,6 +279,11 @@ pub struct RevolveParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "RevolveConventionParam")]
     pub convention: Option<RevolveConventionParam>,
+    /// Join pieces of the same circular profile. Default: true. Set false to keep the face and
+    /// edge layout of Revolve features saved before arc joining.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub join_profile_arcs: Option<bool>,
     /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
     /// and `direction`.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
@@ -867,8 +909,10 @@ pub struct OffsetPlaneParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PlaneAtAngleParams {
-    /// The plane to turn.
-    pub base: PlaneOrFace,
+    /// The plane to turn. Omitted with a body edge as `axis`: a flat face that meets the edge, so
+    /// the plane goes through the edge and `angle` is measured from that face (#20233).
+    #[serde(default)]
+    pub base: Option<PlaneOrFace>,
     /// The axis it turns about. A picked edge's or face's axis points the way its largest
     /// component is positive.
     pub axis: AxisLine,
@@ -882,6 +926,11 @@ pub struct PlaneAtAngleParams {
     /// Omit to use the base plane's origin. `null` counts as not given.
     #[serde(default)]
     pub pivot: Option<GeoRefParam>,
+    /// Bring `base` onto the axis first (moved along its normal, tilted when the axis is not
+    /// parallel to it), so the plane goes through the whole axis even when it is off the base.
+    /// Not with `direction_only`. Default false: `base` turns about the axis where it is.
+    #[serde(default)]
+    pub through_axis: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }
@@ -1248,8 +1297,23 @@ pub struct MoveParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub copy: Option<bool>,
+    /// Construction features (names or feature ids) moved with the bodies, such as a Center Pole
+    /// held by fixed points.
+    #[serde(default)]
+    pub carry: Option<Vec<ConstructionRef>>,
+    /// Construction features (names or feature ids) built on the bodies but left where they are.
+    #[serde(default)]
+    pub leave: Option<Vec<ConstructionRef>>,
     #[serde(flatten, deserialize_with = "super::feature_common")]
     pub common: super::FeatureCommon,
+}
+
+/// A construction feature, by name or by feature id.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ConstructionRef {
+    Name(String),
+    Id(u64),
 }
 
 /// Body features, component copies, or repeated placements moved together.
@@ -1369,7 +1433,7 @@ pub struct PatternRectangularParams {
     /// What sets the first direction's copies: `count_spacing` (the default: `count1` and
     /// `spacing1`), `count_extent` (`count1` and `extent1`; the spacing is the extent divided by
     /// one less than the count) or `spacing_extent` (`spacing1` and `extent1`; as many copies as
-    /// fit, none past the extent's end).
+    /// fit, none past the extent's end) or `count_list` (`count1` and `spacing_list1`).
     #[serde(default, deserialize_with = "pattern_distance1")]
     pub distance1: Option<PatternDistanceParam>,
     /// What sets the second direction's copies, as `distance1`.
@@ -1389,6 +1453,14 @@ pub struct PatternRectangularParams {
     /// As `copy_at_end1`, along the second direction.
     #[serde(default, deserialize_with = "copy_at_end2")]
     pub copy_at_end2: Option<bool>,
+    /// `count_list`: the gaps between neighbours along the first direction, each greater than
+    /// zero, used in turn and from the start again: `[10, 20, 30]` with a count of 5 puts the
+    /// copies at 10, 30, 60 and 70. Centred, the list runs out from the original on both sides.
+    #[serde(default, deserialize_with = "spacing_list1")]
+    pub spacing_list1: Option<Vec<LengthExpr>>,
+    /// As `spacing_list1`, along the second direction.
+    #[serde(default, deserialize_with = "spacing_list2")]
+    pub spacing_list2: Option<Vec<LengthExpr>>,
     /// Join the bodies copied from and their copies where they touch or overlap, so a part
     /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
     /// their own (#21625). Default: false, every copy a body of its own.
@@ -1405,6 +1477,7 @@ pub enum PatternDistanceParam {
     CountSpacing,
     CountExtent,
     SpacingExtent,
+    CountList,
 }
 
 /// A distance type under `key`, with the handler's message; `null` is read as left out.
@@ -1413,7 +1486,7 @@ fn distance_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<Patt
         Value::Null => Ok(None),
         v => serde_json::from_value(v)
             .map(Some)
-            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be count_spacing, count_extent or spacing_extent")))),
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be count_spacing, count_extent, spacing_extent or count_list")))),
     }
 }
 
@@ -1440,6 +1513,24 @@ fn copy_at_end1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Erro
 
 fn copy_at_end2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     copy_at_end_at(d, "copy_at_end2")
+}
+
+/// A spacing list under `key`, with the handler's message; `null` is read as left out.
+fn spacing_list_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => serde_json::from_value(v)
+            .map(Some)
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be a list of spacings, each a number or an expression")))),
+    }
+}
+
+fn spacing_list1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    spacing_list_at(d, "spacing_list1")
+}
+
+fn spacing_list2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<LengthExpr>>, D::Error> {
+    spacing_list_at(d, "spacing_list2")
 }
 
 /// The most curves a pattern path lists, as `features::pattern_path` reads it.
@@ -1691,6 +1782,386 @@ pub struct DraftParams {
     pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// The most faces one Thread feature takes, as `solid.thread` reads `faces`.
+const MAX_THREAD_FACES: usize = 1024;
+
+/// The handler's reading of one Thread face pick: a point, or an object with a `point`.
+fn thread_point(v: &Value) -> Option<solidcore_record::Vec3> {
+    crate::params::vec3(v).or_else(|| v.get("point").and_then(crate::params::vec3))
+}
+
+/// Thread's `face`: a point on a cylindrical face, `[x, y, z]`, `{x, y, z}` or `{point}`, read as
+/// the handler reads it, with its message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThreadFacePoint(pub solidcore_record::Vec3);
+
+impl<'de> Deserialize<'de> for ThreadFacePoint {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        thread_point(&Value::deserialize(d)?)
+            .map(ThreadFacePoint)
+            .ok_or_else(|| D::Error::custom(whole("`face` must be a point [x, y, z] on a cylindrical face")))
+    }
+}
+
+impl JsonSchema for ThreadFacePoint {
+    fn schema_name() -> Cow<'static, str> {
+        "ThreadFacePoint".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "A point on the cylindrical face to thread, in mm: [x, y, z], {\"x\", \"y\", \"z\"} or {\"point\": [x, y, z]}. Give it or `faces`.",
+            "anyOf": [point, {"type": "object", "properties": {"point": point}, "required": ["point"]}]
+        })
+    }
+}
+
+/// Thread's `faces`: 1 to 1024 entries `{body, point}`, read as the handler reads them, with its
+/// messages. Whether a body exists, and whether the faces share a component, stay the handler's to
+/// check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadFaces(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for ThreadFaces {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let entries = v
+            .as_array()
+            .filter(|entries| !entries.is_empty() && entries.len() <= MAX_THREAD_FACES)
+            .ok_or_else(|| D::Error::custom(whole("`faces` must contain between 1 and 1024 points on cylindrical faces")))?;
+        if entries.iter().any(|e| thread_point(e).is_none()) {
+            return Err(D::Error::custom(whole("`faces` must be finite points [x, y, z] on cylindrical faces")));
+        }
+        if entries.iter().any(|e| e.get("body").and_then(Value::as_str).is_none()) {
+            return Err(D::Error::custom(whole("each entry of `faces` must be {body, point}")));
+        }
+        Ok(ThreadFaces(entries.clone()))
+    }
+}
+
+impl JsonSchema for ThreadFaces {
+    fn schema_name() -> Cow<'static, str> {
+        "ThreadFaces".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "The cylindrical faces to thread with the same options, 1 to 1024, each {\"body\", \"point\"}: the body's exact world name or an unambiguous definition name, and a point on the face in mm. Every body must belong to the same component. An automatic size fits each face on its own. Not with `face`.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": MAX_THREAD_FACES,
+            "items": {
+                "type": "object",
+                "properties": {"body": {"type": "string"}, "point": point},
+                "required": ["body", "point"]
+            }
+        })
+    }
+}
+
+/// A word Thread reads with an exact match (no trimming, case counts), with the handler's message
+/// for any other text. A value that isn't text, which the handler reads as left out, is refused.
+fn thread_word<'de, D: Deserializer<'de>>(d: D, words: &[&str], unknown: impl Fn(&str) -> String) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) if words.contains(&s.as_str()) => Ok(Some(s)),
+        Value::String(s) => Err(D::Error::custom(whole(unknown(&s)))),
+        _ => Err(D::Error::custom(format!("must be one of {}", words.join(", ")))),
+    }
+}
+
+fn thread_hand<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    thread_word(d, &["right", "left", "both"], |h| format!("unknown hand `{h}` (right, left or both)"))
+}
+
+fn thread_hand_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Which way the thread turns: right, left, or both (a right- and a left-handed groove crossing, as on a reversing screw). Default: right.",
+        "type": ["string", "null"],
+        "enum": ["right", "left", "both", null]
+    })
+}
+
+fn thread_steep_flank<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    thread_word(d, &["start", "end"], |h| format!("unknown steep_flank `{h}` (start or end)"))
+}
+
+fn thread_steep_flank_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "For the buttress forms only (refused with any other form): which end of the thread the steep flank of the screw's teeth faces, start or end. Default: end, the way the thread's axis points.",
+        "type": ["string", "null"],
+        "enum": ["start", "end", null]
+    })
+}
+
+fn thread_tip<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    thread_word(d, &["none", "start", "both"], |t| match t {
+        "chamfer" => "tip `chamfer` is now `both` (every free end) or `start` (the end the thread starts from)".to_string(),
+        t => format!("unknown tip `{t}` (none, start or both)"),
+    })
+}
+
+fn thread_tip_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Modelled external threads: a chamfered end as in ISO 4753, the last teeth tapering into the cone. none; start (the end the thread starts from, which must be free); or both (each free end the thread reaches). Default: none. A cosmetic thread refuses start and both.",
+        "type": ["string", "null"],
+        "enum": ["none", "start", "both", null]
+    })
+}
+
+fn thread_extent<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    thread_word(d, &["full", "length", "up_to"], |e| format!("unknown extent `{e}` (full, length or up_to)"))
+}
+
+fn thread_extent_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "How far the thread runs: full (the whole face, with no `length` or `up_to`), length (needs `length`) or up_to (needs `up_to`). Default: length when `length` is given, up_to when `up_to` is, else full.",
+        "type": ["string", "null"],
+        "enum": ["full", "length", "up_to", null]
+    })
+}
+
+/// Thread's `form`, as `ThreadForm::from_name` reads it (trimmed, any case), with the handler's
+/// message for a name it doesn't know. A value that isn't text, which the handler reads as left
+/// out, is refused.
+fn thread_form<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    use solidcraft_doc::thread_forms::ThreadForm;
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) if ThreadForm::from_name(&s).is_some() => Ok(Some(s)),
+        Value::String(s) => Err(D::Error::custom(whole(format!(
+            "unknown thread form `{s}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt, custom or square)"
+        )))),
+        _ => Err(D::Error::custom("must be a thread form's name")),
+    }
+}
+
+fn thread_form_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The thread's form: metric (ISO 68-1), unified (ASME B1.1), trapezoidal (ISO 2904), acme (ASME B1.5), buttress (DIN 513, 3°/30°), buttress_asme (ASME B1.9, 7°/45°), bspp (ISO 228-1, 55° parallel), rp (ISO 7-1's parallel internal thread), bspt (ISO 7-1, 55° taper), npt (ASME B1.20.1, 60° taper) or custom (not a standard: the ISO 68-1 basic profile at the included angle its designation gives, 20° to 90°). Matching ignores case and surrounding spaces. square is refused: no current standard defines it. Default: the form `designation` names, else metric.",
+        "type": ["string", "null"]
+    })
+}
+
+/// A key Thread reads as true or false only, refusing anything else (`null` too) with the
+/// handler's message.
+fn thread_bool<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole(format!("`{key}` must be a boolean")))),
+    }
+}
+
+fn single_face_selection<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    thread_bool(d, "single_face_selection")
+}
+
+fn continuous_flanks<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    thread_bool(d, "continuous_flanks")
+}
+
+/// Thread's `starts`, a whole number from 1 to 8, with the handler's message. `null` is left out.
+fn thread_starts<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => v
+            .as_u64()
+            .filter(|n| (1..=8).contains(n))
+            .and_then(|n| u32::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| D::Error::custom(whole("`starts` must be a whole number from 1 to 8"))),
+    }
+}
+
+/// Thread's `ease_out`, as `runout_param` reads it: a length (a number or an expression),
+/// `"standard"` or `"short"`; 0 is none.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadRunoutParam(pub Value);
+
+impl<'de> Deserialize<'de> for ThreadRunoutParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let ok = matches!(&v, Value::String(t) if t == "standard" || t == "short") || crate::params::expr(&json!({ "v": v }), "v").is_some();
+        if ok { Ok(ThreadRunoutParam(v)) } else { Err(D::Error::custom(whole("`ease_out` must be a length, \"standard\" or \"short\""))) }
+    }
+}
+
+impl JsonSchema for ThreadRunoutParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ThreadRunout".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let length = generator.subschema_for::<LengthExpr>();
+        json_schema!({
+            "description": "Modelled threads: the inner end, away from where the thread starts, fades out over this length (it may be shorter than a turn), its section moving out of the material as it turns. standard is 2.5 pitches and short 1.25 pitches (ISO 3508). It lies past the full-form length, up to a shoulder's clearance; at a free end it lies inside the face. 0 or left out: the groove stops square, ending in its own profile. The start never fades: it runs off its free end, plain or chamfered (`tip`).",
+            "anyOf": [{"type": "string", "enum": ["standard", "short"]}, length]
+        })
+    }
+}
+
+/// Thread's `up_to`: a point (`[x, y, z]` or `{x, y, z}`), or else a plane as
+/// `features::plane_param` reads it, with its message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadUpTo(pub Value);
+
+impl<'de> Deserialize<'de> for ThreadUpTo {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        if crate::params::vec3(&v).is_some() {
+            return Ok(ThreadUpTo(v));
+        }
+        match super::types::plane_problem_named(&v, "plane") {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(ThreadUpTo(v)),
+        }
+    }
+}
+
+impl JsonSchema for ThreadUpTo {
+    fn schema_name() -> Cow<'static, str> {
+        "ThreadUpTo".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        let plane = generator.subschema_for::<PlaneParam>();
+        json_schema!({
+            "description": "Where the thread ends: a point in mm, such as on a shoulder face (the thread runs to its place along the axis), or a plane (the thread runs to where the plane crosses the axis). Not with `length`.",
+            "anyOf": [point, plane]
+        })
+    }
+}
+
+/// Put a cosmetic or modelled thread on cylindrical faces: a shaft's (external) or a hole's
+/// (internal). Cosmetic: the model is unchanged and `model.threads` lists the thread. Modelled
+/// (`modeled: true`): the thread's profile is cut into the body. Past a free end the groove runs
+/// out a pitch into the air (or through a chamfer). At a shoulder, a head or a blind hole's bottom
+/// it stops with its section clear of it. A hole as wide as the thread or wider is narrowed to the
+/// thread's minor diameter first, and the reply's `warning` says so, unless its wall is open along
+/// the thread (a cross hole, a cut through the side, a slanted end), which is refused with the
+/// drill to use. A shaft thicker than the thread is refused with the size to make it. One undo
+/// step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ThreadParams {
+    #[serde(default)]
+    pub face: Option<ThreadFacePoint>,
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ThreadFaces")]
+    pub faces: Option<ThreadFaces>,
+    /// True: the Thread came from a single face picked on its own, and keeps replacing that one
+    /// face when it is edited. Needs exactly one entry in `faces`. Default: false.
+    #[serde(default, deserialize_with = "single_face_selection", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub single_face_selection: Option<bool>,
+    #[serde(default, deserialize_with = "thread_form")]
+    #[schemars(schema_with = "thread_form_schema")]
+    pub form: Option<String>,
+    /// The size, as its standard writes it: metric "M8", "M8x1", "M16xPh3P1.5", with an optional
+    /// ISO 965-1 tolerance class kept in the callout ("M8-6g" on a shaft, "M8-6H" in a hole); unified
+    /// "1/4-20 UNC-2A", "#10-32 UNF"; trapezoidal "Tr20x4", "Tr40x14(P7)"; buttress "S20x4"; acme
+    /// "1/2-10 ACME"; buttress_asme "2.5-8 BUTT"; bspp "G 1/2"; rp "Rp 1/2"; bspt "R 1/2"
+    /// (external) or "Rc 1/2" (internal); npt "1/2-14 NPT"; custom "C10x1.5x90" (major diameter x
+    /// pitch x included angle, mm and degrees, 20° to 90°). Blank text is the same as left out.
+    /// Default: the standard size that fits the face: a shaft by its major diameter, a hole by its
+    /// nominal diameter (a 12 mm hole is M12), else the size whose tap drill it is.
+    #[serde(default)]
+    pub designation: Option<String>,
+    /// How many grooves, each a turn's starts-th further round: the lead is starts times the
+    /// pitch. A whole number from 1 to 8. A designation that gives the lead gives the starts.
+    /// Default: 1.
+    #[serde(default, deserialize_with = "thread_starts")]
+    #[schemars(with = "Option<u32>", range(min = 1, max = 8))]
+    pub starts: Option<u32>,
+    #[serde(default, deserialize_with = "thread_hand")]
+    #[schemars(schema_with = "thread_hand_schema")]
+    pub hand: Option<String>,
+    #[serde(default, deserialize_with = "thread_steep_flank")]
+    #[schemars(schema_with = "thread_steep_flank_schema")]
+    pub steep_flank: Option<String>,
+    #[serde(default, deserialize_with = "thread_tip")]
+    #[schemars(schema_with = "thread_tip_schema")]
+    pub tip: Option<String>,
+    /// A chamfered tip's angle to the axis. Default: 45 deg. Only with `tip: start` or `both`.
+    #[serde(default)]
+    pub chamfer_angle: Option<AngleExpr>,
+    /// A chamfered tip's depth, radial from the major diameter. Default for a metric thread: down to
+    /// the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other
+    /// forms give their own. Only with `tip: start` or `both`.
+    #[serde(default)]
+    pub chamfer_depth: Option<LengthExpr>,
+    /// Gone: always refused, with a note. A thread's start runs off its free end, plain or
+    /// chamfered (`tip: start`); fade the inner end with `ease_out`.
+    #[serde(default)]
+    pub ease_in: Option<Value>,
+    #[serde(default)]
+    pub ease_out: Option<ThreadRunoutParam>,
+    #[serde(default, deserialize_with = "thread_extent")]
+    #[schemars(schema_with = "thread_extent_schema")]
+    pub extent: Option<String>,
+    /// How far the thread runs, from where it starts (the end it starts at, or `offset` in from it).
+    /// Not with `up_to`.
+    #[serde(default)]
+    pub length: Option<LengthExpr>,
+    /// How far in from the end it starts at (`from`) the thread starts, leaving that much of the face
+    /// plain; `length` and `up_to` are measured from there. 0 or more, shorter than the face; not
+    /// with `tip: start` or a taper pipe thread. Default: 0, the thread starts at that end.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    #[serde(default)]
+    pub up_to: Option<ThreadUpTo>,
+    /// A point near the end of the face the thread starts at, in mm. Default: the face's only free
+    /// end (the one with no material past it); else the end the `face` point lies within a third of
+    /// the face of. A pick in the middle of a face whose ends are alike is refused.
+    #[serde(default)]
+    pub from: Option<ThreadFromPoint>,
+    /// True: cut the thread into the body. False: a cosmetic thread, which leaves the model as it
+    /// is. Default: false.
+    #[serde(default)]
+    pub modeled: Option<bool>,
+    /// False keeps the older construction: half-turn faces, and the groove cut before the chamfer.
+    /// Default: true.
+    #[serde(default, deserialize_with = "continuous_flanks", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub continuous_flanks: Option<bool>,
+    /// True: an automatic size keeps the rule of designs saved before a hole was sized by its
+    /// nominal diameter (a 12 mm hole is M14). Set on those threads, so they stay as they were when
+    /// edited. Ignored with a `designation`. Default: false.
+    #[serde(default)]
+    pub old_auto_size: Option<bool>,
+    // Not `FeatureCommon`: a thread makes no body, so `body_name` and `body_names` would do nothing.
+    // `participants` stays because `timeline.redefine` passes a feature's own back.
+    /// The feature's name in the timeline.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The bodies taking part, which every feature records; each an existing body or `*`. A
+    /// thread finds its faces by their points (and the bodies `faces` names), whatever this lists.
+    #[serde(default)]
+    pub participants: Option<StringList>,
+}
+
+/// What `solid.thread` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadFeatureResult {
+    /// The new feature's id.
+    pub feature: u64,
+    /// The new feature's name.
+    pub name: String,
+    /// The cosmetic thread as `model.threads` lists it (the first face's, with `faces`), or `null`
+    /// for a modelled thread.
+    pub thread: Option<super::inspect::ModelThread>,
+    /// With `faces`: each face's cosmetic thread, in the order given (empty for a modelled thread).
+    /// Left out with `face`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threads: Option<Vec<super::inspect::ModelThread>>,
+    /// A warning from the evaluation, such as a hole narrowed to the thread's minor diameter.
+    /// Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What a feature command returns.

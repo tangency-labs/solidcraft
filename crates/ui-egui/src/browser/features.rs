@@ -527,16 +527,20 @@ fn folder_row(app: &mut SolveApp, rows: &mut Rows<'_>, folders: &[TimelineGroup]
         pick_folder(app, rows.ui(), folder.id);
     }
     inline_rename(app, rows.ui(), r.name_at(), &folder.name);
-    if let Some(resp) = &r.resp {
-        crate::ui_kit::Menu::context(resp, |ui| {
-            if crate::ui_kit::menu::button(ui, "Rename Folder", "rename").clicked() {
+    if let Some(resp) = &r.resp
+        && (crate::ui_kit::Menu::context_active(resp))
+    {
+        let mut menu = vec![crate::ui_kit::Item::action("rename_folder", "Rename Folder", "rename")];
+        menu.extend(crate::timeline::edit_holes_item(app, folder.id));
+        menu.push(crate::ui_kit::Item::sep());
+        menu.extend(crate::timeline_left::selection_items(app, folders, false));
+        if let Some(picked) = crate::ui_kit::Menu::context_items(resp, &menu) {
+            if picked.id == "rename_folder" {
                 start_inline_rename(app, what.clone(), r.name_at());
-                ui.close();
+            } else if !crate::timeline::run_holes_item(app, &picked) {
+                crate::timeline_left::run_selection_item(app, &picked);
             }
-            crate::timeline::edit_holes_item(app, ui, folder.id);
-            ui.separator();
-            crate::timeline_left::selection_actions(app, ui, folders, false);
-        });
+        }
     }
 }
 
@@ -752,7 +756,7 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     crate::ui_kit::history_marker(ui.painter(), line, true, crate::workspace::tab_accent(&t, &app.ui.tab));
     crate::scenario::publish_handle("browser:rollback", rect.center());
     if response.hovered() || response.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"))
 }
@@ -2285,6 +2289,20 @@ mod tests {
         settle_heavy(&mut h);
         assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
         assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
+    }
+
+    /// The History marker in the browser moves only up and down, so the pointer over it shows
+    /// up-and-down arrows, not the grab cursor Windows draws as a four-way move cross.
+    #[test]
+    fn browser_history_marker_shows_up_and_down_arrows() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Cube"})).unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        let marker = crate::scenario::handle_at("browser:rollback").unwrap();
+        h.call("ui.move", json!({"x": marker.x, "y": marker.y}));
+        h.frames(2);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::ResizeVertical, "up and down arrows over the marker");
     }
 
     /// #7221: the history in the browser shows the timeline folders as the vertical History

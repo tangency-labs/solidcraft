@@ -40,6 +40,7 @@
 //! the fork (200 iterations of 12 tries, 20000 march steps or 5000 points, 20 node
 //! passes, 24 probe directions); there is no recursion.
 
+use crate::math::det;
 use std::cell::Cell;
 
 use crate::error::{Result, SolidError};
@@ -653,7 +654,7 @@ impl<'a> TangentTracer<'a> {
             n: e0.n,
             n2: e1.n,
             gap,
-            ang: smin(1.0, len(e0.n.cross(e1.n))).asin(),
+            ang: det::asin(smin(1.0, len(e0.n.cross(e1.n)))),
         }))
     }
 
@@ -897,7 +898,7 @@ impl<'a> TangentTracer<'a> {
             let tn = c * 2.0 - t;
             let tn = unit(tn - nxt.n * nxt.n.dot(tn));
             let d_cos = tn.dot(t);
-            if d_cos < deg2rad(6.0).cos() && h > h_min {
+            if d_cos < det::cos(deg2rad(6.0)) && h > h_min {
                 h *= 0.5;
                 continue;
             }
@@ -976,7 +977,7 @@ impl<'a> TangentTracer<'a> {
                     if self.probe(k, &m, &mut out)? < 0 {
                         return Ok(false);
                     }
-                    let mut best = deg2rad(45.0).cos();
+                    let mut best = det::cos(deg2rad(45.0));
                     let mut cont = false;
                     for o in &out {
                         if o.dot(t_in) > best {
@@ -1012,7 +1013,7 @@ impl<'a> TangentTracer<'a> {
             cur = nxt;
             cur_is_node = false;
             t = tn;
-            if d_cos > deg2rad(1.5).cos() {
+            if d_cos > det::cos(deg2rad(1.5)) {
                 h = smin(h * 1.5, h_max);
             }
         }
@@ -1076,10 +1077,10 @@ impl<'a> TangentTracer<'a> {
         let mut hits: Vec<Vec3> = Vec::new();
         // whether the contact found in each direction lies along it
         let mut along = [false; PROBE_DIRS as usize];
-        let cos_half_step = (PI / f64::from(PROBE_DIRS)).cos();
+        let cos_half_step = det::cos(PI / f64::from(PROBE_DIRS));
         for (jj, along_jj) in (0..PROBE_DIRS).zip(along.iter_mut()) {
             let th = 2.0 * PI * f64::from(jj) / f64::from(PROBE_DIRS);
-            let d = e1 * th.cos() + e2 * th.sin();
+            let d = e1 * det::cos(th) + e2 * det::sin(th);
             let Some(duv) = self.drop_dir(k, &p.x, d)? else {
                 continue;
             };
@@ -1116,7 +1117,7 @@ impl<'a> TangentTracer<'a> {
             return Ok(-1);
         }
         // cluster
-        let cos30 = deg2rad(30.0).cos();
+        let cos30 = det::cos(deg2rad(30.0));
         for hit in &hits {
             if !dirs.iter().any(|d| d.dot(*hit) > cos30) {
                 dirs.push(*hit);

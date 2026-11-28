@@ -60,6 +60,8 @@ semver = { workspace = true }
 sha2 = { workspace = true }
 minisign-verify = "0.3"
 zip = { workspace = true }
+# Workshop links: the signed index's Ed25519 signature (already in the tree through solidcraft-io).
+ed25519-dalek = { workspace = true }
 # Rasterises the icon SVGs (crates/look/icons/design/svg) at the size they are drawn.
 tiny-skia = { workspace = true }
 # The random installation id of usage statistics (MIT/Apache-2.0; already in the tree, `js` for
@@ -95,11 +97,11 @@ quote = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 fontdb = { workspace = true }
-lopdf = { version = "0.45", default-features = false }
 # Waits for wgpu error scopes when a plugin background effect is built.
 pollster = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 wat = "1"
 
 [build-dependencies]

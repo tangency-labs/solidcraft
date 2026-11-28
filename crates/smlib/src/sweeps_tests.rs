@@ -34,6 +34,99 @@ fn extrusions_straight_and_drafted() {
     assert_close(solid_volume(&b, "frustum"), PI * 4.0 / 3.0 * (25.0 + r2 * r2 + 5.0 * r2), 1e-6, "drafted disc");
 }
 
+/// Two cubic pieces of a closed spline that run within 3e-7 mm of one straight line, from the
+/// design of #22584, closed into a stadium by two half circles and a line, drafted 10 degrees
+/// outward over 80 mm. Each piece's wall is a ruled patch a plane fits to within the zone
+/// tolerance (1e-5) but not to within half its edges' (5e-6): taken as that plane, the wall
+/// missed its corner by 7.03e-6 and the check refused the solid. The volume is the profile's
+/// area A, its length L and the offset d = z tan 10 at depth z, integrated over the height
+/// (A + L d + pi d^2: the profile is convex, so each section is its parallel curve).
+#[test]
+fn a_drafted_nearly_straight_spline_keeps_its_walls_on_their_corners() {
+    let z = 80.0;
+    let cubic = |p: [[f64; 2]; 4]| Curve::Nurbs {
+        degree: 3,
+        points: p.iter().map(|q| [q[0], q[1], z, 1.0]).collect(),
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    };
+    let pieces = [
+        [
+            [22.9046875, 108.60000000000001],
+            [22.1226345485602, 108.59999969569137],
+            [21.340581597201535, 108.59999991448386],
+            [20.558528645833334, 108.60000000000001],
+        ],
+        [
+            [20.558528645833334, 108.60000000000001],
+            [19.740407986132755, 108.60000008946011],
+            [18.922287326421745, 108.60000003306719],
+            [18.104166666666668, 108.60000000000001],
+        ],
+    ];
+    let (start, end, r) = (pieces[0][0], pieces[1][3], 24.3);
+    let arc = |c: [f64; 2], from: f64| Curve::Arc {
+        center: [c[0], c[1], z],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start: from,
+        end: from + PI,
+    };
+    let profile = vec![
+        cubic(pieces[0]),
+        cubic(pieces[1]),
+        arc([end[0], end[1] - r], PI / 2.0),
+        Curve::Line { start: [end[0], end[1] - 2.0 * r, z], end: [start[0], start[1] - 2.0 * r, z] },
+        arc([start[0], start[1] - r], 1.5 * PI),
+    ];
+    let taper = 10f64.to_radians();
+    let b = Brep::extrude(&profile, [0.0, 0.0, -1.0], z, -taper, DraftCorner::Curvature, true).unwrap();
+    // A and L by Green's theorem and arc length, 16-point Gauss-Legendre on each piece (exact
+    // for the cubics' area, the circles' closed forms for theirs).
+    let nodes: Vec<(f64, f64)> = (1..=16)
+        .map(|i| {
+            let mut x = (PI * (f64::from(i) - 0.25) / 16.5).cos();
+            let mut dp = 1.0;
+            for _ in 0..100 {
+                let (mut p0, mut p1) = (1.0, x);
+                for k in 2..=16 {
+                    let k = f64::from(k);
+                    (p0, p1) = (p1, ((2.0 * k - 1.0) * x * p1 - (k - 1.0) * p0) / k);
+                }
+                dp = 16.0 * (x * p1 - p0) / (x * x - 1.0);
+                x -= p1 / dp;
+            }
+            (0.5 * (x + 1.0), 1.0 / ((1.0 - x * x) * dp * dp))
+        })
+        .collect();
+    let (mut area, mut length) = (0.0, 0.0);
+    for p in pieces {
+        for &(t, w) in &nodes {
+            let m = 1.0 - t;
+            let (b, db) = (
+                [m * m * m, 3.0 * m * m * t, 3.0 * m * t * t, t * t * t],
+                [-3.0 * m * m, 3.0 * m * m - 6.0 * m * t, 6.0 * m * t - 3.0 * t * t, 3.0 * t * t],
+            );
+            let at = |c: &[f64; 4], i: usize| c.iter().zip(&p).map(|(c, q)| c * q[i]).sum::<f64>();
+            let (x, y, dx, dy) = (at(&b, 0), at(&b, 1), at(&db, 0), at(&db, 1));
+            area += w * 0.5 * (x * dy - y * dx);
+            length += w * dx.hypot(dy);
+        }
+    }
+    // The half circles about (cx, cy) from angle a over pi: 0.5 (r^2 pi + r (cx (sin b - sin a) - cy (cos b - cos a))).
+    for (c, a) in [([end[0], end[1] - r], PI / 2.0), ([start[0], start[1] - r], 1.5 * PI)] {
+        let b2 = a + PI;
+        area += 0.5 * (r * r * PI + r * (c[0] * (b2.sin() - a.sin()) - c[1] * (b2.cos() - a.cos())));
+        length += r * PI;
+    }
+    let (y0, x0, x1) = (end[1] - 2.0 * r, end[0], start[0]);
+    area += 0.5 * (x0 * (start[1] - 2.0 * r) - y0 * x1);
+    length += (x1 - x0).hypot(start[1] - end[1]);
+    let t = taper.tan();
+    let want = z * area + length * t * z * z / 2.0 + PI * t * t * z * z * z / 3.0;
+    assert_close(solid_volume(&b, "drafted stadium"), want, 1e-6, "drafted stadium");
+}
+
 #[test]
 fn revolutions_whole_and_partial() {
     // A half disc on the z axis, in the xz plane: a sphere; a quarter turn of a square off it.
@@ -46,6 +139,32 @@ fn revolutions_whole_and_partial() {
     let sq = polygon(&[[6.0, 0.0, 0.0], [8.0, 0.0, 0.0], [8.0, 0.0, 2.0], [6.0, 0.0, 2.0]]);
     let b = Brep::revolve(&sq, [0.0; 3], [0.0, 0.0, 1.0], PI / 2.0, true).unwrap();
     assert_close(solid_volume(&b, "quarter ring"), PI / 2.0 * 7.0 * 4.0, 1e-6, "quarter ring");
+}
+
+#[test]
+fn a_stopped_revolve_refuses_before_parsing_its_profile() {
+    let stop = crate::stop::Stop::new();
+    stop.stop();
+    let r = stop.within(|| Brep::revolve_joining_arcs(&[], [0.0; 3], [0.0, 0.0, 1.0], TAU, true));
+    assert_eq!(r.err(), Some(Error::Cancelled("smlib_revolve")));
+}
+
+#[test]
+fn a_revolved_arc_split_into_pieces_keeps_one_spherical_wall() {
+    // The open path in issue #18537 splits one circular sketch arc. Its pieces still
+    // define one sphere; the extra face boundary used to block the handle's fillet.
+    let arc = |start, end| Curve::Arc { center: [0.0; 3], axis: [0.0, -1.0, 0.0], reference: [0.0, 0.0, 1.0], radius: 5.0, start, end };
+    let profile = vec![arc(0.0, PI / 3.0), arc(PI / 3.0, PI), Curve::Line { start: [0.0, 0.0, -5.0], end: [0.0, 0.0, 5.0] }];
+    for angle in [TAU, PI / 2.0] {
+        for offset in 0..profile.len() {
+            let mut pieces = profile.clone();
+            pieces.rotate_left(offset);
+            let b = Brep::revolve_joining_arcs(&pieces, [0.0; 3], [0.0, 0.0, 1.0], angle, true).unwrap();
+            let record = b.to_native().unwrap();
+            assert_eq!(record.faces.len(), if angle == TAU { 1 } else { 3 }, "angle {angle}, offset {offset}");
+            assert_close(solid_volume(&b, "split sphere"), angle / TAU * 4.0 / 3.0 * PI * 125.0, 1e-5, "split sphere");
+        }
+    }
 }
 
 /// A half disc of radius 14 centred 14 off the axis, its rim outward, three quarters of a turn
@@ -97,11 +216,11 @@ fn sweeps_lofts_and_screws() {
     let b = Brep::screw_sweep(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, 1e-4).unwrap();
     assert_close(solid_volume(&b, "screw"), 0.16 * TAU * 4.2 * 3.0, 1e-4, "screw sweep");
     let historical = b.to_native().unwrap();
-    assert!(historical.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::RationalSpline { .. })).count() > 2);
+    assert!(historical.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Sweep { .. })).count() > 2);
     let options = crate::sweeps::ScrewSweepOptions { law: None, join_spline_walls: true, tolerance: 1e-4 };
     let b = Brep::screw_sweep_with_options(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, options).unwrap();
     let record = b.to_native().unwrap();
-    let flanks = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::RationalSpline { .. })).count();
+    let flanks = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Sweep { .. })).count();
     assert_eq!(flanks, 2, "each screw flank must remain one face across the cylinder seams");
     // The tooth moved out 1 mm over its three turns, linearly: A 2 pi (c turns + int offset dt).
     let b = Brep::screw_sweep_with_options(
@@ -129,7 +248,7 @@ fn sweeps_lofts_and_screws() {
     .unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
     let record = b.to_native().unwrap();
-    let splines = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::RationalSpline { .. })).count();
+    let splines = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Sweep { .. })).count();
     assert_eq!(splines, 8, "two flanks across three law intervals and two sloping radial walls");
     assert_eq!(Brep::screw_sweep_radial(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, &[(2.0, 0.0), (1.0, 1.0)], 1e-4).err(), Some(Error::Argument));
 }
@@ -173,9 +292,12 @@ fn hostile_curve_lists_are_refused() {
     assert_eq!(Brep::extrude(&nan, [0.0, 0.0, 1.0], 1.0, 0.0, DraftCorner::default(), true).err(), Some(Error::Argument));
     let bad = [Curve::Nurbs { degree: 3, points: vec![[0.0, 0.0, 0.0, 1.0]; 2], knots: vec![0.0; 6] }];
     assert_eq!(Brep::extrude(&bad, [0.0, 0.0, 1.0], 1.0, 0.0, DraftCorner::default(), true).err(), Some(Error::Argument));
+    for profile in [&nan[..], &bad[..], &[]] {
+        assert_eq!(Brep::revolve_joining_arcs(profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).err(), Some(Error::Argument));
+    }
     assert_eq!(Brep::loft(&[vec![circle([0.0; 3], 1.0)]], 1, true).err(), Some(Error::Argument));
     let sq = polygon(&[[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]]);
-    assert_eq!(Brep::revolve(&sq, [0.0; 3], [0.0, 1.0, 0.0], 7.0, true).err(), Some(Error::Argument));
+    assert_eq!(Brep::revolve_joining_arcs(&sq, [0.0; 3], [0.0, 1.0, 0.0], 7.0, true).err(), Some(Error::Argument));
     assert_eq!(Brep::screw_sweep(&sq, [0.0; 3], [0.0, 0.0, 1.0], 0.0, 1.0, 1e-4).err(), Some(Error::Argument));
 }
 

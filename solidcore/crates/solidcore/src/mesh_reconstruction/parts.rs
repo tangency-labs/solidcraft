@@ -3,6 +3,7 @@
 //!
 //! Deviations: no upstream counterpart. Shoulder decomposition descends at most eight levels.
 
+use crate::math::det;
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::kernel::Kernel;
@@ -234,7 +235,7 @@ fn recover(
         }
         let original = mesh.volume();
         let split_volume: f64 = pieces.iter().map(TriMesh::volume).sum();
-        if (split_volume - original).abs() > epsilon * size.powi(2) * 10. {
+        if (split_volume - original).abs() > epsilon * det::powi(size, 2) * 10. {
             continue;
         }
         let mut bodies = Vec::new();
@@ -280,7 +281,7 @@ fn recover(
             let Some(volume) = native::volume(k, &mut body)? else {
                 return Ok(None);
             };
-            let bound = size.powi(2) * tolerance * 4.;
+            let bound = det::powi(size, 2) * tolerance * 4.;
             if !volume.is_finite() || volume <= 0. || (volume - original).abs() > bound {
                 return Ok(None);
             }
@@ -333,7 +334,7 @@ impl CutMesh {
     }
     /// Weld a clipped triangle, discard degenerate corners and enforce the clipping triangle budget.
     fn triangle(&mut self, a: Vec3, b: Vec3, c: Vec3) -> Result<bool> {
-        if (b - a).cross(c - a).length() <= self.epsilon.powi(2) {
+        if (b - a).cross(c - a).length() <= det::powi(self.epsilon, 2) {
             return Ok(true);
         }
         let (a, b, c) = (self.point(a)?, self.point(b)?, self.point(c)?);

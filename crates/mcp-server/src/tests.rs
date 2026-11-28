@@ -1,7 +1,10 @@
+use std::sync::{Arc, Mutex};
+
 use serde_json::{Value, json};
 
 use crate::{
-    Contents, Effect, Info, PROTOCOL_VERSION, Reference, SUPPORTED_VERSIONS, Server, Tools, check_arguments, object, string, text_result, tool,
+    Cancelled, Contents, Effect, Info, PROTOCOL_VERSION, ProgressReporter, Reference, ResourceError, SUPPORTED_VERSIONS, Server, Tools,
+    cancelled_notification, check_arguments, object, progress_notification, progress_token, string, text_result, tool,
 };
 
 /// One app's tools: `echo` and `level`, nothing behind them (no engine, no design). `log` records
@@ -382,4 +385,223 @@ fn additional_properties_are_forwarded_only_when_allowed() {
         assert!(check_arguments(&defs, "prefs", &json!({"theme": 1})).is_err());
         assert!(check_arguments(&defs, "prefs", &json!({"other": 1})).is_err());
     }
+}
+
+/// Standard MCP `notifications/cancelled` parsing accepts string & integer `requestId`s, rejects
+/// requests and malformed payloads, and invokes both `Tools::cancel` and `with_on_cancel` hooks
+/// without emitting a JSON-RPC reply.
+#[test]
+fn cancelled_notification_parses_valid_messages_and_invokes_hooks() {
+    assert_eq!(
+        cancelled_notification(r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":42,"reason":"user aborted"}}"#),
+        Some(Cancelled { request_id: json!(42), reason: Some("user aborted".into()) })
+    );
+    assert_eq!(
+        cancelled_notification(r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"req-7"}}"#),
+        Some(Cancelled { request_id: json!("req-7"), reason: None })
+    );
+    for invalid in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"notifications/cancelled","params":{"requestId":42}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":null}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1.5}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":{"id":1}}}"#,
+        "not json",
+    ] {
+        assert_eq!(cancelled_notification(invalid), None, "{invalid}");
+    }
+
+    #[derive(Default)]
+    struct CancelSpy {
+        seen: Vec<(Value, Option<String>)>,
+    }
+    impl Tools for CancelSpy {
+        fn instructions(&self) -> String {
+            "spy".into()
+        }
+        fn list(&mut self) -> Vec<Value> {
+            Vec::new()
+        }
+        fn call(&mut self, _: &str, _: &Value) -> Value {
+            text_result("ok", false)
+        }
+        fn cancel(&mut self, request_id: &Value, reason: Option<&str>) {
+            self.seen.push((request_id.clone(), reason.map(str::to_owned)));
+        }
+    }
+
+    let hook_seen: Arc<Mutex<Vec<(Value, Option<String>)>>> = Arc::new(Mutex::new(Vec::new()));
+    let hook_log = Arc::clone(&hook_seen);
+    let mut s = Server::new(info(), CancelSpy::default()).with_on_cancel(move |id, reason| {
+        hook_log.lock().unwrap().push((id.clone(), reason.map(str::to_owned)));
+    });
+    assert_eq!(
+        reply(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 11, "reason": "timeout"}})),
+        None
+    );
+    assert_eq!(reply(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "abc"}})), None);
+    assert_eq!(reply(&mut s, &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": null}})), None);
+
+    let expected = vec![(json!(11), Some("timeout".to_string())), (json!("abc"), None)];
+    assert_eq!(s.tools().seen, expected);
+    assert_eq!(*hook_seen.lock().unwrap(), expected);
+}
+
+/// Standard MCP `notifications/progress` serializes string & integer `_meta.progressToken` values,
+/// supports thread-safe emission via `ProgressReporter`, and emits nothing when no valid
+/// `progressToken` is supplied.
+#[test]
+fn progress_notifications_serialize_string_and_integer_tokens_and_omit_when_absent() {
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": "tok-1"}})), Some(json!("tok-1")));
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": 99}})), Some(json!(99)));
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": 1.5}})), None);
+    assert_eq!(progress_token(&json!({"_meta": {"progressToken": true}})), None);
+    assert_eq!(progress_token(&json!({})), None);
+
+    assert_eq!(
+        progress_notification(&json!("tok-1"), 1.0, Some(4.0), Some("step 1/4")),
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "tok-1", "progress": 1, "total": 4, "message": "step 1/4"}})
+    );
+    assert_eq!(
+        progress_notification(&json!(7), 0.5, None, Some("")),
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 7, "progress": 0.5}})
+    );
+
+    struct Stepper;
+    impl Tools for Stepper {
+        fn instructions(&self) -> String {
+            "stepper".into()
+        }
+        fn list(&mut self) -> Vec<Value> {
+            vec![tool("work", "Work", "Do two steps.", object(json!({}), &[]), Effect::ReadOnly)]
+        }
+        fn call(&mut self, _: &str, _: &Value) -> Value {
+            text_result("done", false)
+        }
+        fn call_with_progress(&mut self, _: &str, _: &Value, progress: Option<&ProgressReporter>) -> Value {
+            if let Some(p) = progress {
+                p.report(1.0, Some(2.0), Some("step 1/2"));
+                p.report(2.0, Some(2.0), None);
+            }
+            text_result("done", false)
+        }
+    }
+
+    let (_, messages) = serve_with(
+        Stepper,
+        &[
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "work", "arguments": {}, "_meta": {"progressToken": "p-str"}}}),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "work", "arguments": {}, "_meta": {"progressToken": 42}}}),
+            json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "work", "arguments": {}}}),
+            json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "work", "arguments": {}, "_meta": {"progressToken": true}}}),
+        ],
+    );
+    assert_eq!(
+        messages,
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "p-str", "progress": 1, "total": 2, "message": "step 1/2"}}),
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "p-str", "progress": 2, "total": 2}}),
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "done"}]}}),
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 42, "progress": 1, "total": 2, "message": "step 1/2"}}),
+            json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": 42, "progress": 2, "total": 2}}),
+            json!({"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "done"}]}}),
+            json!({"jsonrpc": "2.0", "id": 3, "result": {"content": [{"type": "text", "text": "done"}]}}),
+            json!({"jsonrpc": "2.0", "id": 4, "result": {"content": [{"type": "text", "text": "done"}]}}),
+        ]
+    );
+}
+
+/// An app that opts into resource subscriptions and `list_changed` notifications advertises both
+/// capabilities, validates `resources/subscribe` and `resources/unsubscribe`, and flushes queued
+/// notifications over stdio right after the triggering response.
+#[test]
+fn resource_subscriptions_and_notifications_work_over_stdio() {
+    #[derive(Default)]
+    struct LiveResources {
+        initialized: bool,
+        subscribed: std::collections::BTreeSet<String>,
+        queued: Vec<Value>,
+    }
+
+    impl Tools for LiveResources {
+        fn instructions(&self) -> String {
+            "Live resource test.".into()
+        }
+        fn list(&mut self) -> Vec<Value> {
+            vec![tool("mutate", "Mutate", "Change state.", object(json!({}), &[]), Effect::Edits)]
+        }
+        fn call(&mut self, _name: &str, _args: &Value) -> Value {
+            self.queued.push(crate::notification("notifications/resources/list_changed", None));
+            for uri in &self.subscribed {
+                self.queued.push(crate::notification("notifications/resources/updated", Some(json!({"uri": uri}))));
+            }
+            text_result("ok", false)
+        }
+        fn resources(&self) -> Vec<Value> {
+            vec![json!({"uri": "live://doc", "name": "Doc", "mimeType": "application/json"})]
+        }
+        fn resource_subscribe(&self) -> bool {
+            true
+        }
+        fn resource_list_changed(&self) -> bool {
+            true
+        }
+        fn subscribe_resource(&mut self, uri: &str) -> Result<(), ResourceError> {
+            if uri != "live://doc" {
+                return Err(ResourceError::NotFound(format!("unknown resource `{uri}`")));
+            }
+            self.subscribed.insert(uri.to_owned());
+            Ok(())
+        }
+        fn unsubscribe_resource(&mut self, uri: &str) -> Result<(), ResourceError> {
+            if uri != "live://doc" && !self.subscribed.contains(uri) {
+                return Err(ResourceError::NotFound(format!("unknown resource `{uri}`")));
+            }
+            self.subscribed.remove(uri);
+            Ok(())
+        }
+        fn on_initialized(&mut self) {
+            self.initialized = true;
+        }
+        fn take_notifications(&mut self) -> Vec<Value> {
+            std::mem::take(&mut self.queued)
+        }
+    }
+
+    // Default Tools implementations do not expose subscribe/unsubscribe.
+    let mut default_server = Server::new(info(), Library::default());
+    for method in ["resources/subscribe", "resources/unsubscribe"] {
+        let r = reply(&mut default_server, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {"uri": "lib://readme"}})).unwrap();
+        assert_eq!(r["error"]["code"], -32601, "{method}: {r}");
+    }
+
+    let req = |id: u64, method: &str, params: Value| json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+    let (mut s, messages) = serve_with(
+        LiveResources::default(),
+        &[
+            req(1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION})),
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            req(2, "resources/subscribe", json!({})),
+            req(3, "resources/subscribe", json!({"uri": "   "})),
+            req(4, "resources/subscribe", json!({"uri": "live://missing"})),
+            req(5, "resources/subscribe", json!({"uri": "live://doc"})),
+            req(6, "tools/call", json!({"name": "mutate", "arguments": {}})),
+            req(7, "resources/unsubscribe", json!({"uri": "live://doc"})),
+            req(8, "tools/call", json!({"name": "mutate", "arguments": {}})),
+        ],
+    );
+    assert!(s.tools().initialized);
+    assert_eq!(messages[0]["result"]["capabilities"]["resources"], json!({"subscribe": true, "listChanged": true}), "{}", messages[0]);
+    assert_eq!(messages[1]["error"]["code"], -32602);
+    assert_eq!(messages[2]["error"]["code"], -32602);
+    assert_eq!(messages[3]["error"]["code"], -32002);
+    assert_eq!(messages[4], json!({"jsonrpc": "2.0", "id": 5, "result": {}}));
+    assert_eq!(messages[5]["id"], 6);
+    assert_eq!(messages[6], json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}));
+    assert_eq!(messages[7], json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "live://doc"}}));
+    assert_eq!(messages[8], json!({"jsonrpc": "2.0", "id": 7, "result": {}}));
+    assert_eq!(messages[9]["id"], 8);
+    assert_eq!(messages[10], json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}));
+    assert_eq!(messages.len(), 11, "{messages:?}");
 }

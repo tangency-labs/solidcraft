@@ -1,15 +1,32 @@
 //! solidcore's exact record queries ([`Queries`]): ops' `Query` itself, each method the call
 //! this crate's callers made before the interface existed.
 
+use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::query::Query;
 use solidcore_record::Vec3;
 use solidcore_record::brep::Brep;
-use solidcraft_kernel_api::query::{OutlineStretch, Queries, QueryRefused};
+use solidcraft_kernel_api::query::{OutlineStretch, Queries, QueryRefused, SurfacePoint};
 
 use super::Solidcore;
 
 impl Queries for Solidcore {
     type Query<'a> = Query<'a>;
+    type FaceSurface = FaceSurface;
+
+    fn face_surface(&self, record: &Brep, face: usize) -> Result<FaceSurface, QueryRefused> {
+        FaceSurface::of(record, face).map_err(|e| QueryRefused(e.to_string()))
+    }
+
+    fn face_surface_domain(&self, surface: &FaceSurface) -> [[f64; 2]; 2] {
+        surface.domain()
+    }
+
+    fn face_surface_closest(&self, surface: &FaceSurface, p: [f64; 3], guess: [f64; 2]) -> Result<SurfacePoint, QueryRefused> {
+        surface
+            .closest_point(p, guess)
+            .map(|c| SurfacePoint { uv: c.uv, point: c.point, distance: c.distance })
+            .map_err(|e| QueryRefused(e.to_string()))
+    }
 
     fn query<'a>(&self, record: &'a Brep) -> Query<'a> {
         Query::new(record)

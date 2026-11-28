@@ -26,7 +26,8 @@ use crate::wire::{Wire, arc_from_3_points, arc_polyline};
 #[path = "wire_dual.rs"]
 mod dual;
 use dual::{Dual, Num, V};
-use solidcraft_kernel::services::constraint::{self, circle_points, circumcenter, circumradius, size, unit, weight};
+use solidcraft_kernel::planar::{arc_circle_points, circle_points, plane_normal, plane_point};
+use solidcraft_kernel::services::constraint::{self, circumcenter, circumradius, size, unit, weight};
 
 /// Every residual below this (mm) ends the solve.
 const TOL: f64 = 1e-10;
@@ -221,7 +222,7 @@ impl PlaneOf {
     pub fn frame(&self) -> Option<(Vec3, Vec3)> {
         match self {
             PlaneOf::Origin(p) => Some((Vec3::ZERO, p.normal())),
-            PlaneOf::Model(m) => m.resolved.map(|p| (p.origin, constraint::plane_normal(&p))),
+            PlaneOf::Model(m) => m.resolved.map(|p| (p.origin, plane_normal(&p))),
         }
     }
     /// Whether these references currently identify the same origin plane or model target.
@@ -688,6 +689,9 @@ pub struct WireConstraint {
     /// A driven (reference) dimension: it measures, it does not constrain.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub driven: bool,
+    /// For a driven dimension: the read-only parameter name exposing its measured value (#14426).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driven_param: Option<String>,
 }
 
 /// How a 3D solve went: apart from the planar sketch's report, whose freedoms and failures it
@@ -945,7 +949,7 @@ impl Sketch {
         if p.index == 0
             && let Some(q) = ids.points.get(p.wire.as_str()).and_then(|i| self.points.get(*i))
         {
-            return Some(Op::Fixed(constraint::plane_point(&frame, q.pos)));
+            return Some(Op::Fixed(plane_point(&frame, q.pos)));
         }
         // A 2D line's ends, for a line operand.
         match ids.curves.get(p.wire.as_str()).and_then(|i| self.curves.get(*i)).map(|c| &c.kind) {
@@ -957,7 +961,7 @@ impl Sketch {
                 } else {
                     return None;
                 };
-                self.points.get(i).map(|q| Op::Fixed(constraint::plane_point(&frame, q.pos)))
+                self.points.get(i).map(|q| Op::Fixed(plane_point(&frame, q.pos)))
             }
             _ => None,
         }
@@ -994,16 +998,14 @@ impl Sketch {
         let frame = self.frame.0?;
         let pos = |i: usize| self.points.get(i).map(|q| q.pos);
         match &self.curves.get(*ids.curves.get(id)?)?.kind {
-            crate::model::CurveKind::Line { a, b } => {
-                Some(vec![Op::Fixed(constraint::plane_point(&frame, pos(*a)?)), Op::Fixed(constraint::plane_point(&frame, pos(*b)?))])
-            }
+            crate::model::CurveKind::Line { a, b } => Some(vec![Op::Fixed(plane_point(&frame, pos(*a)?)), Op::Fixed(plane_point(&frame, pos(*b)?))]),
             crate::model::CurveKind::Circle { c, r } => {
-                let c = constraint::plane_point(&frame, pos(*c)?);
+                let c = plane_point(&frame, pos(*c)?);
                 Some(circle_points(c, frame.x, frame.y, *r, 0.0).into_iter().map(Op::Fixed).collect())
             }
             crate::model::CurveKind::Arc { c, a, .. } => {
                 let (c2, a2) = (pos(*c)?, pos(*a)?);
-                Some(constraint::arc_circle_points([c2.x, c2.y], [a2.x, a2.y], &frame).into_iter().map(Op::Fixed).collect())
+                Some(arc_circle_points([c2.x, c2.y], [a2.x, a2.y], &frame).into_iter().map(Op::Fixed).collect())
             }
             _ => None,
         }
@@ -1087,7 +1089,7 @@ impl Sketch {
         }
         let id = self.fresh("k")?;
         let param = if driven || !kind.is_dimension() { None } else { param };
-        self.wire_constraints.push(WireConstraint { id: id.clone(), kind, param, driven });
+        self.wire_constraints.push(WireConstraint { id: id.clone(), kind, param, driven, driven_param: None });
         Ok(id)
     }
 
@@ -1182,6 +1184,42 @@ impl Sketch {
             .iter()
             .filter_map(|c| c.param.as_deref().map(|p| (c.id.as_str(), p)))
             .chain(self.wire_constraints.iter().filter_map(|c| c.param.as_deref().map(|p| (c.id.as_str(), p))))
+            .collect()
+    }
+
+    /// Read-only parameter names exposed by driven dimensions, planar and 3D (#14426).
+    pub fn driven_dimension_params(&self) -> Vec<&String> {
+        self.constraints
+            .iter()
+            .filter(|c| c.driven)
+            .filter_map(|c| c.driven_param.as_ref())
+            .chain(self.wire_constraints.iter().filter(|c| c.driven).filter_map(|c| c.driven_param.as_ref()))
+            .collect()
+    }
+
+    /// Mutable view of [`Sketch::driven_dimension_params`] (for renaming them).
+    pub fn driven_dimension_params_mut(&mut self) -> Vec<&mut Option<String>> {
+        self.constraints
+            .iter_mut()
+            .filter(|c| c.driven)
+            .map(|c| &mut c.driven_param)
+            .chain(self.wire_constraints.iter_mut().filter(|c| c.driven).map(|c| &mut c.driven_param))
+            .collect()
+    }
+
+    /// Named driven dimensions as `(constraint_id, param_name, measured_value, is_angle)`, planar
+    /// and 3D (#14426).
+    pub fn driven_dimensions(&self) -> Vec<(&str, &str, Option<f64>, bool)> {
+        self.constraints
+            .iter()
+            .filter(|c| c.driven)
+            .filter_map(|c| c.driven_param.as_deref().map(|name| (c.id.as_str(), name, c.kind.value(), c.kind.is_angle())))
+            .chain(
+                self.wire_constraints
+                    .iter()
+                    .filter(|c| c.driven)
+                    .filter_map(|c| c.driven_param.as_deref().map(|name| (c.id.as_str(), name, c.kind.value(), c.kind.is_angle()))),
+            )
             .collect()
     }
 

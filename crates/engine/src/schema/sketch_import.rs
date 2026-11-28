@@ -80,6 +80,12 @@ pub struct InsertDrawingKeys {
     /// height). Default: geometry. "viewbox" is for SVG drawings that have a sheet; a DXF has none.
     #[serde(default)]
     pub size_from: Option<DrawingSizeFrom>,
+    /// The dots per inch an SVG's pixels (its user units, and lengths without a unit) are read at,
+    /// 1 to 10000: a file drawn at 72 dpi comes in at the size it was drawn at with 72. Lengths
+    /// with their own unit (`mm`, `in`, `pt`) keep it. Default: 96, as CSS has it. For SVG
+    /// drawings; a DXF has no pixels.
+    #[serde(default)]
+    pub dpi: Option<f64>,
     /// The distance in mm within which ends join into one point, 1e-9 to 10 (a value outside is
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
@@ -132,8 +138,9 @@ fn read_keys<'de, D: Deserializer<'de>>(d: D) -> Result<InsertDrawingKeys, D::Er
     serde_path_to_error::deserialize(&value).map_err(|e| D::Error::custom(located(&e)))
 }
 
-/// Insert an ASCII DXF drawing into a sketch as curves: the active sketch, or a new one when none
-/// is being edited. Give the drawing as `path` or as `text`. Blocks are expanded. It can be
+/// Insert a DXF drawing into a sketch as curves: the active sketch, or a new one when none is
+/// being edited. Give the drawing as `path` (an ASCII or a binary DXF file) or as `text` (ASCII
+/// DXF). Blocks are expanded. It can be
 /// sized, turned and placed. Text in the drawing becomes sketch text. One undo step.
 #[derive(Debug)]
 pub struct InsertDxfParams(pub InsertDrawingKeys);
@@ -155,7 +162,7 @@ impl JsonSchema for InsertDxfParams {
     }
 }
 
-const INSERT_DXF: &str = "Insert an ASCII DXF drawing into a sketch as curves: the active sketch, or a new one when none is being edited. Give the drawing as `path` or as `text`. Blocks are expanded. It can be sized, turned and placed. Text in the drawing becomes sketch text. One undo step.";
+const INSERT_DXF: &str = "Insert a DXF drawing into a sketch as curves: the active sketch, or a new one when none is being edited. Give the drawing as `path` (an ASCII or a binary DXF file) or as `text` (ASCII DXF). Blocks are expanded. It can be sized, turned and placed. Text in the drawing becomes sketch text. One undo step.";
 
 /// Insert an SVG drawing into a sketch as curves: the active sketch, or a new one when none is
 /// being edited. Give the drawing as `path` or as `text`. It can be sized, turned and placed.
@@ -815,6 +822,14 @@ pub struct DrawingBoundsParams {
     #[serde(default, deserialize_with = "drawing_format", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "drawing_format_schema")]
     pub format: Option<String>,
+    /// The dots per inch an SVG's pixels are read at, 1 to 10000, as `sketch.insert_svg`'s
+    /// `dpi`. Default: 96. For SVG drawings; a DXF has no pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dpi: Option<f64>,
+    /// Whether to also work out the smallest Simplify distance at which the insert fits a
+    /// sketch, as `auto_simplify`. Default: false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<bool>,
 }
 
 /// The `anyOf` saying a drawing must come from `text` or from a `path` the handler reads.
@@ -823,7 +838,7 @@ fn source_any_of() -> Value {
     serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}])
 }
 
-/// `sketch.drawing_bounds` reads no key but these three, so only the source rule applies.
+/// `sketch.drawing_bounds` has no rule across its keys but the source one.
 fn bounds_source_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), source_any_of());
 }
@@ -874,6 +889,12 @@ pub struct DrawingBoundsResult {
     /// texts): about what the insert adds curves for, so a window can tell whether the sketch
     /// takes the drawing as drawn.
     pub edges: usize,
+    /// With `fit`: the smallest Simplify distance, mm on the drawing to 0.01, at which the insert
+    /// adds it to a sketch without running out of points or curves: 0 when it fits as drawn.
+    /// Left out when no distance up to the cap (a hundredth of the drawing's span, and 100 mm)
+    /// does, and when `fit` is not given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_simplify: Option<f64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

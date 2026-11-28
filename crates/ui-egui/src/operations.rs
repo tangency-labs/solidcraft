@@ -212,6 +212,10 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     for file in app.file_load.operations() {
         let key = format!("file:{}", file.serial);
         let label = if file.name.is_empty() { command_name(file.command) } else { format!("{} {}", command_name(file.command), file.name) };
+        let label = match file.importer_status {
+            Some(stage) => format!("{label}: {stage}"),
+            None => label,
+        };
         let cancel = if file.waiting {
             Cancel::FileWaiting(file.serial)
         } else if file.queued {
@@ -369,6 +373,7 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
             if let Some(read) = app.insert_read.as_mut() {
                 read.cancel();
             }
+            record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
             return Ok(());
         }
         // It says itself how it ended: a save already replacing the file goes through.
@@ -449,6 +454,12 @@ fn record(panel: &mut Panel, key: &str, label: String, outcome: Outcome) {
         panel.finished.remove(0);
     }
     panel.finished.push(Finished { key: key.to_string(), label, outcome, at: now });
+}
+
+/// Records how an operation ended, for work that finishes on its own (the tests read of a
+/// drawing): `ui.operations` lists it with the ones it cancelled.
+pub(crate) fn record_ended(app: &mut SolveApp, key: &str, label: String, outcome: Outcome) {
+    record(&mut app.operations, key, label, outcome);
 }
 
 /// A row on screen: what it showed last, and since when it is gone (fading out).
@@ -689,7 +700,8 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         ..egui::text::LayoutJob::simple_singleline(row.label.clone(), font, fade(t.text))
     };
     let galley = painter.layout_job(job);
-    painter.galley(pos2(r.left(), r.center().y - galley.size().y * 0.5), galley, fade(t.text));
+    let rise = egui::galley_cap_ink_rise(painter, &galley);
+    painter.galley(pos2(r.left(), r.center().y - galley.size().y * 0.5 - rise), galley, fade(t.text));
     // The bar between them, the step over it.
     let bar = Rect::from_min_max(pos2(r.left() + name_w, r.center().y - 7.0), pos2(x.left() - 6.0, r.center().y + 7.0));
     painter.rect_filled(bar, t.space_3, fade(t.dialog_rule));
@@ -708,7 +720,7 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         None => {}
     }
     if let Some(status) = row.status() {
-        painter.text(bar.center(), Align2::CENTER_CENTER, status, FontId::monospace(t.font_small), fade(t.text));
+        crate::ui_kit::paint_anchored(painter, bar.center(), Align2::CENTER_CENTER, status, FontId::monospace(t.font_small), fade(t.text));
     }
     row.cancellable() && response.clicked()
 }

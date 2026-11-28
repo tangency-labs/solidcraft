@@ -68,6 +68,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The build job keeps target/ on a Blacksmith sticky disk that main's pushes write, as ci.yml's
+  # build jobs do (WARM_TARGET there); change it to start the disk afresh.
+  WARM_TARGET: target-v1
+  SCCACHE_IDLE_TIMEOUT: "0"
 
 jobs:
   plan:
@@ -151,6 +155,15 @@ jobs:
     if: needs.plan.outputs.build == 'true'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 60
+    outputs:
+      # On a pull request, the main commit this build merged the PR onto (merge-main) and the
+      # merged tree: every shard grades the CLI on that same merge, not on main as it is when the
+      # shard starts. A shard that merged a newer main graded this binary against cases and
+      # KNOWN_FAILING lists from after it (fake REGRESSION lines), and a re-run of the failed
+      # shards reuses this build, so it failed the same way. Empty for other events, whose
+      # checkout is already fixed (a merge group's or batch's commit, a push).
+      main_sha: ${{ steps.merged.outputs.main_sha }}
+      tree: ${{ steps.merged.outputs.tree }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -159,6 +172,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/merge-main
+      - id: merged
+        name: Record the merge the shards grade
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "main_sha=$(git rev-parse HEAD~1)" | tee -a "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" | tee -a "$GITHUB_OUTPUT"
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -171,9 +190,22 @@ jobs:
           key: ${{ github.repository }}-sccache-kernel-rig
           path: /home/runner/.cache/sccache
           commit: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && 'on-change' || 'false' }}
+      # target/ from main's last rig build; scripts/ci/warm_target.py marks what changed since its
+      # tree, so Cargo rebuilds only those crates and what depends on them.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-kernel-rig
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: kernel-rig
+          cache-targets: "false"
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
       - name: Set up compiler cache
         id: sccache
@@ -195,6 +227,9 @@ jobs:
       # Every registry command is used by a case or listed in tests/kernel-cases/EXEMPT.
       - name: Every command has a case
         run: target/debug/xtask kernel-cases --coverage --cli target/release/solidcraft-cli
+      - name: Seal the build directory
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
       # A coverage-only run (the registry or the cases changed, no area selected) runs no shard.
       - name: Pack the binaries
         if: needs.plan.outputs.shards != '[]'
@@ -225,7 +260,19 @@ jobs:
         group: ${{ fromJSON(needs.plan.outputs.groups) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The build job's merge (its main commit), so the cases match the binary.
       - uses: ./.github/actions/merge-main
+        with:
+          base-sha: ${{ needs.build.outputs.main_sha }}
+      - name: Check the tree is the one the CLI was built from
+        if: github.event_name == 'pull_request'
+        env:
+          BUILT_TREE: ${{ needs.build.outputs.tree }}
+          MAIN_SHA: ${{ needs.build.outputs.main_sha }}
+        run: |
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "Grading on main $MAIN_SHA: tree $tree, built from $BUILT_TREE"
+          test "$tree" = "$BUILT_TREE"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: kernel-rig-bin

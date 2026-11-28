@@ -2,7 +2,7 @@
 //! construction sources the builders' vocabulary gives each face.
 
 use solidcraft_geom::prelude::*;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
@@ -113,12 +113,12 @@ fn a_revolution_names_its_walls_by_segment_and_skips_the_axis() {
         ],
     };
     let r = region(half);
-    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&r), Vec3::ZERO, Vec3::Y, TAU).unwrap();
+    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&r), Vec3::ZERO, Vec3::Y, TAU, false).unwrap();
     close(volume(&b), 4.0 / 3.0 * PI * 125.0, 1e-3, "sphere (measured on a mesh)");
     assert!(origins(&b).iter().all(|o| *o == profile(1)), "{:?}", origins(&b));
     // A quarter turn of a square off the axis: two caps and four walls.
     let sq = region(Loop2::polygon(&[Vec2::new(6.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(8.0, 2.0), Vec2::new(6.0, 2.0)]));
-    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&sq), Vec3::ZERO, Vec3::Y, PI / 2.0).unwrap();
+    let b = smlib_sweeps::revolve(&Plane::XY, &pieces_of(&sq), Vec3::ZERO, Vec3::Y, PI / 2.0, false).unwrap();
     close(volume(&b), PI / 2.0 * 7.0 * 4.0, 1e-3, "quarter ring");
     let mut want = vec![cap(false), cap(true), profile(0), profile(1), profile(2), profile(3)];
     want.sort();
@@ -317,6 +317,55 @@ fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
     // A twist that does not bring the square back onto itself cannot close.
     let ctl = crate::SweepControl { twist: PI / 3.0, ..Default::default() };
     assert!(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &round, &ctl).is_err());
+}
+
+/// Turning with the path, a profile keeps its angle to the path all the way, so one whose
+/// plane holds the path's direction where it starts sweeps no volume, round a circle in its own
+/// plane or with a twist: SMLib can only make a flat solid, and the refusal says why. The same
+/// square across the path sweeps A L (an 8 x 8 square round a circle of radius 30).
+#[test]
+fn a_profile_lying_along_the_path_is_refused_when_it_turns_with_it() {
+    let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    let square = region(Loop2::polygon(&[Vec2::new(26.0, -4.0), Vec2::new(34.0, -4.0), Vec2::new(34.0, 4.0), Vec2::new(26.0, 4.0)]));
+    let a = Vec3::new(30.0, 0.0, 0.0);
+    // Round the Y axis: a circle in the XZ plane, the square's own.
+    let flat = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Y, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Y, angle: PI },
+    ];
+    let along = |e: crate::KernelError| assert!(e.to_string().contains("the profile lies along the path"), "{e}");
+    along(smlib_sweeps::sweep(&xz, &pieces_of(&square), &flat, false).unwrap_err());
+    let ctl = crate::SweepControl { twist: PI / 2.0, ..Default::default() };
+    along(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &flat, &ctl).unwrap_err());
+    // Round the Z axis the path crosses the square's plane square to it.
+    let round = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+    ];
+    close(volume(&smlib_sweeps::sweep(&xz, &pieces_of(&square), &round, false).unwrap()), 64.0 * TAU * 30.0, 1e-3, "ring");
+}
+
+/// A profile whose plane holds the path's direction at the start but that sits off the path still
+/// sweeps a volume, and is not refused for it: a 2 x 2 rectangle in the plane x = 30 (spanning
+/// y 10 to 12, z -1 to 1) turned once about the Z axis does not overlap itself (a point's radius
+/// r satisfies r^2 = 900 + y^2, so each (r, z) comes from one point). Its volume is the integral
+/// of 2 pi r dr dz over the region, and r dr = y dy, so V = 2 pi (2) (12^2 - 10^2) / 2 = 88 pi.
+#[test]
+fn a_profile_off_the_path_in_a_plane_holding_its_direction_still_sweeps() {
+    let yz = Plane { origin: Vec3::new(30.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z };
+    let rect = region(Loop2::polygon(&[Vec2::new(10.0, -1.0), Vec2::new(12.0, -1.0), Vec2::new(12.0, 1.0), Vec2::new(10.0, 1.0)]));
+    let a = Vec3::new(30.0, 0.0, 0.0);
+    let round = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+    ];
+    let want = 88.0 * PI;
+    close(volume(&smlib_sweeps::sweep(&yz, &pieces_of(&rect), &round, false).unwrap()), want, 1e-3, "ring");
+    // A rectangle a thousandth off the path (its corner at local 0.001, 0.001) is off it too: its
+    // points turn at radius sqrt(30^2 + y^2), so V = 2 pi h (b^2 - a^2) / 2 with h = 2, a = 0.001
+    // and b = 2.001, which is 8.008 pi.
+    let near = region(Loop2::polygon(&[Vec2::new(0.001, 0.001), Vec2::new(2.001, 0.001), Vec2::new(2.001, 2.001), Vec2::new(0.001, 2.001)]));
+    close(volume(&smlib_sweeps::sweep(&yz, &pieces_of(&near), &round, false).unwrap()), 8.008 * PI, 1e-3, "near ring");
 }
 
 #[test]
@@ -910,4 +959,106 @@ fn fast_torus_supports_booleans_and_display_plan() {
     assert!(deferred);
     let body = res.unwrap();
     crate::check_kept(&body).unwrap();
+}
+
+#[test]
+fn closed_path_with_arcs_and_corners_and_out_of_plane_profile_keeps_whole_body() {
+    // #23185: a closed planar path in XY with two R4.5 arcs and two sharp 90-degree corners,
+    // swept with an eave profile offset 489 mm out of the path plane along Z. Previously the
+    // corner mitre lead and cutter used the 3D reach from the path (489 mm), turning the cutter
+    // at (-169.5, -141.5) into a 2 m cube that sliced off the +X wall, first arc, and part of
+    // the top straight segment (~15% of the volume, COM x = -30.13 instead of 0).
+    let path = [
+        crate::PathSeg::Line { a: Vec3::new(169.5, 0.0, 0.0), b: Vec3::new(169.5, 165.0, 0.0) },
+        crate::PathSeg::Arc { a: Vec3::new(169.5, 165.0, 0.0), center: Vec3::new(165.0, 165.0, 0.0), axis: Vec3::Z, angle: FRAC_PI_2 },
+        crate::PathSeg::Line { a: Vec3::new(165.0, 169.5, 0.0), b: Vec3::new(-165.0, 169.5, 0.0) },
+        crate::PathSeg::Arc { a: Vec3::new(-165.0, 169.5, 0.0), center: Vec3::new(-165.0, 165.0, 0.0), axis: Vec3::Z, angle: FRAC_PI_2 },
+        crate::PathSeg::Line { a: Vec3::new(-169.5, 165.0, 0.0), b: Vec3::new(-169.5, -141.5, 0.0) },
+        crate::PathSeg::Line { a: Vec3::new(-169.5, -141.5, 0.0), b: Vec3::new(169.5, -141.5, 0.0) },
+        crate::PathSeg::Line { a: Vec3::new(169.5, -141.5, 0.0), b: Vec3::new(169.5, 0.0, 0.0) },
+    ];
+    let profile_plane = Plane::XZ;
+    let profile = region(Loop2::polygon(&[Vec2::new(169.5, -488.5), Vec2::new(169.5, -489.0), Vec2::new(176.0, -489.0), Vec2::new(176.0, -482.0)]));
+    // Exact analytic volume by Pappus:
+    // trapezoid h(u) = 0.5 + u over u in [0, 6.5] => A = 24.375, I_1 = integral u*h(u) du = 102.1041666667.
+    let area = 24.375;
+    let first_moment = 0.25 * 6.5_f64.powi(2) + 6.5_f64.powi(3) / 3.0;
+    let straight_len = 165.0 + 330.0 + 306.5 + 339.0 + 141.5;
+    let want_vol = area * straight_len + PI * (4.5 * area + first_moment) + 4.0 * first_moment;
+
+    let plain = smlib_sweeps::sweep(&profile_plane, &pieces_of(&profile), &path, false).unwrap();
+    let ctl = crate::SweepControl::default();
+    let controlled = smlib_sweeps::sweep_controlled(&profile_plane, &numbered(&profile), &path, &ctl).unwrap();
+
+    for (what, body, vol_tol, sym_tol, bb_tol) in [("plain", &plain, 1e-3, 1e-5, 1e-2), ("controlled", &controlled, 5e-2, 5e-2, 0.25)] {
+        assert_eq!(body.validity(), Vec::<String>::new(), "{what}: valid solid");
+        let m = crate::measure(body).unwrap();
+        close(m.volume, want_vol, vol_tol, what);
+        assert!(m.centroid.x.abs() < sym_tol, "{what}: centroid x should be 0 by symmetry, got {}", m.centroid.x);
+        let bb = body.exact_bounds().unwrap();
+        assert!((bb.min.x - -176.0).abs() < bb_tol && (bb.max.x - 176.0).abs() < bb_tol, "{what}: x bounds {bb:?}");
+        assert!((bb.min.y - -148.0).abs() < bb_tol && (bb.max.y - 176.0).abs() < bb_tol, "{what}: y bounds {bb:?}");
+    }
+}
+
+#[test]
+fn closed_path_with_inside_offset_and_out_of_plane_profile_mitres_cleanly() {
+    // Companion to #23185: a profile sitting on the INSIDE of the path (crossing the mitre plane
+    // before the corner point, so the cutter must cover both the forward lead and the inner-side
+    // crossing) and offset 200 mm along Z.
+    let path = [
+        crate::PathSeg::Line { a: Vec3::new(30.0, 0.0, 0.0), b: Vec3::new(30.0, 20.0, 0.0) },
+        crate::PathSeg::Arc { a: Vec3::new(30.0, 20.0, 0.0), center: Vec3::new(20.0, 20.0, 0.0), axis: Vec3::Z, angle: FRAC_PI_2 },
+        crate::PathSeg::Line { a: Vec3::new(20.0, 30.0, 0.0), b: Vec3::new(-20.0, 30.0, 0.0) },
+        crate::PathSeg::Arc { a: Vec3::new(-20.0, 30.0, 0.0), center: Vec3::new(-20.0, 20.0, 0.0), axis: Vec3::Z, angle: FRAC_PI_2 },
+        crate::PathSeg::Line { a: Vec3::new(-30.0, 20.0, 0.0), b: Vec3::new(-30.0, -30.0, 0.0) },
+        crate::PathSeg::Line { a: Vec3::new(-30.0, -30.0, 0.0), b: Vec3::new(30.0, -30.0, 0.0) },
+        crate::PathSeg::Line { a: Vec3::new(30.0, -30.0, 0.0), b: Vec3::new(30.0, 0.0, 0.0) },
+    ];
+    // 4 x 4 square shifted 200 mm in Z and lying strictly inside x in [26, 30] (radius 10 > 4).
+    let profile_plane = Plane::XZ;
+    let profile = region(Loop2::polygon(&[Vec2::new(26.0, 200.0), Vec2::new(30.0, 200.0), Vec2::new(30.0, 204.0), Vec2::new(26.0, 204.0)]));
+    // Centroid sits 2 mm inside the path: straight lengths 20 + 40 + 50 + 60 + 30 = 200,
+    // 2 quarter arcs of centroid radius (10 - 2) = 8, 2 sharp 90-deg inner corners remove 2*2 each.
+    let area = 16.0;
+    let want_vol = area * (200.0 + PI * 8.0 - 8.0);
+
+    let plain = smlib_sweeps::sweep(&profile_plane, &pieces_of(&profile), &path, false).unwrap();
+    assert_eq!(plain.validity(), Vec::<String>::new());
+    let m = crate::measure(&plain).unwrap();
+    close(m.volume, want_vol, 1e-3, "inside-offset closed sweep");
+    assert!(m.centroid.x.abs() < 1e-5, "centroid x should be 0 by symmetry, got {}", m.centroid.x);
+}
+
+#[test]
+fn non_coplanar_arc_corner_trims_cleanly_along_corner_axis() {
+    // An incoming +Y line ending at the origin meets an R10 quarter arc curving down into -Z
+    // (out of the XY corner plane, so the arc bends along the corner axis -Z). The entry mitre
+    // cutter must bound the arc's displacement along the corner axis so no discarded sliver
+    // protrudes past the mitre plane x + y = 0 below z = -0.1.
+    let path = [
+        crate::PathSeg::Line { a: Vec3::new(0.0, -20.0, 0.0), b: Vec3::ZERO },
+        crate::PathSeg::Arc { a: Vec3::ZERO, center: Vec3::new(0.0, 0.0, -10.0), axis: Vec3::Y, angle: FRAC_PI_2 },
+    ];
+    let profile_plane = Plane { origin: Vec3::new(0.0, -20.0, 0.0), x: Vec3::X, y: -Vec3::Z };
+    let profile = region(Loop2::polygon(&[Vec2::new(-4.0, -0.1), Vec2::new(4.0, -0.1), Vec2::new(4.0, 0.1), Vec2::new(-4.0, 0.1)]));
+    // Cross-section area 8 * 0.2 = 1.6 centered on the path; both the mitre cut y = -x on the
+    // straight leg and theta = arcsin(-y/R) on the arc are odd over [-4, 4], so the analytic
+    // volume equals 1.6 * (20 + 10 * PI / 2).
+    let want_vol = 1.6 * (20.0 + 5.0 * PI);
+
+    let body = smlib_sweeps::sweep(&profile_plane, &pieces_of(&profile), &path, false).unwrap();
+    assert_eq!(body.validity(), Vec::<String>::new());
+    let m = crate::measure(&body).unwrap();
+    close(m.volume, want_vol, 1e-3, "non-coplanar arc corner volume");
+
+    // Verify no tessellated vertex on the discarded side of the mitre (x + y < -0.05) dips
+    // below the incoming straight leg's bottom face (z = -0.1).
+    let plan = body.mesh_plan(&crate::display_tolerance(body.size())).unwrap();
+    let mesh = body.mesh_of(&plan).unwrap();
+    for p in &mesh.positions {
+        if p.x + p.y < -0.05 {
+            assert!(p.z >= -0.12, "discarded arc sliver escaped entry mitre cutter at {p:?}");
+        }
+    }
 }

@@ -37,10 +37,12 @@
 //!   is not a closed manifold solid is `SM_ERR` (`SMLIB_ERR_NOT_SOLID`). The `_body`
 //!   variants stop where the fork hands the body to its `finish`, without that check,
 //!   so a C API port can give `SMLIB_ERR_EMPTY` / `SMLIB_ERR_NOT_SOLID` itself.
-//! - **Bounds.** As the fork: at most [`MAX_TURNS`] turns, [`MAX_STATIONS`] spans in all
-//!   and [`MAX_LAW`] law pairs. Added: the span width's shrinking loop stops after
-//!   [`MAX_SHRINK`] steps, and a wall's control net holds at most [`MAX_NET_POINTS`]
-//!   points; past either the sweep is `InvalidInput`.
+//! - **Bounds.** As the fork: at most [`MAX_STATIONS`] spans in all and [`MAX_LAW`] law
+//!   pairs. The turns are bounded by the spans: at most [`MAX_TURNS`], as many as the spans
+//!   hold at a span of an eighth of a turn (the fork's 200 is no bound of the work). Added:
+//!   the span width's shrinking loop stops after [`MAX_SHRINK`] steps, and a wall's control
+//!   net holds at most [`MAX_NET_POINTS`] points; past either the sweep is `InvalidInput`.
+//!   The sweep checks for cancellation before each wall face.
 //! - **The caps.** A point at turn 0 is the point itself (moved by the radial shift), and
 //!   one at the last turn is the end cap's placement applied to it, so a wall's first and
 //!   last stations and the caps are the same points by construction; the fork computes
@@ -61,6 +63,7 @@
 // The fork's range tests are NaN-safe negations (`!(x > y)`); kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -82,10 +85,13 @@ use crate::topology::{Brep, FaceId};
 
 const OP: &str = "sweep::screw::screw_sweep";
 
-/// The most turns a screw sweep takes (`SMLIB_SCREW_MAX_TURNS`).
-pub const MAX_TURNS: f64 = 200.0;
 /// The most spans a screw sweep's walls take in all (`SMLIB_SCREW_MAX_STATIONS`).
 pub const MAX_STATIONS: f64 = 12000.0;
+/// The most turns a screw sweep takes: as many as [`MAX_STATIONS`] spans hold at the widest
+/// span, an eighth of a turn, so more turns always take more spans. It only refuses early
+/// what the span bound refuses anyway (the fork's `SMLIB_SCREW_MAX_TURNS`, 200, has no
+/// reason of its own).
+pub const MAX_TURNS: f64 = MAX_STATIONS / 8.0;
 /// The most `(turn, offset)` pairs of a radial law (`SMLIB_SCREW_MAX_LAW`).
 pub const MAX_LAW: usize = 1024;
 /// The most steps the span width shrinks by 1% to meet the tolerance (not in the fork,
@@ -138,7 +144,9 @@ struct Screw {
 impl Screw {
     /// Rodrigues: `v` turned right-handed about `k` by angle `a`.
     fn turn(&self, v: Vec3, a: f64) -> Vec3 {
-        v * a.cos() + self.k.cross(v) * a.sin() + self.k * (self.k.dot(v) * (1.0 - a.cos()))
+        v * det::cos(a)
+            + self.k.cross(v) * det::sin(a)
+            + self.k * (self.k.dot(v) * (1.0 - det::cos(a)))
     }
 
     fn lift(&self, a: f64) -> f64 {
@@ -263,7 +271,7 @@ impl Stations {
         if j % 2 == 0 {
             1.0
         } else {
-            self.half.cos()
+            det::cos(self.half)
         }
     }
 }
@@ -275,8 +283,11 @@ fn lift_error(half: f64) -> f64 {
     let mut worst: f64 = 0.0;
     for i in 0..=2048 {
         let s = f64::from(i) / 2048.0;
-        let lift = half * s / (1.0 - (1.0 - s * s) * (1.0 - half.cos()) / 2.0);
-        worst = max2(worst, (lift - 2.0 * ((half / 2.0).tan() * s).atan()).abs());
+        let lift = half * s / (1.0 - (1.0 - s * s) * (1.0 - det::cos(half)) / 2.0);
+        worst = max2(
+            worst,
+            (lift - 2.0 * det::atan(det::tan(half / 2.0) * s)).abs(),
+        );
     }
     worst
 }
@@ -285,7 +296,7 @@ fn lift_error(half: f64) -> f64 {
 /// quadratic offset strays from the true offset turned with the profile, at most
 /// (about `h / 8`).
 fn offset_error(half: f64) -> f64 {
-    let c = half.cos();
+    let c = det::cos(half);
     let h = 2.0 * half;
     let mut worst: f64 = 0.0;
     for i in 0..=4096 {
@@ -296,11 +307,11 @@ fn offset_error(half: f64) -> f64 {
         let b2 = t * t;
         let den = b0 + c * b1 + b2;
         let ax = 0.5 * (b2 - b0) * c / den;
-        let ay = 0.5 * (b2 + b0) * half.sin() / den;
-        let phi = 2.0 * ((half / 2.0).tan() * s).atan();
+        let ay = 0.5 * (b2 + b0) * det::sin(half) / den;
+        let phi = 2.0 * det::atan(det::tan(half / 2.0) * s);
         worst = max2(
             worst,
-            (ax - phi / h * phi.cos()).hypot(ay - phi / h * phi.sin()),
+            det::hypot(ax - phi / h * det::cos(phi), ay - phi / h * det::sin(phi)),
         );
     }
     worst
@@ -318,7 +329,7 @@ fn path(m: &Screw, p: Point3, st: &Stations) -> Vec<Point3> {
             d.push(m.at(p, t0));
             let mid = 0.5 * (t0 + t1);
             d.push(
-                m.o + m.turn(radial + m.shift(mid), mid) * (1.0 / st.half.cos())
+                m.o + m.turn(radial + m.shift(mid), mid) * (1.0 / det::cos(st.half))
                     + m.k * (axial + m.lift(mid)),
             );
         }
@@ -936,7 +947,7 @@ fn sweep(
     breaks.push(total);
     breaks.sort_by(f64::total_cmp);
     let rise = m.pitch.abs() / TAU;
-    let mut h = min2(TAU / 8.0, (tolerance / (0.008 * rise)).cbrt());
+    let mut h = min2(TAU / 8.0, det::cbrt(tolerance / (0.008 * rise)));
     let mut shrink = 0;
     while rise * lift_error(0.5 * h) > tolerance {
         h *= 0.99;
@@ -962,7 +973,9 @@ fn sweep(
         let n = ((b1 - b0) / piece).ceil();
         spans += n;
         if !(spans <= MAX_STATIONS) {
-            return Err(bad("too many spans"));
+            return Err(bad(
+                "too many turns for the tolerance: more spans than a screw sweep takes",
+            ));
         }
         pieces.push(Stations::new(b0, b1, n as usize));
     }
@@ -990,9 +1003,12 @@ fn sweep(
         };
         let (t0, t1) = (first.start, last.end);
         for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
+            // A long thread is thousands of faces: a cancelled call stops between them.
+            k.check_cancelled(OP)?;
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
                 for st in group {
+                    k.check_cancelled(OP)?;
                     let at = r + m.offset(st.start);
                     cylinder_piece(k, &mut brep, m, ends.start, ends.end, at, st)?;
                 }

@@ -711,7 +711,7 @@ fn colours_read_into_records_are_the_ones_our_step_reader_reads() {
     let theirs = theirs.unwrap_or_else(|e| panic!("{e} {warnings:?}"));
     let look = |imp: &solidcraft_kernel::StepImport| {
         let b = &imp.bodies[0].body;
-        let p = b.paint().cloned().unwrap_or(solidcraft_kernel::Paint { opacity: 1.0, faces: Vec::new(), name: None });
+        let p = b.paint().cloned().unwrap_or(solidcraft_kernel::Paint { opacity: 1.0, faces: Vec::new(), name: None, layer: None });
         let mut faces: Vec<String> = p.faces.iter().map(|f| format!("{:?} {:.3} {:?}", f.color, f.opacity, f.name)).collect();
         faces.sort();
         (b.color(), p.name, format!("{:.3}", p.opacity), faces)

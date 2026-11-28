@@ -135,23 +135,23 @@ fn occurrence_path(doc: &Document, occurrence: u64) -> String {
 /// Every persistent name the snap holds, with what it refers to.
 fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
     let mut out = Vec::new();
-    let mut face = |role: ReferenceRole, name: &Option<String>| {
+    let mut face = |role: ReferenceRole, name: Option<&str>| {
         if let Some(n) = name {
             out.push(Reference { role, to: Referent::Face(face_ref(doc, n)) });
         }
     };
     match snap {
         Snap::FaceCenter { face: f, x, .. } => {
-            face(ReferenceRole::Face, f);
+            face(ReferenceRole::Face, f.as_deref());
             if let Some(XRef::Face { face: n, .. }) = x {
-                face(ReferenceRole::X, &Some(n.clone()));
+                face(ReferenceRole::X, Some(n));
             }
         }
         Snap::CircleCenter { face: f, end, x, .. } => {
-            face(ReferenceRole::Face, f);
-            face(ReferenceRole::End, end);
+            face(ReferenceRole::Face, f.as_deref());
+            face(ReferenceRole::End, end.as_deref());
             if let Some(XRef::Face { face: n, .. }) = x {
-                face(ReferenceRole::X, &Some(n.clone()));
+                face(ReferenceRole::X, Some(n));
             }
         }
         Snap::Edge { edge, face: f, corner, .. } => {
@@ -165,9 +165,16 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
                 out.push(Reference { role: ReferenceRole::Corner, to: Referent::Edge(edge_ref(doc, e)) });
             }
         }
+        Snap::BetweenFaces { a, b, snap } => {
+            face(ReferenceRole::Face, Some(&a.face));
+            face(ReferenceRole::Face, Some(&b.face));
+            if let Some(inner) = snap {
+                out.extend(references(doc, inner));
+            }
+        }
         Snap::Plane { x, .. } | Snap::Axis { x, .. } => {
             if let Some(XRef::Face { face: n, .. }) = x {
-                face(ReferenceRole::X, &Some(n.clone()));
+                face(ReferenceRole::X, Some(n));
             }
         }
         Snap::SketchPoint { sketch, point, x } => {
@@ -176,7 +183,7 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
                 None => (String::new(), Some(format!("sketch {sketch} is gone"))),
             };
             if let Some(XRef::Face { face: n, .. }) = x {
-                face(ReferenceRole::X, &Some(n.clone()));
+                face(ReferenceRole::X, Some(n));
             }
             out.push(Reference {
                 role: ReferenceRole::SketchPoint,

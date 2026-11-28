@@ -173,6 +173,14 @@ pub(crate) fn note_framed(app: &mut SolveApp) {
     }
 }
 
+/// The camera was set for the design being meshed (its remembered view): the open no longer
+/// frames the meshes when they are ready.
+pub(crate) fn keep_camera(app: &mut SolveApp) {
+    if let Some(m) = app.open_meshing.as_mut() {
+        m.framed = None;
+    }
+}
+
 /// How far the meshing is: bodies done, and of how many.
 pub(crate) fn progress(app: &SolveApp) -> Option<(usize, usize)> {
     app.open_meshing.as_ref().filter(|m| !m.complete).map(|m| (m.done.load(Ordering::Acquire).min(m.world.bodies.len()), m.world.bodies.len()))

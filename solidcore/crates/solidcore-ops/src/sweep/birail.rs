@@ -9,7 +9,7 @@ use solidcore::sweep::stations::RailFit as KernelRailFit;
 
 use super::railed::{refused, RailFit};
 use super::{parse, Curve};
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish_closed, Body, Expect};
 use crate::session::run;
 use crate::{Error, Result};
 
@@ -53,7 +53,7 @@ pub fn sweep_two_rails(
         match kernel_sweep(k, &refs, [r0, r1], &opts) {
             Ok(swept) => {
                 let bound = swept.bounds.iter().copied().fold(0.0, f64::max);
-                Ok(finish(k, swept.skin.brep, Expect::FACES)?.map(|b| (b, bound)))
+                Ok(finish_closed(k, swept.skin.brep, Expect::FACES)?.map(|b| (b, bound)))
             }
             Err(e) => Ok(Err(refused(e))),
         }
