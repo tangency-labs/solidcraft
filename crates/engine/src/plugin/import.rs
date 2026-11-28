@@ -192,7 +192,13 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
     let consent = session.plugin_state.user.dialog_folders.take();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
-    convert(session, importer, path, options, consent.as_ref()).map_err(super::messages::named(&importer.name, Some(&file)))
+    let requested_limits = super::messages::format_limits(session, &importer.folder);
+    convert(session, importer, path, options, consent.as_ref()).map_err(super::messages::named_with_limits(
+        &importer.name,
+        Some(&file),
+        false,
+        requested_limits,
+    ))
 }
 
 /// All callers receive schema defaults for omitted options. User preferences belong to the
@@ -343,8 +349,9 @@ pub struct ImportedBytes {
 pub fn import_design_bytes(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedBytes> {
     let consent = session.plugin_state.user.dialog_folders.take();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
+    let requested_limits = super::messages::format_limits(session, &importer.folder);
     let (imported, version, ()) = run_importer(session, importer, path, options, consent.as_ref(), |_, _| Ok(()))
-        .map_err(super::messages::named(&importer.name, Some(&file)))?;
+        .map_err(super::messages::named_with_limits(&importer.name, Some(&file), false, requested_limits))?;
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let notes = {
         let report = &imported.report;

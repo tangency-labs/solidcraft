@@ -334,6 +334,7 @@ pub(crate) fn describe<H: PluginHost + 'static>(
         created_dirs: Vec::new(),
         clock: false,
         forms: false,
+        execution_limits: Limits::default(),
         limits: store_limits(limits, 10_000),
         failed: None,
         calls: 0,

@@ -48,7 +48,8 @@ pub(super) fn refuse_unreadable(runtime: &RuntimeManifest) -> Result<()> {
 /// that was there (or no file) as it was. The design is never changed.
 pub fn export_file(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
-    convert(session, exporter, path, options).map_err(super::messages::named_export(&exporter.name, &file))
+    let requested_limits = super::messages::format_limits(session, &exporter.folder);
+    convert(session, exporter, path, options).map_err(super::messages::named_with_limits(&exporter.name, Some(&file), true, requested_limits))
 }
 
 fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {

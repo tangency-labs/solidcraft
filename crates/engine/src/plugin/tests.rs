@@ -217,7 +217,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
                 json!({"plugin":"sample","grant":"fuel","approve":tools::APPROVE}),
             ),
         ] {
-            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
+            let failure = PluginFailure { requested_limits: None, plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
             let original = failure.text();
             let explained = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure))).to_string();
             assert!(explained.starts_with(&original), "{explained}");
@@ -230,7 +230,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
             let unchanged = explain_named(&session, &manifest, "make", error.clone().into());
             assert!(matches!(&unchanged, EngineError::Plugin(actual) if actual == &error));
             assert!(structured_tool_error(&unchanged.to_string()).is_none());
-            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
+            let failure = PluginFailure { requested_limits: None, plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
             let original = failure.text();
             let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
             assert!(matches!(unchanged, EngineError::PluginFailed(_)));
@@ -277,6 +277,7 @@ fn workspace_hook_budgets_are_capped_without_raising_smaller_limits() {
 fn workspace_hooks_require_enabled_plugins_and_the_ui_capability() {
     let mut session = Session::default();
     let package = |value: Value| Package {
+        requested_limits: None,
         manifest: parse_manifest(&serde_json::to_vec(&value).unwrap(), "sample").unwrap(),
         approval: "approved".into(),
         component: vec![],
@@ -390,6 +391,7 @@ fn panel_manifest() -> Value {
 
 fn panel_host() -> SolidCraftHost {
     let package = Package {
+        requested_limits: None,
         manifest: parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap(),
         approval: "approved".into(),
         component: Vec::new(),
@@ -1010,22 +1012,26 @@ fn disabled_ids_survive_scratch_and_new_design() {
 
 #[test]
 fn guest_deadline_messages_preserve_the_exact_millisecond_budget() {
-    for (allowed, seconds) in [(1, "0.001"), (50, "0.05"), (5000, "5"), (u64::MAX, "18446744073709551.615")] {
+    for allowed in [1, 50, 5000] {
         let failure = PluginFailure {
+            requested_limits: None,
             plugin: "Sample".into(),
             file: None,
             exporting: false,
             error: HostError::Exhausted { limit: "deadline_ms".into(), allowed },
         };
         let text = failure.text();
-        assert!(text.contains(&format!("all {seconds} s of guest time")), "{text}");
-        assert!(text.contains("runtime.limits.deadline_ms") && text.contains("max_deadline_ms"), "{text}");
+        let budget = if allowed == 5000 { "5,000".into() } else { allowed.to_string() };
+        assert!(text.contains(&format!("all {budget} ms of guest time")), "{text}");
+        assert!(text.contains("Preferences › Plugins › Max plugin guest time (ms)"), "{text}");
+        assert!(!text.contains("It asks for"), "{text}");
     }
 }
 
 #[test]
 fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
     let failure = |file: &str, reason: &str| PluginFailure {
+        requested_limits: None,
         plugin: "Sample".into(),
         file: Some(file.into()),
         exporting: false,
@@ -1069,6 +1075,35 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    #[test]
+    fn limit_messages_preserve_explicit_requests_and_omit_missing_requests() {
+        let fixture = Fixture::new("(loop $forever br $forever)");
+        let path = fixture.0.join("sample/plugin.json");
+        let mut manifest = manifest();
+        for explicit in [true, false] {
+            if explicit {
+                manifest["runtime"]["limits"]["fuel"] = json!(670_960_576_380_u64);
+            } else {
+                manifest["runtime"].as_object_mut().unwrap().remove("limits");
+            }
+            std::fs::write(&path, manifest.to_string()).unwrap();
+            let package = read_package(&fixture.path()).unwrap();
+            let failure = PluginFailure {
+                requested_limits: package.requested_limits,
+                plugin: "Sample".into(),
+                file: None,
+                exporting: false,
+                error: HostError::Exhausted { limit: "fuel".into(), allowed: 100_000_000_000 },
+            }
+            .text();
+            assert!(failure.contains("all 100,000,000,000 fuel allowed"), "{failure}");
+            assert!(failure.contains("Preferences › Plugins › Max plugin fuel"), "{failure}");
+            assert_eq!(failure.contains("It asks for 670,960,576,380"), explicit, "{failure}");
+            assert_eq!(failure.contains("It asks for"), explicit, "{failure}");
+        }
+        std::fs::remove_dir_all(fixture.0).unwrap();
+    }
+
     /// An entry asks `plugin.preview` whether it runs as a dialog's live preview (#22297): true in
     /// a run of a preview session or with `preview: true`, false otherwise, and with no command
     /// group. The flag stays with that run.
@@ -1874,9 +1909,9 @@ mod native {
             ("call $box i32.const 8 i32.const 1 i32.store", "entry result is not JSON"),
             (
                 "call $box (loop $forever br $forever)",
-                "Sample: it used all 100000 fuel it asks for and was stopped. Ask its author to raise its fuel limit.",
+                "Sample: This plugin used all 100,000 fuel allowed. It asks for 100,000. Raise Preferences › Plugins › Max plugin fuel, or approve its request when you install it.",
             ),
-            ("call $box i32.const 10000 memory.grow drop", "Sample: it needed more than the 1 MiB of memory it asks for and was stopped."),
+            ("call $box i32.const 10000 memory.grow drop", "Sample: This plugin needed more than the 1 MiB of memory allowed. It asks for 1."),
             ("call $box i32.const -1 i32.load drop", "trap=MemoryOutOfBounds"),
             ("call $box i32.const 1 i32.const 0 i32.div_u drop", "trap=IntegerDivisionByZero"),
             ("call $box i32.const 2048 i32.const 11 i32.const 1024 i32.const 33 i32.const 0 call $run", "not granted"),
@@ -4868,7 +4903,7 @@ mod importers {
         let error = s.execute("doc.open", &json!({"path": put(&root, "slow.smp", b"L")})).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Sample Importer could not open slow.smp: it used all 0.05 s of guest time it asks for and was stopped. Ask its author to raise runtime.limits.deadline_ms; if needed, raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file)."
+            "Sample Importer could not open slow.smp: This plugin used all 50 ms of guest time allowed. It asks for 50. Raise Preferences › Plugins › Max plugin guest time (ms)."
         );
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -5197,7 +5232,7 @@ mod exporters {
                 assert!(failure.contains(says), "{slot}: {failure}");
                 assert!(failure.starts_with(&format!("Sample Exporter could not export {name}:")), "{failure}");
                 if slot == "loop" {
-                    assert!(failure.contains("Ask its author to raise its fuel limit."), "{failure}");
+                    assert!(failure.contains("Preferences › Plugins › Max plugin fuel"), "{failure}");
                 }
             }
         }
@@ -5940,7 +5975,7 @@ fn user_storage_stale_commits_conflict_without_losing_keys_and_can_be_retried() 
         let error = second.commit_transaction().unwrap_err();
         assert_eq!(error, HostError::UserStorageConflict { plugin: "gears".into() });
         assert_eq!(serde_json::to_value(&error).unwrap(), json!({"kind":"user_storage_conflict", "plugin":"gears"}));
-        let message = PluginFailure { plugin: "Gears".into(), file: None, exporting: false, error }.text();
+        let message = PluginFailure { requested_limits: None, plugin: "Gears".into(), file: None, exporting: false, error }.text();
         assert!(message.starts_with("Gears:"), "{message}");
         assert!(message.contains("Retry the plugin run"), "{message}");
         assert!(std::sync::Arc::ptr_eq(&original, &second.session.doc));
@@ -6300,7 +6335,7 @@ fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
         "sample",
     )
     .unwrap();
-    let package = Package { manifest, approval: "reviewed".into(), component: Vec::new() };
+    let package = Package { requested_limits: None, manifest, approval: "reviewed".into(), component: Vec::new() };
     let mut s = Session::default();
     let params = json!({"use_library":true,"library":library});
     assert!(folders::for_entry(&s, &package, "make", &params, None).is_err(), "a field value grants nothing");

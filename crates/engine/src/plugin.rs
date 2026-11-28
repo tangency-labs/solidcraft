@@ -405,6 +405,8 @@ fn catalog_command(id: &str) -> Option<&'static crate::CommandSpec> {
 }
 
 pub struct Package {
+    /// Limits explicitly present in the manifest, before defaults are applied.
+    pub requested_limits: Option<Value>,
     pub manifest: Manifest,
     pub approval: String,
     pub component: Vec<u8>,
@@ -423,7 +425,8 @@ pub fn read_package(path: &str) -> Result<Package> {
     } else {
         Vec::new()
     };
-    Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
+    let requested_limits = serde_json::from_slice::<Value>(&bytes).ok().and_then(|value| value.pointer("/runtime/limits").cloned());
+    Ok(Package { requested_limits, manifest, approval: package_hash(&bytes, &component), component })
 }
 
 /// Whether `folder` is an installed package in the app's own plugins folder (`{plugins}/<id>`).
@@ -593,7 +596,8 @@ pub fn run_with_ui_event(
     ui_event: Option<&ui::UiEvent>,
 ) -> Result<crate::schema::plugin::RunResult> {
     let name = package.manifest.name.clone();
-    run_package(session, package, entry, params, ui_event, false).map_err(messages::named(&name, None))
+    let requested_limits = package.requested_limits.clone();
+    run_package(session, package, entry, params, ui_event, false).map_err(messages::named_with_limits(&name, None, false, requested_limits))
 }
 
 /// What a workspace hook changed in its own plugin's panels. Nothing else leaves a hook.
@@ -629,6 +633,7 @@ pub fn run_workspace_hook(
     entering: bool,
 ) -> Result<(crate::schema::plugin::RunResult, PanelUpdates)> {
     let name = package.manifest.name.clone();
+    let requested_limits = package.requested_limits.clone();
     let result = (|| {
         let mut scratch = session.scratch();
         scratch.plugin_state.refresh_stored();
@@ -694,7 +699,7 @@ pub fn run_workspace_hook(
         result.view = None;
         Ok((result, updates))
     })();
-    result.map_err(messages::named(&name, None))
+    result.map_err(messages::named_with_limits(&name, None, false, requested_limits))
 }
 
 /// Apply the panel changes a workspace hook made, to the live session. Only the plugin's own

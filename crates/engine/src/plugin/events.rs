@@ -136,7 +136,12 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
             if include_links {
                 event["links"] = json!(links);
             }
-            let invocation = Package { manifest, approval: package.approval.clone(), component: package.component.clone() };
+            let invocation = Package {
+                requested_limits: package.requested_limits.clone(),
+                manifest,
+                approval: package.approval.clone(),
+                component: package.component.clone(),
+            };
             let result = run(&mut scratch, invocation, &listener.entry, &event)
                 .and_then(|reply| listener_panel_data(session, &id, &listener.entry, reply.result).map_err(EngineError::from));
             match result {

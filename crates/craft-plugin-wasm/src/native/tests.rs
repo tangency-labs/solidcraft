@@ -1215,6 +1215,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         created_dirs: Vec::new(),
         clock: false,
         forms: false,
+        execution_limits: Limits::default(),
         limits: StoreLimitsBuilder::new().build(),
         failed: None,
         calls: 0,
@@ -3033,4 +3034,50 @@ fn a_cache_hit_loads_cranelift_code_without_compiling_with_winch() {
     std::fs::remove_dir_all(folder).unwrap();
     // Best effort: Wasmtime's cache worker may still be writing here.
     let _ = std::fs::remove_dir_all(root.parent().unwrap());
+}
+
+#[test]
+fn guests_read_effective_limits_at_both_api_versions_and_old_guests_still_run() {
+    for version in ["0.1.0", "0.2.0"] {
+        let mut manifest = manifest();
+        manifest.capabilities.push("host@0.1".into());
+        // These are the budgets approved by the host, not the manifest's original request.
+        let limits = &mut manifest.runtime.as_mut().unwrap().limits;
+        limits.fuel = 234_567;
+        limits.memory_mib = 2;
+        let original = include_str!("../fixture.wat").replace("__PACKAGE__", API.split_once('@').unwrap().0).replace("__VERSION__", version);
+        let original = if version == "0.1.0" { original.replace(r#" (case "unsupported" string)"#, "") } else { original };
+        let query = r#"
+  (import "craft:host/limits@0.1.0" (instance $limits
+    (type $budgets (record (field "fuel" u64) (field "memory-bytes" u64)
+      (field "fuel-left" u64) (field "deadline-ms" u64)))
+    (export "get" (func (result $budgets)))))
+  (alias export $limits "get" (func $get-limits))
+  (core func $get-limits-lowered (canon lower (func $get-limits) (memory $memory)))
+  (core module $probe-limits
+    (import "q" "get" (func $get (param i32)))
+    (import "q" "memory" (memory 1))
+    (func $check
+      i32.const 128 call $get
+      i32.const 128 i64.load i64.const 234567 i64.ne if unreachable end
+      i32.const 136 i64.load i64.const 2097152 i64.ne if unreachable end
+      i32.const 144 i64.load i64.eqz if unreachable end
+      i32.const 144 i64.load i64.const 234567 i64.gt_u if unreachable end
+      i32.const 152 i64.load i64.eqz if unreachable end
+      i32.const 152 i64.load i64.const 5000 i64.gt_u if unreachable end)
+    (start $check))
+  (core instance $limits-imports
+    (export "get" (func $get-limits-lowered)) (export "memory" (memory $memory)))
+  (core instance $probe-limits (instantiate $probe-limits (with "q" (instance $limits-imports))))
+"#;
+        let end = original.rfind(')').unwrap();
+        let guest = wat::parse_str(format!("{}{query}\n)", &original[..end])).unwrap();
+        crate::check_component(&manifest, &guest).unwrap();
+        run(&mut App::default(), &manifest, &guest, "make", &json!({})).unwrap();
+        // The original imports require neither the new limits interface nor host@0.1.
+        manifest.capabilities.pop();
+        let old = wat::parse_str(&original).unwrap();
+        run(&mut App::default(), &manifest, &old, "make", &json!({})).unwrap();
+        assert!(crate::check_component(&manifest, &guest).is_err());
+    }
 }

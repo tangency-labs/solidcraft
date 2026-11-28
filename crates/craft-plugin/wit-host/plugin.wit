@@ -11,3 +11,17 @@ interface capabilities {
 world host-query {
     import capabilities;
 }
+
+// Additive import: existing capabilities and plugin worlds remain unchanged.
+// Requires host@0.1; a static import requires a host providing this interface.
+interface limits {
+    record execution-limits {
+        // Effective fuel budget after manifest requests and user approval.
+        fuel: u64,
+        memory-bytes: u64,
+        fuel-left: u64,
+        // Remaining guest execution time in milliseconds, excluding host calls.
+        deadline-ms: u64,
+    }
+    get: func() -> execution-limits;
+}
