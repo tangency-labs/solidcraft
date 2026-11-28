@@ -128,7 +128,7 @@ mod imp {
     use std::collections::BTreeSet;
 
     use solidcore_ops::sweep::Curve as SkinCurve;
-    use solidcore_ops::sweep::railed::{RailFit as SkinFit, RailLoft, RailSection as SkinSection};
+    use solidcore_ops::sweep::railed::{RailFit as SkinFit, RailLoft, SpaceRailSection as SkinSection};
     use solidcraft_smlib::Brep;
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
 
@@ -2762,7 +2762,7 @@ mod imp {
             cap,
             ..RailLoft::relative(1e-4)
         };
-        let skin = solidcore_ops::sweep::railed::loft_rails(sections, &rail_curves, &how).map_err(|e| KernelError::Invalid(e.to_string()))?;
+        let skin = solidcore_ops::sweep::railed::loft_rails_space(sections, &rail_curves, &how).map_err(|e| KernelError::Invalid(e.to_string()))?;
         let (record, _) = skin.to_record().map_err(|e| KernelError::Invalid(e.to_string()))?;
         Ok(record)
     }
@@ -2782,16 +2782,15 @@ mod imp {
     /// brought to one form, as the one or two rails' loft does (`unified`). Solidcore pairs the
     /// curves by their weights, so a straight curve's weights are solidcore's to give.
     pub(crate) fn skin_sections(matched: &[crate::loft_rails::Section]) -> Result<Vec<SkinSection>> {
-        let unified = crate::loft_rails::unified(matched)?;
+        let unified = crate::loft_rails::resolve_planes(&crate::loft_rails::unified(matched)?);
         Ok(unified
             .iter()
-            .map(|s| {
-                let n = s.plane.normal();
-                SkinSection {
-                    origin: [s.plane.origin.x, s.plane.origin.y, s.plane.origin.z],
-                    normal: [n.x, n.y, n.z],
-                    curves: s.curves.iter().map(skin_nurbs).collect(),
-                }
+            .map(|s| SkinSection {
+                plane: s.plane.map(|pl| {
+                    let n = pl.normal();
+                    ([pl.origin.x, pl.origin.y, pl.origin.z], [n.x, n.y, n.z])
+                }),
+                curves: s.curves.iter().map(skin_nurbs).collect(),
             })
             .collect())
     }

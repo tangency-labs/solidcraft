@@ -102,7 +102,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_loft")
         .contract(&SURFACE_LOFT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end, planar or of a 3D sketch; all open or all closed (all open with a 3D sketch curve); a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; planar sketch sections only, both ends g0); faced?: bool (default true: through planar sketch sections, the walls face out of the region closed sections bound, as solid.loft's faces do, and an open section's direction crossed with its sketch normal, as surface.extrude's; false: each wall along its skinned surface's normal, as surface lofts saved before it keep); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps); stays_surface?: bool (default true: a result whose shells close stays a surface body, which Stitch makes a solid; false: it becomes a solid, as features saved before it keep)"),
+        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end, planar or of a 3D sketch; all open or all closed (all open with a 3D sketch curve); a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; sketch sections, both ends g0); faced?: bool (default true: through planar sketch sections, the walls face out of the region closed sections bound, as solid.loft's faces do, and an open section's direction crossed with its sketch normal, as surface.extrude's; false: each wall along its skinned surface's normal, as surface lofts saved before it keep); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps); stays_surface?: bool (default true: a result whose shells close stays a surface body, which Stitch makes a solid; false: it becomes a solid, as features saved before it keep)"),
     CommandSpec::new("surface.offset", "Offset Surface", crate::checked!("surface.offset", offset)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_offset")
@@ -2224,8 +2224,8 @@ mod tests {
     /// planar sketch 30 away, a 40 × 30 strip; a 3D line lofted to a box edge 30 and 40 away, drawn
     /// either way, a flat 10 × 30 and 10 × 40 strip (the edge chain turned to run as the line
     /// does); the two splines of the issue the same sheet Boundary Surface builds on them; undo,
-    /// redo and reopening. Refused: guide rails with a 3D section, and a 3D section of two curves
-    /// that do not meet.
+    /// redo and reopening. Refused: a rail that does not reach the 3D sections, and a 3D section
+    /// of two curves that do not meet.
     #[test]
     fn surface_loft_through_3d_sketch_curves() {
         let mut s = Session::default();
@@ -2316,7 +2316,7 @@ mod tests {
             &mut s,
             json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "rails": [{"sketch": "Space", "curves": [near]}]}),
         );
-        assert!(railed.contains("not supported yet") && railed.contains("3D sketch"), "{railed}");
+        assert!(railed.contains("guide rail") && railed.contains("does not reach"), "{railed}");
         let gap = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": [a, apart]}, {"sketch": "Space", "curves": [b]}]}));
         assert!(gap.contains("not connected"), "{gap}");
         let both = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": [a], "profiles": [0]}, {"sketch": "Space", "curves": [b]}]}));
@@ -2335,6 +2335,192 @@ mod tests {
         );
         assert_eq!(topology(&s, "Tangent"), (1, 4, 4, 1));
         close(area(&s, "Tangent"), 30.0 * 1700f64.sqrt());
+    }
+
+    /// Surface Loft through 3D sketch sections (and mixed planar + 3D sketch sections) guided by
+    /// 1, 2, and 3 guide rails (#15367): both `scale` and `stretch` follow every section and rail;
+    /// edge sections + rails, non-G0 continuity + rails, and closed 3D sections + rails remain
+    /// cleanly refused.
+    #[test]
+    fn surface_loft_through_3d_sketch_curves_with_guide_rails() {
+        use solidcraft_geom::brep::eval::SurfaceEval;
+        use solidcraft_geom::prelude::*;
+
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Space"}));
+        run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+        let spline3d = |s: &mut Session, pts: &[[f64; 3]]| -> String {
+            run(s, "sketch.spline3d", json!({"points": pts}))["curves"][0].as_str().unwrap().to_string()
+        };
+        let line3d = |s: &mut Session, a: [f64; 3], b: [f64; 3]| -> String {
+            run(s, "sketch.line3d", json!({"points": [a, b]}))["curves"][0].as_str().unwrap().to_string()
+        };
+        // Two curved 3D sections at y = 0 and y = 40.
+        let s1 = spline3d(&mut s, &[[-40.0, 0.0, -4.0], [-20.0, 0.0, -1.0], [0.0, 0.0, 0.0], [20.0, 0.0, -1.0], [40.0, 0.0, -4.0]]);
+        let s2 = spline3d(&mut s, &[[-40.0, 40.0, -4.0], [-20.0, 40.0, -1.0], [0.0, 40.0, 0.0], [20.0, 40.0, -1.0], [40.0, 40.0, -4.0]]);
+        // Three guide rails connecting s1 to s2 at left, middle, and right.
+        let r_right = spline3d(&mut s, &[[40.0, 0.0, -4.0], [55.0, 20.0, -4.0], [40.0, 40.0, -4.0]]);
+        let r_left = spline3d(&mut s, &[[-40.0, 0.0, -4.0], [-50.0, 20.0, -4.0], [-40.0, 40.0, -4.0]]);
+        let r_mid = spline3d(&mut s, &[[0.0, 0.0, 0.0], [0.0, 20.0, 6.0], [0.0, 40.0, 0.0]]);
+        // Two truly non-planar 3D sections (bending in X, Y, and Z) and two rails.
+        let t1 = spline3d(&mut s, &[[-30.0, 0.0, -3.0], [-10.0, 4.0, 1.0], [10.0, -4.0, 1.0], [30.0, 0.0, -3.0]]);
+        let t2 = spline3d(&mut s, &[[-30.0, 40.0, -3.0], [-10.0, 44.0, 1.0], [10.0, 36.0, 1.0], [30.0, 40.0, -3.0]]);
+        let tr_left = spline3d(&mut s, &[[-30.0, 0.0, -3.0], [-38.0, 20.0, -3.0], [-30.0, 40.0, -3.0]]);
+        let tr_right = spline3d(&mut s, &[[30.0, 0.0, -3.0], [38.0, 20.0, -3.0], [30.0, 40.0, -3.0]]);
+        // Closed 3D loop for refusal check.
+        let ring = [
+            line3d(&mut s, [-40.0, 0.0, -4.0], [40.0, 0.0, -4.0]),
+            line3d(&mut s, [40.0, 0.0, -4.0], [0.0, 0.0, 6.0]),
+            line3d(&mut s, [0.0, 0.0, 6.0], [-40.0, 0.0, -4.0]),
+        ];
+        run(&mut s, "sketch.finish", json!({}));
+
+        // Planar sketch in the y = 0 (XZ) plane for mixed planar + 3D tests.
+        run(&mut s, "sketch.create", json!({"name": "FlatXZ", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+        run(&mut s, "sketch.line", json!({"points": [[-40, -4], [40, -4]], "ids": ["base"]}));
+        run(&mut s, "sketch.finish", json!({}));
+
+        let off = |s: &Session, body_name: &str, pt: [f64; 3]| -> f64 {
+            let st = s.world_state().unwrap();
+            let p = solidcore_record::Vec3::new(pt[0], pt[1], pt[2]);
+            st.body(body_name)
+                .unwrap()
+                .body
+                .record()
+                .faces
+                .iter()
+                .filter_map(|f| {
+                    let ev = SurfaceEval::new(&f.surface).ok()?;
+                    let uv = ev.project(p, None, f64::INFINITY)?;
+                    Some(ev.point(uv)?.dist(p))
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+
+        // Plain unrailed reference area.
+        let secs = json!([{"sketch": "Space", "curves": [s1]}, {"sketch": "Space", "curves": [s2]}]);
+        run(&mut s, "surface.loft", json!({"sections": secs, "body_name": "Plain"}));
+        let plain_area = area(&s, "Plain");
+
+        // 1 guide rail: both `scale` and `stretch`.
+        let mut one_rail_areas = Vec::new();
+        for (fit, name) in [("scale", "OneScale"), ("stretch", "OneStretch")] {
+            run(
+                &mut s,
+                "surface.loft",
+                json!({"sections": secs, "rails": [{"sketch": "Space", "curves": [r_right]}], "rail_fit": fit, "body_name": name}),
+            );
+            assert!(s.world_state().unwrap().body(name).unwrap().body.is_surface());
+            assert!(off(&s, name, [0.0, 0.0, 0.0]) < 1e-3, "{name} misses s1");
+            assert!(off(&s, name, [0.0, 40.0, 0.0]) < 1e-3, "{name} misses s2");
+            assert!(off(&s, name, [55.0, 20.0, -4.0]) < 0.05, "{name} misses r_right: {}", off(&s, name, [55.0, 20.0, -4.0]));
+            let a = area(&s, name);
+            assert!(a > plain_area, "{name} area {a} should exceed plain {plain_area}");
+            one_rail_areas.push(a);
+        }
+        assert!((one_rail_areas[0] - one_rail_areas[1]).abs() > 1e-2, "scale vs stretch should differ: {one_rail_areas:?}");
+
+        // 2 guide rails: both `scale` and `stretch`.
+        for (fit, name) in [("scale", "TwoScale"), ("stretch", "TwoStretch")] {
+            run(
+                &mut s,
+                "surface.loft",
+                json!({
+                    "sections": secs,
+                    "rails": [{"sketch": "Space", "curves": [r_left]}, {"sketch": "Space", "curves": [r_right]}],
+                    "rail_fit": fit,
+                    "body_name": name,
+                }),
+            );
+            assert!(s.world_state().unwrap().body(name).unwrap().body.is_surface());
+            assert!(off(&s, name, [0.0, 0.0, 0.0]) < 1e-3, "{name} misses s1");
+            assert!(off(&s, name, [0.0, 40.0, 0.0]) < 1e-3, "{name} misses s2");
+            assert!(off(&s, name, [-50.0, 20.0, -4.0]) < 0.05, "{name} misses r_left");
+            assert!(off(&s, name, [55.0, 20.0, -4.0]) < 0.05, "{name} misses r_right");
+        }
+
+        // 3 guide rails (solidcore 3..=16 rails path).
+        run(
+            &mut s,
+            "surface.loft",
+            json!({
+                "sections": secs,
+                "rails": [
+                    {"sketch": "Space", "curves": [r_left]},
+                    {"sketch": "Space", "curves": [r_mid]},
+                    {"sketch": "Space", "curves": [r_right]},
+                ],
+                "body_name": "ThreeRails",
+            }),
+        );
+        assert!(s.world_state().unwrap().body("ThreeRails").unwrap().body.is_surface());
+        for pt in [[0.0, 0.0, 0.0], [0.0, 40.0, 0.0], [-50.0, 20.0, -4.0], [0.0, 20.0, 6.0], [55.0, 20.0, -4.0]] {
+            assert!(off(&s, "ThreeRails", pt) < 0.05, "ThreeRails misses {pt:?}: {}", off(&s, "ThreeRails", pt));
+        }
+
+        // Non-planar 3D sections with 2 guide rails.
+        run(
+            &mut s,
+            "surface.loft",
+            json!({
+                "sections": [{"sketch": "Space", "curves": [t1]}, {"sketch": "Space", "curves": [t2]}],
+                "rails": [{"sketch": "Space", "curves": [tr_left]}, {"sketch": "Space", "curves": [tr_right]}],
+                "body_name": "Twisted3D",
+            }),
+        );
+        assert!(s.world_state().unwrap().body("Twisted3D").unwrap().body.is_surface());
+        for pt in [[-38.0, 20.0, -3.0], [38.0, 20.0, -3.0], [-10.0, 4.0, 1.0], [10.0, 36.0, 1.0]] {
+            assert!(off(&s, "Twisted3D", pt) < 0.05, "Twisted3D misses {pt:?}: {}", off(&s, "Twisted3D", pt));
+        }
+
+        // Mixed planar 2D sketch + 3D sketch sections with guide rails (both section orders).
+        for (name, mixed_secs) in [
+            ("MixedPlanarFirst", json!([{"sketch": "FlatXZ", "curves": ["base"]}, {"sketch": "Space", "curves": [s2]}])),
+            ("MixedSpaceFirst", json!([{"sketch": "Space", "curves": [s2]}, {"sketch": "FlatXZ", "curves": ["base"]}])),
+        ] {
+            run(
+                &mut s,
+                "surface.loft",
+                json!({
+                    "sections": mixed_secs,
+                    "rails": [{"sketch": "Space", "curves": [r_left]}, {"sketch": "Space", "curves": [r_right]}],
+                    "body_name": name,
+                }),
+            );
+            assert!(s.world_state().unwrap().body(name).unwrap().body.is_surface());
+            for pt in [[0.0, 0.0, -4.0], [0.0, 40.0, 0.0], [-50.0, 20.0, -4.0], [55.0, 20.0, -4.0]] {
+                assert!(off(&s, name, pt) < 0.05, "{name} misses {pt:?}: {}", off(&s, name, pt));
+            }
+        }
+
+        // Refusals still preserved: edge section + rails, non-G0 + rails, closed 3D section + rails.
+        let err = |s: &mut Session, p: Value| s.execute("surface.loft", &p).unwrap_err().to_string();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        let with_edge = err(
+            &mut s,
+            json!({
+                "sections": [{"sketch": "Space", "curves": [s1]}, {"body": "Box", "edges": [[5, 0, 10]]}],
+                "rails": [{"sketch": "Space", "curves": [r_right]}],
+            }),
+        );
+        assert!(with_edge.contains("not supported yet") && with_edge.contains("edge sections or end continuity"), "{with_edge}");
+        let with_g1 = err(
+            &mut s,
+            json!({
+                "sections": secs,
+                "continuity": ["g1", "g0"],
+                "rails": [{"sketch": "Space", "curves": [r_right]}],
+            }),
+        );
+        assert!(with_g1.contains("not supported yet") && with_g1.contains("edge sections or end continuity"), "{with_g1}");
+        let closed_railed = err(
+            &mut s,
+            json!({
+                "sections": [{"sketch": "Space", "curves": ring}, {"sketch": "Space", "curves": [s2]}],
+                "rails": [{"sketch": "Space", "curves": [r_right]}],
+            }),
+        );
+        assert!(closed_railed.contains("not supported yet") && closed_railed.contains("closed section"), "{closed_railed}");
     }
 
     /// Surface Loft from a body's edge to a line of a planar sketch (#7383): the line drawn one

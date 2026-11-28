@@ -641,19 +641,53 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced, stays_surface } => {
             use kernel::Continuity::{G0, G1};
             let in_space = sections.iter().any(|s| section_in_space(st, s));
-            let planar = !in_space && sections.iter().all(|s| s.body.is_none());
+            let sketch_only = sections.iter().all(|s| s.body.is_none());
+            let planar = !in_space && sketch_only;
             let plain = planar && *continuity == [G0, G0];
+            let space_railed = in_space && sketch_only && *continuity == [G0, G0] && !rails.is_empty();
             let tangent_end = match *continuity {
                 [G1, G0] if planar && sections.len() == 2 => Some((0, crown[0])),
                 [G0, G1] if planar && sections.len() == 2 => Some((1, crown[1])),
                 _ => None,
             };
-            if !plain && !rails.is_empty() {
-                return Err(DocError::Invalid(if in_space {
-                    "not supported yet: guide rails on a loft through 3D sketch curves".into()
+            if !plain && !space_railed && !rails.is_empty() {
+                return Err(DocError::Invalid("not supported yet: guide rails on a loft with edge sections or end continuity".into()));
+            }
+            if space_railed {
+                let mut secs = Vec::with_capacity(sections.len());
+                for sec in sections {
+                    let raw = loft_section_sketch(st, sec)?;
+                    if section_in_space(st, sec) {
+                        if sec.profiles.is_some() {
+                            return Err(loft_section_chain_error());
+                        }
+                        let mapped = path_in_frame(doc, raw, f.component)?;
+                        let path = path_points(&curves_in(mapped.as_ref(), &sec.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))?
+                            .ok_or_else(loft_section_chain_error)?;
+                        secs.push(kernel::SpaceLoftSection::Space(path));
+                    } else {
+                        let (ss, chain) = planar_loft_section(doc, raw, f, sec)?;
+                        secs.push(kernel::SpaceLoftSection::Planar { plane: ss.plane, segs: chain });
+                    }
+                }
+                let start = secs
+                    .first()
+                    .and_then(|s| match s {
+                        kernel::SpaceLoftSection::Planar { plane, segs } => segs.first().map(|seg| plane.to_world(seg.start())),
+                        kernel::SpaceLoftSection::Space(path) => path.points().first().copied(),
+                    })
+                    .unwrap_or_default();
+                let rails = crate::eval::rail_polylines(doc, st, rails, f.component, start)?;
+                let fit = crate::eval::kernel_rail_fit(*rail_fit);
+                let body = if *faced {
+                    kernel::loft_sheet_space_with_rails(&secs, &rails, fit)?
                 } else {
-                    "not supported yet: guide rails on a loft with edge sections or end continuity".into()
-                }));
+                    kernel::loft_sheet_space_with_rails_legacy_sides(&secs, &rails, fit)?
+                };
+                let name = new_name(st, f, 0);
+                st.bodies.push(ModelBody::new(name, body, f.id));
+                stays_a_surface(st, *stays_surface);
+                return Ok(());
             }
             if !plain && tangent_end.is_none() {
                 loft_blend(st, f, sections, *continuity, *crown, doc)?;

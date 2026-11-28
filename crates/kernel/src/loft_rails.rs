@@ -33,14 +33,15 @@ pub(crate) const MAX_PER_SPAN: usize = 15;
 /// stray from them between stations ([`spaced`]).
 const TRACK_STEPS: usize = 8;
 
-/// A loft section: its plane and its curves in order, each a NURBS curve with homogeneous control
-/// points `[x w, y w, z w, w]`, and the profile segments each curve stands for.
+/// A loft section: its plane (when drawn on a sketch plane; `None` for 3D sketch curves) and its
+/// curves in order, each a NURBS curve with homogeneous control points `[x w, y w, z w, w]`, and
+/// the profile segments each curve stands for.
 #[derive(Clone, Debug)]
 pub(crate) struct Section {
-    pub plane: Plane,
+    pub plane: Option<Plane>,
     pub curves: Vec<CurveN<4>>,
     pub numbers: Vec<Vec<usize>>,
-    /// The sketch segments the curves are, on `plane`.
+    /// The sketch segments the curves are, on `plane` (empty for 3D sections).
     pub segs: Vec<Seg2>,
 }
 
@@ -49,12 +50,12 @@ impl Section {
     /// standing for the profile segments `numbers[i]`.
     pub(crate) fn of(plane: &Plane, segs: &[Seg2], numbers: Vec<Vec<usize>>) -> Result<Section> {
         let curves = segs.iter().map(|s| nurbs(&crate::freeform::segment(plane, s)?.0)).collect::<Result<Vec<_>>>()?;
-        Ok(Section { plane: *plane, curves, numbers, segs: segs.to_vec() })
+        Ok(Section { plane: Some(*plane), curves, numbers, segs: segs.to_vec() })
     }
 }
 
 /// A record line or (rational) B-spline as a homogeneous NURBS curve.
-fn nurbs(c: &solidcore_record::brep::Curve) -> Result<CurveN<4>> {
+pub(crate) fn nurbs(c: &solidcore_record::brep::Curve) -> Result<CurveN<4>> {
     use solidcore_record::brep::Curve;
     let degree = |knots: &[f64], n: usize| knots.len().checked_sub(n + 1).ok_or_else(|| KernelError::Invalid("spline degree".into()));
     Ok(match c {
@@ -69,6 +70,82 @@ fn nurbs(c: &solidcore_record::brep::Curve) -> Result<CurveN<4>> {
         }
         _ => return Err(KernelError::Invalid("a loft section curve that is not a line or a spline".into())),
     })
+}
+
+/// A 3D path segment as an exact homogeneous NURBS curve on `[0, 1]`.
+pub(crate) fn path_seg_nurbs(s: &crate::PathSeg) -> Result<CurveN<4>> {
+    match *s {
+        crate::PathSeg::Line { a, b } => {
+            if !(a.is_finite() && b.is_finite() && a.dist(b) > 0.0) {
+                return Err(KernelError::Invalid("a loft section line has no length or is not finite".into()));
+            }
+            Ok(CurveN { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]] })
+        }
+        crate::PathSeg::Arc { a, center, axis, angle } => {
+            let (knots, ctrl) = solidcore_ops::sweep::railed::arc_nurbs(a.into(), center.into(), axis.into(), angle)
+                .map_err(|e| KernelError::Invalid(e.to_string()))?;
+            Ok(CurveN { degree: 2, knots, ctrl })
+        }
+        crate::PathSeg::Curve { plane, seg } => nurbs(&crate::freeform::segment(&plane, &seg)?.0),
+        crate::PathSeg::Bezier(b) => {
+            let degree = b.degree();
+            let knots = std::iter::repeat_n(0.0, degree + 1).chain(std::iter::repeat_n(1.0, degree + 1)).collect();
+            let ctrl: Vec<[f64; 4]> = b.ctrl().iter().map(|h| [h.x, h.y, h.z, h.w]).collect();
+            if ctrl.len() != degree + 1 || ctrl.iter().any(|h| !h.iter().all(|v| v.is_finite()) || !(h[3] > 0.0)) {
+                return Err(KernelError::Invalid("a loft section Bézier is not valid".into()));
+            }
+            Ok(CurveN { degree, knots, ctrl })
+        }
+    }
+}
+
+/// Split a homogeneous NURBS curve at the midpoint of its parameter range into two exact halves
+/// normalized onto `[0, 1]`.
+pub(crate) fn split_curve_half(c: &CurveN<4>) -> Result<(CurveN<4>, CurveN<4>)> {
+    let c = normalized(c)?;
+    let h: Vec<HPoint> = c.ctrl.iter().map(|q| hpoint(*q)).collect();
+    let fail = |e: solidcraft_geom::bspline::SplineError| KernelError::Failed(format!("loft section split: {e}"));
+    let (k0, c0) = solidcraft_geom::bspline::segment(c.degree, &c.knots, &h, 0.0, 0.5).map_err(fail)?;
+    let (k1, c1) = solidcraft_geom::bspline::segment(c.degree, &c.knots, &h, 0.5, 1.0).map_err(fail)?;
+    let left = normalized(&CurveN { degree: c.degree, knots: k0, ctrl: c0.into_iter().map(array).collect() })?;
+    let right = normalized(&CurveN { degree: c.degree, knots: k1, ctrl: c1.into_iter().map(array).collect() })?;
+    Ok((left, right))
+}
+
+/// Reverse the parameter direction of a homogeneous NURBS curve, normalized onto `[0, 1]`.
+pub(crate) fn reverse_curve(c: &CurveN<4>) -> Result<CurveN<4>> {
+    let c = normalized(c)?;
+    let knots = c.knots.iter().rev().map(|&u| (1.0 - u).clamp(0.0, 1.0)).collect();
+    let ctrl = c.ctrl.iter().rev().copied().collect();
+    Ok(CurveN { degree: c.degree, knots, ctrl })
+}
+
+/// Arc length of a homogeneous NURBS curve (8-point Gauss–Legendre per knot span).
+pub(crate) fn curve_length(c: &CurveN<4>) -> f64 {
+    let (Some(&lo), Some(&hi)) = (c.knots.get(c.degree), c.knots.get(c.ctrl.len())) else { return 0.0 };
+    let mut length = 0.0;
+    for w in c.knots.windows(2) {
+        let (a, b) = (w[0].max(lo), w[1].min(hi));
+        if !(b > a) {
+            continue;
+        }
+        let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+        for (x, wt) in solidcraft_geom::bspline::GAUSS_8 {
+            let Some(([hx, hy, hz, hw], [dx, dy, dz, dw])) = c.eval(mid + half * x) else { continue };
+            if !(hw.abs() > 1e-300) {
+                continue;
+            }
+            let p = Vec3::new(hx / hw, hy / hw, hz / hw);
+            let speed = ((Vec3::new(dx, dy, dz) - p * dw) * (1.0 / hw)).len();
+            length += wt * half * speed;
+        }
+    }
+    length
+}
+
+/// Start and end points of a homogeneous NURBS curve.
+pub(crate) fn curve_ends(c: &CurveN<4>) -> Option<(Vec3, Vec3)> {
+    Some((point_at(c, 0.0)?, point_at(c, 1.0)?))
 }
 
 /// A curve's control points (x, y, z) and weights.
@@ -281,7 +358,7 @@ pub(crate) fn railed_to_point(base: &Section, apex: Vec3, rails: &[Vec<Vec3>], f
         return Err(KernelError::Invalid("loft to a point: the apex".into()));
     }
     let tip = Section {
-        plane: Plane { origin: apex, ..base.plane },
+        plane: base.plane.map(|p| Plane { origin: apex, ..p }),
         curves: base.curves.iter().map(|c| with(c, &vec![apex; c.ctrl.len()])).collect(),
         numbers: base.numbers.clone(),
         segs: Vec::new(),
@@ -525,18 +602,26 @@ fn spaced(tracks: &[Vec<Vec3>], per: usize, tol: f64, at: impl Fn(usize) -> f64)
 /// takes it from the nearest section the loft decides.
 pub(crate) fn section_normals(sections: &[Section], direction: impl Fn(f64) -> Option<Vec3>, along: &[f64]) -> Vec<Vec3> {
     let turn = |n: Vec3, to: Vec3| if n.dot(to) < 0.0 { n * -1.0 } else { n };
+    let raw: Vec<Option<Vec3>> =
+        sections.iter().zip(along).map(|(s, &v)| s.plane.map(|p| p.normal()).or_else(|| direction(v).and_then(Vec3::normalized))).collect();
     let forward: Vec<Option<Vec3>> = sections
         .iter()
         .zip(along)
-        .map(|(s, &v)| {
-            let n = s.plane.normal();
-            let facing = direction(v).map_or(0.0, |d| n.dot(d));
-            (facing.abs() > 1e-3).then(|| if facing < 0.0 { n * -1.0 } else { n })
+        .map(|(s, &v)| match s.plane {
+            Some(plane) => {
+                let n = plane.normal();
+                let facing = direction(v).map_or(0.0, |d| n.dot(d));
+                (facing.abs() > 1e-3).then(|| if facing < 0.0 { n * -1.0 } else { n })
+            }
+            None => direction(v).and_then(Vec3::normalized),
         })
         .collect();
     let mut normals: Vec<Vec3> = Vec::with_capacity(sections.len());
-    for (s, decided) in sections.iter().zip(&forward) {
-        let n = s.plane.normal();
+    for (raw_n, decided) in raw.iter().zip(&forward) {
+        let Some(n) = *raw_n else {
+            normals.push(normals.last().copied().or_else(|| forward.iter().flatten().copied().next()).unwrap_or(Vec3::Z));
+            continue;
+        };
         normals.push(match (normals.last(), decided) {
             (None, Some(f)) => *f,
             (None, None) => forward.iter().flatten().next().map_or(n, |f| turn(n, *f)),
@@ -580,27 +665,46 @@ fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
         let mut cursor = (0usize, 0.0f64);
         let mut anchors = Vec::with_capacity(sections.len());
         for (i, section) in sections.iter().enumerate() {
-            let (hit, at) = if i + 1 == sections.len() && !closed {
-                let back: Vec<Vec3> = points.iter().rev().copied().collect();
-                let (hit, (k, u)) = crate::sweep_path::rail_crossing(&back, section.plane.origin, section.plane.normal(), (0, 0.0), tol)
-                    .ok_or_else(|| not_reached(i))?;
-                let at = (points.len().saturating_sub(2).saturating_sub(k), 1.0 - u);
-                if at < cursor {
-                    return Err(not_reached(i));
+            match section.plane {
+                Some(plane) => {
+                    let (hit, at) = if i + 1 == sections.len() && !closed {
+                        let back: Vec<Vec3> = points.iter().rev().copied().collect();
+                        let (hit, (k, u)) =
+                            crate::sweep_path::rail_crossing(&back, plane.origin, plane.normal(), (0, 0.0), tol).ok_or_else(|| not_reached(i))?;
+                        let at = (points.len().saturating_sub(2).saturating_sub(k), 1.0 - u);
+                        if at < cursor {
+                            return Err(not_reached(i));
+                        }
+                        (hit, at)
+                    } else {
+                        crate::sweep_path::rail_crossing(points, plane.origin, plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
+                    };
+                    cursor = at;
+                    let (g, on, d) = nearest_on(&section.curves, hit).ok_or_else(|| KernelError::Failed("loft rails: section".into()))?;
+                    if d > tol {
+                        return Err(KernelError::Invalid(format!(
+                            "a guide rail crosses section {}'s plane {d:.3} mm from its curves: a rail has to pass through every section",
+                            i + 1
+                        )));
+                    }
+                    anchors.push(Anchor { g, on, nudge: on - hit, at });
                 }
-                (hit, at)
-            } else {
-                crate::sweep_path::rail_crossing(points, section.plane.origin, section.plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
-            };
-            cursor = at;
-            let (g, on, d) = nearest_on(&section.curves, hit).ok_or_else(|| KernelError::Failed("loft rails: section".into()))?;
-            if d > tol {
-                return Err(KernelError::Invalid(format!(
-                    "a guide rail crosses section {}'s plane {d:.3} mm from its curves: a rail has to pass through every section",
-                    i + 1
-                )));
+                None => {
+                    let (hit, at, g, on) = if i + 1 == sections.len() && !closed {
+                        let back: Vec<Vec3> = points.iter().rev().copied().collect();
+                        let (hit, (k, u), g, on) = rail_curve_hit(&back, &section.curves, (0, 0.0), tol).ok_or_else(|| not_reached(i))?;
+                        let at = (points.len().saturating_sub(2).saturating_sub(k), 1.0 - u);
+                        if at < cursor {
+                            return Err(not_reached(i));
+                        }
+                        (hit, at, g, on)
+                    } else {
+                        rail_curve_hit(points, &section.curves, cursor, tol).ok_or_else(|| not_reached(i))?
+                    };
+                    cursor = at;
+                    anchors.push(Anchor { g, on, nudge: on - hit, at });
+                }
             }
-            anchors.push(Anchor { g, on, nudge: on - hit, at });
         }
         Ok(anchors)
     };
@@ -613,17 +717,134 @@ fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
     }
 }
 
+/// Where a rail polyline first passes within `tol` of a 3D section's curves at or after `from`:
+/// the refined point on the rail, its `(segment, fraction)` cursor, the section wire parameter
+/// `g`, and the closest point on the section.
+fn rail_curve_hit(rail: &[Vec3], curves: &[CurveN<4>], from: (usize, f64), tol: f64) -> Option<(Vec3, (usize, f64), f64, Vec3)> {
+    const SEC_SAMPLES: usize = 128;
+    let mut aabb = solidcraft_geom::Aabb3::EMPTY;
+    let mut polys: Vec<Vec<Vec3>> = Vec::with_capacity(curves.len());
+    let mut max_step = 0.0f64;
+    for c in curves {
+        for p in points(c).0 {
+            aabb.add(p);
+        }
+        let pts: Vec<Vec3> = (0..=SEC_SAMPLES).filter_map(|j| point_at(c, j as f64 / SEC_SAMPLES as f64)).collect();
+        for w in pts.windows(2) {
+            max_step = max_step.max(w[0].dist(w[1]));
+        }
+        polys.push(pts);
+    }
+    let pad = tol + max_step;
+    let padded = aabb.inflated(pad);
+    let (k0, u0) = from;
+    let mut best: Option<(Vec3, (usize, f64), f64, Vec3, f64)> = None;
+    let ratio = 0.5 * (5f64.sqrt() - 1.0);
+    for k in k0..rail.len().saturating_sub(1) {
+        if k == k0 && u0 >= 1.0 - 1e-12 && k + 1 < rail.len().saturating_sub(1) {
+            continue;
+        }
+        let (a_full, b) = (*rail.get(k)?, *rail.get(k + 1)?);
+        let base = if k == k0 { u0 } else { 0.0 };
+        let a = if k == k0 { a_full.lerp(b, u0) } else { a_full };
+        let mut seg_box = solidcraft_geom::Aabb3::EMPTY;
+        seg_box.add(a);
+        seg_box.add(b);
+        let overlaps = seg_box.max.x >= padded.min.x
+            && seg_box.min.x <= padded.max.x
+            && seg_box.max.y >= padded.min.y
+            && seg_box.min.y <= padded.max.y
+            && seg_box.max.z >= padded.min.z
+            && seg_box.min.z <= padded.max.z;
+        if !overlaps {
+            if best.is_some() {
+                break;
+            }
+            continue;
+        }
+        let mut approx: Option<(f64, f64)> = None;
+        for poly in &polys {
+            for w in poly.windows(2) {
+                let Ok((s, d)) = solidcore_ops::sweep::railed::segment_segment_closest(a.into(), b.into(), w[0].into(), w[1].into()) else {
+                    continue;
+                };
+                if approx.is_none_or(|(_, bd)| d < bd) {
+                    approx = Some((s, d));
+                }
+            }
+        }
+        let Some((s0, d_approx)) = approx else { continue };
+        if d_approx > pad {
+            if best.is_some() {
+                break;
+            }
+            continue;
+        }
+        let seg_len = a.dist(b);
+        let half = if seg_len > 1e-12 { (2.0 * pad / seg_len).clamp(0.05, 1.0) } else { 1.0 };
+        let (mut lo, mut hi) = ((s0 - half).max(0.0), (s0 + half).min(1.0));
+        let eval = |s: f64| nearest_on(curves, a.lerp(b, s));
+        for _ in 0..48 {
+            let (x, y) = (hi - ratio * (hi - lo), lo + ratio * (hi - lo));
+            let dx = eval(x).map_or(f64::INFINITY, |(_, _, d)| d);
+            let dy = eval(y).map_or(f64::INFINITY, |(_, _, d)| d);
+            if dx < dy {
+                hi = y;
+            } else {
+                lo = x;
+            }
+        }
+        let mut s_best = 0.5 * (lo + hi);
+        let mut hit_info = eval(s_best)?;
+        for cand in [0.0, 1.0, s0] {
+            if let Some(info) = eval(cand)
+                && info.2 < hit_info.2
+            {
+                s_best = cand;
+                hit_info = info;
+            }
+        }
+        let (g, on, d) = hit_info;
+        if d <= tol {
+            let hit = a.lerp(b, s_best);
+            let at = (k, base + (1.0 - base) * s_best);
+            if best.as_ref().is_none_or(|prev| d < prev.4) {
+                best = Some((hit, at, g, on, d));
+            } else {
+                break;
+            }
+            if s_best < 1.0 - 1e-6 {
+                break;
+            }
+        } else if best.is_some() {
+            break;
+        }
+    }
+    best.map(|(hit, at, g, on, _)| (hit, at, g, on))
+}
+
 /// The closed rail `ring` (its last point its first) opened where it first leaves `section`'s
 /// plane at a point of its curves (within `tol`): where it crosses the plane, or where a run of
 /// it along the plane (an edge of the section drawn into the rail) ends (the kernel's
-/// departures). It then runs from that point round the ring and back to it. `None` when it
-/// leaves the section nowhere on its curves.
+/// departures). For a 3D section without a plane, opened where `ring` first meets `section`'s
+/// curves within `tol`. It then runs from that point round the ring and back to it. `None` when
+/// it leaves the section nowhere on its curves.
 fn opened(ring: &[Vec3], section: Option<&Section>, tol: f64) -> Option<Vec<Vec3>> {
     let section = section?;
-    let points: Vec<[f64; 3]> = ring.iter().map(|p| <[f64; 3]>::from(*p)).collect();
-    let departures = solidcore_ops::sweep::polyline_plane_departures(&points, section.plane.origin.into(), section.plane.normal().into(), tol);
-    let (k, hit) =
-        departures.into_iter().map(|(k, p)| (k, Vec3::from(p))).find(|(_, p)| nearest_on(&section.curves, *p).is_some_and(|(_, _, d)| d <= tol))?;
+    let (k, hit) = match section.plane {
+        Some(plane) => {
+            let points: Vec<[f64; 3]> = ring.iter().map(|p| <[f64; 3]>::from(*p)).collect();
+            let departures = solidcore_ops::sweep::polyline_plane_departures(&points, plane.origin.into(), plane.normal().into(), tol);
+            departures
+                .into_iter()
+                .map(|(k, p)| (k, Vec3::from(p)))
+                .find(|(_, p)| nearest_on(&section.curves, *p).is_some_and(|(_, _, d)| d <= tol))?
+        }
+        None => {
+            let (hit, (k, _), ..) = rail_curve_hit(ring, &section.curves, (0, 0.0), tol)?;
+            (k, hit)
+        }
+    };
     // From that point on to the end of the ring, which is its start, and on to the point again.
     let mut out = vec![hit];
     out.extend(ring.iter().skip(k + 1));
@@ -681,6 +902,20 @@ fn wire_point(section: &[CurveN<4>], g: f64) -> Result<Vec3> {
     section.get(k).and_then(|c| point_at(c, g - k as f64)).ok_or_else(|| KernelError::Failed("loft rails: section".into()))
 }
 
+/// Resolve straight-line planar sections' planes to face along the loft (leaving curved planar
+/// sections and 3D sections without planes untouched).
+pub(crate) fn resolve_planes(sections: &[Section]) -> Vec<Section> {
+    let ctrl: Vec<Vec<Vec<Vec3>>> = sections.iter().map(|s| s.curves.iter().map(|c| points(c).0).collect()).collect();
+    let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+    for p in ctrl.iter().flatten().flatten() {
+        if p.is_finite() {
+            bounds.add(*p);
+        }
+    }
+    let tol = (bounds.diagonal() * 1e-4).max(1e-6);
+    section_planes(sections, &ctrl, tol)
+}
+
 /// The sections with the planes the rails meet them in; `ctrl` holds each section's control
 /// points. A section whose curves run along one line lies in every plane through that line, so
 /// the plane of the sketch it was drawn in says nothing about the loft. It takes the plane
@@ -692,8 +927,11 @@ fn section_planes(sections: &[Section], ctrl: &[Vec<Vec<Vec3>>], tol: f64) -> Ve
     let curved = |j: usize| lines.get(j).is_some_and(Option::is_none);
     let plane = |i: usize| -> Option<Plane> {
         let (Some(d), Some(mid)) = (lines.get(i).copied().flatten(), middles.get(i).copied().flatten()) else { return None };
-        let nearest = (1..sections.len()).flat_map(|k| [i.checked_sub(k), Some(i + k)]).flatten().find(|j| curved(*j));
-        let facing = nearest.and_then(|j| sections.get(j)).map(|s| s.plane.normal());
+        let nearest = (1..sections.len())
+            .flat_map(|k| [i.checked_sub(k), Some(i + k)])
+            .flatten()
+            .find(|j| curved(*j) && sections.get(*j).is_some_and(|s| s.plane.is_some()));
+        let facing = nearest.and_then(|j| sections.get(j)).and_then(|s| s.plane).map(|p| p.normal());
         let next = middles.get(i + 1).copied().flatten();
         let prev = i.checked_sub(1).and_then(|j| middles.get(j).copied().flatten());
         let along = next.map(|q| q - mid).or_else(|| prev.map(|q| mid - q));
@@ -706,7 +944,7 @@ fn section_planes(sections: &[Section], ctrl: &[Vec<Vec<Vec3>>], tol: f64) -> Ve
             .find(|n| n.len() > 1e-6)
             .and_then(|n| Plane::new(mid, d, n.cross(d)))
     };
-    sections.iter().enumerate().map(|(i, s)| Section { plane: plane(i).unwrap_or(s.plane), ..s.clone() }).collect()
+    sections.iter().enumerate().map(|(i, s)| Section { plane: s.plane.map(|p| plane(i).unwrap_or(p)), ..s.clone() }).collect()
 }
 
 /// The direction of the line every point of `pts` lies on (within `tol`), if there is one.

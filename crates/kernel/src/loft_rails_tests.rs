@@ -486,7 +486,7 @@ fn arcs_of_different_turns_take_rails() {
 /// A section on the plane through the origin with axes `x` and `y` (normal x × y), with no curves:
 /// enough for the normals.
 fn facing(x: Vec3, y: Vec3) -> crate::loft_rails::Section {
-    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new(), segs: Vec::new() }
+    crate::loft_rails::Section { plane: Some(Plane { origin: Vec3::ZERO, x, y }), curves: Vec::new(), numbers: Vec::new(), segs: Vec::new() }
 }
 
 /// The sections' oriented normals, with the loft's direction `d(v)` at each section.
@@ -746,4 +746,86 @@ fn a_spline_profile_follows_a_straight_rail_to_the_apex() {
     let plain = crate::loft_to_point(&at(0.0), &lp, apex).unwrap();
     let (v, want) = (volume(&railed), volume(&plain));
     assert!(close(v, want, 1e-6), "railed {v} vs plain {want}");
+}
+
+/// Surface loft through curved 3D sketch sections (and mixed planar + 3D sections) with 1, 2,
+/// and 3 guide rails (#15367): both Scale and Stretch follow every section and guide rail.
+#[test]
+fn loft_sheet_space_follows_one_two_and_three_rails() {
+    use crate::{PathPiece, PointPath, SpaceLoftSection, loft_sheet_space_with_rails};
+
+    let s1 = SpaceLoftSection::Space(PointPath {
+        pieces: vec![PathPiece::Spline {
+            fit: vec![
+                Vec3::new(-40.0, 0.0, -4.0),
+                Vec3::new(-20.0, 0.0, -1.0),
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(20.0, 0.0, -1.0),
+                Vec3::new(40.0, 0.0, -4.0),
+            ],
+            reversed: false,
+        }],
+    });
+    let s2 = SpaceLoftSection::Space(PointPath {
+        pieces: vec![PathPiece::Spline {
+            fit: vec![
+                Vec3::new(-40.0, 40.0, -4.0),
+                Vec3::new(-20.0, 40.0, -1.0),
+                Vec3::new(0.0, 40.0, 0.0),
+                Vec3::new(20.0, 40.0, -1.0),
+                Vec3::new(40.0, 40.0, -4.0),
+            ],
+            reversed: false,
+        }],
+    });
+    let rail_pts = |x0: f64, x_mid: f64, z0: f64, z_mid: f64| -> Vec<Vec3> {
+        (0..=40)
+            .map(|i| {
+                let t = f64::from(i) / 40.0;
+                let b = (PI * t).sin();
+                Vec3::new(x0 + (x_mid - x0) * b, 40.0 * t, z0 + (z_mid - z0) * b)
+            })
+            .collect()
+    };
+    let r_right = rail_pts(40.0, 55.0, -4.0, -4.0);
+    let r_left = rail_pts(-40.0, -50.0, -4.0, -4.0);
+    let r_mid = rail_pts(0.0, 0.0, 0.0, 6.0);
+
+    // 1 rail: Scale and Stretch.
+    for fit in [RailFit::Scale, RailFit::Stretch] {
+        let b = loft_sheet_space_with_rails(&[s1.clone(), s2.clone()], std::slice::from_ref(&r_right), fit).unwrap();
+        assert!(b.is_surface());
+        let worst = r_right.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 0.05, "1 rail {fit:?}: worst {worst}");
+        assert!(off(&b, Vec3::new(0.0, 0.0, 0.0)) < 1e-4);
+        assert!(off(&b, Vec3::new(0.0, 40.0, 0.0)) < 1e-4);
+    }
+
+    // 2 rails: Scale and Stretch.
+    for fit in [RailFit::Scale, RailFit::Stretch] {
+        let b = loft_sheet_space_with_rails(&[s1.clone(), s2.clone()], &[r_left.clone(), r_right.clone()], fit).unwrap();
+        assert!(b.is_surface());
+        for (idx, r) in [&r_left, &r_right].iter().enumerate() {
+            let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+            assert!(worst < 0.05, "2 rails {fit:?} rail {idx}: worst {worst}");
+        }
+    }
+
+    // 3 rails (solidcore 3..=16 rails path).
+    let b3 = loft_sheet_space_with_rails(&[s1.clone(), s2.clone()], &[r_left.clone(), r_mid.clone(), r_right.clone()], RailFit::Scale).unwrap();
+    assert!(b3.is_surface());
+    for (idx, r) in [&r_left, &r_mid, &r_right].iter().enumerate() {
+        let worst = r.iter().map(|p| off(&b3, *p)).fold(0.0, f64::max);
+        assert!(worst < 0.05, "3 rails rail {idx}: worst {worst}");
+    }
+
+    // Mixed planar + 3D sections with 2 rails.
+    let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    let flat = SpaceLoftSection::Planar { plane: xz, segs: vec![Seg2::Line { a: Vec2::new(-40.0, -4.0), b: Vec2::new(40.0, -4.0) }] };
+    let mixed = loft_sheet_space_with_rails(&[flat, s2], &[r_left.clone(), r_right.clone()], RailFit::Scale).unwrap();
+    assert!(mixed.is_surface());
+    for (idx, r) in [&r_left, &r_right].iter().enumerate() {
+        let worst = r.iter().map(|p| off(&mixed, *p)).fold(0.0, f64::max);
+        assert!(worst < 0.05, "mixed rail {idx}: worst {worst}");
+    }
 }
