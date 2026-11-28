@@ -590,6 +590,35 @@ fn screw_sweep_joined_walls_are_the_pieces_solid() {
     assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
+/// solidcore#3413: a coil of 100 turns, a 0.6 circle on radius 22 at pitch 2.54 and
+/// SolidCraft's tolerance, is a closed solid of its exact volume (Pappus: the circle's area
+/// times the length its centre travels, `2 pi 22 N pi 0.6^2`). A cell of the volume's
+/// enclosure that ended on a knot line of the surface was held by none of its pieces, and
+/// halving it in t left the half at the line the same; the knots at a quarter, a half and
+/// three quarters of a turn also fell on the crossings' samples, where no cut was made. Past
+/// about 30 turns those cells spent the enclosure's budget and the coil was "not a closed
+/// solid".
+#[test]
+fn screw_sweep_of_100_turns_is_a_closed_solid() {
+    let profile = vec![circle(
+        [22.0, 0.0, 5.0],
+        [0.0, -1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        0.6,
+    )];
+    let options = ScrewSweepOptions {
+        law: None,
+        tolerance: 2.54e-4,
+        walls: ScrewWalls::Pieces,
+    };
+    let turns = 100.0;
+    let coil = screw_sweep_with(&profile, [0.0; 3], Z, 2.54, turns, &options).unwrap();
+    assert_eq!(coil.counts().unwrap(), [3, 3, 2]);
+    let exact = TAU * 22.0 * turns * PI * 0.36;
+    let v = coil.volume(1e-8).unwrap();
+    assert!(rel(v, exact) < 1e-9, "{v}, want {exact}");
+}
+
 /// A screw sweep's walls go into the record as their definitions (`sweep` faces on their nets)
 /// and come back with them as their labels: a body built from the record writes the very same
 /// record again, and its volume is the sweep's own.

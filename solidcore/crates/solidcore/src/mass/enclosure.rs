@@ -915,6 +915,10 @@ struct Piece {
     cn: NurbsCurve,
     span: usize,
     dir: f64,
+    /// The face's interior u knot lines the piece may reach ([`inset_cut`]).
+    lines_u: Vec<f64>,
+    /// How far inside an end on one of them a cell of it is cut ([`inset_cut`]).
+    inset: f64,
 }
 
 /// An edge's two boundary curves on its faces, over their common parameters.
@@ -1504,6 +1508,16 @@ impl<'a> Work<'a> {
                 lines_u.push(x);
             }
         }
+        // the end spans run on without end (`span_range`): only an interior line bounds one
+        let (u_lo, u_hi) = (
+            knot(&fg.cn.u, fg.cn.p as isize),
+            knot(&fg.cn.u, fg.cn.nu as isize),
+        );
+        let inner_u: Vec<f64> = lines_u
+            .iter()
+            .copied()
+            .filter(|&x| u_lo < x && x < u_hi)
+            .collect();
         let levels = fg.levels.clone();
         let lines_v: Vec<f64> = levels.iter().skip(1).copied().collect();
         for (s, a, z) in curve_spans(cn) {
@@ -1520,12 +1534,19 @@ impl<'a> Work<'a> {
             }
             cuts.sort_by(f64::total_cmp);
             cuts.dedup();
+            let hull_u = piece_hull(cn, s).0;
             let piece = self.pieces.len();
             self.pieces.push(Piece {
                 face,
                 cn: cn.clone(),
                 span: s,
                 dir,
+                lines_u: inner_u
+                    .iter()
+                    .copied()
+                    .filter(|&l| hull_u.lo <= l && l <= hull_u.hi)
+                    .collect(),
+                inset: INSET * (z - a).abs().max(a.abs()).max(z.abs()).max(1.0),
             });
             for pair in cuts.windows(2) {
                 let &[t0, t1] = pair else {
@@ -2285,7 +2306,14 @@ impl<'a> Work<'a> {
                 it.depth % 2 == 0
             };
             let children = if can_t && (split_t || !can_s) {
-                [(it.t.0, tm), (tm, it.t.1)].map(|t| Item {
+                let cut = match it.kind {
+                    Kind::Sweep { piece, .. } => {
+                        let p = self.pieces.get(piece).ok_or_else(|| defect(NO_ENTRY))?;
+                        inset_cut(p, it.t)?.unwrap_or(tm)
+                    }
+                    Kind::Strip { .. } => tm,
+                };
+                [(it.t.0, cut), (cut, it.t.1)].map(|t| Item {
                     t,
                     depth: it.depth + 1,
                     ..it
@@ -2385,11 +2413,54 @@ fn crossings(
                 }
             }
             out.push(0.5 * (lo + hi));
+        } else if f1 == 0.0 && i < SAMPLES {
+            // a sample on the line: no sign change on either side of it, yet it may be a
+            // crossing (solidcore#3413: at i/16, on the knots at 1/4, 1/2, 3/4 of a turn)
+            out.push(t1);
         }
         t0 = t1;
         f0 = f1;
     }
     Ok(())
+}
+
+/// The inset of [`inset_cut`], relative to the size of the piece's parameters: well past a
+/// cell's rounding in u (tens of units in the last place).
+const INSET: f64 = 1.0 / (1u64 << 30) as f64;
+
+/// Where a cell of piece `p` over `t` is cut in t when an end of it lies on an interior u
+/// knot line of its face (`None`: at its middle). Such a cell has a u box that, enclosed to
+/// rounding, reaches past the line: no piece of the surface holds it, so it is enclosed by
+/// its range and cut in t, and the half at the line fails the same way, down to the budget
+/// (solidcore#3413). Cut instead `p.inset` inside that end, where the curve leaves the line,
+/// the rest of the cell lies clear of it; the sliver at the line keeps its range, too narrow
+/// to be worth cutting, and is never inset again. Whether a cell lies clear is still decided
+/// by [`piece_of`], so the inset decides only the cost, never the enclosure.
+fn inset_cut(p: &Piece, t: (f64, f64)) -> Result<Option<f64>> {
+    // an end is on a line to within the bisection's rounding
+    const NEAR: f64 = 1.0 / (1u64 << 36) as f64;
+    let d = p.inset;
+    // false for a NaN width too
+    let wide = t.1 - t.0 > 4.0 * d;
+    if p.lines_u.is_empty() || !wide {
+        return Ok(None);
+    }
+    let u_at = |t: f64| -> Result<f64> {
+        let e = curve_derivs_over(&p.cn, Ivl::from(t), 0, Some(p.span))?;
+        Ok(e.first().map_or(f64::NAN, |q| q.x.mid()))
+    };
+    let on_line = |u: f64| {
+        p.lines_u
+            .iter()
+            .any(|&l| (u - l).abs() <= NEAR * l.abs().max(1.0))
+    };
+    for (end, inside) in [(t.0, t.0 + d), (t.1, t.1 - d)] {
+        // along a line (a seam) nothing is gained
+        if on_line(u_at(end)?) && !on_line(u_at(inside)?) {
+            return Ok(Some(inside));
+        }
+    }
+    Ok(None)
 }
 
 /// A bound on the 3D length of the uv box where it lies on the net's first or last knot in
