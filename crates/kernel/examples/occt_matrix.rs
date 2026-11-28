@@ -18,7 +18,7 @@
 use std::f64::consts::PI;
 use std::time::Instant;
 
-use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::foreign::{self, Kernel};
 use solidcraft_kernel::{Body, BoolOp, Result};
 
@@ -340,6 +340,77 @@ fn cases() -> Vec<Case> {
             answer: Answer::Solid { volume: 12.0 * PI - rimv, area: Some(20.0 * PI - rima) },
         },
         Case {
+            op: "revolve",
+            name: "a disc of r 1 at radius 6 drawn as two half circles, arcs joined, a full turn",
+            build: || {
+                let half = |start: f64| Seg2::Arc { center: Vec2::new(6.0, 0.0), radius: 1.0, start, sweep: PI };
+                let r = Region2 { outer: Loop2 { segs: vec![half(0.0), half(PI)] }, holes: vec![] };
+                one(solidcraft_kernel::revolve_joining_arcs(&Plane::XZ, &[r], Vec2::ZERO, Vec2::new(0.0, 1.0), 2.0 * PI))
+            },
+            // A ring torus: 2π · 6 · π r², area 4π² · 6 · r.
+            answer: Answer::Solid { volume: 12.0 * PI * PI, area: Some(24.0 * PI * PI) },
+        },
+        Case {
+            op: "fillet",
+            name: "one edge of a 10 cube, r 1, as the Fillet feature rounds it",
+            build: || {
+                some(
+                    solidcraft_kernel::fillet_removing(&cube(0.0, 10.0)?, &[v(5.0, 0.0, 10.0)], 1.0, solidcraft_kernel::FilletTurn::Mitre)
+                        .map(|(b, _)| b),
+                )
+            },
+            answer: Answer::Solid { volume: 1000.0 - e1v, area: Some(600.0 - e1a) },
+        },
+        Case {
+            op: "chamfer",
+            name: "one edge of a 10 cube, 1 back",
+            build: || some(solidcraft_kernel::chamfer(&cube(0.0, 10.0)?, &[v(5.0, 0.0, 10.0)], 1.0)),
+            // A prism of section 1/2 off; the two 1-wide strips traded for one √2 wide.
+            answer: Answer::Solid { volume: 995.0, area: Some(600.0 - 20.0 + 10.0 * 2f64.sqrt()) },
+        },
+        Case {
+            op: "shell",
+            name: "a 10 cube, 1 thick, open at the top",
+            build: || some(solidcraft_kernel::shell(&cube(0.0, 10.0)?, &[v(5.0, 5.0, 10.0)], 1.0)),
+            // The 8 x 8 x 9 hollow out; outside 500, inside 64 + 4 · 72, the rim 100 − 64.
+            answer: Answer::Solid { volume: 424.0, area: Some(500.0 + 64.0 + 288.0 + 36.0) },
+        },
+        Case {
+            op: "thicken",
+            name: "a 10 square sheet, 2 up",
+            build: || {
+                some(solidcraft_kernel::thicken(
+                    &solidcraft_kernel::patch_region(&Plane::XY, &Region2 { outer: rect(0.0, 0.0, 10.0, 10.0), holes: vec![] })?,
+                    2.0,
+                    false,
+                ))
+            },
+            answer: Answer::Solid { volume: 200.0, area: Some(280.0) },
+        },
+        Case {
+            op: "offset faces",
+            name: "the top of a 10 cube moved out 2",
+            build: || some(solidcraft_kernel::offset_faces(&cube(0.0, 10.0)?, &[v(5.0, 5.0, 10.0)], 2.0)),
+            answer: Answer::Solid { volume: 1200.0, area: Some(680.0) },
+        },
+        Case {
+            op: "draft",
+            name: "a side of a 10 cube tilted 0.1 rad in going up from z 0",
+            build: || some(solidcraft_kernel::draft(&cube(0.0, 10.0)?, &[v(10.0, 5.0, 5.0)], &Plane::XY, v(0.0, 0.0, 1.0), 0.1)),
+            // The cube less a wedge of section 10 · 10 tan(0.1) / 2, 10 deep (area not derived).
+            answer: Answer::Solid { volume: 1000.0 - 500.0 * 0.1_f64.tan(), area: None },
+        },
+        Case {
+            op: "loft",
+            name: "a 4 square to a 2 square, 5 up",
+            build: || {
+                let at = |z: f64| Plane { origin: v(0.0, 0.0, z), ..Plane::XY };
+                some(solidcraft_kernel::loft(&[(at(0.0), rect(-2.0, -2.0, 2.0, 2.0)), (at(5.0), rect(-1.0, -1.0, 1.0, 1.0))]))
+            },
+            // A frustum: h/3 (A + B + √(AB)); the four trapezoid sides (4 + 2)/2 · √(25 + 1) each.
+            answer: Answer::Solid { volume: 5.0 / 3.0 * (16.0 + 4.0 + 8.0), area: Some(16.0 + 4.0 + 4.0 * 3.0 * 26f64.sqrt()) },
+        },
+        Case {
             op: "split",
             name: "a 10 cube split at z 3, the piece below",
             build: || piece(split(cube(0.0, 10.0), v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0)), 0),
@@ -492,7 +563,24 @@ fn main() {
     let mut summary = String::from(
         "\n| op | cases | solidcore pass | occt pass / fail / unsupported | occt looser than solidcore (any / above 1e-12) |\n|---|---|---|---|---|\n",
     );
-    for op in ["box", "cylinder", "sphere", "torus", "extrude", "revolve", "boolean", "fillet", "split", "trim"] {
+    for op in [
+        "box",
+        "cylinder",
+        "sphere",
+        "torus",
+        "extrude",
+        "revolve",
+        "boolean",
+        "fillet",
+        "chamfer",
+        "shell",
+        "thicken",
+        "offset faces",
+        "draft",
+        "loft",
+        "split",
+        "trim",
+    ] {
         let of: Vec<&serde_json::Value> = rows.iter().filter(|r| r["op"] == op).collect();
         let count = |k: &str, v: &str| of.iter().filter(|r| r[k]["verdict"] == v).count();
         // Looser: larger than solidcore's beyond the last bits (1e-15), and also above 1e-12.
