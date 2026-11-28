@@ -216,7 +216,7 @@ pub(crate) fn snap_trim_ends(record: &mut solidcore_record::brep::Brep) {
 /// The first of the import's record checks `record` fails, in a sentence, or `None` where it
 /// passes them all.
 pub(crate) fn import_check_failure(record: &solidcore_record::brep::Brep) -> Option<String> {
-    if let Err(e) = crate::record_check::validate(record) {
+    if let Err(e) = crate::record_check::validate_built(record) {
         return Some(format!("the completed record is invalid: {e}"));
     }
     if let Err(e) = crate::record_check::agreement(record) {
@@ -371,6 +371,32 @@ pub fn exact_pcurves(
                 .collect()
         })
         .collect())
+}
+
+/// The proved gaps (mm) of a face's edge uses where the face is the whole polynomial spline patch
+/// `surface` and each use is a whole copy of one of its four boundary curves, one of each, every
+/// one taken by [`exact_pcurves`] as the straight line along it: `None` otherwise
+/// ([`solidcore::eval::pcurve::boundary_covers`]). `uses` are the face's one loop, each with the
+/// tolerance the importer asks at (the largest of the face's and its edge's), covered `margin`
+/// times within `max_tolerance`; `domain` is the face's parameter box where it has one. The
+/// surface is checked and converted once for the face, each curve once.
+///
+/// # Errors
+/// [`Error::Invalid`] for a malformed record, an interval, a tolerance, a margin or a maximum that
+/// is not valid.
+pub fn boundary_covers(
+    surface: &Surface,
+    uses: &[EdgeUse<'_>],
+    domain: Option<[[f64; 2]; 2]>,
+    margin: f64,
+    max_tolerance: f64,
+) -> Result<Option<Vec<f64>>> {
+    let face = Converted::new(surface, &[uses.to_vec()])?;
+    let loops = face.loops();
+    let Some(converted) = loops.first() else {
+        return Ok(None);
+    };
+    k::boundary_covers(&face.surface, converted, domain, margin, max_tolerance)
 }
 
 /// The pcurve on a cylinder or cone face `label` (on its NURBS form `form` when the face has

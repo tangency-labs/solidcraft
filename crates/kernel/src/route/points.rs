@@ -5,11 +5,25 @@
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{OpKind, Points};
 
-pub use solidcraft_kernel_api::points::{Distance, PointSetSummary, PointsRefused};
+pub use solidcraft_kernel_api::points::{
+    ClassifiedPoint, Distance, HoleSpacing, PitchCircle, PointNormalFace, PointSetSummary, PointsRefused, SpacingPattern, UnitNormal,
+};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
 use crate::body::Body;
+
+/// The spacing of round items, each its centre and its axis direction: holes along a row or round
+/// a bolt circle, measured centre to centre in the plane square to the axis.
+///
+/// # Errors
+/// The kernel's refusal, in its words: fewer than two items, axes that are not parallel, two
+/// items on one centre.
+pub fn hole_spacing(items: &[([f64; 3], [f64; 3])]) -> Result<HoleSpacing, PointsRefused> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.hole_spacing(items),
+    }
+}
 
 /// The distance from `a` to `b`, with its proved rounding bound.
 pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance, PointsRefused> {
@@ -71,6 +85,15 @@ pub fn flush_contact_points(target: &Body, tool: &Body) -> Option<Vec<[f64; 3]>>
     }
 }
 
+/// `direction` made unit, however short it is: only a direction that is exactly zero or not finite
+/// has none.
+#[must_use]
+pub fn unit_direction(direction: [f64; 3]) -> Option<[f64; 3]> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.unit_direction(direction),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +113,16 @@ mod tests {
         let k = measure::centroid_and_mean_radius(&pts).unwrap();
         assert_eq!((s.centroid, s.mean_distance), (k.centroid, k.mean_distance));
         assert_eq!(polyline_2d_closest_point([1.0, 1.0], &pts).unwrap(), measure::polyline_2d_closest_point([1.0, 1.0], &pts).unwrap());
+        for v in [[3.0, 4.0, 0.0], [1e-300, 0.0, 0.0], [0.0; 3], [f64::NAN, 1.0, 0.0]] {
+            assert_eq!(unit_direction(v), measure::unit_direction(v));
+        }
+        let z = [0.0, 0.0, 1.0];
+        let row = [([0.0; 3], z), ([10.0, 0.0, 0.0], z), ([30.0, 0.0, 4.0], z)];
+        let (s, k) = (hole_spacing(&row).unwrap(), solidcore_ops::hole_spacing::spacing(&row).unwrap());
+        assert_eq!((s.pattern, &s.order, &s.gaps, s.span, s.even, s.pitch), (SpacingPattern::Line, &k.order, &k.gaps, k.span, k.even, k.pitch));
+        assert_eq!((s.gaps.as_slice(), s.span), ([10.0, 20.0].as_slice(), 30.0));
+        let words = solidcore_ops::hole_spacing::spacing(&row[..1]).unwrap_err().to_string();
+        assert_eq!(hole_spacing(&row[..1]), Err(PointsRefused(words)));
         // a refusal carries solidcore's words whole
         let words = measure::point_distance([f64::NAN, 0.0, 0.0], [0.0; 3]).unwrap_err().to_string();
         assert_eq!(point_distance([f64::NAN, 0.0, 0.0], [0.0; 3]), Err(PointsRefused(words)));

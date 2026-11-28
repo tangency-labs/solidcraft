@@ -924,6 +924,34 @@ fn choice_options_show_their_titles_and_send_their_values() {
 }
 
 #[test]
+fn a_list_of_options_sends_the_ticked_consts_in_option_order_within_its_counts() {
+    let options = json!([{"const":"front","title":"Front"},{"const":"back","title":"Back"},{"const":"left"}]);
+    let sides = |extra: Value| {
+        let mut p =
+            json!({"type":"array","uniqueItems":true,"minItems":1,"maxItems":2,"default":["back","front"],"items":{"type":"string","oneOf":options}});
+        p.as_object_mut().into_iter().for_each(|p| p.extend(extra.as_object().cloned().unwrap_or_default()));
+        json!({"type":"object","required":["sides"],"properties":{"sides":p}})
+    };
+    let mut fields = form(&sides(json!({}))).expect("drawn");
+    assert!(!fields[0].0.buttons, "checkboxes without the annotation");
+    assert_eq!(fields[0].1, Input::Choices(vec![0, 1]), "the default, in option order");
+    assert_eq!(params(&fields), Ok(json!({"sides":["front","back"]})));
+    let mut chosen = vec![0, 2];
+    toggle_option(&mut chosen, 1);
+    assert_eq!(chosen, [0, 1, 2], "a tick keeps the option order");
+    fields[0].1 = Input::Choices(chosen);
+    assert!(params(&fields).is_err(), "three ticks exceed maxItems");
+    fields[0].1 = Input::Choices(Vec::new());
+    assert!(params(&fields).is_err(), "none is under minItems");
+
+    let buttons = form(&sides(json!({"x-solidcraft-choice":{"version":1,"style":"buttons"}}))).expect("drawn");
+    assert!(buttons[0].0.buttons);
+    for extra in [json!({"uniqueItems":false}), json!({"default":["nope"]}), json!({"minItems":3,"maxItems":2})] {
+        assert_eq!(form(&sides(extra.clone())), None, "{extra}");
+    }
+}
+
+#[test]
 fn swatch_annotations_preserve_partial_choices_and_const_values() {
     let schema = json!({"type":"object","properties":{"finish":{"type":"string","oneOf":[
         {"const":"oak","title":"Oak","x-solidcraft-swatch":"oak.png"},
@@ -2121,6 +2149,7 @@ pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -
         entries,
         ribbon_groups: Vec::new(),
         images: Default::default(),
+        declarations: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
         tints: Vec::new(),
@@ -3207,6 +3236,48 @@ mod native {
         panic!("the run did not finish");
     }
 
+    /// #22032: a form a docked panel's action asks for with `forms.open` opens once the run has
+    /// succeeded, as a Plugins-menu entry's does, against the design the action ran on. A reply
+    /// that comes while another design is in front waits for its own design.
+    #[test]
+    fn a_form_a_panel_action_asks_for_opens_after_the_run() {
+        let root = package("panel-form");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let asks = json!({"ok":true,"result":{"forms":[{"plugin":"boxes","entry":"make","params":{"length":7}}],"result":{}}});
+        let opened = |h: &crate::scenario::Harness| h.app.plugin_menu.dialogs.iter().find(|d| d.entry == "make").map(|d| d.form_guard.clone());
+        // The action is dispatched on this design: its reply opens the form.
+        run_panel(&mut h.app, "sample.make".into(), json!({})).unwrap();
+        let request = h.app.control_held.pop_back().unwrap();
+        check_dispatch(&mut h.app, &request).unwrap();
+        request.reply.send(asks.clone()).unwrap();
+        poll(&mut h.app);
+        let guard = opened(&h).expect("the requested form opens").expect("against the action's design");
+        assert_eq!(guard.document_id, h.app.session.document_id);
+        checked_prefill(&h.app);
+        let dialog = h.app.plugin_menu.dialogs.iter().find(|d| d.entry == "make").unwrap();
+        assert_eq!(dialog.ready(&h.app).unwrap(), json!({"length":7.0,"width":10.0,"height":3.0}));
+        assert!(h.app.plugin_menu.panel_runs.is_empty());
+        h.app.plugin_menu.dialogs.clear();
+        // Another design comes to the front before the reply: the form waits for its own design.
+        let first = h.app.docs.current_tab();
+        run_panel(&mut h.app, "sample.make".into(), json!({})).unwrap();
+        let request = h.app.control_held.pop_back().unwrap();
+        check_dispatch(&mut h.app, &request).unwrap();
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        request.reply.send(asks).unwrap();
+        poll(&mut h.app);
+        assert!(opened(&h).is_none(), "not over another design");
+        assert_eq!(h.app.plugin_menu.panel_runs.len(), 1, "held for its own design");
+        assert!(crate::documents::select_tab(&mut h.app, first));
+        poll(&mut h.app);
+        assert!(opened(&h).is_some(), "opens when its design is back in front");
+        assert!(h.app.plugin_menu.panel_runs.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn interactive_guest_import_opens_the_same_prefilled_form_after_success() {
         let root = package("guest-form");
@@ -3468,6 +3539,32 @@ mod native {
         assert!(h.app.plugin_menu.dialogs.is_empty());
         h.frames(2);
         assert!(!h.app.preview.active, "no dialog, no preview");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A preview that fails says why at the top of its dialog, in the error colour (#22297). The
+    /// dialogs are out of the list while they are drawn, so the line used never to show.
+    #[test]
+    fn a_failed_preview_shows_its_error_at_the_top_of_the_dialog() {
+        let root = view_package("preview-error");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let fail = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "fail").expect("fail");
+        open_entry(&mut h.app, 0, fail);
+        previewed(&mut h);
+        let error = h.app.preview.error.clone().expect("the failed run's error");
+        assert!(!h.app.preview.active, "nothing is drawn for a run that failed");
+        h.frames(2);
+        let line = solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", &error)]);
+        let shown = solidcraft_ui_registry::rect_of(&format!("dialog:status:{line}")).expect("the dialog shows the preview's error");
+        // Above the Preview box, which comes after the fields.
+        let preview_box = h.widget("Preview").expect("the Preview box");
+        assert!(f64::from(shown.center().y) < preview_box[1], "the error is above the fields and the Preview box: {shown:?} vs {preview_box:?}");
+        // Preview off: no error is shown.
+        h.app.plugin_menu.dialogs[0].preview = false;
+        previewed(&mut h);
+        assert!(preview_error(&h.app, &h.app.plugin_menu.dialogs[0]).is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4542,4 +4639,16 @@ fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_fra
     std::fs::write(&outside, b"private").unwrap();
     assert!(scope.check(&outside.to_string_lossy()).is_err());
     h.app.file_load.cancel();
+}
+
+/// Every message the plugin dialog names is in the English catalog, so no button or line shows
+/// its key instead of text (#22652).
+#[test]
+fn every_plugin_dialog_message_has_text() {
+    crate::i18n::install();
+    let mut missing: Vec<&str> =
+        include_str!("plugin_menu.rs").split('"').filter(|s| s.starts_with("ui.plugin_dialog_") && solidcraft_ui_text::tr(s) == *s).collect();
+    missing.sort_unstable();
+    missing.dedup();
+    assert!(missing.is_empty(), "no text for {missing:?}");
 }

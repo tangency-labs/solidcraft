@@ -133,11 +133,20 @@ pub fn import_trims() -> &'static (dyn solidcore_ops::pcurve::Trims + Sync) {
 /// The bodies an import kept as records makes, with its tree and warnings: what a STEP import
 /// gives, so a design uses either the same way.
 pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
+    records_import_with_workers(records, super::parallel::workers())
+}
+
+/// [`records_import`] with at most `workers` threads preparing independent original bodies in
+/// parallel while assembling the import in exact file order.
+pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usize) -> Result<StepImport> {
     let _span = solidcraft_profile::span("import", "records.import");
     if records.bodies.len() > super::MAX_BODIES {
         return Err(KernelError::Invalid(format!("an import of {} bodies (at most {})", records.bodies.len(), super::MAX_BODIES)));
     }
     check_tree(&records.tree, records.bodies.len(), 0, &mut 0)?;
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("import"));
+    }
     let mut bodies = Vec::with_capacity(records.bodies.len());
     // A part placed again is one part: its copies are not counted again. One root product: the
     // first name of every issue's path is the import's own component.
@@ -158,6 +167,23 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             detail: w.clone(),
         });
     }
+    // Prepare independent original bodies in parallel (on desktop), collecting in exact file order.
+    let original_indices: Vec<usize> = records.bodies.iter().enumerate().filter_map(|(k, r)| r.copy_of.is_none().then_some(k)).collect();
+    let mut prepared: Vec<Option<std::result::Result<Part, String>>> = vec![None; records.bodies.len()];
+    if original_indices.len() > 1 && workers > 1 {
+        let made = crate::par::map_on_threads(&original_indices, workers.min(original_indices.len()), |&k| {
+            if crate::watch::cancelled() {
+                return Err(String::new());
+            }
+            part_of(&records.bodies[k])
+        });
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("import"));
+        }
+        for (&k, res) in original_indices.iter().zip(made) {
+            prepared[k] = Some(res.unwrap_or_else(|| Err("record body worker panicked".into())));
+        }
+    }
     // A body SMLib refuses is left out, as a STEP import leaves out a solid it cannot make, and
     // the others still come in: `kept[k]` is where record body `k` is among the bodies made.
     let mut kept = vec![None; records.bodies.len()];
@@ -166,11 +192,14 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     // The parts counted among the import's solids.
     let mut counted = std::collections::HashSet::new();
     for (k, r) in records.bodies.iter().enumerate() {
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("import"));
+        }
         let label = if r.name.is_empty() { format!("body {}", k + 1) } else { r.name.clone() };
         // The record body whose part this is: itself, or the one it is a copy of.
         let source = r.copy_of.unwrap_or(k);
         let part = match r.copy_of {
-            None => part_of(r),
+            None => prepared[k].take().unwrap_or_else(|| part_of(r)),
             Some(j) => copy_part(records, &originals, k, j),
         };
         // An original's part is kept for its copies whatever its own placement: a copy placed
@@ -249,7 +278,11 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             file_faces: part.file_faces,
             refused: None,
             hidden: r.hidden,
+            layer: None,
         });
+    }
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("import"));
     }
     Ok(StepImport {
         tree: renumbered(&records.tree, &kept, &bodies),
@@ -300,6 +333,12 @@ fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody])
 /// [`records_import`] through the recent imports' cache ([`super::step_import_shared`]'s), keyed
 /// by the records' serialised form.
 pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>> {
+    records_import_shared_with_workers(records, super::parallel::workers())
+}
+
+/// [`records_import_shared`] with at most `workers` inner worker threads, bounding nested
+/// parallelism when multiple independent imports decode concurrently.
+pub fn records_import_shared_with_workers(records: &ImportRecords, workers: usize) -> Result<Arc<StepImport>> {
     let text = records_text(records)?;
     let key = super::text_key(&text);
     // Records are made into bodies as they are, whatever the heal preference
@@ -307,7 +346,7 @@ pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>>
     if let Some(imp) = super::recent(key, false) {
         return Ok(imp);
     }
-    let imp = Arc::new(records_import(records)?);
+    let imp = Arc::new(records_import_with_workers(records, workers)?);
     super::remember(key, false, &imp, text.len() <= super::KEEP_SMALL_BYTES);
     Ok(imp)
 }
@@ -370,7 +409,7 @@ fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
             Some(crate::FacePaint { face: i, color: p.color.map(unit), opacity: unit(p.opacity), name: p.name.clone() })
         })
         .collect();
-    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone() }
+    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone(), layer: paint.layer.clone() }
 }
 
 /// A colour channel or an opacity from a file, kept in 0..1 (1 when it is not a number).

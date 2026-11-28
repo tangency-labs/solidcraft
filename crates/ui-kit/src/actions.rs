@@ -153,7 +153,7 @@ pub fn filter_button_at<R>(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &st
         let size = vec2((galley.size().x + t.space_4).max(galley.size().y), galley.size().y);
         let badge = egui::Rect::from_min_size(egui::pos2(rect.right() - size.x, rect.top()), size);
         ui.painter().rect_filled(badge, size.y / 2.0, t.accent);
-        ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
+        ui.painter().galley(crate::text::centred_in(ui.painter(), &galley, badge.center()), galley, t.on_accent);
         badge
     });
     let popup = crate::Container::new(ui.ctx(), crate::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
@@ -167,16 +167,29 @@ pub fn filter_button_at<R>(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &st
 
 /// Quiet secondary action: a small, muted glyph with the normal full-size hit target.
 pub fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
-    icon_button_presentation(ui, rect, icon, label, None, true, false)
+    icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Quiet)
+}
+
+/// A 22-point glyph that brightens without painting a hover background.
+pub fn bare_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
+    icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Bare)
 }
 
 /// Directional counterpart of an existing master, with the same hit target and accessibility.
 pub fn mirrored_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
-    icon_button_presentation(ui, rect, icon, label, None, false, true)
+    icon_button_presentation(ui, rect, icon, label, None, IconPresentation::Mirrored)
 }
 
 pub fn icon_button_colored(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, ink: Option<egui::Color32>) -> Response {
-    icon_button_presentation(ui, rect, icon, label, ink, false, false)
+    icon_button_presentation(ui, rect, icon, label, ink, IconPresentation::Normal)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IconPresentation {
+    Normal,
+    Mirrored,
+    Quiet,
+    Bare,
 }
 
 fn icon_button_presentation(
@@ -185,25 +198,28 @@ fn icon_button_presentation(
     icon: &str,
     label: &str,
     ink: Option<egui::Color32>,
-    quiet: bool,
-    mirrored: bool,
+    presentation: IconPresentation,
 ) -> Response {
     let t = Tokens::get();
     let response = ui.interact(rect, ui.make_persistent_id(("icon_button", icon, label)), egui::Sense::click());
     if response.clicked() {
         response.request_focus();
     }
-    if response.hovered() {
+    if response.hovered() && presentation != IconPresentation::Bare {
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
-    let paint = if mirrored { crate::icons::paint_ink_mirrored } else { crate::icons::paint_ink };
+    let paint = if presentation == IconPresentation::Mirrored { crate::icons::paint_ink_mirrored } else { crate::icons::paint_ink };
     paint(
         ui.painter(),
-        if quiet { egui::Rect::from_center_size(rect.center(), vec2(t.space_12, t.space_12)) } else { rect.shrink(t.form_icon_inset) },
+        match presentation {
+            IconPresentation::Bare => egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(22.0_f32.min(rect.width()).min(rect.height()))),
+            IconPresentation::Quiet => egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(t.space_12)),
+            _ => rect.shrink(t.form_icon_inset),
+        },
         icon,
         ink.unwrap_or(if response.hovered() || response.has_focus() {
             t.form_ink
-        } else if quiet {
+        } else if presentation == IconPresentation::Quiet {
             t.form_dim.lerp_to_gamma(t.control_fill, 0.35)
         } else {
             t.form_dim
@@ -287,6 +303,9 @@ pub struct Footer<'a> {
     /// Nothing to apply yet (nothing changed since the dialog opened or since the last Apply):
     /// Apply is drawn and reported disabled, and clicking it does nothing (#8561).
     pub nothing_to_apply: bool,
+    /// Leave the rule on top of the band out: a section directly above shares the band's fill
+    /// and draws the one rule that opens the whole pinned area.
+    pub no_rule: bool,
 }
 
 pub fn footer(ui: &mut Ui, ok_label: &str, cancel_label: &str, ok_enabled: bool, options: Footer<'_>) -> Action {
@@ -333,7 +352,9 @@ pub(super) fn stacked_footer_height(ui: &Ui, ok: &str, cancel: &str, apply: Opti
     Some(t.form_footer_height - t.form_button_height + buttons + gaps)
 }
 
-pub(super) fn footer_with_left(
+/// Pinned actions with custom content at the left. The left slot is clipped to the space
+/// remaining beside the normal actions; icon-label buttons truncate to that width.
+pub fn footer_with_left(
     ui: &mut Ui,
     ok_label: &str,
     cancel_label: &str,
@@ -353,7 +374,7 @@ pub(super) fn draw_footer(
     stacked_height: Option<f32>,
     left: impl FnOnce(&mut Ui),
 ) -> Action {
-    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, nothing_to_apply } = options;
+    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, nothing_to_apply, no_rule } = options;
     let t = Tokens::get();
     let ok_enabled = ok_enabled && !ok_label.is_empty();
     // The footer is a full-width band (the card has no margin of its own): its own fill, a rule
@@ -366,7 +387,9 @@ pub(super) fn draw_footer(
         egui::CornerRadius { nw: 0, ne: 0, sw: corners.sw.saturating_sub(1), se: corners.se.saturating_sub(1) },
         t.dialog_footer,
     );
-    t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
+    if !no_rule {
+        t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
+    }
     solidcraft_ui_registry::publish_rect("dialog:footer", band);
     solidcraft_ui_registry::publish_count("dialog:ok:enabled", f64::from(ok_enabled && ui.is_enabled()));
     let stacked = stacked_height.is_some();
@@ -431,6 +454,8 @@ pub(super) fn draw_footer(
                 action = Action::Apply;
             }
         }
+        ui.set_clip_rect(ui.clip_rect().intersect(left_rect));
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         left(ui);
     });
     if let Some(status) = status {
@@ -816,6 +841,35 @@ pub fn wide_primary_button(ui: &mut Ui, label: &str) -> Response {
     response
 }
 
+/// A full-width row of a secondary action and the primary one, side by side in the order every
+/// dialog footer uses (Cancel left of OK), each half the row: `(secondary, primary)`.
+pub fn wide_secondary_and_primary(ui: &mut Ui, secondary: &str, primary: &str) -> (Response, Response) {
+    let t = Tokens::get();
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_6 as i8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_6;
+                let size = vec2(dimension((ui.available_width() - t.space_6) / 2.0), t.form_button_height);
+                let add = |ui: &mut Ui, label: &str, tone: ButtonTone| {
+                    let mut text = RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_label);
+                    if matches!(tone, ButtonTone::Primary) {
+                        text = text.bold_face();
+                    }
+                    let response = ui.add_sized(size, styled_button(ui, text.into(), tone).corner_radius(t.control_radius));
+                    t.button_bevel(ui, &response, false);
+                    pointer_on_hover(ui, &response);
+                    response
+                };
+                let secondary = add(ui, secondary, ButtonTone::Normal);
+                let primary = add(ui, primary, ButtonTone::Primary);
+                (secondary, primary)
+            })
+            .inner
+        })
+        .inner
+}
+
 #[cfg(test)]
 #[path = "actions_tests.rs"]
 mod tests;
@@ -899,6 +953,7 @@ fn compact_button_presentation(ui: &mut Ui, glyph: &str, tooltip: &str, enabled:
 }
 
 /// Secondary action with an existing icon, optionally using the danger ink. Keeps button handles.
+/// In a truncating layout (such as a footer's left slot), fits the available width.
 pub fn icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: bool, danger: bool) -> Response {
     icon_label_presentation(ui, solidcraft_ui_text::tr_label(label), Some(icon), enabled, false, danger, false)
 }
@@ -972,6 +1027,7 @@ pub fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::StageAction<
 fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled: bool, primary: bool, danger: bool, dense: bool) -> Response {
     let t = Tokens::get();
     let width = icon_label_width(ui, label, icon, primary);
+    let width = if ui.style().wrap_mode == Some(egui::TextWrapMode::Truncate) { width.min(dimension(ui.available_width())) } else { width };
     let paint = |ui: &mut Ui| {
         let (rect, response) =
             ui.allocate_exact_size(vec2(width, if dense { t.control_height - t.space_2 } else { t.control_height }), egui::Sense::click());
@@ -982,7 +1038,8 @@ fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled
         } else {
             t.form_ink
         };
-        ui.painter().rect(
+        let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+        painter.rect(
             rect,
             t.control_radius,
             if primary {
@@ -1005,7 +1062,7 @@ fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled
             };
         if let Some(icon) = icon {
             crate::icons::paint_ink(
-                ui.painter(),
+                &painter,
                 egui::Rect::from_center_size(egui::pos2(left + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14)),
                 icon,
                 ink,

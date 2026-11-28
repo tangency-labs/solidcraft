@@ -62,12 +62,16 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// `direction`: an index into [`EXTRUDE_SIDES`]; `to_object`: the extent is To Object
             /// (the To Object input holds the pick), with `to_offset` past it (empty: none);
             /// `to_next`: the extent is To Next (each wall runs on until it meets a body).
+            /// `taper`: the angle the walls lean by, as typed, sent while it is not zero or the
+            /// feature has one (`taper_present`: an authored zero taper is still a parameter).
             Extrude {
                 distance: String,
                 direction: usize,
                 to_object: bool,
                 to_next: bool,
                 to_offset: String,
+                taper: String,
+                taper_present: bool,
             },
             /// `axis`: a stored {origin, dir} axis, used while no axis is picked.
             Revolve {
@@ -249,6 +253,12 @@ const TO_NEXT_SIDES: [usize; 2] = [0, 2];
 /// The sides a surface extrude goes to (labels, and the `direction` parameter).
 const EXTRUDE_SIDES: [(&str, &str); 3] = [("One Side", "positive"), ("Symmetric", "symmetric"), ("Flipped", "negative")];
 
+/// Whether a surface extrude to the side `direction` (an index into [`EXTRUDE_SIDES`]) takes a
+/// taper: One Side and Flipped do, Symmetric does not yet.
+fn extrude_tapers(direction: usize) -> bool {
+    direction != 1
+}
+
 /// The ways a ruled surface leaves its edges (labels, and the `mode` parameter).
 const RULED_MODES: [(&str, &str); 4] = [("Normal", "normal"), ("Tangent", "tangent"), ("Angle", "angle"), ("Direction", "direction")];
 
@@ -260,7 +270,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
             vec![
                 SelInput::new("Profiles or curves", PROFILES | CURVES, true),
-                SelInput::new("Path", CURVES | EDGES, true),
+                SelInput::new("Path", CURVES | EDGES, true).chains(),
                 crate::dialogs_sweep::direction_input(),
                 rail,
                 rail2,
@@ -268,17 +278,26 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Loft { .. } => {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
-            vec![SelInput::new("Sections", PROFILES | CURVES | EDGES, true), rail, rail2]
+            vec![SelInput::new("Sections", PROFILES | CURVES | EDGES, true).chains(), rail, rail2]
         }
-        Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
-        Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
+        Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true).chains(), SelInput::new("To edges", EDGES, true).chains()],
+        Surf::Boundary { .. } => {
+            vec![SelInput::new("Curves", CURVES | EDGES, true).chains(), SelInput::new("Cross curves", CURVES | EDGES, true).chains()]
+        }
         Surf::Patch { .. } => {
-            vec![SelInput::new("Boundary", PROFILES | CURVES | EDGES, true), SelInput::new("Pass through", VERTICES | FACES | SNAP_POINTS, true)]
+            vec![
+                SelInput::new("Boundary", PROFILES | CURVES | EDGES, true).chains(),
+                SelInput::new("Pass through", VERTICES | FACES | SNAP_POINTS, true),
+            ]
         }
         Surf::Unstitch => vec![SelInput::new("Body, or faces to take out", BODIES | FACES, true)],
         Surf::ReverseNormal => vec![SelInput::new("Surface, or faces to turn over", BODIES | FACES, true)],
         Surf::Ruled { .. } => {
-            vec![SelInput::new("Edges", EDGES, true), SelInput::new("Reference face", FACES, false), SelInput::new("Direction", AXES | EDGES, false)]
+            vec![
+                SelInput::new("Edges", EDGES, true).chains(),
+                SelInput::new("Reference face", FACES, false),
+                SelInput::new("Direction", AXES | EDGES, false),
+            ]
         }
         Surf::Trim { .. } => vec![
             SelInput::new("Surface", BODIES, false),
@@ -306,6 +325,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             to_object: false,
             to_next: false,
             to_offset: String::new(),
+            taper: "0 deg".into(),
+            taper_present: false,
         },
         "surface.revolve" => Surf::Revolve { angle: "360 deg".into(), symmetric: false, axis: None },
         "surface.sweep" => Surf::Sweep(crate::dialogs_sweep::SweepOpts::default()),
@@ -393,7 +414,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
             });
             ui_kit::options(ui, "ruled_options", &mut [("Flip", flip)]);
         }
-        Surf::Extrude { distance, direction, to_object, to_next, to_offset } => {
+        Surf::Extrude { distance, direction, to_object, to_next, to_offset, taper, taper_present } => {
             let mut extent = if *to_object {
                 1
             } else if *to_next {
@@ -428,6 +449,16 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
                 form_row(ui, "Direction", |ui| {
                     ui_kit::segmented(ui, direction, &EXTRUDE_SIDES.map(|(label, _)| label), Default::default());
                 });
+                // A taper leans the walls of one side, as Extrude's does.
+                if extrude_tapers(*direction) {
+                    form_row(ui, "Taper Angle", |ui| {
+                        let before = taper.clone();
+                        enter |= ui_kit::stepped_field(ui, taper, "", "1 deg", |text, delta| crate::dialogs::angle_step(text, delta, 1.0, None));
+                        if *taper != before {
+                            *taper_present = !taper.trim().is_empty();
+                        }
+                    });
+                }
             }
         }
         Surf::Untrim { holes, outer, in_place } => {
@@ -677,7 +708,7 @@ fn chains(app: &SolveApp, picks: &[Sel]) -> Result<Vec<Chain>, String> {
 pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let need = |i: usize, what: &str| if items(inputs, i).is_empty() { Err(format!("select {what} first")) } else { Ok(()) };
     let (cmd, mut p) = match k {
-        Surf::Extrude { distance, direction, to_object, to_next, to_offset } => {
+        Surf::Extrude { distance, direction, to_object, to_next, to_offset, taper, taper_present } => {
             need(0, "profiles or curves to extrude")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
             if *to_next {
@@ -691,6 +722,12 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             } else {
                 p["distance"] = json!(distance);
                 p["direction"] = json!(EXTRUDE_SIDES.get(*direction).map_or("positive", |(_, d)| *d));
+                // As Extrude sends its taper: one the feature has, or one that is not zero (a
+                // text that is no angle goes too, so the command says so).
+                let tapered = app.session.doc.eval(taper, ValueKind::Angle).map(|v| v.abs() > 1e-12).unwrap_or(!taper.trim().is_empty());
+                if extrude_tapers(*direction) && (*taper_present || tapered) {
+                    p["taper"] = json!(taper);
+                }
             }
             ("surface.extrude", p)
         }
@@ -1241,6 +1278,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 to_object: extent.to.is_some(),
                 to_next: *to_next,
                 to_offset: extent.to_offset.as_deref().map(str::to_string).unwrap_or_default(),
+                taper: extent.taper.as_deref().map(str::to_string).unwrap_or_else(|| "0 deg".into()),
+                taper_present: extent.taper.is_some(),
             };
             let mut ins = inputs(&k);
             if let Some(input) = ins.first_mut() {
@@ -1258,6 +1297,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let mut extra = Map::new();
             if extent.direction == Direction::Symmetric {
                 extra.insert("convention".into(), json!(extent.convention));
+            }
+            // A corner rule the taper was given (the command takes one) stays with it.
+            if let Some(corner) = extent.corner {
+                extra.insert("corner".into(), json!(corner));
             }
             return Some((Kind::Surface(k), ins, extra));
         }
@@ -1362,12 +1405,15 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::SurfaceExtend { edges, mode, up_to, neighbours, .. } => {
+        FeatureKind::SurfaceExtend { edges, mode, angle, up_to, neighbours, .. } => {
             // The dialog edits the edges and the distance or the plane, face or body they go up to; the
-            // rest is kept as it was.
+            // rest (a law extension's angle too) is kept as it was.
             let mut extra = Map::new();
             if !mode.is_natural() {
                 extra.insert("mode".into(), json!(mode));
+            }
+            if let Some(a) = angle {
+                extra.insert("angle".into(), json!(a));
             }
             if !*neighbours {
                 extra.insert("neighbours".into(), json!(false));
