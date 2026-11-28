@@ -100,6 +100,9 @@ pub enum Error {
     /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet: solidcore's
     /// reason and the vertex's point, where it notes them.
     CornerUnsupported { why: Option<String>, at: Option<[f64; 3]> },
+    /// A blend whose edge touches another edge of a face beside it tangentially at `at`, where
+    /// that face narrows to a point, so no blend of any size fits there (#16404).
+    FaceClosesToPoint { at: Option<[f64; 3]> },
     /// A swept turn ([`Turn::Swept`]) solidcore does not build at the corner `at`: `room` where
     /// no radius builds it (a sharp concave side edge between the rounds, solidcore's `NoRoom`),
     /// else not supported there (`CornerUnsupported`: unequal or variable rounds, a corner of
@@ -222,6 +225,13 @@ impl std::fmt::Display for Error {
                     write!(f, ": {why}")?;
                 }
                 Ok(())
+            }
+            Error::FaceClosesToPoint { at } => {
+                write!(f, "a face beside the blend's edge narrows to a point")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, ", where the edge touches another edge of that face tangentially, so no blend of any size fits there")
             }
             Error::TurnRefused { why, at, .. } => {
                 write!(f, "the swept corner is not built")?;

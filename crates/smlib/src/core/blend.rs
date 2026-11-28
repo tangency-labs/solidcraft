@@ -229,6 +229,7 @@ pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Optio
         Ops::TooLarge { size, kind, at, face, why } => Error::TooLarge { size, kind, at, face, why },
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
         Ops::CornerUnsupported { why, at } => Error::CornerUnsupported { why, at },
+        Ops::FaceClosesToPoint { at } => Error::FaceClosesToPoint { at },
         Ops::CornerRefused { corner } => Error::CornerRefused { corner },
         Ops::TurnRefused { room, why, at, .. } => Error::TurnRefused { room, why, at },
         Ops::NoEffect => Error::NoEffect,

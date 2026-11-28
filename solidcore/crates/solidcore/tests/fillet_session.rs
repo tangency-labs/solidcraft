@@ -62,6 +62,12 @@ fn actual_box_solver_stays_authoritative_through_corner_creation() {
     assert_eq!(session.executive().filleted_vertices.len(), 2);
     session.create_corners(&k, None).unwrap();
     assert_eq!(session.executive().corners.len(), 2);
+    // Both NByOne corners built: the narrowing diagnosis (#16404) leaves them
+    // retained without recording a refusal, and no face of a box corner narrows to a point.
+    assert_eq!(session.error_info().code, 0);
+    assert_eq!(session.error_info().comment, "<no comment>\n");
+    assert_eq!(session.error_site(), solidcore::error::Site::default());
+    assert!(session.narrowing_vertex().is_none());
     assert!(std::ptr::eq(
         actual_base,
         session.solver(solver).unwrap().base()

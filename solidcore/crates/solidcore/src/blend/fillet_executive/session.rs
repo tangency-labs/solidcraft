@@ -417,6 +417,10 @@ struct SessionObjects<'target> {
     /// ([`FilletSession::set_roll_over_pass`]), and its vertices V, the corners where the
     /// concave chain meets the cliff (empty: not the second pass).
     roll_over_ends: Vec<VertexId>,
+    /// Not upstream (#16404): the point of the first vertex where the corners step found a
+    /// face beside a blended edge closing to a point
+    /// ([`crate::blend::fillet_corner::p3::face_closes_to_a_point`]).
+    narrowing_vertex: Option<crate::math::Point3>,
     /// The fork's `m_vSetBackVertices` (`AddSetBackVertex`; WR-697, 79d4763): the
     /// vertices the caller sets back, where no Ball is built.
     set_back_vertices: Vec<VertexId>,
@@ -1879,6 +1883,7 @@ impl<'target> FilletSession<'target> {
                 roll_over_classify: false,
                 roll_overs: Vec::new(),
                 roll_over_ends: Vec::new(),
+                narrowing_vertex: None,
                 set_back_vertices: Vec::new(),
                 set_back_fills: Vec::new(),
                 radius_corner_surfaces: Vec::new(),
@@ -2453,6 +2458,7 @@ impl<'target> FilletSession<'target> {
             roll_over_classify,
             roll_overs,
             roll_over_ends,
+            narrowing_vertex,
             ..
         } = &mut self.objects;
         let turns = *turns;
@@ -2546,6 +2552,53 @@ impl<'target> FilletSession<'target> {
                     },
                     roll_over_classify.then_some(&mut *roll_overs),
                 )?;
+                // Not upstream (#16404): a face beside a blended edge that closes to a point at
+                // the vertex (between that edge and one of the other convexity not blended
+                // there, or two blended edges of one convexity) leaves no room for a blend of
+                // any size. The vertex is noted, and a later failure of the blend that gives no
+                // other reason is given as it (the boss's base circle touching the rim of the
+                // face it stands on, whose corner builds and then fails to make its topology; a
+                // chamfer's tangent chain from a hole's rim on to the bottom edge the hole
+                // touches, #1390, whose corner is unsupported). Nothing is refused here, so a
+                // blend that builds is never refused. A round that runs out at the vertex (the
+                // degenerate corner) has no width there and builds, so it is not read.
+                if narrowing_vertex.is_none()
+                    && !made
+                        .as_ref()
+                        .is_some_and(|c| c.kind == FilletCornerKind::Degenerate)
+                {
+                    // the tightest tangency tolerance of the vertex's solvers, as the corner
+                    // takes it
+                    let mut tangency_tol_radians = f64::INFINITY;
+                    for &edgeuse in &edgeuses {
+                        let object =
+                            FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+                        let Some(FilletObject::Solver(id)) =
+                            executive.fillet_solver_of_edgeuse(object)
+                        else {
+                            continue;
+                        };
+                        if let Some(s) = solvers.get(id.0 as usize).and_then(Option::as_ref) {
+                            tangency_tol_radians =
+                                tangency_tol_radians.min(s.base().tangency_tolerance);
+                        }
+                    }
+                    // a walk the test cannot make notes nothing; cancellation stops the step
+                    let closes = tangency_tol_radians.is_finite()
+                        && match crate::blend::fillet_corner::p3::face_closes_to_a_point(
+                            k,
+                            target,
+                            &edgeuses,
+                            tangency_tol_radians,
+                        ) {
+                            Ok(closes) => closes,
+                            Err(e) if e.is_cancelled() => return Err(e),
+                            Err(_) => false,
+                        };
+                    if closes {
+                        *narrowing_vertex = crate::topology::vertex::point(target, vertex).ok();
+                    }
+                }
                 let Some(mut corner) = made else {
                     // The vertex's point feeds the opt-in vertex error note, as the
                     // fork's corrected overload reads it from the vertex itself.
@@ -3248,6 +3301,14 @@ impl<'target> FilletSession<'target> {
     /// passes. Off by default. Set it before [`Self::create_corners`].
     pub fn set_roll_over_classify(&mut self, classify: bool) {
         self.objects.roll_over_classify = classify;
+    }
+
+    /// Not upstream (#16404): the point of the first vertex where the corners step found a
+    /// face beside a blended edge closing to a point, so that no blend of any size fits there;
+    /// `None` where it found none.
+    #[must_use]
+    pub fn narrowing_vertex(&self) -> Option<crate::math::Point3> {
+        self.objects.narrowing_vertex
     }
 
     /// Not upstream (#10876): the Roll-over corners noted by the corners step

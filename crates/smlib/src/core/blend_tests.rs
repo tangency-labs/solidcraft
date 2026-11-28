@@ -177,7 +177,7 @@ fn case(name: &str) -> Case {
         }
         // A 20 mm cube with a hole of radius 5 along z whose wall touches the face y = 0 along
         // x = 10 (#1390): a 3 mm chamfer of the hole's top rim runs out of that face where the
-        // rim meets it tangentially, a vertex no blend corner handles. The tangent chain the app
+        // rim meets it tangentially: the top face narrows to a point at (10, 0, 20). The tangent chain the app
         // blends is picked: the rim at 135° and 315° round the hole (away from the cylinder's
         // seam at 0° and the face at 270°), and the two pieces of the top's front edge, which the
         // rim runs on tangentially into at (10, 0, 20).
@@ -190,7 +190,7 @@ fn case(name: &str) -> Case {
                     vec![[10.0 - d, 5.0 + d, 20.0], [10.0 + d, 5.0 - d, 20.0], [5.0, 0.0, 20.0], [15.0, 0.0, 20.0]],
                     3.0,
                 ),
-                Expect::Fails(Error::CornerUnsupported { why: None, at: None }),
+                Expect::Fails(Error::FaceClosesToPoint { at: Some([10.0, 0.0, 20.0]) }),
             )
         }
         // √3 from all three edges at the corner (0, 0, 10).

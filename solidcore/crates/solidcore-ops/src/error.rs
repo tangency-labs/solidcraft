@@ -95,6 +95,12 @@ pub enum Error {
         /// The vertex's point.
         at: Option<[f64; 3]>,
     },
+    /// A face beside a blended edge narrows to a point where the edge touches another
+    /// edge of that face tangentially, so no blend of any size fits there.
+    FaceClosesToPoint {
+        /// The vertex's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+    },
     /// A dome the kernel refuses, and why (a non-planar face, holes, a non-star outline, a
     /// height not positive and finite, a spherical dome on a face that is not a circle, a
     /// reversed dome not supported yet).
@@ -567,6 +573,7 @@ impl Error {
             Error::WallFolds { .. } => "WallFolds",
             Error::Unsupported(..) => "Unsupported",
             Error::CornerUnsupported { .. } => "CornerUnsupported",
+            Error::FaceClosesToPoint { .. } => "FaceClosesToPoint",
             Error::TurnRefused { .. } => "TurnRefused",
             Error::CornerRefused { .. } => "CornerRefused",
             Error::RoundsCross { .. } => "RoundsCross",
@@ -1093,6 +1100,13 @@ impl std::fmt::Display for Error {
                     write!(f, ": {why}")?;
                 }
                 Ok(())
+            }
+            Error::FaceClosesToPoint { at } => {
+                write!(f, "a face beside the blend's edge narrows to a point")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, ", where the edge touches another edge of that face tangentially, so no blend of any size fits there")
             }
             Error::TurnRefused { why, at, .. } => {
                 write!(f, "the swept corner is not built")?;
