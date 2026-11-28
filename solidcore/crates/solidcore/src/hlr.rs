@@ -3202,9 +3202,9 @@ fn classify_point_counted(
                     let p = f.surface.point(h.uv);
                     // A face drawn from a surface within ε of what it is: that face crosses the
                     // ray within ε / |n · d| of this hit, to first order (a grazing hit, where
-                    // first order fails, is uncertain anyway). Closer than that to its boundary
-                    // or to the point, the hit decides nothing; on the point's own faces it is
-                    // the point's own surface, as hits closer than `own_eps` are.
+                    // first order fails, is uncertain anyway). Closer than that to the face's
+                    // boundary, or to `start`, the hit decides nothing: the face itself may pass
+                    // on either side of the point, or miss the ray.
                     let margin = if f.bound > 0. {
                         match f.surface.normal(h.uv).map(|n| n.dot(dl).abs()) {
                             Some(c) if c > 0. => f.bound / c,
@@ -3217,9 +3217,8 @@ fn classify_point_counted(
                     } else {
                         0.
                     };
-                    if is_own && h.lam < own_eps + margin {
-                        continue;
-                    }
+                    // Hits nearer the point than `start` are its own surface or rounding.
+                    let start = if is_own { own_eps } else { ctx.eps_own };
                     let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len() + margin;
                     // A hit on the boundary is uncertain on either side of it, so the parity test
                     // is left out there: its cost grows with the boundary around the hit, all of a
@@ -3233,11 +3232,7 @@ fn classify_point_counted(
                         Some(inside) => {
                             // An unsupported freeform face never hides anything for certain.
                             let unsure = f.freeform && !ctx.freeform;
-                            if inside
-                                && (unsure
-                                    || h.grazing
-                                    || (!is_own && h.lam < ctx.eps_own + margin))
-                            {
+                            if inside && (unsure || h.grazing || h.lam < start + margin) {
                                 uncertain = true;
                             } else if inside {
                                 return true;

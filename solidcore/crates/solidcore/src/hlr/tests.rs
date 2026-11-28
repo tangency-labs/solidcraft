@@ -824,10 +824,12 @@ fn a_face_within_its_bound_of_an_edge_does_not_hide_it_for_certain() {
 /// A face whose surface stands ε off its own edges, as a blend's net may stand off the edges of
 /// its definition: the unit cube's top face drawn as the plane z = 1 + ε over its edges at
 /// z = 1, ε = 1e-3, far past the 1e-6 of the face a ray skips at its start. Seen from above,
-/// each top edge's ray crosses that plane ε / |n · d| from its start; within the face's bound
-/// that is the edge's own surface, so the top edges stay visible.
+/// each top edge's ray crosses that plane λ = ε / |n · d| from its start, which lies on the
+/// face's boundary: the hit is within λ of the boundary, and the face itself may pass within
+/// λ of the hit, so it decides nothing. The top edges are uncertain, never hidden by their own
+/// face.
 #[test]
-fn a_faces_own_edges_are_not_hidden_by_its_surface_within_its_bound() {
+fn a_faces_own_edges_are_not_hidden_for_certain_by_its_surface_within_its_bound() {
     let eps = 1e-3;
     let mut body = bounded(&cuboid([0.; 3], [1.; 3]), |i| if i == 1 { eps } else { 0. });
     // Face 1 is the top, the plane through corner 4 (0, 0, 1).
@@ -863,7 +865,7 @@ fn a_faces_own_edges_are_not_hidden_by_its_surface_within_its_bound() {
             .map(|p| p.visibility)
             .collect();
         assert!(
-            got.iter().all(|v| *v == Visibility::Visible),
+            !got.is_empty() && got.iter().all(|v| *v == Visibility::Uncertain),
             "top edge {e}: {got:?}"
         );
     }
