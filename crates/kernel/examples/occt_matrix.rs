@@ -365,8 +365,8 @@ fn cases() -> Vec<Case> {
             op: "chamfer",
             name: "one edge of a 10 cube, 1 back",
             build: || some(solidcraft_kernel::chamfer(&cube(0.0, 10.0)?, &[v(5.0, 0.0, 10.0)], 1.0)),
-            // A prism of section 1/2 off; the two 1-wide strips traded for one √2 wide.
-            answer: Answer::Solid { volume: 995.0, area: Some(600.0 - 20.0 + 10.0 * 2f64.sqrt()) },
+            // A prism of section 1/2 off: two 1-wide strips and two end triangles of 1/2 traded for one √2 wide.
+            answer: Answer::Solid { volume: 995.0, area: Some(600.0 - 20.0 - 1.0 + 10.0 * 2f64.sqrt()) },
         },
         Case {
             op: "shell",
