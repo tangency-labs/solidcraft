@@ -675,7 +675,14 @@ fn screw_sweep_meets_a_coaxial_cylinder_along_exact_helices() {
                         Surface::Cylinder { .. }
                     )
                 });
-                if on_rod && points == 2 {
+                let helix = matches!(
+                    record.edges[u.edge as usize]
+                        .nurbs
+                        .as_ref()
+                        .unwrap_or(&record.edges[u.edge as usize].curve),
+                    solidcore_record::brep::Curve::RationalSpline { .. }
+                );
+                if on_rod && points == 2 && helix {
                     straight += 1;
                 }
             }

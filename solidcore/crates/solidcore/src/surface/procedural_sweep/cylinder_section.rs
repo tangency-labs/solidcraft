@@ -21,11 +21,13 @@
 use super::{Motion, ProceduralSweep};
 use crate::curve::curve::Curve;
 use crate::error::Result;
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::Point2;
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
 use crate::surface::cone::Cone;
@@ -107,6 +109,11 @@ pub(crate) fn intersect(
     let Some(roots) = crossings(&gap, p_ivl.min(), p_ivl.max(), tolerance)? else {
         return Ok(None);
     };
+    // No crossing found: leave the pair to the general intersection rather than answer that
+    // there is none.
+    if roots.is_empty() {
+        return Ok(None);
+    }
     let mut result = SurfaceIntersection::default();
     for p0 in roots {
         let residual = gap(p0)?.abs();
@@ -143,8 +150,15 @@ pub(crate) fn intersect(
         let Some(cuts) = seam_cuts(&angle, q0, q1, samples)? else {
             return Ok(None);
         };
+        // A cut at an end, or within rounding of one, is the end itself (a helix that starts or
+        // stops on the seam).
+        let near = 1e-9 * (q1 - q0);
         let mut ends = vec![q0];
-        ends.extend(cuts);
+        for c in cuts {
+            if c - ends.last().copied().unwrap_or(q0) > near && q1 - c > near {
+                ends.push(c);
+            }
+        }
         ends.push(q1);
         for piece in ends.windows(2) {
             let [qa, qb] = *piece else {
@@ -179,9 +193,22 @@ pub(crate) fn intersect(
             result
                 .deviations
                 .push(residual.max(off_radius) + misaligned + rounding);
-            result.surface1_uv_curves.push(iso.uv_iso_curve);
+            // The wall's line, on the piece's own stretch, as the 3D curve is.
+            let uv = match iso.uv_iso_curve {
+                Some(mut line) => {
+                    let mut stretch = Extent1d::from_min_max(qa, qb);
+                    line.trim(k, &mut stretch, TrimMode::Notify)?;
+                    Some(line)
+                }
+                None => None,
+            };
+            result.surface1_uv_curves.push(uv);
             result.surface2_uv_curves.push(None);
         }
+    }
+    // Nothing within the faces: the general intersection decides.
+    if result.curves_3d.is_empty() {
+        return Ok(None);
     }
     Ok(Some(result))
 }
@@ -249,19 +276,32 @@ fn crossings(
         }
         values.push(v);
     }
+    let value = |i: usize| values.get(i).copied().unwrap_or(f64::NAN);
+    let opposite = |a: f64, b: f64| a != 0.0 && b != 0.0 && (a < 0.0) != (b < 0.0);
     let mut roots = Vec::new();
-    for i in 0..SAMPLES {
-        let (Some(&va), Some(&vb)) = (values.get(i), values.get(i + 1)) else {
-            continue;
-        };
-        if va == 0.0 || vb == 0.0 || (va < 0.0) == (vb < 0.0) {
-            // no crossing inside: a sample this close to zero is a contact the bracket misses
-            if va.abs() <= tolerance && (i == 0 || va != 0.0) && !crossing_beside(&values, i) {
+    for i in 0..=SAMPLES {
+        let v = value(i);
+        if v == 0.0 {
+            // A sample on the root: a crossing only inside, with the values beside it of
+            // opposite signs (at an end, or between values of one sign, it is a contact).
+            if i == 0 || i == SAMPLES || !opposite(value(i - 1), value(i + 1)) {
                 return Ok(None);
             }
+            roots.push(at(i));
+        } else if v.abs() <= tolerance {
+            // this close to zero without a sign change beside it: a near-tangent contact
+            let beside = (i > 0 && opposite(value(i - 1), v))
+                || (i < SAMPLES && opposite(v, value(i + 1)))
+                || (i > 0 && value(i - 1) == 0.0)
+                || (i < SAMPLES && value(i + 1) == 0.0);
+            if !beside {
+                return Ok(None);
+            }
+        }
+        if i == SAMPLES || !opposite(v, value(i + 1)) {
             continue;
         }
-        let (mut a, mut b, mut fa) = (at(i), at(i + 1), va);
+        let (mut a, mut b, mut fa) = (at(i), at(i + 1), v);
         for _ in 0..BISECTIONS {
             let mid = 0.5 * (a + b);
             if !(a < mid && mid < b) {
@@ -281,25 +321,11 @@ fn crossings(
             }
         }
         roots.push(0.5 * (a + b));
-        if roots.len() > MAX_ROOTS {
-            return Ok(None);
-        }
     }
-    if let Some(&last) = values.last() {
-        if last.abs() <= tolerance && !crossing_beside(&values, SAMPLES) {
-            return Ok(None);
-        }
+    if roots.len() > MAX_ROOTS {
+        return Ok(None);
     }
     Ok(Some(roots))
-}
-
-/// Whether sample `i` is the end of an interval in which the values change sign.
-fn crossing_beside(values: &[f64], i: usize) -> bool {
-    let sign_change = |j: usize| match (values.get(j), values.get(j + 1)) {
-        (Some(&a), Some(&b)) => a != 0.0 && b != 0.0 && (a < 0.0) != (b < 0.0),
-        _ => false,
-    };
-    sign_change(i) || (i > 0 && sign_change(i - 1))
 }
 
 /// The parameters in `[lo, hi]` where `height` lies within `[h_lo, h_hi]`, when that is one
