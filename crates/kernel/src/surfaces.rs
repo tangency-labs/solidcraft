@@ -1319,6 +1319,27 @@ pub fn loft_sheet_with_rails_legacy_sides(sections: &[(Plane, Vec<Seg2>)], rails
     lofted_sheet(sections, rails, fit, false)
 }
 
+/// A section of a surface loft in space: either a planar chain of sketch segments on its plane,
+/// or a chain of 3D sketch curves ([`crate::PointPath`]).
+#[derive(Clone, Debug)]
+pub enum SpaceLoftSection {
+    Planar { plane: Plane, segs: Vec<Seg2> },
+    Space(crate::PointPath),
+}
+
+/// [`loft_sheet_with_rails`] for sections that include 3D sketch curves (or mixed planar and 3D
+/// sketch sections), all open, following 1…16 guide rails (`fit` saying how they reshape the
+/// sections between). Closed sections are refused.
+pub fn loft_sheet_space_with_rails(sections: &[SpaceLoftSection], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    lofted_sheet_space(sections, rails, fit, true)
+}
+
+/// [`loft_sheet_space_with_rails`] as designs saved before `faced` built it: each wall along the
+/// normal of the surface SMLib skins it with.
+pub fn loft_sheet_space_with_rails_legacy_sides(sections: &[SpaceLoftSection], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    lofted_sheet_space(sections, rails, fit, false)
+}
+
 /// Whether the ends of an ordered planar section meet, at the sketch chain's join tolerance.
 /// This distinguishes a loop from an open chain; it does not validate the section.
 #[must_use]
@@ -1400,6 +1421,44 @@ fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate
     }
 }
 
+fn lofted_sheet_space(sections: &[SpaceLoftSection], rails: &[Vec<Vec3>], fit: crate::RailFit, faced: bool) -> Result<Body> {
+    if sections.len() < 2 || sections.len() > 50 {
+        return Err(invalid("a loft needs 2…50 sections"));
+    }
+    let matched = open_space_sections(sections)?;
+    if rails.len() > 2 {
+        let skin = crate::smlib_sweeps::skin_sections(&matched)?;
+        return all_new(Body::from_record(crate::smlib_sweeps::railed_skin(&skin, rails, fit, false)?)?, &[]);
+    }
+    let lofted = crate::loft_rails::railed(&matched, false, rails, fit)?;
+    let curves: usize = lofted.iter().map(Vec::len).sum();
+    if curves > solidcore_ops::sweep::MAX_CURVES {
+        return Err(invalid(format!(
+            "a surface loft takes at most {} curves in all its sections and stations, this one has {curves}",
+            solidcore_ops::sweep::MAX_CURVES
+        )));
+    }
+    let (r, sources) = imp::lofted(&lofted)?;
+    let h = match sources {
+        Some(faces) => {
+            let n = matched.first().map_or(0, |s| s.curves.len());
+            faces
+                .iter()
+                .map(|cs| {
+                    let ks: BTreeSet<usize> = cs.iter().filter_map(|c| c.checked_rem(n)).collect();
+                    record::profile(ks.iter().flat_map(|k| matched.iter().filter_map(|s| s.numbers.get(*k)).flatten()))
+                })
+                .collect()
+        }
+        None => vec![record::generated(Vec::new()); r.faces.len()],
+    };
+    let sheet = sheet_of(vec![(r, h)], false, &[])?;
+    match matched.first() {
+        Some(first) if faced => faced_at_section(sheet, first, false),
+        _ => Ok(sheet),
+    }
+}
+
 /// The lofted sheet `sheet` with each face turned over where it faces away from the side its
 /// first section `first` gives it: each segment's direction crossed with the section plane's
 /// normal, that direction counted counter-clockwise about the normal when the section is
@@ -1407,18 +1466,24 @@ fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate
 /// solidcore judges the faces through it (`Query::faces_against`); a face no sample lies on
 /// keeps its side. The history is carried through the turn.
 fn faced_at_section(sheet: Body, first: &crate::loft_rails::Section, closed: bool) -> Result<Body> {
+    let Some(plane) = first.plane else {
+        return Ok(sheet);
+    };
+    if first.segs.is_empty() {
+        return Ok(sheet);
+    }
     let backwards = closed && solidcore_record::Loop2 { segs: first.segs.clone() }.signed_area() < 0.0;
     let samples: Vec<(Vec3, Vec3)> = first
         .segs
         .iter()
         .map(|s| {
-            let d = first.plane.dir_to_world(s.derivative(0.5));
-            (first.plane.to_world(s.point_at(0.5)), if backwards { d * -1.0 } else { d })
+            let d = plane.dir_to_world(s.derivative(0.5));
+            (plane.to_world(s.point_at(0.5)), if backwards { d * -1.0 } else { d })
         })
         .collect();
     let r = sheet.record();
     let accept = 4.0 * r.edges.iter().map(|e| e.tolerance).fold(r.tolerance, f64::max).max(1e-6);
-    let against = solidcore_ops::query::Query::new(r).faces_against(first.plane.normal(), &samples, accept);
+    let against = solidcore_ops::query::Query::new(r).faces_against(plane.normal(), &samples, accept);
     if against.is_empty() {
         return Ok(sheet);
     }
@@ -1465,6 +1530,115 @@ fn open_sections(sections: &[(Plane, Vec<Seg2>)]) -> Result<Vec<crate::loft_rail
         prev = ends(&segs);
         let pieces: Vec<Seg2> = segs.iter().map(|(s, _)| *s).collect();
         out.push(crate::loft_rails::Section::of(plane, &pieces, segs.iter().map(|(_, k)| vec![*k]).collect())?);
+    }
+    Ok(out)
+}
+
+/// Open planar or 3D sketch sections converted to exact homogeneous NURBS curves, split (longest
+/// curve first) until every section has the same curve count, and turned so each runs the way the
+/// one before it does. Closed sections are refused.
+fn open_space_sections(sections: &[SpaceLoftSection]) -> Result<Vec<crate::loft_rails::Section>> {
+    struct Raw {
+        plane: Option<Plane>,
+        items: Vec<(solidcraft_geom::bspline::CurveN<4>, Option<Seg2>, usize)>,
+    }
+    let mut raw: Vec<Raw> = Vec::with_capacity(sections.len());
+    let mut offset = 0usize;
+    for sec in sections {
+        match sec {
+            SpaceLoftSection::Planar { plane, segs } => {
+                if !crate::build::frame_ok(plane) {
+                    return Err(invalid("a loft section's frame is not finite and orthonormal"));
+                }
+                if segs.is_empty() || segs.len() > 4096 {
+                    return Err(invalid("a loft section has no curves, or too many"));
+                }
+                check_chains(std::slice::from_ref(segs), "loft")?;
+                if loft_section_closed(segs) {
+                    return Err(KernelError::Failed("not supported yet: a closed section in a loft through 3D sketch curves".into()));
+                }
+                let mut items = Vec::with_capacity(segs.len());
+                for (i, s) in segs.iter().enumerate() {
+                    let c = crate::loft_rails::nurbs(&crate::freeform::segment(plane, s)?.0)?;
+                    items.push((c, Some(*s), offset + i));
+                }
+                offset += segs.len();
+                raw.push(Raw { plane: Some(*plane), items });
+            }
+            SpaceLoftSection::Space(path) => {
+                let segs = path.segs()?;
+                if segs.is_empty() || segs.len() > 4096 {
+                    return Err(invalid("a loft section has no curves, or too many"));
+                }
+                let (Some(first), Some(last)) = (segs.first(), segs.last()) else {
+                    return Err(invalid("a loft section has no curves, or too many"));
+                };
+                if first.start().dist(last.end()) <= 1e-6 {
+                    return Err(KernelError::Failed("not supported yet: a closed section in a loft through 3D sketch curves".into()));
+                }
+                let mut items = Vec::with_capacity(segs.len());
+                for (i, s) in segs.iter().enumerate() {
+                    let c = crate::loft_rails::path_seg_nurbs(s)?;
+                    items.push((c, None, offset + i));
+                }
+                offset += segs.len();
+                raw.push(Raw { plane: None, items });
+            }
+        }
+    }
+    let n = raw.iter().map(|s| s.items.len()).max().unwrap_or(0);
+    let mut out = Vec::with_capacity(raw.len());
+    let mut prev: Option<(Vec3, Vec3)> = None;
+    for mut sec in raw {
+        while sec.items.len() < n {
+            let Some(i) = sec
+                .items
+                .iter()
+                .enumerate()
+                .max_by(|a, b| crate::loft_rails::curve_length(&a.1.0).total_cmp(&crate::loft_rails::curve_length(&b.1.0)))
+                .map(|(i, _)| i)
+            else {
+                break;
+            };
+            let Some((c, seg_opt, k)) = sec.items.get(i).cloned() else { break };
+            let pair = match (sec.plane, seg_opt) {
+                (Some(plane), Some(s)) => {
+                    let (a, b) = s.split_half();
+                    let ca = crate::loft_rails::nurbs(&crate::freeform::segment(&plane, &a)?.0)?;
+                    let cb = crate::loft_rails::nurbs(&crate::freeform::segment(&plane, &b)?.0)?;
+                    [(ca, Some(a), k), (cb, Some(b), k)]
+                }
+                _ => {
+                    let (ca, cb) = crate::loft_rails::split_curve_half(&c)?;
+                    [(ca, None, k), (cb, None, k)]
+                }
+            };
+            sec.items.splice(i..=i, pair);
+        }
+        let ends = |items: &[(solidcraft_geom::bspline::CurveN<4>, Option<Seg2>, usize)]| {
+            let (s, _) = crate::loft_rails::curve_ends(&items.first()?.0)?;
+            let (_, e) = crate::loft_rails::curve_ends(&items.last()?.0)?;
+            Some((s, e))
+        };
+        if let (Some((ps, pe)), Some((s, e))) = (prev, ends(&sec.items))
+            && s.dist(ps) + e.dist(pe) > s.dist(pe) + e.dist(ps)
+        {
+            sec.items = sec
+                .items
+                .into_iter()
+                .rev()
+                .map(|(c, seg_opt, k)| Ok((crate::loft_rails::reverse_curve(&c)?, seg_opt.map(|s| s.reversed()), k)))
+                .collect::<Result<_>>()?;
+        }
+        prev = ends(&sec.items);
+        let segs: Vec<Seg2> = if sec.plane.is_some() && sec.items.iter().all(|(_, s, _)| s.is_some()) {
+            sec.items.iter().filter_map(|(_, s, _)| *s).collect()
+        } else {
+            Vec::new()
+        };
+        let curves = sec.items.iter().map(|(c, _, _)| c.clone()).collect();
+        let numbers = sec.items.iter().map(|(_, _, k)| vec![*k]).collect();
+        out.push(crate::loft_rails::Section { plane: sec.plane, curves, numbers, segs });
     }
     Ok(out)
 }

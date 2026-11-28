@@ -4,7 +4,8 @@
 
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::sweep::loft_rails::{
-    loft_rails as kernel_loft_rails, polyline, RailLoftOptions, RailSection as KernelSection,
+    loft_rails as kernel_loft_rails, loft_rails_space as kernel_loft_rails_space, polyline,
+    RailLoftOptions, RailSection as KernelSection, SpaceRailSection as KernelSpaceSection,
     DEFAULT_MAX_WIRES,
 };
 use solidcore::sweep::section_blend::{section_blend_surface, EndOrder, SectionFrame};
@@ -35,6 +36,18 @@ pub struct RailSection {
     pub origin: [f64; 3],
     /// The plane's normal.
     pub normal: [f64; 3],
+    /// The section's curves, in order; each section's k-th curve pairs with the others' (the
+    /// same degree, knots and weights).
+    pub curves: Vec<Curve>,
+}
+
+/// A section of a railed loft: optionally in a plane (`Some((origin, normal))`) or a 3D curve
+/// chain in space (`None`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpaceRailSection {
+    /// A point of the section's plane and its normal, or `None` when the section is a 3D curve
+    /// chain in space.
+    pub plane: Option<([f64; 3], [f64; 3])>,
     /// The section's curves, in order; each section's k-th curve pairs with the others' (the
     /// same degree, knots and weights).
     pub curves: Vec<Curve>,
@@ -133,6 +146,76 @@ pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> 
             max_wires: how.max_wires,
         };
         match kernel_loft_rails(k, &kernel_sections, &rail_refs, &opts) {
+            Ok(made) => finish_closed(
+                k,
+                made.skin.brep,
+                if how.cap {
+                    Expect::SOLID
+                } else {
+                    Expect::FACES
+                },
+            ),
+            Err(e) => Ok(Err(refused(e))),
+        }
+    })
+}
+
+/// [`loft_rails`] through sections that may be planar or 3D curve chains in space
+/// ([`SpaceRailSection`]).
+///
+/// # Errors
+/// As [`loft_rails`].
+pub fn loft_rails_space(
+    sections: &[SpaceRailSection],
+    rails: &[Curve],
+    how: &RailLoft,
+) -> Result<Body> {
+    if !(2..=solidcore::sweep::loft_rails::MAX_SECTIONS).contains(&sections.len())
+        || !(1..=solidcore::sweep::loft_rails::MAX_RAILS).contains(&rails.len())
+    {
+        return Err(Error::Argument);
+    }
+    let all: Vec<Curve> = sections
+        .iter()
+        .flat_map(|s| s.curves.iter().cloned())
+        .chain(rails.iter().cloned())
+        .collect();
+    making("loft_rails", |k| {
+        let made = match parse(k, &all) {
+            Ok(m) => m,
+            Err(e) => return Ok(Err(e)),
+        };
+        let mut at = 0usize;
+        let mut kernel_sections = Vec::with_capacity(sections.len());
+        for s in sections {
+            let n = s.curves.len();
+            let Some(curves) = made.curves.get(at..at + n) else {
+                return Ok(Err(Error::Argument));
+            };
+            at += n;
+            kernel_sections.push(KernelSpaceSection {
+                plane: s
+                    .plane
+                    .map(|(o, n)| (Vec3::new(o[0], o[1], o[2]), Vec3::new(n[0], n[1], n[2]))),
+                curves: curves.iter().collect(),
+            });
+        }
+        let Some(rail_curves) = made.curves.get(at..) else {
+            return Ok(Err(Error::Argument));
+        };
+        let rail_refs: Vec<_> = rail_curves.iter().collect();
+        let opts = RailLoftOptions {
+            fit: match how.fit {
+                RailFit::Scale => KernelRailFit::Scale,
+                RailFit::Stretch => KernelRailFit::Stretch,
+            },
+            closed: how.cap,
+            degree: 3,
+            cap: how.cap,
+            tolerance: how.tolerance,
+            max_wires: how.max_wires,
+        };
+        match kernel_loft_rails_space(k, &kernel_sections, &rail_refs, &opts) {
             Ok(made) => finish_closed(
                 k,
                 made.skin.brep,

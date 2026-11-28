@@ -137,6 +137,17 @@ pub struct RailSection<'a> {
     pub curves: Vec<&'a Curve>,
 }
 
+/// A section of a railed loft: either on a plane (`Some((origin, normal))`) or a 3D curve chain
+/// in space (`None`).
+#[derive(Debug, Clone)]
+pub struct SpaceRailSection<'a> {
+    /// A point of its plane and the plane's normal, or `None` when the section is a 3D curve
+    /// chain in space.
+    pub plane: Option<(Point3, Vec3)>,
+    /// Its curves, in order (each a B-spline; counterparts in every section pair).
+    pub curves: Vec<&'a Curve>,
+}
+
 /// The floor of a [`Tolerance::Relative`] certificate, mm: a loft's size never makes it finer.
 pub const RELATIVE_TOLERANCE_FLOOR: f64 = 1e-6;
 
@@ -595,18 +606,20 @@ fn shrinks(two: bool) -> SolidError {
     })
 }
 
-/// Where a rail meets a section: the guided point as a wire parameter, the point, and the
-/// nudge onto it from the rail's crossing.
+/// Where a rail meets a section: the guided point as a wire parameter, the nudge onto it from
+/// the rail's hit, and the rail's parameter and point there.
 #[derive(Clone, Copy)]
 struct Anchor {
     g: f64,
     nudge: Vec3,
+    t: f64,
+    hit: Point3,
 }
 
 /// The loft's sections as plain curves and the construction of its stations.
 struct Loft<'a> {
     sections: Vec<Vec<(Plain, NurbCurve)>>,
-    sources: &'a [RailSection<'a>],
+    sources: &'a [SpaceRailSection<'a>],
     rails: &'a [&'a Curve],
     opts: &'a RailLoftOptions,
     along: Vec<f64>,
@@ -622,7 +635,7 @@ struct Loft<'a> {
 impl<'a> Loft<'a> {
     fn new(
         k: &Kernel,
-        sources: &'a [RailSection<'a>],
+        sources: &'a [SpaceRailSection<'a>],
         rails: &'a [&'a Curve],
         opts: &'a RailLoftOptions,
     ) -> Result<Self> {
@@ -753,16 +766,6 @@ impl<'a> Loft<'a> {
                 across.push(per);
             }
         }
-        // the sections' normals, turned to agree with the first's
-        let mut normals: Vec<Vec3> = Vec::with_capacity(count);
-        for s in sources {
-            let nn = s
-                .normal
-                .unitize()
-                .map_err(|_| invalid("a section plane's normal of no length"))?;
-            let prev = normals.last().copied().unwrap_or(nn);
-            normals.push(if nn.dot(prev) < 0.0 { nn * -1.0 } else { nn });
-        }
         let mut loft = Self {
             sections,
             sources,
@@ -770,11 +773,28 @@ impl<'a> Loft<'a> {
             opts,
             along,
             across,
-            normals,
+            normals: Vec::new(),
             anchors: Vec::new(),
             size,
             tolerance,
         };
+        // the sections' normals, turned to agree with the previous section's; a 3D section
+        // without a plane takes the plain loft's run direction there
+        let mut normals: Vec<Vec3> = Vec::with_capacity(count);
+        for (i, s) in sources.iter().enumerate() {
+            let nn = match s.plane {
+                Some((_, n)) => n
+                    .unitize()
+                    .map_err(|_| invalid("a section plane's normal of no length"))?,
+                None => {
+                    let v = *loft.along.get(i).ok_or_else(|| invalid("sections"))?;
+                    loft.middle(v)?.1
+                }
+            };
+            let prev = normals.last().copied().unwrap_or(nn);
+            normals.push(if nn.dot(prev) < 0.0 { nn * -1.0 } else { nn });
+        }
+        loft.normals = normals;
         loft.anchors = loft.anchor_rails(k)?;
         Ok(loft)
     }
@@ -782,36 +802,70 @@ impl<'a> Loft<'a> {
     /// Where each rail meets each section (module docs).
     fn anchor_rails(&self, k: &Kernel) -> Result<Vec<Vec<Anchor>>> {
         let tol = k.tolerances.zone_tol_3d;
+        let space_tol = tol.max(self.tolerance);
+        let any_space = self.sources.iter().any(|s| s.plane.is_none());
         let mut out = Vec::new();
         for rail in self.rails {
+            let rail_plain_nurb = if any_space {
+                let p = Plain::of(rail)?;
+                let n = p.nurb()?;
+                Some((p, n))
+            } else {
+                None
+            };
             let mut anchors = Vec::new();
             for (s, curves) in self.sources.iter().zip(&self.sections) {
-                let (_, hit) = rail_crossing(k, rail, s.origin, s.normal)?;
-                let mut best: Option<(f64, Point3, f64)> = None;
-                for (i, c) in s.curves.iter().enumerate() {
-                    let near = crate::query::api_queries::curve_closest_point(k, c, hit)?;
-                    let (plain, _) = curves.get(i).ok_or_else(|| invalid("a section's curves"))?;
-                    let (Some(&t0), Some(&t1)) = (
-                        plain.knots.get(plain.degree),
-                        plain.knots.get(plain.points.len()),
-                    ) else {
-                        return Err(invalid("a curve's knots"));
-                    };
-                    let f = ((near.parameter - t0) / (t1 - t0)).clamp(0.0, 1.0);
-                    let d = near.closest.distance;
-                    if best.is_none_or(|b| d < b.2) {
-                        #[allow(clippy::cast_precision_loss)] // at most MAX_CURVES
-                        let g = i as f64 + f;
-                        best = Some((g, near.closest.point, d));
+                match s.plane {
+                    Some((origin, normal)) => {
+                        let (t, hit) = rail_crossing(k, rail, origin, normal)?;
+                        let (g, on, d) = closest_on_section(k, &s.curves, curves, hit)?;
+                        if d > tol {
+                            return Err(invalid(
+                                "a guide rail crosses a section's plane away from its curves: a rail has to pass through every section",
+                            ));
+                        }
+                        anchors.push(Anchor {
+                            g,
+                            nudge: on - hit,
+                            t,
+                            hit,
+                        });
+                    }
+                    None => {
+                        let Some((ref rail_plain, ref rail_nurb)) = rail_plain_nurb else {
+                            return Err(invalid("a guide rail"));
+                        };
+                        let hit_info = anchor_rail_to_curves(
+                            k, rail, rail_plain, rail_nurb, &s.curves, curves, space_tol,
+                        )?;
+                        if hit_info.distance > space_tol {
+                            return Err(invalid(
+                                "a guide rail does not pass through every section",
+                            ));
+                        }
+                        anchors.push(Anchor {
+                            g: hit_info.g,
+                            nudge: hit_info.on - hit_info.hit,
+                            t: hit_info.t,
+                            hit: hit_info.hit,
+                        });
                     }
                 }
-                let (g, on, d) = best.ok_or_else(|| invalid("a section's curves"))?;
-                if d > tol {
+            }
+            if any_space && anchors.len() >= 2 {
+                let inc = anchors.windows(2).all(|w| match *w {
+                    [a, b] => a.t < b.t,
+                    _ => true,
+                });
+                let dec = anchors.windows(2).all(|w| match *w {
+                    [a, b] => a.t > b.t,
+                    _ => true,
+                });
+                if !inc && !dec {
                     return Err(invalid(
-                        "a guide rail crosses a section's plane away from its curves: a rail has to pass through every section",
+                        "a guide rail turns back between sections: it has to run on from one section to the next",
                     ));
                 }
-                anchors.push(Anchor { g, nudge: on - hit });
             }
             out.push(anchors);
         }
@@ -931,6 +985,263 @@ pub(crate) struct Wire {
     pub(crate) hits: Vec<(f64, Point3)>,
 }
 
+/// The closest point of a section's curves to `pt`: wire parameter, point, and distance.
+fn closest_on_section(
+    k: &Kernel,
+    s_curves: &[&Curve],
+    curves: &[(Plain, NurbCurve)],
+    pt: Point3,
+) -> Result<(f64, Point3, f64)> {
+    let mut best: Option<(f64, Point3, f64)> = None;
+    for (i, c) in s_curves.iter().enumerate() {
+        let near = crate::query::api_queries::curve_closest_point(k, c, pt)?;
+        let (plain, _) = curves.get(i).ok_or_else(|| invalid("a section's curves"))?;
+        let (Some(&t0), Some(&t1)) = (
+            plain.knots.get(plain.degree),
+            plain.knots.get(plain.points.len()),
+        ) else {
+            return Err(invalid("a curve's knots"));
+        };
+        let f = ((near.parameter - t0) / (t1 - t0)).clamp(0.0, 1.0);
+        let d = near.closest.distance;
+        if best.is_none_or(|b| d < b.2) {
+            #[allow(clippy::cast_precision_loss)] // at most MAX_CURVES
+            let g = i as f64 + f;
+            best = Some((g, near.closest.point, d));
+        }
+    }
+    best.ok_or_else(|| invalid("a section's curves"))
+}
+
+/// Closest fraction `s` on segment `[a0, a1]` to segment `[b0, b1]`, and the distance between
+/// the two segments.
+fn seg_seg_closest(a0: Point3, a1: Point3, b0: Point3, b1: Point3) -> (f64, f64) {
+    let d1 = a1 - a0;
+    let d2 = b1 - b0;
+    let r = a0 - b0;
+    let a = d1.dot(d1);
+    let e = d2.dot(d2);
+    let f = d2.dot(r);
+    let (s, t) = if a <= 1e-24 && e <= 1e-24 {
+        (0.0, 0.0)
+    } else if a <= 1e-24 {
+        (0.0, (f / e).clamp(0.0, 1.0))
+    } else {
+        let c = d1.dot(r);
+        if e <= 1e-24 {
+            ((-c / a).clamp(0.0, 1.0), 0.0)
+        } else {
+            let b = d1.dot(d2);
+            let denom = a * e - b * b;
+            let mut s = if denom > 1e-24 {
+                ((b * f - c * e) / denom).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let mut t = (b * s + f) / e;
+            if t < 0.0 {
+                t = 0.0;
+                s = (-c / a).clamp(0.0, 1.0);
+            } else if t > 1.0 {
+                t = 1.0;
+                s = ((b - c) / a).clamp(0.0, 1.0);
+            }
+            (s, t)
+        }
+    };
+    let p = a0 + d1 * s;
+    let q = b0 + d2 * t;
+    (s, p.distance(q))
+}
+
+/// Where a rail passes closest to a 3D section's curves.
+struct RailHit {
+    t: f64,
+    hit: Point3,
+    g: f64,
+    on: Point3,
+    distance: f64,
+}
+
+/// Candidate parameter span on a rail curve near a 3D section.
+struct SpanCand {
+    a: f64,
+    b: f64,
+    t0: f64,
+    approx_dist: f64,
+}
+
+/// Where `rail` passes closest to a 3D section's curves: rail parameter, point on rail,
+/// section wire parameter, point on section, and distance.
+fn anchor_rail_to_curves(
+    k: &Kernel,
+    rail: &Curve,
+    rail_plain: &Plain,
+    rail_nurb: &NurbCurve,
+    s_curves: &[&Curve],
+    curves: &[(Plain, NurbCurve)],
+    tol: f64,
+) -> Result<RailHit> {
+    const SEC_SAMPLES: usize = 64;
+    const RAIL_SUB: usize = 16;
+    const GOLDEN: f64 = 0.618_033_988_749_894_9;
+
+    // Sample the section curves into chords and bound them.
+    let mut sec_lo = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut sec_hi = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut polys: Vec<Vec<Point3>> = Vec::with_capacity(curves.len());
+    let mut max_step = 0.0_f64;
+    for (plain, nurb) in curves {
+        for p in &plain.points {
+            sec_lo = Point3::new(sec_lo.x.min(p.x), sec_lo.y.min(p.y), sec_lo.z.min(p.z));
+            sec_hi = Point3::new(sec_hi.x.max(p.x), sec_hi.y.max(p.y), sec_hi.z.max(p.z));
+        }
+        let mut pts = Vec::with_capacity(SEC_SAMPLES + 1);
+        for j in 0..=SEC_SAMPLES {
+            #[allow(clippy::cast_precision_loss)]
+            let f = j as f64 / SEC_SAMPLES as f64;
+            pts.push(plain.point_at(nurb, f)?);
+        }
+        for w in pts.windows(2) {
+            if let [p0, p1] = *w {
+                max_step = max_step.max(p0.distance(p1));
+            }
+        }
+        polys.push(pts);
+    }
+
+    let (Some(&r0), Some(&r1)) = (
+        rail_plain.knots.get(rail_plain.degree),
+        rail_plain.knots.get(rail_plain.points.len()),
+    ) else {
+        return Err(invalid("a rail's knots"));
+    };
+    let mut spans: Vec<(f64, f64)> = Vec::new();
+    for w in rail_plain.knots.windows(2) {
+        let [k0, k1] = *w else {
+            continue;
+        };
+        let (a, b) = (k0.max(r0), k1.min(r1));
+        if b <= a {
+            continue;
+        }
+        if rail_plain.degree <= 1 {
+            spans.push((a, b));
+        } else {
+            for j in 0..RAIL_SUB {
+                #[allow(clippy::cast_precision_loss)]
+                let f0 = j as f64 / RAIL_SUB as f64;
+                #[allow(clippy::cast_precision_loss)]
+                let f1 = (j + 1) as f64 / RAIL_SUB as f64;
+                spans.push((a + (b - a) * f0, a + (b - a) * f1));
+            }
+        }
+    }
+
+    let mut best: Option<RailHit> = None;
+    let mut closest_span: Option<SpanCand> = None;
+    let mut candidates: Vec<(f64, f64, f64)> = Vec::new();
+    for (a, b) in spans {
+        let pa = rail_nurb.eval(a, Side::Left)?;
+        let pb = rail_nurb.eval(b, Side::Left)?;
+        let sag = if rail_plain.degree <= 1 {
+            0.0
+        } else {
+            let pm = rail_nurb.eval(0.5 * (a + b), Side::Left)?;
+            2.0 * pm.distance(pa + (pb - pa) * 0.5)
+        };
+        let pad = tol + max_step + sag;
+        let seg_lo = Point3::new(pa.x.min(pb.x), pa.y.min(pb.y), pa.z.min(pb.z));
+        let seg_hi = Point3::new(pa.x.max(pb.x), pa.y.max(pb.y), pa.z.max(pb.z));
+        let overlaps = seg_hi.x >= sec_lo.x - pad
+            && seg_lo.x <= sec_hi.x + pad
+            && seg_hi.y >= sec_lo.y - pad
+            && seg_lo.y <= sec_hi.y + pad
+            && seg_hi.z >= sec_lo.z - pad
+            && seg_lo.z <= sec_hi.z + pad;
+        if !overlaps {
+            continue;
+        }
+        let mut approx: Option<(f64, f64)> = None;
+        for poly in &polys {
+            for w in poly.windows(2) {
+                if let [q0, q1] = *w {
+                    let (s, d) = seg_seg_closest(pa, pb, q0, q1);
+                    if approx.is_none_or(|(_, bd)| d < bd) {
+                        approx = Some((s, d));
+                    }
+                }
+            }
+        }
+        let Some((s0, d_approx)) = approx else {
+            continue;
+        };
+        let t0 = a + (b - a) * s0;
+        if closest_span
+            .as_ref()
+            .is_none_or(|c| d_approx < c.approx_dist)
+        {
+            closest_span = Some(SpanCand {
+                a,
+                b,
+                t0,
+                approx_dist: d_approx,
+            });
+        }
+        if d_approx <= pad {
+            candidates.push((a, b, t0));
+        }
+    }
+    if candidates.is_empty() {
+        if let Some(c) = closest_span {
+            candidates.push((c.a, c.b, c.t0));
+        } else {
+            candidates.push((r0, r1, 0.5 * (r0 + r1)));
+        }
+    }
+
+    for (a, b, t0) in candidates {
+        let mut lo = a;
+        let mut hi = b;
+        let eval_dist = |t: f64| -> Result<(f64, Point3, f64)> {
+            let pt = rail_nurb.eval(t, Side::Left)?;
+            closest_on_section(k, s_curves, curves, pt)
+        };
+        for _ in 0..48 {
+            let x = hi - GOLDEN * (hi - lo);
+            let y = lo + GOLDEN * (hi - lo);
+            let dx = eval_dist(x)?.2;
+            let dy = eval_dist(y)?.2;
+            if dx < dy {
+                hi = y;
+            } else {
+                lo = x;
+            }
+        }
+        let mut t_best = 0.5 * (lo + hi);
+        let mut res = eval_dist(t_best)?;
+        for cand in [a, b, t0] {
+            let info = eval_dist(cand)?;
+            if info.2 < res.2 {
+                t_best = cand;
+                res = info;
+            }
+        }
+        let hit = rail.evaluate_point(k, t_best)?;
+        let (g, on, distance) = closest_on_section(k, s_curves, curves, hit)?;
+        if best.as_ref().is_none_or(|b| distance < b.distance) {
+            best = Some(RailHit {
+                t: t_best,
+                hit,
+                g,
+                on,
+                distance,
+            });
+        }
+    }
+    best.ok_or_else(|| invalid("a guide rail does not pass through every section"))
+}
+
 /// The loft through `sections` guided by `rails` (module docs).
 ///
 /// # Errors
@@ -945,11 +1256,33 @@ pub fn loft_rails(
     rails: &[&Curve],
     opts: &RailLoftOptions,
 ) -> Result<RailedLoft> {
+    let space: Vec<SpaceRailSection<'_>> = sections
+        .iter()
+        .map(|s| SpaceRailSection {
+            plane: Some((s.origin, s.normal)),
+            curves: s.curves.clone(),
+        })
+        .collect();
+    loft_rails_space(k, &space, rails, opts)
+}
+
+/// [`loft_rails`] through sections that may be planar or 3D curve chains in space
+/// ([`SpaceRailSection`]).
+///
+/// # Errors
+///
+/// As [`loft_rails`].
+pub fn loft_rails_space(
+    k: &mut Kernel,
+    sections: &[SpaceRailSection<'_>],
+    rails: &[&Curve],
+    opts: &RailLoftOptions,
+) -> Result<RailedLoft> {
     let loft = Loft::new(k, sections, rails, opts)?;
     let spans = sections.len() - 1;
-    // the sections, with the rails' own crossings
+    // the sections, with the rails' own hits
     let mut wires: Vec<Wire> = Vec::new();
-    for (i, s) in sections.iter().enumerate() {
+    for i in 0..sections.len() {
         let curves = loft
             .sections
             .get(i)
@@ -957,9 +1290,10 @@ pub fn loft_rails(
             .iter()
             .map(|(c, _)| c.clone())
             .collect();
-        let mut hits = Vec::new();
-        for rail in rails {
-            hits.push(rail_crossing(k, rail, s.origin, s.normal)?);
+        let mut hits = Vec::with_capacity(rails.len());
+        for anchors in &loft.anchors {
+            let a = anchors.get(i).ok_or_else(|| invalid("a rail's anchors"))?;
+            hits.push((a.t, a.hit));
         }
         let (span, f) = if i < spans {
             (i, 0.0)
