@@ -856,6 +856,17 @@ mod tests {
     }
 
     #[test]
+    fn the_split_feature_s_halves_match_solidcore() {
+        use solidcraft_geom::PlaneGeom as _;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let plane = Plane::from_normal(v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0)).unwrap();
+        let half =
+            |positive: bool| move || crate::half_space(&cube()?, &plane, positive)?.0.ok_or_else(|| crate::KernelError::Failed("empty".into()));
+        same_solid("the half above z 3", 700.0, half(true));
+        same_solid("the half below z 3", 300.0, half(false));
+    }
+
+    #[test]
     fn sheets_trimmed_by_a_plane_match_solidcore() {
         use crate::route::foreign::{Kernel, fell_back, set_kernel};
         use solidcraft_geom::PlaneGeom as _;
