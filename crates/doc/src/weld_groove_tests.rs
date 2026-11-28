@@ -941,3 +941,25 @@ fn walls_apart_join_straight_lines_and_tell_the_halves_of_a_circle_apart() {
     assert_eq!(apart(&[into_left], &[into_right], tol), None);
     assert_eq!(apart(&[into_left], &[into_left], tol), Some(0.0));
 }
+
+/// CodeRabbit on #22504: the rib of [`a_rib_under_a_plate_inside_the_mark_leaves_no_seam_under_the_root`]
+/// only over the last 0.04 of the joint (z from 119.96 to 120), joined to the left plate: still
+/// inside the mark, so still no seam under the root.
+#[test]
+fn a_rib_inside_the_mark_only_at_the_joint_s_end_leaves_no_seam_under_the_root() {
+    let plain = plate(&[(-40.0, 0.0), (-40.0, -6.0), (0.0, -6.0), (0.0, 0.0)]);
+    let end = Plane { origin: Vec3::new(0.0, 0.0, 119.96), ..Plane::XY };
+    let rib = swept_by(&end, &[(-2.0, -6.0), (-1.5, -7.0), (-1.0, -6.0)], 0.04);
+    let left = solidcraft_kernel::boolean(&plain, &rib, solidcraft_kernel::BoolOp::Union).unwrap().unwrap();
+    let right = plate(&[(0.0, 0.0), (0.0, -6.0), (40.0, -6.0), (40.0, 0.0)]);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let (l, r) = (pick(&left, &lf), pick(&right, &rf));
+    for picks in [[&l, &r], [&r, &l]] {
+        let got = groove_weld(picks, &flat()).unwrap_err();
+        let GrooveRefusal::NoGroove(no) = got else {
+            panic!("not NoGroove: {got:?}");
+        };
+        assert_eq!(no.other, None);
+    }
+}

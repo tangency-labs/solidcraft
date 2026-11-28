@@ -236,12 +236,13 @@ fn hole(x: f64, z: f64) -> [(f64, f64); 4] {
 
 /// The beveled T of [`t_joint`] on a through plate with holes: one under the weld but past the
 /// stem's end (z = -20), one beside the stem away from the weld (x = -30): both filled as without
-/// them; one under the weld beside the stem (x from 2 to 4, z = 50): refused as interrupted,
+/// them; one under the weld beside the stem (x from 2 to 4, z = 50), and one past the stem's end
+/// that reaches 0.04 under it (z from -3.96 to 0.04, CodeRabbit on #22504): refused as interrupted,
 /// naming the through part whichever part is first.
 #[test]
 fn a_hole_in_the_through_plate_matters_only_under_the_weld() {
     let (_, stem, bevel) = t_joint(0.0);
-    for (holes, builds) in [(hole(2.0, -20.0), true), (hole(-30.0, 50.0), true), (hole(2.0, 50.0), false)] {
+    for (holes, builds) in [(hole(2.0, -20.0), true), (hole(-30.0, 50.0), true), (hole(2.0, 50.0), false), (hole(2.0, -3.96), false)] {
         let through = through_plate(&THROUGH, &[&holes]);
         let top = facing(&through, UP);
         assert_eq!(top.len(), 1, "{holes:?}");
@@ -272,5 +273,20 @@ fn a_fillet_leg_that_runs_off_a_narrowing_through_face_is_refused() {
         assert_eq!(groove_fillet_weld(picks, &flat(), legs(4.0, 8.0)).unwrap_err(), GrooveRefusal::LegPastFace { part });
         let volume = groove_fillet_weld(picks, &flat(), legs(4.0, 4.0)).unwrap().body.volume_at(1e-9).unwrap();
         assert!((volume - 120.0 * 26.0).abs() <= 1e-6 * volume, "{volume}");
+    }
+}
+
+/// CodeRabbit on #22504: the T of [`t_joint`] on a through plate whose edge on the fillet's side
+/// reaches x = -8 only 0.04 short of the stem's end (from x = -40 at z = -40 to x = 0.01 at
+/// z = 160): a through leg of 8 is on the face but for its last 0.04, by less than a skin of volume,
+/// and is refused at the end.
+#[test]
+fn a_fillet_leg_that_leaves_the_through_face_only_at_its_end_is_refused() {
+    let (_, stem, bevel) = t_joint(0.0);
+    let through = through_plate(&[(-40.0, -40.0), (40.0, -40.0), (40.0, 160.0), (0.01, 160.0)], &[]);
+    let top = facing(&through, UP);
+    let [t, s] = t_picks(&through, &stem, &top, &bevel);
+    for (picks, part) in [([&s, &t], JointPart::Right), ([&t, &s], JointPart::Left)] {
+        assert_eq!(groove_fillet_weld(picks, &flat(), legs(4.0, 8.0)).unwrap_err(), GrooveRefusal::LegPastFace { part });
     }
 }

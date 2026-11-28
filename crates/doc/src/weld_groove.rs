@@ -731,7 +731,12 @@ impl Piece<'_> {
     /// middle.
     fn in_space(&self, p: Vec2) -> [f64; 3] {
         let [lo, hi] = self.along;
-        let on = affine::parallelogram_point(point(self.frame.origin), self.d, point(self.frame.x), (lo + hi) / 2.0, p.x);
+        self.at(p, (lo + hi) / 2.0)
+    }
+
+    /// The point `p` of the frame's plane moved `along` along `d` from the frame's origin.
+    fn at(&self, p: Vec2, along: f64) -> [f64; 3] {
+        let on = affine::parallelogram_point(point(self.frame.origin), self.d, point(self.frame.x), along, p.x);
         affine::parallelogram_point(on, point(self.frame.y), self.d, p.y, 0.0)
     }
 
@@ -865,10 +870,10 @@ fn through_wall(pick: &GroovePick<'_>, parts: [JointPart; 2], stem: &[Seg2], pie
         return Err(off);
     };
     let (toe, root) = (Vec2::new(start.x + hit.distance, start.y), ends(last).1);
-    if near(toe, root, tol) || !on_face(pick, pick.outer, piece.in_space(root), tol)? {
+    if near(toe, root, tol) || !on_face_along(pick, pick.outer, root, piece)? {
         return Err(off);
     }
-    if !whole_under(pick, pick.outer, toe, root, piece)? {
+    if !on_face_along(pick, pick.outer, toe, piece)? || !whole_under(pick, pick.outer, toe, root, piece)? {
         return Err(GrooveRefusal::GrooveFaceInterrupted { part: parts[1], face: pick.outer });
     }
     Ok(Some(vec![Seg2::Line { a: toe, b: root }]))
@@ -928,12 +933,12 @@ fn fillet_fill(
     let out = if affine::distance_along(c3, u3, [root.x, root.y, 0.0]) > 0.0 { -fillet.through } else { fillet.through };
     let [rx, ry, _] = affine::parallelogram_point(c3, u3, [0.0; 3], out, 0.0);
     let right = Vec2::new(rx, ry);
-    if fillet.stem > down && !on_face(picks[0], picks[0].outer, piece.in_space(left), tol)? {
+    if fillet.stem > down && !on_face_along(picks[0], picks[0].outer, left, piece)? {
         return Err(GrooveRefusal::LegPastFace { part: parts[0] });
     }
     // the leg on the through part's face all along the stretch, not only in its middle: a face
     // that narrows or a hole beside the stem leaves it (CodeRabbit on #22504)
-    if !on_face(picks[1], picks[1].outer, piece.in_space(right), tol)? || !whole_under(picks[1], picks[1].outer, c, right, piece)? {
+    if !on_face_along(picks[1], picks[1].outer, right, piece)? || !whole_under(picks[1], picks[1].outer, c, right, piece)? {
         return Err(GrooveRefusal::LegPastFace { part: parts[1] });
     }
     let mut fill = match fill_channel(&[Seg2::Line { a: left, b: c }], &[Seg2::Line { a: right, b: c }], None, options)? {
@@ -976,22 +981,23 @@ fn span(p: Vec2, q: Vec2) -> Option<f64> {
     affine::segment_distance(&Seg2::Line { a: p, b: p }, q)
 }
 
-/// How deep below a face, and how far in from a piece's ends, a slab ([`slab`]) starts: a quarter
-/// of [`MARK_HEIGHT`], so that its faces are not the part's own.
+/// How deep below a face a slab ([`slab`]) starts: a quarter of [`MARK_HEIGHT`], so that its side
+/// along the face is not the face itself.
 const SLAB_GAP: f64 = MARK_HEIGHT / 4.0;
 
-/// The quadrilateral `corners` (in the frame's plane) swept along `piece`, [`SLAB_GAP`] short of
-/// each of its ends.
+/// The quadrilateral `corners` (in the frame's plane) swept along the whole of `piece`, end to end
+/// (CodeRabbit on #22504: a slab short of the ends would not see what lies within that of them).
 fn slab(corners: [Vec2; 4], piece: &Piece<'_>) -> Result<Body> {
     let region = Region2 { outer: Loop2::polygon(&corners), holes: Vec::new() };
     let [lo, hi] = piece.along;
-    Ok(extrude_planar_regions(piece.frame, &[region], lo + SLAB_GAP, hi - SLAB_GAP)?)
+    Ok(extrude_planar_regions(piece.frame, &[region], lo, hi)?)
 }
 
-/// The volume a slab `width` wide over `piece` may leave from a boolean and still count as
-/// nothing: a skin [`ALLOWANCE`] zone tolerances thick over it.
+/// The volume a slab `width` wide (and [`MARK_HEIGHT`] - [`SLAB_GAP`] deep) may leave from a
+/// boolean and still count as nothing: a skin [`ALLOWANCE`] zone tolerances thick over its two end
+/// faces, the only faces it may share with a part (a plate that ends where the piece does).
 fn skin(width: f64, piece: &Piece<'_>) -> f64 {
-    piece.zone * ALLOWANCE * width * (piece.along[1] - piece.along[0])
+    2.0 * piece.zone * ALLOWANCE * width * (MARK_HEIGHT - SLAB_GAP)
 }
 
 /// The volume of a boolean's result `got`, none for an empty one; `None` where the kernel
@@ -1005,7 +1011,7 @@ fn volume_of(got: Option<Body>) -> Option<f64> {
 /// [`SLAB_GAP`] to [`MARK_HEIGHT`] inside the part, lies in its material (cut by the part, at most
 /// a [`skin`] is left; [`boolean`]). A hole, a notch, or an edge of the face that crosses the strip,
 /// straight or curved, leaves more (CodeRabbit on #22504). `true` for a face that is not a plane.
-/// shortcut: a gap shallower than [`SLAB_GAP`], or within it of the piece's ends, is not seen.
+/// shortcut: a gap shallower than [`SLAB_GAP`] is not seen.
 fn whole_under(pick: &GroovePick<'_>, face: usize, a: Vec2, b: Vec2, piece: &Piece<'_>) -> Result<bool> {
     let Some(n) = pick.part.face_plane_normal(face)? else {
         return Ok(true);
@@ -1033,6 +1039,20 @@ fn clear_under(pick: &GroovePick<'_>, seam: &Seam, piece: &Piece<'_>) -> Result<
     let (near, far) = if seam.normal.y > 0.0 { (y + SLAB_GAP, y + MARK_HEIGHT) } else { (y - SLAB_GAP, y - MARK_HEIGHT) };
     let probe = slab([Vec2::new(x - half, near), Vec2::new(x + half, near), Vec2::new(x + half, far), Vec2::new(x - half, far)], piece)?;
     Ok(volume_of(boolean(&probe, pick.part, BoolOp::Intersect)?).is_some_and(|v| v <= skin(2.0 * half, piece)))
+}
+
+/// Whether the point `p` of the frame's plane lies on record face `face` of `pick`'s part at both
+/// ends of `piece` and in its middle, within [`ALLOWANCE`] zone tolerances: a line along the joint
+/// that leaves the face only near an end, by less than [`whole_under`]'s skin, is seen there
+/// (CodeRabbit on #22504).
+fn on_face_along(pick: &GroovePick<'_>, face: usize, p: Vec2, piece: &Piece<'_>) -> Result<bool> {
+    let ([lo, hi], tol) = (piece.along, piece.zone * ALLOWANCE);
+    for along in [lo, (lo + hi) / 2.0, hi] {
+        if !on_face(pick, face, piece.at(p, along), tol)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Whether point `p` lies on record face `face` of `pick`'s part, within `tol`.
