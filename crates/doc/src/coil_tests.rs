@@ -71,3 +71,19 @@ fn all_profiles_are_omitted() {
     assert_eq!(saved, v);
     assert!(saved.get("profiles").is_none());
 }
+
+#[test]
+fn a_triangle_coil_from_an_end_face_saves_without_a_diameter() {
+    let v = json!({
+        "type": "coil",
+        "base": [0.0, 0.0, 0.0],
+        "axis": [0.0, 0.0, 1.0],
+        "axis_ref": {"type": "model", "geo": {"type": "face", "at": [5.0, 5.0, 40.0]}},
+        "pitch": "8",
+        "turns": "3",
+        "section_size": "2",
+        "section": "triangle",
+        "operation": "cut"
+    });
+    assert_eq!(serde_json::to_value(kind(v.clone())).unwrap(), v);
+}

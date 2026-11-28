@@ -257,7 +257,7 @@ impl Surface {
                 Surface::nurbs(degree, nu, nv, u_knots, v_knots, &flat, Some(&weights))
             }
             // A ball patch's label has no (u, v): its face's NURBS form is the surface.
-            S::PlacedRevolution { .. } | S::BallPatch { .. } | S::Blend { .. } => Err(Error::Unsupported),
+            S::PlacedRevolution { .. } | S::BallPatch { .. } | S::Blend { .. } | S::Sweep { .. } => Err(Error::Unsupported),
         }
     }
 

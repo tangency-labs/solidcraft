@@ -6393,7 +6393,7 @@
   "ui.drawing_detail.step_size": "Feu clic per fixar la mida de la regió.",
   "ui.drawing_detail.title": "Vista de detall",
   "ui.drawing_dimension_tool.pick": "Feu clic en una aresta d'una vista del dibuix.",
-  "ui.drawing_dimension_tool.place": "Feu clic al full per col·locar la cota.",
+  "ui.drawing_dimension_tool.place": "Feu clic al full o premeu Retorn per col·locar la cota.",
   "ui.drawing_export.all_sheets": "Tots els fulls",
   "ui.drawing_export.dxf": "DXF (línies)",
   "ui.drawing_export.dxf_note": "El full mostrat, amb les seves línies en mil·límetres i una capa per a cada tipus de línia. Les vistes ombrejades i les imatges s'ometen.",

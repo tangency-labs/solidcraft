@@ -281,6 +281,24 @@ fn glyphs_and_snaps() {
 }
 
 #[test]
+fn auto_constrain_refuses_parameter_exhaustion_without_changing_the_design() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 5}));
+    s.doc_mut().params = (0..solidcraft_doc::MAX_PARAMS - 1)
+        .map(|i| solidcraft_doc::Param { name: format!("p{i}"), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: false })
+        .collect();
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let error = s.execute("sketch.auto_constrain", &json!({})).unwrap_err();
+    assert!(error.to_string().contains("too many parameters"), "{error}");
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo);
+    let result = run(&mut s, "sketch.auto_constrain", json!({"dimensions": false}));
+    assert_eq!(result["dof"], 3);
+    assert_eq!(s.doc.params.len(), solidcraft_doc::MAX_PARAMS - 1);
+}
+
+#[test]
 fn auto_constrain_fully_constrains_a_rough_sketch() {
     let mut s = new_sketch();
     // A slightly crooked closed rectangle and a circle inside.
@@ -382,12 +400,12 @@ fn internal_freedom_queries_skip_redundancy_and_keep_constraint_acceptance() {
     let mut doc = solidcraft_doc::Document::default();
     let before = sk.clone();
     let (rejected, profile) = capture(|| super::try_add(&mut sk, &mut doc, k, dof, false));
-    assert_eq!(rejected, None, "a duplicate must not be accepted as a DOF reduction");
+    assert_eq!(rejected.unwrap(), None, "a duplicate must not be accepted as a DOF reduction");
     assert_eq!(sk, before);
     assert_eq!(profile.counters.redundancy_checks, 0);
 
     let (accepted, profile) = capture(|| super::try_add(&mut sk, &mut doc, ConstraintKind::DistanceX { p: 0, q, value: 6.0 }, dof, false));
-    assert_eq!(accepted, Some(0));
+    assert_eq!(accepted.unwrap(), Some(0));
     assert_eq!(profile.counters.redundancy_checks, 0);
     let full = solidcraft_sketch::solve(&mut sk);
     assert!(full.ok());

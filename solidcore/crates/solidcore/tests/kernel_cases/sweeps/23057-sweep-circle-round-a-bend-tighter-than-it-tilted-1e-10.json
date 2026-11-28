@@ -1,0 +1,281 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "sweep",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "cap": true,
+        "frame": "follow",
+        "path": [
+          {
+            "line": {
+              "end": [
+                2.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                -1.0,
+                -1e-10,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 1.0,
+              "reference": [
+                1e-10,
+                -1.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "angle": 1.3962634015956294,
+        "cap": true,
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          2.0,
+          0.6,
+          0.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                -1.0,
+                -1.000000082740371e-10,
+                0.0
+              ],
+              "center": [
+                2.0,
+                0.0,
+                0.0
+              ],
+              "end": 0.0,
+              "radius": 1.0,
+              "reference": [
+                1.000000082740371e-10,
+                -1.0,
+                0.0
+              ],
+              "start": -2.214297435588181
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -1.0,
+                -1.000000082740371e-10,
+                0.0
+              ],
+              "center": [
+                2.0,
+                0.0,
+                0.0
+              ],
+              "end": 2.2142974355881813,
+              "radius": 1.0,
+              "reference": [
+                1.000000082740371e-10,
+                -1.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1.99999999994,
+                0.6,
+                -0.8000000000000007
+              ],
+              "start": [
+                1.99999999994,
+                0.6,
+                0.7999999999999998
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "angle": 1.3962634015956294,
+        "cap": true,
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          2.0,
+          0.6,
+          0.0
+        ],
+        "profile": [
+          {
+            "line": {
+              "end": [
+                1.99999999994,
+                0.6,
+                0.8000000000000007
+              ],
+              "start": [
+                1.99999999994,
+                0.6,
+                -0.7999999999999998
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -1.0,
+                -1.000000082740371e-10,
+                0.0
+              ],
+              "center": [
+                2.0,
+                0.0,
+                0.0
+              ],
+              "end": 4.068887871591405,
+              "radius": 1.0,
+              "reference": [
+                1.000000082740371e-10,
+                -1.0,
+                0.0
+              ],
+              "start": 2.2142974355881804
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b12",
+        "b11"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "23057-sweep-circle-round-a-bend-tighter-than-it-tilted-1e-10",
+  "expected": {
+    "body_count": 1,
+    "method": "The straight stretch is a cylinder, pi * 1^2 * 2 = 2 pi. Round the bend (axis through (2, 0.6), parallel to z, turned phi = 80 deg) the part of the disc beyond the axis (y > 0.6, rho = y - 0.6 <= 0.4) turns back into the cylinder: a point moves to x = 2 - rho sin(t) >= 1.6 and y = 0.6 + rho cos(t) with y^2 no larger, so it adds nothing. The near part (y < 0.6, rho = 0.6 - y) turns into x >= 2, apart from the cylinder, and adds by Pappus phi * integral(rho dA) = phi * (0.6 A + (2/3)(1 - 0.36)^(3/2)), A = pi - (acos(0.6) - 0.6 * 0.8) the disc's area below y = 0.6. V = 2 pi + (4 pi / 9) * 1.9579117946862417 = 9.016945889652078. A tilt t of the profile plane moves no point of the body by more than about t (the profile has radius 1 about the origin), so the volume moves by at most the area (24.8) times 1e-9, under 3e-9 relative; the sketch's 10-digit arc end moves the turn by under 2e-10 rad: tolerance 1e-8 relative.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#23057"
+    ],
+    "tolerance": {
+      "rel": 1e-08
+    },
+    "volume_mm3": 9.016945889652078,
+    "what": "a circle of radius 1 swept along a 2 long line and then a tangent arc of radius 0.6 turning 80 deg about (2, 0.6), its profile plane tilted 1e-10 rad off square. The bend is tighter than the profile, so SolidCraft cuts the profile along the bend's axis, turns each side about it and joins them to the straight stretch. Tilted 1e-10, the near side's torus passes 6e-11 off the axis and the first union was refused ('the drop found no foot point'): the drop of a point just past the apex, on the part of the end circle that leaves that face, is rightly bounded to nothing, which was taken as an error."
+  },
+  "expressible": true,
+  "gallery_note": "The union of the straight stretch and the near side's turn was refused ('the drop found no foot point') until the drop curve read a drop proved empty within its bound as the curve leaving the face: just past the apex circled here, where the torus face meets the bend's axis, the stretch's end circle runs onto the part beyond the axis, which that face does not reach (4.3e-3 away), so that start starts nothing, as it already did for the square profile. The result has the square profile's face, edge and vertex counts and volume, but one plane/torus edge (the end cap's arc) carries tolerance 9.8e-3, 981 times the body's, under the pointer check's ratio of 1000; the near side's revolve already carries it, and the -1e-10 tilt builds with it on main.",
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 6,
+      "vertices": 5
+    }
+  },
+  "result": [
+    {
+      "body": "W",
+      "made": "b13"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 24.793668327472528,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 6,
+      "vertices": 5,
+      "volume_mm3": 9.016945889652401
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#23057"
+  ],
+  "traced_ops": [
+    "sweep",
+    "revolve",
+    "revolve",
+    "boolean",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a circle of radius 1 swept along a 2 long line and then a tangent arc of radius 0.6 turning 80 deg about (2, 0.6), its profile plane tilted 1e-10 rad off square. The bend is tighter than the profile, so SolidCraft cuts the profile along the bend's axis, turns each side about it and joins them to the straight stretch. Tilted 1e-10, the near side's torus passes 6e-11 off the axis and the first union was refused ('the drop found no foot point'): the drop of a point just past the apex, on the part of the end circle that leaves that face, is rightly bounded to nothing, which was taken as an error.",
+  "why_not": []
+}

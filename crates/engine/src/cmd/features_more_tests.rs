@@ -2957,7 +2957,9 @@ fn a_tapered_foot_under_a_part_joins_as_drawn() {
 /// along the sketch normal and the walls are drafted from there, so the section at the start
 /// plane is the profile itself and the solid is the frustum over it, moved along the normal by
 /// the offset. Controls that build today: the same extrude with the taper and no offset, and
-/// with the offset and no taper. Two-sided and symmetric tapers are still refused, by name.
+/// with the offset and no taper. A taper with a symmetric offset, and one on a thin wall with
+/// two sides, are still refused, by name (two-sided and symmetric tapers build:
+/// `a_symmetric_taper_drafts_both_halves_from_the_start`).
 #[test]
 fn a_drafted_extrude_starts_at_an_offset() {
     use solidcraft_kernel::{FaceSurface, face_surface, measure as measure_body};
@@ -3045,13 +3047,207 @@ fn a_drafted_extrude_starts_at_an_offset() {
     }
 
     // The extents that are still to come are refused, and say which they are.
-    for p in [json!({"distance":h,"distance2":5,"taper":"6 deg"}), json!({"distance":h,"direction":"symmetric","taper":"6 deg"})] {
+    for (p, why) in [
+        (json!({"distance":h,"direction":"symmetric","start_offset":off,"symmetric_offset":true,"taper":"6 deg"}), "a taper with symmetric offset"),
+        (json!({"distance":h,"distance2":5,"thin":true,"thickness":1,"taper":"6 deg"}), "a taper on a thin extrude with two sides or symmetric"),
+    ] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
         run(&mut s, "sketch.finish", json!({}));
         let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
-        assert!(e.contains("not supported yet: taper with two-sided or symmetric extents"), "{p}: {e}");
+        assert!(e.contains(&format!("not supported yet: {why}")), "{p}: {e}");
+    }
+}
+
+/// The solid a drafted extrude of the `w` x `d` rectangle at (0, 0)..(w, d) on XY makes: one body
+/// of one lump. Its volume, area, height range and faces: `walls` planes leaning by the tapers
+/// and two flat caps, at `z0` and `z1`, none on the plane the halves meet on.
+fn drafted_solid(s: &mut Session, (w, d): (f64, f64), (z0, z1): (f64, f64), walls: usize) -> (f64, f64) {
+    use solidcraft_kernel::{FaceSurface, face_surface, measure as measure_body};
+    let v = volume(s);
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 1, "one body");
+    let b = &st.body("B").unwrap().body;
+    let m = measure_body(b).unwrap();
+    assert_eq!(m.shells, 1, "one lump");
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    assert!((m.bbox.min.z - z0).abs() < 1e-9 && (m.bbox.max.z - z1).abs() < 1e-9, "{:?} for z {z0}..{z1}", m.bbox);
+    let (mut planes, mut caps) = (0, 0);
+    for i in 0..b.face_count() {
+        match face_surface(b, i) {
+            Some(FaceSurface::Plane { normal, point }) if normal.z.abs() > 1.0 - 1e-9 => {
+                caps += 1;
+                assert!((point.z - z0).abs() < 1e-9 || (point.z - z1).abs() < 1e-9, "a cap at z = {}", point.z);
+            }
+            Some(FaceSurface::Plane { .. }) => planes += 1,
+            other => panic!("face {i} is {other:?}"),
+        }
+    }
+    assert_eq!((planes, caps), (walls, 2), "{w} x {d}");
+    (v, m.area)
+}
+
+/// A rectangle `w` x `d` drafted so each side moves out by `s * t` at the signed height `s` along
+/// the first side's way (`t` = tan of the taper): A(s) = (w + 2 s t)(d + 2 s t), so over `s0..s1`
+/// V = w d (s1 - s0) + (w + d) t (s1^2 - s0^2) + 4/3 t^2 (s1^3 - s0^3) (exact: A is quadratic).
+/// The frustum of height h is `drafted_volume(w, d, 0, h, t)`.
+fn drafted_volume(w: f64, d: f64, s0: f64, s1: f64, t: f64) -> f64 {
+    w * d * (s1 - s0) + (w + d) * t * (s1 * s1 - s0 * s0) + 4.0 / 3.0 * t * t * (s1.powi(3) - s0.powi(3))
+}
+
+/// Area of the walls of that rectangle's frustum of height `h` drafted `a` radians: four
+/// trapezoids, each (base + top)/2 by the slant height h / cos a.
+fn drafted_walls(w: f64, d: f64, h: f64, a: f64) -> f64 {
+    let t = a.tan();
+    2.0 * h / a.cos() * ((w + h * t) + (d + h * t))
+}
+
+/// A symmetric extrude with a taper (#22419): each half is drafted by the taper from the start
+/// plane outward, so the solid is two frusta over the profile, back to back. 24 mm total at
+/// 6 deg: V = 2 * frustum_12(tan 6), and the area is the two far caps (w + 2*12 t)(d + 2*12 t)
+/// plus both halves' walls. The halves meet on the profile at z = 0, which is no face.
+#[test]
+fn a_symmetric_taper_drafts_both_halves_from_the_start() {
+    let (w, d, h) = (30.0, 20.0, 12.0);
+    let a = 6f64.to_radians();
+    let t = a.tan();
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":2.0 * h,"direction":"symmetric","taper":"6 deg","body_name":"B"}));
+    let (v, area) = drafted_solid(&mut s, (w, d), (-h, h), 8);
+    let v_want = 2.0 * drafted_volume(w, d, 0.0, h, t);
+    let far = (w + 2.0 * h * t) * (d + 2.0 * h * t);
+    let a_want = 2.0 * (far + drafted_walls(w, d, h, a));
+    assert!(rel(v, v_want) < 1e-9, "{v} mm3 for {v_want}");
+    assert!(rel(area, a_want) < 1e-9, "{area} mm2 for {a_want}");
+}
+
+/// Two Sides with a taper on each (#22419): the first side 12 mm up drafted 6 deg, the second
+/// 5 mm down drafted `taper2`, each from the start plane, so V = frustum_12(tan 6) +
+/// frustum_5(tan t2). Without `taper2` the second side takes the first's taper, as a symmetric
+/// extrude's halves do. With `taper2` = 0 the second side is the straight prism, w d 5. With
+/// `taper2` = -6 deg the second side's walls continue the first's
+/// through the profile: one drafted solid over s in -5..12, whose walls are one plane each.
+#[test]
+fn a_two_sided_taper_drafts_each_side_by_its_own_taper() {
+    let (w, d) = (30.0, 20.0);
+    let tan = |deg: f64| deg.to_radians().tan();
+    // (taper2, wall faces, the volume: side 1 over 0..12 at 6 deg, side 2 over 0..5 at its taper)
+    let f = |s0: f64, s1: f64, deg: f64| drafted_volume(w, d, s0, s1, tan(deg));
+    for (taper2, walls, v_want) in [
+        (Some("-3 deg"), 8, f(0.0, 12.0, 6.0) + f(0.0, 5.0, -3.0)),
+        (None, 8, f(0.0, 12.0, 6.0) + f(0.0, 5.0, 6.0)),
+        // An undrafted second side is the straight prism over the profile: w d 5.
+        (Some("0 deg"), 8, f(0.0, 12.0, 6.0) + w * d * 5.0),
+        // One plane through the profile: the section at s along the first side is grown by
+        // s tan 6, for s from -5 to 12.
+        (Some("-6 deg"), 4, f(-5.0, 12.0, 6.0)),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"distance":12,"distance2":5,"taper":"6 deg","body_name":"B"});
+        if let Some(t2) = taper2 {
+            p["taper2"] = json!(t2);
+        }
+        run(&mut s, "solid.extrude", p);
+        let (v, _) = drafted_solid(&mut s, (w, d), (-5.0, 12.0), walls);
+        assert!(rel(v, v_want) < 1e-9, "taper2 {taper2:?}: {v} mm3 for {v_want}");
+    }
+}
+
+/// A two-sided drafted cut inside a block (#22419) takes out exactly the two frusta: the block,
+/// 50 x 40 x 40 from (-10, -10, -20), less frustum_12(tan 6) + frustum_5(tan -3) over the
+/// 30 x 20 profile, which stays inside it (it grows at most 12 tan 6 = 1.3 mm).
+#[test]
+fn a_two_sided_drafted_cut_removes_both_frusta() {
+    let (w, d) = (30.0, 20.0);
+    let tan = |deg: f64| deg.to_radians().tan();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":50,"width":40,"height":40,"corner":[-10,-10,-20],"body_name":"Block"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":12,"distance2":5,"taper":"6 deg","taper2":"-3 deg","operation":"cut","targets":["Block"]}));
+    let removed = drafted_volume(w, d, 0.0, 12.0, tan(6.0)) + drafted_volume(w, d, 0.0, 5.0, tan(-3.0));
+    let want = 50.0 * 40.0 * 40.0 - removed;
+    let v = volume(&mut s);
+    assert!(rel(v, want) < 1e-9, "{v} mm3 for {want}");
+    assert_eq!(s.model.state().bodies.len(), 1);
+}
+
+/// A taper renames no cap (#22419): a symmetric extrude started 8 mm up, 10 mm in total (both
+/// caps above the sketch plane, at 3 and 13 along its normal), a two-sided one, 12 up and 5 down,
+/// and that one with an undrafted second side (`taper2` 0) give their caps the names the
+/// straight extrude gives them. The symmetric one again on a sketch whose normal is -Z (x along
+/// X, y along -Y), where its caps lie at z = -3 and -13: two caps named alike are numbered by
+/// where they lie, whichever way the sketch faces.
+#[test]
+fn a_taper_on_two_sides_keeps_the_straight_cap_names() {
+    let (w, d) = (30.0, 20.0);
+    let xy = json!("XY");
+    let down = json!({"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,-1,0]});
+    for (plane, p, y, (z0, z1)) in [
+        (&xy, json!({"distance":10,"direction":"symmetric","start_offset":8}), d / 2.0, (3.0, 13.0)),
+        (&xy, json!({"distance":12,"distance2":5}), d / 2.0, (-5.0, 12.0)),
+        (&xy, json!({"distance":12,"distance2":5,"taper2":"0 deg"}), d / 2.0, (-5.0, 12.0)),
+        (&down, json!({"distance":10,"direction":"symmetric","start_offset":8}), -d / 2.0, (-3.0, -13.0)),
+    ] {
+        let caps = |taper: Option<&str>| {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane":plane}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let mut p = p.clone();
+            if let Some(t) = taper {
+                p["taper"] = json!(t);
+            }
+            run(&mut s, "solid.extrude", p);
+            let pts = [solidcore_record::Vec3::new(w / 2.0, y, z0), solidcore_record::Vec3::new(w / 2.0, y, z1)];
+            solidcraft_doc::naming::face_names_at(&s.model.state(), &pts)
+        };
+        let straight = caps(None);
+        assert!(straight.iter().all(|n| !n.is_empty()), "{plane} {p}: {straight:?}");
+        let tapered = caps(Some("6 deg"));
+        assert_eq!(tapered, straight, "{plane} {p}: tapered {tapered:?}, straight {straight:?}");
+    }
+}
+
+/// `taper2` is the second side's: without `distance2` the command refuses it, by name.
+#[test]
+fn a_second_taper_needs_a_second_side() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("solid.extrude", &json!({"distance":12,"taper":"6 deg","taper2":"3 deg"})).unwrap_err().to_string();
+    assert!(e.contains("`taper2` goes with `distance2`"), "{e}");
+}
+
+/// A second side that runs Through All or To Object (#18691) takes no taper yet: a taper on the
+/// first side (which the second would take) or one of its own is refused, by name, and the
+/// design keeps no half-built feature.
+#[test]
+fn a_taper_with_the_second_side_through_all_or_to_object_is_refused() {
+    for second in [json!({"through_all2":true}), json!({"to2":[0,0,-20]})] {
+        for tapers in [json!({"taper":"6 deg"}), json!({"taper":"6 deg","taper2":"3 deg"}), json!({"taper":"0 deg","taper2":"3 deg"})] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length":40,"width":40,"height":40,"corner":[-20,-20,-20],"body_name":"Box"}));
+            run(&mut s, "sketch.create", json!({"plane":"XY","name":"Hole"}));
+            run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":5}));
+            run(&mut s, "sketch.finish", json!({}));
+            let before = s.doc.to_json();
+            let mut p = json!({"sketch":"Hole","distance":"5 mm","operation":"cut","targets":["Box"]});
+            p.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+            p.as_object_mut().unwrap().extend(tapers.as_object().unwrap().clone());
+            let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
+            assert!(e.contains("a taper with the second side Through All or To Object"), "{second} {tapers}: {e}");
+            assert_eq!(s.doc.to_json(), before, "{second} {tapers}: the design is unchanged");
+        }
     }
 }
 
@@ -3910,27 +4106,22 @@ fn a_sketch_coil_refuses_contradictory_parameters() {
     assert!(e.contains("no sketch `Nope`"), "{e}");
 }
 
-/// A circle on XY does not lie in a plane through the default Z axis (XY's normal is Z).
-/// The command must refuse; a stacked slab of that disk would be π·2²·(pitch·revolutions) = 96π.
+/// A circle on XY, across the default Z axis (XY's normal is Z). The screw motion carries the
+/// disk up the axis as it turns, so each slice square to the axis is the disk turned: a twisted
+/// extrusion, which 0.50 built. By Cavalieri its volume is the disk's area times the height:
+/// π·2²·(pitch·revolutions) = 4π·24 = 96π.
 #[test]
-fn coil_profile_plane_across_the_axis_is_refused() {
+fn coil_profile_plane_across_the_axis_is_a_twisted_extrusion() {
     use std::f64::consts::PI;
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat section"}));
     run(&mut s, "sketch.circle.center", json!({"center": [20, 0], "diameter": 4}));
     run(&mut s, "sketch.finish", json!({}));
-    let built = s.execute("solid.coil", &json!({"sketch": "Flat section", "pitch": 8, "revolutions": 3, "body_name": "FlatCoil"}));
-    let err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
-    // Disk area π·2² = 4π, height 8·3 = 24: slab volume 96π.
-    let slab = PI * 4.0 * 24.0;
+    run(&mut s, "solid.coil", json!({"sketch": "Flat section", "pitch": 8, "revolutions": 3, "body_name": "FlatCoil"}));
+    let m = measure(&mut s);
+    assert_eq!(m["bodies"][0]["closed"], json!(true), "{m}");
     let vol = volume(&mut s);
-    let off = rel(vol, slab);
-    assert!(
-        err.contains("plane through its axis") && err.contains("across"),
-        "a profile on a plane across the axis must be refused, not built (volume {vol}, a slab is {slab}, rel {off}): {err}"
-    );
-    assert!(s.model.state().bodies.is_empty(), "a refused coil left a body of volume {vol}");
-    assert!(rel(vol, slab) > 1e-3, "left the slab volume {vol}");
+    assert!(rel(vol, PI * 4.0 * 24.0) < 1e-3, "{vol}");
 }
 
 /// The same circle on XZ, which contains the Z axis. Centroid 20 mm from the axis,
@@ -3946,18 +4137,43 @@ fn coil_profile_plane_on_xz_keeps_the_closed_form_volume() {
     assert!(rel(volume(&mut s), 2.0 * PI * 3.0 * (PI * 4.0) * 20.0) < 1e-3, "{}", volume(&mut s));
 }
 
-/// XZ offset 5 mm is parallel to Z (normal +Y) but the axis through the origin is 5 mm off it.
+/// XZ offset 5 mm is parallel to Z (normal +Y) but 5 mm off the axis, as 0.50 built it. Per
+/// radian a point moves k × r + (pitch / 2π) k; across the plane (along +Y) that is x, the
+/// distance along the plane from the line nearest the axis. The swept volume is then
+/// 2π·n·A·x̄ = 2π·3·4π·20 = 480π², the same as the circle on XZ itself.
 #[test]
-fn coil_profile_plane_parallel_but_not_through_the_axis_is_refused() {
+fn coil_profile_plane_parallel_to_the_axis_off_it_builds() {
+    use std::f64::consts::PI;
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 5, "name": "Section"}));
     run(&mut s, "sketch.circle.center", json!({"center": [20, 0], "diameter": 4}));
     run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
+    let vol = volume(&mut s);
+    assert!(rel(vol, 2.0 * PI * 3.0 * (PI * 4.0) * 20.0) < 1e-3, "{vol}");
+    // A 1 mm radius circle 10 mm along XZ offset 3, 5 turns at pitch 4: 2π·5·π·10 = 100π²
+    // (986.96 mm³), as 0.50 built it and as the same circle on XZ itself builds.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 3, "name": "Section"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 1}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 5, "pitch": 4}));
+    let vol = volume(&mut s);
+    assert!(rel(vol, 100.0 * PI * PI) < 1e-3, "{vol}");
+}
+
+/// The same offset plane with the circle centred on the line nearest the axis: its speed across
+/// the plane, x, runs from −2 to 2 over the profile, so the sweep would pass back over itself.
+#[test]
+fn coil_profile_that_would_sweep_over_itself_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 5, "name": "Section"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 4}));
+    run(&mut s, "sketch.finish", json!({}));
     let built = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
     let err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
-    let vol = volume(&mut s);
-    assert!(err.contains("plane through its axis"), "a plane parallel to the axis but not through it must be refused (volume {vol}): {err}");
-    assert!(s.model.state().bodies.is_empty(), "a refused coil left a body of volume {vol}");
+    assert!(err.contains("would sweep over itself"), "{err}");
+    assert!(s.model.state().bodies.is_empty(), "a refused coil left a body");
 }
 
 /// XY contains the X axis. A 1×1 mm square, sketch x −0.5..0.5 along the axis and sketch y 10..11
@@ -3973,30 +4189,26 @@ fn coil_profile_plane_on_xy_about_axis_x_is_a_coil() {
     assert!(rel(volume(&mut s), 2.0 * PI * 3.0 * 1.0 * 10.5) < 1e-3, "{}", volume(&mut s));
 }
 
-/// The thread-groove square, drawn on XY instead of a plane through the shaft axis.
-/// A refused cut must leave the cylinder's volume unchanged.
+/// The thread-groove square, drawn on XY across the shaft axis. Its farthest corner is
+/// √(19² + 2²) ≈ 19.1 mm from the axis, inside the 20 mm shaft, so the twisted extrusion lies
+/// in the shaft and the cut removes its whole volume: area 1 mm² times height 8·3 = 24 mm³.
 #[test]
-fn coil_profile_plane_across_the_axis_does_not_cut() {
+fn coil_profile_plane_across_the_axis_cuts_a_twisted_groove() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Groove"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [18, 1], "p1": [19, 2]}));
     run(&mut s, "sketch.finish", json!({}));
     let before = volume(&mut s);
-    let built = s.execute("solid.coil", &json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
-    let err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+    run(&mut s, "solid.coil", json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
     let after = volume(&mut s);
-    assert!(
-        err.contains("plane through its axis") && err.contains("across"),
-        "a cut on a plane across the axis must be refused (before {before}, after {after}): {err}"
-    );
-    assert!((after - before).abs() < 1e-6, "the shaft changed: before {before} after {after}");
+    assert!(((before - after) - 24.0).abs() < 1e-3 * 24.0, "removed {} of 24 (before {before}, after {after})", before - after);
 }
 
-/// A coil whose profile plane contained the axis, then redefined onto XY, which does not.
-/// The rebuild must refuse. Stacking the 1×1 mm square for pitch·revolutions = 24 mm is the slab.
+/// A coil whose profile plane contained the axis, then redefined onto XY across it. The rebuild
+/// keeps building, as a twisted extrusion of the 1×1 mm square: area 1 times height 8·3 = 24.
 #[test]
-fn coil_profile_plane_redefined_onto_xy_is_refused() {
+fn coil_profile_plane_redefined_onto_xy_rebuilds_as_a_twisted_extrusion() {
     use std::f64::consts::PI;
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
@@ -4005,18 +4217,149 @@ fn coil_profile_plane_redefined_onto_xy_is_refused() {
     run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
     // Same square as the valid YZ coil: V = 2 π n A r_centroid, A = 1, r = 10.5, n = 3.
     assert!(rel(volume(&mut s), 2.0 * PI * 3.0 * 1.0 * 10.5) < 1e-3, "the coil on YZ should build: {}", volume(&mut s));
-    let built = s.execute("sketch.redefine", &json!({"sketch": "Section", "plane": "XY"}));
-    let command_err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+    run(&mut s, "sketch.redefine", json!({"sketch": "Section", "plane": "XY"}));
     let feature_errs: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
-    let text = format!("{command_err} {}", feature_errs.join(" "));
-    // Area 1 mm² times height 8·3 = 24 mm.
-    let slab = 1.0 * 8.0 * 3.0;
+    assert!(feature_errs.is_empty(), "{feature_errs:?}");
     let vol = volume(&mut s);
-    let coil_ok = built.is_ok() && feature_errs.is_empty();
-    assert!(
-        text.contains("plane through its axis") && !(coil_ok && rel(vol, slab) < 1e-3),
-        "redefining onto XY must refuse, not leave a slab of {slab} (got {vol}; command={command_err:?}; features={feature_errs:?})"
+    assert!(rel(vol, 24.0) < 1e-3, "{vol}");
+}
+
+/// Helical flutes cut from sectors sketched on a shaft's end face, a design that built in 0.50
+/// and failed on open in 0.51.1. A Ø10 × 100 shaft; the end face split into eight 45° sectors;
+/// four alternate sectors cut as coils of 2 turns at pitch 50, each the shaft's full height.
+/// Each cut is a twisted extrusion of its sector, removing π·5²/8·100; four leave half the shaft,
+/// in four flutes of π·5²/8·100 = 981.748 each, as 0.50 built them.
+#[test]
+fn coil_cuts_from_end_face_sectors_make_helical_flutes() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 100, "body_name": "Shaft"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sectors"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+    for i in 0..8 {
+        let a = PI / 4.0 * f64::from(i);
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [5.0 * a.cos(), 5.0 * a.sin()]]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    for i in [0, 2, 4, 6] {
+        let a = PI / 4.0 * (f64::from(i) + 0.5);
+        run(
+            &mut s,
+            "solid.coil",
+            json!({"sketch": "Sectors", "profiles": [{"point": [3.0 * a.cos(), 3.0 * a.sin()]}], "turns": 2, "pitch": 50, "operation": "cut"}),
+        );
+    }
+    let feature_errs: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(feature_errs.is_empty(), "{feature_errs:?}");
+    let flute = PI * 25.0 / 8.0 * 100.0;
+    assert!(rel(volume(&mut s), 4.0 * flute) < 1e-3, "{}", volume(&mut s));
+    assert_eq!(s.model.state().bodies.len(), 4, "four flutes");
+    // The break showed when such a design was opened: the saved design rebuilds the same.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let reopen_errs: Vec<String> = reopened.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(reopen_errs.is_empty(), "{reopen_errs:?}");
+    assert!(rel(volume(&mut reopened), 4.0 * flute) < 1e-3, "{}", volume(&mut reopened));
+    assert_eq!(reopened.model.state().bodies.len(), 4, "four flutes after reopening");
+}
+
+/// A shaft of radius `radius` (a parameter `r`) and height 40 standing on the origin, and the
+/// volume a Coil cut takes out of it: 3 turns of pitch 8 with a section of `section_size` 2 on
+/// the shaft's wall, from `start` (axis and base, with or without a diameter).
+fn shaft_groove(radius: &str, start: Value, section: &str) -> (Session, f64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": radius}));
+    run(&mut s, "solid.cylinder", json!({"radius": "r", "height": 40, "body_name": "Shaft"}));
+    let before = volume(&mut s);
+    let mut p =
+        json!({"revolutions": 3, "pitch": 8, "section_size": 2, "section": section, "operation": "cut", "targets": ["Shaft"], "name": "Groove"});
+    p.as_object_mut().unwrap().extend(start.as_object().unwrap().clone());
+    run(&mut s, "solid.coil", p);
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let removed = before - volume(&mut s);
+    (s, removed)
+}
+
+/// Coil from an end face: the shaft's flat top gives the base (its centre), the axis (its
+/// outward normal, reversed to grow down into the shaft) and the diameter (its round edge). It
+/// cuts exactly what the same coil typed out in full cuts, and follows the shaft's radius.
+#[test]
+fn a_coil_cut_from_a_shafts_top_face_grooves_its_wall() {
+    let typed = |d: f64| json!({"base": [0, 0, 40], "axis": [0, 0, -1], "diameter": d});
+    let from_face = json!({"axis": {"face": [5, 5, 40]}, "reversed": true});
+    let (mut s, removed) = shaft_groove("20 mm", from_face, "circular");
+    let (_, expected) = shaft_groove("20 mm", typed(40.0), "circular");
+    assert!(removed > 0.0 && rel(removed, expected) < 1e-6, "{removed} vs {expected}");
+    assert_eq!(measure(&mut s)["body_count"], 1);
+    let saved = serde_json::to_value(&s.doc.find_feature("Groove").unwrap().kind).unwrap();
+    assert_eq!(saved["axis_ref"]["type"], "model", "{saved}");
+    assert!(saved.get("diameter").is_none(), "the diameter follows the face: {saved}");
+    // A wider shaft: the coil follows its top face's circle out to the new wall.
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "25 mm"}));
+    let (_, wider) = shaft_groove("25 mm", typed(50.0), "circular");
+    let full = std::f64::consts::PI * 25.0 * 25.0 * 40.0;
+    assert!(rel(full - volume(&mut s), wider) < 1e-6, "{} vs {wider}", full - volume(&mut s));
+    // The saved design rebuilds the same.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(rel(full - volume(&mut reopened), wider) < 1e-6);
+}
+
+/// A triangle section from the same end face cuts a thread-like V groove: the same as the typed
+/// coil, and less than the square groove it fits in.
+#[test]
+fn a_triangle_coil_from_an_end_face_cuts_a_thread_like_groove() {
+    let from_face = json!({"axis": {"face": [5, 5, 40]}, "reversed": true});
+    let (_, v) = shaft_groove("20 mm", from_face.clone(), "triangle");
+    let (_, expected) = shaft_groove("20 mm", json!({"base": [0, 0, 40], "axis": [0, 0, -1], "diameter": 40}), "triangle");
+    let (_, square) = shaft_groove("20 mm", from_face, "square");
+    assert!(v > 0.0 && rel(v, expected) < 1e-6, "{v} vs {expected}");
+    assert!(v < square, "{v} {square}");
+}
+
+/// The triangle's volume as a new body, worked out by Pappus: a screw motion sweeps the section
+/// as a revolve does, `n` turns about the axis at the radius of its centroid. An equilateral
+/// triangle of side `a` pointing at the axis, centred across its depth `h = a √3 / 2` on the
+/// circle of radius `R`, has its centroid at `R + h / 6` and area `√3 / 4 a²`.
+#[test]
+fn a_triangle_coil_sweeps_its_area_about_the_axis() {
+    use std::f64::consts::PI;
+    let (a, big_r, n) = (2.0f64, 20.0, 3.0);
+    let h = a * 3f64.sqrt() / 2.0;
+    for (position, centre) in [("center", big_r), ("inside", big_r - h / 2.0), ("outside", big_r + h / 2.0)] {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.coil",
+            json!({"diameter": 2.0 * big_r, "revolutions": n, "pitch": 8, "section": "triangle", "section_size": a, "section_position": position}),
+        );
+        let expected = n * 2.0 * PI * (centre + h / 6.0) * 3f64.sqrt() / 4.0 * a * a;
+        assert!(rel(volume(&mut s), expected) < 1e-3, "{position}: {} vs {expected}", volume(&mut s));
+    }
+}
+
+/// A spring joined on a block's flat top: the face's centre is its base and its outward normal
+/// its axis, so it stands up off the face; a face without a round edge needs the diameter typed.
+#[test]
+fn a_coil_joined_on_a_flat_face_stands_on_its_centre() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "Block"}));
+    let refused =
+        s.execute("solid.coil", &json!({"axis": {"face": [5, 5, 10]}, "revolutions": 2, "pitch": 6, "section_size": 2, "operation": "join"}));
+    assert!(refused.unwrap_err().to_string().contains("diameter"), "a square face has no diameter to give");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis": {"face": [5, 5, 10]}, "diameter": 16, "revolutions": 2, "pitch": 6, "section_size": 2, "operation": "join", "targets": ["Block"]}),
     );
+    let m = measure(&mut s);
+    assert_eq!(m["body_count"], 1, "{m}");
+    let at = |k: &str, i: usize| m["bodies"][0]["bbox"][k][i].as_f64().unwrap_or(f64::NAN);
+    // Up off the top by the two turns and the section's half above the centre line.
+    assert!((at("max", 2) - (10.0 + 12.0 + 1.0)).abs() < 1e-3, "{m}");
+    assert!((at("min", 2)).abs() < 1e-6 && (at("max", 0) - 40.0).abs() < 1e-6, "the block is unchanged below: {m}");
+    // Its turns stand around the face's centre (20, 15): a point just past the wire's start, which
+    // lies in the plane y = 15 through the axis (start angle 0, from the axis toward +x).
+    assert!(in_body(&s, "Block", [20.0 + 8.0, 15.3, 10.5]), "the spring starts on the face's centre line");
 }
 
 #[test]
@@ -4443,6 +4786,29 @@ fn an_emboss_that_works_has_no_warning() {
         assert!(reply["warning"].is_null(), "{mode}: {reply}");
         run(&mut s, "edit.undo", json!({}));
     }
+}
+
+/// #23375: an Emboss whose raised piece stands apart from the body it joins (the Emboss window
+/// sends the shown body A when B, under the profile, is hidden) leaves A in two pieces, and says
+/// so as an Extrude Join apart does. A Deboss there keeps its own "changed nothing" warning.
+#[test]
+fn an_emboss_apart_from_its_body_says_it_left_two_pieces() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [40, 0, 0], "operation": "new", "body_name": "B"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Logo"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [45, 5], "p1": [55, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 1, "mode": "emboss", "targets": ["A"]}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the joined piece doesn't touch `A`, so `A` is now in 2 separate pieces"), "{reply}");
+    assert!(!warning.contains("New Body"), "Emboss has no New Body: {reply}");
+    assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), reply["warning"].as_str());
+    assert!(rel(body_volume(&s, "A"), 8100.0) < 1e-9 && rel(body_volume(&s, "B"), 8000.0) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 1, "mode": "deboss", "targets": ["A"]}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("deboss changed nothing") && !warning.contains("separate pieces"), "{reply}");
 }
 
 /// #6612: an explicitly fixed face extrusion stays on its fixed plane even when the converted
@@ -5063,6 +5429,32 @@ fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
     assert!(!e.contains("for this geometry"), "{e}");
     assert_eq!(shape(&s), before);
     assert_eq!(body_volume(&s, "Base"), volume);
+}
+
+/// #22803: a cylinder R 20 x 60 whose top edge is rounded 2, its side drafted 3° about its circle
+/// on XY, leaning in. The round follows the drafted side, as if the side had been drafted first
+/// and the edge rounded after. With t = tan 3°, q = sqrt(1 + t^2): the round's centre circle is
+/// at z = 58, rho_c = 20 - 58 t - 2 q; it meets the side at z_s = 58 + 2 t / q, radius
+/// rho_s = 20 - t z_s; the frustum below z_s is pi z_s (400 + 20 rho_s + rho_s^2) / 3 and the cap
+/// above it pi times the integral of (rho_c + sqrt(4 - u^2))^2 for u from 2 t / q to 2. It was
+/// refused: how far the round extends to meet the drafted side "has no certified bound".
+#[test]
+fn a_cylinders_side_drafts_under_its_rounded_top_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 60, "base": [0, 0, 0], "axis": "Z", "operation": "new", "body_name": "Part"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, -20, 60]], "radius": 2}));
+    run(&mut s, "solid.draft", json!({"faces": [[0, -20, 30]], "angle": "3 deg", "neutral": "XY"}));
+    let t = 3.0_f64.to_radians().tan();
+    let q = (1.0 + t * t).sqrt();
+    let rho_c = 20.0 - 58.0 * t - 2.0 * q;
+    let (z_s, a) = (58.0 + 2.0 * t / q, 2.0 * t / q);
+    let rho_s = 20.0 - t * z_s;
+    let frustum = std::f64::consts::PI * z_s * (400.0 + 20.0 * rho_s + rho_s * rho_s) / 3.0;
+    let f = |u: f64| rho_c * rho_c * u + rho_c * (u * (4.0 - u * u).sqrt() + 4.0 * (u / 2.0).asin()) + 4.0 * u - u * u * u / 3.0;
+    let want = frustum + std::f64::consts::PI * (f(2.0) - f(a));
+    assert!((want - 64086.644031).abs() < 1e-5, "closed form {want}");
+    let got = body_volume(&s, "Part");
+    assert!((got - want).abs() < 1e-9 * want, "{got} {want}");
 }
 
 /// #22807: drafting an Ø20 x 100 mm cylinder by 6° about XY closes the cone to a point at

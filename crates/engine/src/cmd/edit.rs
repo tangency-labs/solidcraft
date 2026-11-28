@@ -492,6 +492,7 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     }
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
+    let entering_sketch = s.active_sketch != snap.active_sketch;
     let moved = s.active_sketch != snap.active_sketch
         || s.pending_moves != snap.pending_moves
         || s.pending_move_records != snap.pending_move_records
@@ -505,6 +506,15 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
     s.sketching_view = snap.sketching_view;
+    // Keep the current edit's boundary while Undo stays in that sketch. An
+    // older entry must not make Cancel cross a later edit's starting point.
+    match s.active_sketch {
+        Some(sketch) if entering_sketch || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != sketch) => {
+            s.sketch_entry = snap.sketch_entry.filter(|entry| entry.sketch == sketch);
+        }
+        None => s.sketch_entry = None,
+        Some(_) => {}
+    }
     s.active_sheet_sketch = snap.active_sheet_sketch;
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
@@ -3277,6 +3287,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)
+        .chain(super::surface_morph::COMMANDS)
         .any(|candidate| candidate.id == spec.id)
         || matches!(
             spec.id,
@@ -3534,7 +3545,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
         spec.run_nested_continuing(&mut trial, &params)
     }?;
-    let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| match r.get("occurrences") {
+        // A pattern of picked placements adds them again once and keeps no feature (#22942).
+        Some(_) => bad(
+            cmd,
+            format!(
+                "a pattern of picked placements adds new placements once and is not kept in the timeline, so `{}` can't be changed into one: make it as a new pattern instead",
+                old.name
+            ),
+        ),
+        None => bad(cmd, format!("`{cid}` did not make a feature")),
+    })?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     if let FeatureKind::Pattern { components, occurrences, .. } = &old.kind
         && !occurrences.is_empty()

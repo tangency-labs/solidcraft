@@ -50,6 +50,35 @@ fn card_placement(service: &LayoutService) -> PanelResult<(Zone, LogicalRect)> {
 }
 
 #[test]
+fn plugin_workspace_ids_are_scoped_bounded_and_round_trip() -> TestResult {
+    let longest = format!("plugin:{}/{}", "a".repeat(MAX_ID_BYTES), "b".repeat(MAX_ID_BYTES));
+    assert_eq!(longest.len(), MAX_WORKSPACE_ID_BYTES);
+    for value in ["host.workspace", "plugin:manufacture/cam", longest.as_str()] {
+        let workspace = WorkspaceId::new(value)?;
+        let layout = Layout::empty(workspace.clone());
+        let registry = registry()?;
+        let encoded = encode(&LayoutEnvelope::new(layout.clone()), &registry)?;
+        let decoded = decode_retained(&encoded, &registry, &workspace)?;
+        assert_eq!(decoded.layout, layout);
+    }
+    for value in [
+        "plugin:",
+        "plugin:manufacture",
+        "plugin:/cam",
+        "plugin:manufacture/",
+        "plugin:manufacture/cam/extra",
+        "plugin:Manufacture/cam",
+        "plugin:manufacture/cam space",
+    ] {
+        assert!(WorkspaceId::new(value).is_err(), "{value}");
+    }
+    assert!(WorkspaceId::new(format!("plugin:{}/cam", "a".repeat(MAX_ID_BYTES + 1))).is_err());
+    assert!(WorkspaceId::new(format!("plugin:manufacture/{}", "b".repeat(MAX_ID_BYTES + 1))).is_err());
+    assert!(PanelKind::new("plugin:manufacture/cam").is_err(), "only workspace identities permit a scope");
+    Ok(())
+}
+
+#[test]
 fn floating_card_drags_docks_right_and_restores() -> TestResult {
     let mut service = new_service(Layout::empty(WorkspaceId::new("host.workspace")?))?;
     let open = Mutation::Open {

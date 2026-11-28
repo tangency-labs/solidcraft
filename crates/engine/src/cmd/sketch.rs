@@ -1841,6 +1841,7 @@ fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
     step.active_sketch = None;
     step.sketching_view = None;
     step.sketch_restore_marker = None;
+    step.sketch_entry = None;
 }
 
 /// Fold only the steps still belonging to this edit. Its snapshots describe the complete
@@ -1869,6 +1870,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             active_sketch: None,
             sketching_view: None,
             sketch_restore_marker: None,
+            sketch_entry: None,
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: entry.pending_moves.clone(),
             pending_move_records: entry.pending_move_records.clone(),
@@ -1890,6 +1892,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             snap.active_sketch = None;
             snap.sketching_view = None;
             snap.sketch_restore_marker = None;
+            snap.sketch_entry = None;
         }
     }
 }
@@ -2652,7 +2655,7 @@ pub(super) fn slot_width_dimension(
 ) -> Result<Option<String>> {
     let Some(e) = driven else { return Ok(None) };
     let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-    let pname = doc.new_model_param(e, &unit);
+    let pname = doc.new_model_param(e, &unit)?;
     Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
 }
 
@@ -2675,7 +2678,7 @@ fn size_dimension(
     let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
     if !paper {
         let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-        let pname = doc.new_model_param(e, &unit);
+        let pname = doc.new_model_param(e, &unit)?;
         return Ok(sk.add_constraint(mk(value), Some(pname))?);
     }
     if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
@@ -4897,7 +4900,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             doc.add_user_param(name, &rhs, Some(&unit), None).map_err(|e| bad(cmd, format!("value: {e}")))?;
         }
         let e = value.as_ref().map(|e| doc.with_design_unit(e, kind)).unwrap_or(default_expr);
-        let pname = doc.new_model_param(&e, &unit);
+        let pname = doc.new_model_param(&e, &unit)?;
         // The value must evaluate.
         let (vals, errs) = doc.param_values_with(live_driven.as_ref());
         if let Some(err) = errs.get(&pname) {

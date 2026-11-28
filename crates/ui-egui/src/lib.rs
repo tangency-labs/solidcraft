@@ -50,6 +50,7 @@ mod cut_bodies;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_report;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
@@ -78,6 +79,7 @@ pub mod dialogs_plastic;
 pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
+pub mod dialogs_scan_align;
 pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
@@ -240,7 +242,7 @@ pub(crate) mod frame_watch;
 #[cfg(test)]
 mod history_off_thread_tests;
 mod move_preview;
-pub use file_picker::FilePickerFuture;
+pub use file_picker::{FilePickerFuture, FilesPickerFuture};
 #[cfg(test)]
 mod blend_arrow_tests;
 #[cfg(test)]
@@ -296,6 +298,7 @@ mod plugin_themes_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod plugin_tint;
 pub(crate) mod plugin_updates;
+pub(crate) mod plugin_workspaces;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
@@ -511,6 +514,9 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Show only constraints of selected geometry in the Sketch Palette (view-only).
+    #[serde(skip)]
+    pub constraint_glyphs_selected_only: bool,
     /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
     /// The saved design and Preferences remain unchanged.
     #[serde(skip)]
@@ -564,6 +570,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            constraint_glyphs_selected_only: false,
             sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
@@ -631,11 +638,22 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
-    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
-    /// Browse button and the text field still accepts a pasted path, the document library cannot
-    /// choose a folder, and Settings › Design hides the folder settings.
+    /// Open a dialog for several files at once (the agent chat's files): the types it names listed
+    /// under its label, or any type when it names none (a coding agent reads them itself). `None`:
+    /// one file, with `pick_file`.
+    pub pick_files: Option<Box<dyn Fn(&str, &[&str]) -> FilesPickerFuture>>,
+    /// Open one dialog for files and folders together, several at once, where the system's dialog
+    /// can (macOS). `None` elsewhere: the chat offers files and folders apart.
+    pub pick_files_or_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used):
+    /// a plugin field's Browse button, the document library's folder, or one the agent chat
+    /// attaches. `None` on the web build and when the host has no folder picker: a plugin field
+    /// shows no Browse button and the text field still accepts a pasted path, the document library
+    /// cannot choose a folder, and Settings › Design hides the folder settings.
     pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
+    /// Open a dialog for several folders at once (the agent chat's files). `None`: one, with
+    /// `pick_folder`.
+    pub pick_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -862,6 +880,8 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
+    /// The Inspect Design window, when it is open (#20662).
+    pub design_report: Option<design_report::DesignReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -983,6 +1003,8 @@ pub struct SolveApp {
     /// after a few seconds (an export that left bodies out).
     pub status_sticky_at: Option<f64>,
     pub quit_requested: bool,
+    /// How long quitting has waited for queued view memories (`view_memory::quit_may_proceed`).
+    quit_wait: std::cell::Cell<view_memory::QuitWait>,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
     /// Lock files next to the open designs (the desktop app turns them on; #5467).
@@ -1116,6 +1138,7 @@ pub struct SolveApp {
     /// Plugin state kept between frames. New plugin state goes in [`app_plugins::State`].
     pub(crate) plugins: app_plugins::State,
     plugin_slots: plugin_slots::State,
+    pub(crate) plugin_workspaces: plugin_workspaces::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1285,6 +1308,7 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
+            design_report: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1343,6 +1367,7 @@ impl SolveApp {
             status_save_sc: false,
             status_sticky_at: None,
             quit_requested: false,
+            quit_wait: std::cell::Cell::new(view_memory::QuitWait::default()),
             autosave: None,
             locks: None,
             lock_prompts: Vec::new(),
@@ -1411,6 +1436,7 @@ impl SolveApp {
             control_answering: Vec::new(),
             plugins: Default::default(),
             plugin_slots: Default::default(),
+            plugin_workspaces: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1589,7 +1615,6 @@ impl SolveApp {
         }
         render_workspace::sync_backend(self);
         ai_connect::tick(self);
-        self.msaa_supported = rs.msaa_supported.clone();
         let info = rs.adapter.get_info();
         self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
         self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
@@ -2462,10 +2487,18 @@ impl SolveApp {
                     self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
-                    self.cam = Camera::default();
+                    // A design opens at its own Home: its orientation, when it has one.
+                    self.cam = Camera { frame: self.session.doc.view_frame, ..Camera::default() };
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
+                    // A design read from its file gets back the views it was closed with, as the
+                    // window's own open gives them (the browser runs `doc.open` here, #23271).
+                    if id == "doc.open"
+                        && let Some(path) = self.session.path.clone()
+                    {
+                        documents::design_opened(self, &path);
+                    }
                 }
                 if matches!(id, "file.save" | "file.save_as") {
                     history_folds::remember(self);
@@ -3225,6 +3258,10 @@ impl SolveApp {
             sketch_report::open(self);
             return;
         }
+        if id == "document.inspect" {
+            design_report::open(self);
+            return;
+        }
         if id == "assembly.bom" {
             if bom_panel::available(self) {
                 bom_panel::set_focus_pending(self, true);
@@ -3314,6 +3351,23 @@ impl SolveApp {
             }
         }
         self.prepared_edit_starts.remove(&self.session.uid);
+        // Finishing the sketch puts the timeline back and drops the selection, because a face
+        // picked on a later feature would no longer exist. A profile of this sketch still does,
+        // and Extrude and Revolve are started to use it (#22673).
+        let kept_profiles = if matches!(id, "solid.extrude" | "solid.revolve") {
+            previous_sketch
+                .map(|sketch| {
+                    self.session
+                        .selection
+                        .iter()
+                        .filter(|sel| matches!(sel, solidcraft_engine::Sel::Profile { sketch: owner, .. } if *owner == sketch))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let finished = match crate::sketch_view::prepare_edit(self, id, &Value::Null) {
             Ok(event) => event,
             Err(error) => {
@@ -3321,6 +3375,11 @@ impl SolveApp {
                 return;
             }
         };
+        for sel in kept_profiles {
+            if !self.session.selection.iter().any(|have| crate::selection::same_item(have, &sel)) {
+                self.session.selection.push(sel);
+            }
+        }
         let finished_sketch = finished.filter(|event| matches!(event.domain, solidcraft_engine::SketchDomain::Model)).map(|event| event.sketch);
         if starts_edit {
             self.prepared_edit_starts.insert(self.session.uid, id.into());
@@ -3924,6 +3983,19 @@ impl SolveApp {
     /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
+        if joint_handles::began_on(self).is_some() {
+            // While dragging a Move handle on the GPU motion table, sub-body highlights
+            // (face/edge/vertex) would stay at the pre-drag pose and force a CPU world rebuild;
+            // highlight their whole body instead so it moves with the GPU motion table.
+            for item in &mut v {
+                if let solidcraft_engine::Sel::Face { body, .. }
+                | solidcraft_engine::Sel::Edge { body, .. }
+                | solidcraft_engine::Sel::Vertex { body, .. } = item
+                {
+                    *item = solidcraft_engine::Sel::Body { name: std::mem::take(body) };
+                }
+            }
+        }
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
@@ -4170,11 +4242,15 @@ impl SolveApp {
         self.home.open = false;
         documents::prepare_open(self);
         let params = self.load_params(path, options);
+        self.docs.camera_recalled = false;
         let r = self.run("doc.open", params)?;
         // An opened design comes up at the home view, not at the angle the design before it
-        // was left at: `prepare_open` keeps the camera when it reuses a blank design.
-        self.cam.set_view(StandardView::Iso);
-        self.fit_view();
+        // was left at: `prepare_open` keeps the camera when it reuses a blank design. One that
+        // got back the camera it was closed with keeps that (#23271).
+        if !self.docs.camera_recalled {
+            self.cam.set_view(StandardView::Iso);
+            self.fit_view();
+        }
         stand_up::offer(self, path, &[], Some(&r));
         // The import's warnings, as the desktop's open says them (`file_load`), before the
         // notices that follow it there too.
@@ -4315,6 +4391,17 @@ impl SolveApp {
             self.insert_path_async(path);
         } else {
             self.open_path_async(path);
+        }
+    }
+
+    /// The design's own FRONT and TOP changed (#6455): the camera takes them and keeps the picture
+    /// it shows, roll included. A Set as turns it to the face itself (`view.frame` sets the camera).
+    pub fn follow_view_frame(&mut self) {
+        let (right, _, back) = self.cam.basis();
+        self.cam_anim = None;
+        self.cam.frame = self.session.doc.view_frame;
+        if let Some(turned) = self.cam.with_frame(right, back) {
+            self.cam = turned;
         }
     }
 
@@ -4803,6 +4890,9 @@ impl SolveApp {
         if self.cam.up != self.ui.up_axis {
             self.set_up_axis(self.ui.up_axis);
         }
+        if self.cam.frame != self.session.doc.view_frame {
+            self.follow_view_frame();
+        }
         self.step_view_animation(ctx);
         self.poll_control_jobs(ctx);
         self.drain_control(ctx);
@@ -4833,7 +4923,9 @@ impl SolveApp {
                 toolbar::shortcuts(self, ctx);
             }
         }
-        recovery_ui::tick(self);
+        if let Some(delay) = recovery_ui::tick(self, ctx) {
+            ctx.request_repaint_after(delay);
+        }
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
         #[cfg(feature = "usage-stats")]
@@ -5056,6 +5148,7 @@ impl SolveApp {
         let _blur_scope = self.blur.begin(ui.ctx());
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
+        canvas::share_box_drag(ui.ctx());
         // #9841: dialog buttons answer their first letter only when the preference says so;
         // off is the old behaviour, so the kit default and this preference default agree.
         ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
@@ -5210,6 +5303,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
+        design_report::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
@@ -5254,9 +5348,10 @@ impl SolveApp {
         }
     }
 
-    /// Whether the host can close after queued view preferences have reached disk.
+    /// Whether the host can close: queued view preferences have reached disk, or quitting has
+    /// waited `view_memory::QUIT_WAIT` (10 s) for them (another process may hold their file).
     pub fn ready_to_quit(&self) -> bool {
-        self.quit_requested && !crate::view_memory::pending()
+        self.quit_requested && crate::view_memory::quit_may_proceed(&self.quit_wait)
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
@@ -5284,18 +5379,7 @@ impl SolveApp {
         } else {
             viewport::show(self, ui);
         }
-        if let Some(view) = view_window_drag::hovered_view(self) {
-            let rect = if view == self.docs.views.active().id {
-                self.viewport.rect
-            } else {
-                self.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
-            };
-            if let Some(rect) = rect.filter(|rect| rect.is_positive()) {
-                let t = solidcraft_theme::Tokens::get();
-                ui.painter().rect_filled(rect.shrink(2.0), 6, t.accent.gamma_multiply(0.035));
-                ui.painter().rect_stroke(rect.shrink(2.0), 6, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
-            }
-        }
+        view_window_drag::paint_hover_outline(self, ui);
     }
 
     fn drain_control(&mut self, ctx: &egui::Context) {

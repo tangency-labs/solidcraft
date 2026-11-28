@@ -58,7 +58,7 @@ pub(crate) fn prepare(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(rs) = state.render.clone() else { return };
-    if rs.device_lost.is_lost() {
+    if solidcraft_viewport_egui::window_device(&rs).lost.is_lost() {
         // The shader may be why the driver gave up: off before the app restarts.
         app.plugin_panels.failed = Some(key.clone());
         app.preferences.panel_shader.clear();

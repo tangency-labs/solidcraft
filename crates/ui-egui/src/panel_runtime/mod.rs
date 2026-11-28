@@ -9,6 +9,8 @@ mod specimen;
 
 pub use app::*;
 pub use fixtures::*;
+#[cfg(test)]
+pub(crate) use plugin::instance_for as plugin_instance;
 pub(crate) use plugin::queue_selection;
 pub(crate) use preferences::PanelLayoutSnapshot;
 pub(crate) use preferences::panel_layout_matches;

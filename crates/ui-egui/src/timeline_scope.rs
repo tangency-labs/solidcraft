@@ -224,7 +224,8 @@ fn components_toggle(app: &mut SolveApp, ui: &mut egui::Ui, p: &Painter, x: f32,
     crate::scenario::publish_handle("timeline:components", br.center());
     let resp = ui.interact(br, ui.scope_id().with("tl_components"), Sense::click());
     p.rect(br, 3.0, if resp.hovered() { t.hover } else { t.timeline_item }, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-    p.galley(br.left_center() + vec2(6.0, -galley.size().y * 0.5), galley, t.text);
+    let rise = egui::galley_cap_ink_rise(p, &galley);
+    p.galley(br.left_center() + vec2(6.0, -galley.size().y * 0.5 - rise), galley, t.text);
     let tip = if show_all {
         "Showing every component's features. Click to show only the active or picked component's"
     } else if only.is_some() {
@@ -271,7 +272,7 @@ fn step_button(app: &mut SolveApp, ui: &mut egui::Ui, p: &Painter, x: f32, r: Re
     } else {
         t.text_dim
     };
-    let text_at = pos2(rect.left() + t.space_4, rect.center().y - galley.size().y / 2.0);
+    let text_at = pos2(rect.left() + t.space_4, rect.center().y - galley.size().y / 2.0 - egui::galley_cap_ink_rise(p, &galley));
     p.with_clip_rect(rect.shrink2(vec2(t.space_4, 0.0)).intersect(p.clip_rect())).galley(text_at, galley, ink);
     let tip = step_tip(app, step, current);
     let response = if current { response } else { response.on_hover_cursor(egui::CursorIcon::PointingHand) };

@@ -21,6 +21,8 @@ fn top_view() -> Harness {
         distance: 100.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     h
 }
@@ -330,6 +332,60 @@ fn a_profile_on_the_section_plane_stays_pickable() {
     assert!(!lies_on_section(&h.app, Vec3::new(0.0, 0.0, 5.0), Vec3::new(1.0, 0.0, 0.0)));
 }
 
+/// A sketch on a plane through a part: where the part's top face hides the lower half of the
+/// rectangle, a click there still takes the profile into Extrude's Profiles, not the face in front
+/// of it (before, only a click right beside the sketch's lines reached it). Select Other still
+/// offers the face, nearest first.
+#[test]
+fn a_profile_hidden_by_a_face_is_still_the_profiles_pick() {
+    use crate::viewport::{Hit, candidate, candidates, pick, projection};
+    use solidcraft_engine::Sel;
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 100, "width": 60, "height": 10})).unwrap();
+    h.app.run("sketch.create", json!({"plane": {"origin": [30, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Upright"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [20, -5], "p1": [30, 20]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Upright").unwrap().id;
+    h.app.cam = Camera {
+        target: Vec3::new(40.0, 25.0, 5.0),
+        yaw: -std::f64::consts::FRAC_PI_4,
+        pitch: 0.6,
+        roll: 0.0,
+        distance: 200.0,
+        fov: 0.0,
+        up: Default::default(),
+        frame: None,
+    };
+    h.app.start("solid.extrude");
+    h.settle();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items.clear();
+    d.active = 0;
+    h.frames(2);
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let proj = projection(&h.app, rect);
+    // Inside the slab, under its top face: the face is nearer along the ray.
+    let hidden = proj.to_screen(Vec3::new(30.0, 25.0, 5.0)).unwrap();
+    let hits = pick(&h.app, &proj, hidden);
+    assert!(matches!(hits.iter().find(|x| matches!(x, Hit::Face { .. } | Hit::Profile { .. })), Some(Hit::Face { .. })), "{hits:?}");
+    assert_eq!(candidate(&h.app, &hits).map(|(_, s)| s), Some(Sel::Profile { sketch, index: 0 }), "{hits:?}");
+    let all = candidates(&h.app, &crate::viewport::pick_all(&h.app, &proj, hidden));
+    assert!(matches!(all.first(), Some((_, Sel::Face { .. }))), "{all:?}");
+    // Off the profile, the face is the pick as before.
+    let beside = proj.to_screen(Vec3::new(60.0, 25.0, 10.0)).unwrap();
+    assert!(matches!(candidate(&h.app, &pick(&h.app, &proj, beside)), Some((_, Sel::Face { .. }))));
+    // A profile that is not shown is not taken through the face: the face is the pick, whether the
+    // Browser hides the sketch's profiles or the sketch's own Show Profile is off.
+    h.app.session.visibility.hidden_profiles.push(sketch);
+    h.frames(2);
+    assert!(matches!(candidate(&h.app, &pick(&h.app, &proj, hidden)), Some((_, Sel::Face { .. }))));
+    h.app.session.visibility.hidden_profiles.retain(|&s| s != sketch);
+    h.app.run("sketch.options", json!({"sketch": sketch, "show_profile": false})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.active == 0), "Extrude stays open on its Profiles");
+    assert!(matches!(candidate(&h.app, &pick(&h.app, &proj, hidden)), Some((_, Sel::Face { .. }))));
+}
+
 /// With a Section Analysis on, `view.pick` must not answer with edges or vertices in the
 /// half the section removes: the mouse picker has skipped them since #6722, and an agent
 /// must not get an answer the user cannot see (#10704).
@@ -345,6 +401,8 @@ fn a_section_pick_skips_edges_and_vertices_in_the_removed_half() {
         distance: 200.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     // Section XZ at 15 mm: keeps y 0..15, removes y 15..30.
     h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 15, 0], "normal": [0, 1, 0]}}}));
@@ -411,6 +469,8 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
         distance: 100.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(960.0, 600.0));
     let cam = h.app.cam;
