@@ -3462,6 +3462,54 @@ fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
     }
 }
 
+/// #18048: a pattern or mirror of a Draft drafts the copied face instead of failing with
+/// "Draft1 cannot be patterned or mirrored yet". A 20 x 20 x 20 pad joined on a 100 x 40 x 10
+/// plate has its side at x = 10 drafted 5 deg about its bottom edge (neutral plane z = 10): the
+/// side sweeps a wedge of 0.5 * 20 * (20 tan 5 deg) * 20 = 4000 tan 5 deg. Each copy of the pad
+/// is drafted by the same wedge, whether the pad is copied with the draft or was copied before.
+#[test]
+fn pattern_and_mirror_of_a_draft_draft_the_copied_face() {
+    let wedge = 4000.0 * 5.0_f64.to_radians().tan();
+    let pattern = json!({"dir1": [1, 0, 0], "count1": 2, "spacing1": 50});
+    let with = |features: Value, mut p: Value| {
+        p["features"] = features;
+        p
+    };
+    let cases = [
+        ("mirror", None, ("solid.mirror", json!({"features": ["Pad1", "Draft1"], "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}))),
+        ("pattern", None, ("solid.pattern.rectangular", with(json!(["Pad1", "Draft1"]), pattern.clone()))),
+        (
+            "pattern of the draft alone",
+            Some(with(json!(["Pad1"]), pattern.clone())),
+            ("solid.pattern.rectangular", with(json!(["Draft1"]), pattern.clone())),
+        ),
+    ];
+    for (what, before, (copy, params)) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 40, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "operation": "join", "name": "Pad1"}));
+        let pad_copied_before = before.is_some();
+        if let Some(p) = before {
+            let r = run(&mut s, "solid.pattern.rectangular", p);
+            assert!(r["error"].is_null(), "{what}: {r}");
+        }
+        let pads = volume(&mut s);
+        run(
+            &mut s,
+            "solid.draft",
+            json!({"faces": [[10, 20, 20]], "angle": "5 deg", "neutral": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "Draft1"}),
+        );
+        let drafted = volume(&mut s) - pads;
+        assert!(rel(drafted.abs(), wedge) < 1e-6, "{what}: the source drafts {drafted} mm³, not ±{wedge}");
+        let r = run(&mut s, copy, params);
+        assert!(r["error"].is_null(), "{what}: {r}");
+        // Both pads undrafted: the second pad is either there already or copied now.
+        let pads = if pad_copied_before { pads } else { 48000.0 + 8000.0 };
+        let want = pads + 2.0 * drafted;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{what}: {} vs {want}", volume(&mut s));
+    }
+}
+
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
 /// earlier or is mirrored together with the thread.
 #[test]
@@ -4992,4 +5040,246 @@ fn pattern_coordinate_ceiling_hostile_spacing_angle_and_counts_are_refused() {
     }
     reject_pattern_without_changing_design(&mut s, "solid.pattern.rectangular", &shaft_pattern_row(json!(10), json!(u64::MAX)));
     reject_pattern_without_changing_design(&mut s, "solid.pattern.circular", &json!({"bodies": ["Shaft"], "axis": "Z", "count": u64::MAX}));
+}
+
+// ---- no-cache model helpers
+fn fresh_no_cache_model(doc: &solidcraft_doc::Document) -> solidcraft_doc::Model {
+    let mut m = solidcraft_doc::Model::new();
+    m.no_cache = true;
+    m.evaluate(doc);
+    assert!(
+        m.results.iter().all(|r| r.error.is_none()),
+        "fresh eval errors: {:?}",
+        m.results.iter().filter_map(|r| r.error.as_deref()).collect::<Vec<_>>()
+    );
+    m
+}
+
+/// Hub/Profile/Sweep(cut, twist 180 deg)/Circular Pattern in C1 referencing a 2D
+/// planar XZ Path sketch in C2. Moving C2 must invalidate the Sweep and Circular Pattern caches
+/// so the cached Hub area matches a fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_sweep_path_recomputes_twisted_cut_pattern() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 40, "base": [0, 0, 0], "body_name": "Hub"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [13, 0], "radius": 3, "id": "prof"}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[13, 0], [13, -40]], "ids": ["path_line"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "Profile",
+            "path_sketch": "Path",
+            "path": ["path_line"],
+            "twist": "180 deg",
+            "operation": "cut",
+            "targets": ["Hub"],
+            "name": "Groove"
+        }),
+    );
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Groove"], "axis": "Z", "count": 4, "name": "Pattern"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "translate": [2, 0, 0], "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+
+    let hub_area = |m: &solidcraft_doc::Model| solidcraft_kernel::measure(&m.state().body("Hub").unwrap().body).unwrap().area;
+    let cached = hub_area(&s.model);
+    let expected = hub_area(&fresh);
+    assert!((cached - expected).abs() < 1e-3, "cached Hub area {cached} vs fresh {expected}");
+}
+
+/// Moving component C2 owning a 2D planar `Pipe` `path_sketch` invalidates the Pipe in C1 and
+/// matches fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_pipe_path_recomputes_pipe() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "PipePath"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -20]], "ids": ["p1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(&mut s, "solid.pipe", json!({"path_sketch": "PipePath", "path": ["p1"], "diameter": 4, "operation": "new", "body_name": "Tube"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "translate": [5, 0, 0], "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+
+    let bounds = |m: &solidcraft_doc::Model| solidcraft_kernel::measure(&m.state().body("Tube").unwrap().body).unwrap().bbox;
+    let cached = bounds(&s.model);
+    let expected = bounds(&fresh);
+    assert!(cached.min.dist(expected.min) < 1e-3 && cached.max.dist(expected.max) < 1e-3, "cached {cached:?} vs fresh {expected:?}");
+}
+
+/// Moving component C2 owning a 2D planar `solid.pattern.path` `path_sketch` invalidates the
+/// path pattern in C1 and matches fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_pattern_path_recomputes_path_pattern() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [0, 0, 0], "body_name": "Pin"}));
+
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PatternPath"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(&mut s, "solid.pattern.path", json!({"bodies": ["Pin"], "path_sketch": "PatternPath", "path": ["l1"], "count": 3, "spacing": 10}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "axis": [0, 0, 1], "angle": "90 deg", "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+
+    let body_boxes = |m: &solidcraft_doc::Model| {
+        m.state()
+            .bodies
+            .iter()
+            .map(|b| {
+                let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+                (b.name.clone(), bb.min, bb.max)
+            })
+            .collect::<Vec<_>>()
+    };
+    let cached = body_boxes(&s.model);
+    let expected = body_boxes(&fresh);
+    assert_eq!(cached.len(), expected.len());
+    for ((cn, cmin, cmax), (en, emin, emax)) in cached.iter().zip(&expected) {
+        assert_eq!(cn, en);
+        assert!(cmin.dist(*emin) < 1e-3 && cmax.dist(*emax) < 1e-3, "{cn}: cached ({cmin:?}, {cmax:?}) vs fresh ({emin:?}, {emax:?})");
+    }
+}
+
+/// Moving component C2 owning a 2D planar guide rail (`rails`) on `solid.sweep` invalidates the
+/// Sweep in C1 and matches fresh `Model::no_cache` evaluation.
+#[test]
+fn moving_component_with_planar_sweep_rail_recomputes_railed_sweep() {
+    let mut s = Session::default();
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10, "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -40]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let c2_occ = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "RailSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [5, -40]], "ids": ["in"]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "Profile",
+            "path_sketch": "Path",
+            "path": ["up"],
+            "rails": [{"sketch": "RailSketch", "curves": ["in"]}],
+            "operation": "new",
+            "body_name": "Frustum"
+        }),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+
+    run(&mut s, "occurrence.move", json!({"occurrence": c2_occ, "translate": [4, 0, 0], "capture": true}));
+    let fresh = fresh_no_cache_model(&s.doc);
+    assert!(s.model.last_recomputed > 0, "expected recomputation after moving C2, got last_recomputed={}", s.model.last_recomputed);
+    let measure = |m: &solidcraft_doc::Model| solidcraft_kernel::measure(&m.state().body("Frustum").unwrap().body).unwrap();
+    let cached = measure(&s.model);
+    let expected = measure(&fresh);
+    assert!((cached.volume - expected.volume).abs() < 1e-3, "cached vol {} vs fresh {}", cached.volume, expected.volume);
+    assert!((cached.area - expected.area).abs() < 1e-3, "cached area {} vs fresh {}", cached.area, expected.area);
+}
+
+// ---- moved-component path/rail tests
+
+/// Scene: `Tube` pipe in C1 along a planar XZ path owned by C2 (nested under `Asm` when
+/// `nested`). Returns the session and the occurrence id to move (C2, or `Asm` when nested).
+fn planar_pipe_scene(nested: bool) -> (Session, u64) {
+    let mut s = Session::default();
+    let mut mover = 0;
+    let mut owner_parent = 0;
+    if nested {
+        let asm = run(&mut s, "component.create", json!({"name": "Asm", "grounded": false}));
+        mover = asm["occurrence"].as_u64().unwrap();
+        owner_parent = asm["component"].as_u64().unwrap();
+        run(&mut s, "component.activate", json!({"component": 0}));
+    }
+    let c1 = run(&mut s, "component.create", json!({"name": "C1", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": owner_parent}));
+    let c2 = run(&mut s, "component.create", json!({"name": "C2", "grounded": false}));
+    if !nested {
+        mover = c2["occurrence"].as_u64().unwrap();
+    }
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "PipePath"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -20]], "ids": ["p1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": c1}));
+    run(&mut s, "solid.pipe", json!({"path_sketch": "PipePath", "path": ["p1"], "diameter": 4, "operation": "new", "body_name": "Tube"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    (s, mover)
+}
+
+fn tube_box(m: &solidcraft_doc::Model) -> (solidcore_record::Vec3, solidcore_record::Vec3) {
+    let b = solidcraft_kernel::measure(&m.state().body("Tube").unwrap().body).unwrap().bbox;
+    (b.min, b.max)
+}
+
+fn assert_tube_fresh(s: &Session, what: &str) {
+    let fresh = fresh_no_cache_model(&s.doc);
+    let (cmin, cmax) = tube_box(&s.model);
+    let (fmin, fmax) = tube_box(&fresh);
+    assert!(cmin.dist(fmin) < 1e-3 && cmax.dist(fmax) < 1e-3, "{what}: cached ({cmin:?},{cmax:?}) vs fresh ({fmin:?},{fmax:?})");
+}
+
+/// the owner of the planar path is nested under a moved assembly; the pipe's component is not.
+#[test]
+fn moving_assembly_around_planar_path_owner_recomputes_pipe() {
+    let (mut s, asm_occ) = planar_pipe_scene(true);
+    run(&mut s, "occurrence.move", json!({"occurrence": asm_occ, "translate": [7, 0, 0], "capture": true}));
+    assert_tube_fresh(&s, "after nested move");
+}
+
+/// undo and redo of the move keep the cached pipe equal to a fresh evaluation.
+#[test]
+fn undo_redo_of_moving_planar_path_owner_keeps_pipe_fresh() {
+    let (mut s, occ) = planar_pipe_scene(false);
+    let (before_min, _) = tube_box(&s.model);
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [5, 0, 0], "capture": true}));
+    assert_tube_fresh(&s, "after move");
+    let (moved_min, _) = tube_box(&s.model);
+    assert!(moved_min.dist(before_min) > 1.0, "the move must change the pipe");
+    run(&mut s, "edit.undo", json!({}));
+    assert_tube_fresh(&s, "after undo");
+    assert!(tube_box(&s.model).0.dist(before_min) < 1e-3, "undo restores the pipe");
+    run(&mut s, "edit.redo", json!({}));
+    assert_tube_fresh(&s, "after redo");
+    assert!(tube_box(&s.model).0.dist(moved_min) < 1e-3, "redo restores the moved pipe");
+}
+
+/// a moved design saved and reopened evaluates to the same pipe the live session shows.
+#[test]
+fn save_reload_after_moving_planar_path_owner_matches_live_pipe() {
+    let (mut s, occ) = planar_pipe_scene(false);
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [5, 0, 0], "capture": true}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let (lmin, lmax) = tube_box(&s.model);
+    let (rmin, rmax) = tube_box(&reopened.model);
+    assert!(lmin.dist(rmin) < 1e-3 && lmax.dist(rmax) < 1e-3, "live ({lmin:?},{lmax:?}) vs reopened ({rmin:?},{rmax:?})");
 }

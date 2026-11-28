@@ -10,7 +10,8 @@
 //!   distance or an angle on the other; [`chamfer_sides_facing`] takes the face of each edge
 //!   that faces a direction most.
 //! - [`fillet_variable`]: one edge rounded with a radius law, from one of its vertices or
-//!   ([`fillet_variable_from`]) from its end nearest a point.
+//!   ([`fillet_variable_from`]) from its end nearest a point; [`fillet_variable_chain_from`]
+//!   a tangent chain with one law along it.
 //! - [`edge_faces_along`]: the two faces of an edge with how far each faces a direction, for an
 //!   application choosing the face a chamfer's first distance is along.
 //! - [`edges_share_wedge`]: whether the faces of some edges all meet at one angle, for an
@@ -43,7 +44,7 @@ use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::crossing_ends::{plan as crossing_end_plan, CrossingEndPlan};
 use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
-    RollOver,
+    RollOver, RollOverKind,
 };
 use solidcore::blend::blend_corner::separate_ends::{
     plan as separate_end_plan, SectionKind, SeparateEndPlan,
@@ -60,6 +61,7 @@ use solidcore::blend::fillet_executive::FilletLaw;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::blend::fillet_solver::p5::is_concave_edge;
 use solidcore::blend::round_room::rounds_cross;
 use solidcore::error::blend::BlendFailure;
 use solidcore::geom::attribute::{ids, Attribute, AttributeHandle, AttributeHandlers, Behavior};
@@ -925,20 +927,20 @@ fn prepare(
     s: &mut FilletSession<'_>,
     edges: &[EdgeId],
     section: Section<'_>,
-    law: Option<FilletLaw>,
+    laws: Vec<FilletLaw>,
 ) -> solidcore::Result<()> {
     let circular = [FilletSurfaceGeneratorType::Circular];
-    match (section, law) {
+    match (section, laws) {
         (Section::Round(sizes), _) => {
             s.prepare_per_edge_constant_radius(k, edges, sizes, &circular, 1, 1.0)
         }
-        (Section::Variable(size), Some(law)) => {
-            s.prepare_variable_radius_edges(k, edges, size, law, 1, 1)
-        }
-        (Section::Variable(_), None) => Err(SolidError::invalid_input(
+        (Section::Variable(_), laws) if laws.is_empty() => Err(SolidError::invalid_input(
             "solidcore-ops blend",
             "a variable round needs its law",
         )),
+        (Section::Variable(size), laws) => {
+            s.prepare_variable_radius_edge_laws(k, edges, size, laws, 1, 1)
+        }
         // the equal-area thumbweight by the kernel's name, never its value
         (Section::Curvature(sizes), _) => s.prepare_per_edge_constant_radius(
             k,
@@ -1002,7 +1004,8 @@ fn corners(
 struct Pass<'a> {
     edges: &'a [EdgeId],
     section: Section<'a>,
-    law: Option<FilletLaw>,
+    /// A variable round's radius laws, one per edge (empty for every other section).
+    laws: Vec<FilletLaw>,
     setbacks: &'a [(VertexId, f64)],
     /// Faces an earlier pass of the same blend made ([`FilletSession::add_earlier_pass_face`]).
     earlier: &'a [FaceId],
@@ -1067,7 +1070,7 @@ fn pass(
             ChamferCorner::Mitre => solidcore::blend::blend_corner::BlendChamferCorner::Mitre,
             ChamferCorner::Facet => solidcore::blend::blend_corner::BlendChamferCorner::Facet,
         });
-        let prepared = prepare(k, &mut s, p.edges, p.section, p.law);
+        let prepared = prepare(k, &mut s, p.edges, p.section, p.laws);
         let prepared_ok = prepared.is_ok();
         // a set-back vertex is no Ball: its corner is the one the setback is set on
         if !p.section.chamfer() {
@@ -1230,7 +1233,7 @@ fn together<'a>(
     Pass {
         edges,
         section,
-        law: None,
+        laws: Vec::new(),
         setbacks: &[],
         earlier,
         patches: false,
@@ -1367,7 +1370,7 @@ fn crossing_end_passes(
                 sizes: &chamfers,
                 along: &[],
             },
-            law: None,
+            laws: Vec::new(),
             setbacks: &[],
             earlier: &[],
             patches: false,
@@ -1427,7 +1430,7 @@ fn overflow_first(
         let alone = Pass {
             edges: &[e],
             section: section(std::slice::from_ref(&size)),
-            law: None,
+            laws: Vec::new(),
             setbacks: &[],
             earlier: &[],
             patches: false,
@@ -1649,7 +1652,12 @@ fn roll_over(
     for i in rest {
         let mut left = false;
         for e in fresh.edge_list().to_vec() {
-            if picked_on(&fresh, e).is_some_and(|(_, p)| p == i) {
+            // a piece the first pass left smooth or convex has nothing to round: at a cusp
+            // (#22151), B2's piece between the rails' crossing and V, which the second pass's
+            // corner covers
+            if picked_on(&fresh, e).is_some_and(|(_, p)| p == i)
+                && is_concave_edge(k, &mut fresh, e)?
+            {
                 remnants.push(e);
                 size_of.push(sizes.get(i).copied().unwrap_or(0.0));
                 left = true;
@@ -1663,9 +1671,12 @@ fn roll_over(
     }
     if !remnants.is_empty() {
         let chain = concave_chain(k, &mut fresh, &remnants, &first)?;
-        // the chain's V, where it meets the cliff: none, and it is not the Roll-over's
+        // the chain's V, where it meets the cliff: none, and it is not the ledge's. The cusp's
+        // (#22151) has no cliff: its ball rolls off the common face onto B1's surface and down
+        // to the tangent seam, a plain pass of the chain, handed the first pass's faces.
         let ends = concave_chain_ends(k, &mut fresh, &chain)?;
-        if ends.is_empty() {
+        let cusps_only = roll_overs.iter().all(|r| r.kind == RollOverKind::Cusp);
+        if ends.is_empty() && !cusps_only {
             return Ok(Err(Error::Unsupported(
                 "a roll-over's concave chain that does not meet the cliff",
             )));
@@ -1683,7 +1694,11 @@ fn roll_over(
         }
         let chain_sizes = vec![size; chain.len()];
         let p = Pass {
-            roll_over: RollOverStep::Concave(&ends),
+            roll_over: if ends.is_empty() {
+                RollOverStep::No
+            } else {
+                RollOverStep::Concave(&ends)
+            },
             ..together(&chain, section(&chain_sizes), turn, &first, contract)
         };
         if let Err(e) = pass_or_refuse(k, &mut fresh, p)? {
@@ -2422,7 +2437,7 @@ fn blend_on_body(
                     sizes: &sizes,
                     along: &[],
                 },
-                law: None,
+                laws: Vec::new(),
                 setbacks: &[],
                 earlier: &[],
                 patches: false,
@@ -2499,7 +2514,7 @@ fn blend_on_body(
     let p = Pass {
         edges: &picked,
         section: section(each),
-        law: None,
+        laws: Vec::new(),
         setbacks: &back,
         earlier: &[],
         patches: corners == Corners::Open,
@@ -3912,7 +3927,7 @@ fn chamfer_sides_impl(
                 sizes: std::slice::from_ref(&size),
                 along: &faces,
             },
-            law: None,
+            laws: Vec::new(),
             setbacks: &[],
             earlier: &[],
             patches: false,
@@ -4167,6 +4182,87 @@ pub fn fillet_variable_from_with(
     )
 }
 
+/// The edges of `body` at native edge-list indices `edges`, one tangent chain, rounded in one
+/// pass with one radius law along the whole chain: the law of [`fillet_variable`] running from
+/// the chain's end nearest `start` (0) to its other end (1), each edge taking the part of it
+/// its interval in the joined-curve parameterization gives, scaled by endpoint-speed ratios
+/// so speed agrees at joints (the kernel's `FilletLaw::chain_of_radii`), so the
+/// radius agrees where two edges meet and the rounds run on into each other as a constant
+/// round's do. One edge is [`fillet_variable_from`]'s round. Like it, a law is not first
+/// checked against its band's room.
+///
+/// # Errors
+/// [`Error::Argument`] for a law as [`fillet_variable`] refuses it, no edges, an index past
+/// the list, an edge given twice or a start point that is not finite; [`Error::Unsupported`]
+/// for a law whose radius is zero inside the chain, and for edges that are not one open
+/// chain (a closed loop, a branch, edges apart, an edge no longer than the zone tolerance);
+/// the refusals of [`blend`]; those of the result contract ([`Contract::Closed`]).
+pub fn fillet_variable_chain_from(
+    body: &Body,
+    edges: &[usize],
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<()> {
+    let contract = Contract::Closed;
+    if !law_ok(degree, knots, radii) || edges.is_empty() {
+        return Err(Error::Argument);
+    }
+    if law_pinches(degree, knots, radii) {
+        return Err(Error::Unsupported(
+            "a radius law that is zero inside its edge",
+        ));
+    }
+    if start.iter().any(|x| !x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    with_body("fillet_variable_chain", body, |k, b| {
+        let list = b.edge_list();
+        let mut ids = Vec::new();
+        for &i in edges {
+            let Some(&e) = list.get(i) else {
+                return Ok(Err(Error::Argument));
+            };
+            if ids.contains(&e) {
+                return Ok(Err(Error::Argument));
+            }
+            ids.push(e);
+        }
+        let [x, y, z] = start;
+        let Some(laws) =
+            FilletLaw::chain_of_radii(k, b, &ids, Vec3::new(x, y, z), degree, knots, radii)?
+        else {
+            return Ok(Err(Error::Unsupported(
+                "a radius law along edges that are not one open tangent chain",
+            )));
+        };
+        let expect = Expect::under(k, b, Proof::default(), contract)?;
+        let (r0, r1) = (
+            radii.first().copied().unwrap_or(0.0),
+            radii.last().copied().unwrap_or(0.0),
+        );
+        let p = Pass {
+            edges: &ids,
+            section: Section::Variable(if r0 > r1 { r0 } else { r1 }),
+            laws,
+            setbacks: &[],
+            earlier: &[],
+            patches: false,
+            overflow: None,
+            // one chain: its rounds run on into each other, none turns at a side edge
+            turn: Turn::Mitre,
+            chamfer_corner: ChamferCorner::Mitre,
+            roll_over: RollOverStep::No,
+            contract,
+        };
+        if let Err(e) = pass_or_refuse(k, b, p)? {
+            return Ok(Err(e));
+        }
+        done(k, b, expect, contract)
+    })?
+}
+
 /// Whether a variable round's law is checked against its band's room (the kernel's
 /// `law_fits_band`) before it is built.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -4258,7 +4354,7 @@ fn fillet_variable_impl(
         let p = Pass {
             edges: &[e],
             section: Section::Variable(if r0 > r1 { r0 } else { r1 }),
-            law: Some(law),
+            laws: vec![law],
             setbacks: &[],
             earlier: &[],
             patches: false,

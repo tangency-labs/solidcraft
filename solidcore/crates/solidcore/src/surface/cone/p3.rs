@@ -2320,4 +2320,113 @@ mod tests {
         assert_eq!(out.curve_types.len(), 1);
         assert_eq!(out.deviations.len(), 1);
     }
+
+    /// A cone of semi-angle 89.99° against a coaxial cylinder, both far
+    /// from the origin. The analytic circle's radial error grows with the slope even
+    /// when the axial shift stays inside the tolerance. Either the analytic path
+    /// falls back, or the reported deviation stays within the tolerance.
+    #[test]
+    fn coaxial_steep_coaxial_cone_cylinder_keeps_deviation_within_tol() {
+        let k = Kernel::default();
+        let slope = 89.99_f64.to_radians().tan();
+        let origin = Vec3::new(1e5, 1e5, 1e5);
+        let mut cone = Cone::new_bounded(
+            origin,
+            Vec3::X,
+            Vec3::Y,
+            1.0,
+            1.0 + 0.01 * slope,
+            0.0,
+            360.0,
+            0.01,
+            false,
+            false,
+            false,
+        );
+        cone.make_nurb(&k).unwrap();
+        let mut cylinder = Cone::new_cylinder_bounded(
+            origin,
+            Vec3::X,
+            Vec3::Y,
+            1.0 + 0.005 * slope,
+            0.0,
+            360.0,
+            0.01,
+            false,
+            false,
+            false,
+        );
+        cylinder.make_nurb(&k).unwrap();
+        let domain = cone.rev().base().natural_uv_domain();
+        let other = cylinder.rev().base().natural_uv_domain();
+        let (more, out) = cone
+            .intersect_with_cone(&k, &domain, &cylinder, &other, Some(1e-7))
+            .unwrap();
+        // Cone against cylinder takes the general intersector, never an analytic circle.
+        assert!(
+            more,
+            "a coaxial cone and cylinder fall back to the general intersector"
+        );
+        assert!(
+            more || (!out.deviations.is_empty() && out.deviations[0] <= 1e-7),
+            "more={more} deviations={:?}",
+            out.deviations
+        );
+    }
+
+    /// Two cones meet on a circle of radius 5e-13, above roundoff and
+    /// below `EFF_ZERO`. Fall back, or emit a degenerate touching curve. A crossing,
+    /// or no curve at all, drops the contact.
+    #[test]
+    fn coaxial_apex_circle_below_eff_zero_falls_back_or_touches() {
+        let k = Kernel::default();
+        let mut a = Cone::new_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            0.0,
+            10.0,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        a.make_nurb(&k).unwrap();
+        let radius = 5e-13;
+        let mut b = Cone::new_bounded(
+            Vec3::new(0.0, 0.0, radius),
+            Vec3::X,
+            Vec3::Y,
+            radius,
+            20.0 + radius,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        b.make_nurb(&k).unwrap();
+        let domain = a.rev().base().natural_uv_domain();
+        let other = b.rev().base().natural_uv_domain();
+        let (more, out) = a
+            .intersect_with_cone(&k, &domain, &b, &other, Some(1e-7))
+            .unwrap();
+        // Two coaxial cones take the general intersector, never an analytic circle.
+        assert!(
+            more,
+            "two coaxial cones fall back to the general intersector"
+        );
+        assert!(
+            more || (!out.curve_types.is_empty()
+                && out
+                    .curve_types
+                    .iter()
+                    .all(|t| *t == TsectCurveType::Touching)),
+            "more={more} curve_types={:?}",
+            out.curve_types
+        );
+    }
 }

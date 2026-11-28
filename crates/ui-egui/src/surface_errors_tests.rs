@@ -5,7 +5,8 @@
 //! for GPU to come idle before reconfiguring the Surface", #1935), which stock egui-wgpu configures
 //! without an error scope.
 
-use egui_wgpu::{capture_errors, wgpu};
+use egui_wgpu::wgpu;
+use solidcraft_viewport_gpu::capture_errors;
 
 #[test]
 fn an_error_under_capture_is_returned_not_a_panic() {
