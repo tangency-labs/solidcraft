@@ -3408,7 +3408,28 @@ fn coil_revolutions_arrows_step_whole_turns() {
         }
         h.frames(2);
     };
-    let click = |h: &mut Harness, arrow: &str| h.step(&json!({"click":{"handle":format!("dialog:ui.revolutions {arrow}")}})).unwrap();
+    // Before each click: the preview has finished and the arrows have stopped moving. A preview
+    // the kernel refuses (1500 turns at this size: "too many turns for the tolerance") shows its
+    // error and scrolls the panel to it, moving the arrows up by about a field: a click aimed
+    // before that scroll ended on the down arrow, stepping to 1499 (#23506).
+    let still = |h: &mut Harness| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let (mut last, mut same) = (None, 0);
+        while same < 3 {
+            assert!(std::time::Instant::now() < deadline, "the Coil preview did not settle");
+            if h.app.preview.busy {
+                h.app.preview.wait_for_worker();
+            }
+            h.frames(1);
+            let at = solidcraft_ui_registry::handle_at("dialog:ui.revolutions up");
+            same = if !h.app.preview.busy && at.is_some() && at == last { same + 1 } else { 0 };
+            last = at;
+        }
+    };
+    let click = |h: &mut Harness, arrow: &str| {
+        still(h);
+        h.step(&json!({"click":{"handle":format!("dialog:ui.revolutions {arrow}")}})).unwrap();
+    };
     assert_eq!(sent(&h), json!("4"));
     click(&mut h, "up");
     assert_eq!(sent(&h), json!("5"));
