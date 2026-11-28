@@ -1,0 +1,453 @@
+{
+ "area": "fillets",
+ "bodies": {
+  "b4": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b5": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b9": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "calls": [
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b1"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "distance": 2.0,
+    "draft": 0.0,
+    "profile": [
+     {
+      "nurbs": {
+       "degree": 3,
+       "knots": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        2.228623148306003,
+        2.228623148306003,
+        2.228623148306003,
+        3.4572462966120057,
+        3.4572462966120057,
+        3.4572462966120057,
+        4.457246296612006,
+        4.457246296612006,
+        4.457246296612006,
+        5.427109786322345,
+        5.427109786322345,
+        5.427109786322345,
+        6.610714306284128,
+        6.610714306284128,
+        6.610714306284128,
+        7.79431882624591,
+        7.79431882624591,
+        7.79431882624591,
+        8.76418231595625,
+        8.76418231595625,
+        8.76418231595625,
+        8.76418231595625
+       ],
+       "points": [
+        [
+         2.0,
+         0.0,
+         0.0,
+         1.0
+        ],
+        [
+         2.0521531162105884,
+         0.40458540682360417,
+         0.0,
+         1.0
+        ],
+        [
+         1.833611619537614,
+         0.8989385108182207,
+         0.0,
+         1.0
+        ],
+        [
+         1.51,
+         1.14,
+         0.0,
+         1.0
+        ],
+        [
+         1.1124032731752922,
+         1.436173725773851,
+         0.0,
+         1.0
+        ],
+        [
+         0.556201636587646,
+         1.35,
+         0.0,
+         1.0
+        ],
+        [
+         0.0,
+         1.35,
+         0.0,
+         1.0
+        ],
+        [
+         -0.556201636587646,
+         1.35,
+         0.0,
+         1.0
+        ],
+        [
+         -1.1124032731752922,
+         1.436173725773851,
+         0.0,
+         1.0
+        ],
+        [
+         -1.51,
+         1.14,
+         0.0,
+         1.0
+        ],
+        [
+         -1.833611619537614,
+         0.8989385108182207,
+         0.0,
+         1.0
+        ],
+        [
+         -2.0521531162105884,
+         0.40458540682360417,
+         0.0,
+         1.0
+        ],
+        [
+         -2.0,
+         0.0,
+         0.0,
+         1.0
+        ],
+        [
+         -1.94941859671273,
+         -0.3923926145478182,
+         0.0,
+         1.0
+        ],
+        [
+         -1.644212315162933,
+         -0.7003465743304298,
+         0.0,
+         1.0
+        ],
+        [
+         -1.31,
+         -0.986,
+         0.0,
+         1.0
+        ],
+        [
+         -0.9021331083698363,
+         -1.3346064681804322,
+         0.0,
+         1.0
+        ],
+        [
+         -0.45106655418491814,
+         -1.65,
+         0.0,
+         1.0
+        ],
+        [
+         0.0,
+         -1.65,
+         0.0,
+         1.0
+        ],
+        [
+         0.45106655418491814,
+         -1.65,
+         0.0,
+         1.0
+        ],
+        [
+         0.9021331083698363,
+         -1.3346064681804322,
+         0.0,
+         1.0
+        ],
+        [
+         1.31,
+         -0.986,
+         0.0,
+         1.0
+        ],
+        [
+         1.644212315162933,
+         -0.7003465743304298,
+         0.0,
+         1.0
+        ],
+        [
+         1.94941859671273,
+         -0.3923926145478182,
+         0.0,
+         1.0
+        ],
+        [
+         2.0,
+         0.0,
+         0.0,
+         1.0
+        ]
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b3"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "distance": 1.0,
+    "draft": 0.0,
+    "profile": [
+     {
+      "arc": {
+       "axis": [
+        0.0,
+        0.0,
+        1.0
+       ],
+       "center": [
+        2.007463896265361,
+        0.14469372669831124,
+        1.0
+       ],
+       "end": 6.896285307179586,
+       "radius": 0.145,
+       "reference": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "start": 0.6131
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [
+    "b5",
+    "b4"
+   ],
+   "op": "boolean_tagged",
+   "outputs": [
+    "b6"
+   ],
+   "params": {
+    "op": "subtract"
+   }
+  },
+  {
+   "inputs": [],
+   "op": "extrude",
+   "outputs": [
+    "b8"
+   ],
+   "params": {
+    "cap": true,
+    "corner": "curvature",
+    "direction": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "distance": 1.92,
+    "draft": 0.0,
+    "profile": [
+     {
+      "arc": {
+       "axis": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "center": [
+        0.0,
+        -0.96,
+        1.88
+       ],
+       "end": 6.896285307179586,
+       "radius": 0.24,
+       "reference": [
+        -1.0,
+        0.0,
+        0.0
+       ],
+       "start": 0.6131
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [
+    "b6",
+    "b9"
+   ],
+   "op": "boolean_tagged",
+   "outputs": [
+    "b11"
+   ],
+   "params": {
+    "op": "subtract"
+   }
+  },
+  {
+   "inputs": [
+    "b11"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b14"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b14"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b15"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b15"
+   ],
+   "op": "blend_dropping",
+   "params": {
+    "edges": {
+     "kind": "edge",
+     "picked": [
+      {
+       "at": [
+        [
+         1.9950526415378427,
+         0.2891615804100924,
+         2.0
+        ],
+        [
+         1.999985389034754,
+         -0.00011328946320466183,
+         2.0
+        ]
+       ],
+       "index": 3
+      },
+      {
+       "at": [
+        [
+         1.9950526415378427,
+         0.2891615804100924,
+         2.0
+        ],
+        [
+         1.999985389034754,
+         -0.00011328946320466183,
+         2.0
+        ]
+       ],
+       "index": 7
+      }
+     ],
+     "points": [
+      [
+       -1.994429262403366,
+       -0.027132370235435577,
+       2.0000000000000004
+      ],
+      [
+       1.8624952634307406,
+       0.1422141121371694,
+       2.0
+      ]
+     ],
+     "tolerance": 0.2708684290694787
+    },
+    "kind": "round",
+    "sizes": [
+     0.12,
+     0.12
+    ],
+    "turn": "auto"
+   },
+   "outputs": [
+    "b16"
+   ]
+  }
+ ],
+ "case": "19684-fillet-spline-rim-notched-at-its-seam-r0-12",
+ "expected": {
+  "body_count": 1,
+  "method": "V0: outline area by Green's theorem over its eight cubic Bezier spans (exact for polynomials) 9.3739668; times 2 = 18.7479336. Notch: the outline's area inside the circle R0.145 about (2.0074639, 0.1446937), bounded by the spline from b = (1.9999854, -0.0001133) through the seam to a = (1.9950526, 0.2891616) and the arc from a to b, 172.1334 degrees, 0.0320659, times 1 deep. Cross hole: the disc R0.24 below its chord 0.12 above the centre, pi r^2 - (r^2 acos(1/2) - 0.12 sqrt(r^2 - 0.12^2)) = 0.1617, times 1.92 = 0.3105. V0 = 18.4363567. The round takes the 90-degree spandrel, area A = r^2 (1 - pi/4) = 0.00309027, its centroid d = r (10 - 3 pi)/(12 - 3 pi) = 0.0268042 in from the edge, swept by Pappus: along the spline edge (length 10.863177, tangent turning 344.1929 degrees, curvature at most 1.12, radius 0.89 > r) A (L - d turn) = 0.0330725; round the notch's arc, the material outside it, A theta (R + d) = 0.0015950. The rounds meet at each vertex in a mitre on the bisector of the top face's corner (86.456 and 85.604 degrees), which leaves A d cot(alpha/2) less at each: 0.0001776 together. Removed 0.0344900; V = 18.4018667. The mitre's term is exact for straight edges; the notch's curvature (r/R = 0.83) moves it by a fraction of itself, inside the tolerance of 3e-4 (1 % of what the round removes; a round 0.01 smaller removes 0.0055 less).",
+  "outcome": "solid",
+  "source": "analytic",
+  "sources": [
+   "tangency-labs/solidcraft#19684"
+  ],
+  "tolerance": {
+   "abs_mm": 0.0003
+  },
+  "volume_mm3": 18.4018667
+ },
+ "expressible": true,
+ "operation_expressible": true,
+ "records": "19684-fillet-spline-rim-notched-at-its-seam-r0-12.bodies.json.gz",
+ "result": [
+  {
+   "body": "Part",
+   "made": "b16"
+  }
+ ],
+ "sources": [
+  "tangency-labs/solidcraft#19684"
+ ],
+ "ungraded": [],
+ "what": "an R0.12 round on the top rim of a 2 mm extrusion of a closed periodic spline outline (fit through 8 points, its seam at (2, 0)), after a notch R0.145, 1 mm deep, is cut down from the top 0.00002 mm clear of the seam and a cross hole R0.24 along y runs under the top face: the notch takes the seam, so the rim is one spline edge most of the way round and the notch's arc, both between the same two vertices 0.29 mm apart. The round's trace runs round the closed outline from one end of the spline edge and its extension past the other end comes back onto its start; it keeps half of that run across the notch, measured from where the edge ends",
+ "why_not": []
+}

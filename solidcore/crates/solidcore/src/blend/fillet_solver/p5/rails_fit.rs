@@ -8,7 +8,10 @@
 //! Deviations: a run of off-face intervals between two stretches on the face is skipped
 //! when it both leaves and returns on or beyond the cross section at the same end of the
 //! filleted edge (#1580; a run past one end and back past the other, round the far side
-//! of a closed rail, is judged, #2175); `518566f` tries [`leaves_past_an_end`] only for
+//! of a closed rail, is judged, #2175, where a stretch of it lies in span: one with none,
+//! the extension past an end across the short gap to the other end of an edge that runs
+//! nearly all round a closed loop, lies wholly past the ends, SolidCraft #19684);
+//! `518566f` tries [`leaves_past_an_end`] only for
 //! the first and last runs and refuses such a round. Such a run's leave (or return) is
 //! also past an end where it crosses the face's side edge at that end heading out past it
 //! (or in from beyond it), as for a first or last run ([`past_end_through_side_edge`]): a
@@ -1130,8 +1133,9 @@ impl FilletSolver {
                         // `518566f` tried only the first and last runs). A run that leaves
                         // past one end and comes back past the other here is one of an open
                         // rail's, and is judged as the fork judges it
-                        // (tangency-labs/solidcore#2175); a closed rail's is judged by its
-                        // stretches in span above (#17646).
+                        // (tangency-labs/solidcore#2175) where it has a stretch in span
+                        // (below); a closed rail's is judged by its stretches in span above
+                        // (#17646).
                         let back = run_end_past(
                             solver.solver(),
                             k,
@@ -1159,6 +1163,22 @@ impl FilletSolver {
                             || back.is_some_and(|b| pinched_back == Some(b))
                         {
                             continue;
+                        }
+                        // A run that leaves past one end and comes back past the other with no
+                        // stretch in span (where the edge point nearest the rail is not an end)
+                        // lies wholly past the ends, which trim it, as a closed rail's run does
+                        // (#17646): the extension past an end of an edge whose ends are near
+                        // each other on a closed loop (a notch across its seam, the loop's
+                        // other edge the side edge at both ends) crosses the gap between them
+                        // and comes back onto its face beyond the other end (SolidCraft
+                        // #19684).
+                        if back.is_some() {
+                            let run = [Extent1d::from_min_max(d_leave, d_back)];
+                            if in_span_stretches(solver.solver(), k, target, &curve, &run)?
+                                .is_empty()
+                            {
+                                continue;
+                            }
                         }
                         wraps = back.is_some();
                     }

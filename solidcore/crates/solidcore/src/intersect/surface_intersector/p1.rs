@@ -675,6 +675,14 @@ pub struct SurfaceIntersector<'s> {
     /// surface of revolution round its axis keeps half the gap of its turn either end
     /// (WR-650).
     pub extension_closed: bool,
+    /// Not upstream (#2500, SolidCraft #19684): the curve parameter of the trace's last
+    /// through point, once the trace has reached it (the traced curve's end, where its
+    /// extension past the end begins); `None` before. The half of the gap an extension
+    /// past the end keeps when it comes back onto the start
+    /// ([`Self::extension_closed`]) is measured from there.
+    /// [`Self::last_through_parameter`] is not that point: upstream records it only while
+    /// clipping an extension of an arc ([`Self::doing_extension_clipping`]).
+    pub traced_end_parameter: Option<f64>,
     /// `m_bCurveIsClosed`.
     pub curve_is_closed: bool,
     /// Not upstream: the `trace_step` calls left to the start-point loop of
@@ -917,6 +925,7 @@ impl<'s> SurfaceIntersector<'s> {
             extension_closes_at: None,
             extension_left_closure: false,
             extension_closed: false,
+            traced_end_parameter: None,
             curve_is_closed: false,
             trace_steps_left: u64::MAX,
             start_loop_trace_steps: super::p4::MAX_START_LOOP_TRACE_STEPS,
