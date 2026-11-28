@@ -815,11 +815,12 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 given_points = Some(points.clone());
                 indices
             }
-            ProfileSel::Curves { loops } => {
+            ProfileSel::Curves { loops, .. } => {
                 // The command's ordinary curve lists are sets, including repeated
                 // caller IDs. Saved graph-span multisets retain their legacy meaning.
                 // Reserved offset roles never use this ordinary normalization.
                 let mut normalized = loops.clone();
+                let mut dynamic_loops = Vec::with_capacity(normalized.len());
                 let reserved = ss
                     .sketch
                     .offsets
@@ -829,13 +830,23 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                     .collect::<std::collections::BTreeSet<_>>();
                 for curves in &mut normalized {
                     let dynamic = curves.iter().any(|curve| reserved.contains(curve.as_str()));
+                    dynamic_loops.push(dynamic);
                     if !dynamic {
                         let mut seen = std::collections::BTreeSet::new();
                         curves.retain(|curve| seen.insert(curve.clone()));
                     }
                 }
-                let selection = ProfileSel::Curves { loops: normalized };
-                solidcraft_doc::profile_selection_indices(ss, &selection)?;
+                let count = normalized.len();
+                let mut selection = ProfileSel::Curves { loops: normalized, sides: Vec::new() };
+                let found = solidcraft_doc::profile_selection_indices(ss, &selection)?;
+                // The side of each curve the named profiles lie on, so the pick still names them
+                // when a change makes a twin bounded by the same curves (#23291). Offset roles are
+                // renamed by their offset, so loops with them keep their curves alone.
+                if found.len() == count
+                    && let ProfileSel::Curves { sides, .. } = &mut selection
+                {
+                    *sides = solidcraft_doc::picked_sides(ss, &found, &dynamic_loops);
+                }
                 *sel = selection;
                 continue;
             }
@@ -883,7 +894,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                             .ok_or_else(|| EngineError::Other(format!("offset association `{id}` changed during profile capture")))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                ProfileSel::Curves { loops }
+                ProfileSel::Curves { loops, sides: Vec::new() }
             }
             captured => captured,
         };
@@ -1063,7 +1074,7 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
                 }
                 loops.push(ids);
             }
-            Ok(ProfileSel::Curves { loops })
+            Ok(ProfileSel::Curves { loops, sides: Vec::new() })
         }
         _ => Err(bad(cmd, "`profiles` must be \"all\" or a list")),
     }
@@ -1611,7 +1622,7 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
         let indices = ps.iter().enumerate().filter(|(_, p)| material.iter().any(|m| std::ptr::eq(*m, *p))).map(|(i, _)| i).collect();
         ProfileSel::Indices { indices }
     } else {
-        ProfileSel::Curves { loops: material.iter().map(|p| p.outer_curves.clone()).collect() }
+        ProfileSel::Curves { loops: material.iter().map(|p| p.outer_curves.clone()).collect(), sides: Vec::new() }
     };
     match solidcraft_doc::profile_selection_indices(ss, &sel) {
         Ok(found) if found.len() == material.len() && material.iter().all(|p| !p.outer_curves.is_empty()) => sel,

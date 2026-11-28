@@ -205,7 +205,15 @@ pub enum ProfileSel {
     /// curves cut them (order and repeats don't matter; see `sketch::profile_by_curves`). Found
     /// again on every evaluation, so stable across parameter changes; no match or several is
     /// an error, never another profile.
-    Curves { loops: Vec<Vec<String>> },
+    Curves {
+        loops: Vec<Vec<String>>,
+        /// For each loop, the side of each of its curves the profile lay on when it was picked
+        /// (inside or outside a circle, left or right of a line), or empty when that was not
+        /// saved (older designs, loops with free curves). Used only when the curves come to bound
+        /// several profiles after a change (#23291): the one that lies the same way is taken.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sides: Vec<Vec<SidedCurve>>,
+    },
     /// Complete current boundaries of topology-aware analytic offset associations.
     /// The local association identity survives retirement and resurrection of arc roles.
     OffsetBoundaries { associations: Vec<String> },

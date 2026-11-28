@@ -9219,10 +9219,14 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
         ProfileSel::SidedCurves { .. } => {
             solidcraft_engine::doc::profile_selection_indices_lenient(ss, sel).map(|(found, _)| found).unwrap_or_default()
         }
-        ProfileSel::Curves { loops } => loops
+        ProfileSel::Curves { loops, sides } => loops
             .iter()
-            .filter_map(|l| {
-                solidcraft_engine::doc::profile_selection_indices(ss, &ProfileSel::Curves { loops: vec![l.clone()] }).ok()?.first().copied()
+            .enumerate()
+            .filter_map(|(k, l)| {
+                // Each loop with its own saved sides, which pick its region when a change made a
+                // twin bounded by the same curves (#23291).
+                let sides = if sides.len() == loops.len() { sides.get(k).cloned().into_iter().collect() } else { Vec::new() };
+                solidcraft_engine::doc::profile_selection_indices(ss, &ProfileSel::Curves { loops: vec![l.clone()], sides }).ok()?.first().copied()
             })
             .collect(),
         ProfileSel::Points { points } => points.iter().filter_map(|q| solidcraft_engine::doc::sketch::profile_at_point(ps, *q)).collect(),
