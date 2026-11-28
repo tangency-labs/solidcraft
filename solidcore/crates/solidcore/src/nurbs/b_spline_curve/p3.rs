@@ -2641,20 +2641,19 @@ impl BSplineCurve {
                 // (above) a UV trim proved to move fast enough on its surface
                 if evaluated && deriv_length < tol {
                     if let Some((surface, surface_tol)) = surface_speed_tol {
-                        let clears = match speed_whole_clears {
-                            Some(c) => c,
-                            None => {
-                                let c = speed_clears_on_surface(
-                                    k,
-                                    self,
-                                    surface,
-                                    domain.min(),
-                                    domain.max(),
-                                    surface_tol,
-                                )?;
-                                speed_whole_clears = Some(c);
-                                c
-                            }
+                        let clears = if let Some(c) = speed_whole_clears {
+                            c
+                        } else {
+                            let c = speed_clears_on_surface(
+                                k,
+                                self,
+                                surface,
+                                domain.min(),
+                                domain.max(),
+                                surface_tol,
+                            )?;
+                            speed_whole_clears = Some(c);
+                            c
                         };
                         if clears {
                             continue;
@@ -3481,9 +3480,9 @@ mod tests {
     /// #23062 (review): the constant metric of the trim's middle decides nothing. On the
     /// regular surface `S(u, v) = (u + 16 u^3 / (3 e^3), v, 0)`, `e = 1e-6`, the trim
     /// `c(t) = (e (t - 1/4), (t - 1/4)^2)` mapped by the metric at its middle (where
-    /// `|S_u|` is about 1e6) moves at about 1 or more, but at `t = 1/4` (where `|S_u|` is
-    /// 1) its image moves at 1e-6, far below the tolerance on the surface (about 1e-4).
-    /// Test 11 reports it, as it does in raw (u, v).
+    /// `|S_u|` is about 1e6) moves at about 1 or more, but at `t = 1/4` (where
+    /// `|S_u|` is 1) its image moves at 1e-6, far below the tolerance on the surface
+    /// (about 1e-4). Test 11 reports it, as it does in raw (u, v).
     #[test]
     fn issue_23062_a_trim_whose_image_slows_off_its_middle_is_reported() {
         use crate::nurbs::b_spline_curve::KnotType as SurfaceKnotType;
