@@ -9221,7 +9221,17 @@ fn clear_group_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
         // on a circle (their boxes overlap) seem to meet (#9007). Their exact shapes may still
         // be apart. Only paid for 8 or more tools so a counterbore's or countersink's two
         // concentric tools never run an extra union just to learn they meet.
-        None if tools.len() >= 8 && tools_clearly_apart(&bodies) => kernel::join_apart(&bodies).ok().flatten(),
+        None if tools.len() >= 8 => {
+            if tools_clearly_apart(&bodies) {
+                kernel::join_apart(&bodies).ok().flatten()
+            } else if let Some((apart, meeting)) = split_apart(&bodies) {
+                // Some tools meet or touch another, most do not: those that meet none are one
+                // tool of many pieces, and the few that meet are cut one at a time, as before.
+                return join_those_apart(tools, &apart, &meeting);
+            } else {
+                None
+            }
+        }
         None => None,
     };
     #[cfg(test)]
@@ -9234,6 +9244,72 @@ fn clear_group_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
         }
         None => tools,
     })
+}
+
+/// The tools `bodies` as indices: those that meet no other tool, and those that meet or touch at
+/// least one. Found from the pairs whose boxes meet: each such pair's exact union says whether
+/// the two meet ([`apart_by_union`], two small tools, far cheaper than one union of all of them).
+/// `None` when that cannot be shown (a mesh, no exact box), when fewer than two tools meet none
+/// (nothing to gain), or when so many pairs have close boxes that the union of all of them is
+/// the cheaper test.
+fn split_apart(bodies: &[Body]) -> Option<(Vec<usize>, Vec<usize>)> {
+    if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
+        return None;
+    }
+    let boxes = bodies.iter().map(more::exact_box).collect::<Option<Vec<_>>>()?;
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| boxes.get(i).map_or(0.0, |b| b.min.x).total_cmp(&boxes.get(j).map_or(0.0, |b| b.min.x)));
+    let limit = bodies.len() * MAX_CLOSE_PAIRS_PER_TOOL;
+    let mut meets = vec![false; bodies.len()];
+    let mut close = 0usize;
+    for (k, &i) in order.iter().enumerate() {
+        let a = boxes.get(i)?;
+        for &j in order.iter().skip(k + 1) {
+            let b = boxes.get(j)?;
+            if b.min.x > a.max.x {
+                break;
+            }
+            if more::boxes_apart(&Some(*a), &Some(*b)) {
+                continue;
+            }
+            close += 1;
+            if close > limit {
+                return None;
+            }
+            if !apart_by_union(bodies.get(i)?, bodies.get(j)?) {
+                *meets.get_mut(i)? = true;
+                *meets.get_mut(j)? = true;
+            }
+        }
+    }
+    let (meeting, apart): (Vec<usize>, Vec<usize>) = (0..bodies.len()).partition(|&i| meets.get(i).copied().unwrap_or(true));
+    (apart.len() >= 2).then_some((apart, meeting))
+}
+
+/// Close box pairs for each tool [`split_apart`] tests exactly, at most.
+const MAX_CLOSE_PAIRS_PER_TOOL: usize = 8;
+
+/// `tools` with those at `apart` (meeting no other tool, [`split_apart`]) joined as one tool of
+/// that many pieces, and those at `meeting` left as they are, after it.
+fn join_those_apart(tools: Vec<Traced>, apart: &[usize], meeting: &[usize]) -> Result<Vec<Traced>> {
+    let mut tools: Vec<Option<Traced>> = tools.into_iter().map(Some).collect();
+    let mut take = |ids: &[usize]| -> Vec<Traced> { ids.iter().filter_map(|&i| tools.get_mut(i).and_then(Option::take)).collect() };
+    let group = take(apart);
+    let rest = take(meeting);
+    let bodies: Vec<Body> = group.iter().map(|t| t.body.clone()).collect();
+    let one = kernel::join_apart(&bodies).ok().flatten();
+    #[cfg(test)]
+    cost_tests::count(|c| c.cut_tools += one.as_ref().map_or(group.len(), |_| 1) + rest.len());
+    let mut out = Vec::with_capacity(rest.len() + 1);
+    match one {
+        Some(one) => {
+            let recipe = recipe_of(&group);
+            out.push(Traced::step(one, &group.iter().collect::<Vec<_>>()).with_recipe(recipe));
+        }
+        None => out.extend(group),
+    }
+    out.extend(rest);
+    Ok(out)
 }
 
 /// Most pairs of tools whose boxes meet that [`tools_clearly_apart`] tests.

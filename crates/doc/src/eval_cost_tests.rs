@@ -3740,6 +3740,139 @@ fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
     assert_eq!(names, one_names);
 }
 
+/// A 200 x 200 x 4 plate cut by one Combine with a cylinder of 2 mm radius through it at each of
+/// `centres` (the tools are separate bodies): the plate's volume, its face count and names, and the
+/// tools the cut was made with. `limit` is the most tools joined into one (None: as a design does).
+fn plate_cut_by_cylinders(centres: &[(f64, f64)], limit: Option<usize>) -> (f64, usize, Vec<String>, usize) {
+    if let Some(limit) = limit {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+    }
+    let mut doc = Document::new("drilled plate");
+    let plate = FeatureKind::Box {
+        corner: point_expr(Vec3::ZERO),
+        length: "200".into(),
+        width: "200".into(),
+        height: "4".into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    let plate = doc.add_feature(plate, Some("Plate")).unwrap();
+    let mut made = Vec::new();
+    for &(x, y) in centres {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(x, y, -1.0)),
+            axis: crate::dir_expr(Vec3::Z),
+            radius: "2".into(),
+            height: "6".into(),
+            operation: Operation::NewBody,
+            references: Vec::new(),
+        };
+        made.push(doc.add_feature(kind, None).unwrap());
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let name_of = |id: u64| model.state().bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
+    let (target, tools) = (name_of(plate), made.iter().map(|&id| name_of(id).into()).collect());
+    let combine = FeatureKind::Combine {
+        target: target.clone().into(),
+        tools,
+        operation: Operation::Cut,
+        keep_tools: false,
+        offset: None,
+        offset_edges: OffsetEdges::Sharp,
+        offset_faces: Vec::new(),
+        offset_radius: None,
+    };
+    doc.add_feature(combine, Some("Drill")).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    let mut names = crate::naming::face_names(&st.bodies[0]).to_vec();
+    names.sort();
+    (disc_volume(&model), st.bodies[0].body.face_count(), names, work.cut_tools)
+}
+
+/// Twelve tools on a diagonal, 4.243 mm apart with 4 mm across (so their boxes overlap while the
+/// tools are 0.243 mm apart), as they are placed.
+fn diagonal_tools() -> Vec<(f64, f64)> {
+    (0..12).map(|i| (10.0 + 3.0 * i as f64, 10.0 + 3.0 * i as f64)).collect()
+}
+
+/// The area two circles of radius `r` whose centres are `d` apart share.
+fn lens_area(r: f64, d: f64) -> f64 {
+    2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt()
+}
+
+/// A cut by many tools of which only a pair meets: the tools that meet no other are one tool of
+/// many pieces, one cut, and the pair is cut one tool at a time, so 12 + 2 tools are 3 cuts and
+/// not 14. The plate comes out as 14 cuts one at a time leave it (1e-9), and as the closed form:
+/// the plate less 12 cylinders and the union of two of them, a lens of area `lens_area` shared.
+#[test]
+fn a_cut_by_many_tools_joins_those_apart_and_cuts_the_overlapping_pair_one_by_one() {
+    let mut centres = diagonal_tools();
+    // Two tools 3 mm apart (2 mm radius) overlap in a lens, far from the others.
+    centres.extend([(100.0, 100.0), (103.0, 100.0)]);
+    let (volume, faces, names, tools) = plate_cut_by_cylinders(&centres, None);
+    // With at most one tool joined, each is cut on its own (and none is counted as joined).
+    let (one_volume, one_faces, one_names, _) = plate_cut_by_cylinders(&centres, Some(1));
+    assert_eq!(tools, 3);
+    assert!((volume - one_volume).abs() <= 1e-9 * volume, "{volume} vs {one_volume}");
+    assert_eq!((faces, &names), (one_faces, &one_names));
+    let disc = std::f64::consts::PI * 4.0;
+    let removed = (12.0 * disc + 2.0 * disc - lens_area(2.0, 3.0)) * 4.0;
+    let expected = 200.0 * 200.0 * 4.0 - removed;
+    assert!((volume - expected).abs() <= 1e-9 * expected, "{volume} vs {expected}");
+}
+
+/// 138 tools: 134 on a grid 15 mm apart, and two pairs that overlap. The pairs are cut one tool at
+/// a time and the 134 others are joined, so the plate loses the volume the closed form says
+/// and the cut is a handful of booleans, not 138 (the time of each is printed).
+#[test]
+fn a_cut_by_138_tools_with_two_overlapping_pairs_is_a_handful_of_cuts() {
+    let mut centres: Vec<(f64, f64)> = (0..134).map(|i| (10.0 + 15.0 * (i % 12) as f64, 10.0 + 15.0 * (i / 12) as f64)).collect();
+    centres.extend([(190.0, 100.0), (193.0, 100.0), (190.0, 150.0), (193.0, 150.0)]);
+    assert_eq!(centres.len(), 138);
+    let started = std::time::Instant::now();
+    let (volume, _, _, tools) = plate_cut_by_cylinders(&centres, None);
+    println!("138 tools: {tools} cuts, {:.2} s", started.elapsed().as_secs_f64());
+    // 134 tools of 4 mm across and two overlapping pairs; the groups of at most 32 tools are cut in
+    // turn: 5 groups of the 134, and the 4 tools of the pairs one by one.
+    assert_eq!(tools, 5 + 4);
+    let disc = std::f64::consts::PI * 4.0;
+    let removed = (134.0 * disc + 4.0 * disc - 2.0 * lens_area(2.0, 3.0)) * 4.0;
+    let expected = 200.0 * 200.0 * 4.0 - removed;
+    assert!((volume - expected).abs() <= 1e-9 * expected, "{volume} vs {expected}");
+}
+
+/// Tools that all meet a neighbour are not joined: a chain of 10 tools each 3 mm from the next
+/// overlaps pair by pair, and is cut one tool at a time. Two tools that only touch (4 mm apart,
+/// 2 mm radius: tangent) are told from the tools apart too, and are cut one at a time. The
+/// volumes are the closed forms.
+#[test]
+fn tools_that_overlap_or_touch_are_cut_one_by_one() {
+    let chain: Vec<(f64, f64)> = (0..10).map(|i| (20.0 + 3.0 * i as f64, 20.0)).collect();
+    let (volume, _, _, tools) = plate_cut_by_cylinders(&chain, None);
+    assert_eq!(tools, 10);
+    let disc = std::f64::consts::PI * 4.0;
+    // Neighbours share a lens; tools two apart (6 mm) do not meet.
+    let removed = (10.0 * disc - 9.0 * lens_area(2.0, 3.0)) * 4.0;
+    let expected = 200.0 * 200.0 * 4.0 - removed;
+    assert!((volume - expected).abs() <= 1e-9 * expected, "{volume} vs {expected}");
+
+    let mut centres = diagonal_tools();
+    centres.extend([(100.0, 150.0), (104.0, 150.0)]);
+    let (volume, faces, names, tools) = plate_cut_by_cylinders(&centres, None);
+    // With at most one tool joined, each is cut on its own (and none is counted as joined).
+    let (one_volume, one_faces, one_names, _) = plate_cut_by_cylinders(&centres, Some(1));
+    assert_eq!(tools, 3);
+    let expected = 200.0 * 200.0 * 4.0 - 14.0 * disc * 4.0;
+    assert!((volume - expected).abs() <= 1e-9 * expected, "{volume} vs {expected}");
+    assert!((volume - one_volume).abs() <= 1e-9 * volume, "{volume} vs {one_volume}");
+    assert_eq!((faces, &names), (one_faces, &one_names));
+}
+
 /// A 60 x 60 x 3 plate cut through by one sketch of `n` x `n` separate 2 mm squares, 4 mm apart,
 /// with at most `shells` shells in one joined tool: the plate's volume, its face count and the
 /// extrude's error.
