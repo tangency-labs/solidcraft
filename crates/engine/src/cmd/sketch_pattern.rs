@@ -87,9 +87,9 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             .chain(ps.iter().filter_map(|i| sk.points.get(*i).map(|p| p.id.clone())))
             .collect();
         if let Some(old) = &mut old {
-            if entity_ids != old.entities {
-                // A changed seed list (#10649) rebuilds every copy: the old copies go, and the
-                // new ones get fresh ids. A copy cannot seed the pattern that makes it.
+            if circular && entity_ids != old.entities {
+                // Circular seed editing rebuilds every copy. Keep this path in sync with upstream;
+                // rectangular edits use update_pattern_entities below to preserve surviving IDs.
                 if old
                     .instances
                     .iter()
@@ -203,16 +203,26 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         let reported_curve_count = entity_ids.iter().filter(|id| sk.curve_index(id).is_some()).count();
         // Removing old copies can retire an earlier pattern seeded by one, so the old index may be past the end.
         let index = old_index.unwrap_or(sk.patterns.len()).min(sk.patterns.len());
+        let is_seed_edit = old.as_ref().is_some_and(|old| entity_ids != old.entities);
         let pattern = SketchPattern {
             id: id.clone(),
-            entities: entity_ids,
+            entities: if is_seed_edit && !circular {
+                old.as_ref().map_or_else(|| entity_ids.clone(), |old| old.entities.clone())
+            } else {
+                entity_ids.clone()
+            },
             kind: kind.clone(),
-            instances: old.map(|old| old.instances).unwrap_or_default(),
+            instances: old.as_ref().map_or_else(Vec::new, |old| old.instances.clone()),
             expressions,
             count_expression,
         };
-        sk.patterns.insert(index, pattern);
-        sk.update_pattern(index, kind)?;
+        sk.patterns.insert(index.min(sk.patterns.len()), pattern);
+        if is_seed_edit && !circular {
+            sk.update_pattern_entities(&id, entity_ids, kind)?;
+        } else {
+            sk.update_pattern(index.min(sk.patterns.len().saturating_sub(1)), kind)?;
+        }
+        let index = sk.patterns.iter().position(|pattern| pattern.id == id).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
         let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
         let curves: Vec<_> = pattern.instances.iter().flat_map(|instance| instance.curves.iter().take(reported_curve_count).cloned()).collect();
         let constraints: Vec<_> = pattern.instances.iter().flat_map(|i| i.constraints.iter().cloned()).collect();
