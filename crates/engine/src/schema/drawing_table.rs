@@ -63,6 +63,11 @@ pub struct ListSet {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub show_purchased_contents: Option<Value>,
+    /// A row for each kind of press-in hardware in the parts listed, with how many (default true on a new list; a list saved
+    /// without it has none).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub press_in_hardware: Option<Value>,
     /// How it shows a mass: `{unit: g | kg | lb, decimals: 0 to 6}` (default kg to 2).
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     pub mass: Option<Value>,

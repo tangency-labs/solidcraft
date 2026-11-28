@@ -665,3 +665,101 @@ fn a_view_that_cant_be_numbered_still_places_its_list() {
     assert!(s.doc.assembly.item_numbers.is_empty());
     assert_eq!(s.drawing("test").unwrap().tables.len(), 1);
 }
+
+/// A sheet metal plate, 100 x 60 x 2, as the component `Plate` placed once in the design.
+fn sheet_part() -> Session {
+    let mut s = Session::default();
+    let rule = json!({"name": "Test", "thickness": "2 mm", "k_factor": "0.44", "bend_radius": "2 mm", "gap": "0.5 mm", "active": true});
+    s.execute("sheet.manage_rules", &rule).unwrap();
+    s.execute("component.create", &json!({"name": "Plate"})).unwrap();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 2, "body_name": "Plate"})).unwrap();
+    s.execute("sheet.convert", &json!({"body": "Plate", "face": [50, 30, 2]})).unwrap();
+    s
+}
+
+fn fit(s: &mut Session, p: Value) {
+    s.execute("sheet.hardware", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+}
+
+/// The rows a parts list of the design has (with or without its hardware rows), as (key, name, description, part number, count).
+fn listed_rows(s: &Session, hardware: bool) -> Vec<(String, String, String, String, String)> {
+    let list = PartsList {
+        of: SheetComponent { source: 1, component: 0 },
+        view: Default::default(),
+        group: Default::default(),
+        fold: false,
+        purchased_contents: false,
+        mass: MassFormat::default(),
+        hardware,
+    };
+    let state = s.model.state();
+    let mut tree = solidcraft_doc::bom::Tree::new(&s.doc, &state);
+    let bom = solidcraft_doc::bom::list_with(&mut tree, &list.request(), true).unwrap();
+    let counted = if hardware { tree.press_in_hardware(&bom) } else { Vec::new() };
+    let field = |row: &solidcraft_geom::table::Row, key: &str| row.fields.get(key).cloned().unwrap_or_default();
+    list.rows_with(&bom, "mm", &counted)
+        .iter()
+        .map(|row| (row.key.clone(), field(row, "name"), field(row, "description"), field(row, "part_number"), field(row, "count")))
+        .collect()
+}
+
+/// A parts list counts the press-in hardware of the parts it lists: two M5 flush nuts and one M4 x 10 mm stud
+/// are two rows, each a purchased part with the catalogue part id, counted 2 and 1; a list saved without
+/// the flag has the component's row alone, as it always had.
+#[test]
+fn a_parts_list_counts_the_press_in_hardware_of_its_parts() {
+    let mut s = sheet_part();
+    fit(&mut s, json!({"kind": "flush_nut", "thread": "M5", "position": [20, 30, 2]}));
+    fit(&mut s, json!({"kind": "flush_nut", "thread": "M5", "position": [80, 30, 2]}));
+    fit(&mut s, json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [50, 45, 2]}));
+    let without = listed_rows(&s, false);
+    assert_eq!(without.len(), 1, "{without:?}");
+    let rows = listed_rows(&s, true);
+    assert_eq!(&rows[..1], &without[..], "the component's row is first and unchanged");
+    let hardware: Vec<(&str, &str, &str, &str, &str)> =
+        rows[1..].iter().map(|r| (r.0.as_str(), r.1.as_str(), r.2.as_str(), r.3.as_str(), r.4.as_str())).collect();
+    assert_eq!(
+        hardware,
+        [("hardware:flush-nut.m5", "Flush nut M5", "M5", "flush-nut.m5", "2"), ("hardware:stud.m4:10", "Stud M4", "M4 \u{d7} 10 mm", "stud.m4", "1"),]
+    );
+}
+
+/// Every copy of a patterned nut is a nut to fit; a nut whose hole a later cut removed is not.
+#[test]
+fn hardware_rows_count_every_pattern_copy_and_skip_a_cut_away_hole() {
+    let mut s = sheet_part();
+    fit(&mut s, json!({"kind": "nut", "thread": "M3", "position": [20, 15, 2], "name": "Nut"}));
+    s.execute("solid.pattern.rectangular", &json!({"features": ["Nut"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 15})).unwrap();
+    fit(&mut s, json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 40, 2]}));
+    let counts = |s: &Session| listed_rows(s, true).into_iter().skip(1).map(|r| (r.3, r.4)).collect::<Vec<_>>();
+    assert_eq!(counts(&s), [("nut.m3".to_string(), "3".to_string()), ("stud.m4".to_string(), "1".to_string())]);
+    s.execute("solid.box", &json!({"corner": [60, 30, -5], "length": 20, "width": 20, "height": 20, "operation": "cut"})).unwrap();
+    assert_eq!(counts(&s), [("nut.m3".to_string(), "3".to_string())], "the stud's hole is gone");
+}
+
+/// A part placed twice is listed with its hardware twice over.
+#[test]
+fn hardware_rows_multiply_by_the_quantity_of_the_part() {
+    let mut s = sheet_part();
+    fit(&mut s, json!({"kind": "flush_nut", "thread": "M5", "position": [20, 30, 2]}));
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("occurrence.copy", &json!({"component": "Plate", "translate": [0, 100, 0]})).unwrap();
+    let rows = listed_rows(&s, true);
+    assert_eq!(rows[0].4, "2", "{rows:?}");
+    assert_eq!((rows[1].0.as_str(), rows[1].4.as_str()), ("hardware:flush-nut.m5", "2"), "{rows:?}");
+}
+
+/// A new parts list shows its hardware rows; a saved list without the flag does not, and saves no flag.
+#[test]
+fn a_new_parts_list_shows_hardware_and_an_old_one_does_not() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let reply = run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"}));
+    assert_eq!(reply["record"]["kind"]["parts_list"]["press_in_hardware"], json!(true), "{reply}");
+    let table = id_of(&reply);
+    let off = run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"list": {"press_in_hardware": false}}}));
+    assert_eq!(off["record"]["kind"]["parts_list"].get("press_in_hardware"), None, "{off}");
+    let saved = s.drawing("test").unwrap().to_json().unwrap();
+    let Some(Kind::PartsList(list)) = s.drawing("test").unwrap().tables.by_id(table).map(|t| t.kind.clone()) else { panic!("no list") };
+    assert!(!list.hardware && !saved.contains("press_in_hardware"));
+}

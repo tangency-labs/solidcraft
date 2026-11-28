@@ -20,6 +20,7 @@ pub mod cosmetic_threads;
 pub mod crash;
 pub mod drawing_balloon_paper;
 pub mod drawing_dimension_paper;
+pub mod drawing_hardware_callout;
 pub mod drawing_note_paper;
 pub mod drawing_picture;
 pub mod drawing_pictures;

@@ -27,6 +27,17 @@ pub struct Flat {
     bends: Vec<(Vec2, Vec2, bool)>,
     /// The box round its outlines.
     pub model: Aabb2,
+    /// Each press-in hardware hole's feature and centre (#20112), in the order the reply lists them.
+    hardware: Vec<(u64, Vec2)>,
+}
+
+impl Flat {
+    /// The centre, on the view's plane, of hole `copy` (from 0) of press-in hardware feature `feature`: none
+    /// when the flat has no such hole, which a hardware callout reads as lost.
+    pub fn hardware_at(&self, feature: u64, copy: u32) -> Option<Vec2> {
+        let copy = usize::try_from(copy).ok()?;
+        self.hardware.iter().filter(|(f, _)| *f == feature).nth(copy).map(|(_, at)| *at)
+    }
 }
 
 /// The flat of `of`'s body in `s`'s design, turned as `of` is; refused in `sheet.flat_pattern`'s
@@ -47,7 +58,10 @@ pub fn flat_from(reply: &Value, turn: QuarterTurn, cmd: &str) -> Result<Flat> {
     let cut_outs = cut_outs.iter().map(|shape| shape_segs(shape, &turn)).collect::<Option<Vec<_>>>().ok_or_else(|| unread("cutout_shapes"))?;
     let bend = |b: &Value| Some((point(b.get("start")?, &turn)?, point(b.get("end")?, &turn)?, b.get("direction")? == "up"));
     let bends = list(reply, "bends").ok_or_else(|| unread("bends"))?.iter().map(bend).collect::<Option<Vec<_>>>().ok_or_else(|| unread("bends"))?;
-    Ok(Flat { loops: outlines.into_iter().chain(cut_outs).collect(), bends, model })
+    // Absent when the part has no press-in hardware.
+    let hardware = list(reply, "hardware")
+        .map_or_else(Vec::new, |all| all.iter().filter_map(|h| Some((h.get("feature")?.as_u64()?, point(h.get("position")?, &turn)?))).collect());
+    Ok(Flat { loops: outlines.into_iter().chain(cut_outs).collect(), bends, model, hardware })
 }
 
 /// A [`QuarterTurn`] on the flat's own plane: each point through the turn's basis, whose axes are

@@ -219,7 +219,8 @@ fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result
     let listed = bom::list_with(&mut tree, &request, true).map_err(|e| e.to_string())?;
     let reading = d.balloons_by_list();
     let counts: HashMap<String, usize> = balloons_by_row(reading.get(&record.id).map_or(&[], Vec::as_slice), &listed, &tree).into_iter().collect();
-    let mut rows = list.rows(&listed, s.doc.drawing_units(d));
+    let hardware = if list.hardware { tree.press_in_hardware(&listed) } else { Vec::new() };
+    let mut rows = list.rows_with(&listed, s.doc.drawing_units(d), &hardware);
     for row in &mut rows {
         let count = row.fields.get("item").and_then(|item| counts.get(item)).copied().unwrap_or(0);
         row.fields.insert(BALLOONED.to_string(), count.to_string());

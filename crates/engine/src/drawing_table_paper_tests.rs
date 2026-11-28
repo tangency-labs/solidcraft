@@ -40,6 +40,7 @@ fn only_a_mass_column_weighs_a_list() {
         fold: false,
         purchased_contents: false,
         mass: Default::default(),
+        hardware: false,
     };
     let mut table = Kind::PartsList(list).default_table();
     assert!(shows_mass(&table), "the default list shows a mass");
