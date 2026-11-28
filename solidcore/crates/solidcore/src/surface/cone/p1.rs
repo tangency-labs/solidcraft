@@ -1324,7 +1324,16 @@ impl Cone {
         }
         let height = -self.base_radius / det::tan(self.semi_angle_deg * PI / 180.0);
         let point = self.rev.position.origin() + height * self.rev.position.z_axis();
-        let param = self.gen()?.step_inversion(k, point)?;
+        // Not upstream (#3386): a generator line's STEP parameter is the height along the
+        // axis (built so, and kept so by `Line::transform`), so the apex's is its height;
+        // upstream inverts the apex point on the line, whose world coordinates round with
+        // the distance the cone was moved (1e-12 at 1e4).
+        let gen = self.gen()?;
+        let param = if matches!(gen.kind(), CurveKind::Line(_)) {
+            height
+        } else {
+            gen.step_inversion(k, point)?
+        };
         Ok(Apex {
             is_cylinder,
             point,

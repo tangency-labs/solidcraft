@@ -3844,6 +3844,80 @@ mod tests {
         expect(&with_nurb(cone(-1.0)), 2, &[fold, radius, pole]);
     }
 
+    /// The 200 rigid motions of #3386 with translations of up to `reach` per axis (the
+    /// issue's generator, whose reach is 1000), each as the placement and per-axis scale
+    /// `topology::brep::mirror::transform_matrix` hands a surface for the issue's
+    /// row-vector matrix (a rotation about a random axis, then the translation).
+    fn issue_3386_motions(reach: f64) -> Vec<(Axis2Placement, Vec3)> {
+        let mut x: u64 = 12345;
+        let mut rnd = || {
+            x = x
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((x >> 11) as f64) / ((1u64 << 53) as f64)
+        };
+        (0..200)
+            .map(|_| {
+                let v = [rnd() - 0.5, rnd() - 0.5, rnd() - 0.5];
+                let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                let d = v.map(|c| c / len);
+                let (s, c) = (rnd() * 6.0).sin_cos();
+                let t = Vec3::new(rnd() * reach, rnd() * reach, rnd() * reach);
+                let k = 1.0 - c;
+                // the matrix's rows: the images of the x, y and z axes
+                let row0 = Vec3::new(
+                    c + d[0] * d[0] * k,
+                    d[1] * d[0] * k + d[2] * s,
+                    d[2] * d[0] * k - d[1] * s,
+                );
+                let row1 = Vec3::new(
+                    d[0] * d[1] * k - d[2] * s,
+                    c + d[1] * d[1] * k,
+                    d[2] * d[1] * k + d[0] * s,
+                );
+                let row2 = Vec3::new(
+                    d[0] * d[2] * k + d[1] * s,
+                    d[1] * d[2] * k - d[0] * s,
+                    c + d[2] * d[2] * k,
+                );
+                let place = Axis2Placement::new(t, row0 / row0.length(), row1 / row1.length());
+                let scale = Vec3::new(row0.length(), row1.length(), row2.length());
+                (place, scale)
+            })
+            .collect()
+    }
+
+    /// A pointed cone (base radius 5, apex at height 10) is valid after every rigid motion
+    /// of #3386, and after the same motions moved 10, 100 and 1000 times as far. Two
+    /// roundings grew with the distance moved: the generator's speed, taken as the
+    /// difference of two moved points, drifted from the 1/cos of the half angle that
+    /// `Bad Cone Line Scale` checks (1.8e-11 at 1e5), and the apex parameter, from
+    /// inverting the moved apex point on the moved line, fell inside the height domain
+    /// that `Bad Cone Pole` checks (1.09e-12 inside at motion 14).
+    #[test]
+    fn a_rigid_motion_keeps_a_pointed_cone_apex_on_its_end() {
+        let k = Kernel::default();
+        for reach in [1.0e3, 1.0e4, 1.0e5, 1.0e6] {
+            let mut bad = Vec::new();
+            for (i, (place, scale)) in issue_3386_motions(reach).iter().enumerate() {
+                let mut cone =
+                    crate::primitive::api_primitives::create_cone_surface(&k, O, 5.0, 0.0, 10.0)
+                        .unwrap();
+                cone.transform(&k, place, Some(*scale)).unwrap();
+                let (ok, failed) = failures(&Surface::from(cone), 2);
+                if !ok {
+                    bad.push((i, failed));
+                }
+            }
+            assert!(
+                bad.is_empty(),
+                "reach {reach}: {} bad, first {:?}",
+                bad.len(),
+                bad.first()
+            );
+        }
+    }
+
     /// A ring of radial width 2.65 a hair off flat (heights 1.3e-5 and 2.1e-5, a revolved
     /// line a few 1e-4 degrees off perpendicular to the axis) is a cone of half angle about
     /// 89.9997 degrees. Its generator scale, length/height, is right; only 1/cos of the
