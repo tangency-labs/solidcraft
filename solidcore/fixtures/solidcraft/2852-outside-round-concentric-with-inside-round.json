@@ -1,0 +1,91 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1668 (earlier report); fix PR below",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/2852",
+ "test": "crates/kernel/src/blend_fit.rs (fit check), test outside_round_concentric_with_the_inside_round_of_a_wall_fits",
+ "summary": "An upside-down U, 3 mm thick, 60 x 20 x 50: an r 15 round on the two inside top edges, then an r 18 round on the two outside ones (concentric, wall stays 3 mm) was refused by SolidCraft's fit check. Volume from the PR test: the shell plus 2 * 20 * (1 - pi/4) * (15^2 - 18^2). Also expected: r 30 outside is refused (largest radius ~25.24).",
+ "cases": [
+  {
+   "name": "u_r15_inside_r18_outside",
+   "steps": [
+    {
+     "op": "box",
+     "id": "outer",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      60,
+      20,
+      50
+     ]
+    },
+    {
+     "op": "box",
+     "id": "hollow",
+     "origin": [
+      3,
+      -1,
+      -1
+     ],
+     "size": [
+      54,
+      22,
+      48
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "u",
+     "a": "outer",
+     "b": "hollow"
+    },
+    {
+     "op": "fillet",
+     "id": "inner",
+     "body": "u",
+     "edges": [
+      [
+       3,
+       10,
+       47
+      ],
+      [
+       57,
+       10,
+       47
+      ]
+     ],
+     "radius": 15
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "inner",
+     "edges": [
+      [
+       0,
+       10,
+       50
+      ],
+      [
+       60,
+       10,
+       50
+      ]
+     ],
+     "radius": 18
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8390.176727,
+     "tol": 0.731018,
+     "formula": "60*20*50 - 54*20*47 + 2*20*(1 - pi/4)*(15^2 - 18^2)"
+    }
+   }
+  }
+ ]
+}

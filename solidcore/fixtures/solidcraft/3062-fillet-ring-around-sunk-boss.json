@@ -1,0 +1,117 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3062",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3485 (fix by another contributor, open; our PR #3297 was closed, cause analysis only)",
+ "test": "none upstream yet; analytic case derived from the issue (synthetic kernel repro, not the reporter's file)",
+ "summary": "A 14 mm cylinder, 48.2 high, with a 5.4 mm boss joined on top and sunk 0.5 mm into it; an r 0.8 fillet on the outer top edge was refused ('the blend is taller than the walls') because the union split the cylinder wall at the boss foot. Expected: the round of the outer edge, volume by Pappus. Control: boss flush with the top.",
+ "cases": [
+  {
+   "name": "boss_sunk_0.5",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "base",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 7,
+     "height": 48.2
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0,
+      0,
+      47.698
+     ],
+     "radius": 2.7,
+     "height": 2.502
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "base",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       7,
+       0,
+       48.2
+      ]
+     ],
+     "radius": 0.8
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7459.731401,
+     "tol": 0.745973,
+     "formula": "pi*7^2*48.2 + pi*2.7^2*2 - 2*pi*(7 - d)*(1 - pi/4)*0.8^2, d = 0.8*(10 - 3*pi)/(3*(4 - pi))"
+    }
+   }
+  },
+  {
+   "name": "boss_flush",
+   "note": "control: boss starting at the top face (the SolidCraft version passed this)",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "base",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 7,
+     "height": 48.2
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0,
+      0,
+      48.2
+     ],
+     "radius": 2.7,
+     "height": 2.0
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "base",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       7,
+       0,
+       48.2
+      ]
+     ],
+     "radius": 0.8
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7459.731401,
+     "tol": 0.745973,
+     "formula": "same as boss_sunk_0.5"
+    }
+   }
+  }
+ ]
+}
