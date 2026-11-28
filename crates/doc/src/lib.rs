@@ -167,6 +167,7 @@ pub mod weld_projection;
 pub mod weld_seam;
 pub mod weld_spot;
 pub mod weld_stake;
+pub mod weld_tack;
 
 pub use assembly::BomType;
 pub use assembly::ExpressedAt;

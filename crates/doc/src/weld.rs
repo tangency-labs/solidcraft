@@ -150,6 +150,14 @@ impl WeldSettings {
     /// The caller retains unsupported choices in this settings record; no symbol is invented.
     pub fn symbol(&self) -> solidcraft_geom::weld::Result<Weld> {
         use solidcraft_geom::weld::{Contour, Intermittent, Invalid, Kind, Size, WeldSide};
+        if self.weld_type == "tack" {
+            // ISO 2553:2019 4.2: the basic welding symbol (no elementary symbol) marks tack welds;
+            // "tack" goes in the tail after the process
+            let tail = Some(self.process.as_ref().map_or_else(|| "tack".to_owned(), |p| format!("{p}/tack")));
+            let symbol = Weld { arrow_side: None, other_side: None, all_round: self.all_around, field: self.field_weld, tail };
+            symbol.validate()?;
+            return Ok(symbol);
+        }
         let kind = match self.weld_type.as_str() {
             "fillet" => Kind::Fillet,
             "butt" if self.groove == "square" => Kind::SquareButt,
