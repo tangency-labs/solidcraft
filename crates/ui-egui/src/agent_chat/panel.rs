@@ -1283,6 +1283,7 @@ struct ComposerOutcome {
     enter: bool,
     steer: bool,
     esc: bool,
+    no_agent: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1293,6 +1294,12 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
     // the box are always in view.
     let edit_max = (ui.available_height() * 0.4).clamp(48.0, 160.0);
     let busy = state == State::Busy;
+    // An empty agent list cannot take a message. Keep typing available while setup opens, but
+    // refuse Send and Enter until an agent is found (#18763).
+    let no_agent = view.agents.is_empty() && chat.detecting.is_none() && !state.running();
+    // A short shared panel has room for its message and footer only if setup lives in the
+    // existing action row, instead of adding a whole line above it (#18763).
+    let compact_setup = no_agent && ui.available_height() < 400.0;
     // Enter sends (queues while the agent works); Ctrl/Cmd+Enter sends now; Esc stops. They are
     // read before the field sees them so no newline is typed.
     let focused = ui.memory(|m| m.has_focus(input_id()));
@@ -1336,6 +1343,17 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+                if no_agent && !compact_setup {
+                    ui.horizontal_wrapped(|ui| {
+                        let hint = ui_kit::text(ui, tr("ui.agent_chat_setup_to_send"), ui_kit::Text::Hint("setup_to_send"));
+                        solidcraft_ui_registry::publish_rect("agent_chat:setup_hint", hint.rect);
+                        let setup = ui_kit::button(ui, tr("ui.ai_add_agent"), ui_kit::Button::Small);
+                        solidcraft_ui_registry::publish_handle("agent_chat:setup", setup.rect.center());
+                        if setup.clicked() {
+                            chat.actions.push(PanelAction::AddAgent);
+                        }
+                    });
+                }
                 ui.allocate_ui_with_layout(
                     vec2(ui.available_width(), Tokens::get().control_height + Tokens::get().space_2),
                     Layout::left_to_right(Align::Center),
@@ -1371,7 +1389,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let action = ui_kit::assistant_send(
                                 ui,
-                                busy || !reading,
+                                busy || (!reading && !no_agent),
                                 busy,
                                 tr(if busy { "ui.agent_chat_stop_turn_tip" } else { "ui.agent_chat_send" }),
                             );
@@ -1386,6 +1404,15 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                                 solidcraft_ui_registry::publish_rect("agent_chat:send", action.rect);
                                 solidcraft_ui_registry::publish_handle("agent_chat:send", action.rect.center());
                                 send_clicked = action.clicked();
+                            }
+                            if compact_setup {
+                                let setup = ui_kit::button(ui, tr("ui.ai_add_agent"), ui_kit::Button::Small)
+                                    .backing_on_hover_text(tr("ui.agent_chat_setup_to_send"));
+                                solidcraft_ui_registry::publish_rect("agent_chat:setup_hint", setup.rect);
+                                solidcraft_ui_registry::publish_handle("agent_chat:setup", setup.rect.center());
+                                if setup.clicked() {
+                                    chat.actions.push(PanelAction::AddAgent);
+                                }
                             }
                         });
                     },
@@ -1442,7 +1469,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
         // The pill goes where the caret is in the box.
         chat.actions.push(PanelAction::StartPick { at: caret(ui.ctx()) });
     }
-    ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc }
+    ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc, no_agent }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1485,9 +1512,13 @@ fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) ->
 
 #[cfg(not(target_arch = "wasm32"))]
 fn finish_composer(chat: &mut AgentChat, outcome: ComposerOutcome) {
-    let ComposerOutcome { send_clicked, stop_clicked, enter, steer, esc, .. } = outcome;
+    let ComposerOutcome { send_clicked, stop_clicked, enter, steer, esc, no_agent, .. } = outcome;
     if esc || stop_clicked {
         chat.actions.push(PanelAction::Cancel);
+    }
+    if no_agent {
+        // Preserve the draft: setup can finish without the composer sending or losing words.
+        return;
     }
     // A message waits for files still being read, and files alone make a message.
     let reading = !chat.loading.is_empty();
@@ -3448,6 +3479,41 @@ mod tests {
         }
         assert_eq!(app.agent_chat.actions, [PanelAction::Send { text: "Make a plate".into(), steer: false }]);
         assert!(app.agent_chat.items.is_empty(), "the panel itself sends nothing");
+    }
+
+    /// An empty installation says what to do next beside the composer. The disabled Send
+    /// button and Enter cannot discard the draft or start a failed connection (#18763).
+    #[test]
+    fn no_agent_composer_disables_send_and_offers_setup() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.detection = Some(discover::Detection::default());
+        app.agent_chat.picking = Some(false);
+        app.agent_chat.input = "Make a plate".into();
+        assert!(agents::entries(&app).is_empty());
+        for _ in 0..4 {
+            composer_frame(&ctx, &mut app, Vec::new());
+        }
+        assert!(solidcraft_ui_registry::rect_of("agent_chat:setup_hint").is_some(), "the explanation is beside the composer");
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:setup").is_some(), "Add agent is one click away");
+        let send = solidcraft_ui_registry::handle_at("agent_chat:send").expect("the Send button");
+        for pressed in [true, false] {
+            composer_frame(&ctx, &mut app, crate::test_support::pointer(send, pressed));
+        }
+        assert!(app.agent_chat.actions.is_empty(), "the disabled button starts no send");
+        finish_composer(
+            &mut app.agent_chat,
+            ComposerOutcome { height: 0.0, send_clicked: false, stop_clicked: false, enter: true, steer: true, esc: false, no_agent: true },
+        );
+        assert!(app.agent_chat.actions.is_empty(), "Enter and Ctrl+Enter also cannot send");
+        assert_eq!(app.agent_chat.input, "Make a plate", "the draft stays until setup is complete");
+
+        let setup = solidcraft_ui_registry::handle_at("agent_chat:setup").unwrap();
+        for pressed in [true, false] {
+            composer_frame(&ctx, &mut app, crate::test_support::pointer(setup, pressed));
+        }
+        assert_eq!(app.agent_chat.actions, [PanelAction::AddAgent], "the setup button opens Add agent");
+        assert_eq!(app.agent_chat.input, "Make a plate");
     }
 
     /// The button that continues a task the agent could not finish asks the host to continue it
