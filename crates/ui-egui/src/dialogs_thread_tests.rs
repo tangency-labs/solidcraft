@@ -626,7 +626,6 @@ fn a_thread_on_four_pattern_faces_applies_and_undoes_as_one_operation() {
         }
         let before = h.app.session.doc.to_json();
         let smooth_volume = volume(&h.app);
-        let markings = if modeled { 0 } else { 4 };
         let undo = h.app.session.undo.len();
         let features = h.app.session.doc.features.len();
         crate::dialogs::run_dialog(&mut h.app, &d).unwrap();
@@ -639,7 +638,7 @@ fn a_thread_on_four_pattern_faces_applies_and_undoes_as_one_operation() {
         assert_eq!(additional_faces.len(), 3);
         assert_eq!(target_bodies.iter().map(|n| n.as_ref()).collect::<Vec<&str>>(), ["Plate"; 4]);
         let threads = h.app.session.model.state().threads.clone();
-        assert_eq!(threads.len(), markings);
+        assert_eq!(threads.len(), picks.len());
         let threaded_volume = volume(&h.app);
         if modeled {
             assert!(smooth_volume - threaded_volume > 1.0, "modeled threads remove material");
@@ -648,12 +647,13 @@ fn a_thread_on_four_pattern_faces_applies_and_undoes_as_one_operation() {
         }
         for thread in &threads {
             assert_eq!(thread.designation, "M6x0.75");
-            assert_eq!(thread.feature, id, "all markings belong to one timeline feature");
+            assert_eq!(thread.feature, id);
+            assert_eq!(thread.modeled, modeled);
         }
         assert_eq!(h.app.session.undo.len(), undo + 1);
         let saved = h.app.session.doc.to_json();
         let reopened = Session::new(Document::from_json(&saved).unwrap());
-        assert_eq!(reopened.model.state().threads.len(), markings);
+        assert_eq!(reopened.model.state().threads, threads);
         assert_eq!(reopened.doc.features.len(), features + 1);
         let reopened_app = crate::SolveApp::new(reopened, crate::Services::default());
         assert!((volume(&reopened_app) - threaded_volume).abs() < 1e-6, "saving preserves the threaded shape");
@@ -664,7 +664,7 @@ fn a_thread_on_four_pattern_faces_applies_and_undoes_as_one_operation() {
         assert!(h.app.session.model.state().threads.is_empty());
         assert!((volume(&h.app) - smooth_volume).abs() < 1e-6, "one undo restores the smooth shafts");
         h.app.run("edit.redo", json!({})).unwrap();
-        assert_eq!(h.app.session.model.state().threads.len(), markings);
+        assert_eq!(h.app.session.model.state().threads, threads);
         assert_eq!(h.app.session.doc.feature(id).unwrap().kind, saved_kind);
         assert!((volume(&h.app) - threaded_volume).abs() < 1e-6, "one redo restores the threaded shape");
     }

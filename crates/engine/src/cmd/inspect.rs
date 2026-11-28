@@ -136,7 +136,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("inspect")
         .noundo()
         .contract(&THREADS_CONTRACT)
-        .output(output_schema_for::<ModelThreads>),
+        .output(output_schema_for::<ModelThreads>)
+        .params("Lists cosmetic and modelled thread records, including the tolerance class when specified"),
     CommandSpec::new("model.body_features", "List Body Features", crate::checked!("model.body_features", body_features::model_body_features))
         .icon("inspect")
         .noundo()

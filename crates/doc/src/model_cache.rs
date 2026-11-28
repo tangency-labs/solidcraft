@@ -30,7 +30,7 @@ const MAX_HELD: usize = 50_000_000;
 /// evaluated again on every open (#8541).
 const MAX_TEXT: usize = 1 << 24;
 
-/// Whether two tap markings are the same to the bit: then they write the same record. (`==` takes
+/// Whether two thread records are the same to the bit: then they write the same record. (`==` takes
 /// 0.0 and -0.0 for the same number, whose records differ.) Every field is named, so a new one
 /// cannot be left out.
 fn same_marking(a: &ThreadInfo, b: &ThreadInfo) -> bool {
@@ -39,6 +39,8 @@ fn same_marking(a: &ThreadInfo, b: &ThreadInfo) -> bool {
             feature: _,
             body: _,
             designation: _,
+            thread_class: _,
+            modeled: _,
             major_diameter,
             radius,
             pitch,
@@ -56,6 +58,8 @@ fn same_marking(a: &ThreadInfo, b: &ThreadInfo) -> bool {
     a.feature == b.feature
         && a.body == b.body
         && a.designation == b.designation
+        && a.thread_class == b.thread_class
+        && a.modeled == b.modeled
         && a.internal == b.internal
         && a.form == b.form
         && a.hand == b.hand
@@ -1029,7 +1033,17 @@ impl SavedModel {
         }
         let mut threads = Vec::new();
         for t in list("threads")? {
-            threads.push(serde_json::from_value::<ThreadInfo>(t.clone()).map_err(|_| bad("saved model: tap marking"))?);
+            // Bound the optional class before cloning the record. Older caches leave it out.
+            match t.get("thread_class") {
+                None | Some(Json::Null) => {}
+                Some(Json::String(class)) if matches!(class.len(), 2 | 4) => {}
+                Some(_) => return Err(bad("saved model: thread tolerance class")),
+            }
+            let info: ThreadInfo = serde_json::from_value(t.clone()).map_err(|_| bad("saved model: thread"))?;
+            if !info.class_is_valid() {
+                return Err(bad("saved model: thread tolerance class"));
+            }
+            threads.push(info);
         }
         // Bound the whole table before decoding any point lists, including unused entries.
         // Older caches lack this table: refuse them so opening evaluates the missing points.
@@ -1082,7 +1096,8 @@ impl SavedModel {
         // Running totals of what each marking costs to clone (its items and text), by place.
         let mut thread_weight = vec![0usize];
         for t in &threads {
-            let w = 1usize.saturating_add((t.body.len().saturating_add(t.designation.len())) / 64);
+            let text = t.body.len().saturating_add(t.designation.len()).saturating_add(t.thread_class.as_ref().map_or(0, String::len));
+            let w = 1usize.saturating_add(text / 64);
             thread_weight.push(thread_weight.last().copied().unwrap_or(0).saturating_add(w));
         }
         let records = list("states")?;

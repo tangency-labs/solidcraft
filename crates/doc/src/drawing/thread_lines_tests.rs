@@ -455,6 +455,8 @@ fn a_cosmetic_thread_is_drawn_from_its_record() {
         feature: 1,
         body: "Body".into(),
         designation: "M8".into(),
+        thread_class: None,
+        modeled: false,
         major_diameter: 8.0,
         radius,
         pitch: 1.25,

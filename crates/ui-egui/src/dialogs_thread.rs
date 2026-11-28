@@ -765,6 +765,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
     let FeatureKind::Thread {
         face,
         designation,
+        thread_class: _, // Retained by timeline.redefine.
         length,
         offset,
         modeled,

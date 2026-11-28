@@ -304,6 +304,57 @@ fn linked_cosmetic_threads_refuse_invalid_saved_records_without_partial_state() 
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn linked_modeled_threads_validate_saved_tolerance_classes() {
+    let dir = folder("modeled-thread-tolerance-class");
+    let file = dir.join("source.sc");
+    let mut source = Session::default();
+    run(&mut source, "solid.cylinder", json!({"radius":4,"height":8,"body_name":"Shaft"}));
+    run(&mut source, "solid.thread", json!({"face":[4,0,4],"designation":"M8","thread_class":"6g","modeled":true}));
+    run(&mut source, "file.save", json!({"path":file}));
+
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path":file}));
+    std::fs::remove_dir_all(dir).unwrap();
+    let feature = inserted["feature"].as_u64().unwrap();
+    let saved = s.doc.to_json();
+    let mut value: Value = serde_json::from_str(&saved).unwrap();
+    let record = &mut value["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"] == inserted["feature"]).unwrap()["link_threads"][0][0];
+    assert_eq!(record["thread_class"], "6g");
+    assert_eq!(record["modeled"], true);
+    let decode = |json: &str| Session::new(solidcraft_doc::Document::from_json(json).unwrap());
+    let mut reopened = decode(&saved);
+    let result = run(&mut reopened, "model.threads", json!({}));
+    assert_eq!(result["threads"][0]["thread_class"], "6g", "{result}");
+    assert!(reopened.model.state().threads[0].modeled);
+
+    let cases = [
+        ("metric", false, "6H".into()),
+        ("metric", false, "4e6g".into()),
+        ("trapezoidal", false, "6g".into()),
+        ("metric", false, "Z".repeat(1_000_000)),
+    ];
+    let mut accepted = Vec::new();
+    for (form, internal, class) in cases {
+        let mut corrupt: Value = serde_json::from_str(&saved).unwrap();
+        let record =
+            &mut corrupt["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"] == inserted["feature"]).unwrap()["link_threads"][0][0];
+        record["form"] = json!(form);
+        record["internal"] = json!(internal);
+        record["thread_class"] = json!(class);
+        let opened = decode(&corrupt.to_string());
+        match opened.model.result(feature).unwrap().error.as_deref() {
+            Some(error) => {
+                assert!(error.contains("invalid cosmetic thread record"), "{error}");
+                assert!(opened.model.state().threads.is_empty());
+                assert!(opened.model.state().bodies.is_empty());
+            }
+            None => accepted.push((form, class.len())),
+        }
+    }
+    assert!(accepted.is_empty(), "accepted linked records with invalid classes (form, byte length) {accepted:?}");
+}
+
 /// A design's canvases and decals come with it through Insert Design: in the linked component,
 /// where the design shows them on its bodies, so they move with its placement. One that follows
 /// sketch points comes in where they put it, and a name the assembly already uses is told apart.

@@ -1,6 +1,6 @@
 //! A drawing view's cosmetic threads (#13050): each shown body's threads, drawn by ISO 6410's
 //! convention where the view drew their crests ([`thread_lines::on_paper`] pairs them). A modelled
-//! thread leaves no cosmetic record, so it draws only its own edges.
+//! thread draws only its own edges.
 
 use solidcraft_doc::drawing::thread_lines::{self, Drawn, Thread, ThreadPiece};
 use solidcraft_geom::drawing_view::ViewFrame;
@@ -26,7 +26,7 @@ pub fn threads(shown: &ShownSet, frame: &ViewFrame, lines: &[ViewLine], model_ch
     let mut out = Vec::new();
     for (at, one) in shown.bodies.iter().enumerate() {
         let Some(body) = shown.body(one).filter(|b| !b.body.is_mesh()) else { continue };
-        let mut own = shown.state.threads.iter().filter(|t| t.body == body.name).peekable();
+        let mut own = shown.state.threads.iter().filter(|t| !t.modeled && t.body == body.name).peekable();
         if own.peek().is_none() {
             continue;
         }

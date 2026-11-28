@@ -2675,10 +2675,11 @@ mod tests {
         assert_eq!(s.doc.parts.get(&comp).and_then(|p| p.thread.clone()).as_deref(), Some("modeled"));
         let r = run(&mut s, "parts.resize", json!({"component": comp, "size": "M8"}));
         assert_eq!(r["thread"], "modeled", "{r}");
-        assert!(s.model.state().threads.is_empty(), "a modelled thread is cut, not recorded");
+        assert!(s.model.state().threads.iter().all(|t| t.modeled), "a modelled thread is cut and recorded as modelled");
         let r = run(&mut s, "parts.resize", json!({"component": comp, "thread": "cosmetic"}));
         assert_eq!((r["thread"].as_str(), r["size"].as_str()), (Some("cosmetic"), Some("M8")), "{r}");
         assert_eq!(s.model.state().threads.len(), 1);
+        assert!(!s.model.state().threads[0].modeled);
         assert_eq!(s.doc.parts.get(&comp).and_then(|p| p.thread.clone()), None, "a cosmetic thread is not saved");
         // A part saved before the thread type existed reads as cosmetic.
         let old: solidcraft_doc::StandardPart = serde_json::from_value(json!({"family": "hex_nut", "size": "M6"})).unwrap();

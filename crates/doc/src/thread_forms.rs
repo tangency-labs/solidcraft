@@ -45,6 +45,47 @@ pub enum ThreadForm {
     Custom,
 }
 
+pub const METRIC_INTERNAL_CLASS: &str =
+    "`thread_class` for an internal ISO metric thread uses grades 4 to 8 and position G or H (e.g. 6H or 5H6H, ISO 965-1)";
+pub const METRIC_EXTERNAL_CLASS: &str = "`thread_class` for an external ISO metric thread uses positions e to h, pitch diameter grades 3 to 9 and major diameter grades 4, 6 or 8 (e.g. 6g or 4g6g, ISO 965-1)";
+
+/// Whether `class` is an ISO 965-1 tolerance class for an internal (`internal`) or external
+/// metric thread ([`crate::thread_catalog::iso_965_class`] has the grammar).
+pub fn check_metric_thread_class(class: &str, internal: bool) -> Result<(), &'static str> {
+    if crate::thread_catalog::iso_965_class(class) == Some(internal) {
+        Ok(())
+    } else if internal {
+        Err(METRIC_INTERNAL_CLASS)
+    } else {
+        Err(METRIC_EXTERNAL_CLASS)
+    }
+}
+
+/// Whether `class` could be a tolerance class of a thread of `form` on either side (the command's
+/// check; the evaluator, which knows the side, uses [`check_thread_class`]). Only an ISO metric
+/// thread (ISO 965-1) and a Unified one (ASME B1.1) take a class.
+pub fn check_thread_class_text(form: ThreadForm, class: &str) -> Result<(), String> {
+    check_thread_class(form, class, false).or_else(|_| check_thread_class(form, class, true))
+}
+
+/// Whether `class` is a tolerance class of a thread of `form` on the side `internal` says.
+pub fn check_thread_class(form: ThreadForm, class: &str, internal: bool) -> Result<(), String> {
+    match form {
+        ThreadForm::Metric => check_metric_thread_class(class, internal).map_err(str::to_string),
+        ThreadForm::Unified => {
+            let ok = if internal { matches!(class, "1B" | "2B" | "3B") } else { matches!(class, "1A" | "2A" | "3A") };
+            if ok {
+                Ok(())
+            } else if internal {
+                Err("`thread_class` for an internal Unified thread is 1B, 2B or 3B (ASME B1.1)".into())
+            } else {
+                Err("`thread_class` for an external Unified thread is 1A, 2A or 3A (ASME B1.1)".into())
+            }
+        }
+        _ => Err("`thread_class` is for an ISO metric (ISO 965-1) or a Unified (ASME B1.1) thread".into()),
+    }
+}
+
 /// Which way a thread turns.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
