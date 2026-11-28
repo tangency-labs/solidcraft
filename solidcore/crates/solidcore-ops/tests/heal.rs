@@ -1438,6 +1438,68 @@ fn an_edge_whose_gap_is_under_the_check_limit_heals_to_a_tolerance_under_it() {
     assert!(failed(&body).contains(&59), "{:?}", failed(&body));
 }
 
+#[test]
+fn a_trusted_cube_with_a_gapped_corner_is_reported() {
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 10.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 10.0, 10.0],
+        [0.0, 10.0, 10.0],
+    ];
+    let cycles: [&[usize]; 6] = [
+        &[0, 3, 2, 1],
+        &[4, 5, 6, 7],
+        &[0, 1, 5, 4],
+        &[2, 3, 7, 6],
+        &[1, 2, 6, 5],
+        &[0, 4, 7, 3],
+    ];
+    let gap_of = |gap: f64, corner_tol: Option<f64>, edge_tol: Option<f64>| {
+        let mut r = with_vertex_gap(
+            polyhedron(&corners, &cycles, TOLS),
+            [10.0, 0.0, 0.0],
+            [0.0, 0.0, gap],
+        );
+        let c = r
+            .vertices
+            .iter()
+            .position(|v| v.point == [10.0, 0.0, gap])
+            .unwrap() as u32;
+        if let Some(t) = corner_tol {
+            r.vertices[c as usize].tolerance = t;
+        }
+        if let Some(t) = edge_tol {
+            for e in r.edges.iter_mut().filter(|e| e.vertices.contains(&c)) {
+                e.tolerance = t;
+            }
+        }
+        let (body, _) = Body::from_record(&r, true).unwrap();
+        failed(&body)
+    };
+    // The gap is inside half the corner's 1e-3 tolerance.
+    assert!(gap_of(2e-4, None, None).is_empty());
+    // A 3e-4 corner leaves a 2e-4 gap over its 1.5e-4 limit: the four vertex/edge and
+    // vertex/face gap tests report it.
+    assert_eq!(
+        gap_of(2e-4, Some(3e-4), None),
+        vec![0, 0, 0, 1, 1, 2, 2, 2, 3]
+    );
+    // Where the edge curve's end is farther than the vertex and edge tolerances allow, the
+    // pointer check reports test 61 before the tolerance pass runs.
+    assert_eq!(gap_of(2e-4, Some(1e-5), Some(1e-5)), vec![61, 61, 61]);
+    assert_eq!(gap_of(2e-3, None, None), vec![61, 61, 61]);
+    // An edge tolerance wide enough for the curve end lets the tolerance pass report the
+    // 2e-3 gap itself.
+    assert_eq!(
+        gap_of(2e-3, Some(1e-3), Some(3e-3)),
+        vec![0, 0, 0, 1, 1, 2, 2, 2, 3]
+    );
+}
+
 /// A block `size` wide on a square base whose top is a ridge `ridge` long along x at half its
 /// width, `size / 2` high: two trapezoids meet at the ridge, two triangles end it. The ridge is
 /// an edge between two large faces, and no face is small.

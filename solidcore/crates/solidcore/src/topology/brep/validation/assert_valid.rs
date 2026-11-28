@@ -609,6 +609,23 @@ fn check_with_keys_counted(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<(BrepCheck, usize)> {
+    // A check reports the tolerances the body has; it must not grow them while it runs.
+    // `m_bValidateOnly` says exactly that, and the cache that makes a face's UV trim curves
+    // reads it before it adjusts any tolerance (#19593).
+    let saved = b.validate_only();
+    b.set_validate_only(true);
+    let checked = check_with_keys_counted_body(k, b, level, keys, scope);
+    b.set_validate_only(saved);
+    checked
+}
+
+fn check_with_keys_counted_body(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<(BrepCheck, usize)> {
     use crate::geom::check_memo;
     let mut standing = standing_where_trims_lack(b)?;
     let b = standing.as_mut().unwrap_or(b);

@@ -256,8 +256,11 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
     }
 
     fn create_uv_trim_curves(&mut self, k: &Kernel) -> Result<()> {
-        // (TRUE, NULL, NULL, ..): adjust tolerances, no given curves
-        crate::topology::face::p3::create_uv_trim_curves(k, self.b, self.f, true, None).map(|_| ())
+        // No given curves. A validate-only body keeps its tolerances: a check must report
+        // the gaps it finds, not hide them by growing a vertex over one (#19593).
+        let adjust_tolerances = !self.b.validate_only();
+        crate::topology::face::p3::create_uv_trim_curves(k, self.b, self.f, adjust_tolerances, None)
+            .map(|_| ())
     }
 
     fn upward_loopuses(&self) -> Result<Vec<EntityRef>> {
