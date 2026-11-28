@@ -792,7 +792,7 @@ mod tests {
         }
     }
 
-    fn collect_shapes<'a>(clipped: &'a [egui::epaint::ClippedShape]) -> Vec<&'a Shape> {
+    fn collect_shapes(clipped: &[egui::epaint::ClippedShape]) -> Vec<&Shape> {
         fn walk<'a>(s: &'a Shape, out: &mut Vec<&'a Shape>) {
             match s {
                 Shape::Vec(v) => v.iter().for_each(|c| walk(c, out)),
