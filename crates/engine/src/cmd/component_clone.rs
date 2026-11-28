@@ -494,7 +494,7 @@ pub(super) fn build(
                     if scratch.doc.params.len() >= solidcraft_doc::MAX_PARAMS {
                         return Err(bad(CMD, "too many copied parameters"));
                     }
-                    let new = scratch.doc_mut().new_model_param(&p.expr, &p.unit);
+                    let new = scratch.doc_mut().new_model_param(&p.expr, &p.unit)?;
                     parameters.insert(name.clone(), new);
                 }
             }

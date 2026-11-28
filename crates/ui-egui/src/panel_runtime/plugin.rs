@@ -491,7 +491,11 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
             });
             let row = selected.clone();
             ui.ctx().data_mut(|data| {
-                data.insert_temp(selected_id, selected.unwrap_or_default());
+                // Nothing selected stores nothing: an empty row id would have every press of the
+                // panel's buttons refused (#23395).
+                if let Some(selected) = selected {
+                    data.insert_temp(selected_id, selected);
+                }
                 data.insert_temp(panel_selection_id(panel), row);
             });
         }

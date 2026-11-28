@@ -331,24 +331,27 @@ published while the secret was missing or expired, submit it afterwards with
 
 ## Python packages
 
-`release.yml`'s `python` job turns each platform's released `solidcraft-cli` into a wheel of the
-Python client (`python/`, [python-api.md](python-api.md)) with `packaging/python/wheels.sh`. It
-repackages the binaries that the Linux, macOS and Windows jobs built and signed; it never rebuilds
-them. The wheels are:
+`release.yml`'s `python` job builds the Python client's one wheel (`python/`,
+[python-api.md](python-api.md)), `py3-none-any` with no binary, and the CLI archives the client
+downloads on first use, with `packaging/python/wheels.sh`. The archives repackage the
+`solidcraft-cli` that the Linux, FreeBSD and Windows jobs built and signed; nothing is rebuilt:
 
-| Package | Wheel platform tag |
+| Package | CLI archive |
 |---|---|
-| `solidcraft-<version>-linux-<arch>.tar.gz` | `manylinux_2_<glibc>_x86_64`, `manylinux_2_<glibc>_aarch64` (the newest glibc symbol the binary needs) |
-| `solidcraft-cli-<version>-macos-universal.zip` | `macosx_11_0_universal2` |
-| `solidcraft-<version>-windows-<arch>-portable.zip` | `win_amd64`, `win32`, `win_arm64` |
-| none | `py3-none-any`, with no binary: it finds `solidcraft-cli` on `PATH` or through `SOLIDCRAFT_CLI` |
+| `solidcraft-<version>-linux-<arch>.tar.gz` | `solidcraft-cli-<version>-linux-<arch>.tar.gz` |
+| `solidcraft-<version>-freebsd-x86_64.tar.gz` | `solidcraft-cli-<version>-freebsd-x86_64.tar.gz` |
+| `solidcraft-<version>-windows-<arch>-portable.zip` | `solidcraft-cli-<version>-windows-<arch>.zip` |
+| (the macOS job) | `solidcraft-cli-<version>-macos-universal.zip`, as it is |
 
-The job installs the Linux x86_64 wheel into a clean environment and runs the client's tests
-against the binary inside it. It then uploads the wheels as `release-python`, so they are attached
-to the draft and listed in `SHA256SUMS.txt` like every other asset. Wheel versions follow PEP 440:
-`0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a nightly.
+The client finds them by these names in the release `v<version>` and checks each against
+`SHA256SUMS.txt`, so renaming one breaks the download for that platform. The job installs the
+wheel into a clean environment, lets it download the Linux x86_64 archive from a `file://` copy of
+these files and runs the client's tests against it. It then uploads everything as
+`release-python`, so the files are attached to the draft and listed in `SHA256SUMS.txt` like every
+other asset. Wheel versions follow PEP 440: `0.52.0`, `0.52.0rc1`, and
+`0.52.0.dev<date><run><attempt>` for a nightly.
 
-`pypi.yml` uploads the release's wheels with PyPI trusted publishing, so no token is stored.
+`pypi.yml` uploads the release's wheel with PyPI trusted publishing, so no token is stored.
 Publishing a pre-release sends its wheels to TestPyPI only. The release reaches PyPI when it becomes
 a full release: flipping the pre-release to a release (or publishing one as a release) uploads its
 wheels to PyPI with no manual run, and the flip doesn't upload to TestPyPI again. A pre-release
@@ -357,7 +360,8 @@ trigger it, so flip the release as yourself;
 to upload one by hand, run `gh workflow run pypi.yml -R tangency-labs/solidcraft --ref v<version> -f tag=v<version>`
 (from the tag: the environments deploy from `v*` tags only, step 2).
 A release with no wheels uploads nothing. PyPI refuses to replace a file it already has, so a
-version is uploaded once.
+version is uploaded once; the upload skips files PyPI already has, so running it again after a
+partial upload sends only the missing ones.
 
 The workflow does nothing until the owner turns it on, once:
 

@@ -1981,3 +1981,35 @@ fn pcurves_of_malformed_records_are_refused_as_invalid() {
     // And a well-formed one still gets its pcurve.
     assert!(one(&line, [0., 1.]).is_ok());
 }
+
+/// The public reducer must carry the new Core orientation refusal through Ops,
+/// rather than flattening its typed cause into an unexplained `SM_ERR` status.
+#[test]
+fn mesh_reduction_preserves_the_uncertified_orientation_reason() {
+    use solidcore::error::mass::MassFailure;
+    let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0.5, 0.5, 0.]];
+    // Four nondegenerate coplanar facets form a zero-volume tetrahedral incidence;
+    // the fifth record repeats the first, so this is only the new duplicate path.
+    let indices = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3, 0, 2, 1];
+    let error = crate::reduce_mesh(&positions, &indices, None, 4).unwrap_err();
+    assert_eq!(
+        error,
+        Error::Refused {
+            operation: "mesh.reduce",
+            reason: MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON,
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "mesh.reduce: {}",
+            MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON
+        )
+    );
+    // Existing mass failures still retain their old status-only policy.
+    let other = solidcore::error::Failure::new("mass::op", MassFailure::Integrand).into_error();
+    assert_eq!(
+        crate::error::status(other),
+        Error::Status(solidcore::error::SM_ERR)
+    );
+}

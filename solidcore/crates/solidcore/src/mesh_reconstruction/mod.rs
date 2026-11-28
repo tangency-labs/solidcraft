@@ -41,17 +41,17 @@ impl TriMesh {
     /// Signed source volume about a source point, avoiding cancellation from world translation.
     fn volume(&self) -> f64 {
         let origin = self.positions.first().copied().unwrap_or(Vec3::ZERO);
-        let mut six = 0.;
+        let mut volume = crate::mesh_reduce::volume::Volume::new(origin);
         for &[a, b, c] in &self.triangles {
             if let (Some(a), Some(b), Some(c)) = (
                 self.positions.get(a as usize),
                 self.positions.get(b as usize),
                 self.positions.get(c as usize),
             ) {
-                six += (*a - origin).dot((*b - origin).cross(*c - origin));
+                volume.add([*a, *b, *c]);
             }
         }
-        six / 6.
+        volume.value()
     }
 }
 

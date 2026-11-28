@@ -200,8 +200,10 @@ fn metric_shaft_and_hole_threads_keep_their_class_after_reopen() {
             let saved = s.doc.to_json();
             let value: Value = serde_json::from_str(&saved).unwrap();
             assert_eq!(value["features"].as_array().unwrap().last().unwrap()["designation"], given, "saved as given");
+            // The class is part of format 73 since the 0.51.1 release, so it is never pending,
+            // whatever other changes are.
             if let Some(pending) = value.get("format_pending").and_then(Value::as_array) {
-                assert!(pending.iter().any(|c| c == "metric-thread-class"), "{pending:?}");
+                assert!(!pending.iter().any(|c| c == "metric-thread-class"), "{pending:?}");
             }
             assert_thread(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
         }
@@ -1100,6 +1102,11 @@ fn every_form_cuts_its_standard_profile() {
             (7.0, 45.0),
             0.75 * inch - 0.6 * inch / 8.0,
         ),
+        // The 90° custom profile: H = P / (2 tan 45°) = P/2, depth 5H/8 = 0.3125 P, flat P/8 at
+        // the crest, so g(r) = P/4 + 2 (r - r3) from the root r3 = 5 - 0.46875 = 4.53125. One turn
+        // is 2π∫ r g(r) dr from r3 to 5 = 2π [a r²/2 + 2 r³/3] with a = P/4 - 2 r3 = -8.6875:
+        // 2π (1.9020081 mm³) = 11.950669 mm³; six turns 71.704 mm³.
+        ("custom", "C10x1.5x90", 10.0, 1.5, 1.5 / 8.0, (45.0, 45.0), 5.0 - 0.3125 * 1.5),
     ];
     for (form, designation, d, p, flat, (a, b), r3) in cases {
         let mut volumes = Vec::new();
@@ -1277,6 +1284,21 @@ fn a_square_thread_is_refused() {
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
     let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "form": "square", "designation": "20x4"})).err().map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("no current standard defines a square thread"));
+}
+
+/// A custom thread keeps its designation in the callout and stores its form; it refuses a
+/// chamfered tip and an angle past 90°. Its groove's volume: `every_form_cuts_its_standard_profile`.
+#[test]
+fn a_custom_thread_keeps_its_designation_and_refuses_a_tip() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Shaft"}));
+    let th = run(&mut s, "solid.thread", json!({"face": [5, 0, 10], "designation": "c10x1.5x90"}));
+    assert_eq!(th["thread"]["designation"], "C10x1.5x90", "{th}");
+    assert_eq!(th["thread"]["form"], "custom", "{th}");
+    let tip = s.execute("solid.thread", &json!({"face": [5, 0, 10], "designation": "C10x1.5x90", "modeled": true, "tip": "both"}));
+    assert!(tip.err().map(|e| e.to_string()).unwrap_or_default().contains("not offered for a custom thread"));
+    let wide = s.execute("solid.thread", &json!({"face": [5, 0, 10], "form": "custom", "designation": "C10x1.5x95"}));
+    assert!(wide.err().map(|e| e.to_string()).unwrap_or_default().contains("must be 20° to 90°"));
 }
 
 /// Ladder 06/008: n starts are n grooves of lead n P, each a turn's n-th further round: over the
