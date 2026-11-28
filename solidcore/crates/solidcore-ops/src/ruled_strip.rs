@@ -155,7 +155,7 @@ mod tests {
     /// fold. A strip that never folds and never reaches: missed. Always folding: a fold.
     #[test]
     fn a_target_short_of_the_fold_is_reached_and_one_past_it_folds() {
-        let fold = 10.0 / 60f64.to_radians().sin();
+        let fold = 11.547_005_383_792_516; // 10 / sin 60° = 20 / sqrt 3 (ops computes no geometry: no sin here)
         assert_eq!(
             up_to_target(2000.0, strip(fold, 4.0), folds),
             Ok(Reach::Cut(4.0))
