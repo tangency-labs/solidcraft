@@ -26,6 +26,8 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::InsertAirfoil(_) => Some("sketch.insert_airfoil"),
         Kind::ShaftSpline(_) => Some(crate::dialogs_shaft_spline::COMMAND),
         Kind::Sketch => Some("sketch.create"),
+        Kind::ScaleInk { .. } => Some(crate::grease_pencil::SCALE),
+        Kind::EditInk(_) => Some(crate::grease_pencil::EDIT),
         Kind::SketchIntersect { .. } => Some("sketch.intersect"),
         Kind::SketchProject { .. } => Some("sketch.project"),
         Kind::SketchModify(k) => Some(crate::sketch_modify_ui::command(k)),
@@ -1574,6 +1576,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
         }
+        Kind::ScaleInk { factor, .. } => enter |= expr_row_positive(ui, "Scale factor", factor),
+        Kind::EditInk(edit) => edit.show(app, ui),
         Kind::Scale { factor, per_axis, factor_y, factor_z } => {
             form_row(ui, "Type", |ui| {
                 let mut i = usize::from(*per_axis);

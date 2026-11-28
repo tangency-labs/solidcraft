@@ -18,7 +18,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::doc::{Document, apply_point, mat_inverse};
 
 use crate::SolveApp;
-use crate::viewport::{Hit, Proj};
+use crate::viewport::{Hit, Proj, ViewTurn};
 
 /// A drag under way.
 #[derive(Clone, Debug)]
@@ -30,6 +30,7 @@ pub struct Drag {
     /// The plane the pointer moves the point in: through where it was grabbed, facing the view.
     origin: Vec3,
     normal: Vec3,
+    turn: Option<(ViewTurn, f64)>,
     /// What Escape goes back to (`edit.checkpoint`).
     checkpoint: Option<u64>,
     /// The drag's undo step is on top of the history (it went in with the first frame that
@@ -77,18 +78,36 @@ pub(crate) fn grabbed_face(app: &SolveApp, proj: &Proj, p: Pos2) -> Option<(Stri
 }
 
 /// Begin a drag on the part under `p` when nothing holds it in place. True when one began.
-pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
+pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2, rotating: bool) -> bool {
     let Some((body, at)) = grabbed_face(app, proj, p) else { return false };
     let Some(path) = placement_of(app, &body) else { return false };
     let s = &app.session;
-    if s.drag_group(&path).is_err() {
+    if let Err(error) = s.drag_group(&path) {
+        if rotating {
+            app.set_status(error.to_string(), true);
+        }
         return false;
     }
     let Some(local) = s.occurrence_placement(&path).ok().and_then(|x| mat_inverse(&x.world)).map(|inv| apply_point(&inv, at)) else {
         return false;
     };
+    let turn = if rotating {
+        let state = crate::open_meshing::shown_world(app);
+        let scene = s.model.state();
+        let bounds = s
+            .doc
+            .body_frames(&scene)
+            .iter()
+            .filter(|(_, _, placed, _)| placed.starts_with(&path))
+            .filter_map(|(name, _, _, _)| state.body(name)?.body.exact_bounds().ok())
+            .fold(solidcraft_engine::geom::Aabb3::EMPTY, |total, b| total.union(&b));
+        let Some(turn) = (!bounds.is_empty()).then(|| ViewTurn::new(proj, bounds.center(), p)).flatten() else { return false };
+        Some((turn, 0.0))
+    } else {
+        None
+    };
     let checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|r| r["checkpoint"].as_u64());
-    app.viewport.occurrence_drag = Some(Drag { path, local, origin: at, normal: proj.ray(p).1, checkpoint, step: None });
+    app.viewport.occurrence_drag = Some(Drag { path, local, origin: at, normal: proj.ray(p).1, turn, checkpoint, step: None });
     true
 }
 
@@ -106,25 +125,39 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         end(app);
         return;
     }
-    let (o, dir) = proj.ray(p);
-    let facing = dir.dot(d.normal);
-    if facing.abs() < 1e-9 {
-        return;
-    }
-    let target = o + dir * ((d.origin - o).dot(d.normal) / facing);
     let Ok(placement) = app.session.occurrence_placement(&d.path) else {
         end(app);
         return;
     };
     let at = apply_point(&placement.world, d.local);
-    if !target.is_finite() || !at.is_finite() || target.dist(at) < 1e-9 {
-        return;
-    }
-    let params = json!({"path": d.path, "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z], "continuous": true});
+    let (target, angle, matrix) = if let Some((turn, previous)) = d.turn {
+        let Some(angle) = turn.rotation_at(p) else { return };
+        let delta = angle - previous;
+        if delta.abs() < 1e-9 {
+            return;
+        }
+        (at, angle, Some(crate::dialogs_move::matrix_rows(&turn.matrix(delta))))
+    } else {
+        let (o, dir) = proj.ray(p);
+        let facing = dir.dot(d.normal);
+        if facing.abs() < 1e-9 {
+            return;
+        }
+        let target = o + dir * ((d.origin - o).dot(d.normal) / facing);
+        if !target.is_finite() || !at.is_finite() || target.dist(at) < 1e-9 {
+            return;
+        }
+        (target, 0.0, None)
+    };
+    let params = json!({"path": d.path, "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z], "matrix": matrix, "continuous": true});
     // One undo step for the whole drag: the first frame's, kept on top while the others run.
     let own = if d.step.is_some() { app.session.undo.pop() } else { None };
     let before = app.session.doc.clone();
-    let pushed = app.run("occurrence.drag", params).is_ok() && !Arc::ptr_eq(&before, &app.session.doc);
+    let success = app.run("occurrence.drag", params).is_ok();
+    let pushed = success && !Arc::ptr_eq(&before, &app.session.doc);
+    if success && let Some((_, previous)) = app.viewport.occurrence_drag.as_mut().and_then(|drag| drag.turn.as_mut()) {
+        *previous = angle;
+    }
     match own {
         Some(step) => {
             if pushed {

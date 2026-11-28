@@ -295,7 +295,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DragResult>)
         .params(
         "occurrence or path: exact placement; at: [x,y,z] world point on it; point: [x,y,z] where it goes. Moves the placement by \
-         point - at (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
+         point - at after an optional rigid world matrix (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
          moves stay pending. Shared definitions move in all placements. Grounded parts and parts joints hold to something fixed are refused (joint.reach moves those)",
     ),
     CommandSpec::new("occurrence.align", "Align Occurrence", crate::checked!("occurrence.align", align::align)).begins_edit()

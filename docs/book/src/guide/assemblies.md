@@ -49,6 +49,9 @@ angle. A ghost shows where the part started. **OK** keeps the new angle.
 
 ## Components, placement and joints
 
+Hold **Option** (**Alt**) and drag on a free component to rotate it around its center in the
+plane of the view. The whole drag is one undo step.
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. **Capture Position**

@@ -5458,6 +5458,14 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`entities` must list sketch entity ids"));
     }
     let model_edit = !s.sheet_sketching();
+    if model_edit
+        && let Ok(id) = sketch_store::target(s, p, cmd)
+        && let Ok(sk) = sketch_store::read(&s.doc, id)
+        && ids.iter().all(|wire| sk.wire_index(wire).and_then(|i| sk.wires.get(i)).is_some_and(|w| w.ink_diameter.is_some()))
+    {
+        super::sketch_3d::ink::delete_strokes(s, id, &ids)?;
+        return reply(cmd, DeleteResult { deleted: ids.len(), sketch: None, broken_links: Vec::new(), param_warnings: Vec::new() });
+    }
     // Explicit preservation records removed source edges; the default breaks the remaining link.
     let preserve = match p.get("preserve_projection_link") {
         None => false,

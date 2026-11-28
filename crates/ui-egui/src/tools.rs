@@ -82,6 +82,9 @@ mod centre_align_ui_tests;
 pub enum Kind {
     /// Click points; `n` points complete the shape (0 = chain until finished).
     Draw(usize),
+    /// Draw a freehand stroke with a primary pointer drag.
+    Freehand,
+    InkErase,
     /// Pick sketch entities; `n` picks run the command.
     Pick(usize),
     /// Pick one straight line, or two distinct points to align: Horizontal and Vertical (and the
@@ -145,11 +148,14 @@ pub struct Tool {
     pub preselected: bool,
     /// Signals `on_click` not to re-store the tool (used by `Kind::Ext` entity constraints).
     pub finished: bool,
+    pub(crate) brush: crate::grease_pencil::Brush,
 }
 
 impl Tool {
     pub fn for_command(id: &str) -> Option<Tool> {
         let (cmd, kind): (&'static str, Kind) = match id {
+            crate::grease_pencil::COMMAND => (crate::grease_pencil::COMMAND, Kind::Freehand),
+            crate::grease_pencil::ERASE => (crate::grease_pencil::ERASE, Kind::InkErase),
             "sketch.line" => ("sketch.line", Kind::Draw(0)),
             "sketch.rectangle.two_point" => ("sketch.rectangle.two_point", Kind::Draw(2)),
             "sketch.rectangle.center" => ("sketch.rectangle.center", Kind::Draw(2)),
@@ -209,12 +215,15 @@ impl Tool {
             rotatable: crate::sketch_dims::last_rectangle_rotatable(),
             preselected: false,
             finished: false,
+            brush: Default::default(),
         })
     }
 }
 
 pub fn hint(id: &str) -> String {
     match id {
+        crate::grease_pencil::COMMAND => tr("sketch.hint.grease_pencil").into(),
+        crate::grease_pencil::ERASE => tr("sketch.hint.erase_ink").into(),
         "sketch.line" => tr("sketch.hint.line").into(),
         "sketch.rectangle.two_point" => tr("sketch.hint.rectangle.two_point").into(),
         "sketch.rectangle.center" => tr("sketch.hint.rectangle.center").into(),
@@ -508,6 +517,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         return;
     }
     match tool.kind {
+        Kind::Freehand | Kind::InkErase => {}
         Kind::Draw(n) => {
             if let Some(p) = sketch_point_at(app, proj, pos) {
                 // Typed values win over the cursor; lines snap to horizontal/vertical.
@@ -1420,6 +1430,12 @@ pub fn finish(app: &mut SolveApp) {
     if crate::sketch_line_arc::finish(app) {
         return;
     }
+    if app.tool.take_if(|t| crate::grease_pencil::is_tool(t.kind)).is_some() {
+        if app.status_is_tool_hint {
+            app.status = None;
+        }
+        return;
+    }
     if let Some(mut t) = app.tool.take_if(|t| t.kind == Kind::Ext) {
         if crate::sketch_tools::finish(app, &mut t) {
             app.tool = Some(t);
@@ -1771,6 +1787,10 @@ fn paint_axis_guide(anchor: Vec2, horizontal: bool, plane: &solidcore_record::Pl
 }
 
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
+    if crate::grease_pencil::is_tool(t.kind) {
+        t.brush.paint(painter);
+        return;
+    }
     if crate::sketch3d::preview(app, t, painter, proj) {
         return;
     }

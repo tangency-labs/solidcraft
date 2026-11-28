@@ -15,6 +15,8 @@ fn wire(id: &str, pts: &[Vec3]) -> crate::wire::Wire {
         space: WireSpace::Component,
         link: None,
         fit: Vec::new(),
+        ink_diameter: None,
+        ink_color: None,
         arc: None,
         control: None,
         exact: Vec::new(),

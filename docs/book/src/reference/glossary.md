@@ -447,6 +447,13 @@ Radius of the surface neighbourhood used to estimate illumination from nearby ph
 
 - **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
 
+### Grease Pencil
+
+A tool for drawing freehand strokes in the 3D view.
+
+- **In SolidCraft:** `sketch.grease_pencil` starts the tool or adds a stroke by command.
+- **For translators:** a sketching tool for ideas and annotations.
+
 ### group
 
 A named container that someone makes, in the browser or in the timeline, to keep items together.
@@ -934,6 +941,12 @@ flange slope.
 - **Don't use:** catalogue profile, library profile (for the size).
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
+### stroke
+
+A freehand curve in a sketch with its own color and diameter.
+
+- **In SolidCraft:** **Edit Stroke**, the `strokes` command input, and the saved `ink_color` and `ink_diameter` fields.
 
 ### surface texture indication
 

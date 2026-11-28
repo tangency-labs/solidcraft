@@ -909,6 +909,8 @@ pub struct GpuScene {
     pub glass: Vec<u8>,
     /// Depth-tested lines.
     pub lines: Vec<u8>,
+    /// Sketch ink capsules. These depth-test and write depth.
+    pub ink: Vec<u8>,
     /// Lines drawn only where the model hides them (hidden edges).
     pub hidden: Vec<u8>,
     /// Lines drawn over everything (active sketch, highlights).
@@ -1502,6 +1504,17 @@ impl GpuScene {
     pub fn line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32, on_top: bool) {
         let out = if on_top { &mut self.overlay } else { &mut self.lines };
         out.extend_from_slice(&line_record(a, b, c, width.to_bits()));
+    }
+
+    /// A round stroke path. Positive width is in pixels, negative width is projected at unit eye depth.
+    pub fn ink_path(&mut self, points: impl Iterator<Item = [f32; 3]>, color: PaletteIndex, width: f32) {
+        let word = width.to_bits();
+        let mut points = points;
+        let Some(mut a) = points.next() else { return };
+        for b in points {
+            self.ink.extend_from_slice(&line_record(a, b, color, word));
+            a = b;
+        }
     }
 }
 
@@ -2554,6 +2567,7 @@ struct Batches {
     lines: Option<Batch>,
     hidden: Option<Batch>,
     overlays: Option<Batch>,
+    ink: Option<Batch>,
     ghost: Option<Batch>,
     xray: Option<Batch>,
     under: Option<Batch>,
@@ -2808,6 +2822,7 @@ impl Batches {
             let own_lines = own("sc_lines", spilled.as_ref().map_or(&sc.lines, |(l, _)| l), LINE_SIZE);
             let own_hidden = own("sc_hidden", spilled.as_ref().map_or(&sc.hidden, |(_, h)| h), LINE_SIZE);
             self.overlays = own("sc_overlay", &sc.overlay, LINE_SIZE);
+            self.ink = own("sc_ink", &sc.ink, LINE_SIZE);
             self.ghost = own("sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = own("sc_xray", &sc.xray, TRI_SIZE);
             self.under = own("sc_under", &sc.under, LINE_SIZE);
@@ -3420,6 +3435,7 @@ pub struct Renderer {
     /// behind an edge then leaves it alone instead of blending over it ([`EDGE_DEPTH_BIAS`]).
     line_depth: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
+    ink: wgpu::RenderPipeline,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
     guide_line: wgpu::RenderPipeline,
@@ -4496,6 +4512,7 @@ impl Renderer {
         };
         let lines_all = || {
             (
+                pipeline("sc_ink", "vs_ink", "fs_ink", line_layout(), depth(wgpu::CompareFunction::LessEqual, true), alpha),
                 pipeline("sc_overlay", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
                 pipeline("sc_guide_lines", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
             )
@@ -4597,7 +4614,7 @@ impl Renderer {
                     lit_hidden: pipe("sc_edges_inst_lit_hidden", "vs_edge_inst_lit_a", wgpu::CompareFunction::Greater),
                 }
             });
-            let (overlay, guide_line) = lines_all.join();
+            let (ink, overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
             let (pbr, pbr_palette, pbr_instanced) = pbr.join();
@@ -4686,6 +4703,7 @@ impl Renderer {
                 line_lit_hidden,
                 line_depth,
                 overlay,
+                ink,
                 guide_trans: guide_trans.join(),
                 guide_line,
                 uniform,
@@ -5884,6 +5902,7 @@ impl Renderer {
         in_moving(pass, &|pass, mv| instanced_edges(pass, mv, false));
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.line, &sk.lines);
+        lines(pass, &res.ink, &sk.ink);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         // Whole bodies' edges first, so an edge or a face's outline lit over them keeps its own.
         lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.halo, tally);
@@ -5892,6 +5911,7 @@ impl Renderer {
             e.draw(pass, &p.lit_a, tally);
             e.draw(pass, &p.lit_b, tally);
         }
+        lines(pass, &res.ink, &h.ink);
         lines(pass, &res.line, &h.lines);
         lines(pass, &res.guide_line, &h.guide_lines);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);

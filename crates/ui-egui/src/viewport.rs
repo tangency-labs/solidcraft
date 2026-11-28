@@ -5,6 +5,7 @@ use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::json;
 use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_engine::doc::Mat;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines, grid_plane, grid_step, sketch_lines_with_sampler};
@@ -167,6 +168,9 @@ impl ViewScenes {
 
 #[derive(Default)]
 pub struct ViewportState {
+    pub(crate) ink_move: Option<crate::grease_pencil::Move>,
+    pub(crate) ink_pick: std::sync::Mutex<crate::grease_pencil::InkPickCache>,
+    pub(crate) ink_hover_frame: Option<Mat>,
     /// Touchscreen gesture ownership and contacts for the shared camera handler.
     pub(crate) touch: crate::navigation::TouchNavigation,
     /// The faces the modelling kernel refuses that the window points at (a failed operation's
@@ -679,7 +683,7 @@ fn framed_in_paint(vp: &Mat4, frame: Rect, paint: Rect) -> Mat4 {
 }
 
 /// World ↔ screen mapping for the current frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Proj {
     pub cam: Camera,
     pub vp: Mat4,
@@ -721,6 +725,42 @@ impl Proj {
         let t = nearest - (b.diagonal() * 0.01 + 1.0);
         if t.is_finite() && t < 0.0 { (o + d * t, d) } else { (o, d) }
     }
+}
+
+/// A turn about a fixed center, measured by the pointer's angle in the view.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ViewTurn {
+    center: Vec3,
+    axis: Vec3,
+    screen: Pos2,
+    start: Pos2,
+}
+
+impl ViewTurn {
+    pub(crate) fn new(proj: &Proj, center: Vec3, start: Pos2) -> Option<Self> {
+        Some(Self { center, axis: proj.cam.back(), screen: proj.to_screen(center)?, start })
+    }
+
+    pub(crate) fn rotation_at(self, pos: Pos2) -> Option<f64> {
+        let start = self.start - self.screen;
+        let end = pos - self.screen;
+        if start.length_sq() < 36.0 {
+            // Near the pivot, horizontal motion gives a stable turn without a polar singularity.
+            return Some(-f64::from(pos.x - self.start.x) / 64.0);
+        }
+        (end.length_sq() >= 4.0).then(|| {
+            use std::f32::consts::{PI, TAU};
+            f64::from((start.angle() - end.angle() + PI).rem_euclid(TAU) - PI)
+        })
+    }
+
+    pub(crate) fn matrix(self, angle: f64) -> solidcraft_engine::doc::Mat {
+        solidcraft_engine::doc::rigid(Vec3::ZERO, self.center, self.axis, angle)
+    }
+}
+
+pub(crate) fn option_only(mods: egui::Modifiers) -> bool {
+    mods.alt && !mods.shift && !mods.ctrl && !mods.command
 }
 
 /// A projected 3D face (convex): an unfeathered triangle fan, outlined one edge at a time (no
@@ -1231,6 +1271,33 @@ fn ground_grid_key(app: &SolveApp, proj: &Proj) -> (u8, [u64; 3], u64, u64, u64)
     )
 }
 
+fn selected_ink<'a>(app: &'a SolveApp, world: &'a solidcraft_engine::doc::ModelState) -> impl Iterator<Item = (u64, &'a str)> {
+    app.session.selection.iter().filter_map(move |sel| {
+        let (Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { sketch: Some(sketch), id }) = sel else { return None };
+        crate::grease_pencil::ink_wire(world, *sketch, id).map(|_| (*sketch, id.as_str()))
+    })
+}
+
+pub(crate) fn selected_ink_sketches<'a>(app: &'a SolveApp, world: &'a solidcraft_engine::doc::ModelState) -> impl Iterator<Item = u64> + 'a {
+    app.session.selection.iter().filter_map(move |item| {
+        let Sel::Feature { id } = *item else { return None };
+        world.sketch(id)?.sketch.wires.iter().any(|wire| wire.ink_diameter.is_some()).then_some(id)
+    })
+}
+
+pub(crate) fn ink_frames(frames: &[Mat], selected: bool) -> &[Mat] {
+    if frames.is_empty() && selected { std::slice::from_ref(&solidcraft_engine::doc::IDENTITY) } else { frames }
+}
+
+fn hovered_ink(app: &SolveApp) -> Option<(u64, &str, &Mat)> {
+    let Hit::SketchCurve { sketch, id, .. } = app.viewport.hover.as_ref()? else { return None };
+    Some((*sketch, id, app.viewport.ink_hover_frame.as_ref()?))
+}
+
+fn ink_highlight(t: &Tokens) -> Color32 {
+    t.hover_profile_edge.lerp_to_gamma(Color32::BLACK, 0.24)
+}
+
 #[cfg(test)]
 fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     sketch_scene_keys(app, proj, scene_key(app)).0
@@ -1243,6 +1310,19 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
 fn sketch_scene_keys(app: &SolveApp, proj: &Proj, model_key: u64) -> (u64, Option<u64>) {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     model_key.hash(&mut h);
+    app.viewport.ink_move.as_ref().map(|m| &m.strokes).hash(&mut h);
+    crate::grease_pencil::pending_erase(app).hash(&mut h);
+    let st = crate::open_meshing::shown_world(app);
+    for stroke in selected_ink(app, &st) {
+        stroke.hash(&mut h);
+    }
+    for sketch in selected_ink_sketches(app, &st) {
+        sketch.hash(&mut h);
+    }
+    hovered_ink(app).map(|(sketch, id, frame)| (sketch, id, frame.map(|col| col.map(f64::to_bits)))).hash(&mut h);
+    if let Some(edit) = crate::grease_pencil::stroke_edit(app) {
+        edit.hash_preview(&mut h);
+    }
     app.viewport.wireframe.generation().hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
     app.preferences.ground_shadow_style.hash(&mut h);
@@ -1267,7 +1347,6 @@ fn sketch_scene_keys(app: &SolveApp, proj: &Proj, model_key: u64) -> (u64, Optio
     preview_plane.map(|p| [p.origin, p.x, p.y].map(|v| [v.x, v.y, v.z].map(f64::to_bits))).hash(&mut h);
     // Conflicting curves in their own colour, or as before (#7244).
     app.preferences.sketch_conflict_colour.hash(&mut h);
-    let st = crate::open_meshing::shown_world(app);
     (std::sync::Arc::as_ptr(&st) as usize).hash(&mut h);
     // The open sketch follows a dimension's typed value.
     crate::dim_view::preview_solve(app).hash(&mut h);
@@ -3833,24 +3912,70 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     // Each sketch where it is edited, if shown there (the identity), and on the other copies of
     // its part that are shown.
     let own: std::collections::HashSet<u64> = visible_sketches(app).into_iter().collect();
+    let ink_sketches: std::collections::BTreeSet<_> = selected_ink_sketches(app, &st).collect();
     let shown: Vec<(u64, &solidcraft_engine::doc::SolvedSketch, bool, Vec<solidcraft_engine::doc::Mat>)> = st
         .sketches
         .iter()
         .filter_map(|ss| {
             let sid = ss.feature;
             let frames = sketch_frames(app, &st, sid, own.contains(&sid));
-            (!frames.is_empty()).then(|| {
+            (!frames.is_empty() || ink_sketches.contains(&sid)).then(|| {
                 let ss = typed.as_ref().filter(|_| crate::sketch_view::active_sketch(app) == Some(sid)).and_then(|t| t.sketch(sid)).unwrap_or(ss);
                 (sid, ss, false, frames)
             })
         })
         .chain(failing.iter().map(|ss| (ss.feature, &**ss, true, vec![solidcraft_engine::doc::IDENTITY])))
         .collect();
+    let selected_ink: std::collections::BTreeSet<_> = selected_ink(app, &st).collect();
+    let hovered_ink = hovered_ink(app);
+    let ink_highlight = ink_highlight(&tk);
+    let ink_edit = crate::grease_pencil::stroke_edit(app);
     for (sid, ss, failed, frames) in shown {
         let at = |m: &solidcraft_engine::doc::Mat, p: Vec3| solidcraft_engine::doc::apply_point(m, p).to_f32();
+        let active = crate::sketch_view::active_sketch(app) == Some(sid);
+        // Selecting a browser row reveals its ink even if the sketch's eye is off.
+        let sketch_selected = ink_sketches.contains(&sid);
+        let ink_frames = ink_frames(&frames, sketch_selected);
+        let moved = app.viewport.ink_move.as_ref().and_then(|drag| drag.strokes.get(&sid));
+        let erased = crate::grease_pencil::pending_erase(app).filter(|(sketch, _)| sid == *sketch).map(|(_, ids)| ids);
+        let ink = |scene: &mut GpuScene, halo: bool| {
+            for wire in &ss.sketch.wires {
+                let Some(diameter) = wire.ink_diameter else { continue };
+                if moved.is_some_and(|ids| ids.contains(&wire.id)) || erased.is_some_and(|ids| ids.contains(&wire.id)) {
+                    continue;
+                }
+                let preview = ink_edit.and_then(|edit| edit.preview(sid, wire));
+                let (diameter, ink) = preview.unwrap_or((diameter, wire.ink_color));
+                let selected = preview.is_none() && (sketch_selected || selected_ink.contains(&(sid, wire.id.as_str())));
+                let extra = if halo { SKETCH_HALO_WIDTH } else { 0.0 };
+                let width = crate::grease_pencil::render_width(proj, diameter, extra) * ppp;
+                for frame in ink_frames {
+                    let lit = selected || hovered_ink == Some((sid, wire.id.as_str(), frame));
+                    // Recolour the stroke itself. A wider pass at the same depth shows its caps.
+                    if halo && (lit || preview.is_some()) {
+                        continue;
+                    }
+                    let color = if lit {
+                        ink_highlight
+                    } else if halo {
+                        tk.sketch_halo
+                    } else {
+                        crate::grease_pencil::ink_color(ink)
+                    };
+                    let color = scene.color(c4(color));
+                    scene.ink_path(wire.pts.iter().map(|&point| at(frame, point)), color, width);
+                }
+            }
+        };
+        if app.preferences.sketch_halo && !active {
+            ink(&mut sc, true);
+        }
+        ink(&mut sc, false);
+        if frames.is_empty() {
+            continue;
+        }
         // A budget per sketch, so one large sketch leaves the next its curves (#6524).
         let mut uncached = crate::sketch_display::Uncached::default();
-        let active = crate::sketch_view::active_sketch(app) == Some(sid);
         // Sampled here, past the display cache: the open sketch as a typed value leaves it, or a
         // failed sketch no world state holds.
         let here = failed || (active && typed.is_some());
@@ -5399,7 +5524,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
         let shown = snapping.then(|| crate::dialogs::SnapPoints::of(&ss.sketch));
         let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
         if picking_3d_curve_points(app) && !ss.sketch.view.hide_points {
-            for wire in &ss.sketch.wires {
+            for wire in ss.sketch.wires.iter().filter(|w| w.ink_diameter.is_none()) {
                 for (index, at) in wire.fit.iter().enumerate() {
                     if let Some(sp) = proj.to_screen(*at) {
                         let dd = sp.distance(pos) - if crate::sketch_view::active_sketch(app) == Some(sid) { 2.0 } else { 0.0 };
@@ -5531,7 +5656,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
             }
         }
         // 3D sketch curves (paths for sweeps and pipes).
-        for w in &ss.sketch.wires {
+        for w in ss.sketch.wires.iter().filter(|wire| wire.ink_diameter.is_none()) {
             let straight = w.fit.len() == 2;
             let tier = tier(w.link.is_none());
             let pts: Vec<(Pos2, Vec3)> = w.pts.iter().filter_map(|q| proj.to_screen(*q).map(|sp| (sp, *q))).collect();
@@ -5646,6 +5771,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let wireframe = app.ui.visual_style == 2;
     let hidden_edges = app.preferences.select_hidden_edges;
     let visible = |p: Vec3, slack: f64| kept(p) && (through || wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack));
+    if !crate::render_workspace::active(app)
+        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
+        && let Some((ink, _)) = crate::grease_pencil::nearby_ink(app, &st, proj, pos, 4.0, None, |p| {
+            kept(p) && (wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack))
+        })
+    {
+        hits.insert(before_curves, ink);
+    }
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
     // A joint origin takes an edge only right under the pointer: inside a face the face is meant (#18255).
@@ -6538,7 +6671,10 @@ pub(crate) fn snap_allowed(app: &SolveApp, snaps: bool, h: &Hit) -> bool {
 /// The selection a click on `h` makes with no dialog (sketch entities only belong to the active sketch).
 fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
     match h {
-        Hit::SketchCurve { sketch, id, .. } if crate::sketch_view::active_sketch(app) != Some(*sketch) => {
+        Hit::SketchCurve { sketch, id, .. }
+            if crate::sketch_view::active_sketch(app) != Some(*sketch)
+                || crate::grease_pencil::ink_wire(&crate::open_meshing::shown_world(app), *sketch, id).is_some() =>
+        {
             Some((h.clone(), Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() }))
         }
         Hit::SketchPoint { sketch, id, .. } if crate::sketch_view::active_sketch(app) != Some(*sketch) => {
@@ -6982,15 +7118,22 @@ pub(crate) fn hover_drawn(hover: &Option<Hit>) -> String {
 
 /// The body the current hover actually selects, after the active dialog's filter.
 fn hovered_body(app: &SolveApp) -> Option<String> {
-    if app.tool.is_some() {
-        return None;
-    }
     let hit = app.viewport.hover.as_ref()?;
+    if app.tool.is_some() || crate::grease_pencil::edit_picking(app) {
+        return match hit {
+            Hit::Face { body, .. } => brush_face_hover(app).then(|| body.clone()),
+            _ => None,
+        };
+    }
     let (_, selected) = candidate(app, std::slice::from_ref(hit))?;
     match selected {
         Sel::Body { name } => Some(name),
         _ => None,
     }
+}
+
+fn brush_face_hover(app: &SolveApp) -> bool {
+    app.tool.as_ref().is_some_and(|t| t.kind == crate::tools::Kind::Freehand) || crate::grease_pencil::edit_picking(app)
 }
 
 fn highlighted_cow(app: &SolveApp) -> std::borrow::Cow<'_, [Sel]> {
@@ -7119,7 +7262,10 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     for item in selected {
         hash_sel(item, &mut h);
     }
-    hover_drawn(&app.viewport.hover).hash(&mut h);
+    // The brush lights the whole body. A different face on it draws the same highlight.
+    if !matches!(&app.viewport.hover, Some(Hit::Face { .. })) || !brush_face_hover(app) {
+        hover_drawn(&app.viewport.hover).hash(&mut h);
+    }
     hover_drawn(&crate::snap_wake::lit_face(app)).hash(&mut h);
     hovered_body(app).hash(&mut h);
     app.preferences.show_selected_hidden_edges.hash(&mut h);
@@ -7219,6 +7365,7 @@ fn highlight_key_with_projection_and_scene(app: &SolveApp, model_key: u64, proje
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let selected = highlighted_cow(app);
     highlight_geometry_key_with(app, model_key, &selected).hash(&mut h);
+    app.viewport.ink_move.as_ref().map(|m| (&m.strokes, m.transform.map(|col| col.map(f64::to_bits)))).hash(&mut h);
     app.cam.half_height().to_bits().hash(&mut h);
     app.preferences.origin_axes_across_view.hash(&mut h);
     // The origin squares' size follows Preferences › Design › Origin › Plane size.
@@ -7235,7 +7382,8 @@ fn highlight_key_with_projection_and_scene(app: &SolveApp, model_key: u64, proje
     // Neither changes the key of the cached world-space feedback block.
     let projected = selected.iter().any(|s| matches!(s, Sel::Profile { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. }))
         || matches!(app.viewport.hover, Some(Hit::Profile { .. }))
-        || !selected_sketches(app, &selected).is_empty();
+        || !selected_sketches(app, &selected).is_empty()
+        || app.viewport.ink_move.is_some();
     let long_axes = app.preferences.origin_axes_across_view && !crate::render_workspace::active(app) && !origin_axes(app).is_empty();
     if projected || long_axes {
         crate::sketch_display::projection_key(&projection(), app.viewport.pixels_per_point()).hash(&mut h);
@@ -7891,7 +8039,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let projected = sel.iter().any(|s| matches!(s, Sel::Profile { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. }))
         || matches!(hover, Some(Hit::Profile { .. }))
         || !sketches.is_empty()
-        || hover_sketch.is_some();
+        || hover_sketch.is_some()
+        || app.viewport.ink_move.is_some();
     if !projected
         && let Some(cached) = app.viewport.hover_block.lock().ok().and_then(|cache| {
             cache.as_ref().filter(|c| c.key == key && std::sync::Arc::ptr_eq(&c.state, &st) && std::sync::Arc::ptr_eq(&c.doc, &s.doc)).cloned()
@@ -7992,6 +8141,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         && t.sel_face.a() == 255
         && !projected
         && sel.iter().filter(|x| matches!(x, Sel::Face { .. } | Sel::Body { .. })).take(2).count() == 1;
+    let (unit, proj) = (grid_step(app.cam.half_height()).0, display_proj(app));
     for x in &sel {
         match x {
             Sel::Face { body, index, .. } => {
@@ -8120,8 +8270,9 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                             feedback.line(a.to_f32(), b.to_f32(), sel_edge, 3.5, true);
                         }
                     }
-                } else if let Some(w) = st.sketch(*sketch).and_then(|ss| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i))) {
-                    // A 3D sketch curve of that sketch.
+                } else if let Some(w) = st.sketch(*sketch).and_then(|ss| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i)))
+                    && w.ink_diameter.is_none()
+                {
                     for q in w.pts.windows(2) {
                         feedback.line(q[0].to_f32(), q[1].to_f32(), sel_edge, 3.5, true);
                     }
@@ -8155,9 +8306,25 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         })
         .collect();
     picked_profile_partings(&mut feedback, app, &picked, t.sketch_fixed);
+    // Drag feedback follows the recorded stroke group, including strokes selected through a sketch row.
+    if let Some(drag) = &app.viewport.ink_move {
+        let color = feedback.color(c4(ink_highlight(&t)));
+        let ppp = app.viewport.pixels_per_point();
+        for (&sketch, ids) in &drag.strokes {
+            let frames = sketch_frames(app, &st, sketch, solidcraft_engine::view::sketch_shown(s, sketch));
+            for &frame in ink_frames(&frames, true) {
+                let transform = solidcraft_engine::doc::mat_mul(&frame, &drag.transform);
+                for id in ids {
+                    let Some(wire) = crate::grease_pencil::ink_wire(&st, sketch, id) else { continue };
+                    let Some(diameter) = wire.ink_diameter else { continue };
+                    let width = crate::grease_pencil::render_width(&proj, diameter, 0.0) * ppp;
+                    feedback.ink_path(wire.pts.iter().map(|&point| solidcraft_engine::doc::apply_point(&transform, point).to_f32()), color, width);
+                }
+            }
+        }
+    }
     // A sketch picked in the Browser or the timeline: all its curves in their line types, over
     // the model, also while the sketch is hidden or inside a body, so it is easy to find.
-    let (unit, proj) = (grid_step(app.cam.half_height()).0, display_proj(app));
     let sel_edge = feedback.color(c4(t.sel_edge));
     for ss in sketches.iter().filter_map(|id| st.sketch(*id)) {
         for (pts, col, cons) in sketch_lines_with_sampler(&ss.sketch, &ss.plane, false, &[], |_, index, plane| {
@@ -8189,6 +8356,10 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     hovered.extend(component_hover.into_iter().flatten());
     let body_hover = hovered_body(app);
     hovered.extend(body_hover.iter().map(|name| Sel::Body { name: name.clone() }));
+    let brush_outline = body_hover.as_deref().filter(|_| brush_face_hover(app)).map(|name| {
+        let blue = ink_highlight(&t);
+        (name, EdgeColours::new(&mut feedback, blue, blue))
+    });
     if let Some((_, item @ (Sel::Body { .. } | Sel::Occurrence { .. } | Sel::Feature { .. }))) =
         app.dialog.as_ref().and_then(|d| d.list_hover.as_ref())
     {
@@ -8213,6 +8384,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         }
     }
     for b in st.bodies.iter().filter(|b| crate::viewport::body_shown(app, &b.name)) {
+        let hover_edge = brush_outline.filter(|(name, _)| *name == b.name).map_or(hover_edge, |(_, edge)| edge);
         // A body the preview stands in for is not lit, its old faces fighting with the preview,
         // but outlined by what the preview draws for it where it says (a combine's result, or a
         // tool it ghosts).
@@ -8407,6 +8579,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     sc.palette = feedback.palette.clone();
     // The scene the frame draws names the hovered body, however the feedback joins it.
     sc.hover_body = feedback.hover_body.clone();
+    sc.ink.append(&mut feedback.ink);
     if projected {
         sc.tris.append(&mut feedback.tris);
         sc.trans.append(&mut feedback.trans);
@@ -8881,10 +9054,14 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
+    let freehand = app.tool.as_ref().is_some_and(|t| crate::grease_pencil::is_tool(t.kind));
+    let ink_color_pick = crate::grease_pencil::edit_picking(app);
+    let brush_pointer = freehand || ink_color_pick;
     // Where the pick under the pointer runs: nowhere while something else owns the pointer. An
     // empty `hits` means empty space only where it ran (`picked`).
     let picked = hover.filter(|_| {
-        inside
+        !brush_pointer
+            && inside
             && app.viewport.boxsel.is_none()
             && !crate::joint_drag::active(app)
             && !joint_handle_pointer
@@ -8906,18 +9083,35 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // corner drawn from the origin is the fixed origin, which ends no two curves.
     let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
     let corner_hovered = corner.is_some();
-    let cand = if app.tool.is_some() {
-        tool_hover(app, &hits).map(|h| (h, None))
-    } else if let Some((hit, sel)) = corner {
-        Some((hit, Some(sel)))
+    let cand = if brush_pointer {
+        let point = hover.filter(|p| inside && !navigating && !joint_handle_pointer && ui.input(|i| i.focused) && !crate::shell::covered(app, *p));
+        let point = if primary_pressed && point.is_some() {
+            ui.input(|i| i.pointer.press_origin()).or(point).filter(|p| rect.contains(*p) && !crate::shell::covered(app, *p))
+        } else {
+            point
+        };
+        let hit = crate::grease_pencil::depth_hover(app, &proj, point, ui.ctx());
+        hit.filter(|_| {
+            !primary_down
+                || ink_color_pick
+                || app.tool.as_ref().is_some_and(|tool| tool.brush.picking_color || tool.kind == crate::tools::Kind::InkErase)
+        })
+        .map(|h| (h, None))
     } else {
-        // A centreline of the Frame Member being made lights up for Remove Tube (#15705).
-        crate::dialogs_frame::tube_hover(app, &hits).map(|h| (h, None)).or_else(|| candidate(app, &hits).map(|(h, s)| (h, Some(s))))
+        app.viewport.ink_hover_frame = None;
+        if app.tool.is_some() {
+            tool_hover(app, &hits).map(|h| (h, None))
+        } else if let Some((hit, sel)) = corner {
+            Some((hit, Some(sel)))
+        } else {
+            // A centreline of the Frame Member being made lights up for Remove Tube (#15705).
+            crate::dialogs_frame::tube_hover(app, &hits).map(|h| (h, None)).or_else(|| candidate(app, &hits).map(|(h, s)| (h, Some(s))))
+        }
     };
     let cand = stable_alignment_hover(app, &proj, hover.filter(|_| inside && !navigating), cand);
     // The view moved under a still pointer: the highlight under it stays on the face it
     // was on instead of going off (#2130). It is picked again when the gesture ends.
-    if !(hover_frozen && inside) {
+    if brush_pointer || !(hover_frozen && inside) {
         app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     }
     wake_centre(app, &hits, hover, &proj);
@@ -8932,10 +9126,30 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // held Space owns drags, not a still press, so only a navigation that has started cancels
     // it. A preset's modifier binding (Maya Alt, Alias Shift+Alt) or Ctrl+left orbit is a
     // gesture to navigate from the press on, so it still cancels the hold at once.
-    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
+    let navigating_from_press = brush_pointer || mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
+    let rotating = option_only(mods);
+    // Sample the current pointer before publishing the frame's sketch and highlight layers.
+    let ink_drag = crate::grease_pencil::move_input(
+        app,
+        ui,
+        &proj,
+        &resp,
+        rotating,
+        app.tool.is_none()
+            && app.dialog.is_none()
+            && !joint_handle_pointer
+            && ui.is_enabled()
+            && !held
+            && primary_nav.is_none()
+            && mode.is_none()
+            && (mods.is_none() || rotating),
+    );
+    if ink_drag {
+        app.viewport.hover = None;
+    }
     let still = inside
         && !navigating
         && !hover_frozen
@@ -8943,6 +9157,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !dragging_layer
         && !layered
         && !held
+        && !ink_drag
         && !flat
         && !corner_hovered
         && !manipulator_dragging
@@ -9113,6 +9328,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 
     // ---- interaction ----
+    if brush_pointer {
+        crate::grease_pencil::input(app, ui, &proj, inside, navigating || held || primary_nav.is_some());
+    }
     // Pencil mode: a finger double-tap on a planar face sketches on it (`pencil`).
     if let Some(p) = app.viewport.fingers.double_tap.take()
         && app.preferences.pencil_mode
@@ -9214,6 +9432,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // it; the snap identifies the intended point even there.
     if !inside
         && app.tool.is_some()
+        && !freehand
         && !held
         && primary_nav.is_none()
         && mode.is_none()
@@ -9228,7 +9447,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(p) = hover.filter(|_| inside) {
         let pen_select =
             app.preferences.pencil_mode && resp.clicked_by(egui::PointerButton::Primary) && crate::pencil::is_pen_release(app.pen_release, p);
-        if app.tool.is_some() {
+        if app.tool.is_some() && !freehand {
             crate::tools::on_hover(app, &proj, p, mods.shift);
         }
         // Trim also trims by press and drag across the pieces to remove (its own release handling,
@@ -9263,6 +9482,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::tools::on_click(app, &proj, a, mods.shift);
             app.viewport.draw_drag = app.tool.as_ref().is_some_and(|t| t.pts.len() == 1).then_some(a);
         } else if app.tool.is_some()
+            && !freehand
             && !app.viewport.trim_drag
             && !crate::dim_view::consumed_outside_press()
             && !held
@@ -9301,7 +9521,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !joint_handle_pointer
             && !app.viewport.draw_drag_handled
             && crate::dim_view::accept_outside_click(app);
-        if resp.clicked() && !held && !reference_pick && !dim_accept && !joint_handle_pointer && !app.viewport.draw_drag_handled {
+        if resp.clicked() && !ink_color_pick && !held && !reference_pick && !dim_accept && !joint_handle_pointer && !app.viewport.draw_drag_handled {
             if crate::browser_canvas::click(app, &proj, p, add) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108); Trace Region: it picks a
                 // region, Ctrl+click one more (#20798).
@@ -9739,10 +9959,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::sketch_text_handles::dragging(app) && !crate::ui_kit::input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
         crate::sketch_text_handles::drag_end(app);
     }
-    // Dragging a part moves its free chain (outside sketches), or reaches within its joints
-    // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
-    // draws a selection box instead, as a drag from empty space does.
+    // Dragging a part moves its free chain or reaches within its joints. Option-drag turns a
+    // free part. A drag from empty space or with selection modifiers draws a selection box.
     if app.tool.is_none()
+        && !ink_drag
         && app.dialog.is_none()
         && primary_nav.is_none()
         && mode.is_none()
@@ -9750,19 +9970,21 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !held
     {
         if resp.drag_started_by(egui::PointerButton::Primary)
-            // Physical Ctrl on macOS is not the primary click-selection modifier, but must
-            // still keep a modified drag from moving a part.
-            && !(mods.shift || mods.command || mods.ctrl || mods.alt)
+            && (mods.is_none() || rotating)
             && let Some(a) = ui.input(|i| i.pointer.press_origin())
             && rect.contains(a)
             && !crate::shell::covered(app, a)
             && !axes.contains(a)
-            && !crate::joint_handles::start_drag(app, &proj, a)
-            && !crate::plane_resize::drag_start(app, &proj, a)
-            && !crate::occurrence_drag::start(app, &proj, a)
-            && !crate::joint_drag::start(app, &proj, a)
         {
-            crate::drag_extrude::press(app, &proj, a);
+            if rotating {
+                crate::occurrence_drag::start(app, &proj, a, true);
+            } else if !crate::joint_handles::start_drag(app, &proj, a)
+                && !crate::plane_resize::drag_start(app, &proj, a)
+                && !crate::occurrence_drag::start(app, &proj, a, false)
+                && !crate::joint_drag::start(app, &proj, a)
+            {
+                crate::drag_extrude::press(app, &proj, a);
+            }
         }
         if crate::plane_resize::dragging()
             && resp.dragged_by(egui::PointerButton::Primary)
@@ -9770,7 +9992,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             crate::plane_resize::drag_to(&proj, p, mods.shift);
         }
-        if resp.dragged_by(egui::PointerButton::Primary)
+        if (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped_by(egui::PointerButton::Primary))
             && let Some(p) = hover
         {
             if crate::joint_handles::active(app) {
@@ -9827,6 +10049,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     // Box selection: a primary drag on the model when no navigation mode is on.
     if app.tool.is_none()
+        && !ink_drag
         && !held
         && primary_nav.is_none()
         && mode.is_none()
@@ -10776,6 +10999,21 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     }
+    if app.dialog.is_none() && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves") {
+        let active = crate::sketch_view::active_sketch(app);
+        for ss in st
+            .sketches
+            .iter()
+            .filter(|ss| active.is_none_or(|sketch| sketch == ss.feature) && solidcraft_engine::view::sketch_shown(&app.session, ss.feature))
+        {
+            for wire in ss.sketch.wires.iter().filter(|w| w.ink_diameter.is_some()) {
+                let points = to2(&wire.pts);
+                if (bx.crossing || points.len() == wire.pts.len()) && bx.takes(&points) {
+                    out.push(Sel::ExternalSketchCurve { sketch: ss.feature, id: wire.id.clone() });
+                }
+            }
+        }
+    }
     // An input that takes curves (Thin Extrude's profiles or curves, a Sweep path, Thin Revolve)
     // takes the visible curves of the shown sketches under a marquee as a click takes them, each
     // naming its sketch unless it is the sketch being edited (#17075).
@@ -10892,7 +11130,7 @@ fn origin_point_shown(app: &SolveApp) -> bool {
 
 /// Use the existing full scan for clicks and for small meshes. Only defer cosmetic
 /// feedback when a large candidate's index is still on the worker.
-fn postpone_triangle_scan(feedback: Option<&egui::Context>, triangles: usize, indexed: bool) -> bool {
+pub(crate) fn postpone_triangle_scan(feedback: Option<&egui::Context>, triangles: usize, indexed: bool) -> bool {
     const FEEDBACK_SCAN_LIMIT: usize = 512 * 1024;
     if let Some(ctx) = feedback
         && !indexed
@@ -11467,7 +11705,7 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
         }
         let mut points = Vec::new();
         if app.preferences.select_3d_curve_points {
-            points.extend(sk.wires.iter().flat_map(|wire| wire.fit.iter().copied()));
+            points.extend(sk.wires.iter().filter(|wire| wire.ink_diameter.is_none()).flat_map(|wire| wire.fit.iter().copied()));
         }
         let used: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);

@@ -2,7 +2,37 @@ use crate::context_menu::{self, Target};
 use crate::scenario::Harness;
 use serde_json::json;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::MeshGeom;
+use solidcraft_engine::geom::{MeshGeom, Vec3Geom as _};
+
+#[test]
+fn option_drag_rotates_a_free_component_about_its_center() {
+    let mut h = Harness::new();
+    let part = h.app.run("component.create", json!({"name": "Plate"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"corner":[10,-5,0],"length":20,"width":10,"height":8})).unwrap();
+    h.app.run("component.activate", json!({"component":"root"})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":part,"translate":[20,0,0],"move_grounded":true})).unwrap();
+    h.run(&json!([
+        {"call": "ui.view", "params":{"view":"top"}},
+        {"call": "ui.camera", "params":{"target":[40,0,0],"distance":120}}
+    ]))
+    .unwrap();
+    let drag = json!([{"drag": [{"world":[47,0,8]},{"world":[40,7,8]}],"alt":true,"steps":12}]);
+    let pose = |h: &Harness| h.app.session.occurrence_placement(&[part]).unwrap().world;
+    let original = pose(&h);
+    h.run(&drag).unwrap();
+    assert_eq!(pose(&h), original);
+
+    h.app.run("occurrence.ground", json!({"occurrence":part,"grounded":false})).unwrap();
+    let undo = h.app.session.undo.len();
+    h.run(&drag).unwrap();
+    let matrix = pose(&h);
+    let center = solidcraft_engine::doc::apply_point(&matrix, solidcore_record::Vec3::new(20.0, 0.0, 4.0));
+    assert!((center - solidcore_record::Vec3::new(40.0, 0.0, 4.0)).len() < 2e-4);
+    assert!(matrix[0][0].abs() < 2e-4 && (matrix[0][1] - 1.0).abs() < 2e-4);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(pose(&h), original);
+}
 
 /// A completed unground command shows both lost-origin and conflicting-joint reports, even
 /// when the part stays where it was. The saved language applies outside a rendered frame too.

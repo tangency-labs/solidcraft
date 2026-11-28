@@ -2862,6 +2862,9 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
     {
         return true;
     }
+    if app.viewport.ink_move.take().is_some() {
+        return true;
+    }
     if crate::select_other::is_open(app) {
         crate::select_other::close(app);
     } else if !app.preferences.escape_closes_analyses && app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.curvature_comb") {
@@ -3218,11 +3221,13 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 app.last_escape = Some(now);
                 // Not while a tool is still out (its first Esc only ended a chain): this press
                 // puts it down, and the next quick one finishes.
-                if again
+                if !repeat
+                    && app.viewport.ink_move.is_none()
                     && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
                     && let Some(sketch) = crate::workspace::focused_sketch(app)
+                    && (again || crate::grease_pencil::editing(app))
                 {
                     app.last_escape = None;
                     // A sketch left blank is taken away instead, in one undo step, so no empty
@@ -3230,7 +3235,11 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                     let blank = app.session.doc.sketch(sketch).is_ok_and(crate::sketch_palette::is_blank);
                     let depth = app.session.undo.len();
                     app.finish_sketch();
-                    if blank && app.session.active_sketch.is_none() && app.run("timeline.delete", json!({ "feature": sketch })).is_ok() {
+                    if blank
+                        && app.session.active_sketch.is_none()
+                        && app.session.doc.feature(sketch).is_some()
+                        && app.run("timeline.delete", json!({ "feature": sketch })).is_ok()
+                    {
                         app.session.undo.truncate(depth + 1);
                     }
                     continue;

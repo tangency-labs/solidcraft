@@ -8,6 +8,8 @@
 //! Coincident and Fix take 3D refs (`<curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's
 //! id), and Along Axis holds a 3D line parallel to an axis.
 
+pub(super) mod ink;
+
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -1307,6 +1309,20 @@ pub(super) fn move_drawn(
         x: solidcraft_doc::apply_vector(&inverse, world.x),
         y: solidcraft_doc::apply_vector(&inverse, world.y),
     };
+    edit_drawn(s, p, cmd, picks, 1.0, |space, q| {
+        let plane = if space == WireSpace::Component { component } else { world };
+        plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)
+    })
+}
+
+fn edit_drawn(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    picks: &[(String, Option<usize>)],
+    factor: f64,
+    transform: impl Fn(WireSpace, Vec3) -> Vec3,
+) -> Result<(usize, Value)> {
     edit(s, p, cmd, false, |sk, _| {
         let mut moves = Vec::new();
         for (wire, index) in picks {
@@ -1315,17 +1331,13 @@ pub(super) fn move_drawn(
                 .and_then(|w| sk.wires.get(w))
                 .filter(|w| !w.fit.is_empty() && w.link.is_none())
                 .ok_or_else(|| bad(cmd, format!("`{wire}` is not an editable drawn 3D curve")))?;
-            let plane = if drawn.space == WireSpace::Component { component } else { world };
             let which: Vec<usize> = match index {
                 Some(i) if *i < drawn.fit.len() => vec![*i],
                 Some(i) => return Err(bad(cmd, format!("`{wire}` has no drawn point {i}"))),
                 None => (0..drawn.fit.len()).collect(),
             };
-            let moved: Vec<(usize, Vec3)> = which
-                .into_iter()
-                .filter_map(|i| drawn.fit.get(i).map(|q| (i, *q)))
-                .map(|(i, q)| (i, plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)))
-                .collect();
+            let moved: Vec<(usize, Vec3)> =
+                which.into_iter().filter_map(|i| drawn.fit.get(i).map(|q| (i, *q))).map(|(i, q)| (i, transform(drawn.space, q))).collect();
             moves.extend(moved.into_iter().map(|(i, to)| (wire.clone(), i, to)));
         }
         if let Some((wire, index, _)) = moves.iter().find(|(w, i, _)| sk.wire_point_fixed(&WirePoint { wire: w.clone(), index: *i })) {
@@ -1333,6 +1345,13 @@ pub(super) fn move_drawn(
         }
         let held_before = sk.wire_constraints_holding();
         sk.move_drawn_points(&moves)?;
+        if factor != 1.0 {
+            for (id, _) in picks {
+                if let Some(w) = sk.wires.iter_mut().find(|w| w.id == *id) {
+                    w.ink_diameter = w.ink_diameter.map(|d| (d * factor).clamp(1e-9, 1e9));
+                }
+            }
+        }
         if !held_before.is_empty() {
             let held_after = sk.wire_constraints_holding();
             if held_before.iter().any(|id| !held_after.contains(id)) {

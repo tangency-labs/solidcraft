@@ -2061,6 +2061,8 @@ pub struct Slider {
     pub format: fn(f64) -> String,
     pub show_value: bool,
     pub integer: bool,
+    /// A logarithmic range which clamps only on edits.
+    pub logarithmic: bool,
     pub workspace_accent: bool,
     /// Blur's off endpoint uses a muted hollow thumb; positive values use solid accent.
     pub off_endpoint: bool,
@@ -2082,7 +2084,15 @@ pub fn read_only_text(ui: &mut Ui, text: &str) -> Response {
 
 impl Default for Slider {
     fn default() -> Self {
-        Self { step: None, format: |v| format!("{v:.2}"), show_value: true, integer: false, workspace_accent: false, off_endpoint: false }
+        Self {
+            step: None,
+            format: |v| format!("{v:.2}"),
+            show_value: true,
+            integer: false,
+            logarithmic: false,
+            workspace_accent: false,
+            off_endpoint: false,
+        }
     }
 }
 
@@ -2113,10 +2123,13 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
             t.space_4
         };
         ui.spacing_mut().slider_width = dimension(ui.available_width() - reserved);
-        let mut widget =
-            egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle).trailing_fill(false);
-        if options.off_endpoint {
-            // Blur's step is an editing affordance, not a persisted/API quantisation rule.
+        let mut widget = egui::Slider::new(value, range)
+            .show_value(options.show_value)
+            .handle_shape(egui::style::HandleShape::Circle)
+            .trailing_fill(false)
+            .logarithmic(options.logarithmic);
+        if options.off_endpoint || options.logarithmic {
+            // View-dependent ranges and blur's step should only affect edited values.
             widget = widget.clamping(egui::SliderClamping::Edits);
         }
         if options.show_value {
@@ -2136,20 +2149,18 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
         // Suppress only a positively identified pair added by this widget. A backing
         // rectangle would flatten translucent/blurred parents. Unexpected painting
         // (including an invisible or clipped widget) keeps the native shapes intact.
-        ui.ctx().graphics_mut(|graphics| {
-            let Some(list) = graphics.get_mut(layer) else {
-                return;
-            };
+        let native_thumb = ui.ctx().graphics_mut(|graphics| {
+            let list = graphics.get_mut(layer)?;
             let paint_end = list.next_idx();
             if paint_end.0.saturating_sub(paint_start.0) < 2 {
-                return;
+                return None;
             }
             let handle_idx = egui::layers::ShapeIdx(paint_start.0 + 1);
             let rail_height = ui.spacing().slider_rail_height.max(0.0);
             let native_radius = slider.height() / 2.5;
             let native_range = slider.x_range().shrink(native_radius);
             let mut rail_matches = false;
-            let mut handle_matches = false;
+            let mut thumb = None;
             // Indexed reads via mutate_shape are bounded and allocate nothing; do not
             // scan the layer's earlier parent/sibling paints looking for a match.
             list.mutate_shape(paint_start, |entry| {
@@ -2163,19 +2174,21 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
             });
             list.mutate_shape(handle_idx, |entry| {
                 if let egui::Shape::Circle(handle) = &entry.shape {
-                    handle_matches = entry.clip_rect == ui.clip_rect()
+                    let matches = entry.clip_rect == ui.clip_rect()
                         && (handle.center.y - slider.center().y).abs() < 0.01
                         // egui's handle range reverses when the control is narrower
                         // than its diameter; either endpoint still belongs to it.
                         && handle.center.x >= native_range.min.min(native_range.max) - 0.01
                         && handle.center.x <= native_range.min.max(native_range.max) + 0.01
                         && (handle.radius - native_radius).abs() < 0.01;
+                    thumb = matches.then_some(handle.center.x);
                 }
             });
-            if rail_matches && handle_matches {
+            if rail_matches && thumb.is_some() {
                 list.mutate_shape(paint_start, |entry| entry.shape = egui::Shape::Noop);
                 list.mutate_shape(handle_idx, |entry| entry.shape = egui::Shape::Noop);
             }
+            thumb
         });
         if ui.ctx().memory(|memory| memory.focused()).is_some_and(|id| {
             ui.ctx().read_response(id).is_some_and(|focused| response.rect.contains(focused.rect.center()))
@@ -2188,18 +2201,21 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
         let input_radius = ui.text_style_height(&egui::TextStyle::Body).max(ui.spacing().interact_size.y) / 2.5;
         let track = egui::Rect::from_center_size(slider.center(), vec2((slider.width() - input_radius * 2.0).max(0.0), t.space_4));
         let fraction = if limits.1 != limits.0 { ((value.to_f64() - limits.0) / (limits.1 - limits.0)).clamp(0.0, 1.0) as f32 } else { 0.0 };
-        let center = egui::pos2(egui::lerp(track.x_range(), fraction), track.center().y);
-        ui.painter().rect_filled(track, t.control_radius, t.dialog_rule);
-        ui.painter().rect_filled(egui::Rect::from_min_max(track.min, egui::pos2(center.x, track.bottom())), t.control_radius, primary);
-        let off = options.off_endpoint && value.to_f64() == 0.0;
-        let fill = if off {
-            egui::Color32::TRANSPARENT
-        } else if options.off_endpoint {
-            primary
-        } else {
-            t.control_fill
-        };
-        ui.painter().circle(center, t.space_8, fill, egui::Stroke::new(t.space_2, if off { t.form_dim } else { primary }));
+        let center_x = if options.logarithmic { native_thumb } else { Some(egui::lerp(track.x_range(), fraction)) };
+        if let Some(x) = center_x {
+            let center = egui::pos2(x, track.center().y);
+            ui.painter().rect_filled(track, t.control_radius, t.dialog_rule);
+            ui.painter().rect_filled(egui::Rect::from_min_max(track.min, egui::pos2(center.x, track.bottom())), t.control_radius, primary);
+            let off = options.off_endpoint && value.to_f64() == 0.0;
+            let fill = if off {
+                egui::Color32::TRANSPARENT
+            } else if options.off_endpoint {
+                primary
+            } else {
+                t.control_fill
+            };
+            ui.painter().circle(center, t.space_8, fill, egui::Stroke::new(t.space_2, if off { t.form_dim } else { primary }));
+        }
         publish(ui, &response, egui::Role::Slider);
         response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), solidcraft_ui_text::tr_label(label(ui))));
         solidcraft_ui_registry::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);

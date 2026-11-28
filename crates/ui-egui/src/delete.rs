@@ -166,9 +166,25 @@ pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, S
             return;
         }
     };
-    let asked =
-        params.get("items").and_then(Value::as_array).map_or(0, |a| a.iter().filter(|i| i["type"] == "feature" || i["type"] == "plane").count());
-    let extra = report["deleted"].as_array().map_or(0, Vec::len) > asked;
+    let items = params.get("items").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let asked = items.iter().filter(|i| i["type"] == "feature" || i["type"] == "plane").count();
+    // Removing the last ink stroke can remove its empty sketch as part of the requested delete.
+    let ink_sketches: std::collections::BTreeSet<_> = items
+        .iter()
+        .filter_map(|item| {
+            if item["type"] != "external_sketch_curve" {
+                return None;
+            }
+            let sketch = item["sketch"].as_u64()?;
+            let wire = item["id"].as_str()?;
+            let drawing = app.session.doc.sketch(sketch).ok()?;
+            drawing.wires.get(drawing.wire_index(wire)?)?.ink_diameter?;
+            app.session.doc.feature(sketch).map(|feature| feature.name.as_str())
+        })
+        .collect();
+    let extra = report["deleted"]
+        .as_array()
+        .is_some_and(|deleted| deleted.iter().filter(|name| name.as_str().is_none_or(|name| !ink_sketches.contains(name))).count() > asked);
     let fails = report["would_fail"].as_array().is_some_and(|a| !a.is_empty());
     let shared = shared_occurrences(app, &params);
     if extra || fails || shared {

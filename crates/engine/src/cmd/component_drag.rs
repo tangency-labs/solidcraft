@@ -121,7 +121,10 @@ pub(super) fn drag(s: &mut Session, p: &Value) -> Result<Value> {
     let at = move_vector(p, "at", Default::default(), true, cmd)?;
     let point = move_vector(p, "point", Default::default(), true, cmd)?;
     let t = point - at;
-    let world_move = translation(t);
+    let world_move = match p.get("matrix").filter(|value| !value.is_null()) {
+        Some(matrix) => mat_mul(&translation(t), &super::matrix::rigid(matrix, 1e-9, cmd)?),
+        None => translation(t),
+    };
     let group = s.drag_group(&path).map_err(|e| bad(cmd, e.to_string()))?;
     let dragged = s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
     let inverse = mat_inverse(&dragged.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;

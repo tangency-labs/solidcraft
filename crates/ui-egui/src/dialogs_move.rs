@@ -456,7 +456,7 @@ pub(crate) fn placement_paths(picks: &[Sel], copy: bool, editing: bool) -> Vec<V
 }
 
 /// The row-major 3x4 matrix `occurrence.move` takes for the rigid move `m`.
-fn matrix_rows(m: &Mat) -> Vec<f64> {
+pub(crate) fn matrix_rows(m: &Mat) -> Vec<f64> {
     (0..3).flat_map(|r| (0..4).map(move |c| m[c][r])).collect()
 }
 

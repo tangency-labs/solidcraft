@@ -5,7 +5,7 @@
 //! annotations. `dry_run` reports what would go and what would fail without changing anything, so the UI
 //! can ask first.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -266,6 +266,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let mut entities = Vec::new();
+    let mut ink = BTreeMap::<u64, Vec<String>>::new();
     let mut features: Vec<u64> = Vec::new();
     let mut bodies: Vec<String> = Vec::new();
     let mut faces: Vec<(String, Vec<Vec3>)> = Vec::new();
@@ -331,6 +332,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
+            Sel::ExternalSketchCurve { sketch, id }
+                if before.state().sketch(*sketch).is_some_and(|s| s.sketch.wires.iter().any(|w| w.id == *id && w.ink_diameter.is_some())) =>
+            {
+                ink.entry(*sketch).or_default().push(id.clone());
+            }
             Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its geometry".into()),
             Sel::Drawing { .. } => skip("a drawing's objects are deleted with the drawing open".into()),
         }
@@ -352,6 +358,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             )?;
             done = true;
         }
+    }
+    for (sketch, entities) in ink.into_iter().filter(|(sketch, _)| !features.contains(sketch)) {
+        super::sketch_3d::ink::delete_strokes(s, sketch, &entities)?;
+        s.refresh();
+        done = true;
     }
     // Faces of a body that is going anyway are left to it; the rest become Delete Face features.
     for (body, points) in faces.iter().filter(|(b, _)| !bodies.contains(b)) {

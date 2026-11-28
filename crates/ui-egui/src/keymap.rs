@@ -494,26 +494,45 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     } else {
         Scope::Model
     };
+    let model_view = here != Scope::Render && !crate::drawing_workspace::active(app);
     let enabled: Vec<&'static str> = commands_for(app, key)
         .into_iter()
         .filter(|id| {
+            let available = match *id {
+                crate::grease_pencil::COMMAND => model_view,
+                crate::grease_pencil::ERASE => model_view && here == Scope::Sketch,
+                _ => match scope(id) {
+                    Scope::Render => here == Scope::Render,
+                    Scope::Sketch => here != Scope::Render,
+                    _ => true,
+                },
+            };
             // Shared panel bindings run only in the host's late input path.
-            solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_none()
-                && (scope(id) != Scope::Render || here == Scope::Render)
-                && (here != Scope::Render || scope(id) != Scope::Sketch)
+            available
+                && solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_none()
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
         .collect();
+    // G keeps Transform in an ordinary sketch and returns to drawing in a Grease Pencil sketch.
+    let grease = enabled
+        .contains(&crate::grease_pencil::COMMAND)
+        .then_some(crate::grease_pencil::COMMAND)
+        .filter(|_| here == Scope::Model || crate::grease_pencil::editing(app));
     // Saved custom keys must take precedence over a newly introduced default in the
     // same mode. Existing preferences may already bind M to a different sketch tool.
     let mine = enabled
         .iter()
-        .find(|id| scope(id) == here && app.keymap.custom.get(**id).is_some_and(|keys| keys.iter().any(|binding| binding == key)))
-        .or_else(|| enabled.iter().find(|id| scope(id) == here));
+        .copied()
+        .find(|id| {
+            (scope(id) == here || (grease.is_some() && runs_everywhere(id)))
+                && app.keymap.custom.get(*id).is_some_and(|keys| keys.iter().any(|binding| binding == key))
+        })
+        .or(grease)
+        .or_else(|| enabled.iter().copied().find(|id| scope(id) == here));
     if app.preferences.sketch_keys_only && here != Scope::Render {
-        mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
+        mine.or_else(|| enabled.iter().copied().find(|id| runs_everywhere(id)))
     } else {
-        mine.or(enabled.first()).copied()
+        mine.or_else(|| enabled.first().copied())
     }
 }
 

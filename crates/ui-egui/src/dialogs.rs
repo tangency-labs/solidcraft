@@ -249,6 +249,8 @@ crate::dialog_descriptor::dialog_descriptors! {
         ; custom {
             /// Pick a plane or planar face; the sketch starts on it at once.
             Sketch,
+            ScaleInk { strokes: Vec<Value>, factor: String },
+            EditInk(crate::grease_pencil::EditStroke),
             Extrude {
                 distance: String,
                 direction: usize,
@@ -1188,6 +1190,14 @@ impl Dialog {
         let s = &app.session;
         let has_bodies = !crate::open_meshing::session_world(s).bodies.is_empty();
         let mut d = match id {
+            crate::grease_pencil::EDIT => {
+                let edit = crate::grease_pencil::EditStroke::selected(app)?;
+                return Some(Dialog::new(Kind::EditInk(edit), vec![]));
+            }
+            crate::grease_pencil::SCALE => {
+                let strokes = crate::grease_pencil::selected_strokes(app)?;
+                return Some(Dialog::new(Kind::ScaleInk { strokes, factor: "2".into() }, vec![]));
+            }
             "sketch.create" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
             "sketch.intersect" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
@@ -3708,6 +3718,8 @@ fn title(k: &Kind) -> &'static str {
         Kind::Pulley(_) => "ui.pulley.title",
         Kind::Text(_) => "EDIT TEXT",
         Kind::TextMove(_) => "MOVE/COPY TEXT",
+        Kind::ScaleInk { .. } => "cmd.sketch.scale_ink",
+        Kind::EditInk(_) => "cmd.sketch.edit_ink",
         Kind::SketchModify(k) => k.title(),
         _ => k.simple_metadata().map_or("", |(_, title)| title),
     }
@@ -5526,6 +5538,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Sketch => false,
         // Nothing picked is an answer too: OK adds no pill.
         Kind::ChatContext => true,
+        Kind::ScaleInk { .. } | Kind::EditInk(_) => apply_commands(app, &d).is_ok(),
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
         // OK waits for values the engine takes; the drawing says why it does not.
@@ -8315,6 +8328,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => return Err("pick a plane, a face or a sketch line".into()),
             };
             ("solid.split_body", p)
+        }
+        Kind::EditInk(edit) => {
+            (crate::grease_pencil::EDIT, edit.params().ok_or_else(|| solidcraft_ui_text::tr("sketch.grease_pencil.style_required"))?)
+        }
+        Kind::ScaleInk { strokes, factor } => {
+            let factor =
+                s.doc.eval(factor, ValueKind::Unitless).ok().filter(|f| (0.01..=100.0).contains(f)).ok_or("Enter a scale factor from 0.01 to 100")?;
+            (crate::grease_pencil::SCALE, json!({"strokes": strokes, "factor": factor}))
         }
         Kind::Scale { .. } => {
             need(0, "bodies")?;

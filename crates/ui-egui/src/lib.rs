@@ -108,6 +108,7 @@ pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
+mod grease_pencil;
 pub mod help;
 pub use solidcraft_ui_kit::history_bar;
 mod history_folds;
@@ -867,6 +868,9 @@ pub struct SolveApp {
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
     pub tool: Option<tools::Tool>,
+    pub(crate) ink_color: Option<[u8; 3]>,
+    pub(crate) ink_diameter: f64,
+    pub(crate) ink_sketches: std::collections::BTreeMap<u64, u64>,
     pub dialog: Option<dialogs::Dialog>,
     /// The joint dialogs' picked and hovered snaps ([`dialogs_assembly::picked_snap`]).
     pub(crate) snaps: dialogs_assembly::SnapMemo,
@@ -966,6 +970,7 @@ pub struct SolveApp {
     pub last_command: Option<(String, String)>,
     /// Bodies copied with Copy (by name), pasted into the active component by Paste.
     pub copied_bodies: Vec<String>,
+    pub(crate) copied_ink: Vec<solidcraft_engine::schema::sketch_3d::CopiedInk>,
     /// Text a copy left for the system clipboard, written on the next frame (so a paste event
     /// follows: the window system sends one only while the clipboard holds text).
     pub(crate) clipboard_text: Option<String>,
@@ -1301,6 +1306,9 @@ impl SolveApp {
             render_workspace,
             drawing_workspace: Default::default(),
             tool: None,
+            ink_color: None,
+            ink_diameter: solidcraft_engine::sketch::DEFAULT_INK_DIAMETER,
+            ink_sketches: Default::default(),
             dialog: None,
             snaps: Default::default(),
             remembered_commands: Vec::new(),
@@ -1351,6 +1359,7 @@ impl SolveApp {
             apply_gate: None,
             last_command: None,
             copied_bodies: Vec::new(),
+            copied_ink: Vec::new(),
             clipboard_text: None,
             copied_placements: Vec::new(),
             cut: Default::default(),
@@ -2721,6 +2730,7 @@ impl SolveApp {
         // `logic`): build its hint in the user's language, not the thread default.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
         self.viewport.edit_dimensions = None;
+        let id = if id == "solid.scale" && grease_pencil::has_stroke_selection(self) { grease_pencil::SCALE } else { id };
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -3431,6 +3441,19 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
+            if id == grease_pencil::COMMAND && self.session.active_sketch.is_none() {
+                let name = self.session.doc.unique_name("SketchGP");
+                if let Err(error) = self.run("sketch.create3d", json!({"name": name})) {
+                    self.set_status(error, true);
+                    self.restore_command_tab();
+                    return;
+                }
+                self.session.mark_sketch_entered_by_person();
+            }
+            if grease_pencil::is_tool(t.kind) {
+                let Some(sketch) = self.session.active_sketch else { return };
+                self.ink_sketches.insert(self.session.uid, sketch);
+            }
             t.classic = self.preferences.construction_line_classic;
             t.arc_modes = self.preferences.sketch_arc_tangent_snap;
             if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
@@ -3494,7 +3517,9 @@ impl SolveApp {
             } else if tools::is_constraint_pick_tool(&t) && !self.session.selection.is_empty() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
-            if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
+            if self.session.has_selection()
+                && (matches!(t.kind, tools::Kind::Draw(_)) || grease_pencil::is_tool(t.kind) || crate::sketch_tools::is_drawing_tool(id))
+            {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             // An open sketch window would keep the keyboard from the tool's size boxes.
@@ -3759,6 +3784,10 @@ impl SolveApp {
     }
 
     pub(crate) fn edit_sketch_at_view(&mut self, id: u64, placement: Option<(u64, &[u64])>, view: Option<u64>) {
+        self.open_sketch(id, placement, view, true);
+    }
+
+    pub(crate) fn open_sketch(&mut self, id: u64, placement: Option<(u64, &[u64])>, view: Option<u64>, turn: bool) {
         let activate = |app: &mut Self| {
             if let Some((component, path)) = placement {
                 let _ = app.run("component.activate", json!({"component": component, "occurrence": path.last(), "path": path}));
@@ -3797,7 +3826,9 @@ impl SolveApp {
         let opened_in = self.session.active_component;
         let moved = (opened_in, &self.session.active_occurrence_path) != (context.0, &context.1);
         self.pre_sketch_component = moved.then_some(PreSketchComponent { sketch: id, component: context.0, path: context.1, opened_in });
-        self.look_at_opened_sketch(before);
+        if turn {
+            self.look_at_opened_sketch(before);
+        }
     }
 
     /// Make a component active again, in the placement it was active in.
@@ -3940,6 +3971,9 @@ impl SolveApp {
     }
 
     fn sketch_closed_in(&mut self, open: Option<u64>, owner: Option<u64>) {
+        if self.ink_sketches.get(&self.session.uid).copied() == open {
+            self.ink_sketches.remove(&self.session.uid);
+        }
         self.take_sketch_exit();
         self.tool = None;
         // A dialog whose command works only in a sketch (Offset, Mirror, Project...) has nothing

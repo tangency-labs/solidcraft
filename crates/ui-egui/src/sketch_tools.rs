@@ -1503,6 +1503,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         rotatable: crate::sketch_dims::last_rectangle_rotatable(),
         preselected: false,
         finished: false,
+        brush: Default::default(),
     })
 }
 

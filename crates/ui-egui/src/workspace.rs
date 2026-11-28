@@ -572,9 +572,10 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "MODEL",
         panel: "SKETCH",
-        promoted: 1,
+        promoted: 2,
         ids: &[
             "sketch.create",
+            "sketch.grease_pencil",
             "sketch.create3d",
             "sketch.edit",
             "sketch.line3d",
@@ -774,6 +775,7 @@ pub const SECTIONS: &[Section] = &[
             "sketch.arc.three_point",
             "sketch.construction_line",
             "sketch.infinite",
+            "sketch.grease_pencil",
         ],
     },
     Section {

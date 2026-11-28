@@ -11,6 +11,8 @@ use crate::model::{Result, Sketch, SketchError, in_range3, radius_in_range};
 
 /// Most points one wire may have.
 pub const MAX_WIRE_POINTS: usize = 100_000;
+/// The default brush diameter in millimetres.
+pub const DEFAULT_INK_DIAMETER: f64 = 1.0;
 
 /// Coordinate meaning of a stored wire and its editable fit points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +71,12 @@ pub struct Wire {
     /// line; more: a smooth spline). `pts` is made from them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fit: Vec<Vec3>,
+    /// Grease Pencil diameter in millimetres. Absent on ordinary sketch curves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ink_diameter: Option<f64>,
+    /// Custom Grease Pencil sRGB color. The theme supplies the color when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ink_color: Option<[u8; 3]>,
     /// Drawn in a 3D sketch as an exact circular arc: the analytic curve, whose `fit` points
     /// are its three defining points (start, through, end) and whose `pts` are its samples.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -405,6 +413,7 @@ impl Sketch {
                 || w.pts.is_empty()
                 || w.pts.len() > MAX_WIRE_POINTS
                 || w.fit.len() > MAX_FIT_POINTS
+                || w.ink_diameter.is_some_and(|w| !(1e-9..=1e9).contains(&w))
                 || (w.pts.len() == 1 && w.fit.len() != 1)
                 || w.pts.iter().chain(&w.fit).any(|p| !in_range3(*p))
                 || w.arc.as_ref().is_some_and(|a| !arc_ok(a, &w.fit))
@@ -476,6 +485,8 @@ impl Sketch {
                 space: WireSpace::Component,
                 link: Some(id.to_string()),
                 fit: Vec::new(),
+                ink_diameter: None,
+                ink_color: None,
                 arc: None,
                 control: None,
                 exact: Vec::new(),
@@ -509,7 +520,18 @@ impl Sketch {
         let pts = drawn_polyline(fit)?;
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh(if fit.len() == 1 { "q" } else { "w" })?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None, control: None, exact: Vec::new() });
+        self.wires.push(Wire {
+            id: id.clone(),
+            pts,
+            space,
+            link: None,
+            fit: fit.to_vec(),
+            ink_diameter: None,
+            ink_color: None,
+            arc: None,
+            control: None,
+            exact: Vec::new(),
+        });
         Ok(id)
     }
 
@@ -529,7 +551,18 @@ impl Sketch {
         let pts = arc_polyline(&arc, ARC_TOL);
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh("w")?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc), control: None, exact: Vec::new() });
+        self.wires.push(Wire {
+            id: id.clone(),
+            pts,
+            space,
+            link: None,
+            fit: fit.to_vec(),
+            ink_diameter: None,
+            ink_color: None,
+            arc: Some(arc),
+            control: None,
+            exact: Vec::new(),
+        });
         Ok(id)
     }
 
@@ -545,6 +578,8 @@ impl Sketch {
             space,
             link: None,
             fit: ctrl.to_vec(),
+            ink_diameter: None,
+            ink_color: None,
             arc: None,
             control: Some(WireControl { degree }),
             exact: Vec::new(),

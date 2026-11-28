@@ -271,6 +271,8 @@ pub struct MenuState {
     /// The model line under the cursor when the sheet's menu opened: its view and the body that
     /// drew it, which Hide in This View leaves out of that view (#22107).
     pub drawing_line: Option<(u64, solidcraft_engine::drawing_view::Shown)>,
+    /// The sketch of the Grease Pencil stroke under the right-click.
+    ink_sketch: Option<u64>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -664,7 +666,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             }
             v
         }
-        Target::Sketch { id } => sketch_items(app, *id),
+        Target::Sketch { id } => sketch_items(app, *id, false),
         Target::Feature { id } => feature_items(app, *id),
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
@@ -1100,6 +1102,21 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.sectionViewOff", "Turn Off Section View", "section").with(json!({ "plane": plane })));
         v.push(Item::sep());
     }
+    let sketch = app.menu.ink_sketch.or_else(|| sel_sketch(app));
+    if (app.session.active_sketch.is_some() || sketch.is_none()) && crate::grease_pencil::has_stroke_selection(app) {
+        let direct = sel.iter().all(|s| matches!(s, Sel::ExternalSketchCurve { .. }));
+        if direct {
+            v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
+        }
+        v.extend(stroke_edit_items(app));
+        if let Some(sketch) = sketch {
+            v.push(ink_item(app, sketch));
+        }
+        if direct {
+            v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        }
+        v.push(Item::sep());
+    }
     if app.session.active_sketch.is_some() {
         v.extend(sketch_entity_items(app));
         v.push(Item::sep());
@@ -1126,8 +1143,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "select.invert", "Invert Selection"));
         v.push(Item::sep());
     }
-    if let Some(sketch) = sel_sketch(app).filter(|_| !solid) {
-        v.extend(sketch_items(app, sketch));
+    if let Some(sketch) = sketch.filter(|_| !solid) {
+        v.extend(sketch_items(app, sketch, true));
     } else if has(|s| matches!(s, Sel::Face { .. })) {
         let face = sel.iter().find_map(|s| if let Sel::Face { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let (feature, sketch) = feature_and_sketch(app, picked_face_feature(app));
@@ -1261,6 +1278,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         };
         if let Some(id) = app.menu.plane.as_deref().or(app.menu.axis.as_deref()).or(picked).and_then(|name| construction_feature(app, name)) {
             v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "construction": id })));
+        }
+        if !app.copied_ink.is_empty() {
+            v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V"));
         }
         v.push(Item::sep());
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
@@ -1396,7 +1416,15 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     v
 }
 
-fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
+fn ink_item(app: &SolveApp, sketch: u64) -> Item {
+    act("ui.enterGreasePencil", app.tr("cmd.sketch.grease_pencil"), "spline").with(json!({"sketch": sketch}))
+}
+
+fn stroke_edit_items(app: &SolveApp) -> [Item; 2] {
+    [cmd(app, crate::grease_pencil::EDIT, "Edit Stroke"), cmd(app, crate::grease_pencil::SCALE, "Scale Strokes")]
+}
+
+fn sketch_items(app: &SolveApp, id: u64, in_viewport: bool) -> Vec<Item> {
     let visible = crate::browser::sketch_visible(app, id);
     let profiles = !app.session.visibility.hidden_profiles.contains(&id);
     let dims = app.session.visibility.shown_dimensions.contains(&id);
@@ -1425,10 +1453,23 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     // entries (Extrude, Replace, Export, Look At, the Show/Hide toggles) act on this sketch.
     let rule = crate::timeline::menu_rule(app, id);
     let find = if rule.many { json!({ "feature": id, "features": targets }) } else { json!({ "feature": id }) };
+    let ink = (in_viewport || app.session.selection.contains(&Sel::Feature { id })) && crate::grease_pencil::has_stroke_selection(app);
+    let direct = ink && in_viewport && app.session.selection.iter().all(|sel| matches!(sel, Sel::ExternalSketchCurve { .. }));
+    // Right-clicking a stroke can reopen its sketch even when other sketches are selected.
+    let draw = if in_viewport && app.menu.ink_sketch == Some(id) { ink_item(app, id) } else { rule.one(ink_item(app, id)) };
+    let delete = if direct {
+        act("ui.delete", "Delete", "delete").key("Del")
+    } else {
+        // Cut, Copy and Delete act on all the selected sketches.
+        act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
+            .key("Del")
+            .with(json!({ "items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>() }))
+    };
     let mut items = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
         rule.one(act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing)),
+        draw,
         rule.one(act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id }))),
         replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
@@ -1437,11 +1478,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
-        // The selected features when this sketch is among them, as Cut and Copy take the
-        // selection and the feature menus' Delete does.
-        act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
-            .key("Del")
-            .with(json!({ "items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>() })),
+        delete,
         rule.one(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id }))),
         crate::browser::sketches_to_parts_item(sketches).on(parts && !editing),
         Item::sep(),
@@ -1455,6 +1492,9 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.findTimeline", "Find in Timeline", "rollback").with(find),
     ];
     items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
+    if ink {
+        items.splice(0..0, stroke_edit_items(app).into_iter().chain([Item::sep()]));
+    }
     items
 }
 
@@ -2721,6 +2761,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.edit_sketch(id);
             }
         }
+        "ui.enterGreasePencil" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                app.open_sketch(id, None, None, false);
+                if app.session.active_sketch == Some(id) {
+                    app.start(crate::grease_pencil::COMMAND);
+                }
+            }
+        }
         "ui.redefineSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 crate::browser::redefine_sketch(app, id);
@@ -3385,7 +3433,9 @@ fn pick_body(sel: &Sel) -> Option<&str> {
 /// own or through an occurrence: the menu is then about the bodies, and the right-click leaves
 /// the selection alone (#5849).
 fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
-    context_target_selected(&app.session.selection, sel) || pick_body(sel).is_some_and(|body| crate::selection::holds_body(&app.session, body))
+    context_target_selected(&app.session.selection, sel)
+        || crate::grease_pencil::selected_by_sketch(app, sel)
+        || pick_body(sel).is_some_and(|body| crate::selection::holds_body(&app.session, body))
 }
 
 /// The browser took the right-click and opened its own menu: the app opens no menu of its own
@@ -3426,37 +3476,32 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
     app.menu.section_plane = crate::view_pick::section_plane_at(app, at).map(|c| c.id);
-    let under = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).map(|(_, sel)| sel);
-    app.menu.face = under.clone().filter(|s| matches!(s, Sel::Face { .. }));
+    let under = app.viewport.hover.as_ref().and_then(|hit| crate::viewport::candidate(app, std::slice::from_ref(hit))).map(|(_, sel)| sel);
+    app.menu.face = under.as_ref().filter(|s| matches!(s, Sel::Face { .. })).cloned();
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
-    app.menu.plane = match &under {
-        Some(Sel::Plane { name }) => Some(name.clone()),
+    app.menu.plane = under.as_ref().and_then(|sel| match sel {
+        Sel::Plane { name } => Some(name.clone()),
+        _ => None,
+    });
+    app.menu.axis = match &under {
+        Some(Sel::Axis { name }) => Some(name.clone()),
         _ => None,
     };
-    app.menu.axis = match under {
-        Some(Sel::Axis { name }) => Some(name),
-        _ => None,
-    };
+    app.menu.ink_sketch = under.as_ref().and_then(|sel| crate::grease_pencil::stroke_sketch(app, sel));
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
         select_under(app, at, before, sel);
-    } else if app.session.active_sketch.is_none()
-        && let Some(h) = app.viewport.hover.clone()
-        && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
-        && !in_selection(app, &sel)
-        && !matches!(sel, Sel::Plane { .. } | Sel::Axis { .. })
-    {
-        let _ = app.run("select.set", json!({ "items": [sel] }));
-        app.menu.picked = Some((at, before, app.session.selection.clone()));
-    } else if app.session.active_sketch.is_some()
-        && let Some(h) = app.viewport.hover.clone()
-        && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
-        && (matches!(sel, Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. })
-            || crate::sketch_text::entity_for_selection(app, &sel).is_some())
-        && !in_selection(app, &sel)
-    {
-        let _ = app.run("select.set", json!({ "items": [sel] }));
-        app.menu.picked = Some((at, before, app.session.selection.clone()));
+    } else if let Some(sel) = under {
+        let takes = if app.session.active_sketch.is_none() {
+            !matches!(sel, Sel::Plane { .. } | Sel::Axis { .. })
+        } else {
+            matches!(sel, Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. })
+                || app.menu.ink_sketch.is_some()
+                || crate::sketch_text::entity_for_selection(app, &sel).is_some()
+        };
+        if takes {
+            select_under(app, at, before, sel);
+        }
     }
     open_for(app, at, Target::Viewport);
 }
@@ -3598,6 +3643,7 @@ pub fn open_from(app: &SolveApp, opener: Rect, target: &Target) -> bool {
 
 pub fn close(app: &mut SolveApp) {
     app.viewport.context_menu = None;
+    app.menu.ink_sketch = None;
     app.menu.opener = None;
     app.menu.window = None;
 }

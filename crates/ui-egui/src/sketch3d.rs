@@ -101,7 +101,7 @@ pub fn drawing(app: &SolveApp) -> bool {
 fn drawn_points(app: &SolveApp) -> Vec<(String, usize, Vec3)> {
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return Vec::new() };
-    ss.sketch.wires.iter().flat_map(|w| w.fit.iter().enumerate().map(|(i, p)| (w.id.clone(), i, *p))).collect()
+    ss.sketch.wires.iter().filter(|w| w.ink_diameter.is_none()).flat_map(|w| w.fit.iter().enumerate().map(|(i, p)| (w.id.clone(), i, *p))).collect()
 }
 
 /// The control polygons of the control point splines drawn in 3D: each one's control points in
@@ -530,7 +530,7 @@ pub fn drag_end() {
 
 /// Draw the drawn 3D points (the selected one in the accent colour).
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.session.active_sketch.is_none() {
+    if app.session.active_sketch.is_none() || app.tool.as_ref().is_some_and(|t| crate::grease_pencil::is_tool(t.kind)) {
         return;
     }
     // Drawn straight onto the view: its side's colours (#4146).

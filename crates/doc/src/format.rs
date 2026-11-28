@@ -2144,6 +2144,41 @@ mod tests {
         assert_eq!(reopened.param_values().0["load"], crate::expr::Value::mass(50.0));
     }
 
+    #[test]
+    fn opens_strokes_from_the_standalone_grease_pencil_patch() {
+        use solidcore_record::Vec3;
+        use solidcraft_sketch::{Sketch, WireSpace};
+
+        let mut document = Document::new("Studio notes");
+        let mut sketch = Sketch::new();
+        let points = [Vec3::ZERO, Vec3::X];
+        sketch.add_drawn_wire_in(&points, WireSpace::Component).unwrap();
+        sketch.view.three_d = true;
+        let plane = crate::PlaneRef::Origin { name: "XY".into() };
+        let id = document.add_feature(crate::FeatureKind::Sketch { plane, sketch }, Some("SketchGP1")).unwrap();
+        let mut file: Value = serde_json::from_str(&document.to_json()).unwrap();
+        file["format"] = Value::from("solidcraft/69");
+        // An early patch saved widths in screen points.
+        file["format_pending"] = serde_json::json!(["grease-pencil-width"]);
+        file["features"][0]["sketch"]["wires"][0]["ink_width"] = Value::from(8.0);
+        let opened = read(&file.to_string()).unwrap();
+        assert!(opened.newer_file.is_none());
+        assert_eq!(opened.sketch(id).unwrap().wires[0].ink_diameter, Some(1.0));
+
+        // The next patch added a physical diameter and color. An old screen width
+        // alongside the diameter must not override it.
+        file["format_pending"] = serde_json::json!(["grease-pencil-color", "grease-pencil-diameter", "grease-pencil-width"]);
+        let wire = &mut file["features"][0]["sketch"]["wires"][0];
+        wire["ink_diameter"] = Value::from(2.0);
+        wire["ink_color"] = serde_json::json!([235, 64, 65]);
+        let opened = read(&file.to_string()).unwrap();
+        assert!(opened.newer_file.is_none());
+        let wire = &opened.sketch(id).unwrap().wires[0];
+        assert_eq!(wire.ink_diameter, Some(2.0));
+        assert_eq!(wire.ink_color, Some([235, 64, 65]));
+        assert_eq!(wire.fit, points);
+    }
+
     /// 24 added the corner relief of an edge flange: a no-op step carries a 23 design up, a flange
     /// without a relief of its own saves as before, and one with it is saved under 24 and kept.
     #[test]

@@ -1087,11 +1087,28 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         };
         let openscad_orbit =
             app.preferences.nav == crate::prefs::OPENSCAD_NAV && app.tool.is_none() && app.dialog.is_none() && !mods.shift && empty_space(app);
-        let preset = if app.preferences.nav != crate::prefs::OPENSCAD_NAV || openscad_orbit {
+        let mut preset = if app.preferences.nav != crate::prefs::OPENSCAD_NAV || openscad_orbit {
             crate::prefs::nav_mode(app, crate::prefs::NavButton::Left, mods)
         } else {
             None
         };
+        if preset.is_some()
+            && crate::viewport::option_only(mods)
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && !crate::render_workspace::active(app)
+            && let Some(p) = hover.filter(|p| picking && rect.contains(*p))
+        {
+            let proj = projection(app, rect);
+            if crate::grease_pencil::stroke_at(app, &proj, p).is_some()
+                || (crate::sketch_view::active_sketch(app).is_none()
+                    && crate::occurrence_drag::grabbed_face(app, &proj, p)
+                        .and_then(|(body, _)| crate::occurrence_drag::placement_of(app, &body))
+                        .is_some_and(|path| app.session.drag_group(&path).is_ok()))
+            {
+                preset = None;
+            }
+        }
         // Ctrl+left drag from empty space orbits in every preset (Cmd on macOS). A Ctrl+click
         // still selects, and Ctrl on geometry still drags it without snapping.
         let ctrl_orbit = (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);

@@ -158,7 +158,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
 
     let mut hits: Vec<Value> = Vec::with_capacity(inputs.len());
     for input in &inputs {
-        let mut cands = face_candidates(app, &st, &bounds, input, &active_bodies, replaced, include_ghosted);
+        let mut cands = face_candidates(app, &st, &bounds, input, &active_bodies, replaced, include_ghosted, None).unwrap_or_default();
         cands.sort_by(|a, b| a.t.total_cmp(&b.t));
         // A section hides the material on the side any plane's normal points at: faces there do
         // not stop a pick, and the cut cap answers where the cut crosses material.
@@ -235,6 +235,27 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     }))
 }
 
+/// The face visibly under the brush, or no answer yet while its pick index builds.
+pub(crate) fn brush_face(
+    app: &SolveApp,
+    world: &std::sync::Arc<solidcraft_engine::doc::ModelState>,
+    proj: &crate::viewport::Proj,
+    pos: Pos2,
+    section: &[SectionPlane],
+    ctx: &egui::Context,
+) -> Option<Option<crate::viewport::Hit>> {
+    let (o, d) = proj.ray(pos);
+    let input = Input { raw: &Value::Null, pixel: Some(pos), o, d };
+    let bounds = crate::viewport::body_bounds(app, world);
+    let active = crate::viewport::active_body_names(app);
+    let replaced = app.preview.effective_replaced();
+    let hit = face_candidates(app, world, &bounds, &input, &active, replaced, false, Some(ctx))?
+        .into_iter()
+        .filter(|hit| section_keeps(section, o + d * hit.t))
+        .min_by(|a, b| a.t.total_cmp(&b.t));
+    Some(hit.map(|hit| crate::viewport::Hit::Face { body: hit.body, index: hit.face, point: o + d * hit.t }))
+}
+
 /// The nearest face of every pickable body along the ray, nearest first. Bodies the
 /// viewport hides, ghosts (unless asked for) or stands in for with a preview are skipped,
 /// exactly as the mouse picker skips them.
@@ -246,7 +267,8 @@ fn face_candidates(
     active_bodies: &Option<crate::viewport::ActiveBodyNames>,
     replaced: &[String],
     include_ghosted: bool,
-) -> Vec<Cand> {
+    feedback: Option<&egui::Context>,
+) -> Option<Vec<Cand>> {
     let mut out = Vec::new();
     for (i, b) in st.bodies.iter().enumerate() {
         if !crate::viewport::body_shown(app, &b.name) || replaced.contains(&b.name) {
@@ -268,11 +290,15 @@ fn face_candidates(
         // there (a rigid move keeps distances along it), so no moved copy of the mesh is made.
         let (m, place) = b.mesh_in_place();
         let Some((lo, ld)) = crate::viewport::local_ray(&place, input.o, input.d) else { continue };
-        let Some((t, ti)) = crate::pick_index::raycast(app.viewport.pick_index.of(&m).as_deref(), &m, lo, ld) else { continue };
+        let index = app.viewport.pick_index.of(&m);
+        if crate::viewport::postpone_triangle_scan(feedback, m.triangle_count(), index.is_some()) {
+            return None;
+        }
+        let Some((t, ti)) = crate::pick_index::raycast(index.as_deref(), &m, lo, ld) else { continue };
         let Some((point, normal)) = refine(&m, ti, t, lo, ld, &place) else { continue };
         out.push(Cand { body: b.name.clone(), face: m.tri_face.get(ti).copied().unwrap_or(0) as usize, point, normal, t, ghosted });
     }
-    out
+    Some(out)
 }
 
 /// The hit point and outward surface normal in world space. A flat face (constant mesh
@@ -400,7 +426,7 @@ pub(crate) fn section_plane_at(app: &SolveApp, pos: Pos2) -> Option<SectionPlane
     let bounds = crate::viewport::body_bounds(app, &st);
     let active_bodies = crate::viewport::active_body_names(app);
     let replaced = app.preview.effective_replaced();
-    let mut cands = face_candidates(app, &st, &bounds, &input, &active_bodies, replaced, false);
+    let mut cands = face_candidates(app, &st, &bounds, &input, &active_bodies, replaced, false, None)?;
     cands.sort_by(|a, b| a.t.total_cmp(&b.t));
     let first_kept = cands.iter().find(|c| section_keeps(&section, c.point)).map(|c| c.t);
     section_cap(app, &st, &bounds, &input, &section, first_kept, false, replaced, &active_bodies).map(|c| c.plane)

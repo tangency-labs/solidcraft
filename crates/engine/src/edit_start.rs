@@ -282,7 +282,7 @@ impl Session {
         result
     }
 
-    fn finish_edit_receivers(&mut self) -> Result<Option<SketchFinishEvent>> {
+    pub(crate) fn finish_edit_receivers(&mut self) -> Result<Option<SketchFinishEvent>> {
         let mut first = None;
         if let Some(sketch) = self.active_sketch {
             let mut event = SketchFinishEvent {
