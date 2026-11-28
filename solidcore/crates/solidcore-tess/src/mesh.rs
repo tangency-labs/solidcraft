@@ -5,6 +5,15 @@
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 
+use crate::vec::VecExt as _;
+
+/// How many times [`Mesh::pieces_off`] halves a triangle that lies partly on the surface: each
+/// halving splits the longest side, so 24 takes a sliver 2^12 times the resolution long down to it.
+const OFF_SPLITS: u32 = 24;
+
+/// A triangle's corners, each with its normal.
+pub type NormalTriangle = [(Vec3, Vec3); 3];
+
 /// An indexed triangle mesh with per-vertex normals, a face id per triangle (the B-rep face it
 /// came from) and edge polylines (B-rep edges for display and picking, or mesh outlines).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -75,6 +84,34 @@ impl Mesh {
             .collect()
     }
 
+    /// The part of this mesh off a surface, as triangles with their corner normals: `on` says
+    /// whether a point lies on the surface (within its own tolerance). A triangle whose corners,
+    /// side middles and centroid are all on it is left out and one with none of them on it is
+    /// kept whole; one that is both is halved across its longest side and each half asked again,
+    /// down to `resolution`, where its centroid decides. Only the triangles along the line where
+    /// the surface ends are split. Normals of new corners are their side's corners' averaged.
+    ///
+    /// For display: a preview ghosts the old shape of a body where the new one is not. Kept or
+    /// dropped whole, a long facet of a face that was only trimmed (an extruded side under a
+    /// fillet, meshed in strips from bottom to top) was ghosted all the way along, over the part
+    /// of the face that stays.
+    #[must_use]
+    pub fn pieces_off(&self, on: impl Fn(Vec3) -> bool, resolution: f64) -> Vec<NormalTriangle> {
+        let mut out = Vec::new();
+        for t in &self.triangles {
+            let corner = |k: u32| {
+                Some((
+                    *self.positions.get(k as usize)?,
+                    *self.normals.get(k as usize)?,
+                ))
+            };
+            if let (Some(a), Some(b), Some(c)) = (corner(t[0]), corner(t[1]), corner(t[2])) {
+                pieces_off(&on, resolution, [a, b, c], 0, &mut out);
+            }
+        }
+        out
+    }
+
     /// The corners of triangle `t`, `None` where an index is out of range.
     #[must_use]
     pub fn tri(&self, t: &[u32; 3]) -> Option<[Vec3; 3]> {
@@ -83,5 +120,103 @@ impl Mesh {
             *self.positions.get(t[1] as usize)?,
             *self.positions.get(t[2] as usize)?,
         ])
+    }
+}
+
+/// [`Mesh::pieces_off`] for one triangle `t`, `depth` halvings in.
+fn pieces_off(
+    on: &impl Fn(Vec3) -> bool,
+    resolution: f64,
+    t: NormalTriangle,
+    depth: u32,
+    out: &mut Vec<NormalTriangle>,
+) {
+    let [(a, _), (b, _), (c, _)] = t;
+    let probes = [
+        a,
+        b,
+        c,
+        (a + b) / 2.0,
+        (b + c) / 2.0,
+        (c + a) / 2.0,
+        (a + b + c) / 3.0,
+    ];
+    let hits = probes.map(on);
+    if hits.iter().all(|h| *h) {
+        return;
+    }
+    let mixed = hits.iter().any(|h| *h);
+    let sides = [a.dist(b), b.dist(c), c.dist(a)];
+    let longest = sides.iter().copied().fold(0.0, f64::max);
+    if !mixed || depth >= OFF_SPLITS || longest <= resolution {
+        // Wholly off, or as small as asked: then its centroid decides.
+        if !mixed || !hits[6] {
+            out.push(t);
+        }
+        return;
+    }
+    // Halve across the longest side, from its middle to the corner opposite: the halves keep
+    // the triangle's winding.
+    let k = sides.iter().position(|s| *s >= longest).unwrap_or(0);
+    let (Some(&(pi, ni)), Some(&(pj, nj)), Some(&o)) =
+        (t.get(k), t.get((k + 1) % 3), t.get((k + 2) % 3))
+    else {
+        return;
+    };
+    let mid = ((pi + pj) / 2.0, (ni + nj).normalized().unwrap_or(ni));
+    pieces_off(on, resolution, [(pi, ni), mid, o], depth + 1, out);
+    pieces_off(on, resolution, [mid, (pj, nj), o], depth + 1, out);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A strip from z = 0 to z = 10 with the surface below z = 5: what is kept lies above it,
+    /// to within the resolution, and covers the upper half's area.
+    #[test]
+    fn pieces_off_keep_only_what_is_off_the_surface() {
+        let up = Vec3::new(0.0, -1.0, 0.0);
+        let mesh = Mesh {
+            positions: vec![
+                Vec3::ZERO,
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 10.0),
+            ],
+            normals: vec![up; 3],
+            triangles: vec![[0, 1, 2]],
+            ..Mesh::default()
+        };
+        let pieces = mesh.pieces_off(|p| p.z < 5.0, 0.01);
+        assert!(!pieces.is_empty());
+        let lowest = pieces
+            .iter()
+            .flatten()
+            .map(|(p, _)| p.z)
+            .fold(f64::INFINITY, f64::min);
+        assert!(lowest > 5.0 - 0.02, "a piece reaches down to z = {lowest}");
+        let area: f64 = pieces
+            .iter()
+            .map(|[(a, _), (b, _), (c, _)]| (*b - *a).cross(*c - *a).len() / 2.0)
+            .sum();
+        // The part above z = 5: a triangle with legs 0.5 and 5, area 1.25.
+        assert!((area - 1.25).abs() < 0.02, "area {area}");
+        // Same winding as the input: normals of the pieces' planes point where the input's does.
+        let n =
+            (mesh.positions[1] - mesh.positions[0]).cross(mesh.positions[2] - mesh.positions[0]);
+        assert!(
+            pieces
+                .iter()
+                .all(|[(a, _), (b, _), (c, _)]| (*b - *a).cross(*c - *a).dot(n) > 0.0)
+        );
+        assert!(
+            mesh.pieces_off(|_| true, 0.01).is_empty(),
+            "all on the surface: nothing"
+        );
+        assert_eq!(
+            mesh.pieces_off(|_| false, 0.01).len(),
+            1,
+            "all off: the triangle whole"
+        );
     }
 }

@@ -1267,7 +1267,12 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
     let kept: Vec<&SurfaceIndex> = sources.iter().collect();
     for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
         let m = a.mesh();
-        ghost_mesh_off_surface(&mut sc, &kept, &m, fill);
+        let resolution = kept.iter().map(|k| k.tol).fold(f64::INFINITY, f64::min);
+        for piece in m.pieces_off(|p| kept.iter().any(|k| k.contains(p)), resolution) {
+            for (p, n) in piece {
+                sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
+            }
+        }
         // Depth-tested, as a body's own edges: the renderer draws no on-top line of a preview.
         for (ei, e) in m.edges.iter().enumerate() {
             if m.shaded_edge_visible(ei) {
@@ -1629,7 +1634,16 @@ fn build_scene(
             // ghost's depth bias, so the ghost showed through the new face in slivers.
             let own = if motion || gone || combine.is_some() { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
             let kept: Vec<&SurfaceIndex> = own.iter().chain(&result).collect();
-            ghost_mesh_off_surface(&mut sc, &kept, &m, fill);
+            let resolution = kept.iter().map(|k| k.tol).fold(f64::INFINITY, f64::min);
+            // Only what is off the kept surfaces is removed material: a facet partly on them is
+            // split (`pieces_off`). Ghosted whole, a long facet of a face the feature only trims
+            // (an extruded side under a fillet) ran down the face the result keeps and showed
+            // through it in red streaks (T-2799).
+            for piece in m.pieces_off(|p| kept.iter().any(|k| k.contains(p)), resolution) {
+                for (p, n) in piece {
+                    sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
+                }
+            }
             if tool {
                 // A tool's ghost has its outline in its own colour, depth-tested as a body's own
                 // edges (the renderer draws no on-top line of a preview).
@@ -1672,58 +1686,6 @@ fn build_scene(
         plugin_view: None,
         centrelines: Vec::new(),
     }
-}
-
-/// Ghost `m` where it is off every one of the `kept` surfaces ([`ghost_off_surface`]).
-fn ghost_mesh_off_surface(sc: &mut GpuScene, kept: &[&SurfaceIndex], m: &Mesh, fill: crate::gpu::PaletteIndex) {
-    for t in &m.triangles {
-        let corners = t.map(|k| (m.positions.get(k as usize).copied(), m.normals.get(k as usize).copied()));
-        let [(Some(pa), Some(na)), (Some(pb), Some(nb)), (Some(pc), Some(nc))] = corners else { continue };
-        ghost_off_surface(sc, kept, [(pa, na), (pb, nb), (pc, nc)], fill, 0);
-    }
-}
-
-/// How many times [`ghost_off_surface`] halves a triangle that lies partly on a kept surface.
-/// Each halving splits the longest side, so 24 takes a 100 mm sliver down to well under the
-/// surface tolerance; only the pieces along the line where the kept surface ends are split.
-const GHOST_SPLITS: u32 = 24;
-
-/// Ghost the part of the old triangle `t` (corner positions and normals) that is not on any of
-/// the `kept` surfaces: removed material only. A triangle wholly on one is left out and one
-/// wholly off is drawn whole; one that is both is halved across its longest side and each half
-/// asked again. Kept whole, a tall facet of a face the feature only trims (an extruded side under
-/// a fillet, meshed in strips from bottom to top) was ghosted all the way down, over the part of
-/// the face the result keeps: where the two meshes of that curved face differ by their chord
-/// error, the ghost poked through it in red streaks running down from the cut.
-fn ghost_off_surface(sc: &mut GpuScene, kept: &[&SurfaceIndex], t: [(Vec3, Vec3); 3], fill: crate::gpu::PaletteIndex, depth: u32) {
-    let [(a, _), (b, _), (c, _)] = t;
-    // Its corners, the middles of its sides and its centroid.
-    let probes = [a, b, c, (a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0, (a + b + c) / 3.0];
-    let on = probes.map(|p| kept.iter().any(|k| k.contains(p)));
-    if on.iter().all(|o| *o) {
-        return;
-    }
-    let tol = kept.iter().map(|k| k.tol).fold(f64::INFINITY, f64::min);
-    let sides = [(a - b).len(), (b - c).len(), (c - a).len()];
-    let longest = sides.iter().copied().fold(0.0, f64::max);
-    let mixed = on.iter().any(|o| *o);
-    if !mixed || depth >= GHOST_SPLITS || longest <= tol {
-        // Off the kept surfaces, or as small as the tolerance tells apart: then its middle decides.
-        if !mixed || !on[6] {
-            for (p, n) in t {
-                sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
-            }
-        }
-        return;
-    }
-    // Halve across the longest side: from its middle to the corner opposite it.
-    let k = sides.iter().position(|s| *s >= longest).unwrap_or(0);
-    let (i, j, o) = (k, (k + 1) % 3, (k + 2) % 3);
-    let (Some(&(pi, ni)), Some(&(pj, nj)), Some(&(po, no))) = (t.get(i), t.get(j), t.get(o)) else { return };
-    let n_mid = (ni + nj).normalized().unwrap_or(ni);
-    let mid = ((pi + pj) / 2.0, n_mid);
-    ghost_off_surface(sc, kept, [(pi, ni), mid, (po, no)], fill, depth + 1);
-    ghost_off_surface(sc, kept, [mid, (pj, nj), (po, no)], fill, depth + 1);
 }
 
 /// Points of one face the vote in [`new_faces`] asks about: every centroid of a face with no
