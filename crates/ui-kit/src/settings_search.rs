@@ -1007,6 +1007,34 @@ mod tests {
                 };
                 assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(response.rect.center()));
             });
+            // Past its time on egui's frame clock, the row draws on with no outline and no handle.
+            set_reveal(
+                &ctx,
+                Some(Reveal { page: PAGE_LAYOUT, label: "Quality".into(), until: ctx.input(|i| i.time) * 1000.0 - 1.0, prefix: "prefs".into() }),
+            );
+            solidcraft_ui_registry::clear_handles();
+            crate::test_support::raw_frame(&ctx, Default::default(), |ui| {
+                let _search = begin(ui, "", "prefs");
+                begin_page(ui, PAGE_LAYOUT, "Layout");
+                let card = Card {
+                    label: "Quality",
+                    sub: None,
+                    selected: false,
+                    enabled: false,
+                    options: None,
+                    check: false,
+                    aspect: 1.0,
+                    figure: &|_, _| {},
+                };
+                let response = match kind {
+                    0 => crate::picture_card(ui, &card, 100.0),
+                    1 => crate::toggle_tile(ui, &card, 100.0),
+                    2 => crate::preset_card(ui, "Quality", "", false, false, &|_, _, _| {}, 100.0),
+                    _ => crate::settings_chip(ui, "Quality", Default::default()),
+                };
+                assert!(!response.clicked());
+            });
+            assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), None, "the outline's time is up");
         }
     }
 

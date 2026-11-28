@@ -994,6 +994,10 @@ pub struct SolveApp {
     pub status: Option<(String, f64, bool)>,
     /// Interactive tool guidance is presented only where the tool receives input.
     pub(crate) status_is_tool_hint: bool,
+    /// The frame clock (`ctx.input(|i| i.time)`, seconds) the status toast started at, armed when
+    /// it first draws and reset by [`Self::set_status`]: its six seconds are spent by drawn frames
+    /// only, as the stand-up note's ten and the 3D mouse offer's thirty are.
+    pub(crate) status_since: Option<f64>,
     /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
     pub status_undo: bool,
     /// The status message is a refused JSON save of a design with binary data in it, and offers
@@ -1363,6 +1367,7 @@ impl SolveApp {
             last_escape: None,
             status: None,
             status_is_tool_hint: false,
+            status_since: None,
             status_undo: false,
             status_save_sc: false,
             status_sticky_at: None,
@@ -4087,6 +4092,8 @@ impl SolveApp {
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
         self.status_is_tool_hint = false;
+        // The stamp is the messages' (wall clock); the toast's clock arms when it next draws.
+        self.status_since = None;
         self.status_undo = false;
         self.status_save_sc = false;
     }
