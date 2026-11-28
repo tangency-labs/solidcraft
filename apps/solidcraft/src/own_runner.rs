@@ -6,8 +6,8 @@
 //! egui-wgpu as it ships. What eframe does around the app, it does too: the settings file
 //! (`app.ron`, written the same way), egui's memory in it, saving every `auto_save_interval` and
 //! at exit, the main window's size and place (`persist_window`), and the control channel's logic
-//! passes (#743). Not yet: `Frame::storage_mut` is `None` during a pass (the app saves through
-//! `App::save`).
+//! passes (#743). eframe's `Frame::storage_mut` is `None` here; the app is handed the settings
+//! file after each pass instead (`App::write_settings`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -88,6 +88,11 @@ impl runner::App for OnRunner<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &Frame<'_>) {
         self.sync(frame);
         self.app.ui(ui, &mut self.frame);
+        // eframe's `Frame::storage_mut` is the settings file during a pass; here the app is
+        // handed ours after it (#8275: a changed setting is written soon, not at the next save).
+        if let Some(app) = self.app.as_any_mut().and_then(|app| app.downcast_mut::<crate::App>()) {
+            app.write_settings(ui.ctx(), &mut self.settings, std::time::Instant::now());
+        }
     }
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         self.app.clear_color(visuals)

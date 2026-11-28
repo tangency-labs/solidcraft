@@ -147,6 +147,8 @@ struct App {
     window_move: native_frame::WindowMove,
     /// After a lost device: the first frame stores it, since the setup's frames save nothing.
     clear_stored_background: bool,
+    /// A pass since the settings were last written had input that can change one (`write_settings`).
+    settings_input: bool,
     /// Brackets the touchpad's swipes (winit sends pixels only for it, #15353).
     #[cfg(target_os = "windows")]
     wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
@@ -422,9 +424,10 @@ impl eframe::App for App {
     /// A frame's UI: the starting page while the setup runs (in the saved language and fonts),
     /// then the app's, whose changed settings are written soon after (#8275).
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        if std::mem::take(&mut self.clear_stored_background)
+        if self.clear_stored_background
             && let Some(storage) = frame.storage_mut()
         {
+            self.clear_stored_background = false;
             clear_stored_background(storage);
         }
         // Logic-only control updates cannot present a frame or complete startup.
@@ -526,13 +529,13 @@ impl eframe::App for App {
         if later {
             ui.ctx().request_repaint_after(self.prefs_writer.check_later(now));
         }
-        if self.prefs_writer.due(input, now)
-            && let Some(storage) = frame.storage_mut()
-            && let Ok(prefs) = self.prefs_for_storage(storage)
-            && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
-        {
-            ui.ctx().request_repaint_after(wait);
+        self.settings_input |= input;
+        if let Some(storage) = frame.storage_mut() {
+            self.write_settings(ui.ctx(), storage, now);
         }
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         let prefs = match self.prefs_for_storage(storage) {
@@ -708,6 +711,21 @@ struct LostWatch {
 }
 
 impl App {
+    /// Write a pass's settings changes to the settings file (#8275), as `ui` does with eframe's
+    /// `Frame::storage_mut`; our own window runner calls it with its file after each pass
+    /// (`own_runner`).
+    pub(crate) fn write_settings(&mut self, ctx: &egui::Context, storage: &mut dyn eframe::Storage, now: std::time::Instant) {
+        if std::mem::take(&mut self.clear_stored_background) {
+            clear_stored_background(storage);
+        }
+        let input = std::mem::take(&mut self.settings_input);
+        if self.prefs_writer.due(input, now)
+            && let Ok(prefs) = self.prefs_for_storage(storage)
+            && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
+        {
+            ctx.request_repaint_after(wait);
+        }
+    }
     fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
         self.solve.try_prefs().or_else(|reason| {
             log::warn!("Panel layout changes were not saved: {reason}");
@@ -2156,6 +2174,7 @@ fn main() -> eframe::Result {
             // Before `app` moves: the settings as read, already on disk.
             prefs_writer: PrefsWriter::read(app.prefs()),
             clear_stored_background: cleared_background,
+            settings_input: false,
             solve: app,
             setup,
             gpu_job: None,
