@@ -2185,8 +2185,16 @@ fn schema_titles_and_descriptions_reach_grouped_menus_and_dialogs() {
     assert_eq!(command_title(&plugin, &plugin.entries[2]), "inspect");
     assert_eq!(command_description(&plugin, "spur"), "Entry-specific help");
     assert_eq!(command_description(&plugin, "bevel"), "Package description");
+    // A standalone button without a ribbon slot keeps its menu label and hover name.
+    plugin.entries[2].slots = entry("inspect", "read", json!([{"kind":"menu","name":"Inspect Tool"}])).slots;
+    plugin.entries[2].input_schema = json!({"type":"object","title":"Inspection"});
+    assert_eq!(command_title(&plugin, &plugin.entries[2]), "Inspection");
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     app.plugin_menu.listed = vec![plugin];
+    let buttons = ribbon_buttons(&app);
+    let standalone = buttons.iter().find(|b| b.id == "plugin_entry:gears:inspect").unwrap();
+    assert_eq!(standalone.label, "Inspect Tool");
+    assert_eq!(standalone.name, format!("{}: Inspect Tool", app.plugin_menu.listed[0].name));
     let menu = ribbon_group_rows(&app, "plugin_group:gears:0");
     let items: Vec<_> = menu.iter().filter(|i| !i.is_sep() && i.children.is_empty()).map(|i| (i.id.as_str(), i.label.as_str())).collect();
     assert_eq!(items, [("entry:0:1", "Bevel Tool"), ("entry:0:0", "Engrenage droit")]);

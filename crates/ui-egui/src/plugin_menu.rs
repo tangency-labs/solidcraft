@@ -982,7 +982,16 @@ pub(crate) fn command_title(plugin: &Listed, entry: &solidcraft_engine::plugin::
         .map(str::to_owned)
         .or_else(|| slot_label_or_name(entry, "menu"))
         .or_else(|| slot_label_or_name(entry, "ribbon"))
-        .unwrap_or_else(|| if plugin.entries.len() == 1 { plugin.name.clone() } else { entry.name.clone() })
+        .unwrap_or_else(|| standalone_ribbon_title(plugin, entry))
+}
+
+// Standalone ribbon buttons retain their existing label and hover-name fallback.
+fn standalone_ribbon_title(plugin: &Listed, entry: &solidcraft_engine::plugin::Entry) -> String {
+    match slot_name(entry, "menu") {
+        Some(name) => name,
+        None if plugin.entries.len() == 1 => plugin.name.clone(),
+        None => entry.name.clone(),
+    }
 }
 
 fn schema_text<'a>(entry: &'a solidcraft_engine::plugin::Entry, key: &str) -> Option<&'a str> {
@@ -1087,7 +1096,7 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
             if (grouped || !entry_shows_in_model_group(entry)) && !individually_pinned(app, plugin, entry) {
                 continue;
             }
-            let title = command_title(plugin, entry);
+            let title = standalone_ribbon_title(plugin, entry);
             let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
             buttons.push(RibbonButton {
                 id: format!("{RIBBON_PREFIX}{}:{}", plugin.id, entry.name),
