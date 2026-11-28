@@ -19,13 +19,9 @@ pollster = { workspace = true }
 thiserror = { workspace = true }
 web-time = { workspace = true }
 wgpu = { workspace = true }
-<<<<<<< HEAD
-winit = { version = "0.30", default-features = false }
+# A window system to build against on Linux (the host picks the one it runs on).
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland", "x11"] }
 
 [dev-dependencies]
 # Native backends, so the example opens a window (the app picks its own).
 wgpu = { workspace = true, features = ["metal", "vulkan", "dx12"] }
-=======
-# A window system to build against on Linux (the host picks the one it runs on).
-winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland", "x11"] }
->>>>>>> origin/window-gpu-d1
