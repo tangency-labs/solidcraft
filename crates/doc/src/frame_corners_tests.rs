@@ -230,7 +230,7 @@ fn coped_cuts_a_butt_as_coped_butt_and_reads_an_old_coped_butt_as_butt() {
     }
     // An older build's `coped_butt`, the frame's or an override's, is Butt with Coped.
     let line = |l: &str| MemberRef { feature: None, line: l.into() };
-    let o = |kind| CornerOverride { members: vec![line("a"), line("b")], kind, gap: None };
+    let o = |kind| CornerOverride { members: vec![line("a"), line("b")], kind, gap: None, coped: None };
     for (frame, over, want) in [
         (CornerType::CopedButt, CornerType::Mitre, (CornerType::Butt, CornerType::Mitre, true)),
         (CornerType::Mitre, CornerType::CopedButt, (CornerType::Mitre, CornerType::Butt, true)),
@@ -247,7 +247,7 @@ fn old_corner_records_read_in_the_new_shape() {
     // A test build's record: bare string members, `corner`, `flip` (ignored: the members keep their written order).
     let old: CornerOverride = serde_json::from_str(r#"{"members":["l1","l2"],"corner":"butt","flip":true}"#).unwrap();
     let line = |l: &str| MemberRef { feature: None, line: l.into() };
-    assert_eq!(old, CornerOverride { members: vec![line("l1"), line("l2")], kind: CornerType::Butt, gap: None });
+    assert_eq!(old, CornerOverride { members: vec![line("l1"), line("l2")], kind: CornerType::Butt, gap: None, coped: None });
     assert_eq!(old.lines().collect::<Vec<_>>(), ["l1", "l2"]);
     assert_eq!(serde_json::to_string(&old).unwrap(), r#"{"members":[{"line":"l1"},{"line":"l2"}],"kind":"butt"}"#);
     // #4003's shape round-trips unchanged.

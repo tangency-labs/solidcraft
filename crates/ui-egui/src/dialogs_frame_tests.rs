@@ -2254,12 +2254,27 @@ fn gaps_under(h: &crate::scenario::Harness, y: f64) -> Vec<bool> {
         .collect()
 }
 
+/// The frame's own Coped box: the topmost box labelled Coped, as the Corner Overrides rows (each with a Coped of its
+/// own) come under the frame's rows. Its centre, and whether it is greyed.
+fn frame_coped(h: &crate::scenario::Harness) -> ([f64; 2], bool) {
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    let mut boxes: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == egui::accesskit::Role::CheckBox && n.label() == Some("Coped"))
+        .filter_map(|(_, n)| Some((n.bounds()?, n.is_disabled())))
+        .collect();
+    boxes.sort_by(|a, b| a.0.y0.total_cmp(&b.0.y0));
+    let (b, disabled) = *boxes.first().unwrap_or_else(|| panic!("no Coped box"));
+    ([f64::midpoint(b.x0, b.x1), f64::midpoint(b.y0, b.y1)], disabled)
+}
+
 /// Gap (#17854) is a row of its own under Fit Ends and Coped: typed, it goes into the command as `gap`; 0 or empty
 /// sends nothing; under None it is greyed and sends nothing. An edit brings it back.
 #[test]
 fn the_gap_field_is_sent() {
     let (mut h, _) = overrides_dialog("butt");
-    let [_, cy] = h.widget("Coped").unwrap();
+    let ([_, cy], _) = frame_coped(&h);
     assert_eq!(gaps_under(&h, cy), [false], "one enabled Gap under Coped");
     let sent = |h: &crate::scenario::Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1.get("gap").cloned();
     assert_eq!(sent(&h), None, "Gap starts empty: nothing sent");
@@ -2270,7 +2285,7 @@ fn the_gap_field_is_sent() {
     member(h.app.dialog.as_mut().unwrap()).gap = "3 mm".into();
     member(h.app.dialog.as_mut().unwrap()).corner = corner_type("none");
     h.frames(2);
-    let [_, cy] = h.widget("Coped").unwrap();
+    let ([_, cy], _) = frame_coped(&h);
     assert_eq!(gaps_under(&h, cy), [true], "Gap is greyed under None");
     assert_eq!(sent(&h), None, "under None no gap is sent");
     member(h.app.dialog.as_mut().unwrap()).corner = corner_type("butt");
@@ -2323,6 +2338,27 @@ fn an_override_row_sends_its_gap_and_kind() {
     h.frames(2);
     let [_, y] = h.widget("Corner 1").unwrap();
     assert!(gaps_under(&h, y).is_empty(), "the overlap row has no Gap");
+}
+
+/// A Corner Overrides row's Coped copes that one butt: it is sent only where it differs from the frame's Coped (a
+/// row left alone follows the frame), and Edit Feature shows it again.
+#[test]
+fn an_override_row_copes_its_own_butt() {
+    let (mut h, _) = overrides_dialog("butt");
+    let m = member(h.app.dialog.as_mut().unwrap());
+    assert!(!m.coped);
+    m.overrides[0].coped = Some(true);
+    m.overrides[1].coped = Some(false);
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["corners"][0]["coped"], json!(true), "{}", c[0].1);
+    assert!(c[0].1["corners"][1].get("coped").is_none(), "the frame's own: {}", c[0].1);
+    h.app.dialog = None;
+    run_all(&mut h.app, c);
+    let f = h.app.session.doc.features.last().unwrap().id;
+    let FeatureKind::FrameMember { corners, .. } = &h.app.session.doc.feature(f).unwrap().kind else { panic!() };
+    assert_eq!(corners.iter().map(|c| c.coped).collect::<Vec<_>>(), [Some(true), None]);
+    let mut e = edit_dialog(&h.app, f, None).unwrap();
+    assert_eq!(member(&mut e).overrides.iter().map(|o| o.coped).collect::<Vec<_>>(), [Some(true), None]);
 }
 
 /// The Butt frame on the rectangle with an override at (0, 0) saved in today's order and one at (600, 400) saved
@@ -2629,28 +2665,20 @@ fn a_corner_override_row_shows_flip_in_full_with_the_bin_at_the_right() {
 
 /// Corner Type offers Auto, None, Mitre and Butt, and an override row None, Mitre and Butt: Coped (#17854) is a tick
 /// box of its own on the Fit Ends to Earlier Frames row, to the right of that box, unticked at the start and greyed
-/// under None.
+/// under None. Each override row has a Coped row of its own, under its Gap.
 #[test]
 fn coped_is_a_tick_box_beside_fit_ends() {
     assert_eq!(CORNER_TYPES.map(|c| c.0)[..], ["auto", "none", "mitre", "butt"]);
     let (mut h, _) = overrides_dialog("butt");
     assert!(!member(h.app.dialog.as_mut().unwrap()).coped);
     h.frames(2);
-    // The Coped box: its centre, and whether it is greyed.
-    let coped = |h: &crate::scenario::Harness| {
-        let tree = h.output.accesskit_update.as_ref().unwrap();
-        let boxes: Vec<_> =
-            tree.nodes.iter().filter(|(_, n)| n.label() == Some("Coped")).filter_map(|(_, n)| Some((n.bounds()?, n.is_disabled()))).collect();
-        assert_eq!(boxes.len(), 1, "one Coped: {boxes:?}");
-        let (b, disabled) = boxes[0];
-        ([f64::midpoint(b.x0, b.x1), f64::midpoint(b.y0, b.y1)], disabled)
-    };
+    let coped = frame_coped;
     let fit = h.widgets("Fit Ends to Earlier Frames");
     let ([x, y], disabled) = coped(&h);
     assert!(!disabled, "Coped is enabled under Butt");
     assert!(fit.len() >= 2 && fit.iter().all(|f| (f[1] - y).abs() < 2.0 && f[0] < x), "Coped at {x}, {y}: Fit Ends at {fit:?}");
-    // No override row offers Coped.
-    assert!(h.widget_near("Coped", "Corner 1").is_none_or(|[cx, cy]| (cx, cy) == (x, y)));
+    // Each override row offers its own Coped, under the row.
+    assert!(h.widget_near("Coped", "Corner 1").is_some_and(|[cx, cy]| (cx, cy) != (x, y)));
     member(h.app.dialog.as_mut().unwrap()).corner = corner_type("none");
     h.frames(2);
     assert!(coped(&h).1, "Coped is greyed under None");
@@ -2994,7 +3022,7 @@ fn removing_the_shown_group_keeps_its_neighbours_values() {
 }
 
 #[test]
-fn adding_groups_refuses_joined_corners_without_resetting_flat_frame_controls() {
+fn groups_send_the_frames_corners_and_finishing_once() {
     let mut app = frame_app();
     let lines = frame_lines(&app);
     let mut d = dialog_on(&mut app, &lines[..1]);
@@ -3003,20 +3031,18 @@ fn adding_groups_refuses_joined_corners_without_resetting_flat_frame_controls() 
     m.coped = true;
     m.gap = "2 mm".into();
     m.add_group(&mut d.inputs);
-    let err = apply_commands(&app, &d).unwrap_err();
-    assert!(err.contains("not supported yet: frame member groups with joined corners"), "{err}");
-    let Kind::Frame(m) = &mut d.kind else { panic!("not a frame member") };
-    assert_eq!(m.corner, corner_type("auto"));
-    assert!(m.coped);
-    assert_eq!(m.gap, "2 mm");
-    m.remove_group(&mut d.inputs);
+    m.angle = "90 deg".into();
+    d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: sketch_id(&app, "Frame"), id: lines[1].clone() }];
     let commands = apply_commands(&app, &d).unwrap();
     let p = &commands[0].1;
-    assert!(p.get("groups").is_none());
+    assert_eq!(p["groups"].as_array().map(Vec::len), Some(2), "{p}");
+    assert!(p["groups"].as_array().unwrap().iter().all(|g| g.get("corner").is_none() && g.get("gap").is_none()), "{p}");
     assert_eq!(p["corner"], "auto");
     assert_eq!(p["coped"], true);
     assert_eq!(p["gap"], "2 mm");
     assert_eq!(p["fit_ends"], true);
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 2);
 }
 
 fn trim(d: &mut Dialog) -> &mut Trim {

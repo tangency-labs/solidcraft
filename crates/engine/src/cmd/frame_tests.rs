@@ -691,7 +691,7 @@ fn corner_settings_are_taken_and_saved() {
     assert_eq!((*corner, *flip), (CornerType::Butt, true));
     // Saved in the order today's rules lay them (the longer l1 runs through), with no `flip`.
     let members = vec![MemberRef { feature: None, line: l1 }, MemberRef { feature: None, line: l2 }];
-    assert_eq!(*corners, [CornerOverride { members, kind: CornerType::Mitre, gap: None }]);
+    assert_eq!(*corners, [CornerOverride { members, kind: CornerType::Mitre, gap: None, coped: None }]);
 }
 
 #[test]
@@ -1069,6 +1069,53 @@ fn a_coped_box_tube_keeps_slivers_in_the_through_member_radii() {
     assert!((left.2[1] - 14.0).abs() < 1e-3, "{left:?}");
     assert!((left.3[1] - 386.0).abs() < 1e-3, "{left:?}");
     assert_eq!(bodies(&mut s).len(), 4);
+}
+
+/// One corner coped on its own: an override's `coped` copes that butt only, and on a coped frame
+/// an override's `coped: false` leaves that butt plain. The left post meets the bottom rail at its
+/// start: coped there, its slivers fill the rail's outer radius down to y = 14, while its top end
+/// butts square at the top rail's near face (380); and the other way round.
+#[test]
+fn one_corner_is_coped_by_its_override() {
+    for (frame_coped, corner_coped, want) in [(false, true, (14.0, 380.0)), (true, false, (20.0, 386.0))] {
+        let mut s = Session::default();
+        rectangle_frame(&mut s);
+        let (rails, posts) = rails_and_posts(&s);
+        let corners = json!([{"members": [&rails[0], &posts[0]], "kind": "butt", "coped": corner_coped}]);
+        let r =
+            run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "corner": "butt", "coped": frame_coped, "corners": corners}));
+        let (_, left) = bottom_and_left(&mut s);
+        assert!((left.2[1] - want.0).abs() < 1e-3 && (left.3[1] - want.1).abs() < 1e-3, "frame coped {frame_coped}: {r} {left:?}");
+        // frame.multi_trim sets the same corner's Coped in place.
+        let fid = r["feature"].clone();
+        run(&mut s, "frame.multi_trim", json!({"feature": fid, "members": [&rails[0], &posts[0]], "kind": "butt", "coped": frame_coped}));
+        let (_, left) = bottom_and_left(&mut s);
+        let back = if frame_coped { 14.0 } else { 20.0 };
+        assert!((left.2[1] - back).abs() < 1e-3, "multi_trim coped {frame_coped}: {left:?}");
+    }
+}
+
+/// Angle iron coped at a rectangle's butts fills each corner: an angle is open on one side, and a cope that stopped
+/// halfway through the through member would leave its upright leg short of the other's. Each post runs on to both
+/// rails' far faces (450 mm of section, 50 × 5 + 45 × 5) less what lies in each rail there: where both bottom legs
+/// are (5 mm high) 50 × 50, above it the two upright legs' 5 × 5, 45 mm high. The rails run through, 650 mm whole.
+#[test]
+fn a_coped_angle_fills_the_corner_without_gaps() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let angle = json!({"kind": "angle", "width": 50, "height": 50, "thickness": 5, "root_radius": 0, "toe_radius": 0});
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": angle, "corner": "butt", "coped": true}));
+    let area = 475.0;
+    let corner = 50.0 * 50.0 * 5.0 + 5.0 * 5.0 * 45.0;
+    let b = bodies(&mut s);
+    for rail in [&b[0], &b[2]] {
+        assert!(rel(rail.1, area * 650.0) < 1e-9, "{rail:?}");
+    }
+    for post in [&b[1], &b[3]] {
+        assert!(rel(post.1, area * 450.0 - 2.0 * corner) < 1e-9, "the post fills each corner: {post:?}");
+        // Its upright leg reaches the rails' upright legs (outer faces at y = -25 and 425, 5 mm thick).
+        assert!((post.2[1] + 20.0).abs() < 1e-6 && (post.3[1] - 420.0).abs() < 1e-6, "{post:?}");
+    }
 }
 
 #[test]
@@ -6979,24 +7026,88 @@ fn groups_refuse_unsupported_finishing_and_pairs_without_changing_the_design() {
         let points: Vec<String> = s.doc.sketch(sketch).unwrap().points.iter().map(|p| p.id.clone()).collect();
         let pair = json!({"a": {"sketch": sketch, "point": points[0]}, "b": {"sketch": sketch, "point": points[1]}});
         let before = s.doc.to_json();
-        for extra in [
-            json!({"corner": "auto"}),
-            json!({"corner": "mitre"}),
-            json!({"corner": "butt"}),
-            json!({"corners": [{"members": [&rails[0], &posts[0]], "kind": "none"}]}),
-            json!({"flip": true}),
-            json!({"fit_ends": true}),
-            json!({"coped": true}),
-            json!({"gap": "0 mm"}),
-            json!({"gap": "2 mm"}),
-            json!({"pairs": [pair]}),
+        let mirrored = |p: &mut Value| p["groups"][1]["mirror"] = json!(true);
+        for (extra, mirror, want) in [
+            // Finishing without a corner type finishes nothing.
+            (json!({"flip": true}), false, "only with a corner type"),
+            (json!({"fit_ends": true}), false, "only with a corner type"),
+            (json!({"coped": true}), false, "only with a corner type"),
+            (json!({"gap": "2 mm"}), false, "only with a corner type"),
+            (json!({"pairs": [pair]}), false, "not supported yet: frame member groups with point pairs"),
+            // Groups finished together share one section.
+            (json!({"corner": "mitre"}), true, "not supported yet: corners between mirrored and unmirrored"),
         ] {
             let mut p = grouped(&rails, &posts);
             p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            if mirror {
+                mirrored(&mut p);
+            }
             let err = s.execute("frame.member", &p).unwrap_err().to_string();
-            assert!(err.contains("not supported yet: frame member groups"), "{p}: {err}");
+            assert!(err.contains(want), "{p}: {err}");
             assert_eq!(s.doc.to_json(), before, "refusing an unsupported combination is atomic");
         }
+    }
+}
+
+/// Groups with a corner type are one frame: its corners are finished across the groups, and a
+/// corner override between a rail and a post sets that one joint's type, order and gap. A square
+/// tube looks the same turned a quarter, so the posts' group turn changes nothing: the grouped
+/// frame is the flat frame, member for member, named by its groups.
+#[test]
+fn groups_with_a_corner_type_finish_their_corners_together() {
+    let build = |grouped_lines: bool, extra: Value| {
+        let mut s = Session::default();
+        rectangle_frame(&mut s);
+        let (rails, posts) = rails_and_posts(&s);
+        let mut p = if grouped_lines {
+            json!({"sketch": "Frame", "profile": tube(), "groups": [
+                {"lines": rails, "body_name": "Rail"},
+                {"lines": posts, "angle": "90 deg", "body_name": "Post"},
+            ]})
+        } else {
+            json!({"sketch": "Frame", "profile": tube()})
+        };
+        let corner = json!([{"members": [&posts[0], &rails[0]], "kind": "butt", "gap": "3 mm"}]);
+        let extra = if extra == json!("override") { json!({"corner": "mitre", "corners": corner}) } else { extra };
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        run(&mut s, "frame.member", p);
+        let b = bodies(&mut s);
+        // (volume, box), by where each member lies: bodies come in group order, flat ones in drawing order.
+        let mut got: Vec<(f64, [f64; 3], [f64; 3])> = b.iter().map(|x| (x.1, x.2, x.3)).collect();
+        got.sort_by(|a, c| (a.1[0] + a.2[0], a.1[1] + a.2[1]).partial_cmp(&(c.1[0] + c.2[0], c.1[1] + c.2[1])).unwrap());
+        (got, b.iter().map(|x| x.0.clone()).collect::<Vec<_>>())
+    };
+    for extra in [json!({"corner": "mitre"}), json!({"corner": "butt", "gap": "2 mm"}), json!("override")] {
+        let (flat, _) = build(false, extra.clone());
+        let (joined, names) = build(true, extra.clone());
+        for (k, (f, j)) in flat.iter().zip(&joined).enumerate() {
+            assert!(rel(j.0, f.0) < 1e-9 && near3(j.1, f.1) && near3(j.2, f.2), "{extra}: member {k}: {j:?} vs flat {f:?}");
+        }
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(sorted, ["Post", "Post (2)", "Rail", "Rail (2)"], "{extra}");
+    }
+    // The override butts the first post against the bottom rail with its own 3 mm gap, unlike a mitre.
+    let (mitred, _) = build(true, json!({"corner": "mitre"}));
+    let (overridden, _) = build(true, json!("override"));
+    assert!(overridden.iter().zip(&mitred).any(|(o, m)| rel(o.0, m.0) > 1e-3), "the override changes that corner: {overridden:?} vs {mitred:?}");
+    // Each group keeps its own placement in one frame: the angle rails keep their 40 mm leg up, the
+    // posts turned a quarter put their 60 mm leg up, and the mitres shorten nobody's section.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    let mut p = grouped(&rails, &posts);
+    p["corner"] = json!("mitre");
+    run(&mut s, "frame.member", p);
+    let bs = boxes(&mut s);
+    let size = |name: &str| {
+        let (lo, hi) = bs[name];
+        [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]
+    };
+    for (name, across) in [("Rail", [60.0, 40.0]), ("Rail (2)", [60.0, 40.0]), ("Post", [40.0, 60.0]), ("Post (2)", [40.0, 60.0])] {
+        let got = size(name);
+        let (w, h) = if name.starts_with("Rail") { (got[1], got[2]) } else { (got[0], got[2]) };
+        assert!((w - across[0]).abs() < 1e-6 && (h - across[1]).abs() < 1e-6, "{name}: {got:?} {bs:?}");
     }
 }
 

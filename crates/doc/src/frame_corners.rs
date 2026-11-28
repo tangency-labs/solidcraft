@@ -77,6 +77,10 @@ pub struct CornerOverride {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Gap")]
     pub gap: Option<Expr>,
+    /// Whether a butt here copes its butting member to the through member's real shape; none: the
+    /// frame's Coped. Only a butt (Auto's butts included) is coped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coped: Option<bool>,
 }
 
 impl CornerOverride {
@@ -94,6 +98,8 @@ struct RawOverride {
     kind: CornerType,
     #[serde(default)]
     gap: Option<Expr>,
+    #[serde(default)]
+    coped: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -113,7 +119,7 @@ impl From<RawOverride> for CornerOverride {
                 RawMember::Ref(m) => m,
             })
             .collect();
-        CornerOverride { members, kind: r.kind, gap: r.gap }
+        CornerOverride { members, kind: r.kind, gap: r.gap, coped: r.coped }
     }
 }
 
@@ -126,6 +132,8 @@ pub struct Override {
     pub corner: CornerType,
     pub flip: bool,
     pub gap: f64,
+    /// Whether a butt here is coped; none: the frame's Coped.
+    pub coped: Option<bool>,
 }
 
 /// The largest weld gap (mm).

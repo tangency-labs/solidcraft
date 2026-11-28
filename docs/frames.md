@@ -183,13 +183,15 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
   **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
   Group** removes the one shown. A line belongs to one group only.
-  Several groups currently require **None**, with no corner overrides, point pairs, **Flip**,
-  **Fit Ends**, **Coped** or weld gap. Unsupported combinations report an error and keep the
-  selected settings; they are not silently dropped. Use separate Frame Members for joined
-  corners or point pairs. A single group uses the normal flat form and retains all corner,
-  pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
-  using each group's actual anchor, mirror and rotation. **Offset A**, **Offset B** and the hot
-  points act on the group shown and are kept with it.
+  With a **Corner Type** other than None, or Corner Overrides, the groups are one frame: their
+  corners are finished across the groups exactly as in a frame of one group, and a Corner Override
+  between a member of one group and a member of another sets that one joint's type, Flip and
+  **Gap**. The groups then share one section, so they must agree on **Mirror** (turn a group with
+  **Angle** instead). Under None each group is laid on its own, as before, and **Flip**, **Fit
+  Ends**, **Coped** and the weld gap are refused. Point pairs still need a Frame Member of their
+  own. Later flat frames can fit their ends to earlier grouped members, using each group's actual
+  anchor, mirror and rotation. **Offset A**, **Offset B** and the hot points act on the group shown
+  and are kept with it.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -249,7 +251,8 @@ A corner sharper than 5 degrees inside is refused: "Corner at (x, y, z) is too s
   largest piece on its own side of the through member, and a member that lies wholly inside the
   through member is refused.
 
-**Corner Overrides** (`corners`) give single corners their own type, member order and weld gap.
+**Corner Overrides** (`corners`) give single corners their own type, member order, weld gap and
+Coped (`coped` on the entry; empty: the frame's), so one butt can be coped and the next left plain.
 Each is saved by the ids of the members that meet there, in order (a line's id, or a pair's
 `pair1`, `pair2`…; a point where three or more end takes an override only under Auto), not by the
 point, so it survives a dimension change while the members still meet. The first member runs
@@ -270,7 +273,9 @@ where three or more end.
 In the dialog, a box drag in the view picks the frame sketch's straight lines (not construction,
 projected lines or arcs), and the corner points when Corner Overrides is active (Shift adds). Each
 override is one row, **Corner 1**, **Corner 2**… in pick order: its type, its **Flip** (greyed for
-None and Mitre) and a bin that removes it, with a **Gap** row under it. The arrow on the Corner
+None and Mitre) and a bin that removes it, with a **Gap** row and a **Coped** row under it (Coped
+greyed but for a Butt or Auto corner; left alone it follows the frame's Coped, and it is saved only
+where it differs). The arrow on the Corner
 Overrides line folds the rows away; picking another corner opens them again. Pointing at an overridden corner in the view lights
 its row (or the Corner Overrides line while the rows are folded).
 
@@ -471,7 +476,7 @@ tubes that overlap takes no `gap`: an overlap is notched, not welded".
 
 **Member order.** An override is saved as `{"members": [{"line": "l1"}, {"line": "l2"}], "kind":
 "butt", "gap": "2 mm"}`: its members in order (a line's id or a pair's `pair1`…), its `kind` (`auto`,
-`none`, `mitre` or `butt`) and its `gap` only when it has one. The order is fixed and decides the
+`none`, `mitre` or `butt`), and its `gap` and `coped` only when it has them. The order is fixed and decides the
 build, whatever later sketch edits do to the members' lengths:
 
 - Two members: the first runs through a Butt (coped or not) and is Auto's long tube at a butt or
@@ -508,9 +513,10 @@ are its UI) sets, changes or removes one override of a Frame Member in place, as
 - `members`: 2 to 1000 line or pair ids (or `{feature?, line}`), in order, which must meet at a
   corner, crossing or overlap of the frame ("a corner override is not at a corner of the frame"). A
   piece of a crossing (`L>X`) is refused, as in `frame.member`: name its line.
-- `kind`: `auto` (the default), `none`, `mitre` or `butt`. `flip` and `gap` as above.
+- `kind`: `auto` (the default), `none`, `mitre` or `butt`. `flip` and `gap` as above. `coped`: a butt
+  here copes the butting tube (default: the frame's `coped`).
 - `remove: true` takes away the override of these members (in any order), and the corner goes back
-  to the frame's own rules; `kind`, `flip` or `gap` with it is refused. It also removes an override
+  to the frame's own rules; `kind`, `flip`, `gap` or `coped` with it is refused. It also removes an override
   whose members no longer meet after a sketch edit.
 
 It replaces the override of the same members (in any order) or adds one, and returns the edited
@@ -587,7 +593,9 @@ placement axes, expressions and hole-pattern limits.
   in the feature's one profile, each placed and named its own way. Each group lists its lines, and
   no line is in two groups. With `groups`, give `lines`, `anchor`, `locate`, `angle`, `mirror` and
   `body_name` in each group, not beside them. A feature with one group saves as before, so designs without
-  groups don't change.
+  groups don't change. `corner`, `corners`, `flip`, `fit_ends`, `coped` and `gap` stay beside the
+  groups and finish the whole frame (a `corners` entry may list lines of different groups); with
+  them every group has the same `mirror`.
 
 ### A bent chassis tube
 
