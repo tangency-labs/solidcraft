@@ -393,6 +393,7 @@ pub fn find_brep_region_of_other_face(
         }
         break;
     }
+    let mut query: Option<BrepQuery<'static>> = None;
     for other_eu in edges {
         let e = eu::edge(other, other_eu)?.ok_or_else(|| {
             SolidError::boolean_null_defect(
@@ -415,14 +416,10 @@ pub fn find_brep_region_of_other_face(
         else {
             continue;
         };
+        let query = query.get_or_insert_with(|| BrepQuery::of_brep(brep));
         // (the classification's construction tolerance, the edge's, is not read)
         let Some(pc) = ignore_failure(classify_point_editing_disabled(
-            k,
-            &BrepQuery::of_brep(brep),
-            brep,
-            point,
-            0.0,
-            false,
+            k, query, brep, point, 0.0, false,
         ))?
         else {
             continue;
@@ -434,6 +431,68 @@ pub fn find_brep_region_of_other_face(
         // use the point's classified region as the input face's Brep region
         return match pc.object() {
             Some(EntityRef::Region(r)) => Ok(Some(r)),
+            _ => Err(SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Classify,
+                "the point classified to a region records no region, though a region class \
+                 always records the region it found",
+            )),
+        };
+    }
+    Ok(None)
+}
+
+/// Classify an unmated other-operand face use into a primary region using a caller-owned
+/// [`BrepQuery`], returning both the region and the classified sample point on the edge
+/// that settled it (not upstream). Used by `make_other_faces` to share one `BrepQuery`
+/// across all disjoint seed faces before mutating `brep`.
+pub(crate) fn classify_unmated_other_face_with_query(
+    k: &Kernel,
+    brep: &mut Brep,
+    other: &Brep,
+    other_faceuse: FaceuseId,
+    query: &BrepQuery<'_>,
+) -> Result<Option<(RegionId, Point3)>> {
+    let listed = crate::topology::brep::p1::regions(brep, None)?;
+    let single_region = if listed.len() == 1 {
+        listed.first().copied()
+    } else {
+        None
+    };
+    let edges = eu::faceuse_edgeuses(other, other_faceuse, false, None)?;
+    for other_eu in edges {
+        let e = eu::edge(other, other_eu)?.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Classify,
+                "an edge use of the other face's loops has no edge, though the kernel links \
+                 every edge use to its edge",
+            )
+        })?;
+        let edge = other.edge(e)?;
+        let curve = edge
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::EdgeWithoutCurve))?;
+        let Some(point) =
+            ignore_failure(curve.evaluate_point(k, edge.interval.evaluate(0.456789)))?
+        else {
+            continue;
+        };
+        if let Some(region) = single_region {
+            return Ok(Some((region, point)));
+        }
+        let Some(pc) = ignore_failure(classify_point_editing_disabled(
+            k, query, brep, point, 0.0, false,
+        ))?
+        else {
+            continue;
+        };
+        if pc.point_class() != PointClassType::Region {
+            continue;
+        }
+        return match pc.object() {
+            Some(EntityRef::Region(r)) => Ok(Some((r, point))),
             _ => Err(SolidError::boolean_null_defect(
                 OP,
                 BooleanStage::Classify,

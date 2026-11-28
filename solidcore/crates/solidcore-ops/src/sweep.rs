@@ -1157,7 +1157,9 @@ fn round_closed_segments(
 ) -> solidcore::Result<Out<(Brep, [Affine; 3])>> {
     let expect = if cap { Expect::SOLID } else { Expect::FACES };
     match sweep_round_closed_segments(k, curves, segs, cap, &PATH) {
-        Ok((b, motions)) => Ok(finish_proved(k, b, expect)?.map(|(b, _)| (b, motions.map(|t| Affine::of(&t))))),
+        Ok((b, motions)) => {
+            Ok(finish_proved(k, b, expect)?.map(|(b, _)| (b, motions.map(|t| Affine::of(&t)))))
+        }
         Err(e) => Ok(Err(status(e))),
     }
 }
@@ -1196,13 +1198,6 @@ pub fn sweep_placed(
     if let SweepFrame::Upright(u) = frame {
         if !u.iter().all(|x| x.is_finite()) {
             return Err(Error::Argument);
-        }
-    }
-    // Round a closed path of lines and arcs the same exact pieces, their walls closing on each
-    // other where the path closes: no caps.
-    if frame == SweepFrame::Follow {
-        if let Some((b, placed)) = sweep_round_closed_path(profile, path, cap)? {
-            return Ok((b, placed, SweepRoute::Segments));
         }
     }
     let mut placed = unplaced();
@@ -1321,7 +1316,20 @@ pub fn sweep_placed(
                 Err(e) => Err(status(e)),
             },
         )
-    })?;
+    });
+    let body = match body {
+        Ok(b) => b,
+        // Round a closed path of lines and arcs the curve sweep cannot close (a wall shrinking
+        // to an edge): the same exact pieces, the walls closing on each other. Where the curve
+        // sweep builds, its result stays.
+        Err(e) if frame == SweepFrame::Follow => {
+            match sweep_round_closed_path(profile, path, cap) {
+                Ok(Some((b, placed))) => return Ok((b, placed, SweepRoute::Segments)),
+                Ok(None) | Err(_) => return Err(e),
+            }
+        }
+        Err(e) => return Err(e),
+    };
     Ok((body, placed, route))
 }
 

@@ -21,6 +21,7 @@ use solidcore_tess::{EvalCurve, EvalSurface};
 
 pub mod capture;
 pub mod concurrent;
+mod device_lost;
 mod environment;
 pub mod pbr;
 #[cfg(not(target_arch = "wasm32"))]
@@ -28,6 +29,8 @@ pub mod select;
 #[cfg(test)]
 mod test_env;
 pub mod view;
+
+pub use device_lost::{DeviceLost, capture_errors};
 
 /// The tessellation compute shader (WGSL).
 pub const SHADER: &str = include_str!("../shaders/tess.wgsl");

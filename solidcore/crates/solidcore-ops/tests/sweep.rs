@@ -2315,7 +2315,6 @@ fn a_profile_bezier_that_turns_sharply_at_its_end_cuts_through_its_plate() {
     assert!((v - 12880.7424621202).abs() <= 1e-6, "{v}");
 }
 
-
 /// A closed `2a` x `2b` rounded rectangle (corner radius `r`) about the origin in z = 0, from
 /// the middle of its bottom line.
 fn rounded_rectangle(a: f64, b: f64, r: f64) -> Vec<Curve> {
@@ -2371,7 +2370,7 @@ fn closed_sweep(name: &str, profile: &[Curve], path: &[Curve], want: f64) -> (Bo
 /// path), `4 (2 (40 - 4) + 2 (20 - 4) + 4 pi)`, with the walls of the 4 profile edges along
 /// the 9 pieces less the 4 corners' inner walls: 32 faces. Its neighbours: inner radius 1e-6
 /// either way, the outside one still a solid; 0.1 past the centres the inner wall turns back
-/// through itself, and that is refused.
+/// through itself, and that stays with the curve sweep.
 #[test]
 fn a_closed_sweep_whose_inner_edge_lies_on_the_corner_centres_is_a_solid() {
     rig_fixes();
@@ -2396,7 +2395,14 @@ fn a_closed_sweep_whose_inner_edge_lies_on_the_corner_centres_is_a_solid() {
         );
     }
     let past = sweep_placed(&across(-10.0, 2.1, 1.0), &path, SweepFrame::Follow, true);
-    assert!(past.is_err(), "{past:?}");
+    // past the centres the curve sweep answers as it always did: the exact route is only the
+    // fallback where the curve sweep refuses
+    assert!(
+        past.as_ref().map_or(true, |(_, _, r)| *r
+            == SweepRoute::Curve(SweepFrame::Follow)),
+        "{:?}",
+        past.as_ref().map(|(_, _, r)| r)
+    );
 }
 
 /// Corner radii 0.5 to 5 with the profile's inner edge on the corner centres (half width the
@@ -2536,4 +2542,3 @@ fn a_ring_swept_round_a_closed_path_to_the_corner_centres_is_a_solid() {
     let (_, route) = closed_sweep("ring", &profile, &path, 3.0 * length);
     assert_eq!(route, SweepRoute::Segments);
 }
-
