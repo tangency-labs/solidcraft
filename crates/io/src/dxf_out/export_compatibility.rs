@@ -5,7 +5,10 @@
 //! the ordinary DxfFile constructor keeps the strict owned-file admission.
 //! Numbers follow the writer's one rule on both routes.
 
-use super::{DxfExportProfile, DxfFile, DxfLinetype, DxfShape, EntityView, LayerView, extend_extents, path, shape_work, write_drawing_views};
+use super::{
+    ARC_EXTENT_SAMPLES, DxfExportProfile, DxfFile, DxfLinetype, DxfShape, EntityView, LayerView, extend_extents, path, shape_work,
+    write_drawing_views,
+};
 use crate::{IoError, Result};
 use solidcore_record::Vec2;
 use std::collections::{HashMap, hash_map::Entry};
@@ -120,7 +123,7 @@ impl Budget {
             Producer::CurrentView => matches!(shape, DxfShape::Line(..) | DxfShape::Polyline { .. }),
             Producer::CurrentViewArcs => {
                 matches!(shape, DxfShape::Line(..) | DxfShape::Polyline { .. })
-                    || (layer == "VISIBLE" && matches!(shape, DxfShape::Circle { .. } | DxfShape::Arc { .. }))
+                    || (matches!(layer, "VISIBLE" | "SKETCH") && matches!(shape, DxfShape::Circle { .. } | DxfShape::Arc { .. }))
             }
             Producer::FlatPattern => match layer {
                 "BEND_UP" | "BEND_DOWN" | "ROLL" | "FORM_UP" | "FORM_DOWN" => matches!(shape, DxfShape::Line(..)),
@@ -212,24 +215,53 @@ impl DxfFile<DxfShape> {
     /// already limits lines+paths to 1,000,000; connecting hidden lines reduces it.
     /// Sketch point counts may exceed the generic writer's 1,000,000-value cap.
     pub fn for_current_view_export(lines: usize, sketch_paths: usize, sketch_points: usize) -> Result<Self> {
-        Self::current_view_export_plan(lines, sketch_paths, sketch_points, false)
+        Self::current_view_export_plan(lines, sketch_paths, sketch_points, false, &[])
     }
 
     /// The current view's optional recognized-circle/arc output, with unchanged source limits.
     /// Each source line can contribute at most one ARC's 65 legacy extent samples;
     /// recognition only reduces the source entity count. Generic owned limits are unchanged.
     pub fn for_current_view_arc_export(lines: usize, sketch_paths: usize, sketch_points: usize) -> Result<Self> {
-        Self::current_view_export_plan(lines, sketch_paths, sketch_points, true)
+        Self::for_current_view_arc_export_with_sketch_arcs(lines, sketch_paths, sketch_points, &[])
     }
 
-    fn current_view_export_plan(lines: usize, sketch_paths: usize, sketch_points: usize, arcs: bool) -> Result<Self> {
+    /// The same source plan with the original point count of each visible sketch path that
+    /// became one ARC. CIRCLEs use two extent values and already fit the path's point budget.
+    /// Other sketch paths keep their original point work; no generic owned-file cap is added.
+    pub fn for_current_view_arc_export_with_sketch_arcs(
+        lines: usize,
+        sketch_paths: usize,
+        sketch_points: usize,
+        arc_source_points: &[usize],
+    ) -> Result<Self> {
+        Self::current_view_export_plan(lines, sketch_paths, sketch_points, true, arc_source_points)
+    }
+
+    fn current_view_export_plan(lines: usize, sketch_paths: usize, sketch_points: usize, arcs: bool, arc_source_points: &[usize]) -> Result<Self> {
         let entities = add(lines, sketch_paths)?;
         if entities > 1_000_000 || sketch_points < mul(sketch_paths, 2)? {
             return Err(invalid("view plan does not match admitted output counts"));
         }
+        if arc_source_points.len() > sketch_paths {
+            return Err(invalid("view arc plan has more arcs than source paths"));
+        }
+        let mut arc_points = 0;
+        let mut arc_top_up = 0;
+        for &points in arc_source_points {
+            if points < 2 {
+                return Err(invalid("view arc source path requires at least two points"));
+            }
+            arc_points = add(arc_points, points)?;
+            arc_top_up = add(arc_top_up, ARC_EXTENT_SAMPLES.saturating_sub(points))?;
+        }
+        let other_points = mul(sketch_paths - arc_source_points.len(), 2)?;
+        if add(arc_points, other_points)? > sketch_points {
+            return Err(invalid("view arc source counts exceed the sketch point plan"));
+        }
         let producer = if arcs { Producer::CurrentViewArcs } else { Producer::CurrentView };
-        let values_per_line = if arcs { 65 } else { 2 };
-        let budget = Budget::new(producer, 4, entities, add(mul(lines, values_per_line)?, sketch_points)?, 0, 4)?;
+        let values_per_line = if arcs { ARC_EXTENT_SAMPLES } else { 2 };
+        let values = add(add(mul(lines, values_per_line)?, sketch_points)?, arc_top_up)?;
+        let budget = Budget::new(producer, 4, entities, values, 0, 4)?;
         Self::with_export_budget(budget)
     }
 }

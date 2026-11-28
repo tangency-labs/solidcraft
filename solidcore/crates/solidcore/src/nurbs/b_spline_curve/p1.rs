@@ -2078,6 +2078,7 @@ impl crate::geom::content::Content for BSplineCurve {
 mod tests {
     use super::*;
     use crate::error::nurbs::NurbsFailure;
+    use crate::math::det;
     use crate::Kernel;
 
     fn cubic() -> BSplineCurve {
@@ -2370,7 +2371,7 @@ mod tests {
         let e = BSplineCurve::create_arc_from_points(
             Point3::ZERO,
             Point3::new(1.0, 0.0, 0.0),
-            Point3::new(t.cos(), t.sin(), 0.0),
+            Point3::new(det::cos(t), det::sin(t), 0.0),
             NurbCircleParam::Quadratic,
         )
         .unwrap_err();

@@ -64,7 +64,7 @@ pub fn paint_circle(ui: &Ui, square: Rect, response: &Response, on: bool) {
         t.control_fill
     };
     let stroke = if on {
-        egui::Stroke::new(1.0, egui::Color32::WHITE)
+        egui::Stroke::new(1.0, t.on_accent)
     } else if response.hovered() || response.has_focus() {
         egui::Stroke::new(1.0, t.form_primary)
     } else {

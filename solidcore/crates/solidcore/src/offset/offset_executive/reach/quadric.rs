@@ -99,6 +99,13 @@ pub(super) fn value_and_gradient(q: &Implicit, x: I3) -> Option<(Ivl, I3)> {
     evaluate(q, enclosed(x)).map(|(f, g, _)| (f.v, values(g)))
 }
 
+/// Whether every point of `x` is on the quadric's own nappe where it is on its implicit
+/// equation: a cone's radius `r + t z` there proved non-negative (the equation holds the
+/// other nappe too), as [`meet`] asks of its roots; a sphere's always.
+pub(super) fn on_nappe(q: &Implicit, x: I3) -> bool {
+    evaluate(q, enclosed(x)).is_some_and(|(_, _, r)| r.v.lo >= 0.0)
+}
+
 /// The radical plane of two cylinders on one axis direction: where their implicit
 /// functions are equal. For the axis `a` (the second's the same, or its exact negation)
 /// and `P v = v − a (a·v)`, each cylinder is `|P (x − o)|² − r² = 0`, and `|P v|² =

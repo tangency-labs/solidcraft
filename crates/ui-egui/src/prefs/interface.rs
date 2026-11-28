@@ -187,8 +187,9 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
                 accent_row(app, ui);
                 // A theme file another tool writes, reloaded when it changes (#7573); or the
-                // organization's (the `ThemeFile` policy), which the person cannot change.
-                let locked = app.policy.locks("theme_follow");
+                // organization's (the `ThemeFile` policy), which the person cannot change. A locked
+                // `Theme` locks it too, so a file cannot override the organization's theme.
+                let locked = app.policy.locks("theme") || app.policy.locks("theme_follow");
                 crate::policy::row(ui, locked, |ui| follow_row(app, ui));
             });
         });
@@ -231,25 +232,13 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             );
             ui_kit::divider(ui, "scale_font");
             if !cfg!(target_arch = "wasm32") {
+                let font_locked = app.policy.locks("ui_font");
                 ui_kit::settings_font_row(ui, solidcraft_ui_text::tr("prefs.font"), |ui, part| {
                     if part == 0 {
-                        ui_font_row(app, ui);
+                        crate::policy::row(ui, font_locked, |ui| ui_font_row(app, ui));
                         return;
                     }
-                    if ui_kit::button(ui, app.tr("prefs.choose_font"), ui_kit::Button::Normal).clicked() {
-                        app.pick_open_for(&["ttf", "otf", "ttc"], |app, path| {
-                            if let Some(path) = path {
-                                if crate::fonts::ui_font(&path).is_some() {
-                                    app.preferences.ui_font = path;
-                                } else {
-                                    app.set_status(solidcraft_ui_text::tr("prefs.font_unreadable"), true);
-                                }
-                            }
-                        });
-                    }
-                    if ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
-                        app.preferences.ui_font.clear();
-                    }
+                    ui.add_enabled_ui(!font_locked, |ui| font_file_buttons(app, ui));
                 });
                 ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.backing_on_hover_text(app.tr("prefs.font_fallback"));
             }
@@ -306,41 +295,37 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui,
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
+                        let locked = app.policy.locks("layout");
                         ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
-                            let mut selected = usize::from(app.ui.layout == crate::ui_kit::LayoutMode::Docked);
-                            if ui_kit::segmented(
-                                ui,
-                                &mut selected,
-                                &[solidcraft_ui_text::tr("ui.layout_floating"), solidcraft_ui_text::tr("ui.layout_compact")],
-                                ui_kit::Segments { intrinsic: true, ..Default::default() },
-                            ) {
-                                let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
-                            }
+                            crate::policy::row(ui, locked, |ui| {
+                                let mut selected = usize::from(app.ui.layout == crate::ui_kit::LayoutMode::Docked);
+                                if ui_kit::segmented(
+                                    ui,
+                                    &mut selected,
+                                    &[solidcraft_ui_text::tr("ui.layout_floating"), solidcraft_ui_text::tr("ui.layout_compact")],
+                                    ui_kit::Segments { intrinsic: true, ..Default::default() },
+                                ) {
+                                    let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
+                                }
+                            });
                         });
+                        let locked = app.policy.locks("ribbon_labels");
                         ui_kit::row(ui, app.tr("prefs.toolbar"), |ui| {
-                            let mut selected = usize::from(!app.preferences.ribbon_labels);
-                            if ui_kit::segmented(
-                                ui,
-                                &mut selected,
-                                &[app.tr("prefs.labels"), app.tr("prefs.icons_only")],
-                                ui_kit::Segments { intrinsic: true, ..Default::default() },
-                            ) {
-                                app.preferences.ribbon_labels = selected == 0;
-                            }
+                            crate::policy::row(ui, locked, |ui| {
+                                let mut selected = usize::from(!app.preferences.ribbon_labels);
+                                if ui_kit::segmented(
+                                    ui,
+                                    &mut selected,
+                                    &[app.tr("prefs.labels"), app.tr("prefs.icons_only")],
+                                    ui_kit::Segments { intrinsic: true, ..Default::default() },
+                                ) {
+                                    app.preferences.ribbon_labels = selected == 0;
+                                }
+                            });
                         });
                         let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(app.tr("prefs.legacy_surface_toolbar_hint"));
                         crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
-                        ui_kit::row(ui, app.tr("prefs.menus"), |ui| {
-                            let mut selected = usize::from(app.preferences.ribbon_icon_grid);
-                            if ui_kit::segmented(
-                                ui,
-                                &mut selected,
-                                &[app.tr("prefs.menu_list"), app.tr("prefs.menu_grid")],
-                                ui_kit::Segments { intrinsic: true, ..Default::default() },
-                            ) {
-                                app.preferences.ribbon_icon_grid = selected == 1;
-                            }
-                        });
+
                         let response = setting::construct_menu_groups(app, ui);
                         crate::scenario::publish_target("prefs:construct_menu_groups", response.rect);
                         ui_kit::row(ui, app.tr("prefs.toast_place"), |ui| {
@@ -362,7 +347,15 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 crate::scenario::publish_handle(&format!("prefs:toast_place:{key}"), at);
                             }
                         }
-                        layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        let locked = app.policy.locks("status_bar");
+                        locked_layout_check(
+                            ui,
+                            app.tr("prefs.status_bar"),
+                            app.tr("prefs.status_bar_note"),
+                            &mut app.preferences.status_bar,
+                            "status_bar",
+                            locked,
+                        );
                         // The operations under way, with their Cancel, in the view's corner.
                         layout_check(
                             ui,
@@ -410,13 +403,15 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 "tab_double_click_renames",
             );
             windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
-            layout_check(
-                ui,
-                app.tr("prefs.show_window_controls"),
-                app.tr("prefs.show_window_controls_help"),
-                &mut app.preferences.show_window_controls,
-                "show_window_controls",
-            );
+            if super::platform::shown(app, super::platform::Needs::OwnWindowButtons) {
+                layout_check(
+                    ui,
+                    app.tr("prefs.show_window_controls"),
+                    app.tr("prefs.show_window_controls_help"),
+                    &mut app.preferences.show_window_controls,
+                    "show_window_controls",
+                );
+            }
             layout_check(
                 ui,
                 app.tr("window_ribbon.ribbon"),
@@ -841,7 +836,7 @@ fn check_columns(ui: &mut egui::Ui, app: &mut SolveApp, caption: Option<&'static
                         let (label, help) = (app.tr(check.label), app.tr(check.help));
                         // The box gets the whole cell: sized to its label alone, a label a fraction wider
                         // at a fractional display scale would end in an ellipsis.
-                        check_row(ui, label, help, (check.value)(&mut app.preferences), check.key);
+                        check_row(ui, label, help, (check.value)(&mut app.preferences), check.key, false, 0.0);
                     });
                 }
             });
@@ -890,23 +885,51 @@ fn browser_tree_check(ui: &mut egui::Ui, app: &mut SolveApp, label: &str, help: 
 
 /// Keep native checkbox responses and one real search target; guidance stays on hover.
 fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str) {
+    locked_layout_check(ui, label, help, value, key, false);
+}
+
+/// A layout checkbox that an organization's policy can lock: greyed out, with "Set by your organization".
+fn locked_layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str, locked: bool) {
     let t = Tokens::get();
-    let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
+    // A locked row is wider by its "Set by your organization" note.
+    let note = if locked { crate::policy::note_width(ui) } else { 0.0 };
+    let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16 + note).min(ui.max_rect().width());
     ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-        check_row(ui, label, help, value, key);
+        check_row(ui, label, help, value, key, locked, note);
     });
 }
 
-/// The box, its label and its help icon, in the width `ui` gives them.
-fn check_row(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str) {
+/// The box, its label and its help icon, in the width `ui` gives them; a locked box is greyed
+/// out with "Set by your organization" in the `note` width beside it.
+fn check_row(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str, locked: bool, note: f32) {
     let t = Tokens::get();
     ui_kit::settings_form(ui, 0.0, |ui| {
         ui_kit::row(ui, "", |ui| {
             ui.spacing_mut().item_spacing.x = t.space_6;
-            let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
-            let response = ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help));
+            let check_width = (ui.available_width() - t.space_16 - t.space_6 - note).max(0.0);
+            let response = crate::policy::row(ui, locked, |ui| {
+                ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help))
+            });
             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
             ui_kit::help_icon(ui, help);
         })
     });
+}
+
+/// Choose a font file for the interface, or go back to the built-in font.
+fn font_file_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if ui_kit::button(ui, app.tr("prefs.choose_font"), ui_kit::Button::Normal).clicked() {
+        app.pick_open_for(&["ttf", "otf", "ttc"], |app, path| {
+            if let Some(path) = path {
+                if crate::fonts::ui_font(&path).is_some() {
+                    app.preferences.ui_font = path;
+                } else {
+                    app.set_status(solidcraft_ui_text::tr("prefs.font_unreadable"), true);
+                }
+            }
+        });
+    }
+    if ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
+        app.preferences.ui_font.clear();
+    }
 }

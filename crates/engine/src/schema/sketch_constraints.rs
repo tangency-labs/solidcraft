@@ -287,8 +287,8 @@ pub struct FinishAutoConstrainParams {
     pub sketch: Option<SketchTarget>,
 }
 
-/// Make a dimension driven (it measures, and is no longer a parameter) or driving again (it gets
-/// a parameter holding its current value).
+/// Make a dimension driven (it measures; with `name`, exposes its value as a read-only parameter)
+/// or driving again (it gets a parameter holding its current value).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = driven_required)]
 pub struct ToggleDrivenParams {
@@ -299,6 +299,9 @@ pub struct ToggleDrivenParams {
     /// `true` for driven, `false` for driving. Default: the other one from now.
     #[serde(default)]
     pub driven: Option<bool>,
+    /// Optional read-only parameter name for a driven dimension (#14426).
+    #[serde(default)]
+    pub name: Option<String>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -422,6 +425,9 @@ pub struct ToggleDrivenResult {
     pub constraint: String,
     /// Whether it is driven now.
     pub driven: bool,
+    /// The read-only parameter name when a driven dimension was named (#14426).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param: Option<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// What the command added to its sketch, `{points, curves, constraints, dimensions}` (lists

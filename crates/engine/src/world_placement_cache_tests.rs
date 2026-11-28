@@ -509,3 +509,93 @@ fn world_bodies_know_the_occurrence_path_that_places_them() {
         assert!(paths.contains(&want), "{want:?} in {paths:?}");
     }
 }
+
+/// Driving a slider joint on an assembly whose stationary housing has in-place features referencing
+/// faces of a moving cap (captured face-anchored sketch + auto-projected border, offset plane on
+/// the moving face, To-Object extrude with pinned placements, and downstream cuts) must recompute
+/// zero timeline features while moving the cap and its rigidly attached group accurately.
+#[test]
+fn in_place_features_referencing_moving_part_faces_recompute_zero_features_on_joint_drive() {
+    let mut session = Session::default();
+    let housing = run(&mut session, "component.create", json!({"name":"Housing","grounded":true}));
+    let housing_comp = housing["component"].as_u64().unwrap();
+    let housing_occ = housing["occurrence"].as_u64().unwrap();
+    run(&mut session, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":20,"body_name":"HousingBody"}));
+
+    run(&mut session, "component.activate", json!({"component":"root"}));
+    let cap = run(&mut session, "component.create", json!({"name":"Cap","grounded":false}));
+    let cap_occ = cap["occurrence"].as_u64().unwrap();
+    run(&mut session, "solid.box", json!({"corner":[-20,-20,40],"length":40,"width":40,"height":10,"body_name":"CapBody"}));
+
+    // Attach several rigid follower parts to the moving cap to mirror a multi-body rigid group.
+    let mut follower_occs = Vec::new();
+    for i in 0..5 {
+        run(&mut session, "component.activate", json!({"component":"root"}));
+        let f = run(&mut session, "component.create", json!({"name":format!("Follower{i}"),"grounded":false}));
+        let f_occ = f["occurrence"].as_u64().unwrap();
+        let x = -16.0 + i as f64 * 8.0;
+        run(&mut session, "solid.box", json!({"corner":[x,0,50],"length":4,"width":4,"height":6,"body_name":format!("FollowerBody{i}")}));
+        follower_occs.push((i, f_occ));
+    }
+
+    // Create in-place features on Housing referencing faces of the moving Cap.
+    run(&mut session, "component.activate", json!({"component":housing_comp,"occurrence":housing_occ,"path":[housing_occ]}));
+    // 1. Face-anchored sketch on Cap's top face (with auto_face border link) + new lug body on Housing.
+    let on_cap = run(&mut session, "sketch.create", json!({"plane":{"face":[0,-10,50]},"name":"OnCapFace"}))["sketch"].as_u64().unwrap();
+    run(&mut session, "sketch.rectangle.two_point", json!({"p0":[-4,-4],"p1":[4,4]}));
+    run(&mut session, "sketch.finish", json!({}));
+    run(&mut session, "solid.extrude", json!({"sketch":on_cap,"distance":5,"operation":"new","body_name":"HousingLug"}));
+    // 2. Construction plane offset from Cap's top face.
+    run(&mut session, "construct.plane.offset", json!({"base":{"face":[0,-10,50]},"offset":5,"name":"CapRefPlane"}));
+    // 3. To-Object extrude from Housing's XY plane up to Cap's underside at z = 40 (`picked_placements`).
+    let to_cap = run(&mut session, "sketch.create", json!({"plane":"XY","name":"UpToCap"}))["sketch"].as_u64().unwrap();
+    run(&mut session, "sketch.rectangle.two_point", json!({"p0":[6,6],"p1":[14,14]}));
+    run(&mut session, "sketch.finish", json!({}));
+    run(&mut session, "solid.extrude", json!({"sketch":to_cap,"to":[10,10,40],"operation":"join"}));
+    // 4. Chain of downstream housing cuts after the cross-component references.
+    for k in 0..6 {
+        let x = -15.0 + k as f64 * 5.0;
+        run(&mut session, "solid.box", json!({"corner":[x,-15,2],"length":3,"width":3,"height":6,"operation":"cut"}));
+    }
+
+    // Slider joint between Housing and Cap + rigid joints locking the follower group to Cap.
+    run(&mut session, "component.activate", json!({"component":"root"}));
+    run(
+        &mut session,
+        "joint.as_built",
+        json!({"type":"slider","name":"Stroke","a":"Housing","b":"Cap","at":{"occurrence":"Housing","point":[0,0,0],"z":[0,0,1]}}),
+    );
+    for &(i, _) in &follower_occs {
+        run(&mut session, "joint.as_built", json!({"type":"rigid","name":format!("Lock{i}"),"a":"Cap","b":format!("Follower{i}")}));
+    }
+    assert!(session.model.results.iter().all(|r| r.error.is_none()), "{:?}", session.model.results);
+    let housing_volume = session.model.state().body("HousingBody").unwrap().measure().unwrap().volume;
+
+    // Verify both the live session and a reopened session (loaded from saved model cache via `adopt`).
+    let saved_json = session.doc.to_json();
+    let saved_model = session.model.saved(&session.doc).unwrap();
+    let reopened_doc = crate::doc::Document::from_json(&saved_json).unwrap();
+    let mut reopened = Session::opened(reopened_doc, Some(&saved_model));
+    assert_eq!(reopened.model.last_recomputed, 0, "saved model cache must adopt without recomputing");
+
+    for target in [&mut session, &mut reopened] {
+        let definitions = target.model.state();
+        for stroke in [-20.0_f64, -100.0, -250.0, 0.0] {
+            let answer = run(target, "joint.drive", json!({"joint":"Stroke","value":stroke,"quiet":true}));
+            assert_eq!(answer["moved"], true, "stroke {stroke}: {answer}");
+            assert_eq!(answer["errors"], json!([]), "stroke {stroke}: {answer}");
+            assert_eq!(answer["conflicts"], json!([]), "stroke {stroke}: {answer}");
+            assert_eq!(target.model.last_recomputed, 0, "joint.drive to {stroke} must recompute zero features");
+            assert!(Arc::ptr_eq(&definitions, &target.model.state()), "joint.drive to {stroke} must keep the evaluated model state");
+            let cap_z = crate::doc::apply_point(&crate::doc::joints::occurrence_world(&target.doc, cap_occ), Vec3::ZERO).z;
+            assert!((cap_z - stroke).abs() < 1e-6, "cap at z={cap_z}, expected {stroke}");
+            for &(_, f_occ) in &follower_occs {
+                let fz = crate::doc::apply_point(&crate::doc::joints::occurrence_world(&target.doc, f_occ), Vec3::ZERO).z;
+                assert!((fz - stroke).abs() < 1e-6, "follower {f_occ} at z={fz}, expected {stroke}");
+            }
+            let vol = target.model.state().body("HousingBody").unwrap().measure().unwrap().volume;
+            assert!((vol - housing_volume).abs() < 1e-6, "housing volume drifted at stroke {stroke}: {vol} vs {housing_volume}");
+            assert_fresh_world(target);
+        }
+    }
+}

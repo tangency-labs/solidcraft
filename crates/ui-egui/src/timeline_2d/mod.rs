@@ -170,7 +170,7 @@ mod tests {
     /// The height the 2D Timeline's grid gets: the panel's body inside the content slot's inset.
     fn grid_height(h: &Harness) -> f32 {
         let frame = h.app.universal_panel_frame().unwrap();
-        let body = frame.layout.sections.iter().find(|s| s.instance.0 == "timeline-2d").and_then(|s| s.body).unwrap();
+        let body = frame.layout.sections.iter().find(|s| s.instance.0 == "history").and_then(|s| s.body).unwrap();
         body.size.height - 2.0 * solidcraft_theme::Tokens::get().space_2
     }
 
@@ -178,7 +178,7 @@ mod tests {
     fn drag_top_edge(h: &mut Harness, dy: f32) {
         use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
         let frame = h.app.universal_panel_frame().unwrap();
-        let section = frame.layout.sections.iter().find(|s| s.instance.0 == "timeline-2d").unwrap().section.clone();
+        let section = frame.layout.sections.iter().find(|s| s.instance.0 == "history").unwrap().section.clone();
         let edge = frame
             .controls
             .iter()
@@ -198,28 +198,32 @@ mod tests {
         h.frames(3);
     }
 
-    /// Floating the 2D Timeline from its menu leaves it just above where it was docked, at its
-    /// width and height, instead of at the free area's corner over the Browser.
+    /// The bottom History is the 2D Timeline once its row is tall: the preference raises it to the
+    /// standard height, its top edge resizes it (skipping the gap below the 2D minimum, where it
+    /// snaps back to the one-row strip), and turning the preference off lowers it.
     #[test]
-    fn test_floating_the_2d_timeline_leaves_it_where_it_was() {
-        use crate::panel_runtime::{HostControlTarget, HostSharedAction};
-        use solidcraft_engine::panels::{InstanceId, SectionLocation, Zone};
+    fn test_timeline_2d_is_the_history_panel_taller_and_resizes() {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.preferences.timeline_2d = true;
         h.call("ui.resize", json!({"width": 1400, "height": 900}));
-        h.frames(3);
-        let docked = panel_rect(&h, "timeline-2d").unwrap();
-        let instance = InstanceId("timeline-2d".into());
-        click_control(&mut h, &HostControlTarget::Pointer(crate::panel_runtime::HostPointerTarget::Menu { instance: instance.clone() }));
-        click_control(&mut h, &HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Move(Zone::Floating) });
-        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
-        let section = layout.containing(&instance).unwrap();
-        assert!(matches!(section.location, SectionLocation::Floating { .. }), "{:?}", section.location);
-        let floated = panel_rect(&h, "timeline-2d").unwrap();
-        let step = solidcraft_theme::Tokens::get().space_24;
-        assert_eq!((floated.left(), floated.top()), (docked.left() + step, docked.top() - step));
-        assert_eq!(floated.height(), docked.height());
+        h.frames(4);
+        let start = panel_rect(&h, "history").expect("History shows");
+        assert!(crate::panel_runtime::timeline_tall(&h.app), "the row is tall");
+        assert_eq!(grid_height(&h), canvas::DOCK_TOTAL_HEIGHT, "the grid gets its default height under the host's header");
+
+        drag_top_edge(&mut h, -60.0);
+        assert_eq!(panel_rect(&h, "history").unwrap().height(), start.height() + 60.0);
+        drag_top_edge(&mut h, 300.0);
+        assert!(!crate::panel_runtime::timeline_tall(&h.app), "dragged into the gap it snaps to the strip");
+        assert!(!h.app.preferences.timeline_2d, "the preference follows the row");
+
+        h.app.preferences.timeline_2d = true;
+        h.frames(4);
+        assert!(crate::panel_runtime::timeline_tall(&h.app));
+        h.app.preferences.timeline_2d = false;
+        h.frames(4);
+        assert!(!crate::panel_runtime::timeline_tall(&h.app), "History is the strip again");
     }
 
     /// A collapsed track's title never runs into its count badge: a short strip (a one-row
@@ -227,12 +231,30 @@ mod tests {
     #[test]
     fn test_a_collapsed_track_title_fits_under_its_badge() {
         use super::assembly::collapsed_strip_title;
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
         let width = |s: &str| s.len() as f32 * 6.0;
         assert_eq!(collapsed_strip_title(false, 200.0, width), Some("Assembly & Joints"));
         assert_eq!(collapsed_strip_title(false, 60.0, width), Some("Assembly"));
         assert_eq!(collapsed_strip_title(true, 60.0, width), Some("Modeling"));
         assert_eq!(collapsed_strip_title(false, 30.0, width), None);
         assert_eq!(collapsed_strip_title(true, -5.0, width), None);
+    }
+
+    #[test]
+    fn timeline_track_titles_and_counts_use_the_selected_language() {
+        use super::assembly::collapsed_strip_title;
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("cs");
+        let width = |s: &str| s.chars().count() as f32 * 6.0;
+        assert_eq!(collapsed_strip_title(false, 200.0, width), Some("Sestava a spoje"));
+        assert_eq!(collapsed_strip_title(false, 60.0, width), Some("Sestava"));
+        assert_eq!(collapsed_strip_title(true, 200.0, width), Some("Modelovací prvky"));
+        assert_eq!(collapsed_strip_title(true, 60.0, width), Some("Modelování"));
+        assert_eq!(collapsed_strip_title(true, 30.0, width), None);
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_steps_badge", &[("count", "3")]), "Kroky: 3");
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_joints_badge", &[("count", "2")]), "Spoje: 2");
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_active_summary", &[("active", "2"), ("total", "3")]), "Aktivní: 2 / 3");
     }
 
     /// A corridor is checked outward from the feature and stops at the first move that fails,
@@ -288,108 +310,6 @@ mod tests {
         }
         assert_eq!(found, Some((1, 2)), "it can go before the second box, not before the one it rounds");
         assert_eq!(s.doc, before);
-    }
-
-    /// Collapsed while floating, the 2D Timeline's header shows at the floating panel's bottom
-    /// edge, not in the middle of the view; expanding brings the panel back where it was.
-    #[test]
-    fn test_the_collapsed_floating_2d_timeline_keeps_its_bottom_edge() {
-        use crate::panel_runtime::{HostControlTarget, HostPointerTarget, HostSharedAction};
-        use solidcraft_engine::panels::{InstanceId, Zone};
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        h.app.preferences.timeline_2d = true;
-        h.call("ui.resize", json!({"width": 1400, "height": 900}));
-        h.frames(3);
-        let instance = InstanceId("timeline-2d".into());
-        let menu = HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() });
-        click_control(&mut h, &menu);
-        click_control(&mut h, &HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Move(Zone::Floating) });
-        let floating = panel_rect(&h, "timeline-2d").unwrap();
-        click_control(&mut h, &menu);
-        click_control(&mut h, &HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Collapse });
-        let header = panel_rect(&h, "timeline-2d").unwrap();
-        assert!(header.height() < 60.0, "{header:?}");
-        assert_eq!(header.bottom(), floating.bottom());
-        assert_eq!(header.left(), floating.left());
-        click_control(&mut h, &menu);
-        click_control(&mut h, &HostControlTarget::Shared { instance, action: HostSharedAction::Collapse });
-        assert_eq!(panel_rect(&h, "timeline-2d").unwrap(), floating);
-    }
-
-    /// The 2D Timeline's menu places it at the bottom, floating or in its own window; it never
-    /// joins another panel's tabs, where it would be too cramped to use.
-    #[test]
-    fn test_the_2d_timeline_menu_offers_no_join() {
-        use crate::panel_runtime::{HostControlTarget, HostPointerTarget, HostSharedAction};
-        use solidcraft_engine::panels::{InstanceId, Zone};
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        h.app.preferences.timeline_2d = true;
-        h.call("ui.resize", json!({"width": 1400, "height": 900}));
-        h.frames(3);
-        h.app.set_panel_native_adapter(Box::new(crate::panel_runtime::DesktopNativeAdapter::default())).unwrap();
-        h.frames(2);
-        let instance = InstanceId("timeline-2d".into());
-        click_control(&mut h, &HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() }));
-        let frame = h.app.universal_panel_frame().unwrap();
-        let offered: Vec<_> = frame
-            .controls
-            .iter()
-            .filter_map(|c| match &c.target {
-                HostControlTarget::Shared { instance: owner, action } if *owner == instance => Some(action.clone()),
-                _ => None,
-            })
-            .collect();
-        assert!(offered.contains(&HostSharedAction::Move(Zone::Floating)), "{offered:?}");
-        assert!(offered.contains(&HostSharedAction::Popout), "{offered:?}");
-        assert!(!offered.iter().any(|a| matches!(a, HostSharedAction::Join(_))), "{offered:?}");
-    }
-
-    /// With the preference on, the panel host shows the 2D Timeline in History's place at the
-    /// bottom; its top edge resizes it, down to one row, and turning the preference off brings
-    /// History back.
-    #[test]
-    fn test_timeline_2d_panel_replaces_history_and_resizes() {
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        h.app.preferences.timeline_2d = true;
-        h.call("ui.resize", json!({"width": 1400, "height": 900}));
-        h.frames(3);
-        assert!(panel_rect(&h, "history").is_none());
-        let start = panel_rect(&h, "timeline-2d").expect("the 2D Timeline shows");
-        assert_eq!(grid_height(&h), canvas::DOCK_TOTAL_HEIGHT, "the grid gets its default height under the host's header");
-        assert_eq!(crate::scenario::rect_of("history:card"), Some(start), "it stands in for History's rectangle");
-
-        drag_top_edge(&mut h, -60.0);
-        assert_eq!(panel_rect(&h, "timeline-2d").unwrap().height(), start.height() + 60.0);
-        drag_top_edge(&mut h, 200.0);
-        assert_eq!(grid_height(&h), canvas::MIN_DOCK_HEIGHT, "one row at least, below the host's header");
-
-        h.app.preferences.timeline_2d = false;
-        h.frames(3);
-        assert!(panel_rect(&h, "timeline-2d").is_none());
-        assert!(panel_rect(&h, "history").is_some(), "History is back");
-    }
-
-    /// A panel layout saved before the 2D Timeline panel existed gains it when the preference is
-    /// turned on, in History's place.
-    #[test]
-    fn test_a_layout_saved_without_the_2d_panel_gains_it() {
-        use solidcraft_engine::panels::{InstanceId, LayoutAction, Mutation};
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        h.call("ui.resize", json!({"width": 1400, "height": 900}));
-        h.frames(3);
-        let instance = InstanceId::new("timeline-2d").unwrap();
-        let destroy = LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Destroy { instance: instance.clone() }] };
-        h.app.dispatch_panel_layout(destroy).unwrap();
-        assert!(h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout().instance(&instance).is_err());
-
-        h.app.preferences.timeline_2d = true;
-        h.frames(4);
-        assert!(panel_rect(&h, "timeline-2d").is_some(), "the 2D Timeline is added");
-        assert!(panel_rect(&h, "history").is_none());
     }
 
     /// Verifies opening, editing, and submitting the Rename Group dialog.
@@ -482,6 +402,90 @@ mod tests {
         // Group and features are now removed
         assert!(!h.app.session.doc.timeline_groups.iter().any(|g| g.id == gid), "Group must be removed after confirmation");
         assert!(!h.app.session.doc.features.iter().any(|f| f.id == f0), "Feature must be removed after confirmation");
+    }
+
+    #[test]
+    fn repaints_reuse_history_until_the_design_changes() {
+        let mut h = Harness::new();
+        h.app.preferences.timeline_2d = true;
+        h.app.run("solid.box", json!({"name": "Base", "length": 10, "width": 10, "height": 10})).unwrap();
+        let base = h.app.session.doc.features[0].id;
+        let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
+        let start = checked();
+        h.frames(2);
+        assert_eq!(checked() - start, 1, "discover the box's tracks once");
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": base}]})).unwrap();
+        h.frames(3);
+        assert_eq!(checked() - start, 1, "selection and repaint reuse the analysis");
+
+        h.app.run("timeline.rename", json!({"feature": base, "name": "Frame"})).unwrap();
+        h.frames(2);
+        assert_eq!(checked() - start, 2);
+        assert!(crate::scenario::handle_at("timeline_2d:Frame").is_some());
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(checked() - start, 3);
+        assert!(crate::scenario::handle_at("timeline_2d:Base").is_some());
+    }
+
+    #[test]
+    fn opening_or_scrolling_a_long_timeline_checks_the_visible_steps_first() {
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+        use solidcraft_engine::panels::{ControlId, InstanceId};
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"name": "First", "length": 5, "width": 5, "height": 5})).unwrap();
+        let doc = std::sync::Arc::make_mut(&mut h.app.session.doc);
+        let first = doc.features[0].clone();
+        for i in 1..256 {
+            doc.features.push(solidcraft_engine::doc::Feature { id: first.id + i, name: format!("Step {i}"), ..first.clone() });
+        }
+        h.frames(3);
+        assert!(panel_rect(&h, "history").is_some());
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_none());
+        let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
+        let start = checked();
+        let expand = HostPointerTarget::HeaderAction { instance: InstanceId("history".into()), action: ControlId("timeline-expand".into()) };
+        click_control(&mut h, &HostControlTarget::Pointer(expand));
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_some());
+        assert!(checked() - start < 256, "opening the dock must not analyze the entire model");
+
+        let uid = Some(h.app.session.uid);
+        let mut state = state::Timeline2DState::load_scoped(&h.ctx, uid);
+        state.scroll_x = 256.0 * canvas::COL_WIDTH;
+        state.store_scoped(&h.ctx, uid);
+        h.frame();
+        assert!(crate::scenario::handle_at("timeline_2d:Step 255").is_some());
+        assert!(checked() - start < 256, "jumping to the last columns must not analyze the intervening steps");
+    }
+
+    #[test]
+    fn component_tracks_keep_changed_and_removed_bodies_after_a_reorder() {
+        use std::sync::Arc;
+        let mut h = Harness::new();
+        for (name, x) in [("A", 0), ("B", 20)] {
+            h.app.run("solid.box", json!({"name": name, "length": 5, "width": 5, "height": 5, "corner": [x, 0, 0]})).unwrap();
+        }
+        let s = &mut h.app.session;
+        let previous = s.model.results[0].state.bodies[0].clone();
+        let current = s.model.results[1].state.bodies[1].clone();
+        let body = |source: &solidcraft_engine::doc::ModelBody, name: &str, owner| {
+            let mut b = source.clone();
+            b.name = name.into();
+            b.transferred = true;
+            b.component = owner;
+            b
+        };
+        // A saved state may have repeated names. A lookup by name still takes its first match.
+        Arc::make_mut(&mut s.model.results[0].state).bodies =
+            vec![body(&previous, "Gone", 1), body(&previous, "Moved", 2), body(&previous, "Same", 3)];
+        Arc::make_mut(&mut s.model.results[1].state).bodies =
+            vec![body(&previous, "Same", 3), body(&current, "Moved", 4), body(&previous, "Moved", 5), body(&previous, "New", 6)];
+        let f = &s.doc.features[1];
+        assert_eq!(canvas::feature_affected_components(&s.doc, Some(&s.model), f), [0, 1, 2, 4, 6]);
+        let (rows, _) = canvas::discover_component_tracks(&h.app);
+        assert_eq!(rows, [0, 1, 2, 3, 4, 6], "undeclared rows appear in first-use order across both steps");
     }
 
     /// Verifies rendering of multi-component feature chips and vertical connector lines across tracks.
@@ -907,6 +911,21 @@ mod tests {
         h.frames(3);
     }
 
+    /// The marker's line ends in a down arrowhead while component rows are out of sight below,
+    /// and in the flat cap otherwise.
+    #[test]
+    fn test_marker_foot_points_down_at_hidden_rows() {
+        let color = egui::Color32::from_rgb(59, 130, 246);
+        let egui::Shape::Path(arrow) = canvas::marker_foot(100.0, 80.0, color, true) else { panic!("an arrowhead while rows are hidden") };
+        assert_eq!(arrow.points.len(), 3);
+        assert!(arrow.points.contains(&egui::pos2(100.0, 80.0)), "its tip ends the line: {:?}", arrow.points);
+        assert!(arrow.points.iter().all(|p| p.y <= 80.0));
+        assert!(matches!(canvas::marker_foot(100.0, 80.0, color, false), egui::Shape::Rect(_)), "the flat cap when all rows show");
+        // The line ends inside both feet: below the arrowhead's base and the 4-point cap's top, above their bottom.
+        let base = arrow.points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        assert!(80.0 - canvas::MARKER_FOOT_OVERLAP > base && canvas::MARKER_FOOT_OVERLAP > 0.0 && canvas::MARKER_FOOT_OVERLAP < 4.0);
+    }
+
     #[test]
     fn test_timeline_2d_custom_options_and_cell_dots() {
         let mut h = Harness::new();
@@ -930,7 +949,7 @@ mod tests {
             let frame = h.app.universal_panel_frame().unwrap();
             frame.controls.iter().find(|c| c.target == *target).map(|c| crate::panel_runtime::egui_rect(c.bounds))
         };
-        click_control(&mut h, &button("timeline-2d", "settings"));
+        click_control(&mut h, &button("history", "settings"));
         assert_eq!(h.app.menu.target, Target::Timeline2dOptions, "the settings button opens the options");
         let run = |h: &mut Harness, id: &str| {
             let item = items(&h.app, &Target::Timeline2dOptions).into_iter().find(|i| i.id == id).unwrap_or_else(|| panic!("the menu offers {id}"));
@@ -950,21 +969,18 @@ mod tests {
         assert_eq!(h.app.preferences.timeline_2d_unsuppress_mode, crate::prefs::Timeline2dUnsuppressMode::UnsuppressAll);
         assert!(!items(&h.app, &Target::HistoryControls).iter().any(|i| i.id.starts_with("ui.timeline2d")), "the Play button's menu stays as it was");
 
-        // 3. The view switch sits at the same place in both headers, and switches.
-        let in_2d = bounds(&h, &button("timeline-2d", "timeline-view")).expect("the 2D Timeline has the switch");
-        click_control(&mut h, &button("timeline-2d", "timeline-view"));
+        // 3. The view icon sits at the header's right end: the 1D icon in 2D, where it lowers the row; the 2D icon in the strip, where it raises it.
+        let in_2d = bounds(&h, &button("history", "timeline-collapse")).expect("the 2D Timeline has the 1D icon");
+        assert!(bounds(&h, &button("history", "timeline-expand")).is_none());
+        click_control(&mut h, &button("history", "timeline-collapse"));
         assert!(!h.app.preferences.timeline_2d);
         h.frames(3);
-        let in_1d = bounds(&h, &button("history", "timeline-view")).expect("the 1D History has the switch");
-        assert!((in_1d.center().x - in_2d.center().x).abs() < 1.0, "the switch lines up: {in_1d:?} {in_2d:?}");
-        click_control(&mut h, &button("history", "timeline-view"));
+        let in_1d = bounds(&h, &button("history", "timeline-expand")).expect("the 1D History has the 2D icon");
+        assert!(bounds(&h, &button("history", "settings")).is_none(), "the options show only in 2D");
+        assert!((in_1d.right() - in_2d.right()).abs() < 1.0, "the icon stays at the right end: {in_1d:?} {in_2d:?}");
+        click_control(&mut h, &button("history", "timeline-expand"));
         assert!(h.app.preferences.timeline_2d);
 
-        // A History on the left has no switch: the 2D Timeline shows only at the bottom.
-        h.app.preferences.timeline_left = true;
-        h.frames(3);
-        assert!(bounds(&h, &button("history", "timeline-view")).is_none());
-        h.app.preferences.timeline_left = false;
         h.app.preferences.timeline_2d_cell_dots = true;
         h.frames(3);
 
@@ -1315,7 +1331,7 @@ mod tests {
         assert!(canvas::MIN_DOCK_HEIGHT >= one_row_bottom + 8.0);
 
         // Dragging the top edge all the way down stops at the minimum height
-        drag_top_edge(&mut h, 200.0);
+        drag_top_edge(&mut h, 120.0);
         assert_eq!(grid_height(&h), canvas::MIN_DOCK_HEIGHT);
 
         // 2. Create a component and body to test component rename & show/hide

@@ -195,6 +195,8 @@ struct Shape {
     volume: f64,
     centroid: Vec3,
     gyration: Option<Tensor3>,
+    measure_error: Option<String>,
+    inertia_error: Option<String>,
 }
 
 /// [`Session::mass_properties`] of a document and its evaluated state.
@@ -254,30 +256,69 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     for (k, &owner) in owners.iter().enumerate() {
         bodies_by_comp.entry(owner).or_default().push(k);
     }
-    let shapes = solidcraft_kernel::map_on_threads(&measured, 16, |&i| -> Result<Shape> {
-        let body = state.bodies.get(i).ok_or_else(|| EngineError::Other("body index out of range".into()))?;
+    let shapes = solidcraft_kernel::map_on_threads(&measured, 16, |&i| -> Shape {
+        let Some(body) = state.bodies.get(i) else {
+            return Shape {
+                closed: false,
+                volume: 0.0,
+                centroid: Vec3::ZERO,
+                gyration: None,
+                measure_error: Some("body index out of range".into()),
+                inertia_error: None,
+            };
+        };
         let closed = body.is_closed();
         if !closed {
-            return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
+            return Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None, measure_error: None, inertia_error: None };
         }
         let sheet = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
-        let (volume, centroid) = if sheet.is_some() {
-            let measured = super::inspect::measure_body(body, Some(state))?;
-            (measured.volume, measured.centroid)
+        let volume_centroid: Result<(f64, Vec3)> = if sheet.is_some() {
+            super::inspect::measure_body(body, Some(state)).map(|measured| (measured.volume, measured.centroid))
         } else {
-            let measured = solidcraft_kernel::measure_mass(&body.body)?;
-            (measured.volume, measured.centroid)
+            solidcraft_kernel::measure_mass(&body.body).map(|measured| (measured.volume, measured.centroid)).map_err(EngineError::from)
         };
-        let mut moments = solidcraft_io::mass_properties(&body.body)?;
-        if let (Some(sheet), Some(moments)) = (sheet, moments.as_mut()) {
-            sheet.correct_perforation_mass_properties(moments, &IDENTITY)?;
-        }
-        let gyration = moments.and_then(|p| p.gyration());
-        Ok(Shape { closed, volume, centroid, gyration })
+        let (volume, centroid) = match volume_centroid {
+            Ok(pair) => pair,
+            Err(err) => {
+                return Shape {
+                    closed: false,
+                    volume: 0.0,
+                    centroid: Vec3::ZERO,
+                    gyration: None,
+                    measure_error: Some(err.to_string()),
+                    inertia_error: None,
+                };
+            }
+        };
+        let (gyration, inertia_error) = match solidcraft_io::mass_properties(&body.body) {
+            Ok(Some(mut moments)) => {
+                if let Some(sheet) = sheet {
+                    match sheet.correct_perforation_mass_properties(&mut moments, &IDENTITY) {
+                        Ok(()) => (moments.gyration(), None),
+                        Err(err) => (None, Some(err.to_string())),
+                    }
+                } else {
+                    (moments.gyration(), None)
+                }
+            }
+            Ok(None) => (None, None),
+            Err(err) => (None, Some(err.to_string())),
+        };
+        Shape { closed, volume, centroid, gyration, measure_error: None, inertia_error }
     });
     let mut shape: BTreeMap<usize, Shape> = BTreeMap::new();
     for (i, s) in measured.into_iter().zip(shapes) {
-        shape.insert(i, s.ok_or_else(|| bad(CMD, "measuring a body failed"))??);
+        shape.insert(
+            i,
+            s.unwrap_or_else(|| Shape {
+                closed: false,
+                volume: 0.0,
+                centroid: Vec3::ZERO,
+                gyration: None,
+                measure_error: Some("measuring this body failed".into()),
+                inertia_error: None,
+            }),
+        );
     }
 
     let mut occurrences = Vec::with_capacity(ids.len());
@@ -320,14 +361,22 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
                     return Err(out_of_range());
                 }
                 if inertia.is_none() {
-                    warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", entry.name));
+                    if let Some(err) = &s.inertia_error {
+                        warnings.push(format!("body `{}`: could not compute inertia ({err})", entry.name));
+                    } else {
+                        warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", entry.name));
+                    }
                 }
                 parts.push(part);
                 entry.volume_mm3 = Some(volume);
                 entry.mass_kg = Some(mass);
             } else {
                 skipped += 1;
-                warnings.push(format!("body `{}` is not a closed solid: it adds no mass", entry.name));
+                if let Some(err) = &s.measure_error {
+                    warnings.push(format!("body `{}` could not be measured ({err}): it adds no mass", entry.name));
+                } else {
+                    warnings.push(format!("body `{}` is not a closed solid: it adds no mass", entry.name));
+                }
             }
             bodies.push(entry);
         }

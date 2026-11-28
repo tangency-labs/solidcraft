@@ -1492,9 +1492,19 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             edges.push(edge_id);
             shares_edge_curve.push(shares);
         }
-        let mut bs_curves = access.smooth_with_target_mut(&edges, |target| {
+        let (mut bs_curves, turned) = access.smooth_with_target_mut(&edges, |target| {
+            let mut starts = Vec::new();
+            for &edge_id in &edges {
+                starts.push(topo_edge::start_vertex(target, edge_id)?);
+            }
             // fork 873c7c9 passes this on (SER)
             topo_edge::orient_edge_sequence(k, target, &edges)?;
+            // Not upstream: the edges the orientation reversed, whose solvers' laws must run
+            // back along their reversed curves to keep their radius where it was.
+            let mut turned = Vec::new();
+            for (&edge_id, start) in edges.iter().zip(&starts) {
+                turned.push(topo_edge::start_vertex(target, edge_id)? != *start);
+            }
 
             let mut prev_ivl = Extent1d::new();
             let mut curves = Vec::new();
@@ -1554,8 +1564,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 prev_ivl = edge_ivl;
                 prev_edge = Some(edge_id);
             }
-            Ok(curves)
+            Ok((curves, turned))
         })?;
+
+        for (&fs, &reversed) in sequence.iter().zip(&turned) {
+            if reversed {
+                access.smooth_reverse_solver_law(fs)?;
+            }
+        }
 
         for ((&fs, &edge_id), &shares) in sequence.iter().zip(&edges).zip(&shares_edge_curve) {
             if shares {
@@ -1731,6 +1747,16 @@ pub trait SmoothSequenceAccess<O: ClassObject + SolutionObject + Ord> {
     /// # Errors
     /// Solver lookup failure.
     fn smooth_set_solver_law_interval(&mut self, solver: O, interval: Extent1d) -> Result<()>;
+    /// Not upstream: flip a variable-radius solver's law orientation (`m_bLawOrientation`)
+    /// after `OrientEdgeSequence` reversed its edge, so the law keeps running along the edge
+    /// as it did: a law that varies along a chain (`FilletLaw::chain_of_radii`) then agrees
+    /// with its neighbours where the edges meet. Other solvers have no law: nothing to do.
+    ///
+    /// # Errors
+    /// Solver lookup failure.
+    fn smooth_reverse_solver_law(&mut self, _solver: O) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ---- RemoveTopoEdges -----------------------------------------------------------------------

@@ -592,6 +592,7 @@ pub(super) fn srf_srf_intersection_with_context(
             skip_two_pnts_intersection,
             ref_point,
             closed_by_start_direction: false,
+            heading_side_only: false,
         },
         context,
     )?;

@@ -53,7 +53,8 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
         ROTATE => v.push(SelInput::new("Axis", AXIS_PICKS, false)),
         POINT_TO_POINT => {
             v.push(SelInput::new("From", POINTS, false));
-            v.push(SelInput::new("To", POINTS, false));
+            // Several To points make a copy at each (#22900), several on one face too.
+            v.push(SelInput::new("To", POINTS, true).places());
         }
         POINT_TO_POSITION => v.push(SelInput::new("Point", POINTS, false)),
         _ => {}
@@ -411,6 +412,12 @@ pub(crate) fn add_body_click(app: &mut SolveApp, hits: &[crate::viewport::Hit], 
 
 /// Whether Capture All Positions is ticked (it is at first): OK captures every component move
 /// still pending, these and any made before, as the Capture Position command does.
+/// Point to Point with more than one To point, which copies the selection to each (#22900). An
+/// edited Move feature is one move, and a pasted design is moved, not copied.
+pub(crate) fn several_destinations(d: &Dialog) -> bool {
+    matches!(d.kind, Kind::Move { mode: POINT_TO_POINT, .. }) && d.editing.is_none() && !pasted(d) && items(d, 2).len() > 1
+}
+
 fn captures(d: &Dialog) -> bool {
     d.extra.get("capture").and_then(Value::as_bool).unwrap_or(true)
 }
@@ -485,6 +492,19 @@ fn check_no_inline_defs(d: &Dialog) -> Result<(), String> {
 /// when only components are picked, nothing moved them and nothing is left to capture: OK then
 /// just closes.
 pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    if several_destinations(d) {
+        // One copy at each To point, each moved from From to it; the original stays (#22900).
+        let mut out = Vec::new();
+        for to in items(d, 2) {
+            let mut one = d.clone();
+            one.extra.insert("copy".into(), json!(true));
+            if let Some(input) = one.inputs.get_mut(2) {
+                input.items = vec![to.clone()];
+            }
+            out.extend(commands(app, &one)?);
+        }
+        return Ok(out);
+    }
     let places = placements(d);
     let (bodies, components) = targets(app, d);
     if !places.is_empty() || (bodies.is_empty() && !components.is_empty()) {

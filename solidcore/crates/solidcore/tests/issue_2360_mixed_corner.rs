@@ -9,8 +9,12 @@
 //! straight tangent seam. Rounded together at r, their rails on the top cross at
 //! X = (40 - sqrt((8 + r)^2 - (8 - r)^2), r, 10) = (40 - sqrt(32 r), r, 10).
 //!
-//! Graded on geometry (the measures of smlib#82's capi test `mixed_rounds_together`,
-//! re-implemented on solidcore calls):
+//! Rounded together, the corner is refused at V (#22151): its faces are Coons patches of
+//! their sides, not a rolling ball's surface, and wait for the Roll-over build. The rounds'
+//! Mixed faces are read from the records that corner wrote, for the record checks below.
+//!
+//! Chamfered together, graded on geometry (the measures of smlib#82's capi test
+//! `mixed_rounds_together`, re-implemented on solidcore calls):
 //! - the body stays inside its unblended box (the planes y = 0, y = 16, z = 0, x = 0, the
 //!   cylinder's top z = 20, x = 48), to the blends' tolerance 4e-5;
 //! - `check_brep` passes; 11 faces (the peg's 7, the two blends, the corner's two);
@@ -33,25 +37,20 @@
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3, Vec3};
-use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
-use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{brep_bounding_box, edge_closest_point};
 use solidcore::surface::surface::p2::SurfaceKind;
-use solidcore::surface::surface::p4::NoObject;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::api_files::read_brep_from_file;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::topology::{edge, Brep, EdgeId};
+use solidcore::topology::{Brep, EdgeId};
 use solidcore::EntityRef;
 use std::f64::consts::PI;
 
@@ -149,155 +148,9 @@ fn bspline_net(s: &Surface) -> Option<&BSplineSurface> {
     }
 }
 
-fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
-}
-
-/// The largest angle between the faces' surface normals (turned as their face uses)
-/// either side of any edge, at 31 stations inside each edge within the corner's box B of
-/// blends of size `s`; and the number of edges with a station there.
-fn worst_seam(k: &Kernel, b: &mut Brep, s: f64) -> (f64, usize) {
-    let (xlo, y1, z0, z1) = (31.0 - s, (s + 1.0).min(8.0), 9.0 - s, 11.0 + s);
-    let mut worst: f64 = 0.0;
-    let mut seams = 0;
-    for e in b.edge_list().to_vec() {
-        let Some(curve) = edge::curve(b, e).unwrap().cloned() else {
-            continue;
-        };
-        if edge::start_vertex(b, e).unwrap() == edge::end_vertex(b, e).unwrap() {
-            continue;
-        }
-        let ivl = edge::interval(b, e).unwrap();
-        let prim = solidcore::topology::edgeuse::p1::primary_edgeuse(b, e)
-            .unwrap()
-            .unwrap();
-        let rad = solidcore::topology::edgeuse::p1::radial(b, prim)
-            .unwrap()
-            .unwrap();
-        assert_ne!(prim, rad, "edge with one face");
-        let eus = [prim, rad];
-        let mut counted = false;
-        for st in 1..32 {
-            let t = ivl.evaluate(f64::from(st) / 32.0);
-            let m = curve.evaluate_point(k, t).unwrap();
-            if m.x < xlo || m.y > y1 || m.z < z0 || m.z > z1 {
-                continue;
-            }
-            if !counted {
-                counted = true;
-                seams += 1;
-            }
-            let mut ns = Vec::new();
-            for &eu in &eus {
-                let bi =
-                    evaluate_binormal(k, b, eu, t, false, &BinormalOptions::default()).unwrap();
-                let f = solidcore::topology::edgeuse::p1::face(b, eu)
-                    .unwrap()
-                    .unwrap();
-                let srf = b.face(f).unwrap().surface.clone().unwrap();
-                let dom = srf.natural_uv_domain_with_nurb(k).unwrap();
-                let sols = srf
-                    .global_point_solve_point_test_off::<NoObject>(
-                        k,
-                        None,
-                        &dom,
-                        SolverOperation::Minimize,
-                        m,
-                        1e-9,
-                        None,
-                        SolutionRequested::Single,
-                    )
-                    .unwrap();
-                let sol = sols.get(0).unwrap();
-                let uv = Point2::new(sol.start.param(0).unwrap(), sol.start.param(1).unwrap());
-                let mut n = srf.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap();
-                if n.dot(bi.face_normal) < 0.0 {
-                    n = -n;
-                }
-                ns.push(n);
-            }
-            worst = worst.max(angle(ns[0], ns[1]));
-        }
-    }
-    (worst, seams)
-}
-
-/// The largest crease inside any face: across each interior knot line of a B-spline face
-/// (within its uv box), the normals 1e-11 of the span either side, at 12 p + 1 stations
-/// per span along the line; and the number of lines.
-fn worst_crease(k: &Kernel, b: &Brep) -> (f64, usize) {
-    let mut worst: f64 = 0.0;
-    let mut lines = 0;
-    for f in solidcore::topology::brep::p1::faces(b, None).unwrap() {
-        let srf = b.face(f).unwrap().surface.clone().unwrap();
-        let Some(net) = bspline_net(&srf) else {
-            continue;
-        };
-        let bx = solidcore::topology::face::p2::uv_domain(b, f).unwrap();
-        let dom = srf.natural_uv_domain_with_nurb(k).unwrap();
-        for dir in 0..2 {
-            let (across, along) = if dir == 0 {
-                (SurfParamType::U, SurfParamType::V)
-            } else {
-                (SurfParamType::V, SurfParamType::U)
-            };
-            let knots = net.knots(across, None).unwrap().0;
-            let along_knots = net.knots(along, None).unwrap().0;
-            let (lo, hi, alo, ahi, span) = if dir == 0 {
-                (
-                    bx.min().x,
-                    bx.max().x,
-                    bx.min().y,
-                    bx.max().y,
-                    dom.max().x - dom.min().x,
-                )
-            } else {
-                (
-                    bx.min().y,
-                    bx.max().y,
-                    bx.min().x,
-                    bx.max().x,
-                    dom.max().y - dom.min().y,
-                )
-            };
-            let d = 1e-11 * span;
-            let per = 12 * net.degree(along) + 1;
-            for &t in knots.iter().skip(1).take(knots.len().saturating_sub(2)) {
-                if t <= lo + d || t >= hi - d {
-                    continue;
-                }
-                lines += 1;
-                for w2 in along_knots.windows(2) {
-                    let (a0, a1) = (w2[0].max(alo), w2[1].min(ahi));
-                    for j in 0..per {
-                        if a1 <= a0 {
-                            break;
-                        }
-                        let w = a0 + (a1 - a0) * (j as f64 + 0.5) / per as f64;
-                        let (m0, m1) = if dir == 0 {
-                            (Point2::new(t - d, w), Point2::new(t + d, w))
-                        } else {
-                            (Point2::new(w, t - d), Point2::new(w, t + d))
-                        };
-                        let (Ok(n0), Ok(n1)) = (
-                            srf.evaluate_normal(k, m0, Side::Left, Side::Left),
-                            srf.evaluate_normal(k, m1, Side::Left, Side::Left),
-                        ) else {
-                            continue;
-                        };
-                        worst = worst.max(angle(n0, n1));
-                    }
-                }
-            }
-        }
-    }
-    (worst, lines)
-}
-
-/// The volume outside B and B' (blends of size `s`, B' B mirrored about y = 8, both
-/// reaching y = 8) and its closed form (the round's section `(1 - pi/4) s^2`, the
-/// chamfer's `s^2 / 2`).
-fn outside_volume(k: &mut Kernel, b: &Brep, s: f64, chamfer: bool) -> (f64, f64) {
+/// The volume outside B and B' (chamfers of size `s`, B' B mirrored about y = 8, both
+/// reaching y = 8) and its closed form (the chamfer's section `s^2 / 2`).
+fn outside_volume(k: &mut Kernel, b: &Brep, s: f64) -> (f64, f64) {
     let (x0, y1, z0, z1) = (31.0 - s, 8.0, 9.0 - s, 11.0 + s);
     let copy = solidcore::topology::brep::p3::brep_copy(k, b).unwrap();
     let cut = create_box(k, Point3::new(x0, -1.0, z0), 60.0, y1 + 1.0, z1 - z0).unwrap();
@@ -307,18 +160,14 @@ fn outside_volume(k: &mut Kernel, b: &Brep, s: f64, chamfer: bool) -> (f64, f64)
     let got = volume(k, &mut out, 1e-12);
     let half = 32.0 * PI;
     let in_box = (40.0 - x0) * 8.0 * (10.0 - z0) + 0.5 * half * (10.0 - z0) + half * (z1 - 10.0);
-    let section = if chamfer {
-        0.5 * s * s
-    } else {
-        (1.0 - PI / 4.0) * s * s
-    };
+    let section = 0.5 * s * s;
     let want = 160.0 * 40.0 + 960.0 * PI - 2.0 * in_box - section * (40.0 - (40.0 - x0));
     (got, want)
 }
 
-/// The grades of the blended peg (`order` G1 for rounds, G0 for chamfers).
-fn graded(r: f64, chamfer: bool) {
-    let (mut k, mut b, res) = blended(r, u32::from(!chamfer));
+/// The grades of the chamfered peg (G0: the corner's faces are the chamfer's Coons patches).
+fn graded_chamfers(r: f64) {
+    let (mut k, mut b, res) = blended(r, 0);
     res.unwrap();
     let bb = brep_bounding_box(&k, &b, true).unwrap();
     let (lo, hi) = ([0.0, 0.0, 0.0], [48.0, 16.0, 20.0]);
@@ -334,7 +183,7 @@ fn graded(r: f64, chamfer: bool) {
             bb.max_at(i)
         );
     }
-    eprintln!("r {r} chamfer {chamfer}: box min y {:e}", bb.min_at(1));
+    eprintln!("d {r}: box min y {:e}", bb.min_at(1));
     let faces = solidcore::topology::brep::p1::faces(&b, None)
         .unwrap()
         .len();
@@ -351,16 +200,7 @@ fn graded(r: f64, chamfer: bool) {
     }
     eprintln!("  nearest vertex {best:e} from X");
     assert!(best <= 5e-11, "X {best:e}");
-    if !chamfer {
-        let (seam, seams) = worst_seam(&k, &mut b, r);
-        let (crease, lines) = worst_crease(&k, &b);
-        eprintln!(
-            "  {seams} seams, worst {seam:e} rad; {lines} knot lines, worst crease {crease:e}"
-        );
-        assert!(seams > 0 && seam <= 1e-9, "seam {seam:e}");
-        assert!(crease <= 1e-9, "crease {crease:e}");
-    }
-    let (got, want) = outside_volume(&mut k, &b, r, chamfer);
+    let (got, want) = outside_volume(&mut k, &b, r);
     eprintln!(
         "  outside volume {got:.13} want {want:.13} rel {:e}",
         (got - want) / want
@@ -374,24 +214,28 @@ fn graded(r: f64, chamfer: bool) {
         .is_valid());
 }
 
-/// r 2: the Mixed corner builds the peg inside its box, G1 within the corner, to the
-/// closed form's volume.
+/// Rounds r 2 and r 5 together: refused at the cusp V (#22151). The Mixed corner's faces
+/// are Coons patches of their sides, not a rolling ball's surface, so the corner of rounds
+/// waits for the Roll-over build; its faces' records stay readable ([`ROUND_RECORDS`]).
 #[test]
-fn rounds_together_r2() {
-    graded(2.0, false);
-}
-
-/// r 5: the trace runs on to the seam's line before it is extended (the through point at
-/// the edge's end, from smlib#82's trace rule).
-#[test]
-fn rounds_together_r5() {
-    graded(5.0, false);
+fn rounds_together_are_refused_at_the_cusp() {
+    for r in [2.0, 5.0] {
+        let (_, _, res) = blended(r, 1);
+        let e = res.unwrap_err();
+        assert!(
+            matches!(
+                e.blend_failure(),
+                Some(solidcore::error::blend::BlendFailure::CornerRefused)
+            ),
+            "r {r}: {e}"
+        );
+    }
 }
 
 /// Chamfers d 2: the corner's faces are the chamfer's Coons patches of their sides (G0).
 #[test]
 fn chamfers_together_d2() {
-    graded(2.0, true);
+    graded_chamfers(2.0);
 }
 
 /// Chamfers d 2: the Mixed corner's face L (X, A, P, V), whose sides A-P and P-V lie in
@@ -505,6 +349,29 @@ fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
         .collect()
 }
 
+/// Two rounds' Mixed faces at r 2, from the records their corner wrote before the session
+/// refused it (#22151: the corner of rounds waits for the Roll-over build); the record
+/// reader still takes the Coons rule they carry.
+const ROUND_RECORDS: &str = include_str!("data/issue_2360_mixed_round_records.json");
+
+/// The Mixed corner's faces at size 2: rounded (`xsect` 1) from [`ROUND_RECORDS`],
+/// chamfered (0) as the session builds them.
+fn mixed_faces(xsect: u32) -> (Kernel, Vec<Surface>) {
+    if xsect == 0 {
+        let (k, b, res) = blended(2.0, 0);
+        res.unwrap();
+        let faces = corner_faces(&b, CornerKind::Mixed);
+        return (k, faces);
+    }
+    let k = kernel();
+    let recs: Vec<CornerRecord> = serde_json::from_str(ROUND_RECORDS).unwrap();
+    let faces = recs
+        .iter()
+        .map(|r| corner_rebuild(&k, r).unwrap())
+        .collect();
+    (k, faces)
+}
+
 /// Stored points `points` (weighted by `weights` when rational) moved by `by` along x, y
 /// and z.
 fn shift(points: &mut [[f64; 3]], weights: Option<&Vec<f64>>, by: f64) {
@@ -544,9 +411,7 @@ fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
 #[test]
 fn the_mixed_faces_are_their_rules() {
     for (xsect, order) in [(1, 1), (0, 0)] {
-        let (k, b, res) = blended(2.0, xsect);
-        res.unwrap();
-        let faces = corner_faces(&b, CornerKind::Mixed);
+        let (k, faces) = mixed_faces(xsect);
         assert_eq!(faces.len(), 2);
         for s in &faces {
             let d = s.procedural_blend().unwrap();
@@ -562,9 +427,8 @@ fn the_mixed_faces_are_their_rules() {
 
 #[test]
 fn a_mixed_face_round_trips_through_its_record() {
-    let (k, b, res) = blended(2.0, 1);
-    res.unwrap();
-    for s in corner_faces(&b, CornerKind::Mixed) {
+    let (k, faces) = mixed_faces(1);
+    for s in faces {
         let rec = corner_to_record(&k, &s).unwrap();
         let json = serde_json::to_string(&rec).unwrap();
         let back = corner_rebuild(&k, &serde_json::from_str(&json).unwrap()).unwrap();
@@ -575,9 +439,8 @@ fn a_mixed_face_round_trips_through_its_record() {
 
 #[test]
 fn a_moved_mixed_face_is_certified_again() {
-    let (k, b, res) = blended(2.0, 1);
-    res.unwrap();
-    for s in corner_faces(&b, CornerKind::Mixed) {
+    let (k, faces) = mixed_faces(1);
+    for s in faces {
         let mut s = s.copy(&k).unwrap();
         let mut place = solidcore::geom::axis2_placement::Axis2Placement::default();
         place.rotate_about_axis(0.3, Vec3::new(1.0, 2.0, 3.0).unitize().unwrap());
@@ -592,9 +455,8 @@ fn a_moved_mixed_face_is_certified_again() {
 
 #[test]
 fn a_mixed_face_off_its_blend_or_t_is_refused() {
-    let (k, b, res) = blended(2.0, 1);
-    res.unwrap();
-    for s in corner_faces(&b, CornerKind::Mixed) {
+    let (k, faces) = mixed_faces(1);
+    for s in faces {
         let CornerRecord::Mixed(rec) = corner_to_record(&k, &s).unwrap() else {
             panic!("not a mixed record");
         };
@@ -666,9 +528,8 @@ use solidcore::surface::procedural_blend::record::{BezierCurveRecord, MixedCorne
 /// defect (the four cases #20725's review reproduced).
 #[test]
 fn a_mixed_record_with_an_empty_curve_the_rule_reads_is_invalid_input() {
-    let (k, b, res) = blended(2.0, 1);
-    res.unwrap();
-    let face = corner_faces(&b, CornerKind::Mixed).remove(0);
+    let (k, mut faces) = mixed_faces(1);
+    let face = faces.remove(0);
     let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
         panic!("not a mixed record");
     };
@@ -706,9 +567,8 @@ fn a_mixed_record_with_an_empty_curve_the_rule_reads_is_invalid_input() {
 #[test]
 fn no_mixed_record_curve_shape_reaches_a_defect() {
     for xsect in [1, 0] {
-        let (k, b, res) = blended(2.0, xsect);
-        res.unwrap();
-        for face in corner_faces(&b, CornerKind::Mixed) {
+        let (k, faces) = mixed_faces(xsect);
+        for face in faces {
             let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
                 panic!("not a mixed record");
             };
@@ -822,9 +682,8 @@ fn a_mixed_record_with_breaks_off_the_unit_range_is_invalid_input() {
     ];
     let mut refused = 0;
     for xsect in [1, 0] {
-        let (k, b, res) = blended(2.0, xsect);
-        res.unwrap();
-        for face in corner_faces(&b, CornerKind::Mixed) {
+        let (k, faces) = mixed_faces(xsect);
+        for face in faces {
             let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
                 panic!("not a mixed record");
             };
@@ -887,9 +746,8 @@ fn a_mixed_record_with_breaks_of_two_curves_a_rounding_apart_is_invalid_input() 
     let mut read_runs = 0;
     let mut unread_runs = 0;
     for xsect in [1, 0] {
-        let (k, b, res) = blended(2.0, xsect);
-        res.unwrap();
-        for face in corner_faces(&b, CornerKind::Mixed) {
+        let (k, faces) = mixed_faces(xsect);
+        for face in faces {
             let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
                 panic!("not a mixed record");
             };

@@ -19,6 +19,7 @@
 //! `angle_on` and the arc join of its one-wall-per-circle rule). Deviations: none (no
 //! upstream counterpart). No recursion.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use crate::curve::curve::Curve;
@@ -32,6 +33,7 @@ use crate::geom::certified::{
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::nurbs::crv_common::DEFAULT_ANGLE_TOL;
 
 const OP_ARC: &str = "curve::arc::Ellipse::arc";
 const OP_DEFINITION: &str = "curve::arc::ArcDefinition::placement";
@@ -140,7 +142,7 @@ impl ArcDefinition {
     pub fn point_at_bounded(&self, t: f64, t_bound: f64) -> Result<(Point3, f64)> {
         let placement = self.placement()?;
         let r = self.radius;
-        let p = placement.transform_point(Point3::new(r * t.cos(), r * t.sin(), 0.0));
+        let p = placement.transform_point(Point3::new(r * det::cos(t), r * det::sin(t), 0.0));
         let c = self.centre;
         let size = c.x.abs().max(c.y.abs()).max(c.z.abs()) + 2.0 * r.abs();
         let bound = (2.0 * gamma(4) * size
@@ -215,7 +217,7 @@ impl ArcDefinition {
     pub fn angle_of(&self, p: Point3) -> Result<f64> {
         let placement = self.placement()?;
         let d = p - self.centre;
-        let t = d.dot(placement.y_axis()).atan2(d.dot(placement.x_axis()));
+        let t = det::atan2(d.dot(placement.y_axis()), d.dot(placement.x_axis()));
         if t >= 0.0 {
             return Ok(t);
         }
@@ -228,7 +230,10 @@ impl ArcDefinition {
 impl Ellipse {
     /// The circle of an arc's definition ([`ArcDefinition::placement`]), its parameter
     /// starting at the arc's start: the placement's axes turned by `start` in their
-    /// plane, its angular domain `[0, sweep]` in degrees.
+    /// plane, its angular domain `[0, sweep]` in degrees. A sweep within the kernel's
+    /// angular tolerance at the radius of a full turn (the zone tolerance over the
+    /// radius, so the end is within the zone tolerance of the start) is the closed
+    /// circle, `[0, 360]`; any shorter sweep is an open arc ending at `end`.
     ///
     /// # Errors
     ///
@@ -256,10 +261,29 @@ impl Ellipse {
         // intervals in degrees within [-360, 360]. Both axes stay in the placement's
         // plane.
         let (x, y) = (placement.x_axis(), placement.y_axis());
-        let (cos, sin) = (arc.start.cos(), arc.start.sin());
+        let (cos, sin) = (det::cos(arc.start), det::sin(arc.start));
         let frame = Axis2Placement::new(arc.centre, x * cos + y * sin, y * cos - x * sin);
-        let degrees = Extent1d::from_min_max(0.0, (sweep * 180.0 / PI).min(360.0));
-        Self::create_canonical_circle(k, &frame, arc.radius, Some(&degrees), None)
+        // A full turn to within the kernel's angular tolerance at this radius (its zone
+        // tolerance over the radius: the end then lies within the zone tolerance of the
+        // start) is the closed circle; anything shorter is an open arc.
+        let angular_tol = k.tolerances.zone_tol_3d / arc.radius;
+        let full_turn = TAU - sweep <= angular_tol;
+        let degrees = if full_turn {
+            360.0
+        } else {
+            (sweep * 180.0 / PI).min(360.0)
+        };
+        let interval = Extent1d::from_min_max(0.0, degrees);
+        let mut circle =
+            Self::create_canonical_circle(k, &frame, arc.radius, Some(&interval), None)?;
+        // The circle's NURB closes any sweep past 360 - DEFAULT_ANGLE_TOL degrees, moving
+        // its end onto its start (and its domain then ends at 360): an open arc that near
+        // a full turn is made again over its own domain, closing only within the angular
+        // tolerance.
+        if !full_turn && degrees > 360.0 - DEFAULT_ANGLE_TOL {
+            circle.make_open_arc_nurb(k, interval, angular_tol * 180.0 / PI)?;
+        }
+        Ok(circle)
     }
 }
 
@@ -626,7 +650,11 @@ mod tests {
     fn a_point_s_bound_covers_its_rounding() {
         let a = def(0.0, 1.0);
         let (p, bound) = a.point_at_bounded(1.0, 0.0).unwrap();
-        let q = Point3::new(1.0 + 2.0 * 1.0_f64.cos(), 2.0 + 2.0 * 1.0_f64.sin(), 3.0);
+        let q = Point3::new(
+            1.0 + 2.0 * det::cos(1.0_f64),
+            2.0 + 2.0 * det::sin(1.0_f64),
+            3.0,
+        );
         assert!((p - q).length() <= bound && bound < 1e-12);
         // An angle given within 1e-6: the bound grows by r 1e-6.
         let (_, wide) = a.point_at_bounded(1.0, 1e-6).unwrap();
@@ -652,6 +680,91 @@ mod tests {
         let ends = e.base().ends().unwrap();
         assert!(near(ends.start, ends.end));
         assert!(near(ends.start, def(0.0, 1.0).point_at(1.0).unwrap()));
+    }
+
+    /// The curve of `a`: its ends, whether it is closed, and the farthest any of 64
+    /// points along it is off the circle (relative to the radius).
+    fn shape(k: &Kernel, a: &ArcDefinition) -> (Point3, Point3, bool, f64) {
+        let e = Ellipse::arc(k, a).unwrap();
+        let ends = e.base().ends().unwrap();
+        let iv = e.base().natural_interval();
+        let closed = crate::curve::curve::p4::is_closed_base(k, e.base(), &iv, 0.0).unwrap();
+        // The angular domain agrees: a full turn when closed, else the sweep.
+        let degrees = e.step_interval();
+        let sweep = if closed {
+            360.0
+        } else {
+            a.sweep() * 180.0 / PI
+        };
+        assert!(
+            degrees.min() == 0.0 && (degrees.max() - sweep).abs() <= 1e-12 * 360.0,
+            "{degrees:?} for a sweep of {sweep} degrees"
+        );
+        let normal = a.placement().unwrap().z_axis();
+        let off = (0..=64)
+            .map(|i| {
+                let t = iv.min() + (iv.max() - iv.min()) * f64::from(i) / 64.0;
+                let d = e.base().evaluate_point(t).unwrap() - a.centre;
+                let along = d.dot(normal);
+                let across = (d - normal * along).length();
+                (across - a.radius).abs().max(along.abs()) / a.radius
+            })
+            .fold(0.0, f64::max);
+        (ends.start, ends.end, closed, off)
+    }
+
+    /// solidcore#3442: an arc short of a full turn by more than the angular tolerance
+    /// at its radius (zone tolerance 1e-5 over the radius) stays open, its end at its
+    /// end angle and every point on its circle; by less, or by nothing, it is the
+    /// closed circle. At radius 100 the tolerance is 1e-7 rad, at radius 2 it is 5e-6.
+    #[test]
+    fn an_arc_closes_only_at_a_full_turn_within_the_angular_tolerance() {
+        let k = Kernel::default();
+        let on = |p: Point3, q: Point3, r: f64| (p - q).length() <= 1e-12 * r;
+        let at = |radius: f64, short: f64| ArcDefinition {
+            // The frame of the first arc in the issue (axis and reference not unit).
+            centre: Point3::new(-46.642538064907995, -99.52832980274029, 196.23709207988531),
+            axis: Vec3::new(-0.560750111753277, -0.9210425121131868, 1.0595970762771103),
+            reference: Vec3::new(
+                -0.45267220923568924,
+                -1.069287548824933,
+                -1.1690248206513878,
+            ),
+            radius,
+            start: 0.7,
+            end: 0.7 + TAU - short,
+        };
+        for (radius, short, closes) in [
+            (100.0, 1e-3, false),
+            (100.0, 1e-6, false),
+            (100.0, 0.0, true),
+            (2.0, 1e-3, false),
+            (2.0, 1e-6, true),
+            (2.0, 0.0, true),
+        ] {
+            let a = at(radius, short);
+            let (start, end, closed, off) = shape(&k, &a);
+            let case = format!("radius {radius}, short by {short}");
+            assert_eq!(closed, closes, "{case}");
+            assert!(
+                off <= 1e-13,
+                "{case}: a point off the circle by {off} of the radius"
+            );
+            assert!(
+                on(start, a.point_at(a.start).unwrap(), radius),
+                "{case}: {start:?}"
+            );
+            if closes {
+                assert_eq!(start, end, "{case}");
+            } else {
+                assert!(
+                    on(end, a.point_at(a.end).unwrap(), radius),
+                    "{case}: {end:?}"
+                );
+                let gap = (end - start).length();
+                assert!(gap > 0.5 * radius * short, "{case}: ends {gap} apart");
+            }
+        }
     }
 
     #[test]
@@ -772,7 +885,7 @@ mod tests {
             start: 0.0,
             end: 1.0,
         };
-        let (s, c) = (PI / 3.0).sin_cos();
+        let (s, c) = det::sin_cos(PI / 3.0);
         let b = ArcDefinition {
             axis: Vec3::new(0.0, s, c),
             ..a

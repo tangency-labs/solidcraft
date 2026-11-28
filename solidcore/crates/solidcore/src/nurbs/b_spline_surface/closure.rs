@@ -267,6 +267,7 @@ fn norm_bound(v: Vec3) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::srf_basic::Surface as Nurb;
 
     fn cp(x: f64, y: f64, z: f64) -> CPoint {
@@ -474,7 +475,7 @@ mod tests {
         // 2^-600 apart: the squares of the difference underflow to 0, so its computed
         // length is 0; the bound must still hold the gap
         let t = f64::from_bits(423_u64 << 52);
-        assert_eq!(t, 2.0_f64.powi(-600));
+        assert_eq!(t, det::powi(2.0_f64, -600));
         let o = Vec3::new(0.0, 0.0, 0.0);
         let d = Vec3::new(t, 0.0, 0.0);
         let b = tube([o, o], [d, d])
@@ -504,8 +505,8 @@ mod tests {
     fn subnormal_weight_ratios_certify_nothing() {
         // ratios 2^-1074 and 1.25 * 2^-1074 both round to the subnormal 2^-1074: the
         // computed spread would be 0 while the curves are 1/18 apart at the middle
-        let big = 2.0_f64.powi(1022);
-        let small = 2.0_f64.powi(-52);
+        let big = det::powi(2.0_f64, 1022);
+        let small = det::powi(2.0_f64, -52);
         let rows = vec![
             vec![cpw(0.0, 0.0, 0.0, big), cpw(1.0, 0.0, 0.0, big)],
             vec![cpw(0.0, 0.0, 0.0, small), cpw(1.0, 0.0, 0.0, 1.25 * small)],

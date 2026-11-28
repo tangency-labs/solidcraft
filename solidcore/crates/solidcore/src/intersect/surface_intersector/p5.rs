@@ -1096,6 +1096,7 @@ mod tests {
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::intersect::adv_surface_intersector::NoSurfaceHandle;
     use crate::intersect::surface_intersector::p4::MAX_START_LOOP_TRACE_STEPS;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::surface::plane::Plane;
     use crate::surface::sphere::Sphere;
@@ -1535,7 +1536,7 @@ mod tests {
         let mut points: Vec<Point3> = (0..16)
             .map(|i| {
                 let t = start + std::f64::consts::TAU * f64::from(i) / 16.0;
-                Point3::new(10.0 * t.sin(), 10.0 * t.sin() * t.cos(), 0.0)
+                Point3::new(10.0 * det::sin(t), 10.0 * det::sin(t) * det::cos(t), 0.0)
             })
             .collect();
         let first = points.first().copied().unwrap();
@@ -1576,7 +1577,7 @@ mod tests {
         let first = p.first().copied().unwrap();
         p.iter()
             .all(|q| (q.x - first.x).abs() < 1e-3 && (q.y - first.y).abs() < 1e-3)
-            && first.x.hypot(first.y) < r
+            && det::hypot(first.x, first.y) < r
     }
 
     /// A closed ribbon (#18117): the offset by 0.5 of the figure-eight ribbon closed a quarter

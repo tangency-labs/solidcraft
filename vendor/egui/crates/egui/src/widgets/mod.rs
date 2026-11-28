@@ -49,6 +49,7 @@ pub use self::{
     spinner::Spinner,
     text_edit::{
         CompletionOutput, CompletionPopup, CompletionQuery, Suggestion, TextBuffer, TextEdit,
+        cap_ink_rise, galley_cap_ink_rise,
     },
     value_format::{NumFormatter, NumParser, ValueFormat},
 };

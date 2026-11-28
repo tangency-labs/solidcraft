@@ -285,7 +285,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         }
         feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped, None)?;
         if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
-            reframe_wires(sketch, scratch.doc_mut(), transform, &world_shift);
+            reframe_wires(sketch, scratch.doc_mut(), transform, &world_shift)?;
             // Patterns and text words have expressions outside FeatureKind's numeric inputs.
             for pattern in &mut sketch.patterns {
                 for e in pattern.count_expression.iter_mut().chain(pattern.expressions.values_mut()) {
@@ -319,7 +319,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Move pasted 3D wires and their constraints in their own coordinate spaces.
-pub(super) fn reframe_wires(sketch: &mut solidcraft_sketch::Sketch, doc: &mut Document, transform: &Mat, world_shift: &Mat) {
+pub(super) fn reframe_wires(sketch: &mut solidcraft_sketch::Sketch, doc: &mut Document, transform: &Mat, world_shift: &Mat) -> Result<()> {
     // 3D wires carry their own coordinate space, independently of the sketch plane.
     for wire in &mut sketch.wires {
         let matrix = if wire.space == solidcraft_sketch::WireSpace::Component { transform } else { world_shift };
@@ -430,11 +430,12 @@ pub(super) fn reframe_wires(sketch: &mut solidcraft_sketch::Sketch, doc: &mut Do
         }
     }
     for (id, expr) in to_param {
-        let name = doc.new_model_param(&expr, "mm");
+        let name = doc.new_model_param(&expr, "mm")?;
         if let Some(c) = sketch.wire_constraints.iter_mut().find(|c| c.id == id) {
             c.param = Some(name);
         }
     }
+    Ok(())
 }
 
 /// The origin plane `matrix` turns `plane` onto, whether it turns the normal round (the plane's

@@ -10,7 +10,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -251,12 +251,16 @@ pub struct Autosaver {
     lock: Option<File>,
     /// The design and what was hidden at the last autosave.
     last: Option<(Arc<Document>, crate::Visibility)>,
+    /// The last document comparison against `last`. The window asks again on every frame.
+    last_match: Mutex<Option<DocumentMatch>>,
     last_at: Instant,
     has_entry: bool,
     /// The autosave being written on a worker thread: the design and what was hidden as it
     /// started, and the outcome once the thread ends. A large design takes long enough to write
     /// (and longer with its evaluated model) that the window must not wait for it.
     writing: Option<Writing>,
+    /// A forced turn that still needs to see the latest design after the current write.
+    requested: bool,
 }
 
 /// An autosaver going away with a write still running (the app quit without closing it) lets the
@@ -275,6 +279,41 @@ struct Writing {
     doc: Arc<Document>,
     visibility: crate::Visibility,
     done: std::sync::mpsc::Receiver<Result<Vec<String>>>,
+}
+
+/// A weak handle keeps the allocation's address unique while the answer is cached. An edit
+/// through `Arc::make_mut` gets a fresh address, without copying a document held only weakly.
+struct DocumentMatch {
+    doc: Weak<Document>,
+    revision: u64,
+    equal: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct WakeAfterWrite<F: FnOnce()>(Option<F>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<F: FnOnce()> Drop for WakeAfterWrite<F> {
+    fn drop(&mut self) {
+        if let Some(wake) = self.0.take() {
+            wake();
+        }
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static DEEP_DOCUMENT_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn documents_match(current: &Document, saved: &Document) -> bool {
+    #[cfg(test)]
+    DEEP_DOCUMENT_COMPARISONS.set(DEEP_DOCUMENT_COMPARISONS.get() + 1);
+    current == saved
+}
+
+fn matches_session(s: &Session, doc: &Arc<Document>, visibility: &crate::Visibility) -> bool {
+    *visibility == s.visibility && (Arc::ptr_eq(doc, &s.doc) || documents_match(&s.doc, doc))
 }
 
 /// What one autosave writes, taken from the session in an instant.
@@ -345,13 +384,25 @@ impl Autosaver {
         let id = format!("{}-{}-{seq}", unix_now(), std::process::id());
         let lock = OpenOptions::new().create(true).truncate(false).write(true).open(file(dir, &id, "lock")).map_err(io)?;
         lock.lock().map_err(io)?;
-        Ok(Autosaver { dir: dir.to_path_buf(), id, interval, lock: Some(lock), last: None, last_at: Instant::now(), has_entry: false, writing: None })
+        Ok(Autosaver {
+            dir: dir.to_path_buf(),
+            id,
+            interval,
+            lock: Some(lock),
+            last: None,
+            last_match: Mutex::default(),
+            last_at: Instant::now(),
+            has_entry: false,
+            writing: None,
+            requested: false,
+        })
     }
 
     /// Autosave now if the design has unsaved changes not written yet (and drop the entry when
     /// nothing is unsaved), waiting for the write. Returns whether it wrote.
     pub fn save(&mut self, s: &Session) -> Result<bool> {
         self.finish(s, true)?;
+        self.requested = false;
         let Some(snapshot) = self.begin(s) else { return Ok(false) };
         let written = snapshot.write();
         self.written(s, snapshot.doc, snapshot.visibility, written)?;
@@ -362,18 +413,49 @@ impl Autosaver {
     /// crash now would leave for the next launch to offer. A finished write counts once a
     /// [`Self::tick`] has taken its outcome.
     pub fn caught_up(&self, s: &Session) -> bool {
-        self.writing.is_none()
-            && self.last.as_ref().is_some_and(|(doc, visibility)| (Arc::ptr_eq(doc, &s.doc) || **doc == *s.doc) && *visibility == s.visibility)
+        self.writing.is_none() && self.last_matches(s)
     }
 
-    /// Autosave when the interval has passed, or right away after a big operation. The design
-    /// is written on a worker thread; true when this call started a write.
+    fn last_matches(&self, s: &Session) -> bool {
+        let Some((doc, visibility)) = &self.last else { return false };
+        if *visibility != s.visibility {
+            return false;
+        }
+        if Arc::ptr_eq(doc, &s.doc) {
+            return true;
+        }
+        let Ok(mut answer) = self.last_match.lock() else { return documents_match(&s.doc, doc) };
+        if let Some(a) = answer.as_ref().filter(|a| a.revision == s.revision && std::ptr::eq(a.doc.as_ptr(), Arc::as_ptr(&s.doc))) {
+            return a.equal;
+        }
+        let equal = documents_match(&s.doc, doc);
+        *answer = Some(DocumentMatch { doc: Arc::downgrade(&s.doc), revision: s.revision, equal });
+        equal
+    }
+
+    /// Whether another tick is needed to collect a write's result or service a queued turn.
+    pub fn has_pending_write(&self) -> bool {
+        self.writing.is_some() || self.requested
+    }
+
+    /// Autosave when the interval has passed, or right away after a big operation. A forced turn
+    /// while the worker is busy is carried to the next tick after it finishes. Returns true when
+    /// this call started a write.
     pub fn tick(&mut self, s: &Session, big: bool) -> Result<bool> {
+        self.tick_with_wake(s, big, || {})
+    }
+
+    /// As [`Self::tick`], waking the caller once a worker's write can be collected.
+    pub fn tick_with_wake(&mut self, s: &Session, big: bool, wake: impl FnOnce() + Send + 'static) -> Result<bool> {
+        if big && self.writing.as_ref().is_some_and(|w| !matches_session(s, &w.doc, &w.visibility)) {
+            self.requested = true;
+        }
         // A write still running: nothing new starts until it has ended.
         if !self.finish(s, false)? {
             return Ok(false);
         }
-        if !big && self.last_at.elapsed() < self.interval {
+        let due = std::mem::take(&mut self.requested) || big;
+        if !due && self.last_at.elapsed() < self.interval {
             return Ok(false);
         }
         let Some(snapshot) = self.begin(s) else { return Ok(false) };
@@ -382,7 +464,10 @@ impl Autosaver {
             let (tx, rx) = std::sync::mpsc::channel();
             let (doc, visibility, dimension_values) = (snapshot.doc.clone(), snapshot.visibility.clone(), snapshot.dimension_values.clone());
             let started = std::thread::Builder::new().name("autosave".into()).spawn(move || {
-                let _ = tx.send(snapshot.write());
+                // Drop the sender before waking, so even an unwind is visible to the next tick.
+                let _wake = WakeAfterWrite(Some(wake));
+                let sender = tx;
+                let _ = sender.send(snapshot.write());
             });
             match started {
                 Ok(_) => {
@@ -408,6 +493,7 @@ impl Autosaver {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            drop(wake);
             let written = snapshot.write();
             self.written(s, snapshot.doc, snapshot.visibility, written)?;
             Ok(true)
@@ -426,11 +512,12 @@ impl Autosaver {
                 self.has_entry = false;
             }
             self.last = None;
+            self.last_match = Mutex::default();
             // Crash replays start from the saved file (or a new design) from here.
             crate::crash::rebased(s, s.path.as_deref().map(Path::new), false);
             return None;
         }
-        if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == s.visibility) {
+        if self.last_matches(s) {
             return None;
         }
         Some(Snapshot {
@@ -475,6 +562,7 @@ impl Autosaver {
             crate::crash::rebased(s, Some(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT)), true);
         }
         self.last = Some((doc, visibility));
+        self.last_match = Mutex::default();
         if left_out.is_empty() { Ok(()) } else { Err(EngineError::Other(left_out.join("; "))) }
     }
 
@@ -594,6 +682,31 @@ mod tests {
             remove(&d, &id).unwrap();
         }
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn caught_up_reuses_the_document_comparison_between_edits() {
+        let d = dir("comparison");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::MAX).unwrap();
+        s.execute("parameters.add", &json!({"name": "length", "expression": "10 mm"})).unwrap();
+        assert!(a.save(&s).unwrap());
+        let saved = s.doc.clone();
+        s.execute("parameters.change", &json!({"name": "length", "expression": "20 mm"})).unwrap();
+
+        DEEP_DOCUMENT_COMPARISONS.set(0);
+        for _ in 0..10 {
+            assert!(!a.caught_up(&s), "the edit still needs to be autosaved");
+        }
+        let comparisons = DEEP_DOCUMENT_COMPARISONS.get();
+
+        // A replacement with the same content as the autosave must refresh the answer,
+        // even with the same session revision and a different Arc from the saved snapshot.
+        s.doc = Arc::new((*saved).clone());
+        assert!(a.caught_up(&s), "the autosave already holds the replacement document");
+        a.discard();
+        fs::remove_dir_all(d).unwrap();
+        assert!(comparisons <= 1, "10 checks of an unchanged edit compared the documents {comparisons} times");
     }
 
     #[test]
@@ -747,6 +860,29 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(load(&d, &found[0].id).unwrap().0, *s.doc, "dropping the autosaver lets its write end");
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_due_autosave_waiting_behind_a_write_remains_due() {
+        let d = dir("queued-worker");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::MAX).unwrap();
+        s.execute("parameters.add", &json!({"name": "length", "expression": "10 mm"})).unwrap();
+
+        // Hold the first write's completion until the next requested autosave has seen
+        // the worker busy, regardless of how quickly the host can write a file.
+        let first = a.begin(&s).unwrap();
+        let (complete, done) = std::sync::mpsc::channel();
+        a.writing = Some(Writing { doc: first.doc.clone(), visibility: first.visibility.clone(), done });
+        s.execute("parameters.change", &json!({"name": "length", "expression": "20 mm"})).unwrap();
+        assert!(!a.tick(&s, true).unwrap(), "the first autosave is still writing");
+        complete.send(first.write()).unwrap();
+
+        assert!(a.tick(&s, false).unwrap(), "the pending autosave starts as soon as the first write finishes");
+        let id = a.id.clone();
+        drop(a);
+        assert_eq!(load(&d, &id).unwrap().0, *s.doc);
+        fs::remove_dir_all(d).unwrap();
     }
 
     #[test]

@@ -30,12 +30,32 @@ pub struct MeshClosest {
 impl TriangleSet {
     /// The set of `mesh`'s triangles (ones with a vertex that is not finite are left out).
     pub fn new(mesh: &Mesh) -> TriangleSet {
-        let mut tris = Vec::with_capacity(mesh.triangles.len());
-        let mut face = Vec::with_capacity(mesh.triangles.len());
-        let mut boxes = Vec::with_capacity(mesh.triangles.len());
+        Self::try_from_indexed(&mesh.positions, &mesh.triangles, &mesh.tri_face, None).unwrap_or_default()
+    }
+
+    /// Fallibly builds a [`TriangleSet`] from indexed triangle buffers, optionally placing each
+    /// vertex through a column-major affine transform `transform` without cloning a moved [`Mesh`].
+    pub fn try_from_indexed(
+        positions: &[Vec3],
+        indices: &[[u32; 3]],
+        tri_face: &[u32],
+        transform: Option<&[[f64; 4]; 4]>,
+    ) -> Result<TriangleSet, std::collections::TryReserveError> {
+        let mut tris: Vec<[Vec3; 3]> = Vec::new();
+        let mut face: Vec<u32> = Vec::new();
+        let mut boxes: Vec<Aabb3> = Vec::new();
+        tris.try_reserve_exact(indices.len())?;
+        face.try_reserve_exact(indices.len())?;
+        boxes.try_reserve_exact(indices.len())?;
         let mut bounds = Aabb3::EMPTY;
-        for (k, t) in mesh.triangles.iter().enumerate() {
-            let Some(p) = mesh.tri(t) else { continue };
+        for (k, &[i0, i1, i2]) in indices.iter().enumerate() {
+            let (Some(&v0), Some(&v1), Some(&v2)) = (positions.get(i0 as usize), positions.get(i1 as usize), positions.get(i2 as usize)) else {
+                continue;
+            };
+            let p = match transform {
+                Some(m) => [apply_point(m, v0), apply_point(m, v1), apply_point(m, v2)],
+                None => [v0, v1, v2],
+            };
             if !p.iter().all(|v| v.is_finite()) {
                 continue;
             }
@@ -46,9 +66,19 @@ impl TriangleSet {
             bounds = bounds.union(&b);
             boxes.push(b);
             tris.push(p);
-            face.push(mesh.tri_face.get(k).copied().unwrap_or(0));
+            face.push(tri_face.get(k).copied().unwrap_or(0));
         }
-        TriangleSet { bvh: Bvh::new(&boxes), tris, face, bounds }
+        let bvh = Bvh::try_new(&boxes)?;
+        Ok(TriangleSet { bvh, tris, face, bounds })
+    }
+
+    /// Rough heap footprint of this triangle set and its BVH in bytes.
+    pub fn estimated_bytes(&self) -> usize {
+        self.tris
+            .capacity()
+            .saturating_mul(std::mem::size_of::<[Vec3; 3]>())
+            .saturating_add(self.face.capacity().saturating_mul(std::mem::size_of::<u32>()))
+            .saturating_add(self.bvh.estimated_bytes())
     }
 
     /// The box around every triangle.
@@ -118,6 +148,15 @@ impl TriangleSet {
             .map(|[a, b, c]| closest_on_triangle(p, *a, *b, *c).dist(p))
             .fold(f64::INFINITY, f64::min)
     }
+}
+
+/// Column-major 4x4 affine point transform.
+fn apply_point(m: &[[f64; 4]; 4], p: Vec3) -> Vec3 {
+    Vec3::new(
+        m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + m[3][0],
+        m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z + m[3][1],
+        m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z + m[3][2],
+    )
 }
 
 /// The gap between two boxes (0 when they meet).
@@ -259,5 +298,16 @@ mod tests {
         assert!(n > 0);
         let far = TriangleSet::new(&cube(Vec3::new(5.0, 5.0, 5.0), 10.0));
         assert_eq!(a.closest(&far, f64::INFINITY).map(|c| c.distance), Some(0.0), "overlapping cubes cross");
+    }
+
+    #[test]
+    fn try_from_indexed_with_transform_matches_moved_mesh() {
+        let base = cube(Vec3::ZERO, 10.0);
+        let translate = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [13.0, 14.0, 0.0, 1.0]];
+        let a = TriangleSet::new(&base);
+        let b = TriangleSet::try_from_indexed(&base.positions, &base.triangles, &base.tri_face, Some(&translate)).unwrap();
+        assert!(b.estimated_bytes() > 0);
+        let c = a.closest(&b, f64::INFINITY).unwrap();
+        assert!((c.distance - 5.0).abs() < 1e-12, "{c:?}");
     }
 }

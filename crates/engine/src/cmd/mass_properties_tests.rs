@@ -328,3 +328,68 @@ fn nested_repeated_subassembly_reports_canonical_paths_warnings_and_mass() {
     let g = &r["groups"][o_sub1["group"].as_u64().unwrap() as usize];
     near(num(&g["mass"]["mass_kg"]), 1000.0 * s.doc.density(&body) * 1e-6, 1e-9);
 }
+
+/// Build a closed B-rep body whose portable record decodes cleanly (`is_closed() == true`) but
+/// fails `solidcraft_kernel::measure_mass`, mirroring an invalid imported solid.
+fn unmeasurable_closed_body() -> solidcraft_kernel::Body {
+    let base = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let bytes = solidcraft_kernel::encode_native_body(&base).unwrap();
+    let mut saved = solidcore_record::native::decode(&bytes).unwrap();
+    // Edge tolerances up to 1000 mm pass portable record validation, while SMLib caps edge
+    // tolerance at 1.0 mm, causing `measure_mass` to reject the body.
+    saved.solid.edges[0].tolerance = 2.0;
+    let edited = solidcore_record::native::encode(&saved).unwrap();
+    let body = solidcraft_kernel::decode_native_body(&edited).unwrap();
+    assert!(!body.is_surface(), "body must still report as topologically closed");
+    assert!(solidcraft_kernel::measure_mass(&body).is_err(), "measure_mass must reject this body");
+    body
+}
+
+#[test]
+fn unmeasurable_body_is_skipped_with_warning_without_aborting_assembly() {
+    use std::sync::Arc;
+
+    let mut s = Session::default();
+    let (_, occ_partner, partner_body) = part(&mut s, "Partner", [10.0, 10.0, 10.0], "Aluminum");
+    let (_, occ_valid, valid_body) = part(&mut s, "Valid", [10.0, 20.0, 30.0], "Steel");
+
+    // Inject an unmeasurable closed body alongside the valid Steel box in `Valid`.
+    let broken = unmeasurable_closed_body();
+    let last = s.model.results.last_mut().expect("valid box feature result");
+    let mut next = (*last.state).clone();
+    let broken_mb = solidcraft_doc::ModelBody::new("BrokenBox".into(), broken, last.id);
+    assert!(broken_mb.is_closed(), "injected test body must report as closed");
+    next.bodies.push(broken_mb);
+    last.state = Arc::new(next);
+
+    let r = run(&mut s, "assembly.mass_properties", json!({}));
+
+    let o_valid = occurrence(&r, occ_valid);
+    assert_eq!(o_valid["open_bodies_skipped"], 1, "{o_valid}");
+    let valid_bodies = o_valid["bodies"].as_array().unwrap();
+    assert_eq!(valid_bodies.len(), 2, "{o_valid}");
+    let broken_entry = valid_bodies.iter().find(|b| b["name"] == "BrokenBox").expect("BrokenBox entry");
+    assert_eq!(broken_entry["closed"], false);
+    assert!(broken_entry["volume_mm3"].is_null());
+    assert!(broken_entry["mass_kg"].is_null());
+
+    // Valid body's mass, centre of mass and inertia are unaffected by its unmeasurable sibling.
+    let m_valid = 6000.0 * s.doc.density(&valid_body) * 1e-6;
+    near(num(&o_valid["mass"]["mass_kg"]), m_valid, 1e-9);
+    for (k, c) in [5.0, 10.0, 15.0].iter().enumerate() {
+        near(num(&o_valid["mass"]["center_of_mass_mm"][k]), *c, 1e-9);
+    }
+    diag(&tensor(&o_valid["mass"]["inertia_world_kg_mm2"]), box_inertia(m_valid, [10.0, 20.0, 30.0]), 1e-9);
+
+    // Other occurrences remain completely accurate.
+    let o_partner = occurrence(&r, occ_partner);
+    let m_partner = 1000.0 * s.doc.density(&partner_body) * 1e-6;
+    near(num(&o_partner["mass"]["mass_kg"]), m_partner, 1e-9);
+    diag(&tensor(&o_partner["mass"]["inertia_world_kg_mm2"]), box_inertia(m_partner, [10.0, 10.0, 10.0]), 1e-9);
+
+    let warnings: Vec<&str> = r["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert!(
+        warnings.iter().any(|w| w.contains("`BrokenBox`") && w.contains("could not be measured")),
+        "expected a warning naming BrokenBox and failure reason, got: {warnings:?}"
+    );
+}

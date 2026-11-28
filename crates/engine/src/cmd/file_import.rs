@@ -581,18 +581,21 @@ pub(crate) fn component_name(path: &str, name: Option<&str>) -> String {
 
 /// Add an import feature `kind` (named `feature_name`, with the file's `body_names`) inside a
 /// new component named `name`, and for a STEP assembly (`imp`) the components of its tree.
-/// Evaluates the design. Returns the feature and the component.
+/// By body, `hidden` says which start hidden and `layers` which folder of the Bodies folder each
+/// goes into (the file's layer). Evaluates the design. Returns the feature and the component.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_in_component(
     s: &mut Session,
     kind: FeatureKind,
     feature_name: &str,
     body_names: Vec<String>,
     hidden: &[bool],
+    layers: &[Option<String>],
     name: &str,
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
-    add_into_component(s, top, top_occ, kind, feature_name, body_names, hidden, tree)
+    add_into_component(s, top, top_occ, kind, feature_name, body_names, hidden, layers, tree)
 }
 
 /// [`add_in_component`] into the component `top` that already exists (placed by `top_occ`), empty
@@ -606,6 +609,7 @@ pub(crate) fn add_into_component(
     feature_name: &str,
     body_names: Vec<String>,
     hidden: &[bool],
+    layers: &[Option<String>],
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (plan, imp, prepared) = match tree {
@@ -663,6 +667,7 @@ pub(crate) fn add_into_component(
         names.iter().enumerate().filter(|(k, _)| hidden.get(*k).copied().unwrap_or(false)).filter_map(|(_, name)| name.clone()).collect()
     };
     let mut hidden_names = names_to_hide(&names);
+    let mut built_names = names.clone();
     let id = s.doc_mut().add_feature(kind, Some(feature_name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = top;
@@ -696,6 +701,7 @@ pub(crate) fn add_into_component(
             put_bodies(s, &actual, &moves);
             s.refresh();
             hidden_names = names_to_hide(&actual);
+            built_names = actual;
         }
     }
     // The file's invisible bodies start hidden; they are still in the model, so Show brings
@@ -709,8 +715,63 @@ pub(crate) fn add_into_component(
         }
         s.refresh_display();
     }
+    let layered: Vec<(&str, &str)> = built_names.iter().zip(layers).filter_map(|(name, layer)| Some((name.as_deref()?, layer.as_deref()?))).collect();
+    put_in_folders(s, id, &layered)?;
     let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
     Ok((id, Placed { component: top, occurrence: top_occ, name, components: comps.len(), rigid_group }))
+}
+
+/// Put each of the feature's bodies named in `layered` into the group its layer names in its
+/// component's Bodies folder, so a file's layers come in as folders; `/` in a layer's name nests
+/// groups (`Frame/Rails`), as a nested folder is exported. A group of that name already there,
+/// under the same parent, is used; others are made.
+fn put_in_folders(s: &mut Session, feature: u64, layered: &[(&str, &str)]) -> Result<()> {
+    if layered.is_empty() {
+        return Ok(());
+    }
+    let state = s.model.state();
+    let placed: Vec<(&str, u64, &str)> = layered
+        .iter()
+        .filter_map(|(name, layer)| {
+            let body = state.bodies.iter().find(|b| b.feature == feature && b.name == *name)?;
+            Some((*name, s.doc.model_body_component(body), *layer))
+        })
+        .collect();
+    for (name, component, layer) in placed {
+        let mut parent = None;
+        for part in layer.split('/').map(str::trim).filter(|p| !p.is_empty()).take(solidcraft_doc::MAX_GROUP_NESTING) {
+            let part: String = part.chars().take(128).collect();
+            let found = s
+                .doc
+                .browser_groups
+                .iter()
+                .find(|g| g.component == component && g.folder == "bodies" && g.parent == parent && g.name == part)
+                .map(|g| g.id);
+            let id = match found {
+                Some(id) => id,
+                None => {
+                    let d = s.doc_mut();
+                    let id = d.allocate_id()?;
+                    d.browser_groups.push(solidcraft_doc::BrowserGroup {
+                        id,
+                        name: part,
+                        component,
+                        folder: "bodies".into(),
+                        parent,
+                        items: Vec::new(),
+                    });
+                    id
+                }
+            };
+            parent = Some(id);
+        }
+        if let Some(g) = parent.and_then(|id| s.doc_mut().browser_groups.iter_mut().find(|g| g.id == id))
+            && !g.has_item(name)
+        {
+            g.items.push(solidcraft_doc::BrowserEntry::item(name));
+        }
+    }
+    Ok(())
 }
 
 /// Move an import to the origin of the component it was inserted into (#12543): the box around
@@ -801,7 +862,7 @@ pub(crate) fn add_design_in(s: &mut Session, design: &solidcraft_io::NativeDesig
                         .param(&pn)
                         .map(|x| (x.expr.clone(), x.unit.clone()))
                         .ok_or_else(|| EngineError::Other(format!("import: no parameter {pn}")))?;
-                    c.param = Some(s.doc_mut().new_model_param(&e, &u));
+                    c.param = Some(s.doc_mut().new_model_param(&e, &u)?);
                 }
             }
         }

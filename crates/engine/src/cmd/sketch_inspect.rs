@@ -147,7 +147,7 @@ fn pick_teeth(s: &Session, pick: &CombPick, density: usize) -> Result<Vec<(Strin
             let world = s.world_state()?;
             let (body, face) = iso_face_at(s, &world, *at).ok_or_else(|| bad(cmd, "no face there"))?;
             let mut out = Vec::new();
-            for (k, line) in body.iso_lines(face, *count)?.iter().enumerate() {
+            for (k, line) in body.iso_lines(face, *count, solidcraft_doc::display_quality::current())?.iter().enumerate() {
                 out.push((format!("face@{},{},{}#{k}", at.x, at.y, at.z), teeth_exact(&crate::kernel::iso_comb(&body.body, face, line, density)?)));
             }
             Ok(out)
@@ -417,7 +417,7 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
     for v in faces {
         let at = vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z] on faces"))?;
         let (body, face) = iso_face_at(s, &st, at).ok_or_else(|| bad(cmd, "no face there"))?;
-        let lines = body.iso_lines(face, count)?;
+        let lines = body.iso_lines(face, count, solidcraft_doc::display_quality::current())?;
         let along_u = lines.iter().filter(|l| l.along_u).count();
         shown.push(IsoFace { body: body.name.clone(), face, count, u_curves: along_u, v_curves: lines.len() - along_u });
         curves.extend(lines.iter().map(|l| l.points.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>()));
@@ -442,9 +442,10 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
 impl Session {
     /// The curves Isocurve Analysis shows, for the viewport to draw: those of each face in
     /// [`Session::isocurves`] of a visible body, found again from its picked point (worked out
-    /// once per face and count, [`solidcraft_doc::ModelBody::iso_lines`]). A pick whose body or
-    /// face is gone shows nothing.
-    pub fn isocurve_lines(&self) -> Vec<std::sync::Arc<[crate::kernel::IsoLine]>> {
+    /// once per face and count, [`solidcraft_doc::ModelBody::iso_lines`]), at display quality
+    /// `quality` (the one the viewport's window draws at). A pick whose body or face is gone
+    /// shows nothing.
+    pub fn isocurve_lines(&self, quality: solidcraft_doc::display_quality::DisplayQuality) -> Vec<std::sync::Arc<[crate::kernel::IsoLine]>> {
         if self.isocurves.is_empty() {
             return Vec::new();
         }
@@ -454,7 +455,7 @@ impl Session {
             .filter_map(|k| {
                 let b = st.body(&k.body).filter(|b| self.body_visible(&b.name))?;
                 let face = solidcraft_doc::appearance::face_index_at(b, k.at)?;
-                b.iso_lines(face, k.count).ok()
+                b.iso_lines(face, k.count, quality).ok()
             })
             .collect()
     }
@@ -757,7 +758,7 @@ mod tests {
         let face = &r["faces"][0];
         assert_eq!((face["u_curves"].as_u64(), face["v_curves"].as_u64()), (Some(5), Some(5)), "{face}");
         assert_eq!(s.isocurves.len(), 1);
-        assert_eq!(s.isocurve_lines().iter().map(|l| l.len()).sum::<usize>(), 10);
+        assert_eq!(s.isocurve_lines(solidcraft_doc::display_quality::current()).iter().map(|l| l.len()).sum::<usize>(), 10);
         // A hole of radius 3 through it along X, at half height.
         s.execute("solid.cylinder", &json!({"radius": 3, "height": 30, "base": [-15, 0, 20], "axis": "X", "operation": "cut"})).unwrap();
         let r = s.execute("inspect.isocurve", &json!({"faces": [[0, 10, 20]], "count": 9})).unwrap();
@@ -791,7 +792,7 @@ mod tests {
         assert_eq!(s.isocurves.last().map(|k| k.count), Some(4));
         let before = s.doc.clone();
         s.execute("inspect.isocurve", &json!({"clear": true})).unwrap();
-        assert!(s.isocurves.is_empty() && s.isocurve_lines().is_empty());
+        assert!(s.isocurves.is_empty() && s.isocurve_lines(solidcraft_doc::display_quality::current()).is_empty());
         assert!(std::sync::Arc::ptr_eq(&before, &s.doc), "view state only: the design is untouched");
         // Hostile counts and picks.
         for count in [json!(0), json!(-3), json!(2.5), json!(101), json!(1e300), json!("8"), json!([4])] {

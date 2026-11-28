@@ -4067,6 +4067,32 @@ fn a_curve_chain_by_edge_index_starts_from_that_edge() {
     assert!(crate::curve_chain_of_edges(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
 }
 
+/// A face chain picked by face index runs round a slot's side: from a flat side, across the
+/// tangent edges onto both half cylinders and the other flat side, never onto the top or bottom it
+/// meets at sharp edges (#22845). An index the body does not have is refused.
+#[test]
+fn a_face_chain_by_face_index_runs_round_a_slots_tangent_side() {
+    let slab = box_solid(Vec3::new(-10.0, -15.0, 0.0), Vec3::new(10.0, 15.0, 12.0)).unwrap();
+    let mut b = slab;
+    for y in [-15.0, 15.0] {
+        let end = cylinder(Vec3::new(0.0, y, 0.0), Vec3::new(0.0, 0.0, 1.0), 10.0, 12.0).unwrap();
+        b = crate::boolean(&b, &end, crate::BoolOp::Union).unwrap().unwrap();
+    }
+    let face = |p: Vec3| b.face_at_point(p).unwrap().unwrap();
+    let side = face(Vec3::new(10.0, 0.0, 6.0));
+    let chain = crate::tangent_face_chain_of_faces(&b, &[side], solidcraft_geom::TANGENT_CHAIN).unwrap();
+    assert_eq!(chain.first(), Some(&side));
+    for p in [Vec3::new(-10.0, 0.0, 6.0), Vec3::new(0.0, 25.0, 6.0), Vec3::new(0.0, -25.0, 6.0)] {
+        assert!(chain.contains(&face(p)), "{p:?} in {chain:?}");
+    }
+    for p in [Vec3::new(0.0, 0.0, 12.0), Vec3::new(0.0, 0.0, 0.0)] {
+        assert!(!chain.contains(&face(p)), "{p:?} not in {chain:?}");
+    }
+    let count = b.record().faces.len();
+    assert!(crate::tangent_face_chain_of_faces(&b, &[count], solidcraft_geom::TANGENT_CHAIN).is_err());
+    assert!(crate::tangent_face_chain_of_faces(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
+}
+
 /// Whether a path of body edges lies in one plane is decided over each free-form span's whole
 /// length from its control points, not from its directions at sampled points. A degree 9 span
 /// along x whose height is the integral of `c (t - 1/8) (t - 2/8) … (t - 1)` runs level at eight

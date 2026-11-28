@@ -1299,6 +1299,7 @@ fn remove_first(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::topology::{
         Edge, Edgeuse, EdgeuseId, EdgeuseOwner, Region, Shell, Vertex, Vertexuse, VertexuseOwner,
@@ -1471,7 +1472,7 @@ mod tests {
                 for f in [0.0, 0.2, 0.45, 0.7, 1.0] {
                     let p = rim.evaluate_point(&k, ivl.evaluate(f)).unwrap();
                     assert!(
-                        p.z.abs() <= 1e-12 && (p.x.hypot(p.y) - 1.0).abs() <= 1e-12,
+                        p.z.abs() <= 1e-12 && (det::hypot(p.x, p.y) - 1.0).abs() <= 1e-12,
                         "rim {p:?}"
                     );
                 }

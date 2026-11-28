@@ -51,7 +51,13 @@
   "click": {"handle": "appbar:file"}
  },
  {
-  "widget": "Export STEP\u2026"
+  "click": {"handle": "menu:Export"}
+ },
+ {
+  "click": {"handle": "menu:CAD & 2D"}
+ },
+ {
+  "widget": "STEP\u2026"
  },
  {
   "expect": {
@@ -75,7 +81,10 @@
   "click": {"handle": "appbar:file"}
  },
  {
-  "widget": "Insert STEP\u2026"
+  "click": {"handle": "menu:Insert"}
+ },
+ {
+  "widget": "STEP\u2026"
  },
  {
   "click": {"handle": "import_options:ok"}

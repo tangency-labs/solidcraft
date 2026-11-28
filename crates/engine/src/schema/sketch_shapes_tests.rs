@@ -35,9 +35,9 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ArcCenterPointParams>(),
         &["center", "clockwise", "connect", "construction", "end", "id", "sketch", "start", "sweep"],
     );
-    assert_keys(input_schema_for::<RectTwoPointParams>(), &["connect", "construction", "p0", "p1", "sketch"]);
+    assert_keys(input_schema_for::<RectTwoPointParams>(), &["connect", "construction", "p0", "p1", "rotatable", "sketch"]);
     assert_keys(input_schema_for::<RectThreePointParams>(), &["connect", "construction", "p0", "p1", "p2", "sketch"]);
-    assert_keys(input_schema_for::<RectCenterParams>(), &["center", "connect", "construction", "corner", "sketch"]);
+    assert_keys(input_schema_for::<RectCenterParams>(), &["center", "connect", "construction", "corner", "rotatable", "sketch"]);
     assert_keys(input_schema_for::<RectRoundedParams>(), &["connect", "construction", "p0", "p1", "radius", "sketch"]);
     // The polygons draw no construction geometry: their handlers never read `construction`.
     assert_keys(input_schema_for::<PolygonInscribedParams>(), &["angle", "center", "connect", "diameter", "radius", "sides", "sketch"]);

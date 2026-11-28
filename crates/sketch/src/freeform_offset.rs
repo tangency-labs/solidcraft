@@ -541,6 +541,11 @@ impl Sketch {
         }
         let source_id = self.curves.get(source).ok_or_else(|| bad("missing offset source"))?.id.clone();
         let source_pieces = self.exact_segs(source).ok_or_else(|| bad("offset source changed shape"))?.len();
+        if source_pieces > MAX_PIECES {
+            return Err(bad(&format!(
+                "offset: the curve has {source_pieces} pieces, at most {MAX_PIECES} can be offset; refit it with fewer points first (Fit Spline Within Tolerance, `sketch.spline.fit_tolerance`)"
+            )));
+        }
         let mut result = None;
         let mut failure = None;
         let mut work = MAX_OFFSET_WORK;
@@ -766,6 +771,29 @@ mod tests {
             let mut reopened: Sketch = serde_json::from_str(&saved).unwrap();
             reopened.refresh_offsets().unwrap();
             assert_eq!(reopened, sk);
+        }
+    }
+
+    #[test]
+    fn certified_offset_of_a_spline_with_too_many_pieces_names_the_limit() {
+        // A hand-traced outline: one fit point per few millimetres gives more pieces than an offset certifies (#5330).
+        let mut sk = Sketch::new();
+        let mut pts: Vec<usize> = (0..300)
+            .map(|i| {
+                let a = i as f64 / 300.0 * std::f64::consts::TAU;
+                sk.add_point(Vec2::new(50.0 * a.cos(), 30.0 * a.sin()), None).unwrap()
+            })
+            .collect();
+        pts.push(pts[0]);
+        let source =
+            sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None).unwrap();
+        let pieces = sk.exact_segs(source).unwrap().len();
+        assert!(pieces > MAX_PIECES);
+        let original = sk.clone();
+        for distance in [1.0, 12.0] {
+            let error = sk.add_freeform_offset(source, true, distance).unwrap_err().to_string();
+            assert!(error.contains(&format!("{pieces} pieces")) && error.contains(&format!("at most {MAX_PIECES}")), "{error}");
+            assert_eq!(sk, original);
         }
     }
 

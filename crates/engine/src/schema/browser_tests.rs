@@ -4,8 +4,8 @@ use super::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
     BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, RedefineSketchParams,
-    RedefineSketchResult, RepairParams, RepairResult, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult,
-    ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
+    RedefineSketchResult, RepairParams, RepairResult, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewFrameParams, ViewFrameResult,
+    ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
 };
 use crate::Session;
 use crate::browser_find::MAX_PATTERN_CHARS;
@@ -819,4 +819,78 @@ fn the_view_commands_still_read_their_calls_as_before_with_the_check_off() {
     s.execute("view.save", &json!({"camera": CAMERA(), "name": 5})).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(s.execute("view.list", &json!({"x": 1})).unwrap_or_else(|e| panic!("{e}"))["views"][0]["name"], "Named View1");
     s.execute("view.apply", &json!({"view": 5, "camera": CAMERA()})).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// A camera looking straight at the FRONT face, so `view.frame` can set from it.
+const FACING: fn() -> Value = || json!({"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100});
+
+#[test]
+fn view_frame_schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<ViewFrameParams>(), &["camera", "reset", "set"]);
+}
+
+/// #6455: what `view.frame` refuses, strict refuses with the same message. A wrong-typed `reset`
+/// or `set` is refused at every check level, not read as left out.
+#[test]
+fn view_frame_strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("view.frame", json!({})),
+        ("view.frame", json!({"reset": false})),
+        ("view.frame", json!({"reset": "yes"})),
+        ("view.frame", json!({"reset": 1})),
+        ("view.frame", json!({"set": "left", "camera": FACING()})),
+        ("view.frame", json!({"set": "Front", "camera": FACING()})),
+        ("view.frame", json!({"set": 5, "camera": FACING()})),
+        ("view.frame", json!({"set": "front"})),
+        ("view.frame", json!({"set": "front", "camera": null})),
+        ("view.frame", json!({"set": "front", "camera": "front"})),
+        ("view.frame", json!({"set": "front", "camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 0}})),
+        ("view.frame", json!({"set": "front", "camera": FACING(), "reset": true})),
+        // Midway between two principal axes: no single face is nearest.
+        ("view.frame", json!({"set": "top", "camera": {"target": [0, 0, 0], "yaw": std::f64::consts::FRAC_PI_4, "pitch": 0, "distance": 100}})),
+    ]);
+    let mut s = Session::default();
+    let error = s.execute("view.frame", &json!({"reset": "yes"})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`reset` must be true or false"), "{error}");
+    assert_eq!(s.doc.view_frame, None);
+}
+
+/// An unknown key is reported in Warn, with a reply that still matches, and refused in Strict
+/// before anything changes.
+#[test]
+fn view_frame_refuses_an_unknown_key_in_strict() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let error = s.execute("view.frame", &json!({"set": "front", "camera": FACING(), "sett": "top"})).err().map(|e| e.to_string());
+    assert!(error.as_deref().is_some_and(|e| e.contains("`sett`")), "{error:?}");
+    assert_eq!(s.doc.view_frame, None, "nothing ran");
+    s.param_check = ParamCheck::Warn;
+    let r = s.execute("view.frame", &json!({"reset": true, "rest": 1})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r["param_warnings"].to_string().contains("rest"), "{r}");
+    let schema = output_schema_for::<ViewFrameResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &r), "{r}");
+}
+
+/// Both reply shapes match the output schema: `{front, top, camera}` after `set` and
+/// `{frame: null, camera}` after `reset`.
+#[test]
+fn view_frame_replies_match_the_output_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap_or_else(|e| panic!("{e}"));
+    let schema = output_schema_for::<ViewFrameResult>();
+    let mut run = |p: Value| {
+        let r = s.execute("view.frame", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        assert!(conforms(schema.as_value(), schema.as_value(), &r), "{p}: {r} doesn't match {}", schema.as_value());
+        r
+    };
+    let set = run(json!({"set": "front", "camera": FACING()}));
+    assert!(set["front"].is_array() && set["top"].is_array() && set["camera"].is_object(), "{set}");
+    let top =
+        run(json!({"set": "top", "camera": {"target": [0, 0, 0], "yaw": 0, "pitch": std::f64::consts::FRAC_PI_2, "distance": 100, "frame": null}}));
+    assert!(top["top"].is_array(), "{top}");
+    let reset = run(json!({"reset": true, "camera": FACING()}));
+    assert_eq!(reset["frame"], Value::Null, "{reset}");
+    assert!(reset.as_object().is_some_and(|o| o.contains_key("frame")) && reset["camera"].is_object(), "{reset}");
+    let reset = run(json!({"reset": true, "set": null}));
+    assert_eq!(reset["frame"], Value::Null, "{reset}");
 }

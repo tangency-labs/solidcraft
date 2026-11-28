@@ -467,7 +467,25 @@ pub fn preferences_value(app: &crate::SolveApp) -> Option<Value> {
 
 /// Disk storage is portable; the exact in-process value remains the Cancel baseline.
 pub fn persistent_preferences_value(app: &crate::SolveApp) -> PanelResult<Option<Value>> {
-    portable_preferences_value(app, preferences_value(app))
+    let mut value = preferences_value(app);
+    // Startup restores host UI before asynchronous plugin discovery. Keep the plugin's
+    // live arrangement, but select the workspace the user came from on disk.
+    if let Some(previous) = crate::plugin_workspaces::previous_layout_id(app)
+        && let Some(integration) = &app.panel_runtime
+        && let Some(raw) = &value
+    {
+        use commands::LayoutCatalogue as _;
+        let registry = integration.runtime().layout().registry();
+        let mut record = PreferenceRecord::read(raw, registry)?;
+        let mut catalogue = commands::InMemoryCatalogue::from_snapshot(&record.catalogue, registry)?;
+        let current = integration.current_preference_envelope()?;
+        let rejected = catalogue.state().remembered(&current.layout.workspace).and_then(|stored| stored.rejected()).map(<[u8]>::to_vec);
+        catalogue.remember(&current, rejected.as_deref(), registry)?;
+        record.catalogue = catalogue.state().export()?;
+        record.selected = previous.clone();
+        value = Some(record.value());
+    }
+    portable_preferences_value(app, value)
 }
 
 /// Also used for the held Preferences baseline. Unreadable recovery stays exact.

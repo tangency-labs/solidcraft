@@ -1,19 +1,20 @@
 //! A record curve's proved distance from a face: the kernel's curve/surface gap
-//! ([`solidcore::query::curve_surface_gap`]) on a record spline, so applications name no
-//! kernel type for it. Only the conversion and the call: the bound is the kernel's.
+//! ([`solidcore::query::curve_surface_gap`]) on a record spline, exposed on [`Body`]
+//! ([`Body::curve_face_gap_bound`]) so applications name no kernel type for it. Only the
+//! conversion and the call: the bound is the kernel's.
 
 use solidcore::curve::curve::CurveKind;
 use solidcore::curve::from_parameters::from_parameters;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
-use solidcore::topology::{Brep, FaceId};
-use solidcore::Kernel;
 use solidcore::SolidError;
 use solidcore_record::brep::Curve as Record;
 
-use crate::session::run;
-use crate::Result;
+use crate::body::Body;
+use crate::order::{self, Order};
+use crate::session::{read_body, run};
+use crate::{Error, Result};
 
 /// A record spline or rational spline read as the kernel's curve.
 pub struct GapCurve(BSplineCurve);
@@ -79,21 +80,38 @@ impl GapCurve {
     }
 }
 
-/// A proved upper bound on the distance from `curve` over `interval` to the surface of face `face`
-/// of `body`; `None` when the kernel does not enclose the gap. `floor` is the scale below which a
-/// tighter bound changes nothing.
-///
-/// # Errors
-/// The kernel's: a dangling face, its unported and cancelled statuses.
-pub fn curve_face_gap_bound(
-    k: &Kernel,
-    body: &Brep,
-    face: FaceId,
-    curve: &GapCurve,
-    interval: [f64; 2],
-    floor: f64,
-) -> solidcore::Result<Option<f64>> {
-    solidcore::query::curve_surface_gap::curve_face_gap_bound(
-        k, body, face, &curve.0, interval, floor,
-    )
+impl Body {
+    /// A proved upper bound on the distance from `curve` over `interval` to the surface of record
+    /// face `face` ([`solidcore::query::curve_surface_gap::curve_face_gap_bound`]); `None` when
+    /// the kernel does not enclose the gap (a face without a surface or whose surface is not a
+    /// NURBS net, an interval past the curve's domain, or a piece the bisection cannot bound).
+    /// `floor` is the scale below which a tighter bound changes nothing. The body is only read.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a `face` index past `order.faces`, a non-finite or non-increasing
+    /// `interval`, or a `floor` that is not finite and non-negative; the kernel's error (a
+    /// dangling face in `order`, unported steps, cancellation or fuel exhaustion).
+    pub fn curve_face_gap_bound(
+        &self,
+        order: &Order,
+        face: usize,
+        curve: &GapCurve,
+        interval: [f64; 2],
+        floor: f64,
+    ) -> Result<Option<f64>> {
+        let f = order::face(order, face)?;
+        if !(interval[0].is_finite()
+            && interval[1].is_finite()
+            && interval[0] < interval[1]
+            && floor.is_finite()
+            && floor >= 0.0)
+        {
+            return Err(Error::Argument);
+        }
+        read_body("curve_face_gap_bound", self, |k, b| {
+            solidcore::query::curve_surface_gap::curve_face_gap_bound(
+                k, b, f, &curve.0, interval, floor,
+            )
+        })
+    }
 }

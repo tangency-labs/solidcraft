@@ -837,3 +837,22 @@ fn reach_with_from_and_joint_exprs_preserves_baselines_across_capture_position_a
 fn close(got: f64, want: f64) -> bool {
     (got - want).abs() < 1e-6
 }
+
+/// An assembly with >100 total loop-closing joints split into small unrelated groups (such as a
+/// large machine with many multi-jointed parts) must still let `joint.reach` move an arm whose own
+/// chain and loops stay within the per-reach cap.
+#[test]
+fn reach_works_when_design_has_more_than_max_loops_in_unrelated_groups() {
+    let mut s = arm(false, 30.0);
+    // Add 105 closing joints on an unrelated fixed pair (Base <-> Anchor), exceeding MAX_LOOPS=100
+    // across the whole design while the arm's own chain has 0 loops.
+    part(&mut s, "Anchor", [-20.0, -20.0, -1.0]);
+    for k in 0..106 {
+        pin(&mut s, "rigid", &format!("Tie_{k}"), "Base", "Anchor", Vec3::new(-10.0, -10.0, 0.0), Vec3::Z);
+    }
+    let tip = Vec3::new(100.0, 0.0, 0.0);
+    let to = Vec3::new(50.0, 50.0, 0.0);
+    let r = reach(&mut s, "Fore", tip, json!({"point": pt(to)}));
+    assert_eq!(r["reached"], true, "{r}");
+    assert!(place(&s, "Fore", tip).dist(to) < 1e-6, "{:?}", place(&s, "Fore", tip));
+}

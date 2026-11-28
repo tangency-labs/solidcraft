@@ -70,6 +70,9 @@ pub struct Files {
     pub disk_known: RefCell<std::collections::HashSet<String>>,
     /// Recent designs whose file is gone: to drop from the recent list.
     pub gone: RefCell<Vec<String>>,
+    /// Recent designs on the computer that are another, newer entry's file: (that entry, this
+    /// one), to drop this one from the recent list (#23033).
+    pub same_file: RefCell<Vec<(String, String)>>,
     /// Disk designs whose last write failed: they are not saved.
     pub unsaved: RefCell<Vec<String>>,
     /// Messages for the status line (errors and confirmations).

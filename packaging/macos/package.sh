@@ -170,6 +170,12 @@ for bin in solidcraft solidcraft-cli solidcraft-thumbnail-extension solidcraft-p
   lipo -create -output "$WORK/bin/$bin" "${inputs[@]}"
   lipo -info "$WORK/bin/$bin"
 done
+# The CLI ships without its symbol table, as on Linux (packaging/linux/package.sh): the names were
+# about 86 MB of each architecture and kept its Python wheels over PyPI's 100 MB limit. Stripped
+# here, before anything is signed, so the app's copy, the CLI zip and the wheels carry the same
+# signed bytes.
+strip "$WORK/bin/solidcraft-cli"
+codesign --force --sign - --timestamp=none "$WORK/bin/solidcraft-cli" # runnable here (Apple silicon) until signed for good below
 
 # ---- SolidCraft.app ----------------------------------------------------------------------------
 echo "==> assembling $APP"

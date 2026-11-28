@@ -89,6 +89,8 @@ mod issue_2111_offset_patch_sheet_gaps;
 mod issue_2174_cap_outward_ub_241;
 #[path = "../issue_2174_cap_rim_two_edges.rs"]
 mod issue_2174_cap_rim_two_edges;
+#[path = "../issue_22811_moved_flat_of_rounded_ball.rs"]
+mod issue_22811_moved_flat_of_rounded_ball;
 #[path = "../issue_2350_shell_offset_construction.rs"]
 mod issue_2350_shell_offset_construction;
 #[path = "../issue_2372_offset_shell_sweep_cancel.rs"]

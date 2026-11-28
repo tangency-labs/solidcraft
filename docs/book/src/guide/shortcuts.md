@@ -149,6 +149,21 @@ T, O, I, P, X and D). Each profile adds:
 | NX | R | Revolve | in a sketch, R still draws a rectangle |
 | NX | Ctrl+Shift+A | Save As | Toggle Assistant loses Ctrl+Shift+A |
 | NX | Ctrl+W | Show/Hide Selection | not used: Ctrl+W closes the design in SolidCraft; V still shows and hides |
+| Onshape | Shift+E, Shift+F, Shift+W | Extrude, Fillet, Revolve | |
+| Onshape | Shift+S | Create Sketch; in a sketch, Point | |
+| Onshape | F | Fit | Fillet loses F |
+| Onshape | N | Normal to Selection | |
+| Onshape | Shift+1 to Shift+7 | Front, Back, Left, Right, Top, Bottom and Isometric View | Ctrl+1 to Ctrl+7 still work |
+| Onshape | Y | Show/Hide Selection | V is Vertical in a sketch, so Show/Hide loses V |
+| Onshape | P | Show/Hide Planes | Project moves to U |
+| Onshape | [ | Measure | I is Coincident in a sketch; Measure keeps I in the model |
+| Onshape | Shift+I | Isolate | SolidCraft hides the other parts; it doesn't make them see-through |
+| Onshape | Shift+X | Section Analysis | |
+| Onshape | L, A, R, G | Line, 3-Point Arc, Center Rectangle, 2-Point Rectangle (in a sketch) | Transform loses G |
+| Onshape | D, O, U, X, M, Q | Sketch Dimension, Offset, Project, Extend, Trim, Normal/Construction (in a sketch) | Move/Copy Sketch Entities loses M |
+| Onshape | I, E, H, V, T, B | Coincident, Equal, Horizontal, Vertical, Tangent, Parallel (in a sketch) | |
+| Onshape | Shift+O, Shift+U, Shift+J, Shift+M, Shift+L, Shift+Q | Concentric, Curvature, Fix/Unfix, MidPoint, Perpendicular, Symmetry (in a sketch) | |
+| Onshape | Shift+F | Fillet (in a sketch) | |
 | SolidWorks | F | Fit | Fillet loses F |
 
 Ctrl+1 to Ctrl+7 and Ctrl+8 already match SolidWorks' standard views and Normal To in every

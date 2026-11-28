@@ -734,13 +734,14 @@ fn f_bounds(pieces: &[Vec<[f64; 4]>], r: f64) -> Result<(f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::knots::Side;
     use std::f64::consts::FRAC_1_SQRT_2;
 
     /// The quarter circle of radius `r` about `(cx, cy, z)` from angle `a0` (a rational
     /// quadratic Bézier, weights 1, √½, 1).
     fn quarter(r: f64, cx: f64, cy: f64, z: f64, a0: f64) -> Curve {
-        let (c, s) = (a0.cos(), a0.sin());
+        let (c, s) = (det::cos(a0), det::sin(a0));
         let at = |x: f64, y: f64| (cx + r * (c * x - s * y), cy + r * (s * x + c * y));
         let (p0, p1, p2) = (at(1.0, 0.0), at(1.0, 1.0), at(0.0, 1.0));
         let w = FRAC_1_SQRT_2;
@@ -767,13 +768,13 @@ mod tests {
     /// circle).
     fn cubic_along(r: f64, n: u32, dz: f64) -> Curve {
         let h = std::f64::consts::FRAC_PI_2 / f64::from(n);
-        let k = 4.0 / 3.0 * (h / 4.0).tan();
+        let k = 4.0 / 3.0 * det::tan(h / 4.0);
         let mut pw = Vec::new();
         let mut knots = vec![0.0; 4];
         for i in 0..n {
             let (a, b) = (h * f64::from(i), h * f64::from(i + 1));
-            let p = |t: f64| (r * t.cos(), r * t.sin());
-            let d = |t: f64| (-r * t.sin(), r * t.cos());
+            let p = |t: f64| (r * det::cos(t), r * det::sin(t));
+            let d = |t: f64| (-r * det::sin(t), r * det::cos(t));
             let (pa, pb, da, db) = (p(a), p(b), d(a), d(b));
             if i == 0 {
                 pw.push(CPoint::new(pa.0, pa.1, dz, NOW));
@@ -845,7 +846,7 @@ mod tests {
         for theta in [1e-5, 1e-3, 0.1] {
             let a = quarter(r, 0.0, 0.0, 0.0, 0.0);
             let b = quarter(r, 0.0, 0.0, 0.0, theta);
-            let want = 2.0 * r * (theta / 2.0).sin();
+            let want = 2.0 * r * det::sin(theta / 2.0);
             let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, 1.0], &c)
                 .unwrap()
                 .unwrap();
@@ -879,7 +880,7 @@ mod tests {
             for i in 0..=4000 {
                 let p = b.eval(hi * f64::from(i) / 4000.0, Side::Left).unwrap();
                 let rho = (p.x * p.x + p.y * p.y).sqrt();
-                sampled = sampled.max(((rho - r).powi(2) + p.z * p.z).sqrt());
+                sampled = sampled.max((det::powi(rho - r, 2) + p.z * p.z).sqrt());
             }
             let d = hausdorff_about_circle(&a, [0.0, 1.0], &b, [0.0, hi], &c)
                 .unwrap()
@@ -964,7 +965,7 @@ mod tests {
                 .collect();
             Curve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap()
         };
-        let tiny = 2.0_f64.powi(-536);
+        let tiny = det::powi(2.0_f64, -536);
         let mut got = Vec::new();
         for w in [1.0, tiny, 4.0] {
             let (a, b) = (bez(1.0, w), bez(33.0 / 32.0, w));
@@ -989,7 +990,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(d < 1e-11, "{d}");
-        let want = 2.0 * r * (std::f64::consts::PI / 8.0).sin();
+        let want = 2.0 * r * det::sin(std::f64::consts::PI / 8.0);
         let d = hausdorff_about_circle(&a, [0.0, 0.5], &a, [0.0, 1.0], &c)
             .unwrap()
             .unwrap();

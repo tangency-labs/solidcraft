@@ -79,6 +79,11 @@ macro_rules! unpaged_preferences {
             send_formats: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
             send_slicer: String = String::new();
+            /// A shape's shortcut (C, R, ...) starts the tool the menu lists it next to (#22247). A mode of
+            /// the shape tools, set in the Sketch Palette's Feature Options while one runs and kept; no
+            /// Preferences page shows or resets it. Off (the default): the key starts the family's tool
+            /// used last, as before (#4308).
+            shortcut_starts_listed_tool: bool = false;
             /// The 3-Point Arc's third point snaps to the arc tangent to the line or arc it starts or ends, or to the arc
             /// whose centre is on a sketch point, and the click adds the Tangent or Coincident constraint (#20719). A mode of the 3-Point Arc tool, set
             /// in the Sketch Palette while it runs and kept for the next time; no Preferences page shows or

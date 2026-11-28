@@ -71,7 +71,7 @@ pub(super) fn for_entry(
         let folder = directory(Path::new(path))?;
         let chosen = consent.is_some_and(|c| c.folders.iter().any(|g| g.name == name && g.read && !g.write && g.folder == folder));
         if !chosen {
-            grant_covers(&approved, &folder, false)?;
+            grant_covers_or(&approved, &folder, false, || messages::say("plugin_error.folder_option_read_approval", &[("option", &name)]))?;
         }
         folders.push(FileGrant { name, folder, read: true, write: false });
     }

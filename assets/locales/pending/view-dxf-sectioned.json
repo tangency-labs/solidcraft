@@ -1,0 +1,26 @@
+{
+  "en": {
+    "dxf.sectioned": "The section is on: the view is exported cut, with the outlines of its cut faces."
+  },
+  "en-GB": {
+    "dxf.sectioned": "The section is on: the view is exported cut, with the outlines of its cut faces."
+  },
+  "de": {
+    "dxf.sectioned": "Der Schnitt ist aktiv: Die Ansicht wird geschnitten exportiert, mit den Umrissen ihrer Schnittflächen."
+  },
+  "ar": {
+    "dxf.sectioned": "المقطع مفعّل: يُصدَّر العرض مقطوعًا، مع حدود أوجه القطع."
+  },
+  "he": {
+    "dxf.sectioned": "החתך פעיל: התצוגה מיוצאת חתוכה, עם קווי המתאר של פאות החתך."
+  },
+  "ja": {
+    "dxf.sectioned": "断面がオンです: ビューは切断された状態で、切断面の輪郭とともにエクスポートされます。"
+  },
+  "vi": {
+    "dxf.sectioned": "Mặt cắt đang bật: khung nhìn được xuất ở dạng đã cắt, kèm đường viền của các mặt cắt."
+  },
+  "zh": {
+    "dxf.sectioned": "剖切已开启：视图将以剖切后的状态导出，并包含剖切面的轮廓。"
+  }
+}

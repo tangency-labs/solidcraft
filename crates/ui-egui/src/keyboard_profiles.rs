@@ -4,7 +4,11 @@
 //! added or fixed without touching any code:
 //!
 //! ```json
-//! { "label": "NX", "provenance": "where the keys come from", "keys": { "view.fit": "Ctrl+F" } }
+//! {
+//!     "label": "NX",
+//!     "provenance": "where the keys come from",
+//!     "keys": { "view.fit": "Ctrl+F" }
+//! }
 //! ```
 //!
 //! A profile is a layer between a command's registered keys and the user's own keys

@@ -3,6 +3,7 @@
 //!
 //! Deviations: no upstream counterpart. No recursion; all walks are source-count bounded.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::Curve;
@@ -222,7 +223,7 @@ pub(super) fn build(k: &mut Kernel, mesh: &TriMesh) -> Result<Brep> {
         || original <= 0.
         || !rebuilt.is_finite()
         || rebuilt <= 0.
-        || (rebuilt - original).abs() > original.abs() * 1e-6 + COPLANAR * mesh.size().powi(2)
+        || (rebuilt - original).abs() > original.abs() * 1e-6 + COPLANAR * det::powi(mesh.size(), 2)
     {
         return Err(invalid("faceted volume differs from the source mesh"));
     }
@@ -343,8 +344,10 @@ fn winding(mesh: &TriMesh, triangles: &[usize], q: Vec3) -> Result<f64> {
         );
         let (la, lb, lc) = (a.length(), b.length(), c.length());
         angle += 2.
-            * a.dot(b.cross(c))
-                .atan2(la * lb * lc + a.dot(b) * lc + b.dot(c) * la + c.dot(a) * lb);
+            * det::atan2(
+                a.dot(b.cross(c)),
+                la * lb * lc + a.dot(b) * lc + b.dot(c) * la + c.dot(a) * lb,
+            );
     }
     Ok(angle / (4. * std::f64::consts::PI))
 }

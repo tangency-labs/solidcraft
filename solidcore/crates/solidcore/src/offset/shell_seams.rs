@@ -43,6 +43,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, PI};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1 as bp1;
@@ -319,7 +320,7 @@ pub fn placement(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Placement> {
     if off <= 1.0e-3 * TURN {
         return leave(Leave::AlreadyClear);
     }
-    let (sin, cos) = by.sin_cos();
+    let (sin, cos) = det::sin_cos(by);
     let x = position.x_axis() * cos + position.y_axis() * sin;
     let turned = Axis2Placement::new(position.origin(), x, position.z_axis().cross(x));
     let mut placed = surface.clone();
@@ -348,10 +349,10 @@ fn control_points(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Option<Vec<Point3>>
 fn angle_about(position: &Axis2Placement, p: Point3) -> Option<f64> {
     let d = p - position.origin();
     let (x, y) = (d.dot(position.x_axis()), d.dot(position.y_axis()));
-    if x.hypot(y) <= 1.0e-6 || !x.is_finite() || !y.is_finite() {
+    if det::hypot(x, y) <= 1.0e-6 || !x.is_finite() || !y.is_finite() {
         return None;
     }
-    Some(y.atan2(x).rem_euclid(TURN))
+    Some(det::atan2(y, x).rem_euclid(TURN))
 }
 
 /// The shortest arc holding every angle of `angles` (sorted in place), as its start and

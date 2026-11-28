@@ -17,9 +17,12 @@ pub fn annotations(schema: &Value) -> Vec<(String, &Value)> {
         out.push((KEY.into(), image));
     }
     for (name, property) in schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.iter()) {
-        for (index, option) in property.get("oneOf").and_then(Value::as_array).into_iter().flatten().enumerate() {
-            if let Some(image) = option.get(KEY) {
-                out.push((format!("properties.{name}.oneOf.{index}.{KEY}"), image));
+        // A list of choices (`items` a `oneOf`) names its options' pictures the same way.
+        for (at, choice) in [("", Some(property)), ("items.", property.get("items"))] {
+            for (index, option) in choice.and_then(|c| c.get("oneOf")).and_then(Value::as_array).into_iter().flatten().enumerate() {
+                if let Some(image) = option.get(KEY) {
+                    out.push((format!("properties.{name}.{at}oneOf.{index}.{KEY}"), image));
+                }
             }
         }
     }

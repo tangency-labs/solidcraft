@@ -17,7 +17,7 @@ modelled: a modelled thread is the maximum-material design profile below.
 
 | Form | `form` | Designation | Flanks | Depth | Crest flat | External minor | Internal minor, root |
 |---|---|---|---|---|---|---|---|
-| ISO metric | `metric` | `M10`, `M10x1`, `M16xPh3P1.5` | 30° / 30° | 5H/8, H = P √3/2 | P/8 at d, P/4 at D1 | d − 5H/4 | D1 = d − 5H/4, D = d |
+| ISO metric | `metric` | `M10`, `M10x1`, `M16xPh3P1.5`, `M10-6g` | 30° / 30° | 5H/8, H = P √3/2 | P/8 at d, P/4 at D1 | d − 5H/4 | D1 = d − 5H/4, D = d |
 | Unified inch | `unified` | `1/4-20 UNC-2A`, `#10-32 UNF` | 30° / 30° | 5H/8, H = P √3/2 | P/8 at d, P/4 at D1 | d − 5H/4 | D1 = d − 5H/4, D = d |
 | Trapezoidal | `trapezoidal` | `Tr20x4`, `Tr40x14(P7)` | 15° / 15° | H1 = P/2 | P/2 (1 − tan 15°) = 0.366 P | d3 = d − 2 (H1 + ac) | D1 = d − P, D4 = d + 2 ac |
 | Acme (general purpose) | `acme` | `1/2-10 ACME` | 14.5° / 14.5° | h = P/2 | P/2 (1 − tan 14.5°) = 0.3707 P | d − P − 0.020″ (0.010″ finer than 10 tpi) | D − P, D + 0.020″ (0.010″) |
@@ -32,6 +32,15 @@ modelled: a modelled thread is the maximum-material design profile below.
 The pipe threads' crest and root rounds (ISO 228-1/7-1 r = 0.137329 P, 0.137278 P taper) are
 modelled as flats at the basic height, as the other forms' radii; NPT takes the minimum truncation
 0.033 P at both. The flanks' bisector is square to the axis in all three.
+
+**Custom profile** (`custom`, `C10x1.5x90`): not a standard, the user's own profile, named as such
+in the callout. The designation is `C<major diameter>x<pitch>x<included angle>`, in mm and
+degrees. The profile is the ISO 68-1 basic profile with its fundamental triangle at that angle:
+H = P / (2 tan(α/2)), basic depth 5H/8, flats P/8 at d and P/4 at D1. At 60° it is the ISO
+metric profile, and at 90° the depth is 0.3125 P. The angle is 20° to 90°, and the minor
+diameter d − 5H/4 must be above zero. It has no size table, and a chamfered tip is refused
+(ISO 4753's is for metric threads). Above 73.7° the external groove's section reaches past the
+crest by less than 0.05 P, so the groove is never wider than 0.95 P there.
 
 **Taper pipe threads** (`bspt`, `npt`): the diameters change 1 in 16 along the axis. The thread
 starts at a free end, the pipe's end or the hole's mouth (`from`), with the diameter its standard
@@ -85,6 +94,20 @@ sizes outside that catalogue. The same strings work in the dialog, scripts and
 MCP. A size that does not fit is refused with a fitting catalogue suggestion when
 available: a 10 mm shaft refuses `1/4-20 UNC` and suggests `3/8-16 UNC`.
 
+**ISO metric tolerance class (ISO 965-1).** A metric designation may end in its tolerance
+class after a hyphen, as ISO 965-1 writes it: `M8-6g`, `M8x1-6H`, `M10x1.25-5g6g`. A class is a
+grade (a digit) then a position (a letter): `e`, `f`, `g` or `h` for an external thread (shaft),
+`G` or `H` for an internal thread (hole). Two classes name the pitch diameter, then the crest
+diameter (major for a shaft, minor for a hole), with one position. A shaft's pitch diameter takes
+grades 3 to 9 and its major diameter 4, 6 or 8; a hole's pitch and minor diameters take 4 to 8.
+One class stands for both diameters (`6g` is 6g6g), so it needs a grade both take: `5g` alone is
+refused, `5g6g` is accepted. A repeated class (`6g6g`) is refused too, so each class has one
+spelling, as for a tapped hole's class. The rule follows the 1998 and 2013 editions; a class a
+later edition adds may be refused. The class is kept in the callout and refused on the wrong
+side. It changes no geometry: the groove is the basic profile for both sides, and fits with a
+clearance are not modelled yet (#17785). `-LH` (use Hand), the engagement groups `-S` and `-L`
+and fits such as `6H/6g` are not accepted.
+
 **Hand.** `hand: right | left | both`. A left-handed groove is the right-handed one's mirror image
 (the screw motion about the reversed axis, rising along it); `both` cuts a right- and a
 left-handed groove crossing on the face (a reversing screw).
@@ -124,6 +147,16 @@ without one, at the end the `face` point lies within a third of the face of. A p
 of a face whose ends are alike is refused, naming `from`. A length as long as the face runs the
 whole face.
 
+**Offset** (`offset`, a length, default 0) starts the thread that far in from the end it starts at,
+leaving that end plain: an unthreaded lead-in on a bolt, a plain stretch below a hole's mouth, a
+thread band in the middle of a rod. `length` and `up_to` are measured from the offset start; Full
+runs from there to the far end, and a length past the far end stops there. The start is a square
+stop inside the face; the runout (`ease_out`) stays at the inner end. Drawings draw a limit line at
+both ends, and `model.threads` reports the offset span as `start`/`end`. Refused: an offset below
+0, one as long as the face or longer, one with `tip: start` (the start is no longer a free end;
+`tip: both` chamfers only a free far end), and one on a taper pipe thread, whose standard sets its
+gauge diameter at the pipe's end or the hole's mouth.
+
 ## Runout and tip
 
 **Runout** (`ease_out`: a length, `standard` = 2.5 P or `short` = 1.25 P, ISO 3508's normal and
@@ -150,7 +183,7 @@ the hole's countersink instead.
 
 ## Sources
 
-- ISO 68-1 (basic profile), ISO 261/262 (sizes), ISO 965-1 (multi-start designation `Ph`).
+- ISO 68-1 (basic profile), ISO 261/262 (sizes), ISO 965-1 (multi-start designation `Ph`, tolerance classes).
 - ASME B1.1 (Unified 60° basic profile, numbered major diameters and classes); the UNC/UNF
   sizes and cutting-tap drills reuse the [tapped-hole catalogue](thread-catalogue.md).
 - ISO 2901 to 2904 (trapezoidal: basic and design profiles, series, basic dimensions); the

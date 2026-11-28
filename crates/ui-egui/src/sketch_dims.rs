@@ -816,6 +816,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     }
     let Some(mut t) = app.tool.take() else { return };
+    // A pick whose curve the Undo button took away goes before the boxes are decided (#23086).
+    if crate::sketch_tools::drop_gone_picks(app, &mut t) {
+        app.set_tool_hint(crate::tools::hint(t.cmd));
+    }
     t.classic = app.preferences.construction_line_classic;
     t.arc_modes = app.preferences.sketch_arc_tangent_snap;
     sync(&mut t);
@@ -823,10 +827,56 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     if t.classic {
         crate::sketch_construction::line_type_switch(ui, &mut t);
     }
+    rectangle_switch(ui, &mut t);
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));
     }
+}
+
+thread_local! {
+    static LAST_RECTANGLE_ROTATABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether a rectangle tool starts drawing rectangles that can be turned: the choice last made on
+/// its switch while the app runs, else Fixed.
+pub(crate) fn last_rectangle_rotatable() -> bool {
+    LAST_RECTANGLE_ROTATABLE.with(std::cell::Cell::get)
+}
+
+/// The 2-Point and Center Rectangle tools' Fixed/Can turn switch under the Width box (#21467). Can
+/// turn holds the sides parallel and perpendicular with only the bottom one horizontal, so
+/// deleting that constraint turns the rectangle; Fixed keeps each side horizontal or vertical. It
+/// belongs to the tool alone, as the construction line tools' Construction/Normal switch does.
+fn rectangle_switch(ui: &mut egui::Ui, t: &mut Tool) {
+    if !matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center") {
+        return;
+    }
+    let Some(i) = t.dims.iter().position(|b| b.label == "Width") else { return };
+    let Some(width_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
+    let tokens = Tokens::get();
+    let options = [solidcraft_ui_text::tr("sketch.rectangle.fixed"), solidcraft_ui_text::tr("sketch.rectangle.can_turn")];
+    let mut selected = usize::from(t.rotatable);
+    let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
+    crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
+        .area(egui::Id::unique("sc_rectangle_switch"))
+        .fixed_pos(width_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
+        .order(egui::Order::Background)
+        .show(ui.ctx(), |ui| {
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                let segments = crate::ui_kit::Segments {
+                    targets: &["rectangle_switch:fixed", "rectangle_switch:can_turn"],
+                    small: true,
+                    intrinsic: true,
+                    compact: true,
+                    ..Default::default()
+                };
+                if crate::ui_kit::segmented(ui, &mut selected, &options, segments) {
+                    t.rotatable = selected == 1;
+                    LAST_RECTANGLE_ROTATABLE.with(|last| last.set(t.rotatable));
+                }
+            });
+        });
 }
 
 fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option<Vec2> {
@@ -937,7 +987,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
         let bounds = egui::Rect::from_points(&points);
-        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
+        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
     } else {
         None
     };
@@ -961,7 +1011,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             if !start.is_finite() || !end.is_finite() || !(end - start).length().is_finite() {
                 return None;
             }
-            Some(line_input_positions([start, end], &sizes, view, tk.space_8))
+            Some(line_inputs_off_pointer([start, end], &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
         })
     } else {
         None
@@ -1085,7 +1135,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                     if focus && i == 0 {
                         r.request_focus();
                     }
-                    any_focused |= r.has_focus() || r.lost_focus();
+                    // `Response::has_focus` is false while the window is not the focused one, which
+                    // would drop a script's Enter (`ui.key`) sent from another window.
+                    any_focused |= ui.memory(|m| m.has_focus(r.id)) || r.has_focus() || r.lost_focus() || focus;
                     if has_focus && ui.is_sizing_pass() {
                         ui.ctx().data_mut(|d| d.insert_temp(refocus, Some(id)));
                     }
@@ -1111,7 +1163,14 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     // A box waiting before the first click only places on Enter once it has the keyboard.
     let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
-    (enter && (any_focused || nothing)).then_some(e)
+    let other_focused = ui.ctx().memory(|m| m.focused().is_some_and(|id| !(0..t.dims.len()).any(|i| id == egui::Id::unique(("sc_dim", i)))));
+    let eligible = any_focused || nothing || (!t.pts.is_empty() && !other_focused);
+    if enter && eligible {
+        let hover = t.hover.clone().or_else(|| t.pts.last().map(|(p, id)| (*p + Vec2::X, id.clone())));
+        hover.map(|h| shown(app, t, &h))
+    } else {
+        None
+    }
 }
 
 /// Place measured rectangle fields nearest their edge anchors, keeping the pointer and
@@ -1143,12 +1202,27 @@ fn rectangle_input_positions(anchors: &[Pos2], sizes: &[egui::Vec2], view: Optio
         .collect()
 }
 
-/// Keep measured Length and Angle fields clear of the projected line and each other.
-/// Opposite sides are preferred; drawing-area edges may require both fields on one side.
-/// Retry first-field candidates when the second field cannot fit. Candidate count is bounded
-/// for the two fields. Only if the original candidates fail, also try axis-aligned
-/// neighbors and slides away from the line. An area too small to fit them can only clamp.
-fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
+/// Where the Line tool's measured Length and Angle fields go: [`line_input_positions`], with the
+/// fields also kept off `pointer`. While the pointer rests on a field the tool has no hover and
+/// the preview stays at the last point, so a field left there would take the click meant for the
+/// next point (#22769). Where no placement clears the pointer, the fields go where they would
+/// without one.
+fn line_inputs_off_pointer(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
+    let under = |positions: &[Pos2]| {
+        pointer.is_some_and(|pointer| {
+            positions.iter().zip(sizes).any(|(pos, size)| egui::Rect::from_min_size(*pos, *size).expand(2.0).contains(pointer))
+        })
+    };
+    let placed = line_input_positions(segment, sizes, view, gap, pointer);
+    if under(&placed) { line_input_positions(segment, sizes, view, gap, None) } else { placed }
+}
+
+/// Keep measured Length and Angle fields clear of the projected line, each other and `pointer`
+/// (when given). Opposite sides are preferred; drawing-area edges may require both fields on one
+/// side. Retry first-field candidates when the second field cannot fit. Candidate count is bounded
+/// for the two fields. Only if the original candidates fail, also try axis-aligned neighbors and
+/// slides away from the line. An area too small to fit them can only clamp.
+fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let [start, end] = segment;
     let delta = end - start;
     let length = delta.length();
@@ -1228,7 +1302,9 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
         }
         rects
     };
-    let usable = |rect: egui::Rect| view.is_none_or(|view| view.fits(rect)) && clear(rect);
+    let usable = |rect: egui::Rect| {
+        view.is_none_or(|view| view.fits(rect)) && clear(rect) && pointer.is_none_or(|pointer| !rect.expand(2.0).contains(pointer))
+    };
     let mut placed: Vec<egui::Rect> = Vec::new();
     for (i, &size) in sizes.iter().enumerate() {
         let mut position = candidates(i, size, placed.last().copied(), false)
@@ -1267,7 +1343,10 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
 
 /// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
 /// the drawing area's edge when the polygon fills the view; keep the boxes separate even then.
-fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
+/// The stack also keeps off `pointer` (when given): while the pointer rests on a box the tool has
+/// no hover and the preview stays tiny at the first point, so a box left there would take the
+/// click meant for the polygon. Where no side clears both, the pointer is not considered.
+fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let size =
         vec2(sizes.iter().map(|s| s.x).fold(0.0, f32::max), sizes.iter().map(|s| s.y).sum::<f32>() + gap * sizes.len().saturating_sub(1) as f32);
     let candidates = [
@@ -1277,10 +1356,13 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
         egui::pos2(bounds.right() + gap, bounds.center().y - size.y * 0.5),
     ];
     let inside = |pos: Pos2| view.map_or(pos, |view| view.clamp(egui::Rect::from_min_size(pos, size)).min);
+    let clear = |pos: &Pos2| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5));
+    let off_pointer = |pos: &Pos2| pointer.is_none_or(|pointer| !egui::Rect::from_min_size(*pos, size).expand(2.0).contains(pointer));
     let start = candidates
         .into_iter()
         .map(inside)
-        .find(|pos| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5)))
+        .find(|pos| clear(pos) && off_pointer(pos))
+        .or_else(|| candidates.into_iter().map(inside).find(clear))
         .unwrap_or_else(|| inside(candidates[0]));
     let mut y = start.y;
     sizes

@@ -9,6 +9,7 @@
     clippy::float_cmp
 )]
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_3, FRAC_PI_4};
 
 use crate::math::{Point2, Vec2};
@@ -42,7 +43,7 @@ fn arc(
 }
 
 fn point_at(center: Point2, radius: f64, angle: f64) -> Point2 {
-    center + Vec2::new(angle.cos(), angle.sin()) * radius
+    center + Vec2::new(det::cos(angle), det::sin(angle)) * radius
 }
 
 /// A butt face on the x axis facing up, and a fillet face tilted a quarter of a right angle.
@@ -124,7 +125,7 @@ fn convex_bulges_outward_and_concave_inward() {
             let bulge = (crown - chord_middle).dot(outward);
             assert!(side * bulge > 0.0, "{contour:?} bulge {bulge}");
             // The sagitta of a sixty-degree arc is r (1 - cos 30 degrees).
-            assert!((bulge.abs() - radius * (1.0 - (FRAC_PI_3 / 2.0).cos())).abs() < 1e-9);
+            assert!((bulge.abs() - radius * (1.0 - det::cos(FRAC_PI_3 / 2.0))).abs() < 1e-9);
         }
     }
 }
@@ -217,7 +218,7 @@ fn v_groove_height_of_an_equilateral_groove() {
     for width in [1e-6, 1.0, 5.0, 123.4] {
         let height = v_groove_height(width).unwrap();
         // Two sides of length `w` and an opening `w` make an equilateral triangle.
-        let side = (height * height + (width / 2.0).powi(2)).sqrt();
+        let side = (height * height + det::powi(width / 2.0, 2)).sqrt();
         assert!((side - width).abs() < 1e-9 * width.max(1.0));
     }
 }

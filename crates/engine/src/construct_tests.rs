@@ -372,6 +372,15 @@ fn axis_perpendicular_to_a_face_at_a_point() {
     run(&mut s, "construct.axis.normal_to_face", json!({"face": {"face": [65, 0, 5]}, "point": {"point": [70, 0, 5]}, "name": "R"}));
     let (o, d) = axis(&s, "R");
     assert!(near(o, Vec3::new(65.0, 0.0, 5.0)) && parallel(d, Vec3::X), "{o:?} {d:?}");
+    // An origin plane or a construction plane in place of a face (#23006): square to it,
+    // from the point's foot on it.
+    run(&mut s, "construct.axis.normal_to_face", json!({"face": {"plane": "XZ"}, "point": {"point": [10, 10, 25]}, "name": "P"}));
+    let (o, d) = axis(&s, "P");
+    assert!(near(o, Vec3::new(10.0, 0.0, 25.0)) && parallel(d, Vec3::Y), "{o:?} {d:?}");
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 7, "name": "Shelf"}));
+    run(&mut s, "construct.axis.normal_to_face", json!({"face": {"plane": "Shelf"}, "point": {"point": [3, 4, 50]}, "name": "S"}));
+    let (o, d) = axis(&s, "S");
+    assert!(near(o, Vec3::new(3.0, 4.0, 7.0)) && parallel(d, Vec3::Z), "{o:?} {d:?}");
 }
 
 #[test]

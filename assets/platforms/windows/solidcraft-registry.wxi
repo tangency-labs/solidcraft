@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SolidCraft's registry values, included by solidcraft.wxs once per install scope (its
+  SolidcraftRegistryMachine and SolidcraftRegistryUser components). HKMU is HKLM for all users and
+  HKCU just for me.
+-->
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Compatibility shim (docs/compatibility.md): designs saved as .solidcraft (before .sc)
+       open as the same ProgId. Registered by hand: a
+       second Extension under one ProgId would write its open verb twice (WIX0091). -->
+  <RegistryValue Root="HKMU" Key="Software\Classes\.solidcraft" Value="Solidcraft.Design" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.solidcraft" Name="Content Type" Value="application/x-solidcraft" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Solidcraft.Model\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.step\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.stp\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.igs\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.iges\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.3mf\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\.stl\OpenWithProgids" Name="Solidcraft.Model" Value="" Type="string" />
+
+  <!-- solidcraft:// links (a Workshop page's Open in SolidCraft button, docs/workshop-links.md):
+       the browser starts the app with the link as its open-url argument. The app looks the item up
+       in the signed Workshop index and asks before it opens or installs anything. -->
+  <RegistryValue Root="HKMU" Key="Software\Classes\solidcraft" Value="URL:SolidCraft" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\solidcraft" Name="URL Protocol" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\solidcraft\DefaultIcon" Value="&quot;[#SolidcraftExe]&quot;,0" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\solidcraft\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; --open-url &quot;%1&quot;" Type="string" />
+
+  <!-- "Open with" app list and the Run dialog (Win+R "solidcraft"). -->
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe" Name="FriendlyAppName" Value="SolidCraft" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".sc" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solidcraft" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".step" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".stp" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".igs" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".iges" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".3mf" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".stl" Value="" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\solidcraft.exe" Value="[#SolidcraftExe]" Type="string" />
+  <RegistryValue Root="HKMU" Key="Software\SolidCraft" Name="InstallDir" Value="[INSTALLFOLDER]" Type="string" KeyPath="yes" />
+</Include>

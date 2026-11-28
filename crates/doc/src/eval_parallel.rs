@@ -22,9 +22,9 @@ use solidcraft_kernel as kernel;
 
 use super::{
     CachedEval, Change, ComponentDigests, Document, EvalCache, EvalKey, EvalValidationGuard, Feature, FeatureKind, FeatureResult, FrameBodies,
-    IMPORT_HEALS, ImportDigests, ModelState, Primed, Value, absorb_sheet_cuts, append_warning, check_kept, copy_instances, eval_feature, fingerprint,
-    naming_feature, note_cut_cavity, note_join_apart, now, overlap, own_copies, own_inputs, param_names, track_altered_sheets,
-    with_named_face_points,
+    IMPORT_HEALS, ImportDigests, ModelState, Primed, SourceStates, Value, absorb_sheet_cuts, append_warning, check_kept, copy_instances,
+    eval_feature, fingerprint, naming_feature, note_cut_cavity, note_join_apart, now, overlap, own_copies, own_inputs, param_names,
+    track_altered_sheets, with_named_face_points,
 };
 
 #[cfg(test)]
@@ -147,6 +147,7 @@ pub(super) fn prefetch_imports(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     prev_results: &[FeatureResult],
+    subset_imports: &BTreeSet<u64>,
     prev_import_digests: &ImportDigests,
     import_digests: &ImportDigests,
     cache: &Mutex<EvalCache>,
@@ -171,7 +172,7 @@ pub(super) fn prefetch_imports(
     let mut by_digest: HashMap<(u8, u64, usize), Vec<usize>> = HashMap::new();
     let cache_guard = cache.lock().ok();
     for (i, f) in doc.features.iter().enumerate().take(limit) {
-        if f.suppressed {
+        if f.suppressed || subset_imports.contains(&f.id) {
             continue;
         }
         let FeatureKind::Import { step, records, .. } = &f.kind else {
@@ -305,6 +306,7 @@ pub(super) fn prefetch_components(
     vals: &BTreeMap<String, Value>,
     param_errors: &BTreeMap<String, String>,
     prev_results: &[FeatureResult],
+    subset_imports: &BTreeSet<u64>,
     empty: &Arc<ModelState>,
     frame_bodies: &Arc<Mutex<FrameBodies>>,
     cache: &Mutex<EvalCache>,
@@ -365,9 +367,19 @@ pub(super) fn prefetch_components(
             reserved.extend(f.body_names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(str::to_string));
             continue;
         }
+        if subset_imports.contains(&f.id) {
+            blocked_components.insert(f.component);
+            continue;
+        }
         if i < first_cold {
             // Components that already have prefix state before `first_cold` are excluded so every
             // worker chain starts cleanly from an empty component state.
+            blocked_components.insert(f.component);
+            continue;
+        }
+        if same_ctx && prev_results.get(i).is_some_and(|old| old.id == f.id && !old.skipped && !old.stale && !old.unkept && old.error.is_none()) {
+            // Components whose results are already cached from the previous evaluation (such as
+            // valid components after a failing feature in a partial model cache) are skipped.
             blocked_components.insert(f.component);
             continue;
         }
@@ -450,6 +462,10 @@ fn eval_component_chain(
     let mut emitted = Vec::new();
     let feature_component = &component_digests.feature_component;
     let mut state = Arc::new(ModelState { reserved_body_names: doc.reserved_body_names.clone(), ..(**empty).clone() });
+    // The model as it was before each feature ran (by feature id), for the features a pattern
+    // copies: a copy of a source whose own result changed the model it is built against is built
+    // where the source was built (see `replay`).
+    let mut before_states: SourceStates = SourceStates::new();
     for step in &chain.steps {
         if kernel::watch::cancelled() || crate::progress::cancelled() {
             break;
@@ -461,6 +477,10 @@ fn eval_component_chain(
         if state.reserved_body_names != step.reserved {
             Arc::make_mut(&mut state).reserved_body_names.clone_from(&step.reserved);
         }
+        // The model as it was before this feature ran: a pattern that copies this feature builds
+        // the copy where the feature was built, when the model it is built against no longer
+        // holds what the feature was built from (see `replay`).
+        before_states.insert(f.id, state.clone());
         let key = EvalKey::new(doc, vals, f, 0, ctx, shared_ctx, &state, import_digests, constructions, component_digests);
         let Some((reads_key, read)) = key.reads.as_ref() else {
             break;
@@ -502,8 +522,20 @@ fn eval_component_chain(
                 let _val_guard = EvalValidationGuard::new(validation);
                 let (r, deferred) = kernel::validating(validation, || {
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = import_digests.heals(f.id).cloned());
-                    let r =
-                        eval_feature(doc, vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, None, prepared_imports.get(f.id));
+                    let r = eval_feature(
+                        doc,
+                        vals,
+                        f,
+                        &mut next,
+                        &mut warning,
+                        &mut import_report,
+                        &mut repair,
+                        heal,
+                        None,
+                        prepared_imports.get(f.id),
+                        None,
+                        Some(&before_states),
+                    );
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                     r
                 });

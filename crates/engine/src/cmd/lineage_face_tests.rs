@@ -384,6 +384,95 @@ fn a_raised_piece_of_a_split_top_takes_a_sketch_by_its_own_name() {
     assert!((healthy(&t, "Raised").0.origin.z - 13.).abs() < 1e-9);
 }
 
+#[test]
+fn transform_face_moves_only_the_picked_piece_and_rebuilds_through_zero() {
+    let mut s = slotted_block();
+    run(&mut s, "parameters.add", json!({"name":"raise","expression":"2 mm"}));
+    run(&mut s, "solid.transform_face", json!({"face":[5,15,10],"translate":[0,0,"raise"],"name":"Raise"}));
+    no_errors(&s);
+    sketch_on(&mut s, [5., 15., 12.], "Raised");
+    sketch_on(&mut s, [35., 15., 10.], "Kept");
+    for height in [0, -1, 3] {
+        run(&mut s, "parameters.change", json!({"name":"raise","expression":format!("{height} mm")}));
+        no_errors(&s);
+        assert!((healthy(&s, "Raised").0.origin.z - f64::from(10 + height)).abs() < 1e-9);
+        assert!((healthy(&s, "Kept").0.origin.z - 10.).abs() < 1e-9);
+    }
+    assert!((healthy(&reopened(&s), "Raised").0.origin.z - 13.).abs() < 1e-9);
+}
+
+#[test]
+fn transform_face_patterns_carry_the_pivot_and_mirror_the_rotation() {
+    for (command, params) in [
+        ("solid.pattern.rectangular", json!({"features":["Tilt"],"dir1":[1,0,0],"count1":2,"spacing1":25})),
+        ("solid.mirror", json!({"features":["Tilt"],"plane":{"origin":[20,0,0],"normal":[1,0,0]}})),
+    ] {
+        let mut s = slotted_block();
+        run(&mut s, "solid.transform_face", json!({"face":[5,15,10],"axis":[0,-1,0],"angle":"10 deg","origin":[0,0,10],"name":"Tilt"}));
+        no_errors(&s);
+        run(&mut s, command, params);
+        no_errors(&s);
+        let measured = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+        // Stock minus the slot, plus two triangular prisms (width 15, depth 30).
+        let want = 40. * 30. * 10. - 10. * 30. * 5. + 30. * 15. * 15. * 10_f64.to_radians().tan();
+        assert!((measured - want).abs() < 1e-5, "{command}: {measured} vs {want}");
+    }
+}
+
+#[test]
+fn transform_face_edits_each_rebuilt_body_not_the_source_or_a_coincident_neighbour() {
+    for (command, params, count) in [
+        ("solid.pattern.rectangular", json!({"features":["Stock","Tilt"],"dir1":[1,0,0],"count1":3,"spacing1":30}), 4),
+        ("solid.mirror", json!({"features":["Tilt","Stock"],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}), 3),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"operation":"new","body_name":"Block","name":"Stock"}));
+        run(&mut s, "solid.box", json!({"corner":[30,0,0],"length":10,"width":10,"height":10,"operation":"new","body_name":"Neighbour"}));
+        run(
+            &mut s,
+            "solid.transform_face",
+            json!({"body":"Block","face":[5,5,10],"translate":[0,0,2],"axis":[0,-1,0],"origin":[0,0,10],"angle":"45 deg","name":"Tilt"}),
+        );
+        run(&mut s, command, params);
+        no_errors(&s);
+        let measured = run(&mut s, "inspect.measure", json!({}));
+        let bodies = measured["bodies"].as_array().unwrap();
+        assert_eq!(bodies.len(), count, "{command}: {measured}");
+        for body in bodies {
+            // Each copy has the same area 100 and mean roof height (12 + 22)/2. The
+            // neighbour also holds the copied pick but must not receive any part of the edit.
+            let want = if body["name"] == "Neighbour" { 1000. } else { 1700. };
+            assert!((body["volume_mm3"].as_f64().unwrap() - want).abs() < 1e-6, "{command}: {body}");
+        }
+    }
+}
+
+#[test]
+fn transform_face_on_a_placed_move_copy_is_not_applied_twice_by_a_mirror() {
+    use solidcore_record::Vec3;
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Blank"}));
+    run(&mut s, "solid.move", json!({"bodies":["Blank"],"translate":[20,0,0],"copy":true,"name":"Duplicate"}));
+    let duplicate = s.model.state().bodies.last().unwrap().name.clone();
+    run(&mut s, "solid.transform_face", json!({"body":duplicate,"face":[30,5,5],"translate":[2,0,0],"name":"Extend"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence":"Part:1","axis":[0,0,1],"angle":"90 deg","origin":[0,0,0],"translate":[50,0,0],"capture":true}),
+    );
+    run(&mut s, "solid.mirror", json!({"features":["Duplicate","Extend"],"plane":"YZ","name":"Echo"}));
+    no_errors(&s);
+    let echo = s.doc.find_feature("Echo").unwrap().id;
+    let world = s.world_state().unwrap();
+    let copy = world.bodies.iter().find(|b| b.feature == echo).unwrap();
+    // The extended face is at local x=32, world y=32. The mirror changes x, not y.
+    assert!(world.body(&duplicate).unwrap().body.face_at_point(Vec3::new(45., 32., 5.)).unwrap().is_some());
+    assert!(copy.body.face_at_point(Vec3::new(-45., 32., 5.)).unwrap().is_some());
+}
+
 /// A plastic Boss keeps the history of the body it stands on (#494): the plate's faces still
 /// take attached sketches, and so does the boss's own top, which follows its height.
 #[test]
@@ -594,5 +683,90 @@ fn the_face_a_split_cuts_takes_a_sketch_and_an_offset_plane_that_follow_the_plan
         for k in 0..2 {
             assert!((healthy(&t, &format!("OnCut{k}")).0.origin.x - 20.).abs() < 1e-9, "{tool} reopened OnCut{k}");
         }
+    }
+}
+
+/// A case's wall (a block with a rib across its top) and a cover extruded above it from an
+/// offset start, cut by the wall so the rib leaves a groove across the cover's underside, with a
+/// pocket in the cover mirrored twice. Both caps of the cover lie above its sketch plane.
+fn grooved_cover() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "wall_h", "expression": "10 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "WallSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-20, -15], "p1": [20, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "WallSketch", "distance": "wall_h", "name": "Wall"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "RibSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-2, -15], "p1": [2, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "RibSketch", "distance": 1, "start_offset": "wall_h", "operation": "join", "targets": ["Body1"], "name": "Rib"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "CoverSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-20, -15], "p1": [20, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "CoverSketch", "distance": 5, "start_offset": "wall_h", "operation": "new_body", "name": "Cover"}));
+    run(&mut s, "solid.combine", json!({"target": "Body2", "tools": ["Body1"], "operation": "cut", "keep_tools": true, "name": "Groove"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PocketSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 8], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "PocketSketch", "distance": 3, "start_offset": "wall_h + 2 mm", "operation": "cut", "targets": ["Body2"], "name": "Pocket"}),
+    );
+    run(&mut s, "solid.mirror", json!({"features": ["Pocket"], "plane": "YZ", "name": "MirrorX"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Pocket", "MirrorX"], "plane": "XZ", "name": "MirrorY"}));
+    no_errors(&s);
+    s
+}
+
+/// Both caps of an extrude from an offset start lie on one side of its sketch plane, so their
+/// height gives both one role (`top`, numbered `top#1` and `top#2`), and the pieces of its
+/// underside the groove left are named after that shared role. Each cap also answers to the end
+/// it closes (`cap:low`, `cap:high`): the pieces take a sketch by it that keeps its attachment,
+/// without a fixed plane, and follows them when the offset changes (T-1986). The faces' names
+/// stay as they were.
+#[test]
+fn the_split_underside_of_an_extrude_from_an_offset_start_takes_a_sketch() {
+    let mut s = grooved_cover();
+    let cover = s.doc.find_feature("Cover").map(|f| f.id).unwrap();
+    let state = s.model.state();
+    let body = state.bodies.iter().find(|b| b.name == "Body2").unwrap();
+    let names = solidcraft_doc::naming::face_names(body);
+    assert!(names.iter().any(|n| n == &format!("F{cover}:top#2")), "{names:?}");
+    let under: Vec<&String> = names.iter().filter(|n| n.starts_with(&format!("F{cover}:top#[")) && n.ends_with("]#1")).collect();
+    assert_eq!(under.len(), 2, "the groove splits the underside in two: {names:?}");
+
+    let faces = run(&mut s, "model.faces", json!({"body": "Body2"}));
+    let piece = |x: f64| {
+        let face = faces["faces"].as_array().unwrap().iter().find(|f| {
+            let c = &f["centroid"];
+            (c[2].as_f64().unwrap() - 10.).abs() < 1e-6 && c[0].as_f64().unwrap() * x > 0.
+        });
+        let face = face.unwrap_or_else(|| panic!("no underside piece at x {x}: {faces}"));
+        (face["index"].as_u64().unwrap(), face["point"].clone())
+    };
+    for (name, x) in [("UnderLeft", -10.), ("UnderRight", 10.)] {
+        let (index, point) = piece(x);
+        run(&mut s, "sketch.create", json!({"plane": {"body": "Body2", "face": point, "index": index}, "name": name}));
+        run(&mut s, "sketch.finish", json!({}));
+        let (plane, certificate) = healthy(&s, name);
+        assert_eq!(certificate, Some(FaceCertificate::Lineage), "{name}");
+        let FaceAttachmentStatus::Healthy { target, .. } = status(&s, name) else { panic!("{name}") };
+        assert_eq!(target.name, format!("F{cover}:cap:low"), "{name}");
+        assert!((plane.normal().z + 1.).abs() < 1e-9 && (plane.origin.z - 10.).abs() < 1e-9, "{name}: {plane:?}");
+    }
+    sketch_on(&mut s, [0., 0., 15.], "OnTop");
+    run(&mut s, "parameters.change", json!({"name": "wall_h", "expression": "12 mm"}));
+    no_errors(&s);
+    for (name, z) in [("UnderLeft", 12.), ("UnderRight", 12.), ("OnTop", 17.)] {
+        assert!((healthy(&s, name).0.origin.z - z).abs() < 1e-9, "{name}");
+    }
+    let t = reopened(&s);
+    for (name, z) in [("UnderLeft", 12.), ("UnderRight", 12.), ("OnTop", 17.)] {
+        assert!((healthy(&t, name).0.origin.z - z).abs() < 1e-9, "{name}");
     }
 }

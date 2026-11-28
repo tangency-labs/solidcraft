@@ -177,9 +177,11 @@ const ANSWERING: &[&str] = &[
     "blend_setback",
     "blend_setback_open",
     "fillet_variable",
+    "fillet_variable_chain",
     "chamfer_sides",
     "shell",
     "offset_faces",
+    "transform_face",
     "thicken",
     "offset_solid",
     "merge_faces",
@@ -207,6 +209,7 @@ const ANSWERING: &[&str] = &[
     "tagged",
     "history",
     "check",
+    "check_local",
     "check_owned",
     "check_stitched",
     "make_cylinder",
@@ -219,6 +222,7 @@ const ANSWERING: &[&str] = &[
     "planar_faces",
     "extrude",
     "revolve",
+    "revolve_joining_arcs",
     "sweep",
     "sweep_placed",
     "project_curves",
@@ -321,9 +325,12 @@ fn every_entry_point_answers() {
     says("blend_setback", a.blend_setback(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
     says("blend_setback_open", a.blend_setback_open(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
     says("fillet_variable", a.fillet_variable(edge[0], 0.1, p(0.0, 10.0, 10.0), 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 1.0]));
+    says("fillet_variable_chain", a.fillet_variable_chain(&edge, 0.1, p(0.0, 10.0, 10.0), 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 1.0]));
     says("chamfer_sides", a.chamfer_sides(&edge, 0.1, 1.0, ChamferSecond::Distance(2.0), p(0.0, 0.0, 1.0)));
     says("shell", a.shell(&top, 0.1, 1.0));
     says("offset_faces", a.offset_faces(&top, 0.1, 1.0));
+    let lost_face = crate::PickedFace { index: usize::MAX, at: top[0], tolerance: 0.1 };
+    assert!(a.transform_face(lost_face, p(0.0, 0.0, 1.0), top[0], p(0.0, 0.0, 1.0), 0.0).is_err());
     says("thicken", a.thicken(1.0, false));
     says("offset_solid", a.offset_solid(1.0, true));
     says("merge_faces", a.merge_faces(&top, 0.1));
@@ -357,6 +364,7 @@ fn every_entry_point_answers() {
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
     says("check_stitched", a.check_stitched(CheckLevel::All));
+    says("check_local", a.check_local(&[0], &[0], CheckLevel::All));
     says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
@@ -367,6 +375,7 @@ fn every_entry_point_answers() {
     says("to_native_prepared", a.to_native_prepared().map_err(|_| Error::Argument));
     says("extrude", Brep::extrude(&lines, p(0.0, 0.0, 1.0), 1.0, 0.0, DraftCorner::Curvature, true));
     says("revolve", Brep::revolve(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
+    says("revolve_joining_arcs", Brep::revolve_joining_arcs(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
     let run = [Curve::Line { start: p(5.0, 5.0, 5.0), end: p(5.0, 5.0, 15.0) }];
     says("sweep", Brep::sweep(&lines, &run, SweepFrame::Follow, true));
     says("sweep_placed", Brep::sweep_placed(&lines, &run, SweepFrame::Follow, true));

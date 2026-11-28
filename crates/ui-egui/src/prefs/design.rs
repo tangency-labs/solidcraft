@@ -12,6 +12,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "prefs.origin_plane_size",
         "prefs.stand_up_unknown",
         "prefs.export_name",
+        "prefs.slicer_file_name",
         "prefs.designs_folder",
         "prefs.exports_folder",
     ]
@@ -349,6 +350,23 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui,
                 &solidcraft_ui_text::format("prefs.export_name_sample", &[("name", &format!("{sample}.step"))]),
                 ui_kit::Text::Hint("export_name"),
+            );
+        }
+        // The name of the file Send to Slicer writes (`slicer_file_name`, #16440).
+        ui_kit::settings_form(ui, label_width, |ui| {
+            let tip = solidcraft_ui_text::format("prefs.slicer_file_name_tip", &[("placeholders", &crate::export_name::placeholder_list())]);
+            ui_kit::settings_row_help(ui, app.tr("prefs.slicer_file_name"), &tip, |ui| {
+                let hint = app.tr("prefs.export_name_hint").to_string();
+                let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.slicer_file_name, &hint, 0.0);
+                crate::scenario::publish_target("prefs:slicer_file_name", response.rect);
+            });
+        });
+        let body = crate::export_name::first_body(app);
+        if let Some(sample) = crate::export_name::sent(app, body.as_deref()) {
+            ui_kit::text(
+                ui,
+                &solidcraft_ui_text::format("prefs.slicer_file_name_sample", &[("name", &format!("{sample}.3mf"))]),
+                ui_kit::Text::Hint("slicer_file_name"),
             );
         }
         // GLB export's node tree (#5296); off writes the flat file of SolidCraft 0.40.

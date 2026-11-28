@@ -25,6 +25,7 @@
 //! `ok_to_make_uv_trim_curve = FALSE`, so the `const` validation no longer stores a
 //! new UV trim curve on a neighbour that had none. The 3D evaluation, its drop onto
 //! the existing face and every status are kept.
+use super::spatial::SpatialIndex;
 use super::{invalid, required, Object, Reports};
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result};
@@ -1786,13 +1787,74 @@ fn check_vertex_clearance(
     if vertices.is_empty() {
         return Ok(());
     }
+    let mut vertex_balls = Vec::new();
+    let mut vertex_boxes = Vec::new();
+    for &v in vertices {
+        let vertex = b.vertex(v)?;
+        let point = vertex.point;
+        let radius = vertex.tolerance;
+        let bbox = (point.x.is_finite()
+            && point.y.is_finite()
+            && point.z.is_finite()
+            && radius.is_finite()
+            && radius >= 0.0)
+            .then(|| {
+                let bounds = |c: f64| {
+                    let margin = radius + 4.0 * f64::EPSILON * (c.abs() + radius);
+                    (c - margin, c + margin)
+                };
+                let (x0, x1) = bounds(point.x);
+                let (y0, y1) = bounds(point.y);
+                let (z0, z1) = bounds(point.z);
+                Extent3d::from_bounds(x0, y0, z0, x1, y1, z1)
+            });
+        vertex_balls.push((point, radius));
+        vertex_boxes.push(bbox);
+    }
+    let vertex_index = SpatialIndex::new(vertex_boxes);
     let mut caches = FaceCaches::new();
     let mut neighbourhoods = BTreeMap::new();
     let mut excluded = BTreeSet::new();
     for f in b.face_list().to_vec() {
+        k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
+        if b.face(f)?.surface.is_none() {
+            // The missing surface has already been reported by the pointer check.
+            continue;
+        }
+        let bbox = exclusion_probe(crate::query::face::p1::calculate_bounding_box(
+            k, &mut *b, f, false,
+        ))?
+        .filter(Extent3d::is_defined);
+        let candidates = match bbox {
+            Some(bounds) => vertex_index.boxes_in_box(&bounds, 0.0),
+            None => (0..vertices.len()).collect(),
+        };
+        let active: Vec<usize> = candidates
+            .into_iter()
+            .filter(|&idx| {
+                let (Some(&v), Some(&(point, radius))) = (vertices.get(idx), vertex_balls.get(idx))
+                else {
+                    return false;
+                };
+                if excluded.contains(&v) {
+                    return false;
+                }
+                // Proven clear: the face's box is at least the ball's radius away.
+                !bbox.is_some_and(|bounds| box_distance(&bounds, point) >= radius)
+            })
+            .collect();
+        if active.is_empty() {
+            continue;
+        }
         let incident: BTreeSet<_> = crate::topology::face::p4::vertices(b, f, None, false, None)?
             .into_iter()
             .collect();
+        if active
+            .iter()
+            .all(|&idx| vertices.get(idx).is_none_or(|v| incident.contains(v)))
+        {
+            continue;
+        }
         let face_edges = crate::topology::face::p4::edges(b, f, None, false, None)?;
         let mut vertex_loops = Vec::new();
         for lu in crate::topology::face::p4::upward_loopuses(b, f, false, None)? {
@@ -1803,23 +1865,16 @@ fn check_vertex_clearance(
             }
         }
         let Some(surface) = b.face(f)?.surface.as_ref() else {
-            // The missing surface has already been reported by the pointer check.
             continue;
         };
         let surface = exclusion_probe(surface.clone_for_evaluation())?;
-        let bbox = exclusion_probe(crate::query::face::p1::calculate_bounding_box(
-            k, &mut *b, f, false,
-        ))?
-        .filter(Extent3d::is_defined);
-        for &v in vertices {
+        for idx in active {
             k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
-            if incident.contains(&v) || excluded.contains(&v) {
+            let (Some(&v), Some(&(point, radius))) = (vertices.get(idx), vertex_balls.get(idx))
+            else {
                 continue;
-            }
-            let point = b.vertex(v)?.point;
-            let radius = b.vertex(v)?.tolerance;
-            // Proven clear: the face's box is at least the ball's radius away.
-            if bbox.is_some_and(|bbox| box_distance(&bbox, point) >= radius) {
+            };
+            if incident.contains(&v) || excluded.contains(&v) {
                 continue;
             }
             if let std::collections::btree_map::Entry::Vacant(entry) = neighbourhoods.entry(v) {
@@ -1896,8 +1951,7 @@ fn check_vertex_clearance(
         }
     }
     for e in b.edge_list().to_vec() {
-        let first = edge::vertex(b, e)?;
-        let last = edge::other_vertex(b, e, first)?;
+        k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
         let data = b.edge(e)?;
         let Some(curve) = data.curve.as_ref() else {
             continue;
@@ -1909,19 +1963,41 @@ fn check_vertex_clearance(
                 bbox.expand_absolute(tol::zone_tol3d(k, data.tolerance));
                 bbox
             });
-        for &v in vertices {
+        let candidates = match bbox {
+            Some(bounds) => vertex_index.boxes_in_box(&bounds, 0.0),
+            None => (0..vertices.len()).collect(),
+        };
+        let active: Vec<usize> = candidates
+            .into_iter()
+            .filter(|&idx| {
+                let (Some(&v), Some(&(point, radius))) = (vertices.get(idx), vertex_balls.get(idx))
+                else {
+                    return false;
+                };
+                if excluded.contains(&v) {
+                    return false;
+                }
+                !bbox.is_some_and(|bounds| box_distance(&bounds, point) >= radius)
+            })
+            .collect();
+        if active.is_empty() {
+            continue;
+        }
+        let first = edge::vertex(b, e)?;
+        let last = edge::other_vertex(b, e, first)?;
+        for idx in active {
             k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
-            if Some(v) == first || Some(v) == last || excluded.contains(&v) {
+            let (Some(&v), Some(&(point, radius))) = (vertices.get(idx), vertex_balls.get(idx))
+            else {
                 continue;
-            }
-            let vertex = b.vertex(v)?;
-            if bbox.is_some_and(|bbox| box_distance(&bbox, vertex.point) >= vertex.tolerance) {
+            };
+            if Some(v) == first || Some(v) == last || excluded.contains(&v) {
                 continue;
             }
             let drop = exclusion_probe(curve.drop_point(
                 k,
                 &data.interval,
-                vertex.point,
+                point,
                 None,
                 b.tolerance(),
                 None,
@@ -1932,7 +2008,7 @@ fn check_vertex_clearance(
                 excluded.insert(v);
                 continue;
             };
-            if drop.distance <= vertex.tolerance {
+            if drop.distance <= radius {
                 if let std::collections::btree_map::Entry::Vacant(entry) = neighbourhoods.entry(v) {
                     let Some(local) = exclusion_probe(vertex_neighbourhood_edges(k, b, v))? else {
                         report_vertex_exclusion(b, r, v, EntityRef::Edge(e), None)?;
@@ -1949,14 +2025,7 @@ fn check_vertex_clearance(
                 }
                 report_vertex_exclusion(b, r, v, EntityRef::Edge(e), Some(drop.distance))?;
                 excluded.insert(v);
-            } else if !curve_clears(
-                k,
-                curve,
-                &data.interval,
-                data.tolerance,
-                vertex.point,
-                vertex.tolerance,
-            )? {
+            } else if !curve_clears(k, curve, &data.interval, data.tolerance, point, radius)? {
                 // the solve found no contact but boxes cannot prove there is none
                 report_vertex_exclusion(b, r, v, EntityRef::Edge(e), None)?;
                 excluded.insert(v);
@@ -2410,6 +2479,7 @@ fn edge_geometry(
 mod issue_891_tests {
     use super::*;
     use crate::curve::curve::{Curve, CurveKind};
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::p1::{
         BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
     };
@@ -2424,8 +2494,8 @@ mod issue_891_tests {
         let point = |deg: f64, scale: f64| {
             let t = deg.to_radians();
             Vec3::new(
-                (cx + scale * r * t.cos()) / 60.0,
-                (cy + scale * r * t.sin()) / 4.0,
+                (cx + scale * r * det::cos(t)) / 60.0,
+                (cy + scale * r * det::sin(t)) / 4.0,
                 0.0,
             )
         };
@@ -3259,5 +3329,69 @@ mod issue_891_tests {
             );
             assert_eq!(b.edgeuses().iter().count(), before);
         }
+    }
+
+    #[test]
+    fn spatial_index_wide_vertex_clearance_passes_clear_and_catches_reaching() {
+        use crate::curve::line::Line;
+        use crate::topology::brep::p5::create_wire_edge_from_curve;
+
+        let mut k = Kernel::default();
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 4.0, 4.0, 4.0)
+                .unwrap();
+        // Add 10 separated wire edges spaced along y so the SpatialIndex builds a multi-node tree.
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        for i in 0..10u32 {
+            let y = 10.0 + f64::from(i) * 3.0;
+            let line = Line::create_line_segment(
+                3,
+                Vec3::new(0.0, y, 0.0),
+                Vec3::new(2.0, y, 0.0),
+                Some(&interval),
+            )
+            .unwrap();
+            create_wire_edge_from_curve(&mut k, &mut body, Curve::from(line), interval).unwrap();
+        }
+        // Body tolerance 5e-4 -> wide_vertex_limit is 0.5, GROWTH_PAST_RATIO * limit is 1.0.
+        body.set_tolerance(5e-4);
+        let all_vertices = body.vertex_list().to_vec();
+        for &v in &all_vertices {
+            body.vertex_mut(v).unwrap().tolerance = 0.75;
+        }
+        let mut array = AssertArray::new();
+        let mut reports = Reports {
+            array: Some(&mut array),
+            failed: false,
+        };
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(
+            !reports.failed,
+            "clear wide vertices should pass: {:?}",
+            array.reports()
+        );
+
+        // Add a separate wire edge 0.5 units from box vertex (0, 0, 0) so only that wide vertex
+        // reaches it.
+        let near = Line::create_line_segment(
+            3,
+            Vec3::new(-0.5, 0.0, 0.0),
+            Vec3::new(-0.5, 0.0, 1.0),
+            Some(&interval),
+        )
+        .unwrap();
+        create_wire_edge_from_curve(&mut k, &mut body, Curve::from(near), interval).unwrap();
+        let mut array = AssertArray::new();
+        let mut reports = Reports {
+            array: Some(&mut array),
+            failed: false,
+        };
+        check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
+        assert!(reports.failed);
+        assert!(
+            array.reports().iter().any(|report| report.test_index == 82),
+            "expected Test #82 clearance failure: {:?}",
+            array.reports()
+        );
     }
 }

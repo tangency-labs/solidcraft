@@ -1,7 +1,9 @@
 //! Projection welds: round, elongated and ring projections, flat and with the dimple on either
 //! face, against their closed-form volumes; the kernel's check on every body; several projections
-//! in one weld; the refusals; the sizes ISO 8167 proposes; and the site of projections picked on a
-//! stack of boxes, with an oval past the face's edge and a projection off the face.
+//! in one weld; the refusals, a direction along the normal and sizes past the model's limit among
+//! them; the sizes ISO 8167 proposes, for measured thicknesses too; and the site of projections
+//! picked on a stack of boxes, with an oval past the face's edge, a projection off the face, and
+//! the sizes the weld refuses.
 
 use std::f64::consts::PI;
 
@@ -173,8 +175,9 @@ fn several_projections_give_one_group_each() {
 }
 
 /// No projections, a dimple through the sheets, an oval not longer than wide, a ring whose inner
-/// diameter is not under its outer or leaves no room inside, no direction, a bad normal or stack
-/// are bad input.
+/// diameter is not under its outer or leaves no room inside, no direction or one along the normal
+/// (or off it by rounding only), an oval or a ring reaching past the model's size limit, a bad
+/// normal or stack are bad input.
 #[test]
 fn bad_projections_are_refused_as_invalid_input() {
     let bad = |shape: ProjectionShape, dimple: Option<SpotSide>| {
@@ -187,6 +190,12 @@ fn bad_projections_are_refused_as_invalid_input() {
     assert!(bad(ProjectionShape::Elongated { b1: f64::NAN, l1: 10.0, along: [1.0, 0.0, 0.0] }, None));
     assert!(bad(ProjectionShape::Ring { d1: 2.0, di: 2.0 }, None));
     assert!(bad(ProjectionShape::Ring { d1: 4.0, di: 0.05 }, None));
+    assert!(bad(ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [0.0, 0.0, 1.0] }, None));
+    assert!(bad(ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [1e-9, 0.0, 1.0] }, None));
+    // centres 9e8 out: the oval's end and the ring's rim reach past 1e9
+    let far = |shape: ProjectionShape| projection_weld(&weld(vec![Projection { at: [9e8, 0.0, 0.0], shape }], None));
+    assert!(matches!(far(ProjectionShape::Elongated { b1: 4.0, l1: 4e8, along: [1.0, 0.0, 0.0] }), Err(ProjectionRefusal::Invalid(_))));
+    assert!(matches!(far(ProjectionShape::Ring { d1: 4e8, di: 3.9e8 }), Err(ProjectionRefusal::Invalid(_))));
     let round = vec![Projection { at: [0.0; 3], shape: ProjectionShape::Round { d1: 4.0 } }];
     assert!(matches!(projection_weld(&ProjectionWeld { normal: [0.0; 3], ..weld(round.clone(), None) }), Err(ProjectionRefusal::Invalid(_))));
     assert!(matches!(projection_weld(&ProjectionWeld { thicknesses: vec![1.0], ..weld(round, None) }), Err(ProjectionRefusal::Invalid(_))));
@@ -207,6 +216,22 @@ fn iso_8167_proposes_group_b_by_the_thinner_sheet() {
         assert_eq!(got, want, "t {t}");
     }
     assert!(matches!(proposed_projection(&[1.0], ProjectionKind::Spherical), Err(ProjectionRefusal::Invalid(_))));
+    // thicknesses as measured, a rounding off the boundary: 1 mm and 0.5 mm sheets
+    let t_one = 2.3 - 1.3;
+    let t_half = 2.2 - 1.7;
+    assert_eq!(size([t_one, 2.0], ProjectionKind::Ring).map(|p| (p.size, p.inner.unwrap())), Some((4.5, 2.0)), "t {t_one}");
+    assert_eq!(size([t_one, 2.0], ProjectionKind::Spherical).map(|p| p.size), Some(3.2), "t {t_one}");
+    assert_eq!(size([t_half, 2.0], ProjectionKind::Ring), None, "t {t_half}");
+    assert_eq!(size([t_half, 2.0], ProjectionKind::Spherical).map(|p| p.size), Some(2.0), "t {t_half}");
+}
+
+/// A direction in the face, however short, is the oval's: made unit, never replaced by the
+/// kernel's own choice.
+#[test]
+fn a_short_direction_in_the_face_is_kept() {
+    let got = one(ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [0.0, 1e-13, 0.0] }, None);
+    let (lo, hi) = bounds(&got);
+    assert!(hi[1] - lo[1] > 10.0 && hi[0] - lo[0] < 5.0, "{lo:?}..{hi:?}");
 }
 
 // ---- where a projection weld sits ----
@@ -240,7 +265,7 @@ fn projections_picked_on_top_give_the_frame_the_sheets_and_the_moved_centres() {
     assert!(s.normal.iter().zip([0.0, 0.0, -1.0]).all(|(a, b)| (a - b).abs() < 1e-9), "{s:?}");
     assert_eq!(s.sheets.iter().map(|x| x.sheet).collect::<Vec<_>>(), [1, 0]);
     for (got, was) in s.projections.iter().zip(&picked) {
-        assert!((got.at[2] - 1.5).abs() < 1e-9 && (got.at[0] - was.at[0]).abs() < 1e-9, "{got:?}");
+        assert!((got.at[2] - 1.5).abs() < 1e-9 && (got.at[0] - was.at[0]).abs() < 1e-9 && (got.at[1] - was.at[1]).abs() < 1e-9, "{got:?}");
         assert_eq!(got.shape, was.shape);
     }
     let weld = ProjectionWeld {
@@ -261,4 +286,18 @@ fn an_oval_past_the_edge_or_a_projection_off_the_face_is_refused() {
     assert!(matches!(got, Err(ProjectionRefusal::AlongProjection { projection: 0, why: SeamRefusal::AtJoint { joint: 1, .. } })), "{got:?}");
     let off = Projection { at: [30.0, 0.0, 2.5], shape: ProjectionShape::Round { d1: 4.0 } };
     assert_eq!(site(&[off]), Err(ProjectionRefusal::AtProjection { projection: 0, why: SpotRefusal::PointOffFace }));
+}
+
+/// The site refuses what the weld refuses: a ring whose inner diameter is not under its outer, one
+/// with no room inside for its marks, an oval along the normal.
+#[test]
+fn a_site_refuses_the_sizes_the_weld_refuses() {
+    for shape in [
+        ProjectionShape::Ring { d1: 4.0, di: 4.0 },
+        ProjectionShape::Ring { d1: 4.0, di: 0.05 },
+        ProjectionShape::Elongated { b1: 4.0, l1: 10.0, along: [0.0, 0.0, 1.0] },
+    ] {
+        let got = site(&[Projection { at: [0.0, 0.0, 2.5], shape }]);
+        assert!(matches!(got, Err(ProjectionRefusal::Invalid(_))), "{shape:?}: {got:?}");
+    }
 }

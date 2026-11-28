@@ -22,7 +22,8 @@
 # The same step puts `solidcraft-cli` on PATH: a small wrapper script in ~/.local/bin that starts this
 # AppImage in command-line mode (SOLIDCRAFT_APPIMAGE_CLI=1 makes AppRun run the bundled
 # solidcraft-cli), so MCP clients and shells find it by name. It is rewritten when the AppImage
-# moves, and a file there that this script did not write is never touched. The same opt-outs apply.
+# runs from a new place; while the AppImage it names is gone it prints one line saying so (exit 127).
+# A file there that this script did not write is never touched. The same opt-outs apply.
 
 set -u
 
@@ -48,7 +49,12 @@ install_cli() {
   fi
   mkdir -p "$bin" 2>/dev/null || return 0
   tmp="$bin/.solidcraft-cli.tmp.$$"
-  printf '#!/bin/sh\n%s\nSOLIDCRAFT_APPIMAGE_CLI=1 exec "%s" "$@"\n' "$CLI_MARKER" "$1" >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+  # The AppImage can be moved or deleted after this is written: then the wrapper says so in one
+  # line instead of the shell's "exec: ...: not found". Running the AppImage from its new place
+  # rewrites the wrapper with that path (integrate, on every launch). The $ in the single-quoted
+  # text are the wrapper's own, expanded when it runs.
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\n%s\napp="%s"\nif [ ! -f "$app" ]; then\n  echo "solidcraft-cli: the SolidCraft AppImage this command starts is no longer at $app; open SolidCraft once from where it is now to update this command, or delete $0" >&2\n  exit 127\nfi\nSOLIDCRAFT_APPIMAGE_CLI=1 exec "$app" "$@"\n' "$CLI_MARKER" "$1" >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
   chmod 755 "$tmp" 2>/dev/null
   if cmp -s "$tmp" "$wrapper" 2>/dev/null; then
     rm -f "$tmp"

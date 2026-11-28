@@ -233,6 +233,7 @@ pub(crate) fn exact_four_products_zero(terms: [(f64, f64, bool); 4]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     #[test]
     fn affine_point_enclosure_uses_actual_right_value_at_a_jump() {
@@ -320,7 +321,7 @@ mod tests {
     /// factor) is not shown zero, so the trim is not shown rectangular.
     #[test]
     fn exact_trim_products_keep_extreme_identity() {
-        for x in [2.0_f64.powi(1000), 2.0_f64.powi(-480), 0.1, 1.0] {
+        for x in [det::powi(2.0_f64, 1000), det::powi(2.0_f64, -480), 0.1, 1.0] {
             assert!(exact_four_products_zero([
                 (x, 2.0, false),
                 (x, 3.0, false),

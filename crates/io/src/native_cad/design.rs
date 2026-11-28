@@ -410,6 +410,7 @@ impl Builder {
                 symmetric_offset: false,
                 through_all: through,
                 taper: None,
+                taper2: None,
                 to: None,
                 to_offset: None,
                 from: None,
@@ -426,6 +427,7 @@ impl Builder {
                 one_sided_direction: None,
                 to_ref: None,
                 from_ref: None,
+                extend_to_face: false,
             },
             operation,
             targets,
@@ -653,6 +655,7 @@ impl Builder {
             angle2: second.map(deg),
             symmetric,
             convention: RevolveConvention::SketchNormal,
+            join_profile_arcs: false,
             to: None,
         };
         let id = self.add(kind, name)?;
@@ -949,7 +952,7 @@ fn build_sketch(arenas: &Arenas, sid: &str, doc: &mut Document) -> Result<(Sketc
         }
         let value = s(def, "parameter").and_then(|p| arenas.parameters.get(p)).and_then(|p| p.pointer("/value/value")).and_then(Value::as_f64);
         for candidate in ctx.candidates(def, value) {
-            if let Some(d) = try_add(&mut sk, doc, candidate, dof, &solved) {
+            if let Some(d) = try_add(&mut sk, doc, candidate, dof, &solved)? {
                 dof = d;
                 kept += 1;
                 break;
@@ -961,11 +964,11 @@ fn build_sketch(arenas: &Arenas, sid: &str, doc: &mut Document) -> Result<(Sketc
 
 /// Add `k` when the sketch still solves, loses a degree of freedom, and keeps every point where
 /// FreeCAD put it.
-fn try_add(sk: &mut Sketch, doc: &mut Document, k: ConstraintKind, dof: usize, geometry: &Sketch) -> Option<usize> {
+fn try_add(sk: &mut Sketch, doc: &mut Document, k: ConstraintKind, dof: usize, geometry: &Sketch) -> Result<Option<usize>, String> {
     let param = match k.value() {
         Some(v) => {
             let (e, unit) = if k.is_angle() { (format!("{} deg", round(v.to_degrees())), "deg") } else { (format!("{} mm", round(v)), "mm") };
-            Some(doc.new_model_param(&e, unit))
+            Some(doc.new_model_param(&e, unit).map_err(|e| e.to_string())?)
         }
         None => None,
     };
@@ -977,16 +980,16 @@ fn try_add(sk: &mut Sketch, doc: &mut Document, k: ConstraintKind, dof: usize, g
     let mut trial = sk.clone();
     if trial.add_constraint(k, param.clone()).is_err() {
         undo(doc, &param);
-        return None;
+        return Ok(None);
     }
     let rep = solidcraft_doc::sketch::solve(&mut trial);
     let moved = trial.points.iter().zip(&geometry.points).any(|(a, b)| a.pos.dist(b.pos) > KEPT);
     if rep.ok() && rep.dof < dof && !moved {
         *sk = trial;
-        return Some(rep.dof);
+        return Ok(Some(rep.dof));
     }
     undo(doc, &param);
-    None
+    Ok(None)
 }
 
 struct Ctx<'a> {

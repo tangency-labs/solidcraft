@@ -1353,6 +1353,16 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text_field(ui, &mut s.command, "");
                     });
                     ui_kit::text(ui, tr("ui.ai_add_installed_note"), ui_kit::Text::Note("installed"));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if !editing {
+                        super::panel::missing_agents(
+                            ui,
+                            "sc_ai_add_missing",
+                            tr("ui.agent_chat_not_installed"),
+                            false,
+                            app.agent_chat.detection.as_ref(),
+                        );
+                    }
                 }
                 AddKind::Custom => {
                     ui_kit::row(ui, tr("ui.ai_name"), |ui| {

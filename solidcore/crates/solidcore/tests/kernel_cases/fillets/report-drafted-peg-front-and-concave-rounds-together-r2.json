@@ -1,52 +1,214 @@
 {
   "area": "fillets",
   "bodies": {
-    "b12": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
       "keeping_splines": false,
       "trusted": true
     }
   },
   "calls": [
     {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.08726646259971647,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                40.0,
+                8.0,
+                0.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 8.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                16.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                16.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                16.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.08726646259971647,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                39.999999999999986,
+                8.0,
+                10.0
+              ],
+              "end": 1.5707963267948946,
+              "radius": 7.12511336474076,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948946
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                39.999999999999986,
+                8.0,
+                10.0
+              ],
+              "end": 4.7123889803846915,
+              "radius": 7.12511336474076,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.5707963267948946
+            }
+          }
+        ]
+      }
+    },
+    {
       "inputs": [
-        "b12"
+        "b3",
+        "b4"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b6"
       ],
       "op": "copy",
       "outputs": [
-        "b13"
+        "b7"
       ],
       "params": {}
     },
     {
       "inputs": [
-        "b13"
-      ],
-      "op": "copy",
-      "outputs": [
-        "b14"
-      ],
-      "params": {}
-    },
-    {
-      "inputs": [
-        "b14"
+        "b7"
       ],
       "op": "tagged",
       "outputs": [
-        "b15"
+        "b8"
       ],
       "params": {
         "operand": 0
       }
     },
     {
+      "code": {
+        "call": "blend",
+        "kind": 6,
+        "operation": "blend::fillet_executive::p1::FilletExecutive::create_fillet_corners"
+      },
+      "error": "not supported yet: a corner of this kind is not supported yet by SMLib's blends at (40.000, 0.875, 10.000): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
       "inputs": [
-        "b15"
+        "b8"
       ],
       "op": "blend_dropping",
-      "outputs": [
-        "b16"
-      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -54,17 +216,17 @@
             {
               "at": [
                 [
-                  0.87488663525924,
+                  0.8748866352592399,
                   0.8748866352592405,
                   10.0
                 ],
                 [
                   40.0,
-                  0.87488663525924,
+                  0.8748866352592399,
                   10.0
                 ]
               ],
-              "index": 10
+              "index": 6
             },
             {
               "at": [
@@ -75,23 +237,23 @@
                 ],
                 [
                   40.0,
-                  0.87488663525924,
+                  0.8748866352592399,
                   10.0
                 ]
               ],
-              "index": 14
+              "index": 11
             }
           ],
           "points": [
             [
-              20.43744331762962,
+              20.437443317629622,
               0.8748866352592402,
               10.0
             ],
             [
-              32.874886635259244,
-              7.999999999999999,
-              9.999999999997844
+              32.874886635259216,
+              8.000000000000005,
+              9.99999999999772
             ]
           ],
           "tolerance": 2.721294101747089
@@ -100,50 +262,51 @@
         "sizes": [
           2.0,
           2.0
-        ]
+        ],
+        "turn": "auto"
       }
     }
   ],
   "case": "report-drafted-peg-front-and-concave-rounds-together-r2",
   "expected": {
-    "body_count": 1,
-    "continuity": {
-      "order": "g1"
-    },
-    "faces": 12,
-    "method": "the peg (a bar 40 x 16 whose far end is a half disc R8 about (40, 8)) extruded 10 with a 5 deg inward taper, then the top's end circle (R 8 - 10 tan 5 deg about (40, 8)) extruded 10 up with the same taper and joined: the bar's drafted front face runs tangent into the cone along its generator through x = 40, and the top's concave arc meets the front top edge where the two are tangent, as on the straight peg; the front top edge and the concave arc rounded r2 in one fillet, tangent chain on; no closed form: one valid body, every seam a round or the corner patch makes G1",
+    "method": "the peg (a bar 40 x 16 whose far end is a half disc R8 about (40, 8)) extruded 10 with a 5 deg inward taper, then the top's end circle (R 8 - 10 tan 5 deg about (40, 8)) extruded 10 up with the same taper and joined: the bar's drafted front face runs tangent into the cone along its generator through x = 40, and the top's concave arc meets the front top edge where the two are tangent, as on the straight peg; the front top edge and the concave arc rounded r2 in one fillet, tangent chain on; no closed form: one valid body, every seam a round or the corner patch makes G1 Refused since #22151: the front top edge runs tangentially into the concave arc, so the top face narrows to zero width at the arc's end. The corner there (the Mixed corner) was a Coons patch of its sides, not a rolling ball's surface: on a mirror-symmetric part it gave the two halves different volumes, following where a neighbouring cone's parametric seam lay. Until the blend corner's Roll-over takes this configuration, the correct outcome is a refusal at that point, naming it.",
+    "outcome": "refused",
+    "refusal": "their common face narrows to zero width",
     "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#22151"
+    ],
     "what": "as report-peg-front-and-concave-rounds-together-r2 on the drafted peg, whose front face runs tangent into a cone"
   },
-  "expressible": false,
-  "gallery_note": "the Mixed corner, where the seam's line runs on past the vertex as an edge of the cone, split along its generator through x = 40",
+  "expressible": true,
   "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind at (40.000, 0.875, 10.000), which SMLib's blends do not handle yet (where its edges run on tangentially into each other, or meet in a way no blend corner builds): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
+    "kernel_error": "not supported yet: a corner of this kind is not supported yet by SMLib's blends at (40.000, 0.875, 10.000): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
+    "ran": false
+  },
   "records": "report-drafted-peg-front-and-concave-rounds-together-r2.bodies.json.gz",
-  "result": [
-    {
-      "body": "Peg",
-      "made": "b16"
-    }
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind at (40.000, 0.875, 10.000), which SMLib's blends do not handle yet (where its edges run on tangentially into each other, or meet in a way no blend corner builds): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#22151"
   ],
-  "sources": null,
   "traced_ops": [
     "extrude",
     "extrude",
-    "copy",
-    "copy",
-    "copy",
-    "copy",
-    "tagged",
-    "tagged",
-    "boolean",
-    "copy",
+    "boolean_tagged",
     "copy",
     "tagged",
     "blend_dropping"
   ],
-  "ungraded": [
-    "continuity: SolidCraft computes it"
-  ],
+  "ungraded": [],
   "what": "as report-peg-front-and-concave-rounds-together-r2 on the drafted peg, whose front face runs tangent into a cone",
-  "why_not": []
+  "why_not": [],
+  "gallery_note": "the Mixed corner, where the seam's line runs on past the vertex as an edge of the cone, split along its generator through x = 40"
 }

@@ -78,10 +78,11 @@ fn addr(port: u16) -> String {
     format!("127.0.0.1:{port}")
 }
 
-/// A port nothing listens on.
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-}
+/// The port of an address nothing can ever listen on. Binding port 0 asks the system for any free
+/// port, so no listener is ever at port 0 and a connect to it cannot succeed. The client reports
+/// every failed connect as "not running", whichever error the system gives (refused at once, an
+/// unusable address, or a timeout).
+const NEVER_LISTENING_PORT: u16 = 0;
 
 #[test]
 fn a_call_is_one_round_trip_with_the_token() {
@@ -115,7 +116,18 @@ fn a_wrong_token_or_none_is_refused() {
 
 #[test]
 fn an_app_not_running_says_how_to_start_it() {
-    let port = free_port();
+    let port = NEVER_LISTENING_PORT;
+    // If a system let this connect through, say so here, not as a confusing `Lost` below.
+    assert!(
+        std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), CONNECT_TIMEOUT).is_err(),
+        "a connect to port 0 succeeded on this system"
+    );
+    // `Connection::new` reads an address it cannot parse as port 0, so check it reads a real port.
+    let real = Connection::new(APP, &addr(4242), None);
+    assert_eq!(real.port(), 4242);
+    // The message names the address and the port it was given, not a fixed one. Nothing connects to 4242.
+    let CallError::NotRunning(m) = real.explain(&std::io::Error::from(std::io::ErrorKind::NotConnected)) else { panic!("not `NotRunning`") };
+    assert!(m.contains("127.0.0.1:4242") && m.contains("--control 4242"), "{m}");
     let mut c = Connection::new(APP, &addr(port), Some(TOKEN));
     let e = c.call(Request::new("document.inspect", json!({}))).unwrap_err();
     let CallError::NotRunning(m) = &e else { panic!("{e:?}") };
@@ -132,6 +144,9 @@ fn an_app_gone_during_a_call_is_lost_and_reached_again_once_back() {
     let port = app.port();
     let mut c = Connection::new(APP, &addr(port), Some(TOKEN));
     c.call(Request::new("document.inspect", json!({}))).unwrap();
+    // The port is closed from here until `serve` binds it again below, and a test that binds port 0
+    // in that gap can be given it. The test needs it closed (to see "not running"), and std cannot
+    // hold a bound socket that does not listen, so this window stays.
     app.stop();
     let e = c.call(Request::new("document.inspect", json!({}))).unwrap_err();
     let CallError::Lost(m) = &e else { panic!("{e:?}") };

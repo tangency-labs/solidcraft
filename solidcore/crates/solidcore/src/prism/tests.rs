@@ -9,6 +9,7 @@
     clippy::float_cmp
 )]
 
+use crate::math::det;
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
 use super::extrude::{
@@ -203,7 +204,7 @@ fn areas_in_closed_form_are_enclosed_by_their_bounds() {
     // a circular arc as a conic (w the cosine of its half angle): its sector less the triangle,
     // past the series' range (75 degrees) and inside it (30 degrees)
     for half in [75.0_f64.to_radians(), 30.0_f64.to_radians()] {
-        let (s, c) = half.sin_cos();
+        let (s, c) = det::sin_cos(half);
         let arc = Seg2::Conic {
             a: p(c, -s),
             apex: p(1.0 / c, 0.0),
@@ -226,7 +227,7 @@ fn areas_in_closed_form_are_enclosed_by_their_bounds() {
     }
     // x^2 - y^2 = 1 from (cosh 1, -sinh 1) to (cosh 1, sinh 1), w = cosh 1: the segment between
     // the hyperbola and its chord is sinh 1 cosh 1 - 1
-    let (sh, ch) = (1.0_f64.sinh(), 1.0_f64.cosh());
+    let (sh, ch) = (det::sinh(1.0_f64), det::cosh(1.0_f64));
     let hyper = Seg2::Conic {
         a: p(ch, -sh),
         apex: p(1.0 / ch, 0.0),
@@ -595,8 +596,8 @@ const ARC_CLOSED_FORM_TOL: f64 = 1e-12;
 /// `center + radius (cos t, sin t)` on the plain frame.
 fn on_circle(center: Point2, radius: f64, t: f64) -> [f64; 3] {
     [
-        center.x + radius * t.cos(),
-        center.y + radius * t.sin(),
+        center.x + radius * det::cos(t),
+        center.y + radius * det::sin(t),
         0.0,
     ]
 }
@@ -640,10 +641,11 @@ fn assert_arc_closed_form(k: &Kernel, center: Point2, radius: f64, start: f64, s
             .unwrap();
         let (dx, dy) = (q.x - center.x, q.y - center.y);
         assert!(
-            (dx.hypot(dy) - radius).abs() < ARC_CLOSED_FORM_TOL && q.z.abs() < ARC_CLOSED_FORM_TOL,
+            (det::hypot(dx, dy) - radius).abs() < ARC_CLOSED_FORM_TOL
+                && q.z.abs() < ARC_CLOSED_FORM_TOL,
             "{s:?} at f = {f}: {q:?} off the circle"
         );
-        let turned = (sweep.signum() * (dy.atan2(dx) - start)).rem_euclid(TAU);
+        let turned = (sweep.signum() * (det::atan2(dy, dx) - start)).rem_euclid(TAU);
         assert!(
             turned > last && turned < sweep.abs(),
             "{s:?} at f = {f}: angle {turned} after {last}"
@@ -1002,9 +1004,9 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
             &k,
             knots.clone(),
             vec![
-                [a * t0.cos(), b * t0.sin(), 0.0, 1.0],
-                [a * mid.cos(), b * mid.sin(), 0.0, h.cos()],
-                [a * t1.cos(), b * t1.sin(), 0.0, 1.0],
+                [a * det::cos(t0), b * det::sin(t0), 0.0, 1.0],
+                [a * det::cos(mid), b * det::sin(mid), 0.0, det::cos(h)],
+                [a * det::cos(t1), b * det::sin(t1), 0.0, 1.0],
             ],
         )
     };
@@ -1013,7 +1015,10 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     // (its sagitta 1.33e-5)
     let (h, g) = (0.0012, 0.04 / 30.0);
     let cases = [
-        (piece(15.0, 15.0, 0.0, h), p(15.0 * h.cos(), 15.0 * h.sin())),
+        (
+            piece(15.0, 15.0, 0.0, h),
+            p(15.0 * det::cos(h), 15.0 * det::sin(h)),
+        ),
         (piece(30.0, 15.0, FRAC_PI_2 - g, g), p(0.0, 15.0)),
     ];
     for ((c, iv), mid) in cases {
@@ -1048,8 +1053,8 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     // control point lies 4e-5 off the chord, the arc 2e-5 (over the zone tolerance); the same
     // control points with equal weights (a polynomial) are not
     let (radius, h) = (4e7, 1e-6_f64);
-    let (w, y) = (h.cos(), radius * h.cos() - radius);
-    let (x, top) = (radius * h.sin(), radius / w - radius);
+    let (w, y) = (det::cos(h), radius * det::cos(h) - radius);
+    let (x, top) = (radius * det::sin(h), radius / w - radius);
     let piece = |w: f64, v: f64| {
         vec![vec![
             [-x * v, y * v, v],
@@ -1065,8 +1070,8 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     // 2e-5 off its chord) raised to degree 32: neighbouring weights differ by at most 1.3e-14,
     // under their rounding, the span's by 1e-13; it is rational
     let (radius, h) = (1e8, 4e-13_f64.sqrt());
-    let (w, y) = (h.cos(), radius * h.cos() - radius);
-    let x = radius * h.sin();
+    let (w, y) = (det::cos(h), radius * det::cos(h) - radius);
+    let x = radius * det::sin(h);
     let mut span = vec![
         [-x, y, 1.0],
         [0.0, (radius / w - radius) * w, w],
@@ -1085,6 +1090,191 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     }
     assert_eq!(span.len(), 33);
     assert!(arc_before_line(&[span], 1e-5));
+}
+
+/// #22818: a 2.9 mm trimmed piece at the flattest spot `(0, 720)` of a 2400 mm polynomial cubic
+/// spline bends ~1e-4 to ~4e-4 mm off its chord — well above the 1e-5 zone tolerance, yet under
+/// the body-scaled tolerances used by `planar_edges` (~2.88e-3) and `sheet_regions` (~2.88e-4).
+/// It must stay the exact cubic spline it is (never flattened to a line or refitted to an arc),
+/// so a crescent between the spline and its chord reads back with its exact curve and nonzero
+/// signed area instead of collapsing to `[Line(a, b), Line(b, a)]`.
+#[test]
+fn a_short_piece_of_a_large_polynomial_spline_stays_free_form() {
+    let mut k = Kernel::default();
+    let r = 3553.0_f64;
+    let half = 1.45_f64;
+    let sag = half * half / (2.0 * r);
+    // Symmetric cubic matching y(±1.45) = 720 - sag and y(0) = 720 (off_chord = 4/3 sag ≈ 3.95e-4).
+    let p0 = p(-half, 720.0 - sag);
+    let p1 = p(-half / 3.0, 720.0 + sag / 3.0);
+    let p2 = p(half / 3.0, 720.0 + sag / 3.0);
+    let p3 = p(half, 720.0 - sag);
+    let h = |q: Point2| [q.x, q.y, 0.0, 1.0];
+    let (single, single_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        vec![h(p0), h(p1), h(p2), h(p3)],
+    );
+    // Exact de Casteljau split at t = 0.5: two 1.45 mm spans meeting at (0, 720), each with
+    // off_chord = sag / 3 ≈ 9.86e-5 (below 2.88e-4, above zone_tol_3d = 1e-5).
+    let q0 = p(-2.0 * half / 3.0, 720.0 - sag / 3.0);
+    let r0 = p(-half / 3.0, 720.0);
+    let mid = p(0.0, 720.0);
+    let r1 = p(half / 3.0, 720.0);
+    let q2 = p(2.0 * half / 3.0, 720.0 - sag / 3.0);
+    let (two_span, two_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0],
+        vec![h(p0), h(q0), h(r0), h(mid), h(r1), h(q2), h(p3)],
+    );
+    for tol in [2.88e-3, 2.88e-4] {
+        for forward in [true, false] {
+            let one = planar_pieces(
+                &k,
+                &run(&k, &single, single_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+                true,
+            )
+            .unwrap();
+            assert!(
+                matches!(one.as_slice(), [Seg2::Cubic { .. }]),
+                "single span tol={tol} forward={forward}: {one:?}"
+            );
+            let projected_one = planar_curves(
+                &k,
+                &run(&k, &single, single_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+            )
+            .unwrap();
+            assert!(
+                matches!(projected_one.as_slice(), [PlanarPiece::Spline(_)]),
+                "single projected tol={tol} forward={forward}: {projected_one:?}"
+            );
+            let two = planar_pieces(
+                &k,
+                &run(&k, &two_span, two_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+                true,
+            )
+            .unwrap();
+            assert_eq!(
+                two.len(),
+                2,
+                "two spans tol={tol} forward={forward}: {two:?}"
+            );
+            assert!(
+                two.iter().all(|s| matches!(s, Seg2::Cubic { .. })),
+                "two spans tol={tol} forward={forward}: {two:?}"
+            );
+            let projected_two = planar_curves(
+                &k,
+                &run(&k, &two_span, two_iv, forward),
+                &xy(),
+                tol,
+                &mut 2_000_000,
+            )
+            .unwrap();
+            assert!(
+                matches!(projected_two.as_slice(), [PlanarPiece::Spline(_)]),
+                "two projected tol={tol} forward={forward}: {projected_two:?}"
+            );
+        }
+    }
+    // A collinear polynomial cubic still reads as a straight line.
+    let (flat, flat_iv) = spline(
+        &k,
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        vec![
+            [0.0, 720.0, 0.0, 1.0],
+            [1.0, 720.0, 0.0, 1.0],
+            [2.0, 720.0, 0.0, 1.0],
+            [3.0, 720.0, 0.0, 1.0],
+        ],
+    );
+    let flat_segs = read(&k, &flat, flat_iv, true, &xy(), 2.88e-3).unwrap();
+    assert!(
+        matches!(flat_segs.as_slice(), [Seg2::Line { .. }]),
+        "{flat_segs:?}"
+    );
+    // A 1.45 mm half-span crescent (off_chord ≈ 9.86e-5 < tol = 2.88e-4) survives a 2D boolean
+    // difference and `sheet_regions` readback with its exact cubic and positive signed area.
+    let tol = 2.88e-4;
+    let half_cubic = Seg2::Cubic {
+        p0,
+        p1: q0,
+        p2: r0,
+        p3: mid,
+    };
+    let floor_y = 718.55;
+    let curved_notch = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-half, floor_y),
+                    b: p(0.0, floor_y),
+                },
+                Seg2::Line {
+                    a: p(0.0, floor_y),
+                    b: mid,
+                },
+                half_cubic.reversed(),
+                Seg2::Line {
+                    a: p0,
+                    b: p(-half, floor_y),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let chord_notch = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: p(-half, floor_y),
+                    b: p(0.0, floor_y),
+                },
+                Seg2::Line {
+                    a: p(0.0, floor_y),
+                    b: mid,
+                },
+                Seg2::Line { a: mid, b: p0 },
+                Seg2::Line {
+                    a: p0,
+                    b: p(-half, floor_y),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let want_crescent = curved_notch.outer.signed_area().unwrap().value
+        - chord_notch.outer.signed_area().unwrap().value;
+    let sa = sheet(&mut k, &curved_notch, tol);
+    let sb = sheet(&mut k, &chord_notch, tol);
+    let diff = combine(&mut k, sa, sb, Boolean2d::Difference).unwrap();
+    let got = sheet_regions(&k, &diff, &xy(), tol).unwrap();
+    assert_eq!(got.regions.len(), 1, "{got:?}");
+    assert!(
+        got.regions[0]
+            .outer
+            .segs
+            .iter()
+            .any(|s| matches!(s, Seg2::Cubic { .. })),
+        "crescent must keep its cubic: {:?}",
+        got.regions[0]
+    );
+    let got_area = got.regions[0].outer.signed_area().unwrap();
+    assert_eq!(got_area.sign(), Some(true), "{got_area:?}");
+    assert!(
+        (got_area.value - want_crescent).abs() < 1e-8,
+        "{} vs {want_crescent}",
+        got_area.value
+    );
 }
 
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1
@@ -1118,8 +1308,13 @@ fn sampling_and_retracing_do_not_certify() {
     for i in 0..8 {
         let a = f64::from(i) * FRAC_PI_2;
         let (m, b) = (a + FRAC_PI_2 * 0.5, a + FRAC_PI_2);
-        pts.push([10.0 * m.cos() / w * w, 10.0 * m.sin() / w * w, 0.0, w]);
-        pts.push([10.0 * b.cos(), 10.0 * b.sin(), 0.0, 1.0]);
+        pts.push([
+            10.0 * det::cos(m) / w * w,
+            10.0 * det::sin(m) / w * w,
+            0.0,
+            w,
+        ]);
+        pts.push([10.0 * det::cos(b), 10.0 * det::sin(b), 0.0, 1.0]);
         knots.extend([f64::from(i + 1) / 8.0; 2]);
     }
     knots.push(1.0);
@@ -1434,11 +1629,11 @@ fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
     assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
     assert_eq!(sweep(center, x, x), Some(0.0));
     for delta in [0.5e-12_f64, 1e-12, 2e-12] {
-        let end = Point2::new(delta.cos(), delta.sin());
+        let end = Point2::new(det::cos(delta), det::sin(delta));
         assert_eq!(sweep(center, x, end), Some(delta));
         let start = Point2::new(-1.0, delta / 2.0);
         let end = Point2::new(-1.0, -delta / 2.0);
-        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        let expected = (det::atan2(end.y, end.x) - det::atan2(start.y, start.x)).rem_euclid(TAU);
         assert_eq!(sweep(center, start, end), Some(expected));
         assert!(expected > 0.0 && expected < 3e-12);
     }
@@ -1619,7 +1814,7 @@ mod recognition {
         assert_eq!(path.as_circle(), None);
         // The stored phase resolves an extra 0.125 radians; its rounding cell must not
         // close the resulting gap/overlap by independently widening both arc endpoints.
-        let start = 2.0_f64.powi(49);
+        let start = det::powi(2.0_f64, 49);
         let circle = Loop2 {
             segs: vec![arc(start, PI), arc((start + PI) + 0.125, PI)],
         };
@@ -1687,6 +1882,228 @@ mod recognition {
         }
     }
 
+    /// The four quarters a sketch ellipse with centre `c`, major end `m` and minor radius
+    /// `r` exports, in the sketch's own arithmetic: `v = perp(u) / hypot(u) * r` and each
+    /// apex `a + b - c`.
+    fn sketch_ellipse_quarters(c: Vec2, m: Vec2, r: f64) -> Loop2 {
+        let u = m - c;
+        let v = Vec2::new(-u.y, u.x) / u.x.hypot(u.y) * r;
+        let corners = [c + u, c + v, c - u, c - v];
+        Loop2 {
+            segs: (0..4)
+                .map(|i| {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    Seg2::Conic {
+                        a,
+                        apex: a + b - c,
+                        b,
+                        w: FRAC_1_SQRT_2,
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    // #18399: a turned ellipse's quarters carry rounded cos/sin products, so exact
+    // parallelogram equalities fail; the loop is still one ellipse.
+    #[test]
+    fn profile_ellipse_recognition_accepts_turned_sketch_quarters() {
+        // The issue's ellipse at (40, 20), and the same shapes at (1000, 1000), where each
+        // corner's world rounding is 64 times the local cell.
+        for center in [Vec2::new(40.0, 20.0), Vec2::new(1000.0, 1000.0)] {
+            let mut ends = vec![
+                center + Vec2::new(-25.0, -20.0),
+                center + Vec2::new(10.0, 10.0),
+            ];
+            ends.extend((0..48).map(|i| {
+                let angle = f64::from(i) * TAU / 48.0 + 0.1;
+                center + Vec2::new(angle.cos(), angle.sin()) * 32.0
+            }));
+            for end in ends {
+                assert_turned_sketch_quarters_are_one_ellipse(center, end, 8.0);
+            }
+            // An axis-aligned sketch ellipse keeps its exact answer.
+            let aligned = sketch_ellipse_quarters(center, center + Vec2::new(15.0, 0.0), 8.0);
+            assert_eq!(
+                aligned.as_ellipse(),
+                Some((center, Vec2::new(15.0, 0.0), 8.0 / 15.0))
+            );
+        }
+        assert_turned_sketch_quarters_are_one_ellipse(
+            Vec2::new(-4.0, -17.0),
+            Vec2::new(0.0, -14.0),
+            1.4,
+        );
+        // The control a + b - c also rounds the sum a + b. Here the corners are exact and
+        // the first control is 3 * 2^-43 off, more than the corners' and its own rounding.
+        let c = Vec2::new(1020.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
+        let u = Vec2::new(12.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
+        let v = Vec2::new(12.0 + 2.0_f64.powi(-43), 8.0);
+        let corners = [c + u, c + v, c - u, c - v];
+        let rounded = Loop2 {
+            segs: (0..4)
+                .map(|i| {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    Seg2::Conic {
+                        a,
+                        apex: a + b - c,
+                        b,
+                        w: FRAC_1_SQRT_2,
+                    }
+                })
+                .collect(),
+        };
+        let (center, _, _) = rounded.as_ellipse().expect("controls rounded as a + b - c");
+        assert_eq!(center, c);
+    }
+
+    fn assert_turned_sketch_quarters_are_one_ellipse(center: Vec2, end: Vec2, minor: f64) {
+        let u = end - center;
+        let ellipse = sketch_ellipse_quarters(center, end, minor);
+        for mut path in [ellipse.clone(), ellipse.reversed()] {
+            for _ in 0..4 {
+                let (c, major, ratio) = path
+                    .as_ellipse()
+                    .unwrap_or_else(|| panic!("major end {end:?}: {path:?}"));
+                assert!(c.dist(center) < 1e-12, "{c:?}");
+                assert!(
+                    (major.length_hypot() - u.length_hypot()).abs() < 1e-12,
+                    "{major:?}"
+                );
+                assert!(major.cross(u).abs() < 1e-9, "{major:?} {u:?}");
+                assert!((ratio - minor / u.length_hypot()).abs() < 1e-12, "{ratio}");
+                for seg in &path.segs {
+                    for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                        let d = seg.point_at(t) - c;
+                        let x = d.dot(major) / major.length_squared();
+                        let y = d.dot(major.perp()) / (major.length_squared() * ratio);
+                        assert!((x * x + y * y - 1.0).abs() < 1e-12);
+                    }
+                }
+                path.segs.rotate_left(1);
+            }
+        }
+        // A control or a corner moved by 16 EPSILON of the largest coordinate (8 to 16
+        // ULPs, several times its cell) is not one ellipse; neither is a gap.
+        let size = ellipse.segs.iter().fold(0.0_f64, |size, seg| match *seg {
+            Seg2::Conic { a, apex, .. } => {
+                size.max(a.x.abs().max(a.y.abs()).max(apex.x.abs()).max(apex.y.abs()))
+            }
+            _ => size,
+        });
+        let step = 16.0 * f64::EPSILON * size;
+        for (index, delta) in [(1, Vec2::new(step, 0.0)), (2, Vec2::new(0.0, -step))] {
+            let mut moved_apex = ellipse.clone();
+            if let Seg2::Conic { apex, .. } = &mut moved_apex.segs[index] {
+                *apex += delta;
+            }
+            assert_eq!(moved_apex.as_ellipse(), None, "{end:?}");
+            // The corner moves in both quarters that share it, so the join stays closed.
+            let mut moved_corner = ellipse.clone();
+            if let Seg2::Conic { a, .. } = &mut moved_corner.segs[index] {
+                *a += delta;
+            }
+            if let Seg2::Conic { b, .. } = &mut moved_corner.segs[index - 1] {
+                *b += delta;
+            }
+            assert!(moved_corner.is_closed(0.0));
+            assert_eq!(moved_corner.as_ellipse(), None, "{end:?}");
+            let mut gap = ellipse.clone();
+            if let Seg2::Conic { a, .. } = &mut gap.segs[index] {
+                *a += delta;
+            }
+            assert_eq!(gap.as_ellipse(), None, "{end:?}");
+        }
+    }
+
+    // Inside their cells, the stored quarter points must also lie within sqrt(EPSILON) of
+    // each semi-axis from the construction, so a loop whose shape the world spacing
+    // decides stays four arcs, and an exact one is never refused for its size.
+    #[test]
+    fn profile_ellipse_quarters_need_points_the_ellipse_resolves() {
+        // At (2^40, 2^40) the corners are rounded to 2^-12, far above sqrt(EPSILON) * 8.
+        let far = Vec2::new(2.0_f64.powi(40), 2.0_f64.powi(40));
+        let turned = sketch_ellipse_quarters(far, far + Vec2::new(-25.0, -20.0), 8.0);
+        assert_eq!(turned.as_ellipse(), None);
+        // An exact turned ellipse thinner than sqrt(EPSILON) keeps its answer.
+        let u = Vec2::new(2.0_f64.powi(26), 2.0_f64.powi(26));
+        let thin = ellipse_quarters(Vec2::ZERO, u, Vec2::new(-1.0, 1.0));
+        assert_eq!(
+            thin.as_ellipse(),
+            Some((Vec2::ZERO, u, 2.0_f64.powi(-26))),
+            "{thin:?}"
+        );
+        // An exact turned circle at 2^52 keeps its answer: its points need no widening.
+        let c = Vec2::new(2.0_f64.powi(52) + 2.0, 0.0);
+        let circle = ellipse_quarters(c, Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0));
+        assert_eq!(
+            circle.as_ellipse(),
+            Some((c, Vec2::new(1.0, 1.0), 1.0)),
+            "{circle:?}"
+        );
+        let quarters = |c: Vec2, corners: [Vec2; 4], controls: [Vec2; 4]| Loop2 {
+            segs: (0..4)
+                .map(|i| Seg2::Conic {
+                    a: c + corners[i],
+                    apex: c + controls[i],
+                    b: c + corners[(i + 1) % 4],
+                    w: FRAC_1_SQRT_2,
+                })
+                .collect(),
+        };
+        // A sliver one ULP wide at 2^28, every control at its parallelogram corner.
+        let c = Vec2::new(2.0_f64.powi(28) + 64.0, 2.0_f64.powi(28) + 64.0);
+        let q = 2.0_f64.powi(-24);
+        let corners = [
+            Vec2::new(32.0, 32.0),
+            Vec2::new(16.0, 16.0),
+            Vec2::new(-32.0, -32.0),
+            Vec2::new(-16.0, -16.0 - q),
+        ];
+        let controls = [0, 1, 2, 3].map(|i| corners[i] + corners[(i + 1) % 4]);
+        // A spike: the first quarter starts and ends at the same corner.
+        let c2 = Vec2::new(2.0_f64.powi(27) + 10.0, 2.0_f64.powi(27) + 10.0);
+        let spike = [
+            Vec2::new(4.0, 4.0),
+            Vec2::new(4.0, 4.0),
+            Vec2::new(-4.0, -4.0),
+            Vec2::new(-4.0, -4.0 + 2.0_f64.powi(-25)),
+        ];
+        let spike_controls = [
+            Vec2::new(8.0, 8.0),
+            Vec2::ZERO,
+            Vec2::new(-8.0, -8.0),
+            Vec2::ZERO,
+        ];
+        // A first quarter that goes out and back near the origin, thinner than even the
+        // local cell resolves.
+        let q = 3.0 * 2.0_f64.powi(-55);
+        let fold = [
+            Vec2::new(1.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::ZERO,
+            Vec2::new(0.0, q),
+        ];
+        let fold_controls = [
+            Vec2::new(1.5, 1.5),
+            Vec2::new(0.5, 0.5),
+            Vec2::new(-0.5, -0.5 + 2.0_f64.powi(-54)),
+            Vec2::new(0.5, 0.5),
+        ];
+        for ellipse in [
+            quarters(c, corners, controls),
+            quarters(c2, spike, spike_controls),
+            quarters(Vec2::ZERO, fold, fold_controls),
+        ] {
+            for mut path in [ellipse.clone(), ellipse.reversed()] {
+                for _ in 0..4 {
+                    assert_eq!(path.as_ellipse(), None, "{path:?}");
+                    path.segs.rotate_left(1);
+                }
+            }
+        }
+    }
+
     #[test]
     fn profile_ellipse_recognition_does_not_replace_other_paths() {
         let ellipse = ellipse_quarters(
@@ -1736,7 +2153,7 @@ mod recognition {
         // The world-coordinate midpoint rounds to c, but the x displacements are +4/-3
         // or +4/-3.5. Even when one offset reconstructs both rounded endpoints, the local
         // asymmetry is significant and must not be replaced by a full ellipse.
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         for left in [3.0, 3.5] {
             let points = [
                 Vec2::new(c + 4.0, 0.0),
@@ -1788,8 +2205,9 @@ mod recognition {
                     ((arc.start + arc.end) * 0.5, piece.point_at(0.5)),
                     (arc.end, b),
                 ] {
-                    let actual =
-                        arc.center + arc.major * t.cos() + arc.major.perp() * (arc.ratio * t.sin());
+                    let actual = arc.center
+                        + arc.major * det::cos(t)
+                        + arc.major.perp() * (arc.ratio * det::sin(t));
                     assert!(
                         actual.dist(expected) < 1e-12,
                         "{piece:?}: {actual:?} != {expected:?}"
@@ -1843,7 +2261,7 @@ mod recognition {
     fn profile_conic_ellipse_refuses_lost_local_displacements() {
         // The exact stored-input midpoint is (C+2.5,1), but the world sum rounds
         // it to (C+2,1). The old extraction then moves A from C+4 to C+3.
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         for x_sign in [1.0, -1.0] {
             for reflect in [1.0, -1.0] {
                 let a = Vec2::new(x_sign * (c + 4.0), 0.0);
@@ -1913,7 +2331,7 @@ mod recognition {
                     center,
                     major,
                     ratio,
-                    direction * 2.0 * w.acos(),
+                    direction * 2.0 * det::acos(w),
                     [start, Vec2::new(middle_x, 0.0), end],
                 );
             }
@@ -1957,7 +2375,7 @@ mod recognition {
             .zip(points)
         {
             let actual =
-                arc.center + arc.major * t.cos() + arc.major.perp() * (arc.ratio * t.sin());
+                arc.center + arc.major * det::cos(t) + arc.major.perp() * (arc.ratio * det::sin(t));
             assert!(
                 actual.dist(expected) < 1e-12,
                 "point: {actual:?}, expected {expected:?}, {arc:?}"
@@ -1984,7 +2402,7 @@ mod recognition {
                     Vec2::new(7.0, -9.5 * reflection),
                     Vec2::new(0.0, 7.5),
                     2.0 / 3.0,
-                    direction * 2.0 * 0.6_f64.acos(),
+                    direction * 2.0 * det::acos(0.6_f64),
                     [start, Vec2::new(7.0, -2.0 * reflection), end],
                 );
             }
@@ -2196,7 +2614,7 @@ mod recognition {
 
     #[test]
     fn profile_ellipse_recognizes_unequal_integer_partitions_through_the_real_candidate() {
-        let far = 2.0_f64.powi(52);
+        let far = det::powi(2.0_f64, 52);
         for three in [false, true] {
             let original = ellipse_unequal_pieces(three);
             for (center, scale) in [
@@ -2339,7 +2757,7 @@ mod recognition {
 
     #[test]
     fn profile_ellipse_uses_local_cells_at_large_world_coordinates() {
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         let original = transform_ellipse_pieces(
             &ellipse_unequal_pieces(false),
             Vec2::new(c, c),
@@ -2483,7 +2901,7 @@ mod recognition {
     fn profile_ellipse_arithmetic_retains_exact_dyadic_residuals() {
         use crate::prism::recognition::EllipseScalar as Number;
         let number = |x| Number::exact(x).expect("finite dyadic fixture");
-        let large = 2.0_f64.powi(53);
+        let large = det::powi(2.0_f64, 53);
         let sum = number(large).plus(number(1.0)).expect("finite sum");
         assert_eq!((sum.hi, sum.lo, sum.radius), (large, 1.0, 0.0));
         let cancellation = sum.minus(number(large)).expect("exact cancellation");
@@ -2491,16 +2909,16 @@ mod recognition {
             (cancellation.hi, cancellation.lo, cancellation.radius),
             (1.0, 0.0, 0.0)
         );
-        let e = 2.0_f64.powi(-27);
+        let e = det::powi(2.0_f64, -27);
         let product = number(1.0 + e)
             .times(number(1.0 - e))
             .expect("finite product");
         // (1+2^-27)(1-2^-27) = 1-2^-54; the low term cannot be discarded.
         assert_eq!((product.hi, product.lo), (1.0, -e * e));
-        assert!(product.radius < 2.0_f64.powi(-100));
-        let third = 2.0_f64.powi(-108);
+        assert!(product.radius < det::powi(2.0_f64, -100));
+        let third = det::powi(2.0_f64, -108);
         let three_terms = number(1.0)
-            .plus(number(2.0_f64.powi(-54)))
+            .plus(number(det::powi(2.0_f64, -54)))
             .expect("pair")
             .plus(number(third))
             .expect("three terms");
@@ -2515,30 +2933,30 @@ mod recognition {
         use crate::prism::recognition::EllipseScalar as Number;
         let number = |x| Number::exact(x).expect("finite fixture");
         let dyadic = number(1.0)
-            .plus(number(2.0_f64.powi(-53)))
+            .plus(number(det::powi(2.0_f64, -53)))
             .expect("exact two-term numerator");
         let quotient = dyadic.divided_by(number(2.0)).expect("dyadic quotient");
-        assert_eq!((quotient.hi, quotient.lo), (0.5, 2.0_f64.powi(-54)));
-        assert!(quotient.radius < 2.0_f64.powi(-100));
+        assert_eq!((quotient.hi, quotient.lo), (0.5, det::powi(2.0_f64, -54)));
+        assert!(quotient.radius < det::powi(2.0_f64, -100));
         let third = number(1.0).divided_by(number(3.0)).expect("one third");
         let correction = third.minus(number(1.0 / 3.0)).expect("retain correction");
         // The exact correction is 1/(3*2^54), strictly between these independent dyadics.
         assert_eq!(
             correction
-                .minus(number(2.0_f64.powi(-56)))
+                .minus(number(det::powi(2.0_f64, -56)))
                 .expect("lower comparison")
                 .sign(),
             Some(1)
         );
         assert_eq!(
-            number(2.0_f64.powi(-55))
+            number(det::powi(2.0_f64, -55))
                 .minus(correction)
                 .expect("upper comparison")
                 .sign(),
             Some(1)
         );
-        assert!(third.radius < 2.0_f64.powi(-100));
-        let e = 2.0_f64.powi(-27);
+        assert!(third.radius < det::powi(2.0_f64, -100));
+        let e = det::powi(2.0_f64, -27);
         let square = number(1.0 + 2.0 * e)
             .plus(number(e * e))
             .expect("(1+e)^2 exactly");
@@ -2546,7 +2964,7 @@ mod recognition {
         assert!(root
             .minus(number(1.0 + e))
             .expect("compare analytic root")
-            .fits(2.0_f64.powi(-100)));
+            .fits(det::powi(2.0_f64, -100)));
     }
 
     #[test]
@@ -2569,7 +2987,7 @@ mod recognition {
         assert!(underflow.radius >= minimum);
         assert!(!underflow.fits(0.0));
         assert_eq!(underflow.sign(), None);
-        let radius = 2.0_f64.powi(-53);
+        let radius = det::powi(2.0_f64, -53);
         assert!(number(radius).fits(radius));
         assert!(!number(next_up(radius)).fits(radius));
         let uncertain = Number {
@@ -2590,36 +3008,36 @@ mod recognition {
         let number = |x| Number::exact(x).expect("finite fixture");
         let center = number(0.5);
         let lower_midpoint = center
-            .minus(number(2.0_f64.powi(-55)))
+            .minus(number(det::powi(2.0_f64, -55)))
             .expect("lower midpoint");
         let upper_midpoint = center
-            .plus(number(2.0_f64.powi(-54)))
+            .plus(number(det::powi(2.0_f64, -54)))
             .expect("upper midpoint");
         assert_eq!(lower_midpoint.rounds_to(0.5), Some(false));
         assert_eq!(upper_midpoint.rounds_to(0.5), Some(false));
         assert_eq!(
             center
-                .minus(number(2.0_f64.powi(-56)))
+                .minus(number(det::powi(2.0_f64, -56)))
                 .expect("inside lower cell")
                 .rounds_to(0.5),
             Some(true)
         );
         assert_eq!(
             center
-                .plus(number(2.0_f64.powi(-55)))
+                .plus(number(det::powi(2.0_f64, -55)))
                 .expect("inside upper cell")
                 .rounds_to(0.5),
             Some(true)
         );
         assert_eq!(
             center
-                .minus(number(3.0 * 2.0_f64.powi(-56)))
+                .minus(number(3.0 * det::powi(2.0_f64, -56)))
                 .expect("outside lower cell")
                 .rounds_to(0.5),
             Some(false)
         );
-        let local = 2.0_f64.powi(-52);
-        let c = 2.0_f64.powi(52);
+        let local = det::powi(2.0_f64, -52);
+        let c = det::powi(2.0_f64, 52);
         assert_eq!(ellipse_local_resolution(-4.0, 4.0), Some(local));
         assert_eq!(ellipse_local_resolution(c - 4.0, c + 4.0), Some(local));
         assert_eq!(
@@ -2636,6 +3054,7 @@ mod recognition {
 mod arc_conversion_regressions {
     use super::super::arc_conversion::*;
     use super::super::profile::Seg2;
+    use crate::math::det;
     use crate::math::Vec2;
 
     #[test]
@@ -2665,7 +3084,7 @@ mod arc_conversion_regressions {
 
     #[test]
     fn arc_degree_conversion_refuses_large_phase_error_for_both_orientations() {
-        for start in [2.0_f64.powi(50), -2.0_f64.powi(50)] {
+        for start in [det::powi(2.0_f64, 50), -det::powi(2.0_f64, 50)] {
             for sweep in [1.0, -1.0] {
                 let arc = Seg2::Arc {
                     center: Vec2::ZERO,
@@ -2719,7 +3138,7 @@ mod arc_conversion_regressions {
             let shape = exact_piece(&arc, 0, 1, scalar_encoding(Some)).unwrap();
             assert!(matches!(shape, PathShape::Arc { a0, a1, .. } if (a0, a1) == expected));
         }
-        for start in [0.0, -1e-13, 1e-13, 1.0_f64.atan2(2.0)] {
+        for start in [0.0, -1e-13, 1e-13, det::atan2(1.0_f64, 2.0)] {
             let arc = Seg2::Arc {
                 center: Vec2::ZERO,
                 radius: 8.0,
@@ -2914,6 +3333,860 @@ mod arc_conversion_regressions {
     }
 
     #[test]
+    fn zero_length_line_beside_sub_cell_sliver_never_emits_collapsing_distinct_vertices() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let snap = |p: Vec2| Vec2::new(grid(p.x).unwrap(), grid(p.y).unwrap());
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let (a, b, c) = (Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(1.0002, 1.0));
+        let b2 = Vec2::new(1.0002, 0.0);
+        let sliver = line(b, b2);
+
+        let check_no_encoded_collapse = |shapes: &[PathShape<Vec2>]| {
+            for shape in shapes {
+                if let &PathShape::BulgedPolyline {
+                    ref vertices,
+                    closed,
+                } = shape
+                {
+                    for pair in vertices.windows(2) {
+                        assert!(
+                            pair[0].at == pair[1].at || snap(pair[0].at) != snap(pair[1].at),
+                            "distinct stored vertices collapse under encoding: {vertices:?}"
+                        );
+                    }
+                    if closed && vertices.len() >= 2 {
+                        let (first, last) =
+                            (vertices.first().unwrap().at, vertices.last().unwrap().at);
+                        assert_ne!(
+                            first, last,
+                            "closed polyline duplicates endpoint: {vertices:?}"
+                        );
+                        assert_ne!(
+                            snap(first),
+                            snap(last),
+                            "closed polyline endpoints collapse under encoding: {vertices:?}"
+                        );
+                    }
+                }
+            }
+        };
+
+        for open_path in [
+            vec![line(b, b), sliver, line(b2, c)],
+            vec![line(a, b), line(b, b), line(b, b), sliver, line(b2, c)],
+        ] {
+            let shapes =
+                path_shapes(PlanarPath::Open(&open_path), PathStyle::Polyline, encoding).unwrap();
+            check_no_encoded_collapse(&shapes);
+        }
+
+        let end_only = path_shapes(
+            PlanarPath::Open(&[line(b, b), sliver]),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&end_only);
+        assert!(matches!(
+            end_only.as_slice(),
+            [PathShape::BulgedPolyline { vertices, closed: false }] if vertices.len() == 2
+        ));
+
+        let closed_start = Loop2 {
+            segs: vec![line(b, b), sliver, line(b2, c), line(c, a), line(a, b)],
+        };
+        let closed_middle = Loop2 {
+            segs: vec![line(a, b), line(b, b), sliver, line(b2, c), line(c, a)],
+        };
+        let closed_end = Loop2 {
+            segs: vec![line(b2, c), line(c, a), line(a, b), line(b, b), sliver],
+        };
+        for (i, lp) in [&closed_start, &closed_middle, &closed_end]
+            .into_iter()
+            .enumerate()
+        {
+            let shapes =
+                path_shapes(PlanarPath::Closed(lp), PathStyle::Polyline, encoding).unwrap();
+            check_no_encoded_collapse(&shapes);
+            if i == 0 {
+                // `line(b, b)` is an authored zero-length piece (preserved), the sliver merges,
+                // and the three remaining edges close back through `lead`: 4 vertices, closed.
+                assert!(matches!(
+                    shapes.as_slice(),
+                    [PathShape::BulgedPolyline { vertices, closed: true }] if vertices.len() == 4
+                ));
+            }
+        }
+    }
+
+    fn check_no_encoded_collapse(shapes: &[PathShape<Vec2>], grid: fn(f64) -> Option<f64>) {
+        let snap = |p: Vec2| Vec2::new(grid(p.x).unwrap(), grid(p.y).unwrap());
+        for shape in shapes {
+            if let PathShape::BulgedPolyline { vertices, closed } = shape {
+                for pair in vertices.windows(2) {
+                    assert!(
+                        pair[0].at == pair[1].at || snap(pair[0].at) != snap(pair[1].at),
+                        "distinct stored vertices collapse under encoding: {vertices:?}"
+                    );
+                }
+                if *closed && vertices.len() >= 2 {
+                    let (first, last) = (vertices.first().unwrap().at, vertices.last().unwrap().at);
+                    assert_ne!(
+                        first, last,
+                        "closed polyline duplicates endpoint: {vertices:?}"
+                    );
+                    assert_ne!(
+                        snap(first),
+                        snap(last),
+                        "closed polyline endpoints collapse under encoding: {vertices:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn interleaved_zero_length_lines_and_slivers_preserve_vertices_and_loop_closure() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let p3 = Vec2::new(1.0003, 0.0);
+        let q = Vec2::new(1.0, 2.0);
+        let r = Vec2::new(3.0, 2.0);
+
+        let open_interleaved = [
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p1),
+            line(p1, p2),
+            line(p2, p2),
+            line(p2, p3),
+            line(p3, q),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&open_interleaved),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3), vertex(p3), vertex(p3), vertex(p3), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        let open_end_only = [line(p0, p0), line(p0, p1), line(p1, p1), line(p1, p2)];
+        let end_shapes = path_shapes(
+            PlanarPath::Open(&open_end_only),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&end_shapes, grid);
+        assert_eq!(
+            end_shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p2), vertex(p2), vertex(p2)],
+                closed: false,
+            }]
+        );
+
+        // Closed loop starting with interleaved zero-length lines and slivers (exercises `lead`).
+        let closed_start = Loop2 {
+            segs: vec![
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, q),
+                line(q, r),
+                line(r, p0),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_start),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p2), vertex(p2), vertex(p2), vertex(q), vertex(r)],
+                closed: true,
+            }]
+        );
+
+        // Closed loop starting with a sliver before interleaved zero-length + sliver pairs.
+        let closed_lead_sliver_first = Loop2 {
+            segs: vec![
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, p2),
+                line(p2, p3),
+                line(p3, q),
+                line(q, r),
+                line(r, p0),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_lead_sliver_first),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3), vertex(p3), vertex(p3), vertex(q), vertex(r)],
+                closed: true,
+            }]
+        );
+
+        // Closed loop with interleaved zero-length lines and slivers in the middle.
+        let closed_middle = Loop2 {
+            segs: vec![
+                line(r, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, q),
+                line(q, r),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_middle),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(r), vertex(p2), vertex(p2), vertex(p2), vertex(q)],
+                closed: true,
+            }]
+        );
+
+        // Closed loop ending with interleaved zero-length lines and slivers: first and last
+        // vertices encode to the same point, so the polyline stays open.
+        let closed_end = Loop2 {
+            segs: vec![
+                line(p2, q),
+                line(q, r),
+                line(r, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_end),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![
+                    vertex(p2),
+                    vertex(q),
+                    vertex(r),
+                    vertex(p2),
+                    vertex(p2),
+                    vertex(p2),
+                ],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn nonzero_edge_or_arc_before_zero_length_sliver_suffix_is_never_shifted() {
+        use std::f64::consts::FRAC_PI_2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let a = Vec2::ZERO;
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let q = Vec2::new(1.0, 2.0);
+
+        let after_line = [
+            line(a, p0),
+            line(p0, p0),
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p2),
+            line(p2, q),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&after_line), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        let after_line_trailing = [
+            line(a, p0),
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p1),
+            line(p1, p2),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&after_line_trailing),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2)],
+                closed: false,
+            }]
+        );
+
+        let arc = Seg2::Arc {
+            center: Vec2::new(0.0, 0.0),
+            radius: 2.0,
+            start: 0.0,
+            sweep: FRAC_PI_2,
+        };
+        let arc_start = arc.start();
+        let arc_end = arc.end();
+        let arc_p1 = Vec2::new(arc_end.x + 1e-4, arc_end.y);
+        let arc_p2 = Vec2::new(arc_end.x + 2e-4, arc_end.y);
+        let expected_bulge = (FRAC_PI_2 * 0.25).tan();
+
+        let after_arc = [
+            arc,
+            line(arc_end, arc_end),
+            line(arc_end, arc_end),
+            line(arc_end, arc_p1),
+            line(arc_p1, arc_p2),
+            line(arc_p2, q),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&after_arc), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![
+                    Vertex {
+                        at: arc_start,
+                        bulge: expected_bulge,
+                    },
+                    vertex(arc_p2),
+                    vertex(arc_p2),
+                    vertex(arc_p2),
+                    vertex(q),
+                ],
+                closed: false,
+            }]
+        );
+
+        let after_arc_trailing = [
+            arc,
+            line(arc_end, arc_end),
+            line(arc_end, arc_p1),
+            line(arc_p1, arc_p2),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&after_arc_trailing),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![
+                    Vertex {
+                        at: arc_start,
+                        bulge: expected_bulge,
+                    },
+                    vertex(arc_p2),
+                    vertex(arc_p2),
+                ],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn disjoint_run_or_exact_entity_after_zero_length_sliver_suffix_flushes_shifted_vertices() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let a = Vec2::ZERO;
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let d = Vec2::new(5.0, 0.0);
+        let e = Vec2::new(6.0, 0.0);
+
+        let disjoint_line = [
+            line(a, p0),
+            line(p0, p0),
+            line(p0, p0),
+            line(p0, p1),
+            line(p1, p2),
+            line(d, e),
+        ];
+        let shapes = path_shapes(
+            PlanarPath::Open(&disjoint_line),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![
+                PathShape::BulgedPolyline {
+                    vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2)],
+                    closed: false,
+                },
+                PathShape::BulgedPolyline {
+                    vertices: vec![vertex(d), vertex(e)],
+                    closed: false,
+                },
+            ]
+        );
+
+        let cubic = Seg2::Cubic {
+            p0: p2,
+            p1: Vec2::new(2.0, 1.0),
+            p2: Vec2::new(3.0, 1.0),
+            p3: d,
+        };
+        let with_exact = [line(a, p0), line(p0, p0), line(p0, p1), line(p1, p2), cubic];
+        let shapes =
+            path_shapes(PlanarPath::Open(&with_exact), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(shapes.len(), 2);
+        assert_eq!(
+            shapes[0],
+            PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2)],
+                closed: false,
+            }
+        );
+        assert!(matches!(shapes[1], PathShape::Spline { .. }));
+
+        // Closed loop interrupted by an exact entity immediately after a zero-length + sliver suffix.
+        let closed_interrupted = Loop2 {
+            segs: vec![
+                line(a, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p2),
+                cubic,
+                line(d, a),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_interrupted),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(shapes.len(), 3);
+        assert_eq!(
+            shapes[0],
+            PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2)],
+                closed: false,
+            }
+        );
+        assert!(matches!(shapes[1], PathShape::Spline { .. }));
+        assert_eq!(
+            shapes[2],
+            PathShape::BulgedPolyline {
+                vertices: vec![vertex(d), vertex(a)],
+                closed: false,
+            }
+        );
+
+        // Disconnected sliver after suffix neither corrupts the flushed run nor re-closes a loop.
+        let disjoint_sliver = Loop2 {
+            segs: vec![
+                line(a, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p2),
+                line(d, Vec2::new(d.x + 1e-4, d.y)),
+                line(p2, a),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&disjoint_sliver),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(a)],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn closed_loop_of_only_zero_length_lines_and_slivers_stays_open_at_final_endpoint() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let p0 = Vec2::new(1.0, 0.0);
+        let p1 = Vec2::new(1.0001, 0.0);
+        let p2 = Vec2::new(1.0002, 0.0);
+        let p3 = Vec2::new(1.0003, 0.0);
+
+        let zero_first = Loop2 {
+            segs: vec![
+                line(p0, p0),
+                line(p0, p0),
+                line(p0, p1),
+                line(p1, p2),
+                line(p2, p2),
+                line(p2, p3),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&zero_first),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3); 4],
+                closed: false,
+            }]
+        );
+
+        let sliver_first = Loop2 {
+            segs: vec![
+                line(p0, p1),
+                line(p1, p1),
+                line(p1, p2),
+                line(p2, p2),
+                line(p2, p3),
+            ],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&sliver_first),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p3); 3],
+                closed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn curved_conic_sub_grid_slivers_after_zero_length_lines_shift_to_final_endpoint() {
+        use super::super::profile::Loop2;
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+
+        let a = Vec2::ZERO;
+        let p0 = Vec2::new(1.0, 0.0);
+        let p0_apex = Vec2::new(1.0001, 0.0001);
+        let p1 = Vec2::new(1.0002, 0.0);
+        let p1_apex = Vec2::new(1.00025, -0.0001);
+        let p2 = Vec2::new(1.0003, 0.0);
+        let q = Vec2::new(1.0, 2.0);
+        let r = Vec2::new(3.0, 2.0);
+
+        // Conic with `a == b` and `apex != a` inside one writer cell.
+        let conic_same_ends = Seg2::Conic {
+            a: p0,
+            apex: p0_apex,
+            b: p0,
+            w: 0.7,
+        };
+        let shapes = path_shapes(
+            PlanarPath::Open(&[line(a, p0), line(p0, p0), conic_same_ends, line(p0, q)]),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p0), vertex(p0), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        // Chained `Conic` slivers with `a != b` after zero-length lines.
+        let conic_01 = Seg2::Conic {
+            a: p0,
+            apex: p0_apex,
+            b: p1,
+            w: 0.7,
+        };
+        let conic_12 = Seg2::Conic {
+            a: p1,
+            apex: p1_apex,
+            b: p2,
+            w: 0.7,
+        };
+        let shapes = path_shapes(
+            PlanarPath::Open(&[
+                line(a, p0),
+                line(p0, p0),
+                line(p0, p0),
+                conic_01,
+                conic_12,
+                line(p2, q),
+            ]),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(p2), vertex(p2), vertex(p2), vertex(q)],
+                closed: false,
+            }]
+        );
+
+        // Closed loop starting with zero-length line + conic sliver (`a != b`) closes via `lead`.
+        let closed_conic = Loop2 {
+            segs: vec![line(p0, p0), conic_01, line(p1, q), line(q, r), line(r, p0)],
+        };
+        let shapes = path_shapes(
+            PlanarPath::Closed(&closed_conic),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        assert_eq!(
+            shapes,
+            vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(p1), vertex(p1), vertex(q), vertex(r)],
+                closed: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn signed_zero_across_zero_length_suffix_and_sliver_preserves_semantics() {
+        let grid = |v: f64| Some((v * 1e3).round() / 1e3);
+        let encoding = scalar_encoding(grid);
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+
+        let neg_a = Vec2::new(-1.0, 0.0);
+        let pos_zero = Vec2::new(0.0, 0.0);
+        let neg_zero = Vec2::new(-0.0, 0.0);
+        let p1 = Vec2::new(1e-4, 0.0);
+        let pos_b = Vec2::new(1.0, 0.0);
+
+        // Without any sliver, untouched zero-length vertices preserve their original +/-0.0 sign bits.
+        let unshifted = [
+            line(neg_a, pos_zero),
+            line(neg_zero, neg_zero),
+            line(pos_zero, pos_zero),
+            line(pos_zero, pos_b),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&unshifted), PathStyle::Polyline, encoding).unwrap();
+        let [PathShape::BulgedPolyline {
+            vertices,
+            closed: false,
+        }] = shapes.as_slice()
+        else {
+            panic!("expected single open polyline, got {shapes:?}");
+        };
+        assert_eq!(vertices.len(), 5);
+        assert_eq!(vertices[0].at, neg_a);
+        assert!(vertices[1].at.x == 0.0 && vertices[1].at.x.is_sign_negative());
+        assert!(vertices[2].at.x == 0.0 && vertices[2].at.x.is_sign_positive());
+        assert!(vertices[3].at.x == 0.0 && vertices[3].at.x.is_sign_positive());
+        assert_eq!(vertices[4].at, pos_b);
+
+        // With a sliver starting at +0.0 after a -0.0 zero-length line, the -0.0 vertex shifts to p1
+        // while the earlier non-zero vertex at neg_a stays untouched.
+        let shifted = [
+            line(neg_a, pos_zero),
+            line(neg_zero, neg_zero),
+            line(pos_zero, p1),
+            line(p1, pos_b),
+        ];
+        let shapes =
+            path_shapes(PlanarPath::Open(&shifted), PathStyle::Polyline, encoding).unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        let [PathShape::BulgedPolyline {
+            vertices,
+            closed: false,
+        }] = shapes.as_slice()
+        else {
+            panic!("expected single open polyline, got {shapes:?}");
+        };
+        assert_eq!(vertices.len(), 4);
+        assert_eq!(vertices[0].at, neg_a);
+        assert_eq!(vertices[1].at, p1);
+        assert_eq!(vertices[2].at, p1);
+        assert_eq!(vertices[3].at, pos_b);
+
+        // A sliver landing on -0.0 before a real edge starting at +0.0 materializes the suffix at -0.0.
+        let to_neg_zero = [line(p1, p1), line(p1, neg_zero), line(pos_zero, pos_b)];
+        let shapes = path_shapes(
+            PlanarPath::Open(&to_neg_zero),
+            PathStyle::Polyline,
+            encoding,
+        )
+        .unwrap();
+        check_no_encoded_collapse(&shapes, grid);
+        let [PathShape::BulgedPolyline {
+            vertices,
+            closed: false,
+        }] = shapes.as_slice()
+        else {
+            panic!("expected single open polyline, got {shapes:?}");
+        };
+        assert_eq!(vertices.len(), 3);
+        assert!(vertices[0].at.x == 0.0 && vertices[0].at.x.is_sign_negative());
+        assert!(vertices[1].at.x == 0.0 && vertices[1].at.x.is_sign_positive());
+        assert_eq!(vertices[2].at, pos_b);
+    }
+
+    #[test]
+    fn zero_length_lines_and_many_slivers_export_in_linear_time() {
+        use std::time::{Duration, Instant};
+        let grid = |v: f64| Some((v * 1e9).round() / 1e9);
+        let encoding = scalar_encoding(grid);
+
+        let n = 80_000usize;
+        let point = |i: usize| Vec2::new(1.0 + (i as f64) * 1e-15, 1.0);
+        let p = point(0);
+        let end = point(n);
+        let q = Vec2::new(10.0, 1.0);
+
+        // Block pattern: n zero-length lines followed by n chained sub-grid slivers + 1 real line.
+        let block_elapsed = {
+            let mut block = Vec::with_capacity(2 * n + 1);
+            for _ in 0..n {
+                block.push(Seg2::Line { a: p, b: p });
+            }
+            for i in 0..n {
+                block.push(Seg2::Line {
+                    a: point(i),
+                    b: point(i + 1),
+                });
+            }
+            block.push(Seg2::Line { a: end, b: q });
+
+            let start = Instant::now();
+            let shapes =
+                path_shapes(PlanarPath::Open(&block), PathStyle::Polyline, encoding).unwrap();
+            let elapsed = start.elapsed();
+            assert!(matches!(
+                shapes.as_slice(),
+                [PathShape::BulgedPolyline { vertices, closed: false }]
+                    if vertices.len() == n + 2
+                        && vertices[..=n].iter().all(|v| v.at == end)
+                        && vertices[n + 1].at == q
+            ));
+            elapsed
+        };
+
+        // Interleaved pattern: (zero-length line, sub-grid sliver) repeated n times + 1 real line.
+        let interleaved_elapsed = {
+            let mut interleaved = Vec::with_capacity(2 * n + 1);
+            for i in 0..n {
+                let pi = point(i);
+                interleaved.push(Seg2::Line { a: pi, b: pi });
+                interleaved.push(Seg2::Line {
+                    a: pi,
+                    b: point(i + 1),
+                });
+            }
+            interleaved.push(Seg2::Line { a: end, b: q });
+
+            let start = Instant::now();
+            let shapes = path_shapes(
+                PlanarPath::Open(&interleaved),
+                PathStyle::Polyline,
+                encoding,
+            )
+            .unwrap();
+            let elapsed = start.elapsed();
+            assert!(matches!(
+                shapes.as_slice(),
+                [PathShape::BulgedPolyline { vertices, closed: false }]
+                    if vertices.len() == n + 2
+                        && vertices[..=n].iter().all(|v| v.at == end)
+                        && vertices[n + 1].at == q
+            ));
+            elapsed
+        };
+
+        assert!(
+            block_elapsed < Duration::from_millis(3_000)
+                && interleaved_elapsed < Duration::from_millis(3_000),
+            "expected linear-time export (< 3000 ms), got block={block_elapsed:?}, interleaved={interleaved_elapsed:?}"
+        );
+    }
+
+    #[test]
     fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
         let arc = Seg2::Arc {
             center: Vec2::ZERO,
@@ -2975,7 +4248,7 @@ mod arc_conversion_regressions {
 
     #[test]
     fn translated_conic_keeps_its_rational_definition_in_public_arc_conversion() {
-        let c = 2.0_f64.powi(52);
+        let c = det::powi(2.0_f64, 52);
         let w = 0.5_f64.sqrt();
         let a = Vec2::new(c + 4.0, 0.0);
         let apex = Vec2::new(c + 4.0, 2.0);
@@ -3917,7 +5190,7 @@ fn gusset_face_boundaries_are_measured_on_their_exact_curves() {
     // A parabola (w = 1) takes 2/3 of its control triangle; a hyperbola (w = cosh 1) takes
     // cosh 1 (sinh 1 cosh 1 - 1) / sinh³ 1; across w = 1 the share is continuous.
     assert!((conic_share(1.).unwrap() - 2. / 3.).abs() < 1e-15);
-    let (c, sh) = (1f64.cosh(), 1f64.sinh());
+    let (c, sh) = (det::cosh(1f64), det::sinh(1f64));
     assert!((conic_share(c).unwrap() - c * (sh * c - 1.) / (sh * sh * sh)).abs() < 1e-12);
     for w in [1. - 1.1e-4, 1. - 0.9e-4, 1. + 0.9e-4, 1. + 1.1e-4] {
         assert!(

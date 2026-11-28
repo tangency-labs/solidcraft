@@ -10,7 +10,8 @@
 //!   distance or an angle on the other; [`chamfer_sides_facing`] takes the face of each edge
 //!   that faces a direction most.
 //! - [`fillet_variable`]: one edge rounded with a radius law, from one of its vertices or
-//!   ([`fillet_variable_from`]) from its end nearest a point.
+//!   ([`fillet_variable_from`]) from its end nearest a point; [`fillet_variable_chain_from`]
+//!   a tangent chain with one law along it.
 //! - [`edge_faces_along`]: the two faces of an edge with how far each faces a direction, for an
 //!   application choosing the face a chamfer's first distance is along.
 //! - [`edges_share_wedge`]: whether the faces of some edges all meet at one angle, for an
@@ -40,9 +41,10 @@
 use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
+use solidcore::blend::blend_corner::crossing_ends::{plan as crossing_end_plan, CrossingEndPlan};
 use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
-    RollOver,
+    RollOver, RollOverKind,
 };
 use solidcore::blend::blend_corner::separate_ends::{
     plan as separate_end_plan, SectionKind, SeparateEndPlan,
@@ -59,6 +61,7 @@ use solidcore::blend::fillet_executive::FilletLaw;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::blend::fillet_solver::p5::is_concave_edge;
 use solidcore::blend::round_room::rounds_cross;
 use solidcore::error::blend::BlendFailure;
 use solidcore::geom::attribute::{ids, Attribute, AttributeHandle, AttributeHandlers, Behavior};
@@ -79,7 +82,7 @@ use solidcore::{Brep, EntityRef, Kernel, SolidError, Vec3};
 
 use crate::body::{finish, finish_under, Body, Contract, Expect, Proof};
 use crate::error::status;
-use crate::session::{answer, measure_body, with_body};
+use crate::session::{answer, measure_body, read_body, with_body};
 use crate::tangent::Chain;
 use crate::{Error, FitKind, Result, RoomReason, Unblendable};
 
@@ -380,6 +383,10 @@ struct Stopped {
     mitred: Vec<EdgeId>,
     /// The Roll-over corners the corners step refused, with [`RollOverStep::Classify`].
     roll_overs: Vec<RollOver>,
+    /// The edges of each two blends whose bands cross only past free ends of their edges, two
+    /// by two, where that was the band check's only refusal (the kernel's
+    /// `FilletSession::bands_crossing_past_ends`, #22798).
+    crossing: Vec<EdgeId>,
 }
 
 /// The kernel's reason for a blend too large, as ops names it; `None` for the reasons it does
@@ -920,20 +927,20 @@ fn prepare(
     s: &mut FilletSession<'_>,
     edges: &[EdgeId],
     section: Section<'_>,
-    law: Option<FilletLaw>,
+    laws: Vec<FilletLaw>,
 ) -> solidcore::Result<()> {
     let circular = [FilletSurfaceGeneratorType::Circular];
-    match (section, law) {
+    match (section, laws) {
         (Section::Round(sizes), _) => {
             s.prepare_per_edge_constant_radius(k, edges, sizes, &circular, 1, 1.0)
         }
-        (Section::Variable(size), Some(law)) => {
-            s.prepare_variable_radius_edges(k, edges, size, law, 1, 1)
-        }
-        (Section::Variable(_), None) => Err(SolidError::invalid_input(
+        (Section::Variable(_), laws) if laws.is_empty() => Err(SolidError::invalid_input(
             "solidcore-ops blend",
             "a variable round needs its law",
         )),
+        (Section::Variable(size), laws) => {
+            s.prepare_variable_radius_edge_laws(k, edges, size, laws, 1, 1)
+        }
         // the equal-area thumbweight by the kernel's name, never its value
         (Section::Curvature(sizes), _) => s.prepare_per_edge_constant_radius(
             k,
@@ -997,7 +1004,8 @@ fn corners(
 struct Pass<'a> {
     edges: &'a [EdgeId],
     section: Section<'a>,
-    law: Option<FilletLaw>,
+    /// A variable round's radius laws, one per edge (empty for every other section).
+    laws: Vec<FilletLaw>,
     setbacks: &'a [(VertexId, f64)],
     /// Faces an earlier pass of the same blend made ([`FilletSession::add_earlier_pass_face`]).
     earlier: &'a [FaceId],
@@ -1062,7 +1070,7 @@ fn pass(
             ChamferCorner::Mitre => solidcore::blend::blend_corner::BlendChamferCorner::Mitre,
             ChamferCorner::Facet => solidcore::blend::blend_corner::BlendChamferCorner::Facet,
         });
-        let prepared = prepare(k, &mut s, p.edges, p.section, p.law);
+        let prepared = prepare(k, &mut s, p.edges, p.section, p.laws);
         let prepared_ok = prepared.is_ok();
         // a set-back vertex is no Ball: its corner is the one the setback is set on
         if !p.section.chamfer() {
@@ -1113,6 +1121,7 @@ fn pass(
                         stopped.overflow = Some(s.overflow_edges());
                         stopped.mitred = s.mitred_edges();
                     }
+                    stopped.crossing = s.bands_crossing_past_ends().to_vec();
                     let (error, edge) = blend_failure(&s, e, call);
                     fit_edge = edge;
                     Ok(Err(Refused::Error(error)))
@@ -1224,7 +1233,7 @@ fn together<'a>(
     Pass {
         edges,
         section,
-        law: None,
+        laws: Vec::new(),
         setbacks: &[],
         earlier,
         patches: false,
@@ -1335,17 +1344,62 @@ fn separated_end_passes(
     groups.build(k, b, pass_group).map(Some)
 }
 
+/// Chamfers whose Ends meet across an unblended edge, built in the kernel's two passes
+/// ([`solidcore::blend::blend_corner::crossing_ends`]), each the ordinary chamfer pass;
+/// `None` where the kernel plans no passes.
+fn crossing_end_passes(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    turn: Turn,
+    chamfer_corner: ChamferCorner,
+    contract: Contract,
+) -> solidcore::Result<Option<Result<()>>> {
+    let CrossingEndPlan::Passes(passes) = crossing_end_plan(k, b, picked, sizes)? else {
+        return Ok(None);
+    };
+    let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
+        let chamfers: Vec<_> = sizes
+            .iter()
+            .map(|&d| ChamferSize::Distances([d, d]))
+            .collect();
+        let p = Pass {
+            edges,
+            section: Section::Chamfer {
+                sizes: &chamfers,
+                along: &[],
+            },
+            laws: Vec::new(),
+            setbacks: &[],
+            earlier: &[],
+            patches: false,
+            overflow: None,
+            turn,
+            chamfer_corner,
+            roll_over: RollOverStep::No,
+            contract,
+        };
+        pass_or_refuse(k, b, p).map(|result| result.map(|_| ()))
+    };
+    passes.build(k, b, pass_group).map(Some)
+}
+
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
-/// stopped in `b`, `edges` its edges, `sizes` theirs, `mitred` the mitred pairs it found): the
-/// blends that overflow on their own (each edge's alone, classified in `b`, where nothing was
-/// built) go first on `fresh` (the untouched input, copied before the first call; a copy keeps
-/// the order, so the edge at index i of `b` is at index i of `fresh`), the asked edges tagged
-/// ([`Picked`]). Each other asked edge is then what is left of it, the edges carrying its tag,
-/// rounded at its size in a second pass that is handed the faces the first made, so it meets
-/// the first rounds as one blend. An asked edge with nothing left is `dropped`. Two rounds
-/// mitred at a face's concave corner go first together. Where none overflows on its own, or
-/// all do, the edges are rounded together as before. Every pass turns as `turn`. The result is
-/// `fresh`, untagged.
+/// stopped in `b`, `edges` its edges, `sizes` theirs, `overflowing` the edges whose blends it
+/// found to overflow, `mitred` the mitred pairs it found): the blends that overflow on their own
+/// (each edge's alone, classified in `b`, where nothing was built) and in the first call go
+/// first on `fresh` (the untouched input, copied before the first call; a copy keeps the order,
+/// so the edge at index i of `b` is at index i of `fresh`), the asked edges tagged ([`Picked`]).
+/// A blend that overflows alone but not with the other asked blends (#22796: a round that
+/// alone runs on past its end into a notch, where with the round of the notch's side edge it
+/// turns the corner) stays with the others: going first, it would be built past its corner
+/// before the round it meets there. Each other asked edge is then what is left of it, the
+/// edges carrying its tag, rounded at its size in a second pass that is handed the faces the
+/// first made, so it meets the first rounds as one blend. An asked edge with nothing left is
+/// `dropped`. Two rounds mitred at a face's concave corner go first together. Where none goes
+/// first, or all do, the edges are rounded together as before. Every pass turns as `turn`. The
+/// result is `fresh`, untagged.
 #[allow(clippy::too_many_arguments)] // the C API's overflow_first
 fn overflow_first(
     k: &mut Kernel,
@@ -1355,6 +1409,7 @@ fn overflow_first(
     sizes: &[f64],
     section: fn(&[f64]) -> Section<'_>,
     turn: Turn,
+    overflowing: &[EdgeId],
     mitred: &[EdgeId],
     dropped: &mut [bool],
     contract: Contract,
@@ -1375,7 +1430,7 @@ fn overflow_first(
         let alone = Pass {
             edges: &[e],
             section: section(std::slice::from_ref(&size)),
-            law: None,
+            laws: Vec::new(),
             setbacks: &[],
             earlier: &[],
             patches: false,
@@ -1403,7 +1458,8 @@ fn overflow_first(
             Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)),
         )?;
         if let Some(flag) = goes_first.get_mut(i) {
-            *flag = stopped.overflow.is_some_and(|over| !over.is_empty());
+            *flag =
+                stopped.overflow.is_some_and(|over| !over.is_empty()) && overflowing.contains(&e);
         }
     }
     // a round mitred to one that goes first goes with it, through every mitre
@@ -1596,7 +1652,12 @@ fn roll_over(
     for i in rest {
         let mut left = false;
         for e in fresh.edge_list().to_vec() {
-            if picked_on(&fresh, e).is_some_and(|(_, p)| p == i) {
+            // a piece the first pass left smooth or convex has nothing to round: at a cusp
+            // (#22151), B2's piece between the rails' crossing and V, which the second pass's
+            // corner covers
+            if picked_on(&fresh, e).is_some_and(|(_, p)| p == i)
+                && is_concave_edge(k, &mut fresh, e)?
+            {
                 remnants.push(e);
                 size_of.push(sizes.get(i).copied().unwrap_or(0.0));
                 left = true;
@@ -1610,9 +1671,12 @@ fn roll_over(
     }
     if !remnants.is_empty() {
         let chain = concave_chain(k, &mut fresh, &remnants, &first)?;
-        // the chain's V, where it meets the cliff: none, and it is not the Roll-over's
+        // the chain's V, where it meets the cliff: none, and it is not the ledge's. The cusp's
+        // (#22151) has no cliff: its ball rolls off the common face onto B1's surface and down
+        // to the tangent seam, a plain pass of the chain, handed the first pass's faces.
         let ends = concave_chain_ends(k, &mut fresh, &chain)?;
-        if ends.is_empty() {
+        let cusps_only = roll_overs.iter().all(|r| r.kind == RollOverKind::Cusp);
+        if ends.is_empty() && !cusps_only {
             return Ok(Err(Error::Unsupported(
                 "a roll-over's concave chain that does not meet the cliff",
             )));
@@ -1630,7 +1694,11 @@ fn roll_over(
         }
         let chain_sizes = vec![size; chain.len()];
         let p = Pass {
-            roll_over: RollOverStep::Concave(&ends),
+            roll_over: if ends.is_empty() {
+                RollOverStep::No
+            } else {
+                RollOverStep::Concave(&ends)
+            },
             ..together(&chain, section(&chain_sizes), turn, &first, contract)
         };
         if let Err(e) = pass_or_refuse(k, &mut fresh, p)? {
@@ -1670,21 +1738,30 @@ pub fn session_failure(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
 
 /// [`session_failure`] on the session's error info.
 fn noted_failure(info: &ErrorInfo<FilletObject>, e: &SolidError) -> Option<Error> {
-    Some(match (failure(e)?, noted(info)) {
-        (
-            Error::BlendFailed {
-                class,
-                status,
-                phrase,
-            },
-            Some(why),
-        ) => Error::BlendFailed {
-            class,
-            status,
-            phrase: format!("{phrase}: {why}"),
-        },
-        (failed, _) => failed,
-    })
+    use std::fmt::Write as _;
+
+    let mut failed = failure(e)?;
+    if let Error::BlendFailed { ref mut phrase, .. } = failed {
+        if let Some(why) = noted(info) {
+            *phrase = format!("{phrase}: {why}");
+        }
+        if !phrase.contains("at (")
+            && info.code != FilletErrorType::Ok as i32
+            && !(info.no_room_without_site && info.code == FilletErrorType::NoRoom as i32)
+        {
+            if let Some(p) = info
+                .location
+                .filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+            {
+                let _ = write!(
+                    phrase,
+                    ", at the edge at ({:.3}, {:.3}, {:.3})",
+                    p.x, p.y, p.z
+                );
+            }
+        }
+    }
+    Some(failed)
 }
 
 /// What the session noted of its last failure, in the kernel's words: its error info's
@@ -1712,7 +1789,10 @@ const NO_COMMENT: &str = "<no comment>";
 /// filled), the overflowing ones go first and the others then round what is left of their
 /// edges, meeting them as one blend; an edge the overflow removed whole is reported dropped.
 /// A closed manifold body gives one. Two rounds that meet at a sharp side edge on a face they share turn
-/// mitred ([`blend_ordered`] takes the [`Turn`]).
+/// mitred ([`blend_ordered`] takes the [`Turn`]). Rounds whose bands cross only past free ends
+/// of their edges (neighbouring edges that share no vertex and end on a face beyond, such as a
+/// block's top edges where a sphere trims its corners) are built in turns and mitred where they
+/// cross.
 ///
 /// # Errors
 /// [`Error::Argument`] for no edges, an index past its list or repeated, sizes neither one nor
@@ -1826,6 +1906,40 @@ fn blend_impl(
     corners: Corners,
     options: BlendOptions,
 ) -> Result<Blended> {
+    blend_impl_in(
+        body,
+        order,
+        kind,
+        edges,
+        sizes,
+        setbacks,
+        corners,
+        options,
+        InTurn::No,
+    )
+}
+
+/// Whether [`blend_impl_in`] builds one turn of [`crossing_in_turns`], which is never itself
+/// built in turns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InTurn {
+    No,
+    Yes,
+}
+
+/// [`blend_impl`], `in_turn` saying whether it builds a turn of [`crossing_in_turns`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn blend_impl_in(
+    body: &Body,
+    order: Option<&crate::Order>,
+    kind: Blend,
+    edges: &[usize],
+    sizes: &[f64],
+    setbacks: &[SetBack],
+    corners: Corners,
+    options: BlendOptions,
+    in_turn: InTurn,
+) -> Result<Blended> {
     let turn = options.turn;
     let one_size = sizes.len() == 1;
     if edges.is_empty()
@@ -1850,7 +1964,19 @@ fn blend_impl(
                 .unwrap_or(0.0)
         })
         .collect();
-    let blended = match blend_session(body, order, kind, edges, &each, setbacks, corners, options) {
+    let mut crossing = Vec::new();
+    let first = blend_session(
+        body,
+        order,
+        kind,
+        edges,
+        &each,
+        setbacks,
+        corners,
+        options,
+        &mut crossing,
+    );
+    let blended = match first {
         // Auto never refuses a blend the mitre builds: its swept turns are chosen per corner
         // ([`TurnChoice::Auto`]), each one the blend corner builds on its own, but a swept turn
         // can still leave a round no room beside another corner of it (a round shorter than its
@@ -1865,7 +1991,18 @@ fn blend_impl(
                 turn: Turn::Mitre,
                 ..options
             };
-            blend_session(body, order, kind, edges, &each, setbacks, corners, mitred)
+            crossing.clear();
+            blend_session(
+                body,
+                order,
+                kind,
+                edges,
+                &each,
+                setbacks,
+                corners,
+                mitred,
+                &mut crossing,
+            )
         }
         other => other,
     };
@@ -1882,20 +2019,270 @@ fn blend_impl(
         ) if matches!(kind, Blend::Chamfer | Blend::Round) && setbacks.is_empty() => {
             // a run-out that cannot be built (`body` untouched) leaves the kernel's refusal,
             // which says what to change, the answer
-            match blend_running_out(body, order, kind, edges, &each) {
-                Ok(Some(made)) => Ok(Blended {
+            if let Ok(Some(made)) = blend_running_out(body, order, kind, edges, &each) {
+                return Ok(Blended {
                     dropped: vec![false; edges.len()],
                     holes: Vec::new(),
                     made,
-                }),
-                Ok(None) | Err(_) => Err(refused),
+                });
             }
+            // (#22798) rounds refused only for bands that cross past free ends of their edges,
+            // built in turns; where they do not build, the refusal stands
+            let in_turns = in_turn == InTurn::No
+                && kind == Blend::Round
+                && corners == Corners::Filled
+                && !crossing.is_empty();
+            if in_turns {
+                let asked = Asked {
+                    order,
+                    edges,
+                    each: &each,
+                };
+                match crossing_in_turns(body, asked, options, &crossing) {
+                    Ok(Some(made)) => return Ok(made),
+                    Err(e @ (Error::Cancelled | Error::OutOfFuel { .. })) => return Err(e),
+                    Ok(None) | Err(_) => {}
+                }
+            }
+            Err(refused)
         }
         other => other,
     }
 }
 
-/// [`blend_impl`]'s kernel session on `body`.
+/// The asked rounds of [`crossing_in_turns`]: the edges at `edges` (through `order`, or the
+/// body's own edge order), `each` the radius of each.
+#[derive(Clone, Copy)]
+struct Asked<'a> {
+    order: Option<&'a crate::Order>,
+    edges: &'a [usize],
+    each: &'a [f64],
+}
+
+/// The attribute id of the faces a turn of [`crossing_in_turns`] made, below [`PICKED_ID`] and
+/// the kernel's own separate-End mark (`ids::USER_1 - 2`).
+const TURN_MADE_ID: u64 = ids::USER_1 - 3;
+
+/// The faces a turn of [`crossing_in_turns`] made, marked through the later turns.
+#[derive(Debug, Clone, PartialEq)]
+struct TurnMade;
+
+impl AttributeHandlers for TurnMade {}
+
+/// The rounds of `asked` whose bands the kernel found crossing only past free ends of their
+/// edges (`crossing`, each pair by its places in `asked.edges`; #22798), built in turns on a
+/// copy of `body`: no two that cross in one turn, each turn a blend of its own on what the
+/// earlier ones left, as [`blend`] builds it, with `options`. Two neighbouring rounds on the
+/// top of a block whose corners a sphere trims share no vertex, so no corner trims them where
+/// their rails, run on past the edges' ends, cross on the top face. Built in turn, the later
+/// one is cut where it crosses the earlier one: the two meet in their mitre, the curve where
+/// their surfaces cross, ended on the face beyond (the sphere). The kernel notes only crossings
+/// past free ends of both edges, so neither round's ball, along its own edge, rolls on what the
+/// other takes off, and the result is `body` less both rounds' removal regions whichever goes
+/// first.
+///
+/// Each asked edge takes the first turn that none of the rounds it crosses has taken, in the
+/// body's own edge order (so the turns do not depend on the order of selection). Every edge
+/// carries its asked edge's tag ([`Picked`]) through the turns, and a turn rounds the edges
+/// carrying its asked edges' tags, each at its radius; the faces each turn made are marked
+/// ([`TurnMade`]) and returned, as [`Blended::made`], by index in the result's face list.
+/// `body` takes the result. `None`, `body` untouched, where an asked edge is not found again,
+/// fewer than two turns are needed, or a turn is refused in both orders
+/// of the turns (the body's, then the other way round: [`in_turns`]).
+///
+/// # Errors
+/// The kernel's errors from tagging and reading the copies; a turn's cancellation.
+fn crossing_in_turns(
+    body: &Body,
+    asked: Asked<'_>,
+    options: BlendOptions,
+    crossing: &[[usize; 2]],
+) -> Result<Option<Blended>> {
+    let Asked { order, edges, each } = asked;
+    // each asked edge's place in the body's native list (a copy keeps it)
+    let places = with_body("blend_in_turns", body, |_, b| {
+        let edge_order = order.map_or_else(|| b.edge_list().to_vec(), |o| o.edges.clone());
+        let native = b.edge_list();
+        let places: Option<Vec<usize>> = edges
+            .iter()
+            .map(|&i| {
+                let e = edge_order.get(i)?;
+                native.iter().position(|n| n == e)
+            })
+            .collect();
+        Ok(Ok::<_, Error>(places))
+    })??;
+    let Some(places) = places else {
+        return Ok(None);
+    };
+    let mut by_place: Vec<usize> = (0..edges.len()).collect();
+    by_place.sort_unstable_by_key(|&i| places.get(i).copied().unwrap_or(usize::MAX));
+    let mut turn_of: Vec<Option<usize>> = vec![None; edges.len()];
+    for &i in &by_place {
+        let taken: Vec<usize> = crossing
+            .iter()
+            .filter_map(|&[a, b]| {
+                let other = if a == i {
+                    b
+                } else if b == i {
+                    a
+                } else {
+                    return None;
+                };
+                turn_of.get(other).copied().flatten()
+            })
+            .collect();
+        // at most as many turns are taken as it has crossings, so one is free
+        let first = (0..=taken.len()).find(|t| !taken.contains(t));
+        if let (Some(slot), Some(first)) = (turn_of.get_mut(i), first) {
+            *slot = Some(first);
+        }
+    }
+    let turns = turn_of.iter().flatten().max().map_or(0, |&t| t + 1);
+    if turns < 2 {
+        return Ok(None);
+    }
+    // the turns in the body's order, else the other way round: the result is the same either
+    // way, but where the rounds only just cross, the later turn's blend can refuse one order
+    // and build the other (a round 0.01 past the size at which the bands meet)
+    let forward: Vec<usize> = (0..turns).collect();
+    let backward: Vec<usize> = (0..turns).rev().collect();
+    for sequence in [forward, backward] {
+        let turned = Turned {
+            places: &places,
+            turn_of: &turn_of,
+            each,
+            options,
+        };
+        if let Some((out, made)) = in_turns(body, turned, &sequence)? {
+            body.take_from(&out);
+            return Ok(Some(Blended {
+                dropped: vec![false; edges.len()],
+                holes: Vec::new(),
+                made,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+/// What [`in_turns`] builds: each asked edge's place in the body's native list, its turn and
+/// its radius, and the options of every turn's blend.
+#[derive(Clone, Copy)]
+struct Turned<'a> {
+    places: &'a [usize],
+    turn_of: &'a [Option<usize>],
+    each: &'a [f64],
+    options: BlendOptions,
+}
+
+/// [`crossing_in_turns`]' turns in the order `sequence`, on a copy of `body`: the copy and the
+/// faces the turns made (by index in its face list), or `None` where an asked edge is not found
+/// again or a turn is refused.
+///
+/// # Errors
+/// The kernel's errors from tagging and reading the copy; a turn's cancellation.
+fn in_turns(
+    body: &Body,
+    turned: Turned<'_>,
+    sequence: &[usize],
+) -> Result<Option<(Body, Vec<usize>)>> {
+    let Turned {
+        places,
+        turn_of,
+        each,
+        options,
+    } = turned;
+    let out = body.copy()?;
+    with_body("blend_in_turns", &out, |_, b| {
+        let native = b.edge_list().to_vec();
+        for (i, place) in places.iter().enumerate() {
+            let Some(&e) = native.get(*place) else {
+                return Ok(Err(Error::Exception));
+            };
+            b.add_attribute(
+                EntityRef::Edge(e),
+                Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)),
+            )?;
+        }
+        Ok(Ok(()))
+    })??;
+    for &t in sequence {
+        let mine: Vec<usize> = (0..places.len())
+            .filter(|&i| turn_of.get(i).copied().flatten() == Some(t))
+            .collect();
+        let found = with_body("blend_in_turns", &out, |_, b| {
+            let (mut at, mut sizes) = (Vec::new(), Vec::new());
+            for &i in &mine {
+                let mut left = false;
+                for (place, &e) in b.edge_list().iter().enumerate() {
+                    if picked_on(b, e).is_some_and(|(_, p)| p == i) {
+                        at.push(place);
+                        sizes.push(each.get(i).copied().unwrap_or(0.0));
+                        left = true;
+                    }
+                }
+                if !left {
+                    return Ok(Ok::<_, Error>(None));
+                }
+            }
+            Ok(Ok(Some((at, sizes))))
+        })??;
+        let Some((at, sizes)) = found else {
+            return Ok(None);
+        };
+        let made = match blend_impl_in(
+            &out,
+            None,
+            Blend::Round,
+            &at,
+            &sizes,
+            &[],
+            Corners::Filled,
+            options,
+            InTurn::Yes,
+        ) {
+            Ok(made) => made.made,
+            Err(e @ (Error::Cancelled | Error::OutOfFuel { .. })) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        with_body("blend_in_turns", &out, |_, b| {
+            let faces = b.face_list().to_vec();
+            for i in &made {
+                if let Some(&f) = faces.get(*i) {
+                    b.add_attribute(
+                        EntityRef::Face(f),
+                        Attribute::application(TURN_MADE_ID, Behavior::Copy, TurnMade),
+                    )?;
+                }
+            }
+            Ok(Ok::<_, Error>(()))
+        })??;
+    }
+    // the marks off, the faces the turns made by index
+    let made = with_body("blend_in_turns", &out, |_, b| {
+        untagged(b)?;
+        let mut made = Vec::new();
+        for (i, f) in b.face_list().to_vec().into_iter().enumerate() {
+            let marks: Vec<AttributeHandle> = b
+                .entity_attributes(EntityRef::Face(f))
+                .into_iter()
+                .filter(|(_, a)| a.attribute_id() == TURN_MADE_ID)
+                .map(|(h, _)| h)
+                .collect();
+            if !marks.is_empty() {
+                made.push(i);
+            }
+            for h in marks {
+                b.remove_attribute(EntityRef::Face(f), h)?;
+            }
+        }
+        Ok(Ok::<_, Error>(made))
+    })??;
+    Ok(Some((out, made)))
+}
+
+/// [`blend_impl`]'s kernel session on `body`; `crossing` as [`blend_on_body`] fills it.
 #[allow(clippy::too_many_arguments)]
 fn blend_session(
     body: &Body,
@@ -1906,12 +2293,15 @@ fn blend_session(
     setbacks: &[SetBack],
     corners: Corners,
     options: BlendOptions,
+    crossing: &mut Vec<[usize; 2]>,
 ) -> Result<Blended> {
     with_body("blend", body, |k, b| {
         // the faces the blend makes, as the kernel's fillet sessions mark them: its log on for
         // this blend, whatever the caller had it at, and put back after
         let outer = k.blend_face_log.replace(BlendFaceLog::default());
-        let ran = blend_on_body(k, b, order, kind, edges, each, setbacks, corners, options);
+        let ran = blend_on_body(
+            k, b, order, kind, edges, each, setbacks, corners, options, crossing,
+        );
         let ours = std::mem::replace(&mut k.blend_face_log, outer);
         let made: HashSet<FaceId> = ours
             .iter()
@@ -1935,7 +2325,9 @@ fn blend_session(
 }
 
 /// [`blend_impl`] on the kernel's body: every pass, its corners and refusals, the body
-/// finished as the result.
+/// finished as the result. Where the first call is refused only for bands that cross past free
+/// ends of their edges, `crossing` takes those pairs, as places in `edges`
+/// ([`Stopped::crossing`]; [`crossing_in_turns`] builds them).
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn blend_on_body(
     k: &mut Kernel,
@@ -1947,6 +2339,7 @@ fn blend_on_body(
     setbacks: &[SetBack],
     corners: Corners,
     options: BlendOptions,
+    crossing: &mut Vec<[usize; 2]>,
 ) -> solidcore::Result<Result<Blended>> {
     let turn = options.turn;
     let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
@@ -2021,6 +2414,19 @@ fn blend_on_body(
         Blend::Curvature => |s| Section::Curvature(s),
         Blend::Chord => |s| Section::Chord(s),
         Blend::Chamfer => {
+            // chamfers whose Ends meet across an unblended edge: two passes (#17026)
+            if let Some(made) =
+                crossing_end_passes(k, b, &picked, each, turn, options.chamfer_corner, contract)?
+            {
+                if let Err(e) = made {
+                    return Ok(Err(e));
+                }
+                return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                    dropped,
+                    holes: Vec::new(),
+                    made: Vec::new(),
+                }));
+            }
             let sizes: Vec<ChamferSize> = each
                 .iter()
                 .map(|&d| ChamferSize::Distances([d, d]))
@@ -2031,7 +2437,7 @@ fn blend_on_body(
                     sizes: &sizes,
                     along: &[],
                 },
-                law: None,
+                laws: Vec::new(),
                 setbacks: &[],
                 earlier: &[],
                 patches: false,
@@ -2061,6 +2467,8 @@ fn blend_on_body(
         None
     };
     let merged = through.is_some();
+    // the asked edges, at their places in `edges`, for the crossings noted below
+    let asked = picked.clone();
     let (picked, sizes): (Vec<EdgeId>, Vec<f64>) = match through {
         Some((clean, picks, kept)) => {
             *b = clean;
@@ -2106,7 +2514,7 @@ fn blend_on_body(
     let p = Pass {
         edges: &picked,
         section: section(each),
-        law: None,
+        laws: Vec::new(),
         setbacks: &back,
         earlier: &[],
         patches: corners == Corners::Open,
@@ -2220,11 +2628,19 @@ fn blend_on_body(
             crate::session::note_back(note);
         }
     }
+    // blends refused only for bands that cross past free ends of their edges (#22798): the
+    // pairs, by their places in `edges`, for [`crossing_in_turns`]
+    if !merged && made.is_err() && stopped.overflow.is_none() {
+        let at = |e: &EdgeId| asked.iter().position(|a| a == e);
+        let (pairs, _) = stopped.crossing.as_chunks::<2>();
+        crossing.extend(pairs.iter().filter_map(|[x, y]| Some([at(x)?, at(y)?])));
+    }
     if stopped.overflow.is_some() {
         let Some(fresh) = fresh else {
             return Ok(Err(Error::Exception));
         };
         let mitred = std::mem::take(&mut stopped.mitred);
+        let overflowing = stopped.overflow.take().unwrap_or_default();
         return match overflow_first(
             k,
             b,
@@ -2233,6 +2649,7 @@ fn blend_on_body(
             each,
             section,
             turn,
+            &overflowing,
             &mitred,
             &mut dropped,
             contract,
@@ -3093,13 +3510,50 @@ fn cut_running_out(
 /// `prism` that hold the run-out `p`'s inside point added, the air counted only where one of
 /// the edge's two faces stands behind it: within the part as it is with that face (the one
 /// holding the plan's point on it) moved the section's reach out along its normal, the faces
-/// around it extended or trimmed to meet it ([`offset_face_at`]). The fill so ends where the
-/// faces beside the edge's ends, carried on, close it. `None` where there is no such piece,
-/// neither face could be moved, or a boolean gives nothing.
+/// around it extended or trimmed to meet it ([`offset_face_at`]). Where that gives nothing or
+/// fails and the faces at the edge's ends are extrusions along one of the faces' normals, the
+/// part with them carried on along it backs the fill instead ([`section_fill`]). The fill so
+/// ends where the faces beside the edge's ends, carried on, close it. `None` where there is no
+/// such piece, neither backing is found, or a boolean gives nothing.
 ///
 /// # Errors
 /// The kernel's errors from the prism, the booleans and the classification.
 fn fill_running_out(
+    out: &Body,
+    prism: &Prism,
+    p: &solidcore::blend::run_out::RunOut,
+) -> Result<Option<Body>> {
+    // each face moved out; where that gives nothing or fails, the faces at the edge's ends
+    // carried on along one face's normal (tangency-labs/solidcraft#22821)
+    let fill = match moved_faces_fill(out, prism, p) {
+        Ok(Some(fill)) => Some(fill),
+        Err(e) if matches!(e, Error::Cancelled | Error::OutOfFuel { .. }) => return Err(e),
+        Ok(None) | Err(_) => section_fill(out, prism, p)?,
+    };
+    let Some(fill) = fill else {
+        return Ok(None);
+    };
+    let pieces = blend_pieces(&fill, p)?;
+    if pieces.is_empty() {
+        return Ok(None);
+    }
+    let mut result = out.copy()?;
+    for piece in pieces {
+        let Some(joined) = crate::boolean::boolean(result, piece, crate::BooleanOp::Union)? else {
+            return Ok(None);
+        };
+        result = joined;
+    }
+    Ok(Some(result))
+}
+
+/// [`fill_running_out`]'s air within `prism` backed by each of the edge's faces moved out
+/// ([`offset_face_at`]), united: `None` where neither face could be moved or a boolean gives
+/// nothing.
+///
+/// # Errors
+/// The kernel's errors from the moves, the prism and the booleans.
+fn moved_faces_fill(
     out: &Body,
     prism: &Prism,
     p: &solidcore::blend::run_out::RunOut,
@@ -3118,21 +3572,85 @@ fn fill_running_out(
             Some(f) => crate::boolean::boolean(f, within, crate::BooleanOp::Union)?,
         };
     }
-    let Some(fill) = fill else {
-        return Ok(None);
-    };
-    let pieces = blend_pieces(&fill, p)?;
-    if pieces.is_empty() {
-        return Ok(None);
-    }
-    let mut result = out.copy()?;
-    for piece in pieces {
-        let Some(joined) = crate::boolean::boolean(result, piece, crate::BooleanOp::Union)? else {
-            return Ok(None);
+    Ok(fill)
+}
+
+/// Not upstream (tangency-labs/solidcraft#22821): [`fill_running_out`]'s air within `prism`,
+/// backed by the part with the faces at the edge's ends carried on exactly. For each of the
+/// concave edge's two faces, along its outward normal `d` (square to the edge): the part within
+/// a slab twice the section's reach deep, just behind the face and square to `d`, is taken.
+/// Where every face of that slab runs straight along `d` (the kernel's bound on how far it
+/// strays across `d`, [`solidcore::prism::measure::face_straying`], within a thousand times
+/// the plan's tolerance) or lies at one of the slab's two levels, the slab is a uniform prism
+/// along `d`: the faces it meets (those at the edge's ends, and those they run on into) are
+/// extrusions along `d`. The slab moved along `d` by its own depth is then the part with those
+/// faces carried on past the face, as far as the blend reaches, and the air of `prism` within it
+/// is the fill, ended exactly where those faces close it. That holds also where the faces at an
+/// end are a cove split between the two faces' sides, the round's end faces being the
+/// cove and the faces it runs on into tangentially, where moving the face itself
+/// ([`offset_face_at`]) gives a body the booleans fail on: tried after it. `None` where neither
+/// face's slab is such a prism or a boolean gives nothing.
+///
+/// # Errors
+/// The kernel's errors from the slab's copy and its section's prism; [`Error::Cancelled`] and
+/// [`Error::OutOfFuel`] from any step.
+fn section_fill(
+    out: &Body,
+    prism: &Prism,
+    p: &solidcore::blend::run_out::RunOut,
+) -> Result<Option<Body>> {
+    use solidcore::blend::run_out::slab_is_prism;
+    use solidcore_record::{Loop2, Region2, Vec2};
+    // a step that fails is a slab that is not such a prism, unless the work was stopped
+    let stops = |e: &Error| matches!(e, Error::Cancelled | Error::OutOfFuel { .. });
+    let r = |v: Vec3| solidcore_record::Vec3::new(v.x, v.y, v.z);
+    for s in p.backing_slabs() {
+        let plane = solidcore_record::Plane {
+            origin: r(s.origin),
+            x: r(s.x),
+            y: r(s.y),
         };
-        result = joined;
+        let rect = Region2 {
+            outer: Loop2::polygon(&s.rect.map(|[a, b]| Vec2::new(a, b))),
+            holes: Vec::new(),
+        };
+        let [lo, hi] = s.levels;
+        let slab = match crate::prism::extrude_planar_regions(&plane, &[rect], lo, hi) {
+            Ok(slab) => slab,
+            Err(e) if stops(&e) => return Err(e),
+            Err(_) => continue,
+        };
+        // the part within the slab, just behind the face
+        let behind = match crate::boolean::boolean(out.copy()?, slab, crate::BooleanOp::Intersect) {
+            Ok(Some(b)) => b,
+            Err(e) if stops(&e) => return Err(e),
+            Ok(None) | Err(_) => continue,
+        };
+        match read_body("section_fill", &behind, |k, b| slab_is_prism(k, b, &s)) {
+            Ok(true) => {}
+            Err(e) if stops(&e) => return Err(e),
+            Ok(false) | Err(_) => continue,
+        }
+        // moved past the face: the part with the faces at the edge's ends carried on
+        let t = s.shift;
+        let moved = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [t.x, t.y, t.z, 1.0],
+        ];
+        match behind.transform(&moved) {
+            Ok(()) => {}
+            Err(e) if stops(&e) => return Err(e),
+            Err(_) => continue,
+        }
+        match crate::boolean::boolean(prism.body()?, behind, crate::BooleanOp::Intersect) {
+            Ok(Some(within)) => return Ok(Some(within)),
+            Err(e) if stops(&e) => return Err(e),
+            Ok(None) | Err(_) => {}
+        }
     }
-    Ok(Some(result))
+    Ok(None)
 }
 
 /// A copy of `body` with its face through `at` (within `tol`) moved `distance` out along its
@@ -3409,7 +3927,7 @@ fn chamfer_sides_impl(
                 sizes: std::slice::from_ref(&size),
                 along: &faces,
             },
-            law: None,
+            laws: Vec::new(),
             setbacks: &[],
             earlier: &[],
             patches: false,
@@ -3664,6 +4182,87 @@ pub fn fillet_variable_from_with(
     )
 }
 
+/// The edges of `body` at native edge-list indices `edges`, one tangent chain, rounded in one
+/// pass with one radius law along the whole chain: the law of [`fillet_variable`] running from
+/// the chain's end nearest `start` (0) to its other end (1), each edge taking the part of it
+/// its interval in the joined-curve parameterization gives, scaled by endpoint-speed ratios
+/// so speed agrees at joints (the kernel's `FilletLaw::chain_of_radii`), so the
+/// radius agrees where two edges meet and the rounds run on into each other as a constant
+/// round's do. One edge is [`fillet_variable_from`]'s round. Like it, a law is not first
+/// checked against its band's room.
+///
+/// # Errors
+/// [`Error::Argument`] for a law as [`fillet_variable`] refuses it, no edges, an index past
+/// the list, an edge given twice or a start point that is not finite; [`Error::Unsupported`]
+/// for a law whose radius is zero inside the chain, and for edges that are not one open
+/// chain (a closed loop, a branch, edges apart, an edge no longer than the zone tolerance);
+/// the refusals of [`blend`]; those of the result contract ([`Contract::Closed`]).
+pub fn fillet_variable_chain_from(
+    body: &Body,
+    edges: &[usize],
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<()> {
+    let contract = Contract::Closed;
+    if !law_ok(degree, knots, radii) || edges.is_empty() {
+        return Err(Error::Argument);
+    }
+    if law_pinches(degree, knots, radii) {
+        return Err(Error::Unsupported(
+            "a radius law that is zero inside its edge",
+        ));
+    }
+    if start.iter().any(|x| !x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    with_body("fillet_variable_chain", body, |k, b| {
+        let list = b.edge_list();
+        let mut ids = Vec::new();
+        for &i in edges {
+            let Some(&e) = list.get(i) else {
+                return Ok(Err(Error::Argument));
+            };
+            if ids.contains(&e) {
+                return Ok(Err(Error::Argument));
+            }
+            ids.push(e);
+        }
+        let [x, y, z] = start;
+        let Some(laws) =
+            FilletLaw::chain_of_radii(k, b, &ids, Vec3::new(x, y, z), degree, knots, radii)?
+        else {
+            return Ok(Err(Error::Unsupported(
+                "a radius law along edges that are not one open tangent chain",
+            )));
+        };
+        let expect = Expect::under(k, b, Proof::default(), contract)?;
+        let (r0, r1) = (
+            radii.first().copied().unwrap_or(0.0),
+            radii.last().copied().unwrap_or(0.0),
+        );
+        let p = Pass {
+            edges: &ids,
+            section: Section::Variable(if r0 > r1 { r0 } else { r1 }),
+            laws,
+            setbacks: &[],
+            earlier: &[],
+            patches: false,
+            overflow: None,
+            // one chain: its rounds run on into each other, none turns at a side edge
+            turn: Turn::Mitre,
+            chamfer_corner: ChamferCorner::Mitre,
+            roll_over: RollOverStep::No,
+            contract,
+        };
+        if let Err(e) = pass_or_refuse(k, b, p)? {
+            return Ok(Err(e));
+        }
+        done(k, b, expect, contract)
+    })?
+}
+
 /// Whether a variable round's law is checked against its band's room (the kernel's
 /// `law_fits_band`) before it is built.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -3755,7 +4354,7 @@ fn fillet_variable_impl(
         let p = Pass {
             edges: &[e],
             section: Section::Variable(if r0 > r1 { r0 } else { r1 }),
-            law: Some(law),
+            laws: vec![law],
             setbacks: &[],
             earlier: &[],
             patches: false,

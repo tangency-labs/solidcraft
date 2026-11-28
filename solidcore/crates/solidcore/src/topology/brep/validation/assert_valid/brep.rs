@@ -257,6 +257,23 @@ fn tolerances(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
     validate_and_update(k, b, &mut cx.rep, true).map(|(ok, _)| ok)
 }
 
+/// (not upstream) [`tolerances`] for the uses of `edges` and of no other edge: the same tests,
+/// run and reported as the whole pass runs and reports them (each use pair of an edge once, on
+/// the faces that use it in the B-rep's face order): its vertex/edge and vertex/face gaps at
+/// both ends over half the vertex tolerance (tests 0-3) and its edge/face gap over the edge
+/// tolerance (test 4). Validating only: no tolerance grows and no UV trim built on the way
+/// raises one. Returns false for an end without vertex, as [`tolerances`].
+pub(super) fn edge_tolerances(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    edges: &[EdgeId],
+) -> Result<bool> {
+    let only: BTreeSet<EdgeId> = edges.iter().copied().collect();
+    k.with_held_trim_raise(|k| validate_and_update_body(k, b, &mut cx.rep, true, None, Some(&only)))
+        .map(|(ok, _)| ok)
+}
+
 /// The outputs of `SmBrep::ValidateAndUpdateTolerances` (see
 /// [`validate_and_update_tolerances`](super::validate_and_update_tolerances)).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -291,9 +308,9 @@ pub(super) fn validate_and_update(
     // built during the pass raises no tolerance; here the pass's argument holds the raise on
     // the kernel for the pass instead, and the B-rep it checks is not written.
     if validate_only {
-        k.with_held_trim_raise(|k| validate_and_update_body(k, b, rep, true, None))
+        k.with_held_trim_raise(|k| validate_and_update_body(k, b, rep, true, None, None))
     } else {
-        validate_and_update_body(k, b, rep, false, None)
+        validate_and_update_body(k, b, rep, false, None, None)
     }
 }
 
@@ -312,7 +329,7 @@ pub(super) fn validate_and_update_remembering(
     rep: &mut Rep<'_>,
     salt: crate::geom::content::ContentId,
 ) -> Result<(bool, ToleranceGaps)> {
-    validate_and_update_body(k, b, rep, false, Some(salt))
+    validate_and_update_body(k, b, rep, false, Some(salt), None)
 }
 
 use super::super::pointers::{edge_tube_reaches, vertex_ball_reaches, GROWTH_PAST_RATIO};
@@ -323,12 +340,20 @@ fn validate_and_update_body(
     rep: &mut Rep<'_>,
     validate_only: bool,
     memo: Option<crate::geom::content::ContentId>,
+    only: Option<&BTreeSet<EdgeId>>,
 ) -> Result<(bool, ToleranceGaps)> {
     // init outputs
     let mut out = ToleranceGaps::default();
 
-    // get all faces
-    let faces = p1::faces(b, None)?;
+    // get all faces (not upstream: with `only`, the faces that use one of its edges)
+    let mut faces = p1::faces(b, None)?;
+    if let Some(only) = only {
+        let mut using = BTreeSet::new();
+        for &e in only {
+            using.extend(tedge::faces(b, e, None)?);
+        }
+        faces.retain(|f| using.contains(f));
+    }
 
     // get bounding box and its size (used only when fixing)
     let size = if validate_only {
@@ -371,9 +396,14 @@ fn validate_and_update_body(
             )?;
             let mate = eu1::mate(b, eu)?;
 
-            // skip marked edgeuses
+            // skip marked edgeuses (not upstream: and those of an edge `only` leaves out)
             if marked.contains(&eu) {
                 continue;
+            }
+            if let Some(only) = only {
+                if !eu1::edge(b, eu)?.is_some_and(|e| only.contains(&e)) {
+                    continue;
+                }
             }
 
             // mark these edgeuses

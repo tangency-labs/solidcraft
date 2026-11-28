@@ -24,6 +24,8 @@ serde = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 robust = { workspace = true }
 pollster = { workspace = true }
+rayon = { workspace = true }
+sha2 = { workspace = true }
 # Native backends, so tests and the CLI can open a device without a window.
 wgpu = { workspace = true, features = ["metal", "vulkan", "dx12"] }
 # wgpu's GL backend statically imports opengl32.dll on Windows, which the Windows Server Core

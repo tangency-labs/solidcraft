@@ -724,9 +724,11 @@ impl Writer {
 }
 
 impl Model {
-    /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation without an
-    /// error and `doc` keeps no names saved before format 14. Works out
-    /// the face names not asked for yet (a saved model keeps them as worked out).
+    /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation with at least
+    /// one valid non-skipped feature (when any feature has an error) and `doc` keeps no names
+    /// saved before format 14. Failing features are left out of the cached states so opening
+    /// re-evaluates only them and reproduces their exact errors (#18815). Works out the face names
+    /// not asked for yet (a saved model keeps them as worked out).
     ///
     /// An import whose SMLib check of its parts is still running is saved with what the check
     /// found: this waits for it ([`Self::saved_now`] does not). `None` when the check healed a
@@ -750,8 +752,8 @@ impl Model {
     }
 
     /// Why [`Self::saved_if_checked`] would leave the model cache out for `doc`, if it cannot
-    /// save one right now (`None` when the model is ready to save or a feature has an error,
-    /// which the caller names specifically).
+    /// save one right now (`None` when the model is ready to save or when every non-skipped
+    /// feature has an error, which the caller names specifically).
     pub fn cache_skip_reason(&self, doc: &Document) -> Option<&'static str> {
         if self.checking_imports() {
             return Some("an imported file's parts were still being checked (a save once the check ends keeps it)");
@@ -762,7 +764,7 @@ impl Model {
         if self.checking_features() {
             return Some("a feature's geometry check was still running (a save once it ends keeps it)");
         }
-        if self.results.iter().any(|r| r.error.is_some()) {
+        if self.results.iter().any(|r| r.error.is_some()) && !self.results.iter().any(|r| !r.skipped && r.error.is_none()) {
             return None;
         }
         if !self.is_current(doc) {
@@ -772,9 +774,10 @@ impl Model {
             return Some("the design still uses legacy face or edge names");
         }
         if self.results.iter().any(|r| {
-            r.import_report.as_ref().is_some_and(|report| {
-                !report.checks.is_empty() && report.checks.heals().is_some_and(|h| self.import_digests.heal_digest(r.id) != Some(h.digest()))
-            })
+            r.error.is_none()
+                && r.import_report.as_ref().is_some_and(|report| {
+                    !report.checks.is_empty() && report.checks.heals().is_some_and(|h| self.import_digests.heal_digest(r.id) != Some(h.digest()))
+                })
         }) {
             return Some("an imported file's parts were healed after evaluation (a save once it updates keeps it)");
         }
@@ -786,9 +789,10 @@ impl Model {
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
         // Nor while the SMLib checks of features still run ([`Model::set_background_checks`]): a
         // model kept before they pass would open with results no check has passed.
+        let has_errors = self.results.iter().any(|r| r.error.is_some());
         if self.results.is_empty()
             || self.checking_features()
-            || self.results.iter().any(|r| r.error.is_some())
+            || (has_errors && !self.results.iter().any(|r| !r.skipped && r.error.is_none()))
             || !self.is_current(doc)
             || has_legacy_names(doc)
         {
@@ -799,6 +803,18 @@ impl Model {
             let mut features = Vec::with_capacity(self.results.len());
             let mut pending = Vec::new();
             for (k, (feature, r)) in doc.features.iter().zip(&self.results).enumerate() {
+                if r.error.is_some() {
+                    // Omit failing features' states so opening re-evaluates them and reproduces
+                    // their exact errors while reusing all valid features (#18815).
+                    features.push(json!({
+                        "id": r.id,
+                        "fingerprint": hex(r.fingerprint),
+                        "ms": r.ms,
+                        "skipped": r.skipped,
+                        "errored": true,
+                    }));
+                    continue;
+                }
                 if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
                     pending.push((k, self.import_digests.heal_digest(feature.id), report.clone()));
                 }
@@ -1260,7 +1276,10 @@ impl SavedModel {
     pub fn final_state(&self) -> Result<Arc<ModelState>> {
         let states = self.states()?;
         let features = self.records.get("features").and_then(Json::as_array).ok_or_else(|| bad("saved model: features"))?;
-        let last = features.iter().rev().find(|f| f.get("skipped").and_then(Json::as_bool) == Some(false));
+        let last = features
+            .iter()
+            .rev()
+            .find(|f| f.get("skipped").and_then(Json::as_bool) == Some(false) && f.get("errored").and_then(Json::as_bool) != Some(true));
         match last {
             Some(f) => f
                 .get("state")
@@ -1322,7 +1341,13 @@ impl SavedModel {
         let mut ms = vec![0.0f64; states.len()];
         let mut last = None;
         for f in features.iter().filter(|f| f.get("skipped").and_then(Json::as_bool) == Some(false)) {
-            let s = at(f.get("state"), states.len())?;
+            let Some(state_val) = f.get("state") else {
+                if f.get("errored").and_then(Json::as_bool) == Some(true) {
+                    continue;
+                }
+                return None;
+            };
+            let s = at(Some(state_val), states.len())?;
             if let Some(t) = ms.get_mut(s) {
                 *t += f.get("ms").and_then(Json::as_f64).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
             }
@@ -1429,7 +1454,11 @@ impl SavedModel {
         }
         let mut out_features = Vec::with_capacity(features.len());
         for f in features {
-            let state = new(&new_state, at(f.get("state"), states.len())?);
+            let state = match f.get("state") {
+                Some(v) => new(&new_state, at(Some(v), states.len())?),
+                None if f.get("errored").and_then(Json::as_bool) == Some(true) => None,
+                None => return None,
+            };
             let mut f = f.clone();
             let o = f.as_object_mut()?;
             match state {
@@ -1571,8 +1600,16 @@ impl Model {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
-            // A file without room for every state keeps some features without one (#3220).
+            // A file without room for every state keeps some features without one (#3220), and
+            // failing features are saved without a state so opening re-evaluates them (#18815).
+            let errored = match r.get("errored") {
+                None => false,
+                Some(v) => v.as_bool().ok_or_else(|| bad("saved model: errored"))?,
+            };
             let state = r.get("state").map(|s| index(Some(s), states.len())).transpose()?;
+            if errored && state.is_some() {
+                return Err(bad("saved model: errored"));
+            }
             if let Some(at) = state
                 && prepared_states.insert(at)
             {
@@ -1617,6 +1654,7 @@ impl Model {
                 stale: false,
                 fingerprint: prev,
                 unkept: state.is_none(),
+                unkept_error: errored,
                 state: state.unwrap_or_else(|| before.clone()),
             };
             // A model saved before rebuildable ordinary members were recorded (#4003) needs
@@ -1650,10 +1688,17 @@ impl Model {
                     );
                     pass1_component_keys.insert(f.id, reached);
                 }
-                exact = !result.unkept;
+                // An errored feature leaves `before` unchanged, so `exact` stays intact for
+                // verifying fingerprints and pose-only features after it (#18815).
+                if !result.unkept {
+                    exact = true;
+                } else if !result.unkept_error {
+                    exact = false;
+                }
                 let prev_state = before;
                 before = result.state.clone();
                 if result.error.is_none()
+                    && !result.unkept_error
                     && i < marker
                     && !f.suppressed
                     && let Some(s) = stepper.as_mut()

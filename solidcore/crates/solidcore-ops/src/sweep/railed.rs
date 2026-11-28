@@ -13,7 +13,7 @@ use solidcore::topology::brep::p3::new_brep;
 use solidcore::Vec3;
 
 use super::{making, parse, Curve};
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish_closed, Body, Expect};
 use crate::error::status;
 use crate::{Error, Result};
 pub use solidcore::sweep::loft_rails::Tolerance;
@@ -133,7 +133,7 @@ pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> 
             max_wires: how.max_wires,
         };
         match kernel_loft_rails(k, &kernel_sections, &rail_refs, &opts) {
-            Ok(made) => finish(
+            Ok(made) => finish_closed(
                 k,
                 made.skin.brep,
                 if how.cap {
@@ -251,7 +251,7 @@ pub fn loft_blend(
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::FACES)
+        finish_closed(k, b, Expect::FACES)
     })
 }
 

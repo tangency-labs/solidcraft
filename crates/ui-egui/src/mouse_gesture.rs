@@ -682,9 +682,9 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
             let mut list = config.tools(studio);
             let catalog = catalog();
             let mut op: Option<Op> = None;
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_min_width(330.0);
+            crate::ui_kit::settings_pair(
+                ui,
+                |ui| {
                     ui.label(
                         egui::RichText::new(format!(
                             "{} {}/{}",
@@ -695,77 +695,94 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                         .size(t.font_small)
                         .color(t.text_dim),
                     );
-                    for i in 0..list.len() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}", i + 1));
-                            let shown = label_of(&list[i]).unwrap_or_default();
-                            ui.scope(|ui| {
-                                ui.set_max_width(200.0);
-                                let picker = crate::ui_kit::dropdown_menu_with_close_behavior(
-                                    ui,
-                                    ("gesture_tool", i),
-                                    &shown,
-                                    egui::PopupCloseBehavior::CloseOnClickOutside,
-                                    |ui| {
-                                        let filter_id = ui.scope_id().with("filter");
-                                        let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
-                                        crate::ui_kit::text_field(ui, &mut filter, solidcraft_ui_text::tr_label("Filter…"));
-                                        ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
-                                        let needle = filter.trim().to_lowercase();
-                                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                                            for (id, label) in &catalog {
-                                                if !needle.is_empty()
-                                                    && !label.to_lowercase().contains(&needle)
-                                                    && !id.to_lowercase().contains(&needle)
-                                                {
-                                                    continue;
+                    let tool_labels: Vec<_> = list.iter().filter_map(|tool| label_of(tool)).collect();
+                    let tool_labels: Vec<_> = tool_labels.iter().map(String::as_str).collect();
+                    let columns = [
+                        crate::ui_kit::Column::new(solidcraft_ui_text::tr_label("Position"), 0.0),
+                        crate::ui_kit::Column::new(solidcraft_ui_text::tr("prefs.structure.tools"), 1.0)
+                            .flex()
+                            .min_content_width(crate::ui_kit::ContentWidth::dropdown(ui, &tool_labels)),
+                        crate::ui_kit::Column::new(solidcraft_ui_text::tr_label("Actions"), 0.0).min_content_width(
+                            ["↑", "↓", "×"].iter().map(|label| crate::ui_kit::ContentWidth::button(ui, label)).sum::<f32>() + t.space_8 * 2.0,
+                        ),
+                    ];
+                    crate::ui_kit::table_custom(ui, "gesture_tools", &columns, "", |ui, table| {
+                        table.headers(ui, |_, _| false);
+                        for (i, tool) in list.iter().enumerate() {
+                            table.row(ui, &i.to_string(), false, |row| {
+                                row.cell(|ui| crate::ui_kit::text(ui, &(i + 1).to_string(), crate::ui_kit::Text::Cell));
+                                let shown = label_of(tool).unwrap_or_default();
+                                row.cell(|ui| {
+                                    let picker = crate::ui_kit::dropdown_menu_with_close_behavior(
+                                        ui,
+                                        ("gesture_tool", i),
+                                        &shown,
+                                        egui::PopupCloseBehavior::CloseOnClickOutside,
+                                        |ui| {
+                                            let filter_id = ui.scope_id().with("filter");
+                                            let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+                                            crate::ui_kit::text_field(ui, &mut filter, solidcraft_ui_text::tr_label("Filter…"));
+                                            ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                                            let needle = filter.trim().to_lowercase();
+                                            egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                                                for (id, label) in &catalog {
+                                                    if !needle.is_empty()
+                                                        && !label.to_lowercase().contains(&needle)
+                                                        && !id.to_lowercase().contains(&needle)
+                                                    {
+                                                        continue;
+                                                    }
+                                                    let taken = list.contains(id) && *id != list[i];
+                                                    let r = ui
+                                                        .add_enabled_ui(!taken, |ui| crate::ui_kit::list_picker(ui, id, label, *id == list[i]))
+                                                        .inner;
+                                                    if r.clicked() {
+                                                        op = Some(Op::Set(i, id.clone()));
+                                                        ui.close();
+                                                    }
                                                 }
-                                                let taken = list.contains(id) && *id != list[i];
-                                                let r =
-                                                    ui.add_enabled_ui(!taken, |ui| crate::ui_kit::list_picker(ui, id, label, *id == list[i])).inner;
-                                                if r.clicked() {
-                                                    op = Some(Op::Set(i, id.clone()));
-                                                    ui.close();
-                                                }
-                                            }
-                                        });
-                                    },
-                                );
-                                crate::scenario::publish_target(&format!("gestures:tool:{i}"), picker.rect);
+                                            });
+                                        },
+                                    );
+                                    crate::scenario::publish_target(&format!("gestures:tool:{i}"), picker.rect);
+                                });
+                                row.cell(|ui| {
+                                    if crate::ui_kit::button(ui, "↑", crate::ui_kit::Button::Enabled(i > 0)).clicked() {
+                                        op = Some(Op::Up(i));
+                                    }
+                                    if crate::ui_kit::button(ui, "↓", crate::ui_kit::Button::Enabled(i + 1 < list.len())).clicked() {
+                                        op = Some(Op::Down(i));
+                                    }
+                                    if crate::ui_kit::button(ui, "×", crate::ui_kit::Button::Enabled(list.len() > 1)).clicked() {
+                                        op = Some(Op::Remove(i));
+                                    }
+                                });
                             });
-                            if crate::ui_kit::button(ui, "↑", crate::ui_kit::Button::Enabled(i > 0)).clicked() {
-                                op = Some(Op::Up(i));
-                            }
-                            if crate::ui_kit::button(ui, "↓", crate::ui_kit::Button::Enabled(i + 1 < list.len())).clicked() {
-                                op = Some(Op::Down(i));
-                            }
-                            if crate::ui_kit::button(ui, "×", crate::ui_kit::Button::Enabled(list.len() > 1)).clicked() {
-                                op = Some(Op::Remove(i));
-                            }
-                        });
-                    }
+                        }
+                    });
                     if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Add a tool"), crate::ui_kit::Button::Enabled(list.len() < MAX_TOOLS))
                         .clicked()
                     {
                         op = Some(Op::Add);
                     }
-                });
-                ui.separator();
-                // The ring as it will look, a little smaller.
-                let scale = 0.62;
-                let side = 2.0 * RING * scale + 8.0;
-                let (r, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
-                // Every tool as available, whatever the design allows now.
-                let preview: Vec<Item> = list
-                    .iter()
-                    .filter_map(|id| item(app, id))
-                    .map(|mut i| {
-                        i.enabled = true;
-                        i
-                    })
-                    .collect();
-                paint(&ui.painter_at(r), r.center(), scale, studio, &preview, None, t);
-            });
+                },
+                |ui, ()| {
+                    // The ring as it will look, a little smaller.
+                    let scale = 0.62;
+                    let side = 2.0 * RING * scale + 8.0;
+                    let (r, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                    // Every tool as available, whatever the design allows now.
+                    let preview: Vec<Item> = list
+                        .iter()
+                        .filter_map(|id| item(app, id))
+                        .map(|mut i| {
+                            i.enabled = true;
+                            i
+                        })
+                        .collect();
+                    paint(&ui.painter_at(r), r.center(), scale, studio, &preview, None, t);
+                },
+            );
             if let Some(op) = op
                 && apply(&mut list, op)
             {

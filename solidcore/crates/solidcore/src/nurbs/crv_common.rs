@@ -43,6 +43,7 @@
 
 use crate::error::nurbs::NurbsFailure;
 use crate::error::{Result, SolidError};
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::crv_basic::{conic_data, ConicType, Curve, CONIC_MAX_TURNS};
@@ -122,8 +123,8 @@ pub enum AngleType {
 
 /// Point `C + r cos(a) X + r sin(a) Y` and unit tangent `-sin(a) X + cos(a) Y`.
 fn circle_pt(c: Vec3, x: Vec3, y: Vec3, r: f64, angle: f64) -> (Vec3, Vec3) {
-    let cosa = angle.cos();
-    let sina = angle.sin();
+    let cosa = det::cos(angle);
+    let sina = det::sin(angle);
     let alf = r * cosa;
     let bet = r * sina;
     (
@@ -174,7 +175,7 @@ pub fn quadratic_arc_min_arcs(arc: &Arc, at: f64, min_arcs: usize) -> Result<Cur
     let (y, _) = normalize(arc.y)?;
 
     let mut angle = (PI * dtheta) / 360.0;
-    let w1 = angle.cos();
+    let w1 = det::cos(angle);
 
     angle = (PI * as_deg) / 180.0;
     let (mut p0, mut t0) = circle_pt(c, x, y, r, angle);
@@ -267,9 +268,9 @@ pub fn quartic_arc_tol(arc: &Arc, at: f64) -> Result<Curve> {
 
     let dtheta = theta / narcs as f64;
     let mut angle = (PI * dtheta) / 180.0;
-    let x2 = angle.cos();
+    let x2 = det::cos(angle);
     angle *= 0.5;
-    let w1 = angle.cos();
+    let w1 = det::cos(angle);
 
     angle = (PI * as_deg) / 180.0;
     let (mut p0, mut t0) = circle_pt(c, x, y, r, angle);
@@ -286,7 +287,7 @@ pub fn quartic_arc_tol(arc: &Arc, at: f64) -> Result<Curve> {
         } else {
             (0.75 * PI * dtheta) / 180.0
         };
-        let cs = ang.cos();
+        let cs = det::cos(ang);
 
         let a = 1.0 - 2.0 * w1 + x2 - 2.0 * cs * (1.0 - w1); // quadratic equation
         let b = 2.0 * (w1 - 1.0) + 2.0 * cs * (1.0 - w1);
@@ -420,14 +421,14 @@ pub fn quintic_arc_tol(arc: &Arc, at: f64) -> Result<Curve> {
     let (y, _) = normalize(arc.y)?;
 
     let mut angle = (PI * as_deg) / 180.0;
-    let ps = translate_sum2_pts(c, r * angle.cos(), x, r * angle.sin(), y);
+    let ps = translate_sum2_pts(c, r * det::cos(angle), x, r * det::sin(angle), y);
 
     angle = (PI * ae) / 180.0;
-    let pe = translate_sum2_pts(c, r * angle.cos(), x, r * angle.sin(), y);
+    let pe = translate_sum2_pts(c, r * det::cos(angle), x, r * det::sin(angle), y);
 
     angle = (PI * am) / 180.0;
-    let cosa = angle.cos();
-    let sina = angle.sin();
+    let cosa = det::cos(angle);
+    let sina = det::sin(angle);
     let alf = r * cosa;
     let bet = r * sina;
 
@@ -598,14 +599,14 @@ pub fn elliptical_arc_ang_type_tol(
         let (alf, bet) = match atp {
             AngleType::Circle => {
                 // Point on circle at angle, projected to the ellipse.
-                (r1 * angle.cos(), r2 * angle.sin())
+                (r1 * det::cos(angle), r2 * det::sin(angle))
             }
             AngleType::Ellipse => {
                 // Point on the ellipse at polar angle: with e = tan(angle),
                 // x = a*b/sqrt(a*a*e*e + b*b) and y = b/a * sqrt(a*a - x*x).
-                let e = angle.tan();
+                let e = det::tan(angle);
                 let mut alf = r1 * r2 / (r2 * r2 + r1 * r1 * e * e).sqrt();
-                if angle.cos() < 0.0 {
+                if det::cos(angle) < 0.0 {
                     alf = -alf;
                 }
                 let mut bet = r1 * r1 - alf * alf;
@@ -614,7 +615,7 @@ pub fn elliptical_arc_ang_type_tol(
                 } else {
                     bet = (r2 / r1) * bet.sqrt();
                 }
-                if angle.sin() < 0.0 {
+                if det::sin(angle) < 0.0 {
                     bet = -bet;
                 }
                 (alf, bet)
@@ -622,7 +623,7 @@ pub fn elliptical_arc_ang_type_tol(
         };
 
         // Polar angle of the circle point.
-        let tmp_angle = (bet / r2).atan2(alf / r1);
+        let tmp_angle = det::atan2(bet / r2, alf / r1);
         let mut ap = (180.0 * tmp_angle) / PI;
 
         // Angle snapping up to NL_PTOL degrees.
@@ -801,7 +802,7 @@ mod tests {
                 let (u0, u1) = (cur.knots()[0], *cur.knots().last().unwrap());
                 for k in 0..=10 {
                     let p = point(&cur, u0 + (u1 - u0) * f64::from(k) / 10.0);
-                    let v = (p.x / 3.0).powi(2) + (p.y / 1.5).powi(2);
+                    let v = det::powi(p.x / 3.0, 2) + det::powi(p.y / 1.5, 2);
                     assert!((v - 1.0).abs() < 1e-9, "{atp:?} {ctp:?} {v}");
                 }
             }

@@ -145,6 +145,12 @@ pub struct Caches {
     /// parameters bit for bit. Off when [`Kernel::memoize_curve_caches`] is false; clearing it
     /// changes no result, only speed.
     pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
+    /// Not upstream (#20158): content-keyed memo of [`crate::topology::edgeuse::p3::fit_tolerance`]'s
+    /// uncached edge/face gap measurements (`topology::edgeuse::p3::FitGapMemo`). Shared through
+    /// an [`Arc`] so boolean worker cache kernels reuse gaps already measured by their parent
+    /// (a hit returns the exact same gap, so sharing changes no result). Off when
+    /// [`Kernel::memoize_curve_caches`] is false; clearing it changes no result, only speed.
+    pub(crate) fit_gap_memo: Arc<Mutex<crate::topology::edgeuse::p3::FitGapMemo>>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
     /// as it does by default, or by upstream's sampled distance, as a file's translation asks
@@ -173,6 +179,7 @@ impl Default for Caches {
         Self {
             curve_analysis: RefCell::default(),
             trim_move_bounds: RefCell::default(),
+            fit_gap_memo: Arc::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
             refit_raising_trims: Cell::new(false),
@@ -207,6 +214,7 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    keep_feature_creases: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
@@ -251,12 +259,16 @@ pub struct WorkCounters {
     split_face_classifications: Cell<u64>,
     face_intersections: Cell<u64>,
     same_parameter_bisections: Cell<u64>,
+    fitted_trim_bisections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
     shells: Cell<u64>,
     booleans: Cell<u64>,
     apart_unions: Cell<u64>,
+    volume_sign_decisions: Cell<u64>,
     move_trim_bisection_pieces: Cell<u64>,
+    edge_tight_box_solves: Cell<u64>,
+    fit_gap_calcs: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -282,6 +294,13 @@ impl WorkCounters {
     #[must_use]
     pub fn wall_body_copies(&self) -> u64 {
         self.wall_body_copies.get()
+    }
+
+    /// Creases keep features computes, each the section of a sheet face of rounds by a
+    /// feature's wall (a planar section, or a surface intersection). Not the fork's.
+    #[must_use]
+    pub fn keep_feature_creases(&self) -> u64 {
+        self.keep_feature_creases.get()
     }
 
     /// Curve intersections a boolean ran to split its proto edges where they cross
@@ -651,6 +670,15 @@ impl WorkCounters {
         self.same_parameter_bisections.get()
     }
 
+    /// Bounds on a trim's distance from its edge as sets
+    /// (`query::curve_surface_gap::trim_image_gap_bound_within`, which the stitch's and a
+    /// move's trim covers take) that the trim's structure did not answer at once, so that
+    /// their bisection ran: the costly ones. Not the fork's.
+    #[must_use]
+    pub fn fitted_trim_bisections(&self) -> u64 {
+        self.fitted_trim_bisections.get()
+    }
+
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
     /// the blend cuts the part or breaks through it
     /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
@@ -691,6 +719,14 @@ impl WorkCounters {
         self.apart_unions.get()
     }
 
+    /// Signs of a closed body's volume decided from its enclosure: the calls of
+    /// `mass::enclosure::volume_sign`, the step that ends a proof that a body is valid and
+    /// faces out (`topology::brep::valid_and_outward_failure`). Not the fork's.
+    #[must_use]
+    pub fn volume_sign_decisions(&self) -> u64 {
+        self.volume_sign_decisions.get()
+    }
+
     /// Bisection pieces evaluated while certifying trim-image gaps across rigid moves
     /// (`topology::edgeuse::p3::cover_moved_trims`, through `query::curve_surface_gap`),
     /// so a far-origin boolean test can catch regressions back to `MAX_PIECES` pole-trim
@@ -700,11 +736,28 @@ impl WorkCounters {
         self.move_trim_bisection_pieces.get()
     }
 
+    /// Tight boxes of edge curves solved
+    /// (`query::edge::calculate_tight_bounding_box`, for an edge whose curve's loose box
+    /// is not already inside its vertices' box), so a test can check that a B-rep's tight
+    /// box does not solve an edge again for each planar face on it. Not the fork's.
+    #[must_use]
+    pub fn edge_tight_box_solves(&self) -> u64 {
+        self.edge_tight_box_solves.get()
+    }
+
+    /// Uncached edge/face gap evaluations (`topology::edgeuse::p1::calc_max_edge_face_gap`)
+    /// performed by `topology::edgeuse::p3::fit_tolerance` (#20158). Not the fork's.
+    #[must_use]
+    pub fn fit_gap_calcs(&self) -> u64 {
+        self.fit_gap_calcs.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.keep_feature_creases.set(0);
         self.proto_edge_intersections.set(0);
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
@@ -749,18 +802,34 @@ impl WorkCounters {
         self.split_face_classifications.set(0);
         self.face_intersections.set(0);
         self.same_parameter_bisections.set(0);
+        self.fitted_trim_bisections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
         self.shells.set(0);
         self.booleans.set(0);
         self.apart_unions.set(0);
+        self.volume_sign_decisions.set(0);
         self.move_trim_bisection_pieces.set(0);
+        self.edge_tight_box_solves.set(0);
+        self.fit_gap_calcs.set(0);
+    }
+
+    /// Counts one solve of an edge curve's tight box.
+    pub(crate) fn add_edge_tight_box_solve(&self) {
+        self.edge_tight_box_solves
+            .set(self.edge_tight_box_solves.get().saturating_add(1));
     }
 
     /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
     pub(crate) fn add_move_trim_bisection_pieces(&self, pieces: u64) {
         self.move_trim_bisection_pieces
             .set(self.move_trim_bisection_pieces.get().saturating_add(pieces));
+    }
+
+    /// Counts one uncached edge/face gap calculation inside `fit_tolerance`.
+    pub(crate) fn add_fit_gap_calc(&self) {
+        self.fit_gap_calcs
+            .set(self.fit_gap_calcs.get().saturating_add(1));
     }
 
     /// Counts one intersection of a blend's section with a face.
@@ -791,6 +860,12 @@ impl WorkCounters {
             .set(self.apart_unions.get().saturating_add(1));
     }
 
+    /// Counts one sign of a closed body's volume decided.
+    pub(crate) fn add_volume_sign_decision(&self) {
+        self.volume_sign_decisions
+            .set(self.volume_sign_decisions.get().saturating_add(1));
+    }
+
     /// Counts one UV trim curve built.
     pub(crate) fn add_uv_trim_build(&self) {
         self.uv_trim_builds
@@ -819,6 +894,12 @@ impl WorkCounters {
     pub(crate) fn add_same_parameter_bisection(&self) {
         self.same_parameter_bisections
             .set(self.same_parameter_bisections.get().saturating_add(1));
+    }
+
+    /// Counts one trim bound as sets that runs its bisection.
+    pub(crate) fn add_fitted_trim_bisection(&self) {
+        self.fitted_trim_bisections
+            .set(self.fitted_trim_bisections.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
@@ -853,6 +934,12 @@ impl WorkCounters {
     pub(crate) fn add_wall_body_copy(&self) {
         self.wall_body_copies
             .set(self.wall_body_copies.get().saturating_add(1));
+    }
+
+    /// Counts one crease keep features computes between a sheet face and a wall.
+    pub(crate) fn add_keep_feature_crease(&self) {
+        self.keep_feature_creases
+            .set(self.keep_feature_creases.get().saturating_add(1));
     }
 
     /// Counts one curve intersection of two proto edges.
@@ -1425,6 +1512,12 @@ pub struct Kernel {
     /// definition is evaluated through `&Kernel`; it is never borrowed across a solve, and
     /// a hit returns what a fresh solve from the same seeds gives.
     pub blend_station_memo: RefCell<crate::blend::fillet_section::definition::StationMemo>,
+    /// Not upstream: the NURBS data of the B-spline surfaces the station solves read last
+    /// ([`crate::blend::fillet_section::station::NurbsMemo`]), so that a support's knots and
+    /// net are gathered once, not at every Newton step of every station. A hit is the data the
+    /// surface's NURB holds now (each is kept with the NURB's own cell, which an edit never
+    /// changes in place while it is shared), so it changes no answer, only the work.
+    pub station_nurbs: RefCell<crate::blend::fillet_section::station::NurbsMemo>,
     /// Not upstream: the arena-identity record map of the last stitch glue or split
     /// (`heal::stitch::p1`) and the B-rep value it was kept for (its progress tag, held
     /// weakly), kept only to reuse its allocation. An edit of another B-rep value starts
@@ -1552,6 +1645,7 @@ impl Kernel {
             blend_station_memo: RefCell::new(
                 crate::blend::fillet_section::definition::StationMemo::default(),
             ),
+            station_nurbs: RefCell::default(),
             arena_notify_records: (
                 std::sync::Weak::new(),
                 crate::topology::topology::NotifyRecords::new(),

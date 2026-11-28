@@ -24,7 +24,7 @@ pub use solidcore::prism::measure::FaceRun;
 pub use solidcore::prism::measure::StraightBy;
 use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
-    edge_face_gap_samples, face_normal_at_edge,
+    edge_face_gap_samples, edge_trim_gap_bound, face_internal_point, face_normal_at_edge,
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
@@ -728,6 +728,26 @@ pub fn turn_to_parallel(
     Ok(m.turn)
 }
 
+/// Whether two 3D directions agree within cosine threshold `min_cos` (`a·b >= min_cos`, or
+/// `|a·b| >= min_cos` when `unsigned` is true).
+#[must_use]
+pub fn directions_aligned(a: [f64; 3], b: [f64; 3], min_cos: f64, unsigned: bool) -> bool {
+    solidcore::query::edge_turn::directions_aligned(Vec3::from(a), Vec3::from(b), min_cos, unsigned)
+}
+
+/// How far a frame's origin and Z axis moved between two column-major 4×4 transforms:
+/// `(origin_shift_mm, z_angle_deg)`.
+#[must_use]
+pub fn frame_z_deviation(before: &[[f64; 4]; 4], after: &[[f64; 4]; 4]) -> (f64, f64) {
+    solidcore::query::edge_turn::frame_z_deviation(before, after)
+}
+
+/// How far two rigid column-major 4×4 transforms differ: `(translation_mm, rotation_deg)`.
+#[must_use]
+pub fn rigid_pose_delta(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> (f64, f64) {
+    solidcore::query::edge_turn::rigid_pose_delta(a, b)
+}
+
 /// Whether the endless line through `origin` along `dir` meets the box with corners `min` and
 /// `max`, each side counting `share` of the box's size beyond it
 /// (`query::api_queries::line_meets_box`). Never for a zero `dir`.
@@ -928,6 +948,26 @@ impl Body {
         } else {
             Err(refused("non-finite gap"))
         }
+    }
+
+    /// A proved bound on how far the trims of record edge `edge` (`order`) stand from it: for
+    /// every use of the edge that stores a trim, the use's face at the trim is within the
+    /// returned distance of the edge's curve at the same parameter, over the edge's whole
+    /// interval (enclosed, not sampled). `None` where a trim is not proved within `within` mm;
+    /// 0 for an edge whose uses store no trim.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges; the kernel's error.
+    pub fn edge_trim_gap_bound(
+        &self,
+        order: &Order,
+        edge: usize,
+        within: f64,
+    ) -> Result<Option<f64>> {
+        let e = order::edge(order, edge)?;
+        read_body("edge_trim_gap_bound", self, |k, b| {
+            edge_trim_gap_bound(k, b, e, within)
+        })
     }
 
     /// Where `p` lies against this body (`SmBrep::Point3DClassify` at the body's own zone
@@ -2284,6 +2324,50 @@ impl Body {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
         Ok(points)
+    }
+
+    /// An interior point of record face `face` (`SmFace::CalculateAnInternalPoint`): on the
+    /// face's surface and inside its trims. The line classifications run on the body in place
+    /// so lazy UV trim curves and caches stay on it (rolled back on error, refusal, cancel or
+    /// panic).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a `face` index past `order.faces`; [`Error::Status`]
+    /// `SM_ERR_INVALID_INPUT` for a point that is not finite; the kernel's error (a face
+    /// without a surface, a face where no isoparameter line meets the interior, a dangling
+    /// face in `order`, unported steps, cancellation or fuel exhaustion).
+    pub fn face_internal_point(&self, order: &Order, face: usize) -> Result<[f64; 3]> {
+        let f = order::face(order, face)?;
+        with_body("face_internal_point", self, |k, b| {
+            let p = array(face_internal_point(k, b, f)?);
+            if !p.iter().all(|x| x.is_finite()) {
+                return Ok(Err(Error::Status(crate::error::INVALID_INPUT)));
+            }
+            Ok(Ok(p))
+        })?
+    }
+
+    /// An interior point of every face in `order.faces`, in `order`'s face order
+    /// ([`Body::face_internal_point`] for each, under one lock and one rollback snapshot of the
+    /// body).
+    ///
+    /// # Errors
+    /// [`Error::Status`] `SM_ERR_INVALID_INPUT` for a point that is not finite; the kernel's
+    /// error for the first face that fails (the body is rolled back on error, refusal, cancel
+    /// or panic).
+    pub fn face_internal_points(&self, order: &Order) -> Result<Vec<[f64; 3]>> {
+        with_body("face_internal_points", self, |k, b| {
+            let mut out = Vec::new();
+            for &f in &order.faces {
+                k.check_cancelled("face_internal_points")?;
+                let p = array(face_internal_point(k, b, f)?);
+                if !p.iter().all(|x| x.is_finite()) {
+                    return Ok(Err(Error::Status(crate::error::INVALID_INPUT)));
+                }
+                out.push(p);
+            }
+            Ok(Ok(out))
+        })?
     }
 }
 

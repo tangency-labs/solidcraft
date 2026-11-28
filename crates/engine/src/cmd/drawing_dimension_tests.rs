@@ -3216,3 +3216,212 @@ fn a_dimension_is_refused_on_a_body_the_design_hides() {
     run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": true}));
     assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
 }
+
+/// A 80 x 40 x 30 mm box with a Ø10 boss along X on its right face and a Ø12 through-bore along Z
+/// at (30, 20), plus a drawing with a Top base view at (100, 230), a Front base view at (100, 120)
+/// and a full section view cut along Y = 20 (arrows left of the +X line: looking toward +Y, the Front direction, so it is not mirrored) at (280, 145),
+/// all at 1:1. Returns `(session, top, front, section, on_boss, on_bore)`.
+fn sectioned_cylinder_views() -> (Session, u64, u64, u64, [f64; 3], [f64; 3]) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [80, 20, 15], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 32, "base": [30, 20, -1], "axis": "Z", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let top = ids::decode(
+        run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [100.0, 230.0]}))["view"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let front = ids::decode(
+        run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": [100.0, 120.0]}))["view"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let section = ids::decode(
+        run(
+            &mut s,
+            "drawing.view.section",
+            json!({
+                "parent": ids::encode(top),
+                "line": {"kind": "full", "points": [[-10.0, 20.0], [110.0, 20.0]], "arrows": "left"},
+                "place": {"at": [280.0, 145.0]}
+            }),
+        )["view"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let angle = 30f64.to_radians();
+    let on_boss = [90.0, 20.0 - 5.0 * angle.sin(), 15.0 + 5.0 * angle.cos()];
+    let on_bore = [30.0 + 6.0 * angle.cos(), 20.0 - 6.0 * angle.sin(), 15.0];
+    (s, top, front, section, on_boss, on_bore)
+}
+
+/// Asserts that `section_reply` has the same view-relative `offset_mm`, `text` (when `check_text`
+/// is true) and `layout` (shifted by `shift` from `front` to `section`) as `base_reply`.
+fn assert_matches_base_layout(base_reply: &Value, section_reply: &Value, shift: Vec2, check_text: bool) {
+    assert!(section_reply.get("layout").is_some() && section_reply.get("layout_why").is_none(), "{section_reply}");
+    let base_off = base_reply["record"]["offset_mm"].as_f64().unwrap();
+    let sec_off = section_reply["record"]["offset_mm"].as_f64().unwrap();
+    assert!((sec_off - base_off).abs() < 1e-9, "offset mismatch: base={base_off}, section={sec_off}");
+    if check_text {
+        match (&base_reply["record"]["text"], &section_reply["record"]["text"]) {
+            (Value::Object(b), Value::Object(sec)) if b.contains_key("at") && sec.contains_key("at") => {
+                assert!(xy(&b["at"]).dist(xy(&sec["at"])) < 1e-9, "text mismatch: {b:?} vs {sec:?}");
+            }
+            (b, sec) => assert_eq!(sec, b, "text mismatch"),
+        }
+    }
+    for key in ["extension_lines", "dimension_lines"] {
+        let base_lines = layout_lines(base_reply, key);
+        let sec_lines = layout_lines(section_reply, key);
+        assert_eq!(sec_lines.len(), base_lines.len(), "{key}: {section_reply}");
+        for (b, sec) in base_lines.iter().zip(&sec_lines) {
+            let shifted: Vec<Vec2> = b.iter().map(|p| *p + shift).collect();
+            assert!(same_points(sec, &shifted, 1e-9), "{key}: base={b:?} shifted={shifted:?} section={sec:?}");
+        }
+    }
+    let base_arrows = layout_arrows(base_reply);
+    let sec_arrows = layout_arrows(section_reply);
+    assert_eq!(sec_arrows.len(), base_arrows.len(), "arrows: {section_reply}");
+    for ((btip, bdir), (stip, sdir)) in base_arrows.iter().zip(&sec_arrows) {
+        assert!(stip.dist(*btip + shift) < 1e-9 && sdir.dist(*bdir) < 1e-9, "arrows: {base_arrows:?} vs {sec_arrows:?}");
+    }
+    let base_boxes = layout_boxes(base_reply);
+    let sec_boxes = layout_boxes(section_reply);
+    assert_eq!(sec_boxes.len(), base_boxes.len(), "boxes: {section_reply}");
+    for (b, sec) in base_boxes.iter().zip(&sec_boxes) {
+        let shifted: Vec<Vec2> = b.iter().map(|p| *p + shift).collect();
+        assert!(same_points(sec, &shifted, 1e-9), "boxes: {b:?} vs {sec:?}");
+    }
+}
+
+/// Drag placement of cylinder dimensions (`text_to_mm` and `line_through_mm`) works on a full
+/// section view (#509) identically to the base view, in `add` (with and without `dry_run`),
+/// `preview_scene`, `edit`, and `drawing.scene`, for both an external boss and a cut-open bore.
+#[test]
+fn a_cylinders_drag_placement_works_on_a_full_section_view() {
+    let (mut s, _, front, section, on_boss, on_bore) = sectioned_cylinder_views();
+    let shift = Vec2::new(180.0, 25.0);
+    let f = ids::encode(front);
+    let sec = ids::encode(section);
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+
+    for (face, value, text, base_text_pt, base_line_pt) in
+        [(on_boss, 10.0, "Ø10.00", [165.0, 138.0], [165.0, 120.0]), (on_bore, 12.0, "Ø12.00", [85.0, 150.0], [80.0, 145.0])]
+    {
+        let sec_text_pt = [base_text_pt[0] + shift.x, base_text_pt[1] + shift.y];
+        let sec_line_pt = [base_line_pt[0] + shift.x, base_line_pt[1] + shift.y];
+        let kind = json!({"cylinder": {"face": face}});
+
+        // `text_to_mm`: add on base vs dry_run + preview_scene + add on full section view.
+        let base_text = run(&mut s, ADD, json!({"view": f, "kind": kind, "text_to_mm": base_text_pt}));
+        reads(&base_text, value, text);
+
+        let sec_text_params = json!({"view": sec, "kind": kind, "text_to_mm": sec_text_pt});
+        let scene_preview = preview_scene(&s, &sec_text_params).unwrap_or_else(|e| panic!("preview_scene text_to_mm: {e}"));
+        assert!(!scene_preview.groups.is_empty() && !scene_preview.groups[0].items.is_empty(), "{scene_preview:?}");
+        let dry_text = previewed(&mut s, &sec_text_params);
+        let added_text = run(&mut s, ADD, sec_text_params);
+        assert_eq!(dry_text, added_text);
+        reads(&added_text, value, text);
+        assert!(box_centre(&added_text).dist(Vec2::from(sec_text_pt)) < 1e-9, "{added_text}");
+        assert_matches_base_layout(&base_text, &added_text, shift, true);
+
+        // `line_through_mm`: add on base vs dry_run + preview_scene + add on full section view.
+        let base_line = run(&mut s, ADD, json!({"view": f, "kind": kind, "line_through_mm": base_line_pt}));
+        reads(&base_line, value, text);
+
+        let sec_line_params = json!({"view": sec, "kind": kind, "line_through_mm": sec_line_pt});
+        let scene_preview = preview_scene(&s, &sec_line_params).unwrap_or_else(|e| panic!("preview_scene line_through_mm: {e}"));
+        assert!(!scene_preview.groups.is_empty() && !scene_preview.groups[0].items.is_empty(), "{scene_preview:?}");
+        let dry_line = previewed(&mut s, &sec_line_params);
+        let added_line = run(&mut s, ADD, sec_line_params);
+        assert_eq!(dry_line, added_line);
+        reads(&added_line, value, text);
+        let lines = layout_lines(&added_line, "dimension_lines");
+        assert!(!lines.is_empty() && lines.iter().all(|l| off_the_line(l, Vec2::from(sec_line_pt)) < 1e-9), "{added_line}");
+        assert_matches_base_layout(&base_line, &added_line, shift, false);
+
+        // `drawing.scene` draws both section-view dimensions without `why`.
+        let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+        for dim in [&added_text["dimension"], &added_line["dimension"]] {
+            let entry =
+                scene["dimensions"].as_array().unwrap().iter().find(|d| d["dimension"] == *dim).unwrap_or_else(|| panic!("missing {dim} in {scene}"));
+            assert_eq!((entry["status"].as_str(), entry["drawn"].as_bool()), (Some("ok"), Some(true)), "{entry}");
+            assert!(entry.get("why").is_none(), "{entry}");
+        }
+    }
+
+    // `drawing.dimension.edit` dragging an existing section-view cylinder dimension.
+    let base_dim = add(&mut s, front, json!({"cylinder": {"face": on_boss}}));
+    let (_, base_edit_line) = drag_to(&mut s, &base_dim, json!({"line_through_mm": [115.0, 120.0]}));
+    let (_, base_edit_text) = drag_to(&mut s, &base_dim, json!({"text_to_mm": [120.0, 102.0]}));
+
+    let sec_dim = add(&mut s, section, json!({"cylinder": {"face": on_boss}}));
+    reads(&sec_dim, 10.0, "Ø10.00");
+
+    let (changed, dragged_line) = drag_to(&mut s, &sec_dim, json!({"line_through_mm": [295.0, 145.0]}));
+    assert_eq!(changed, json!(["offset_mm"]), "{dragged_line}");
+    let lines = layout_lines(&dragged_line, "dimension_lines");
+    assert!(!lines.is_empty() && lines.iter().all(|l| off_the_line(l, Vec2::new(295.0, 145.0)) < 1e-9), "{dragged_line}");
+    assert_matches_base_layout(&base_edit_line, &dragged_line, shift, false);
+
+    let (changed, dragged_text) = drag_to(&mut s, &sec_dim, json!({"text_to_mm": [300.0, 127.0]}));
+    assert!(changed.as_array().unwrap().contains(&json!("text")), "{changed}");
+    assert!(box_centre(&dragged_text).dist(Vec2::new(300.0, 127.0)) < 1e-9, "{dragged_text}");
+    assert_matches_base_layout(&base_edit_text, &dragged_text, shift, true);
+}
+
+/// Refusal cases for cylinder drag placement on section views (#509): dragging `line_through_mm`
+/// between a cylinder's ends on a full section view is refused with `"runs beyond their ends"`,
+/// and drag placement on an undrawn section view (a `"shaded"` full section view) is still refused
+/// with `"its view isn't drawn"`, leaving drawing and undo unchanged; a `"half"` section can't be made.
+#[test]
+fn a_cylinders_drag_on_undrawn_or_invalid_section_is_refused() {
+    let (mut s, top, _, section, on_boss, on_bore) = sectioned_cylinder_views();
+    let sec = ids::encode(section);
+    let sec_boss = add(&mut s, section, json!({"cylinder": {"face": on_boss}}))["dimension"].clone();
+    let sec_bore = add(&mut s, section, json!({"cylinder": {"face": on_bore}}))["dimension"].clone();
+
+    let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
+    for p in [
+        json!({"view": sec, "kind": {"cylinder": {"face": on_boss}}, "line_through_mm": [320.0, 145.0]}),
+        json!({"view": sec, "kind": {"cylinder": {"face": on_bore}}, "line_through_mm": [260.0, 145.0]}),
+    ] {
+        let e = refused_alike(&mut s, &p);
+        assert!(e.contains("runs beyond their ends"), "{p}: {e}");
+    }
+    for (id, pt) in [(&sec_boss, [320.0, 145.0]), (&sec_bore, [260.0, 145.0])] {
+        let p = json!({"dimension": id, "set": {"line_through_mm": pt}});
+        let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+        assert!(e.contains("runs beyond their ends"), "{p}: {e}");
+    }
+    assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len()), (before, steps));
+
+    // A "half" section view can't be made yet, so no dimension can be dragged on one.
+    let half = json!({
+        "parent": ids::encode(top),
+        "line": {"kind": "half", "points": [[50.0, 45.0], [50.0, 20.0], [110.0, 20.0]], "arrows": "right"},
+        "place": {"at": [280.0, 230.0]}
+    });
+    let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
+    let e = s.execute("drawing.view.section", &half).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {half}"));
+    assert!(e.contains("not supported yet: a half section"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len()), (before, steps));
+
+    // A "shaded" full section view is not drawn yet either.
+    run(&mut s, "drawing.view.edit", json!({"view": sec, "set": {"visual_style": "shaded"}}));
+    let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
+    for p in [
+        json!({"view": sec, "kind": {"cylinder": {"face": on_boss}}, "text_to_mm": [345.0, 163.0]}),
+        json!({"view": sec, "kind": {"cylinder": {"face": on_boss}}, "line_through_mm": [345.0, 145.0]}),
+    ] {
+        let e = refused_alike(&mut s, &p);
+        assert!(e.contains("its view isn't drawn"), "{p}: {e}");
+    }
+    assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len()), (before, steps));
+}

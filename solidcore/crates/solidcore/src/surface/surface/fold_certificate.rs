@@ -1304,6 +1304,7 @@ pub mod analytic {
     use crate::geom::certified::above;
     use crate::geom::extent2d::Extent2d;
     use crate::kernel::Kernel;
+    use crate::math::det;
     use crate::nurbs::math::gamma;
     use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -1387,7 +1388,7 @@ pub mod analytic {
     /// them. At most 64 extremes (an interval of more than 32 turns is refused by the
     /// caller seeing an undecided sign).
     fn cos_extremes(v0: f64, v1: f64) -> Vec<(f64, f64)> {
-        let cos = |v: f64| (v * core::f64::consts::PI / 180.0).cos();
+        let cos = |v: f64| det::cos(v * core::f64::consts::PI / 180.0);
         let mut out = vec![(v0, cos(v0)), (v1, cos(v1))];
         let turns = (v1 - v0) / 180.0;
         if turns.is_nan() || turns > 64.0 {

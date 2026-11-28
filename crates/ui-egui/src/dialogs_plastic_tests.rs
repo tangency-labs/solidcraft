@@ -83,6 +83,43 @@ fn snap_lip_rest() {
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["length"], "15 mm");
 }
 
+#[test]
+fn plastic_rule_literal_display_uses_document_units_and_keeps_expressions() {
+    let mut doc = solidcraft_engine::doc::Document::default();
+    for (units, source, shown) in [
+        ("mm", "0.1 in", "2.54 mm"),
+        ("mm", "0.14 in", "3.556 mm"),
+        ("mm", "0.05 in", "1.27 mm"),
+        ("in", "25.4 mm", "1 in"),
+        ("in", "25.4", "1 in"),
+        ("in", "2 * 1 mm", "2 * 1 mm"),
+    ] {
+        doc.units = units.into();
+        assert_eq!(rule_length_display(&doc, source), shown);
+    }
+    doc.units = "mm".into();
+    let original = "0.1 in";
+    let shown = rule_length_display(&doc, original);
+    assert_eq!(doc.eval(original, ValueKind::Length).unwrap(), doc.eval(&shown, ValueKind::Length).unwrap());
+}
+
+#[test]
+fn plastic_rule_literal_display_does_not_round_editable_values() {
+    let mut doc = solidcraft_engine::doc::Document::default();
+    for unit in ["mm", "in"] {
+        doc.units = unit.into();
+        for number in ["0.123456789012345", "0.00000000000000000012"] {
+            let original = format!("{number} {unit}");
+            let shown = rule_length_display(&doc, &original);
+            let (digits, suffix) = shown.split_once(' ').unwrap();
+            let edited = format!("{digits}0 {suffix}");
+            let expected = doc.eval(&original, ValueKind::Length).unwrap();
+            assert_eq!(doc.eval(&shown, ValueKind::Length).unwrap(), expected, "{shown}");
+            assert_eq!(doc.eval(&edited, ValueKind::Length).unwrap(), expected, "{edited}");
+        }
+    }
+}
+
 /// The rule manager edits a library rule into the design; Assign gives bodies a rule.
 #[test]
 fn plastic_rules_manage_and_assign() {

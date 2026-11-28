@@ -610,7 +610,7 @@ fn generated_copy_parameters_cannot_heal_an_unrelated_missing_reference() {
     let kind = s.doc.feature(valid).unwrap().kind.clone();
     let broken = s.doc_mut().add_feature(kind, Some("Broken reference")).unwrap();
     let mut probe = (*s.doc).clone();
-    let missing = probe.new_model_param("2 mm", "mm");
+    let missing = probe.new_model_param("2 mm", "mm").unwrap();
     let feature = s.doc_mut().feature_mut(broken).unwrap();
     feature.component = 0;
     if let solidcraft_doc::FeatureKind::Box { width, .. } = &mut feature.kind {

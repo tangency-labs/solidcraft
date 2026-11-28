@@ -386,6 +386,22 @@ pub struct ExportViewDxfParams {
     #[serde(default, deserialize_with = "export_path", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<String>,
+    /// The planes the view is cut with, as Section Analysis cuts it: what lies on the normal side
+    /// of any one is left out, and the cut faces' outlines are drawn (#22913). Default: the
+    /// session's Section Analysis planes; `[]` draws the bodies whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(max = 6))]
+    pub section: Option<Vec<DxfSectionPlane>>,
+}
+
+/// One plane a view DXF is cut with ([`ExportViewDxfParams::section`]).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DxfSectionPlane {
+    /// A point on the plane, in mm.
+    pub origin: [f64; 3],
+    /// The side left out; any length but zero.
+    pub normal: [f64; 3],
 }
 
 /// How the drawing is projected.

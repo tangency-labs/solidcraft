@@ -1080,7 +1080,7 @@ fn inspect_design_lists_joint_definitions() {
 
     // A sub-assembly held together as an import holds it: with `joints: "summary"` its rigid
     // joints are counted, not listed.
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         let mut exec = |command: &str, params: Value| tool(&mut s, "execute", json!({"command": command, "params": params}));
         for (name, corner) in [("A", [0, 0, 0]), ("B", [20, 0, 0])] {
@@ -1305,7 +1305,7 @@ fn check_parameters_reports_only_the_bodies_asked_for_in_summary() {
 /// without compact output and as a batch step; left out, the call and its reply are as before.
 #[test]
 fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         parametric_box_with_cylinder(&mut s);
         tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}}));
@@ -1361,8 +1361,13 @@ fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
     // before them answers as it always did.
     let mut b = Answers { calls: Vec::new(), answer: Box::new(|_, _| Ok(json!({"timeline": [], "bodies": [], "sketches": []}))) };
     crate::tools::call_tool(&mut b, "inspect_design", &json!({"sketches": false, "joints": false}));
-    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true });
-    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false, "bodies": ["B"]}), crate::Options { compact: true });
+    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true, ..Default::default() });
+    crate::tools::call_tool_with(
+        &mut b,
+        "inspect_design",
+        &json!({"joints": false, "bodies": ["B"]}),
+        crate::Options { compact: true, ..Default::default() },
+    );
     let sent: Vec<&Value> = b.calls.iter().filter(|(m, _)| m == "document.inspect").map(|(_, p)| p).collect();
     assert_eq!(
         sent,
@@ -5140,7 +5145,7 @@ fn no_tool_schema_has_a_list_of_types() {
             _ => {}
         }
     }
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut found = Vec::new();
         for def in crate::tool_definitions_with(opts) {
             mixed(def["name"].as_str().unwrap_or("?"), &def["inputSchema"], &mut found);
@@ -5181,15 +5186,21 @@ fn inspect_design_is_unchanged_without_compact_output() {
 /// sketches asked for; `bodies` keeps only those bodies.
 #[test]
 fn compact_inspect_design_summarises_sketches_unless_asked() {
-    let mut s = server_with_big_sketch(crate::Options { compact: true });
+    let mut s = server_with_big_sketch(crate::Options { compact: true, ..Default::default() });
     let listed = call(&mut s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().unwrap().iter().find(|d| d["name"] == "inspect_design").cloned().unwrap();
     assert!(def["inputSchema"]["properties"]["bodies"].is_object(), "{def}");
-    assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
+    assert_eq!(
+        def,
+        crate::tool_definitions_with(crate::Options { compact: true, ..Default::default() })
+            .into_iter()
+            .find(|d| d["name"] == "inspect_design")
+            .unwrap()
+    );
     // Arguments are checked against the tools as listed: `bodies` only with compact output.
     let bodies = json!({"bodies": ["Body1"]});
     let check = |options| solidcraft_mcp_server::check_arguments(&crate::tool_definitions_with(options), "inspect_design", &bodies);
-    assert!(check(crate::Options { compact: true }).is_ok());
+    assert!(check(crate::Options { compact: true, ..Default::default() }).is_ok());
     assert!(check(crate::Options::default()).is_err_and(|e| e.contains("bodies")));
 
     let (_, summary) = inspect_text(&mut s, json!({"measure": false}));
@@ -5282,9 +5293,9 @@ fn compact_output_follows_the_apps_preference() {
     assert!(!inspect_design_is_compact(&mut s));
 
     // The command line turns it on whatever the app says.
-    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true });
+    let mut s = Server::new(app(vec![Ok(Some(json!({"compact": false})))])).with_options(crate::Options { compact: true, ..Default::default() });
     assert!(inspect_design_is_compact(&mut s));
-    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
+    let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true, ..Default::default() });
     assert!(inspect_design_is_compact(&mut s));
 }
 
@@ -5857,7 +5868,7 @@ fn the_instructions_tell_the_agent_to_use_the_selection() {
 /// Counts, positions and volumes are specified independently of inspect.measure (#21797).
 #[test]
 fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names() {
-    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+    for opts in [crate::Options::default(), crate::Options { compact: true, ..Default::default() }] {
         let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
         let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command":command, "params":params}));
         let part = exec(&mut s, "component.create", json!({"name":"Part", "grounded":false}));
@@ -5926,6 +5937,244 @@ fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names()
         let after = tool(&mut s, "inspect_design", json!({"bodies":false, "measure":false, "sketches":false, "joints":false}));
         assert_eq!(after, before, "no document/history mutation: {opts:?}");
     }
+}
+
+#[test]
+fn initialize_advertises_resources_prompts_and_completions_capabilities() {
+    let mut s = server();
+    let init =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
+    let caps = &init["result"]["capabilities"];
+    assert_eq!(caps["tools"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["resources"], json!({"subscribe": true, "listChanged": true}), "{caps}");
+    assert_eq!(caps["prompts"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["completions"], json!({}), "{caps}");
+}
+
+#[test]
+fn resource_templates_list_and_read_body_sketch_feature_command_and_skill() {
+    let mut s = server();
+
+    // Verify all resource templates are listed with their expected MIME types.
+    let listed = call(&mut s, 1, "resources/templates/list", json!({}));
+    let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
+    let pairs: Vec<(&str, &str)> = templates.iter().map(|t| (t["uriTemplate"].as_str().unwrap(), t["mimeType"].as_str().unwrap())).collect();
+    assert_eq!(
+        pairs,
+        [
+            ("solidcraft://body/{name}", "application/json"),
+            ("solidcraft://sketch/{name}", "application/json"),
+            ("solidcraft://feature/{id}", "application/json"),
+            ("solidcraft://command/{id}", "application/json"),
+            ("solidcraft://skill/{skill}/{file}", "text/markdown"),
+        ],
+        "{listed}"
+    );
+
+    // Build a small parametric design: a component with a box body (and placed copy) plus a sketch.
+    let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command": command, "params": params}));
+    let comp = exec(&mut s, "component.create", json!({"name": "Housing", "grounded": false}));
+    exec(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 20, "height": 30, "body_name": "MainBox", "name": "BaseBox"}));
+    exec(&mut s, "component.activate", json!({"component": 0}));
+    exec(&mut s, "occurrence.copy", json!({"component": comp["component"], "translate": [40, 0, 0]}));
+    exec(&mut s, "sketch.create", json!({"plane": "XY", "name": "BaseSketch"}));
+    exec(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    exec(&mut s, "sketch.finish", json!({}));
+
+    let design = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": false}));
+    let box_feature_id = design["timeline"].as_array().unwrap().iter().find(|f| f["name"] == "BaseBox").unwrap()["id"].as_u64().unwrap();
+
+    let read_json = |s: &mut Server, id: u64, uri: &str| -> Value {
+        let r = call(s, id, "resources/read", json!({"uri": uri}));
+        assert!(r.get("error").is_none(), "{uri}: {r}");
+        let block = &r["result"]["contents"][0];
+        assert_eq!(block["uri"], uri);
+        assert_eq!(block["mimeType"], "application/json");
+        serde_json::from_str(block["text"].as_str().unwrap()).unwrap()
+    };
+
+    // solidcraft://body/{name} (plain name and percent-encoded occurrence name)
+    let body = read_json(&mut s, 2, "solidcraft://body/MainBox");
+    assert_eq!(body["name"], "MainBox", "{body}");
+    assert_eq!(body["faces"], 6, "{body}");
+    assert_eq!(body["edges"], 12, "{body}");
+    assert!((body["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{body}");
+    assert!(body["mass_g"].as_f64().unwrap() > 0.0, "{body}");
+    assert_eq!(body["bbox"]["min"], json!([0.0, 0.0, 0.0]), "{body}");
+    assert_eq!(body["bbox"]["max"], json!([10.0, 20.0, 30.0]), "{body}");
+    assert_eq!(body["component"], "Housing", "{body}");
+
+    let copy = read_json(&mut s, 3, "solidcraft://body/MainBox%20(Housing%3A2)");
+    assert_eq!(copy["name"], "MainBox (Housing:2)", "{copy}");
+    assert_eq!(copy["definition"], "MainBox", "{copy}");
+    assert_eq!(copy["component"], "Housing", "{copy}");
+    assert_eq!(copy["bbox"]["min"], json!([40.0, 0.0, 0.0]), "{copy}");
+
+    // solidcraft://sketch/{name}
+    let sketch = read_json(&mut s, 4, "solidcraft://sketch/BaseSketch");
+    assert_eq!(sketch["name"], "BaseSketch", "{sketch}");
+    assert_eq!(sketch["curves"].as_array().unwrap().len(), 4, "{sketch}");
+    assert_eq!(sketch["profiles"].as_array().unwrap().len(), 1, "{sketch}");
+
+    // solidcraft://feature/{id} by numeric id and by name
+    let feat_by_id = read_json(&mut s, 5, &format!("solidcraft://feature/{box_feature_id}"));
+    assert_eq!(feat_by_id["id"], box_feature_id, "{feat_by_id}");
+    assert_eq!(feat_by_id["name"], "BaseBox", "{feat_by_id}");
+    assert!(feat_by_id["definition"].is_object(), "{feat_by_id}");
+    assert!(feat_by_id["inputs"].is_array(), "{feat_by_id}");
+
+    let feat_by_name = read_json(&mut s, 6, "solidcraft://feature/BaseBox");
+    assert_eq!(feat_by_name["id"], box_feature_id, "{feat_by_name}");
+    assert_eq!(feat_by_name["name"], "BaseBox", "{feat_by_name}");
+
+    // solidcraft://command/{id}
+    let cmd = read_json(&mut s, 7, "solidcraft://command/solid.box");
+    assert_eq!(cmd["id"], "solid.box", "{cmd}");
+    assert!(cmd["label"].as_str().is_some_and(|l| !l.is_empty()), "{cmd}");
+    assert!(cmd["input"].is_object(), "{cmd}");
+
+    // solidcraft://skill/{skill}/{file} (top-level and nested file path)
+    let skill_reply = call(&mut s, 8, "resources/read", json!({"uri": "solidcraft://skill/solidcraft-modeling/SKILL.md"}));
+    let skill_block = &skill_reply["result"]["contents"][0];
+    assert_eq!(skill_block["mimeType"], "text/markdown");
+    assert_eq!(skill_block["text"], include_str!("../../../skills/solidcraft-modeling/SKILL.md"));
+
+    let nested_reply = call(&mut s, 9, "resources/read", json!({"uri": "solidcraft://skill/solidcraft-checking/reference/porting.md"}));
+    let nested_block = &nested_reply["result"]["contents"][0];
+    assert_eq!(nested_block["mimeType"], "text/markdown");
+    assert_eq!(nested_block["text"], include_str!("../../../skills/solidcraft-checking/reference/porting.md"));
+
+    // Existing static resources remain intact.
+    let static_design = read_json(&mut s, 10, "solidcraft://design");
+    assert!(static_design["timeline"].is_array(), "{static_design}");
+    let static_commands = read_json(&mut s, 11, "solidcraft://commands");
+    assert!(static_commands.as_array().is_some_and(|c| !c.is_empty()), "{static_commands}");
+
+    // Unknown targets across every template return RESOURCE_NOT_FOUND (-32002).
+    for uri in [
+        "solidcraft://body/DoesNotExist",
+        "solidcraft://body/",
+        "solidcraft://sketch/DoesNotExist",
+        "solidcraft://sketch/BaseBox",
+        "solidcraft://feature/999999",
+        "solidcraft://feature/DoesNotExist",
+        "solidcraft://command/no.such.command",
+        "solidcraft://skill/unknown-skill/SKILL.md",
+        "solidcraft://skill/solidcraft-modeling/missing.md",
+        "solidcraft://skill/solidcraft-modeling",
+    ] {
+        let err = call(&mut s, 12, "resources/read", json!({"uri": uri}));
+        assert_eq!(err["error"]["code"], -32002, "{uri}: {err}");
+    }
+}
+
+#[test]
+fn prompts_list_and_get_cover_cad_workflows_and_validate_arguments() {
+    let mut s = server();
+    let listed = call(&mut s, 1, "prompts/list", json!({}));
+    let prompts = listed["result"]["prompts"].as_array().unwrap();
+    let names: Vec<&str> = prompts.iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["model-part", "edit-design", "check-parameters", "diagnose-feature", "assembly-clearance"], "{listed}");
+
+    for prompt in prompts {
+        let name = prompt["name"].as_str().unwrap();
+        assert!(prompt["description"].as_str().is_some_and(|d| !d.is_empty()), "{prompt}");
+        // Every prompt can be requested with no arguments (all arguments are optional).
+        let filled = call(&mut s, 2, "prompts/get", json!({"name": name, "arguments": {}}));
+        assert!(filled.get("error").is_none(), "{name}: {filled}");
+        assert!(filled["result"]["description"].as_str().is_some_and(|d| !d.is_empty()), "{name}: {filled}");
+        let msg = &filled["result"]["messages"][0];
+        assert_eq!(msg["role"], "user", "{name}: {filled}");
+        assert_eq!(msg["content"]["type"], "text", "{name}: {filled}");
+        assert!(msg["content"]["text"].as_str().is_some_and(|t| t.len() > 80), "{name}: {filled}");
+    }
+
+    // Optional arguments are woven into the returned workflow instructions.
+    let model = call(&mut s, 3, "prompts/get", json!({"name": "model-part", "arguments": {"part": "L-bracket 60x40x5", "material": "sheet metal"}}));
+    let model_text = model["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(model_text.contains("L-bracket 60x40x5"), "{model_text}");
+    assert!(model_text.contains("solidcraft-sheetmetal"), "{model_text}");
+
+    let edit = call(&mut s, 4, "prompts/get", json!({"name": "edit-design", "arguments": {"goal": "widen slot by 2 mm", "target": "MainBox"}}));
+    let edit_text = edit["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(edit_text.contains("widen slot by 2 mm") && edit_text.contains("MainBox"), "{edit_text}");
+
+    let check =
+        call(&mut s, 5, "prompts/get", json!({"name": "check-parameters", "arguments": {"parameters": "width, wall", "ranges": "width 40..120 mm"}}));
+    let check_text = check["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(check_text.contains("width, wall") && check_text.contains("width 40..120 mm"), "{check_text}");
+
+    let diag = call(&mut s, 6, "prompts/get", json!({"name": "diagnose-feature", "arguments": {"feature": "Fillet1"}}));
+    let diag_text = diag["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(diag_text.contains("Fillet1"), "{diag_text}");
+
+    let clearance =
+        call(&mut s, 7, "prompts/get", json!({"name": "assembly-clearance", "arguments": {"occurrences": "Arm:1, Frame:1", "joint": "Hinge"}}));
+    let clearance_text = clearance["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(clearance_text.contains("Arm:1, Frame:1") && clearance_text.contains("Hinge"), "{clearance_text}");
+
+    // Unknown prompt names and undeclared arguments are rejected with INVALID_PARAMS (-32602).
+    let unknown_prompt = call(&mut s, 8, "prompts/get", json!({"name": "no-such-prompt"}));
+    assert_eq!(unknown_prompt["error"]["code"], -32602, "{unknown_prompt}");
+    let bad_arg = call(&mut s, 9, "prompts/get", json!({"name": "diagnose-feature", "arguments": {"bogus": "1"}}));
+    assert_eq!(bad_arg["error"]["code"], -32602, "{bad_arg}");
+}
+
+#[test]
+fn completion_suggests_bodies_sketches_features_commands_skills_and_prompt_args() {
+    let mut s = server();
+    let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command": command, "params": params}));
+
+    tool(&mut s, "set_parameter", json!({"name": "plate_w", "value": "50 mm"}));
+    tool(&mut s, "set_parameter", json!({"name": "plate_h", "value": "30 mm"}));
+    exec(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Bracket", "name": "MainBox"}));
+    exec(&mut s, "solid.box", json!({"corner": [30, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Boss", "name": "TopBoss"}));
+    exec(&mut s, "sketch.create", json!({"plane": "XY", "name": "BaseSketch"}));
+    exec(&mut s, "sketch.finish", json!({}));
+
+    let complete = |s: &mut Server, reference: Value, arg: &str, value: &str| -> Vec<String> {
+        let r = call(s, 1, "completion/complete", json!({"ref": reference, "argument": {"name": arg, "value": value}}));
+        assert!(r.get("error").is_none(), "{r}");
+        r["result"]["completion"]["values"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_owned()).collect()
+    };
+
+    // ref/resource completions for bodies, sketches, features, commands and skills
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://body/{name}"}), "name", ""), ["Boss", "Bracket"]);
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://body/{name}"}), "name", "br"), ["Bracket"]);
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://sketch/{name}"}), "name", "Base"), ["BaseSketch"]);
+
+    let feat_matches = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://feature/{id}"}), "id", "Main");
+    assert_eq!(feat_matches, ["MainBox"]);
+    let all_feats = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://feature/{id}"}), "id", "");
+    assert!(all_feats.iter().any(|f| f == "MainBox") && all_feats.iter().any(|f| f == "TopBoss"), "{all_feats:?}");
+    assert!(all_feats.iter().any(|f| f.chars().all(|c| c.is_ascii_digit())), "numeric feature ids included: {all_feats:?}");
+
+    let cmd_prefix = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://command/{id}"}), "id", "solid.b");
+    assert!(cmd_prefix.iter().any(|c| c == "solid.box"), "{cmd_prefix:?}");
+    assert!(cmd_prefix.iter().all(|c| c.starts_with("solid.b")), "{cmd_prefix:?}");
+    let cmd_sub = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://command/{id}"}), "id", "fillet");
+    assert!(cmd_sub.iter().any(|c| c == "solid.fillet"), "{cmd_sub:?}");
+
+    let skills = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "skill", "solidcraft-m");
+    assert_eq!(skills, ["solidcraft-mechanisms", "solidcraft-modeling"]);
+    let all_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "file", "");
+    assert_eq!(all_files, ["SKILL.md", "reference.md", "reference/porting.md", "reference/report-template.md"]);
+    let scoped_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/solidcraft-checking/{file}"}), "file", "ref");
+    assert_eq!(scoped_files, ["reference/porting.md"]);
+
+    // ref/prompt argument completions
+    let edit_targets = complete(&mut s, json!({"type": "ref/prompt", "name": "edit-design"}), "target", "Br");
+    assert_eq!(edit_targets, ["Bracket"]);
+    let params = complete(&mut s, json!({"type": "ref/prompt", "name": "check-parameters"}), "parameters", "plate_");
+    assert_eq!(params, ["plate_h", "plate_w"]);
+    let params_csv = complete(&mut s, json!({"type": "ref/prompt", "name": "check-parameters"}), "parameters", "plate_w, p");
+    assert_eq!(params_csv, ["plate_w, plate_h"]);
+    let diag_feats = complete(&mut s, json!({"type": "ref/prompt", "name": "diagnose-feature"}), "feature", "Top");
+    assert_eq!(diag_feats, ["TopBoss"]);
+    let materials = complete(&mut s, json!({"type": "ref/prompt", "name": "model-part"}), "material", "sheet");
+    assert_eq!(materials, ["sheet metal"]);
+    let occs = complete(&mut s, json!({"type": "ref/prompt", "name": "assembly-clearance"}), "occurrences", "Bo");
+    assert_eq!(occs, ["Boss"]);
 }
 
 #[test]
@@ -6451,4 +6700,329 @@ fn notifications_cancelled_aborts_local_headless_batch_and_rolls_back() {
     server_thread.join().unwrap();
     let doc: Value = serde_json::from_str(inspect["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(doc["params"], json!([]), "rolled back parameter `a`: {doc}");
+}
+
+/// `--structured`: every result also carries its reply as data, built from the text every tool
+/// already returns, so a program (the Python client) reads the same tools an agent does, and a
+/// new tool needs no change. Off by default: chat clients get exactly what they got before.
+#[test]
+fn structured_results_carry_the_reply_as_data() {
+    let structured = crate::Options { structured: true, ..Default::default() };
+    let mut s = Server::new(Box::new(Headless::default())).with_options(structured);
+    let made = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    let r = &made["result"];
+    assert_ne!(r["isError"], json!(true), "{r}");
+    let text: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(r["structuredContent"]["result"], text, "the data is the text's JSON, number for number");
+
+    let measured = raw_tool(&mut s, "measure", json!({}));
+    let bodies = &measured["result"]["structuredContent"]["result"]["bodies"];
+    assert!((bodies[0]["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{bodies}");
+
+    // A message that is not JSON is the result as a string, and the error flag stays.
+    let refused = raw_tool(&mut s, "execute", json!({"command": "solid.no_such_command"}));
+    assert_eq!(refused["result"]["isError"], json!(true));
+    assert!(refused["result"]["structuredContent"]["result"].as_str().is_some_and(|m| m.contains("no_such_command")), "{refused}");
+
+    // Off: no structured copy on a success, as before.
+    let mut plain = Server::new(Box::new(Headless::default()));
+    let made = raw_tool(&mut plain, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    assert!(made["result"].get("structuredContent").is_none(), "{made}");
+}
+
+/// A notice or selection block added after the reply goes in `notes`; keys a result already
+/// carries stay.
+#[test]
+fn structured_results_keep_notes_and_existing_keys() {
+    let mut r = json!({"content": [{"type": "text", "text": "{\"a\": 1}"}, {"type": "text", "text": "selected: Body1"}], "structuredContent": {"panel_error": {"rule": "schema"}}});
+    crate::server::structure(&mut r);
+    assert_eq!(r["structuredContent"], json!({"panel_error": {"rule": "schema"}, "result": {"a": 1}, "notes": ["selected: Body1"]}));
+    let mut image = json!({"content": [{"type": "image", "data": "AA==", "mimeType": "image/png"}, {"type": "text", "text": "{\"width\": 4}"}]});
+    crate::server::structure(&mut image);
+    assert_eq!(image["structuredContent"], json!({"result": {"width": 4}}), "an image's text block is its reply");
+}
+
+#[test]
+fn initialize_advertises_resource_subscribe_and_list_changed_capabilities() {
+    let mut s = server();
+    let init =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}));
+    assert_eq!(init["result"]["capabilities"]["resources"], json!({"subscribe": true, "listChanged": true}), "{init}");
+}
+
+#[test]
+fn resource_subscribe_and_unsubscribe_validate_uris_and_enforce_limit() {
+    assert_eq!(crate::MAX_RESOURCE_SUBSCRIPTIONS, 256);
+
+    // Direct check of the default 256-subscription session ceiling.
+    let mut bounded = crate::server::ResourceSubscriptions::new(crate::MAX_RESOURCE_SUBSCRIPTIONS);
+    for i in 0..crate::MAX_RESOURCE_SUBSCRIPTIONS {
+        assert!(bounded.subscribe(&format!("solidcraft://item/{i}")).is_ok());
+    }
+    assert_eq!(bounded.len(), 256);
+    // Re-subscribing an existing URI at capacity is idempotent.
+    assert!(bounded.subscribe("solidcraft://item/0").is_ok());
+    // A 257th distinct URI is refused with InvalidParams.
+    let err = bounded.subscribe("solidcraft://item/256").unwrap_err();
+    assert!(matches!(err, solidcraft_mcp_server::ResourceError::InvalidParams(_)), "{err:?}");
+    assert!(bounded.unsubscribe("solidcraft://item/0"));
+    assert!(bounded.subscribe("solidcraft://item/256").is_ok());
+
+    // End-to-end JSON-RPC validation and limit enforcement on Server.
+    let mut s = server();
+    s.set_max_subscriptions(1);
+
+    for (params, expected_code) in [
+        (json!({}), -32602),
+        (json!({"uri": ""}), -32602),
+        (json!({"uri": "   "}), -32602),
+        (json!({"uri": 42}), -32602),
+        (json!({"uri": "solidcraft://nope"}), -32002),
+        (json!({"uri": "https://example.com/design"}), -32002),
+    ] {
+        let sub = call(&mut s, 1, "resources/subscribe", params.clone());
+        assert_eq!(sub["error"]["code"], expected_code, "subscribe {params}: {sub}");
+        let unsub = call(&mut s, 2, "resources/unsubscribe", params.clone());
+        assert_eq!(unsub["error"]["code"], expected_code, "unsubscribe {params}: {unsub}");
+    }
+
+    // Valid subscribe succeeds and is idempotent even at capacity.
+    assert_eq!(call(&mut s, 3, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(call(&mut s, 4, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(s.subscribed_resources(), ["solidcraft://design"]);
+
+    // Exceeding the session limit refuses the second URI.
+    let over = call(&mut s, 5, "resources/subscribe", json!({"uri": "solidcraft://commands"}));
+    assert_eq!(over["error"]["code"], -32602, "{over}");
+    assert!(over["error"]["message"].as_str().unwrap().contains("limit"), "{over}");
+
+    // Unsubscribing frees the slot; repeated unsubscribe on a known URI is idempotent.
+    assert_eq!(call(&mut s, 6, "resources/unsubscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(call(&mut s, 7, "resources/unsubscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert!(s.subscribed_resources().is_empty());
+    assert_eq!(call(&mut s, 8, "resources/subscribe", json!({"uri": "solidcraft://commands"}))["result"], json!({}));
+    assert_eq!(s.subscribed_resources(), ["solidcraft://commands"]);
+}
+
+#[test]
+fn mutating_tools_emit_resource_list_changed_and_updated_notifications() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let seen: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    let mut s = Server::new(Box::new(Headless::default())).with_notification_sink(move |note| sink.borrow_mut().push(note));
+    let take = |seen: &Rc<RefCell<Vec<Value>>>| std::mem::take(&mut *seen.borrow_mut());
+
+    // Subscribe to both design and static command catalog.
+    assert_eq!(call(&mut s, 1, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(call(&mut s, 2, "resources/subscribe", json!({"uri": "solidcraft://commands"}))["result"], json!({}));
+    assert!(take(&seen).is_empty(), "subscribing must not emit notifications");
+
+    // Creating a body changes the resource list and updates solidcraft://design (not commands).
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Parameter edit changes design revision without changing the set of bodies/sketches/features:
+    // emits `updated` for solidcraft://design only (no unnecessary `list_changed`).
+    tool(&mut s, "set_parameter", json!({"name": "width", "value": 20}));
+    assert_eq!(take(&seen), vec![json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}})]);
+
+    // Batch adding a sketch and extruded body changes both list and design.
+    tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.rectangle.two_point", "params": {"p0": [20, 0], "p1": [30, 10]}},
+            {"command": "sketch.finish", "params": {}},
+            {"command": "solid.extrude", "params": {"distance": 5}},
+        ]}),
+    );
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Undo removes the extruded feature/body, redo restores it; both notify list_changed + updated.
+    tool(&mut s, "undo", json!({}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+    tool(&mut s, "redo", json!({}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Save + new_design + open: re-saving an already-named design emits nothing; new_design and open replace document_id.
+    let dir = tempfile::tempdir().unwrap();
+    let design = dir.path().join("part.sc");
+    tool(&mut s, "save", json!({"path": design.to_string_lossy()}));
+    let _ = take(&seen);
+    tool(&mut s, "save", json!({"path": design.to_string_lossy()}));
+    assert!(take(&seen).is_empty(), "re-saving an unchanged design must not emit notifications");
+
+    tool(&mut s, "new_design", json!({"name": "Fresh"}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    tool(&mut s, "open", json!({"path": design.to_string_lossy()}));
+    assert_eq!(
+        take(&seen),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+
+    // Unsubscribing solidcraft://design stops `updated`, while `list_changed` still fires on structural edits.
+    assert_eq!(call(&mut s, 3, "resources/unsubscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": {"diameter": 8, "height": 12}}));
+    assert_eq!(take(&seen), vec![json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"})]);
+}
+
+#[test]
+fn read_only_and_rolled_back_calls_emit_zero_spurious_notifications() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let seen: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    let mut s = Server::new(Box::new(Headless::default())).with_notification_sink(move |note| sink.borrow_mut().push(note));
+
+    assert!(s.handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
+    assert_eq!(call(&mut s, 1, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+
+    // Seed one parametric box so measure / body_topology / check_parameters have geometry to inspect.
+    tool(&mut s, "set_parameter", json!({"name": "L", "value": 20}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": "L", "width": 10, "height": 10, "body_name": "Box1"}}));
+    seen.borrow_mut().clear();
+    let _ = s.take_notifications();
+
+    // Every read-only tool and read-only command must emit zero notifications.
+    tool(&mut s, "version", json!({}));
+    tool(&mut s, "list_commands", json!({"filter": "fillet"}));
+    tool(&mut s, "describe_command", json!({"id": "solid.box"}));
+    tool(&mut s, "inspect_design", json!({}));
+    tool(&mut s, "measure", json!({}));
+    tool(&mut s, "body_topology", json!({"body": "Box1"}));
+    tool(&mut s, "skill_reference", json!({"skill": "solidcraft-modeling"}));
+    tool(&mut s, "crash_reports", json!({"limit": 1}));
+    tool(&mut s, "running", json!({}));
+    tool(&mut s, "pending", json!({}));
+    tool(&mut s, "execute", json!({"command": "document.inspect", "params": {"measure": false}}));
+    tool(&mut s, "execute", json!({"command": "document.revision", "params": {}}));
+    let _ = call(&mut s, 2, "resources/list", json!({}));
+    let _ = call(&mut s, 3, "resources/read", json!({"uri": "solidcraft://design"}));
+    let _ = call(&mut s, 4, "ping", json!({}));
+
+    // Failed edit, rolled-back batch, and check_parameters (which restores its checkpoint) also emit zero notifications.
+    let bad = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 0, "width": 10, "height": 10}}));
+    assert_eq!(bad["result"]["isError"], true, "{bad}");
+    let rolled = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}},
+            {"command": "solid.box", "params": {"length": 0, "width": 5, "height": 5}},
+        ]}),
+    );
+    assert_eq!(rolled["result"]["isError"], true, "{rolled}");
+    tool(&mut s, "check_parameters", json!({"set": {"L": 30}}));
+
+    assert!(seen.borrow().is_empty(), "expected zero spurious notifications, got: {:?}", seen.borrow());
+    assert!(s.take_notifications().is_empty());
+}
+
+#[test]
+fn remote_external_changes_emit_resource_notifications_via_poll_and_serve() {
+    use std::io::{BufRead, Write};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    let rev = std::sync::Arc::new(AtomicU64::new(1));
+    let app_rev = rev.clone();
+    let (addr, _seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("document.revision") => json!({"ok": true, "result": {"document_id": "live-doc-1", "revision": app_rev.load(Ordering::SeqCst)}}),
+        Some("mcp.options") => json!({"ok": true, "result": {"compact": false}}),
+        Some("document.selection") => json!({"ok": true, "result": {"selection": null}}),
+        _ => json!({"ok": true, "result": {}}),
+    });
+
+    // 1) Direct poll_changes() with notification sink (no subprocesses).
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let sink = captured.clone();
+    let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let mut s = Server::new(Box::new(remote)).with_notification_sink(move |note| sink.lock().unwrap().push(note));
+    assert_eq!(call(&mut s, 1, "resources/subscribe", json!({"uri": "solidcraft://design"}))["result"], json!({}));
+    assert_eq!(s.poll_changes(), 0, "unchanged revision emits nothing");
+
+    // Simulate the user or built-in Assistant editing the design directly in the desktop app.
+    rev.store(2, Ordering::SeqCst);
+    assert_eq!(s.poll_changes(), 2);
+    assert_eq!(
+        std::mem::take(&mut *captured.lock().unwrap()),
+        vec![
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}),
+            json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}),
+        ]
+    );
+    assert_eq!(s.poll_changes(), 0, "subsequent poll without new edits emits nothing");
+
+    // 2) Live serve() loop detects external remote changes while idle and writes notifications to stdout.
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
+    let handle = std::thread::spawn(move || {
+        let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+        let mut s = Server::new(Box::new(remote)).with_poll_interval(Duration::from_millis(20));
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
+    });
+
+    writeln!(to_server, r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"{PROTOCOL_VERSION}"}}}}"#).unwrap();
+    writeln!(to_server, r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#).unwrap();
+    writeln!(to_server, r#"{{"jsonrpc":"2.0","id":2,"method":"resources/subscribe","params":{{"uri":"solidcraft://design"}}}}"#).unwrap();
+
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut read_msg = || {
+        let mut line = String::new();
+        replies.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    let init = read_msg();
+    assert_eq!(init["id"], 1);
+    assert_eq!(init["result"]["capabilities"]["resources"], json!({"subscribe": true, "listChanged": true}));
+    let sub = read_msg();
+    assert_eq!(sub, json!({"jsonrpc": "2.0", "id": 2, "result": {}}));
+
+    // Trigger an external edit in the live app while the MCP client is idle.
+    rev.store(3, Ordering::SeqCst);
+    let note1 = read_msg();
+    let note2 = read_msg();
+    assert_eq!(note1, json!({"jsonrpc": "2.0", "method": "notifications/resources/list_changed"}));
+    assert_eq!(note2, json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": "solidcraft://design"}}));
+
+    drop(to_server);
+    handle.join().unwrap();
 }

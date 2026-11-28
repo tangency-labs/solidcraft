@@ -510,6 +510,91 @@ with fields and Open disabled while it is pending. File conditions themselves ne
 Scripts, CLI and MCP continue to pass `path` and `options` directly and never call this file-aware
 schema hook. An explicit `dialog_hook` entry still runs its general field hook before importing.
 
+## Plugin workspaces
+
+An enabled plugin that declares [docked panels](#docked-panels) can also add up to two workspaces
+beside Design and Render by listing them in `runtime.ui.workspaces`. There is no separate
+capability: a workspace is a placement of the plugin's own panels, so it needs `ui@0.1` and
+nothing more. Plugins without `workspaces` keep their existing command, menu, ribbon and panel
+behaviour. A workspace's id is `plugin:<plugin-id>/<workspace-id>`; select it through
+the usual switcher or `ui.workspace {"workspace":"plugin:manufacture/cam"}`.
+The switcher shows the workspace's name and disables workspaces that do not apply to the current
+design kind (`part`, `assembly`, `sketch` or `drawing`).
+
+The workspaces are inert data in the manifest, listed with the panels when the plugin is
+installed, so reviewing them runs no plugin code. For example, this `runtime` declares a panel, a
+workspace that places it, a ribbon button and read-only enter and exit hooks:
+
+```json
+{
+  "module": "manufacture.wasm",
+  "entries": [
+    {"name": "pocket", "effect": "edit"},
+    {"name": "ws_enter", "effect": "read"},
+    {"name": "ws_exit", "effect": "read"}
+  ],
+  "commands": ["document.inspect", "solid.box"],
+  "ui": {
+    "ui_version": 1,
+    "panels": [{
+      "id": "operations",
+      "title": "Operations",
+      "zones": ["right", "bottom"],
+      "layout": {"root": 0, "nodes": [
+        {"widget": {"group": [1, 2]}},
+        {"widget": {"text": "Choose an operation."}},
+        {"widget": {"button": {"label": "Pocket", "icon": null, "entry": "pocket"}}}
+      ]}
+    }],
+    "workspaces": [{
+      "id": "cam",
+      "name": "Manufacture",
+      "icon": "ws_design",
+      "applies_to": ["part", "assembly"],
+      "ribbon": [{"name": "Machining", "groups": [{"name": "Operations", "entries": ["pocket"]}]}],
+      "panels": [["right", ["operations"]]],
+      "builtin_panels": ["browser"],
+      "on_enter": "ws_enter",
+      "on_exit": "ws_exit"
+    }]
+  }
+}
+```
+
+Names in ribbon groups refer to the plugin's declared command entries. The host invokes the same
+namespaced commands and input-schema forms as the Plugins menu. Icons name the host's icon
+registry. The host supplies all drawing, theme colours, plugin badges and panel headers, and
+draws the panels with the same widgets as any docked panel. Workspace panel placements must
+respect each panel's allowed zones and place each panel only once. Each workspace has at most six
+ribbon tabs and 60 ribbon entries. `builtin_panels` names existing host panels to retain, such as
+`browser`; one the layout the user came from does not have is left out, and entering never fails for it.
+
+While a plugin workspace is shown it holds exactly the panels it places; the plugin's other
+panels open again in the built-in workspaces. Entering a workspace seeds its declared panel
+placements once. User rearrangements are remembered per workspace, and leaving restores the
+previous workspace's layout. On restart, the host workspace opens first while plugins are
+discovered; returning to the plugin restores its saved arrangement. Updating a plugin with
+registered workspace panels requires restarting SolidCraft before re-entry. No design-format
+default changes. Missing, disabled or unsupported plugins leave Design and Render available.
+
+`on_enter` and `on_exit` name optional `read` command entries. Their parameters contain
+`{"workspace":"cam"}` in this example, so the entry's `input_schema` must accept that object;
+a hook whose schema refuses it fails. Hooks are read-only: no folder is writable and no command
+that reaches files runs, whatever the grants. The only thing a hook may change is its own
+plugin's panels (`ui.set-data`, `show-panel`); the host adopts those updates when the hook
+finishes, if the design is still the one it started in. They run on a worker against a snapshot; the switch
+continues and failures appear in the status line and in Messages. Each hook receives at most one second, 1,000,000
+fuel and 32 MiB of memory, respecting lower package and user limits; an explicit stack request is
+capped at 256 KiB. Narrowing these budgets preserves the approval for the original manifest and
+component. Read hooks cannot call edit commands. The host adopts
+no computed design, camera, selection or undo history from a hook, on success or failure.
+A queued hook is dropped if its design is no longer active when it would start. Hook failures
+remain in Messages after leaving the workspace. A result from an earlier design does not replace
+the current design's status.
+
+This is the workspace portion of [RFC 0015](rfcs/0015-plugin-ui-workspaces.md). Design-changed
+listeners and viewport overlays remain follow-up work.
+
 ## Integration APIs
 
 Preferences and the Plugins menu share `plugin_install::start(app)` in
@@ -954,7 +1039,8 @@ key is the argument the plugin receives. The design follows the
   is only `{"type": "object"}`.
 - **Reserved lists.** Without the annotation, `bodies` and `body_ids` take bodies and send their
   names (`items` may be `{"type": "string"}`), and `selection`, `target` and `targets` take edges,
-  faces and bodies as references. Any other array still leaves Run off.
+  faces and bodies as references. A list of options to tick (`items` a string `oneOf`, see
+  "Icons and pictures") is not a selection field. Any other array still leaves Run off.
 - **Picking.** The first selection field takes the viewport's picks when the dialog opens, and
   starts with what is selected that it takes. The other fields start empty, so one selection never
   fills two fields. Clicking a field makes it the one that picks; its clear button, its list of
@@ -994,6 +1080,30 @@ relative path to an `.svg` file inside the package:
   entry has the generic plugin icon. Importers use the same image checks and fallback as commands.
 - On a `oneOf` option it is that option's picture in the dropdown. Pictures show when every option
   of the choice names one that passed the check below; otherwise the dropdown shows the titles alone.
+- **Icon buttons.** `"x-solidcraft-choice": {"version": 1, "style": "buttons"}` on the choice
+  draws its options as a row of icon buttons instead of the dropdown. Each button's tooltip is the
+  option's title. The selected button has the dialog's accent fill, and its icon is drawn with the
+  lighter lines the app uses on a dark surface, so it follows the theme, the accent and the
+  colour-vision setting. The dialog draws the dropdown instead when an option has no picture that
+  passed the check, or when the row is wider than the dialog.
+- **Toggle buttons.** On an `array` with `uniqueItems: true` whose `items` is exactly
+  `{"type": "string", "oneOf": [...]}`, the same annotation draws one toggle button per option.
+  The value is the list of the selected consts, in the order of the options; `minItems` and
+  `maxItems` are the counts Run checks, and `default` is a list of consts. Without the annotation,
+  or when the buttons cannot be drawn, the list shows one checkbox per option. Options of such a
+  list take no `x-solidcraft-when`.
+
+  ```json
+  "sides": {"type": "array", "title": "Edge banding", "uniqueItems": true, "default": ["front"],
+    "x-solidcraft-choice": {"version": 1, "style": "buttons"},
+    "items": {"type": "string", "oneOf": [
+      {"const": "front", "title": "Front", "x-solidcraft-icon": "icons/front.svg"},
+      {"const": "back", "title": "Back", "x-solidcraft-icon": "icons/back.svg"}
+    ]}}
+  ```
+
+  The annotation changes only how the dialog draws the field. The manifest check refuses any other
+  `version` or `style`, and the annotation on a property that is not one of these two.
 - The image is drawn like the app's own icons, and must be one: SolidCraft's icon SVG subset
   (the check the built-in icons pass, see `crates/look/icons/design/tools/lint_icons.py`).
   `viewBox="0 0 64 64"`; absolute `M L C Q A Z` paths, circles, groups with a clip or opacity,

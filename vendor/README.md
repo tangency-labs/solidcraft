@@ -121,90 +121,39 @@ SolidCraft changes to egui and eframe:
   the handle each window, the main one and every pop-out, publishes its own bar for one window
   procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
 
+- `crates/egui/src/widgets/text_edit/{builder.rs,mod.rs}`, `crates/egui/src/widgets/mod.rs`,
+  `crates/egui/src/atomics/container_atom.rs`, `crates/egui/src/lib.rs`: a vertically centred
+  `TextEdit` lifts its single row of text so the middle of a capital's ink lands in the middle of
+  the field, not the middle of the font's row box (SolidCraft #23381). A row box is not where
+  capitals sit: the ascent exceeds the cap height and a descent hangs below the baseline, so
+  centring the row box puts the text low in the frame — 1.5 pt with egui's own font. The lift
+  comes from `cap_ink_rise`; it lays out one fixed probe glyph, so it follows the font, its size
+  and the pixels-per-point, and the baseline never moves while one types. `galley_cap_ink_rise`
+  applies it to a laid-out galley (zero for multi-row galleys, which centre as a block); both are
+  exported for SolidCraft's ui-kit to centre hand-drawn pills the same way. The atom layout
+  applies the lift to every [`AtomKind::Text`] atom whose cross-axis alignment is centred, so
+  `TextEdit`'s hint, prefix and suffix atoms share its lifted baseline and centred labels in
+  other atom containers read centred too. Only `Align::Center` rows are touched; top- and
+  bottom-aligned edits are unchanged. Tests: `crates/egui/tests/text_edit_centering.rs`.
+
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
 SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
 separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
-- `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu
-  request when the requested card is unavailable or incompatible with the window surface.
-- `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
-  exposing the effective sample count so host paint callbacks can match it.
-- `src/winit.rs`: use that same effective count for depth and resolve attachments.
-- `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
-  or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
-- Other backends retain requested MSAA, without another adapter or device probe.
-- `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
-  depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a
-  device without it failed pipeline validation, a panic at start.
-- `src/setup.rs`: the default device requests `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` when
-  the adapter has it, so 2x and 8x work where the adapter supports them (WebGPU only
-  guarantees 1x and 4x).
-- `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
-  instead of exactly 8192.
-- `src/setup.rs`: the default device never asks for a limit the adapter does not offer
-  (`or_worse_values_from(adapter.limits())`). Older drivers (Mesa 20.3 on Debian 11) report
-  fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
-  defaults refused the device, so no window opened. An adapter at or above the defaults gets
-  the same request as before.
-- `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
-  device and the window's surface up (instance, surface, adapter request, the chosen adapter,
-  device, renderer, surface configure, first present), so the app's crash journal can say which
-  step a crash inside the graphics driver happened in.
 - `src/lib.rs`, `src/winit.rs`: a window larger than the device's largest texture gets a surface
   clamped to it (`clamp_surface_extent`, aspect ratio kept) and egui is drawn at the matching
   smaller scale, instead of a `Surface::configure` validation panic (#869). The resize path and
   an unsupported surface no longer unwrap.
 - `src/winit.rs`: acquire a drawable before preparing paint callbacks, so a skipped
   surface frame cannot discard initialization commands for cached viewport meshes.
-- `src/lib.rs`, `src/winit.rs`: surfaces are configured under `capture_errors` (error scopes):
-  a configuration the device refuses (D3D12 "Failed to wait for GPU to come idle before
-  reconfiguring the Surface", #1935) is logged, the frame is skipped and the configure is tried
-  again, instead of the device's uncaptured-error handler panicking. A streak of refusals warns
-  once (debug after), waits 16 ms doubling up to 1 s between tries and recreates the surface
-  every `SURFACE_RECREATE_AFTER` refusals (`ConfigureRetry`). Each surface keeps the deadline of
-  its next try: until it is due, no configure or recreate happens, whether the repaint comes
-  from input, an animation, a resize (its size is kept for the retry) or an outdated surface,
-  and the frame is skipped with a repaint asked for when it is due. The streak and the deadline
-  survive a recreate; a configure the device takes ends the streak, a recreate it asked for
-  included. A recreate for a lost surface goes ahead as before.
-- `src/lib.rs`, `src/winit.rs`: a window other than the main one (an immediate viewport, drawn
-  and presented inside the main window's frame) is configured with Mailbox, else Immediate,
-  when the configured mode waits for vsync and the surface offers one (`viewport_present_mode`).
-  Waiting on both surfaces in one frame halved the frame rate, and on Wayland a window the
-  compositor wasn't showing stalled the main window behind its present.
-- `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
-  (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
-  submits a command buffer holding a debug marker (`DeviceLost::probe`), so a device the
-  driver lost is found by opening that command list rather than by the first queue write,
-  which panicked inside wgpu-core (`PendingWrites::activate`, #4172). An empty submission
-  only signalled a fence, which a reset D3D12 device let through (#6528).
-  A reset that lands after the probe is still met by a queue write or the present: the painter
-  runs the frame under `DeviceLost::survive`, which takes that panic for the loss once the probe
-  then finds the device lost, and lets any other panic carry on (#10240).
-- `src/lib.rs`, `src/winit.rs`: a surface configure that meets a lost device is not taken as
-  configured (`configure_captured`): wgpu reports device-loss errors to no error scope, and on
-  D3D12 a driver reset found by the configure has already dropped the surface's configuration.
-  The next acquire failed with "Surface is not configured for presentation" and the device's
-  default handler panicked (#7007). An unsupported surface is a refused configure too. The
-  acquire runs under `capture_errors`, and the `Validation` status it then returns reconfigures
-  the surface instead of skipping every later frame.
-- `src/lib.rs`, `src/winit.rs`: the painter holds an acquired frame as `AcquiredFrame`, which
-  destroys a second handle to the frame's texture once the frame is presented or dropped. On a
-  lost device wgpu's present and discard keep the frame's image in the surface, and dropping
-  the surface (the window closing for the restart) then panicked in wgpu-hal ("Trying to
-  destroy a SwapchainAcquireSemaphore that is still in use by a SurfaceTexture", #7148); the
-  destroy takes the image back whatever the device's state.
-- `src/lib.rs`: creation of the egui renderer uses validation, internal and out-of-memory
-  error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
-  `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
-  eframe so startup can retry another backend instead of invoking wgpu's panic handler.
-- `src/lib.rs`, `src/winit.rs`: `stalled_frames` counts the frames in a row whose texture took
-  at least `STALLED_ACQUIRE` (950 ms) to acquire. wgpu waits at most a second for the next
-  image and D3D12 then goes on as if it had come, so a hung GPU shows only as frames that each
-  wait that second; the app restarts on another renderer after a few of them (#3321). Only the
-  main window counts. `refused_for` says how long the main window has skipped its frames on a
-  refused configure, which never reach the acquire.
+- `src/renderer.rs`, `src/winit.rs`: `FrameCompositor`, an optional owner of a whole frame
+  (`Renderer::frame_compositor`, unset unless the blur behind panels is on, #8876), which
+  eframe's painter hands the frame to (`crates/ui-kit/src/blur_native.rs`). Our own runner's
+  painter (`crates/window-gpu`) has the same hook without a patch; this one goes when the app
+  runs there by default.
+- `src/renderer.rs`: `Callback::downcast_ref` (and `CallbackTrait: Any`), so tests can count the
+  kinds of paint callbacks a frame emitted (`crates/ui-egui/src/gpu.rs`).
 
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 

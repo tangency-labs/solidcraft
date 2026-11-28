@@ -1,0 +1,26 @@
+{
+  "en": {
+    "thread.form_custom": "Custom (diameter x pitch x angle)"
+  },
+  "ar": {
+    "thread.form_custom": "مخصص (القطر × الخطوة × الزاوية)"
+  },
+  "de": {
+    "thread.form_custom": "Benutzerdefiniert (Durchmesser x Steigung x Winkel)"
+  },
+  "he": {
+    "thread.form_custom": "מותאם אישית (קוטר × פסיעה × זווית)"
+  },
+  "ja": {
+    "thread.form_custom": "カスタム（径 × ピッチ × 角度）"
+  },
+  "ko": {
+    "thread.form_custom": "사용자 지정 (지름 × 피치 × 각도)"
+  },
+  "vi": {
+    "thread.form_custom": "Tùy chỉnh (đường kính × bước × góc)"
+  },
+  "zh": {
+    "thread.form_custom": "自定义（直径 × 螺距 × 角度）"
+  }
+}

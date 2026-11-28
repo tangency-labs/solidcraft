@@ -19,6 +19,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use super::profile::{cross2, Loop2, Seg2, MAX_SEGMENTS};
@@ -90,7 +91,7 @@ fn turned(ang: f64, sweep: f64) -> f64 {
 }
 
 fn angle_of(v: Vec2) -> f64 {
-    v.y.atan2(v.x)
+    det::atan2(v.y, v.x)
 }
 
 fn unit(v: Vec2) -> Option<Vec2> {

@@ -356,9 +356,9 @@ fn each_field_is_shown_empty_or_lost() {
 }
 
 /// A sheet's scale is the one its base views share, written as a view's scale is: a projected view's
-/// own scale and another sheet's are not it. Base views at different scales give none, whichever
+/// own scale and another sheet's are not it. Two base views at different scales give none, whichever
 /// was placed first and whichever id is lower. A sheet without a base view shows the one scale its
-/// views draw at (projected views of a base on another sheet), and none when they differ or it has
+/// views draw at (projected views of a base on another sheet), and none when two differ or it has
 /// no views.
 #[test]
 fn a_sheets_scale_is_the_one_its_base_views_share() {
@@ -421,6 +421,57 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
     let settings = ViewOverrides { scale: Some("2:1".parse().unwrap()), ..d.views[at].settings.clone() };
     d.views[at] = Arc::new(View { settings, ..(*d.views[at]).clone() });
     assert_eq!(scale(&d), ["1:2", "1:5", ""], "its views draw at 1:2 and 2:1: no scale of the sheet's");
+}
+
+/// A view at a scale of its own leaves the sheet's scale field its main scale (ISO 5455),
+/// the one most of its base views draw at, and the view's label gives its own. A sheet holding a
+/// 1:1 section and a 4:1 detail, their base view on another sheet, shows 1:1, not nothing: a detail
+/// enlarges its parent. A sheet of two 1:1 base views and a 4:1 one shows 1:1. The detail's label
+/// reads its 4:1, the section's no scale.
+#[test]
+fn a_view_at_a_scale_of_its_own_leaves_the_sheet_its_main_scale() {
+    use crate::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
+    use crate::drawing::view::DetailBoundary;
+    use solidcore_record::Vec2;
+    let mut d = drawing();
+    let scale = |d: &Drawing| [0, 1, 2].map(|at| shown(d, at, None, vec![field(Source::Sheet, "scale")]));
+    let mut ids = IdSource::seeded(763);
+    let source = d.allocate_id(&mut ids).unwrap();
+    d.sources.push(DrawingSource { id: source, path: None });
+    let [front, section, detail, top, side, enlarged] = [(); 6].map(|()| d.allocate_id(&mut ids).unwrap());
+    let (first, second, third) = (d.sheets[0].id, d.sheets[1].id, d.sheets[2].id);
+    let view = |id, sheet, kind, scale: Option<&str>| {
+        let settings = ViewOverrides { scale: scale.map(|s| s.parse().unwrap()), ..ViewOverrides::default() };
+        Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At([150.0, 150.0]),
+            settings,
+            reference_shown_percent: 0.0,
+            label: None,
+            centre_marks: None,
+        })
+    };
+    let base = |named| ViewKind::Base { source, view: ViewDirection::Named(named) };
+    let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 5.0), Vec2::new(30.0, 5.0)], ArrowSide::Right).unwrap();
+    let boundary = DetailBoundary::Circle { centre: [10.0, 5.0], radius: 3.0 };
+    d.add_views([
+        view(front, first, base(NamedView::Front), Some("1:1")),
+        view(section, second, ViewKind::Section { parent: front, line }, None),
+        view(detail, second, ViewKind::Detail { parent: front, boundary }, Some("4:1")),
+        view(top, third, base(NamedView::Top), Some("1:1")),
+        view(side, third, base(NamedView::Right), Some("1:1")),
+        view(enlarged, third, base(NamedView::Bottom), Some("4:1")),
+    ]);
+    for id in [section, detail] {
+        d.give_letter(id).unwrap();
+    }
+    d.validate().unwrap();
+    assert_eq!(scale(&d), ["1:1", "1:1", "1:1"], "the main scale of each sheet");
+    let label = |id| d.label_text(id).unwrap_or_default();
+    assert!(label(detail).ends_with("4:1"), "{}", label(detail));
+    assert!(!label(section).contains("1:1"), "{}", label(section));
 }
 
 /// A field its source doesn't have reads unknown, prints nothing, and says why: a note saved with

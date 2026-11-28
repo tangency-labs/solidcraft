@@ -64,6 +64,17 @@ impl Brep {
         core::check_scoped(self.core(), level, false, solidcore_ops::check::ValidityScope::Stitched)
     }
 
+    /// [`Brep::check`]'s tests of faces `faces` with their loops and of edges `edges` with the
+    /// vertices at their ends (indices in the body's face and edge orders), and none other: not
+    /// the pointer check, the tolerance pass or the tests of the body as a whole, its regions and
+    /// shells. For an edit of a body that passed [`Brep::check`], with `faces` the faces it changed
+    /// (and those beside an edge it changed) and `edges` the edges it changed, it is the whole
+    /// check's verdict on what the edit made, in the time those entities take; it proves nothing of
+    /// the rest. An index past the faces or edges is [`crate::Error::Argument`].
+    pub fn check_local(&self, faces: &[usize], edges: &[usize], level: CheckLevel) -> Result<CheckReport> {
+        core::check_local(self.core(), faces, edges, level)
+    }
+
     /// [`Brep::check`] of a body nobody else reads, which it takes: the token over this thread's
     /// work ([`crate::stop`]) stops it ([`crate::Error::Cancelled`]). A check left part way may
     /// leave the body's caches half-built, so it runs only on a body it consumes.
@@ -90,6 +101,21 @@ mod tests {
         assert!(matches!(owned, Err(crate::Error::Cancelled("check"))), "{owned:?}");
         let mine = b.try_clone().unwrap();
         assert!(mine.check_owned(CheckLevel::All).is_ok_and(|r| r.is_valid()), "no token, no stop");
+    }
+
+    /// The check of some faces and edges of a box passes at every level; an index past its faces
+    /// or edges is an argument error.
+    #[test]
+    fn a_local_check_of_a_box_passes() {
+        let b = Brep::make_box([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
+        for level in [CheckLevel::Basic, CheckLevel::Geometry, CheckLevel::All] {
+            for (faces, edges) in [(&[0][..], &[][..]), (&[1, 2], &[0, 5]), (&[0, 1, 2, 3, 4, 5], &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])] {
+                let r = b.check_local(faces, edges, level).unwrap();
+                assert!(r.is_valid(), "{faces:?} {edges:?}, {level:?}: {r}");
+            }
+        }
+        assert!(matches!(b.check_local(&[6], &[], CheckLevel::All), Err(crate::Error::Argument)));
+        assert!(matches!(b.check_local(&[], &[12], CheckLevel::All), Err(crate::Error::Argument)));
     }
 
     #[test]

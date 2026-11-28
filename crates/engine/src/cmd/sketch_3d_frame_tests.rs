@@ -2042,6 +2042,51 @@ fn a_3d_line_is_held_to_the_sketchs_2d_point_and_line() {
 }
 
 #[test]
+fn coincident_3d_accepts_model_picks_and_keeps_them_linked() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": "h"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let line = run(&mut s, "sketch.line3d", json!({"points": [[1, 1, 12], [30, 2, 15]]}))["curves"][0].as_str().unwrap().to_string();
+    let vertex = json!({"body": "Body1", "vertex": [0, 0, 10]});
+    let edge = json!({"body": "Body1", "edge": [20, 0, 10]});
+
+    // A curve-to-curve pick must refuse the edit, including the tentative model link.
+    let before = s.doc.to_json();
+    let error = s.execute("sketch.constraint.coincident", &json!({"a": edge, "b": line})).unwrap_err();
+    assert!(error.to_string().contains("give two points"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // A vertex is projected to the sketch plane, as for the planar Coincident command.
+    let result = run(&mut s, "sketch.constraint.coincident", json!({"a": vertex, "b": format!("{line}.start")}));
+    assert!(result["constraint"].is_string(), "{result}");
+    near(fit(&s, &line, 0), Vec3::new(0.0, 0.0, 0.0));
+
+    // The edge pick keeps its true height. The reverse operand order works too.
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": edge}));
+    let end = fit(&s, &line, 1);
+    near(end, Vec3::new(end.x, 0.0, 10.0));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "25 mm"}));
+    let end = solved_fit(&s, sketch, &line, 1);
+    near(end, Vec3::new(end.x, 0.0, 25.0));
+}
+
+#[test]
+fn coincident_3d_accepts_a_model_vertex_and_the_whole_3d_line() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    sketch_3d_on_xy(&mut s);
+    let line = run(&mut s, "sketch.line3d", json!({"points": [[1, 1, 12], [30, 2, 15]]}))["curves"][0].as_str().unwrap().to_string();
+    let result = run(&mut s, "sketch.constraint.coincident", json!({"a": {"body": "Body1", "vertex": [0, 0, 10]}, "b": line}));
+    assert!(result["constraint"].is_string(), "{result}");
+    let start = fit(&s, &line, 0);
+    let direction = fit(&s, &line, 1) - start;
+    assert!(direction.len() > 1.0);
+    assert!(start.cross(direction).len() / direction.len() < 1e-7, "{start:?}, {direction:?}");
+}
+
+#[test]
 fn a_3d_line_held_to_an_included_model_edge_follows_the_model() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));

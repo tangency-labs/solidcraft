@@ -734,6 +734,7 @@ pub fn unbounded3(a: Bounded3) -> Bernstein3 {
 mod tests {
     use super::*;
     use crate::geom::expansion;
+    use crate::math::det;
 
     fn poly(du: usize, dv: usize, f: impl Fn(usize, usize) -> f64) -> Bernstein2 {
         let mut c = Vec::new();
@@ -751,7 +752,7 @@ mod tests {
     fn product_derivative_split_and_elevation_agree_with_values() {
         let b = Binomials::new();
         let p = poly(2, 1, |i, j| (i as f64) * 1.5 - (j as f64) + 0.25);
-        let q = poly(1, 3, |i, j| ((i + 2 * j) as f64).sin());
+        let q = poly(1, 3, |i, j| det::sin((i + 2 * j) as f64));
         let pq = p.mul(&q, &b).unwrap();
         let e = p.elevate(4, 3, &b).unwrap();
         let du = pq.deriv_u();
@@ -825,7 +826,7 @@ mod tests {
     fn mixed(du: usize, dv: usize, seed: f64) -> Bernstein2 {
         poly(du, dv, |i, j| {
             let k = (i * (dv + 1) + j) as f64;
-            ((k + seed) * 0.7).sin() * 10f64.powi((i + 2 * j) as i32 % 5 - 2) + 1.0 / 3.0
+            det::sin((k + seed) * 0.7) * det::powi(10f64, (i + 2 * j) as i32 % 5 - 2) + 1.0 / 3.0
         })
     }
 
@@ -840,7 +841,7 @@ mod tests {
         if m > k {
             return 0.0;
         }
-        b.get(k, m) * 0.5f64.powi(k as i32)
+        b.get(k, m) * det::powi(0.5f64, k as i32)
     }
 
     /// The exact product of `fa` and `fb`, coefficient by coefficient (row by row): the
@@ -931,11 +932,11 @@ mod tests {
         }
         // `3 t` times `(1 + 2^-52) 2^1023` is `3 2^-51 + 3 2^-103` exactly, rounded by
         // `2^-103`, while `gamma * 3 t` alone underflows to 0
-        let (a, b) = (3.0 * t, (1.0 + f64::EPSILON) * 2f64.powi(1023));
+        let (a, b) = (3.0 * t, (1.0 + f64::EPSILON) * det::powi(2f64, 1023));
         let p = Bounded::exact(Bernstein2::constant(a))
             .mul(&Bounded::exact(Bernstein2::constant(b)), &Binomials::new())
             .unwrap();
-        let exact = [3.0 * 2f64.powi(-103), 3.0 * 2f64.powi(-51)];
+        let exact = [3.0 * det::powi(2f64, -103), 3.0 * det::powi(2f64, -51)];
         let c = p.f.coefficients()[0];
         assert!(!within(c, &exact, 1.0, 0.0));
         assert!(within(c, &exact, 1.0, p.err), "{}", p.err);

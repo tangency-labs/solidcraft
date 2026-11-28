@@ -398,6 +398,29 @@ fn pinned() -> BTreeMap<String, BTreeSet<String>> {
                 "fillets/2903-original-rim-round.json:b0",
             ],
         ),
+        // the same for a torus the flat hop found from its form (#23062): its frame 2.4e-10 off
+        // the form, so the face goes as the form alone
+        (
+            label("torus -> rational_spline", &["major_radius", "minor_radius"]),
+            &["booleans/23062-notch-through-thin-round-on-large-half-torus.json:b15"],
+        ),
+        // that torus, and the circle edge labelled on it (its centre and radius 1.9e-11 off the
+        // form's exact circle), going as their forms alone
+        (
+            {
+                let mut c = label("torus -> rational_spline", &["major_radius", "minor_radius"]);
+                c.extend(set(&[
+                    ".edges[*].curve.frame",
+                    ".edges[*].curve.homogeneous",
+                    ".edges[*].curve.kind: circle -> rational_spline",
+                    ".edges[*].curve.knots",
+                    ".edges[*].curve.radius",
+                    ".edges[*].nurbs",
+                ]));
+                c
+            },
+            &["booleans/23062-notch-through-thin-round-on-large-half-torus.json:b8"],
+        ),
         // an extruded circle the flat hop left a spline, proved a cylinder
         (
             label("rational_spline -> cylinder", &["radius"]),
@@ -574,7 +597,7 @@ fn parity(stride: usize) {
         // differs is pinned above, and the rest must be identical or within rounding.
         assert_eq!(
             (t.bodies - t.identical - t.rounding_only, t.rounding_only),
-            (pinned.len(), 37), // 37 with fillets/15437's block (within rounding)
+            (pinned.len(), 38), // 37 with fillets/15437's block; 38 with the drafted peg re-exported for #22151 (report-drafted-peg-front-and-concave-rounds-together-r2), both within rounding
             "bodies that differ, bodies within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)

@@ -3811,6 +3811,7 @@ mod tests {
     use crate::geom::attribute::ObjectKey;
     use crate::geom::object::ObjectRef;
     use crate::kernel::KernelOptions;
+    use crate::math::det;
     use crate::surface::plane::Plane;
     use crate::topology::{Face, Faceuse, Loopuse, ShellId};
 
@@ -4518,12 +4519,12 @@ mod tests {
             panic!("UV trim curve is not a B-spline");
         };
         let d = c.evaluate(t, 2, from_left, false).unwrap();
-        (d[1].x * d[2].y - d[1].y * d[2].x).abs() / d[1].length().powi(3)
+        (d[1].x * d[2].y - d[1].y * d[2].x).abs() / det::powi(d[1].length(), 3)
     }
 
     /// The angle from `a` to `b`, both in the UV plane.
     fn turn(a: Vec3, b: Vec3) -> f64 {
-        (a.x * b.y - a.y * b.x).atan2(a.dot(b)).abs()
+        det::atan2(a.x * b.y - a.y * b.x, a.dot(b)).abs()
     }
 
     /// #14257: an end 1e-4 beside its vertex, at end control legs of 4e-5. Upstream's move
@@ -4555,7 +4556,10 @@ mod tests {
         // every leg before the stop turns by atan(g / d_j): 0.36 degrees
         for i in 0..4 {
             let angle = turn(p0[i + 1] - p0[i], p1[i + 1] - p1[i]);
-            assert!((angle - (g / d_j).atan()).abs() < 1e-9, "leg {i}: {angle}");
+            assert!(
+                (angle - det::atan(g / d_j)).abs() < 1e-9,
+                "leg {i}: {angle}"
+            );
         }
         // tangent-continuous at the triple knot
         let (into, out) = (p1[3] - p1[2], p1[4] - p1[3]);

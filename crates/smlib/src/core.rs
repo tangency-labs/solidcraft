@@ -7,10 +7,8 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, PoisonError};
 
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
-use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
 
 use crate::{Error, Result};
@@ -57,8 +55,8 @@ mod trim_tests;
 pub(crate) use convert::from_arrays;
 pub(crate) use convert::{from_arrays_with_shell_order, to_arrays, to_arrays_sampled_trims};
 pub(crate) use measure::{
-    area, bounds, check, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance, is_manifold_solid,
-    mass_properties, solid_count,
+    area, bounds, check, check_local, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance,
+    is_manifold_solid, mass_properties, solid_count,
 };
 
 /// A solidcore body: solidcore-ops' own, with its own lock (solidcore's operations take
@@ -412,20 +410,17 @@ pub(crate) fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64)
     run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::from_kernel)
 }
 
-/// The enclosed volume (`SmApiBrepComputeVolume`), its accuracy clamped as [`mass_properties`]
-/// clamps it.
+/// The enclosed volume (`SmApiBrepComputeVolume`, [`Body::volume`]), its accuracy clamped as
+/// [`mass_properties`] clamps it.
 pub(crate) fn volume(body: &Body, relative_accuracy: f64) -> Result<f64> {
     let relative_accuracy = measure::accuracy(relative_accuracy)?;
-    with_body("brep_volume", body, |k, b| {
-        let store = AttributeStore::default();
-        let attrs = PropertyAttributes { store: &store, key_of: &|_| ObjectKey(0) };
-        brep_volume(k, b, relative_accuracy, &attrs)
-    })
+    // A read on a body itself is not stopped by a cancelled token (as before with `with_body`).
+    crate::stop::unstoppable(|| call::ops_on("brep_volume", &[("brep", body)], || body.volume(relative_accuracy)))
 }
 
-/// Face, edge and vertex counts.
+/// Face, edge and vertex counts ([`Body::counts`]).
 pub(crate) fn counts(body: &Body) -> Result<[usize; 3]> {
-    with_body("counts", body, |_, b| Ok([b.face_list().len(), b.edge_list().len(), b.vertex_list().len()]))
+    crate::stop::unstoppable(|| call::ops_on("counts", &[("brep", body)], || body.counts()))
 }
 
 #[cfg(test)]

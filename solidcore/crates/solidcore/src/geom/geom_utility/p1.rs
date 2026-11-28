@@ -121,6 +121,7 @@ use crate::geom::polynomial::{solve_quadratic, Roots};
 use crate::geom::tol::{are_same_to_tol, is_zero, within_contact_tol};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
+use crate::math::det;
 use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
@@ -335,7 +336,7 @@ pub fn parallelogram_cross_vectors(
     let base = base.unitize()?;
     let side = side.unitize()?;
     let angle = base.angle_between(side)?;
-    let sine_angle = angle.sin();
+    let sine_angle = det::sin(angle);
     let leng_side = distance_top_to_bottom / sine_angle;
     let leng_bot = distance_between_sides / sine_angle;
     let low_left_to_up_right = base * leng_bot + side * leng_side;
@@ -1991,8 +1992,8 @@ mod tests {
     /// The point of the tilted ellipse at angle `u` and its unit tangent there.
     fn ellipse_at(u: f64) -> (Point3, Vec3) {
         let (c, x, y, [a, b]) = tilted_ellipse();
-        let p = c + a * u.cos() * x + b * u.sin() * y;
-        let t = (-a * u.sin() * x + b * u.cos() * y).unitize_or_z();
+        let p = c + a * det::cos(u) * x + b * det::sin(u) * y;
+        let t = (-a * det::sin(u) * x + b * det::cos(u) * y).unitize_or_z();
         (p, t)
     }
 
@@ -2997,7 +2998,7 @@ mod tests {
         let best = squared_residual(&rect, line.line_vec);
         for i in 0..360 {
             let a = f64::from(i).to_radians();
-            let dir = v(a.cos(), a.sin(), 0.0);
+            let dir = v(det::cos(a), det::sin(a), 0.0);
             assert!(best <= squared_residual(&rect, dir) + 1e-9);
         }
         assert!(best < squared_residual(&rect, Vec3::Y));

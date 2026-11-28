@@ -13,6 +13,7 @@ use crate::{Result, SolidError};
 mod collision;
 mod quadric;
 mod topology;
+pub(crate) mod volume;
 
 use collision::Bounds;
 use quadric::Quadric;
@@ -28,8 +29,12 @@ pub struct ReducedMesh {
     pub corner_normals: Option<Vec<[f64; 3]>>,
     /// Input triangle count.
     pub original_triangles: usize,
+    /// Redundant indexed facets removed before simplification, excluding edge collapses.
+    pub removed_duplicate_triangles: usize,
     /// Output triangle count, possibly greater than the target.
     pub reduced_triangles: usize,
+    /// Nonempty topology whose edges all have two opposite uses; winding is preserved.
+    pub closed: bool,
 }
 
 const OPERATION: &str = "mesh.reduce";
@@ -591,13 +596,15 @@ fn queue_vertex(
 /// Reduce a persistent mesh with topology, crease, seam and crossing guards.
 ///
 /// `corner_normals`, when supplied, has exactly one finite vector per index.
-/// The target is a lower limit: a collapse that would pass it is not performed.
+/// After exact repeated facets are removed, the target is a lower limit for edge
+/// collapses: a collapse that would pass it is not performed.
 /// The result can contain more triangles than requested, including the unchanged
 /// input, when the conservative restrictions prevent further collapses.
 ///
 /// # Errors
 /// Returns an error for malformed indices, non-finite data, degenerate triangles,
-/// duplicate faces, or edges shared by more than two faces or with inconsistent winding.
+/// oppositely wound or attribute-conflicting duplicate faces, or edges shared by more
+/// than two distinct faces or with inconsistent winding. Exact redundant facets are removed.
 pub fn reduce_mesh(
     positions: &[[f64; 3]],
     indices: &[u32],
@@ -640,15 +647,27 @@ pub fn reduce_mesh_with_cancel(
     }
     let original_triangles = indices.len() / 3;
     check_cancel(&mut cancel)?;
-    let protected =
-        topology::validate_with_cancel(indices, positions, corner_normals, &mut cancel)?;
+    let topology::PreparedTopology {
+        protected,
+        retained,
+        triangles,
+        closed,
+    } = topology::validate_with_cancel(indices, positions, corner_normals, &mut cancel)?;
     check_cancel(&mut cancel)?;
     let origin = positions.first().copied().unwrap_or([0.; 3]);
     let mut quadrics = filled(positions.len(), Quadric::default())?;
-    let mut faces = buffer(original_triangles)?;
+    let mut faces = buffer(triangles)?;
     let mut incident = filled(positions.len(), Vec::<usize>::new())?;
-    for (id, tri) in indices.chunks_exact(3).enumerate() {
-        check_stride(id, &mut cancel)?;
+    for (original, tri) in indices.chunks_exact(3).enumerate() {
+        check_stride(original, &mut cancel)?;
+        if !retained
+            .get(original)
+            .copied()
+            .ok_or_else(|| invariant("invalid retained face"))?
+        {
+            continue;
+        }
+        let id = faces.len();
         let [a, b, c] = tri else {
             return Err(invalid("invalid triangle"));
         };
@@ -692,9 +711,16 @@ pub fn reduce_mesh_with_cancel(
     )?;
     check_cancel(&mut cancel)?;
     let normals = if let Some(normals) = corner_normals {
-        let mut grouped = buffer(original_triangles)?;
+        let mut grouped = buffer(triangles)?;
         for (id, triangle) in normals.chunks_exact(3).enumerate() {
             check_stride(id, &mut cancel)?;
+            if !retained
+                .get(id)
+                .copied()
+                .ok_or_else(|| invariant("invalid retained normal"))?
+            {
+                continue;
+            }
             let &[a, b, c] = triangle else {
                 return Err(invalid("invalid corner normals"));
             };
@@ -710,9 +736,10 @@ pub fn reduce_mesh_with_cancel(
         normals,
         incident,
         bvh,
-        clear: filled(original_triangles, false)?,
+        clear: filled(triangles, false)?,
     };
-    let mut remaining = original_triangles;
+    drop(retained);
+    let mut remaining = triangles;
     let mut pending = Work::new();
     pending
         .try_reserve_exact(positions.len())
@@ -933,8 +960,94 @@ pub fn reduce_mesh_with_cancel(
         indices: out_indices,
         corner_normals: out_normals,
         original_triangles,
+        removed_duplicate_triangles: original_triangles
+            .checked_sub(triangles)
+            .ok_or_else(|| invariant("normalized triangle count exceeds input"))?,
         reduced_triangles: remaining,
+        closed,
     })
+}
+
+/// Reduce while restoring the global outward-winding convention after exact
+/// duplicate cleanup repairs a closed topology.
+/// Ordinary reduction itself preserves the first retained winding. Inputs with no
+/// removed duplicates retain their previous path and are not subjected to a new
+/// volume test. Open normalized meshes retain their winding too.
+///
+/// # Errors
+/// The errors from reduction, cancellation, or an uncertified nonzero volume sign
+/// for a newly normalized closed duplicate mesh.
+pub fn reduce_mesh_normalized_outward_with_cancel(
+    positions: &[[f64; 3]],
+    indices: &[u32],
+    corner_normals: Option<&[[f64; 3]]>,
+    target_triangles: usize,
+    mut cancel: impl FnMut() -> bool,
+) -> Result<ReducedMesh> {
+    let mesh = reduce_mesh_with_cancel(
+        positions,
+        indices,
+        corner_normals,
+        target_triangles,
+        &mut cancel,
+    )?;
+    finalize_repaired_closed_mesh(mesh, &mut cancel)
+}
+
+fn finalize_repaired_closed_mesh(
+    mut mesh: ReducedMesh,
+    cancel: &mut impl FnMut() -> bool,
+) -> Result<ReducedMesh> {
+    if mesh.removed_duplicate_triangles == 0 || !mesh.closed {
+        return Ok(mesh);
+    }
+    check_cancel(cancel)?;
+    let origin = mesh
+        .positions
+        .first()
+        .copied()
+        .map_or(crate::math::Vec3::ZERO, crate::math::Vec3::from);
+    let mut volume = volume::Volume::certified(origin);
+    for (id, triangle) in mesh.indices.chunks_exact(3).enumerate() {
+        check_stride(id, cancel)?;
+        let [a, b, c] = triangle else {
+            return Err(invariant("invalid compact triangle"));
+        };
+        let point = |i: u32| {
+            mesh.positions
+                .get(i as usize)
+                .copied()
+                .map(crate::math::Vec3::from)
+                .ok_or_else(|| invariant("invalid compact vertex"))
+        };
+        volume.add([point(*a)?, point(*b)?, point(*c)?]);
+    }
+    let sign = volume.sign().ok_or_else(|| {
+        SolidError::mass(
+            OPERATION,
+            crate::error::mass::MassFailure::MeshVolumeSignUncertain,
+        )
+    })?;
+    if sign == core::cmp::Ordering::Less {
+        for (id, triangle) in mesh.indices.chunks_exact_mut(3).enumerate() {
+            check_stride(id, cancel)?;
+            let [_, b, c] = triangle else {
+                return Err(invariant("invalid compact triangle"));
+            };
+            std::mem::swap(b, c);
+        }
+        if let Some(normals) = &mut mesh.corner_normals {
+            for (id, triangle) in normals.chunks_exact_mut(3).enumerate() {
+                check_stride(id, cancel)?;
+                let [_, b, c] = triangle else {
+                    return Err(invariant("invalid compact normals"));
+                };
+                std::mem::swap(b, c);
+            }
+        }
+    }
+    check_cancel(cancel)?;
+    Ok(mesh)
 }
 
 #[cfg(test)]
@@ -1134,5 +1247,370 @@ mod tests {
         let mut bad = positions;
         bad[0][0] = f64::NAN;
         assert!(reduce_mesh(&bad, &indices, None, 0).is_err());
+    }
+
+    #[test]
+    fn a_repeated_cube_facet_is_removed_before_topology_and_crease_checks() {
+        let positions = [
+            [0., 0., 0.],
+            [0., 50., 0.],
+            [50., 50., 0.],
+            [50., 0., 0.],
+            [0., 0., 50.],
+            [50., 0., 50.],
+            [50., 50., 50.],
+            [0., 50., 50.],
+        ];
+        // Six outward square faces, each triangulated once. All corners lie on a sharp crease.
+        let unique = [
+            0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 0, 3, 5, 0, 5, 4, 1, 7, 6, 1, 6, 2, 0, 4, 7, 0, 7,
+            1, 3, 2, 6, 3, 6, 5,
+        ];
+        let mut duplicated = unique.to_vec();
+        duplicated.extend([3, 6, 5]);
+        let reduced = reduce_mesh(&positions, &duplicated, None, 6).unwrap();
+        assert_eq!(reduced.original_triangles, 13);
+        assert_eq!(reduced.reduced_triangles, 12);
+        assert_eq!(reduced.positions, positions);
+        assert_eq!(reduced.indices, unique);
+        assert_eq!(reduced.corner_normals, None);
+    }
+
+    #[test]
+    fn cyclic_duplicate_facets_keep_the_first_winding_and_vertex_associated_normals() {
+        let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.]];
+        let indices = [2, 0, 1, 0, 1, 2, 1, 2, 0];
+        let vertex_normals = [[0., 0., 1.], [1., 0., 1.], [0., 1., 1.]];
+        let normals = indices.map(|vertex| vertex_normals[vertex as usize]);
+        let reduced = reduce_mesh(&positions, &indices, Some(&normals), 3).unwrap();
+        assert_eq!(reduced.original_triangles, 3);
+        assert_eq!(reduced.reduced_triangles, 1);
+        assert_eq!(reduced.positions, positions);
+        assert_eq!(reduced.indices, [2, 0, 1]);
+        assert_eq!(reduced.corner_normals, Some(normals[..3].to_vec()));
+    }
+
+    #[test]
+    fn duplicate_normalization_feeds_the_same_reduction_as_the_unique_mesh() {
+        let (positions, unique) = grid(2);
+        let mut duplicated = unique.clone();
+        duplicated.extend_from_slice(&unique[..3]);
+        let expected = reduce_mesh(&positions, &unique, None, 4).unwrap();
+        assert!(
+            expected.reduced_triangles < expected.original_triangles,
+            "the clean fixture must actually reduce"
+        );
+        let actual = reduce_mesh(&positions, &duplicated, None, 4).unwrap();
+        assert_eq!(actual.original_triangles, 9);
+        assert_eq!(expected.original_triangles, 8);
+        assert_eq!(actual.reduced_triangles, expected.reduced_triangles);
+        assert_eq!(actual.positions, expected.positions);
+        assert_eq!(actual.indices, expected.indices);
+        assert_eq!(actual.corner_normals, expected.corner_normals);
+        assert_eq!(area(&actual.positions, &actual.indices), 4.);
+    }
+
+    #[test]
+    fn duplicate_facets_with_conflicting_corner_normals_are_refused() {
+        let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.]];
+        let indices = [0, 1, 2, 1, 2, 0];
+        let mut normals = [[0., 0., 1.]; 6];
+        normals[3] = [1., 0., 1.];
+        let error = reduce_mesh(&positions, &indices, Some(&normals), 1).unwrap_err();
+        assert!(error.to_string().contains("conflicting corner normals"));
+    }
+
+    #[test]
+    fn equal_positions_with_distinct_indices_are_not_welded_by_reduction() {
+        let positions = [
+            [0., 0., 0.],
+            [2., 0., 0.],
+            [0., 2., 0.],
+            [0., 0., 0.],
+            [2., 0., 0.],
+            [0., 2., 0.],
+        ];
+        let indices = [0, 1, 2, 3, 4, 5];
+        let result = reduce_mesh(&positions, &indices, None, 1).unwrap();
+        assert_eq!(result.positions, positions);
+        assert_eq!(result.indices, indices);
+        assert_eq!(result.reduced_triangles, 2);
+        assert!(!result.closed);
+    }
+
+    #[test]
+    fn normalized_closedness_does_not_reverse_the_retained_input_winding() {
+        let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0., 0., 2.]];
+        // An inward tetrahedron: the slanted face is [1,3,2], not outward [1,2,3].
+        let unique = [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2];
+        let mut indices = unique.to_vec();
+        indices.extend([1, 3, 2]);
+        let result = reduce_mesh(&positions, &indices, None, 1).unwrap();
+        assert_eq!(result.original_triangles, 5);
+        assert_eq!(result.reduced_triangles, 4);
+        assert!(result.closed, "each tetrahedron edge has two opposite uses");
+        assert_eq!(
+            result.indices, unique,
+            "closedness does not claim outward orientation"
+        );
+        assert_eq!(result.positions, positions);
+    }
+
+    #[test]
+    fn interleaved_duplicate_facets_keep_later_unique_corner_normal_blocks() {
+        let positions = [
+            [0., 0., 0.],
+            [2., 0., 0.],
+            [0., 2., 0.],
+            [5., 0., 0.],
+            [7., 0., 0.],
+            [5., 2., 0.],
+        ];
+        let indices = [0, 1, 2, 1, 2, 0, 3, 4, 5];
+        let per_vertex = [
+            [0., 0., 1.],
+            [1., 0., 1.],
+            [0., 1., 1.],
+            [0., 0., 2.],
+            [1., 0., 2.],
+            [0., 1., 2.],
+        ];
+        let normals = indices.map(|i| per_vertex[i as usize]);
+        let result = reduce_mesh(&positions, &indices, Some(&normals), 3).unwrap();
+        assert_eq!(result.original_triangles, 3);
+        assert_eq!(result.removed_duplicate_triangles, 1);
+        assert_eq!(result.reduced_triangles, 2);
+        assert_eq!(result.positions, positions);
+        assert_eq!(result.indices, [0, 1, 2, 3, 4, 5]);
+        assert_eq!(
+            result.corner_normals,
+            Some([&normals[..3], &normals[6..]].concat())
+        );
+        assert!(!result.closed);
+    }
+
+    #[test]
+    fn mesh_body_workflow_restores_outward_duplicate_winding_and_corner_associations() {
+        let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0., 0., 2.]];
+        let outward = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3];
+        let per_vertex = [[0., 0., 1.], [1., 0., 1.], [0., 1., 1.], [1., 1., 1.]];
+        for reverse in [false, true] {
+            let mut indices = outward.to_vec();
+            if reverse {
+                for triangle in indices.chunks_exact_mut(3) {
+                    triangle.swap(1, 2);
+                }
+            }
+            indices.extend_from_within(..3);
+            let normals: Vec<_> = indices.iter().map(|&i| per_vertex[i as usize]).collect();
+            let result = reduce_mesh_normalized_outward_with_cancel(
+                &positions,
+                &indices,
+                Some(&normals),
+                1,
+                || false,
+            )
+            .unwrap();
+            assert_eq!(result.indices, outward);
+            assert_eq!(result.removed_duplicate_triangles, 1);
+            assert_eq!(
+                result.corner_normals,
+                Some(outward.map(|i| per_vertex[i as usize]).to_vec())
+            );
+            assert!(result.closed);
+        }
+    }
+
+    #[test]
+    fn mesh_body_workflow_leaves_no_duplicate_inward_mesh_unchanged() {
+        let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0., 0., 2.]];
+        let inward = [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2];
+        let expected = reduce_mesh(&positions, &inward, None, 1).unwrap();
+        let actual =
+            reduce_mesh_normalized_outward_with_cancel(&positions, &inward, None, 1, || false)
+                .unwrap();
+        assert_eq!(expected, actual);
+        assert_eq!(actual.indices, inward);
+        assert_eq!(actual.removed_duplicate_triangles, 0);
+    }
+
+    #[test]
+    fn repaired_closed_orientation_checks_cancellation_during_volume_and_flip() {
+        let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0., 0., 2.]];
+        let indices = [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2, 0, 1, 2];
+        let normals = [[0., 0., 1.]; 15];
+        let prepared = reduce_mesh(&positions, &indices, Some(&normals), 1).unwrap();
+        let mut calls = 0;
+        finalize_repaired_closed_mesh(prepared.clone(), &mut || {
+            calls += 1;
+            false
+        })
+        .unwrap();
+        assert!(
+            calls >= 5,
+            "entry, volume, indices, normals and exit are cancellable"
+        );
+        for stop in 1..=calls {
+            let mut checks = 0;
+            let error = finalize_repaired_closed_mesh(prepared.clone(), &mut || {
+                checks += 1;
+                checks == stop
+            })
+            .unwrap_err();
+            assert!(error.is_cancelled());
+            assert_eq!(checks, stop);
+        }
+    }
+
+    #[test]
+    fn repaired_closed_mesh_with_uncertified_zero_volume_has_a_typed_reason() {
+        let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0.5, 0.5, 0.]];
+        let indices = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3, 0, 2, 1];
+        let mesh = reduce_mesh(&positions, &indices, None, 4).unwrap();
+        assert!(mesh.closed);
+        let error = finalize_repaired_closed_mesh(mesh, &mut || false).unwrap_err();
+        assert_eq!(
+            error.mass_failure(),
+            Some(&crate::error::mass::MassFailure::MeshVolumeSignUncertain)
+        );
+    }
+
+    #[test]
+    fn shared_volume_keeps_rounded_arithmetic_and_refuses_overflow_sign() {
+        let a = crate::math::Vec3::new(0., 0., 0.);
+        let b = crate::math::Vec3::new(2., 0., 0.);
+        let c = crate::math::Vec3::new(0., 2., 0.);
+        let d = crate::math::Vec3::new(0., 0., 2.);
+        let mut volume = volume::Volume::new(a);
+        volume.add([b, c, d]);
+        assert_eq!(volume.value(), 4. / 3.);
+        let mut overflow = volume::Volume::certified(a);
+        let huge = f64::MAX;
+        overflow.add([
+            crate::math::Vec3::new(huge, 0., 0.),
+            crate::math::Vec3::new(0., huge, 0.),
+            crate::math::Vec3::new(0., 0., huge),
+        ]);
+        assert_eq!(overflow.sign(), None);
+    }
+
+    #[test]
+    fn repaired_closed_orientation_cancels_inside_each_large_output_pass() {
+        let unit = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0., 0., 2.]];
+        let inward = [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2];
+        let mut positions = Vec::new();
+        let mut indices = Vec::new();
+        for copy in 0..1500_u32 {
+            positions.extend(unit.map(|[x, y, z]| [x + 4. * f64::from(copy), y, z]));
+            indices.extend(inward.map(|i| i + copy * 4));
+        }
+        let mesh = ReducedMesh {
+            positions,
+            corner_normals: Some(vec![[0., 0., 1.]; indices.len()]),
+            indices,
+            original_triangles: 6001,
+            removed_duplicate_triangles: 1,
+            reduced_triangles: 6000,
+            closed: true,
+        };
+        // Entry then the volume pass checks 0 and 4096, then each permutation pass.
+        // These three stops are inside the long volume, index and corner-normal passes.
+        for stop in [3, 5, 7] {
+            let mut calls = 0;
+            let error = finalize_repaired_closed_mesh(mesh.clone(), &mut || {
+                calls += 1;
+                calls == stop
+            })
+            .unwrap_err();
+            assert!(error.is_cancelled());
+            assert_eq!(calls, stop);
+        }
+    }
+
+    #[test]
+    fn shared_volume_is_translation_stable_and_certifies_each_winding() {
+        use crate::math::Vec3;
+        for shift in [0., 2_f64.powi(40)] {
+            let origin = Vec3::new(shift, shift, shift);
+            let points = [
+                Vec3::new(shift + 2., shift, shift),
+                Vec3::new(shift, shift + 2., shift),
+                Vec3::new(shift, shift, shift + 2.),
+            ];
+            for reverse in [false, true] {
+                let mut facet = points;
+                if reverse {
+                    facet.swap(1, 2);
+                }
+                let mut volume = volume::Volume::certified(origin);
+                volume.add(facet);
+                let expected: f64 = if reverse { -4. / 3. } else { 4. / 3. };
+                assert_eq!(volume.value().to_bits(), expected.to_bits());
+                assert_eq!(
+                    volume.sign(),
+                    Some(if reverse {
+                        core::cmp::Ordering::Less
+                    } else {
+                        core::cmp::Ordering::Greater
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shared_volume_does_not_certify_a_nonzero_rounding_scale_cancellation() {
+        use crate::math::Vec3;
+        let a = Vec3::new(1.25, 0., 0.);
+        let b = Vec3::new(0., 1.25, 0.);
+        let c = Vec3::new(0., 0., 1.25);
+        let larger_c = Vec3::new(0., 0., crate::geom::certified::next_up(1.25));
+        let mut volume = volume::Volume::certified(Vec3::ZERO);
+        volume.add([a, b, c]);
+        volume.add([a, larger_c, b]);
+        assert_ne!(
+            volume.value(),
+            0.,
+            "the rounded sum alone has a nonzero sign"
+        );
+        assert_eq!(
+            volume.sign(),
+            None,
+            "one-ULP imbalance is below this enclosure's proof"
+        );
+    }
+
+    #[test]
+    fn shared_volume_retains_legacy_bits_on_asymmetric_decimal_facets() {
+        use crate::math::Vec3;
+        let origin = Vec3::new(0.1, -0.7, 3.3);
+        let facets = [
+            [
+                Vec3::new(1.1, 2.7, -3.2),
+                Vec3::new(4.5, -0.2, 0.1),
+                Vec3::new(-2.8, 1.3, 8.9),
+            ],
+            [
+                Vec3::new(0.9, -7.1, 2.3),
+                Vec3::new(-4.2, 3.5, 1.7),
+                Vec3::new(2.1, 0.4, -0.8),
+            ],
+            [
+                Vec3::new(11.7, 4.2, 0.9),
+                Vec3::new(-0.3, 0.7, 1.9),
+                Vec3::new(3.8, -2.1, 0.6),
+            ],
+        ];
+        let mut old_six = 0.;
+        let mut plain = volume::Volume::new(origin);
+        let mut certified = volume::Volume::certified(origin);
+        for [a, b, c] in facets {
+            old_six += (a - origin).dot((b - origin).cross(c - origin));
+            plain.add([a, b, c]);
+            certified.add([a, b, c]);
+        }
+        let old_volume: f64 = old_six / 6.;
+        assert_eq!(plain.value().to_bits(), old_volume.to_bits());
+        assert_eq!(certified.value().to_bits(), old_volume.to_bits());
     }
 }

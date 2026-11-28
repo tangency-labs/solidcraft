@@ -81,6 +81,22 @@ pub enum Event {
         /// The tool call's kind, as the agent gives it.
         kind: Option<String>,
         options: Vec<PermissionOption>,
+        /// The path it would read, when it is one of Claude Code's own read tools
+        /// ([`super::acp::read_path`]).
+        reads: Option<std::path::PathBuf>,
+        /// The file it would write, when it is one of Claude Code's own write tools
+        /// ([`super::acp::write_path`]).
+        writes: Option<std::path::PathBuf>,
+        /// The plan it asks the user to approve ([`super::acp::plan_text`]).
+        plan: Option<String>,
+        /// Which of Claude Code's own tools it asks about, when the Claude adapter says
+        /// ([`super::acp::ClaudeCalls`]), whatever command started it.
+        claude_tool: Option<String>,
+    },
+    /// One of Claude Code's read or write tools completed without asking first, which its session's ask
+    /// rule forbids ([`super::acp::ClaudeCalls`]): the panel stops the message and says so.
+    Unasked {
+        tool: String,
     },
     /// It needs the user to sign in; `methods` are its own ways to do so.
     AuthRequired {
@@ -162,10 +178,18 @@ pub trait ChatBackend {
     fn set_request_timeout(&mut self, _secs: u64) {}
     /// An endpoint's new reasoning effort (empty: send nothing), from the next request on.
     fn set_reasoning_effort(&mut self, _effort: &str) {}
+    /// The endpoint's requested service tier, starting on the next turn.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_service_tier(&mut self, _tier: super::agents::ServiceTier) {}
     fn set_config_option(&mut self, _id: &str, _value: &str) {}
     /// Its process, for status and tests.
     fn pid(&self) -> Option<u32> {
         None
+    }
+    /// It is Claude Code's adapter, as its command said when it started (its read tools are on
+    /// only then, [`super::acp::CLAUDE_ASK_TOOLS`]).
+    fn claude_code(&self) -> bool {
+        false
     }
     /// End it and everything it started. `wait`: block until done (quitting).
     fn shutdown(&mut self, wait: bool);

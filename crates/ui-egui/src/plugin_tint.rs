@@ -107,7 +107,7 @@ pub(crate) fn begin(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(rs) = app.plugin_tint.render.clone() else { return };
-    if rs.device_lost.is_lost() {
+    if solidcraft_viewport_egui::window_device(&rs).lost.is_lost() {
         // The tint may be why the driver gave up: off until it is chosen again.
         app.preferences.tint_shader.clear();
         fail(app, &key, "graphics device lost");
