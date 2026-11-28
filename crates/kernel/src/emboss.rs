@@ -174,6 +174,18 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
         if face >= rec.faces.len() {
             return Err(refuse("selected face"));
         }
+        // Profiles that share an edge are one profile (a cut or a join of touching prisms would
+        // meet along coincident faces).
+        let tol = (body.size() * 1e-7).max(1e-7);
+        let numbered: Vec<NumberedRegion> = crate::numbered::number_regions(regions).iter().map(NumberedRegion::oriented).collect();
+        let (joined, touched) = join_touching(numbered, tol)?;
+        let merged: Vec<Region2>;
+        let regions = if touched {
+            merged = joined.iter().map(NumberedRegion::region).collect();
+            merged.as_slice()
+        } else {
+            regions
+        };
         let d = depth.abs();
         // The slab reaches a little past the face on the side away from the depth, so the pieces
         // overlap the body rather than touch it.
@@ -636,8 +648,9 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             unoriented.push(Region2 { outer: given.next().ok_or_else(|| fail("profile"))?, holes: given.collect() });
         }
         // A loop of one closed curve (a circle) is split in two, so each wall has two corners.
-        let numbered: Vec<NumberedRegion> =
-            crate::numbered::number_regions(&unoriented).iter().map(|r| r.oriented().map_loops(split_single)).collect();
+        let oriented: Vec<NumberedRegion> = crate::numbered::number_regions(&unoriented).iter().map(NumberedRegion::oriented).collect();
+        // Profiles that share an edge are one profile.
+        let numbered: Vec<NumberedRegion> = join_touching(oriented, tol)?.0.iter().map(|r| r.map_loops(split_single)).collect();
         let mapped: Vec<Region2> = numbered.iter().map(NumberedRegion::region).collect();
         validate_profiles(&mapped, tol)?;
         if qualify {
@@ -1853,6 +1866,115 @@ fn profile_interval_overlaps(plane: &Plane, regions: &[Region2], o: Vec3, axis: 
         overlaps |= min < hi && max > lo;
     }
     Ok(overlaps)
+}
+
+/// Profiles that share an edge made one: where one region's segment runs back over another's (the
+/// same line or arc the other way, or a line along part of another's), the shared pieces are
+/// dropped and what is left chained into outlines and holes. Regions that share nothing are
+/// returned as they are. Every piece keeps the profile segments it ran over.
+fn join_touching(regions: Vec<NumberedRegion>, tol: f64) -> Result<(Vec<NumberedRegion>, bool)> {
+    use crate::numbered::NumberedLoop as NL;
+    let mut pieces: Vec<(Seg2, Vec<usize>)> = Vec::new();
+    for lp in regions.iter().flat_map(NumberedRegion::loops) {
+        pieces.extend(lp.lp.segs.iter().copied().zip(lp.from.iter().cloned()));
+    }
+    if pieces.len() > 8192 {
+        return Ok((regions, false));
+    }
+    // A line is cut where another line along it starts or ends.
+    let lines: Vec<(Vec2, Vec2)> = pieces.iter().filter(|(s, _)| matches!(s, Seg2::Line { .. })).map(|(s, _)| (s.start(), s.end())).collect();
+    let mut cut: Vec<(Seg2, Vec<usize>)> = Vec::with_capacity(pieces.len());
+    for (seg, from) in &pieces {
+        let Seg2::Line { a, b } = *seg else {
+            cut.push((*seg, from.clone()));
+            continue;
+        };
+        let d = b - a;
+        let len = d.len();
+        let mut ts: Vec<f64> = Vec::new();
+        if len > tol {
+            for (p, q) in &lines {
+                for v in [p, q] {
+                    let t = (*v - a).dot(d) / (len * len);
+                    if t * len > tol && (1.0 - t) * len > tol && (*v - a).cross(d).abs() <= tol * len {
+                        ts.push(t);
+                    }
+                }
+            }
+        }
+        ts.sort_by(f64::total_cmp);
+        ts.dedup_by(|x, y| (*x - *y).abs() * len <= tol);
+        let mut last = a;
+        for t in ts.into_iter().chain(std::iter::once(1.0)) {
+            let next = if t >= 1.0 { b } else { a + d * t };
+            cut.push((Seg2::Line { a: last, b: next }, from.clone()));
+            last = next;
+        }
+    }
+    let same = |s: &Seg2, t: &Seg2| match (s, t) {
+        (Seg2::Line { .. }, Seg2::Line { .. }) => s.start().dist(t.end()) <= tol && s.end().dist(t.start()) <= tol,
+        (Seg2::Arc { center: c, radius: r, .. }, Seg2::Arc { center: c2, radius: r2, .. }) => {
+            c.dist(*c2) <= tol && (r - r2).abs() <= tol && s.start().dist(t.end()) <= tol && s.end().dist(t.start()) <= tol
+        }
+        _ => false,
+    };
+    let mut gone = vec![false; cut.len()];
+    for i in 0..cut.len() {
+        for j in i + 1..cut.len() {
+            if gone[i] || gone[j] {
+                continue;
+            }
+            if let (Some((s, _)), Some((t, _))) = (cut.get(i), cut.get(j))
+                && same(s, t)
+                && let (Some(gi), Some(gj)) = (gone.get(i).copied(), gone.get(j).copied())
+                && !gi
+                && !gj
+            {
+                gone[i] = true;
+                gone[j] = true;
+            }
+        }
+    }
+    if !gone.iter().any(|g| *g) {
+        return Ok((regions, false));
+    }
+    let rest: Vec<(Seg2, Vec<usize>)> = cut.into_iter().zip(gone).filter_map(|(p, g)| (!g).then_some(p)).collect();
+    let mut used = vec![false; rest.len()];
+    let mut loops: Vec<NL> = Vec::new();
+    for k in 0..rest.len() {
+        if used[k] {
+            continue;
+        }
+        used[k] = true;
+        let Some((seg, from)) = rest.get(k) else { continue };
+        let (start, mut end) = (seg.start(), seg.end());
+        let mut lp = NL { lp: Loop2 { segs: vec![*seg] }, from: vec![from.clone()] };
+        while end.dist(start) > tol {
+            let next = (0..rest.len()).find(|j| !used[*j] && rest.get(*j).is_some_and(|(s, _)| s.start().dist(end) <= tol));
+            let Some(j) = next else { return Err(fail("touching profiles do not close into outlines")) };
+            used[j] = true;
+            let Some((s, f)) = rest.get(j) else { continue };
+            end = s.end();
+            lp.lp.segs.push(*s);
+            lp.from.push(f.clone());
+            if lp.lp.segs.len() > 8192 {
+                return Err(fail("touching profiles are too detailed"));
+            }
+        }
+        loops.push(lp.merged_lines(crate::build::continues_straight));
+    }
+    let (outers, holes): (Vec<NL>, Vec<NL>) = loops.into_iter().partition(|l| l.lp.signed_area() > 0.0);
+    let mut joined: Vec<NumberedRegion> = outers.into_iter().map(|outer| NumberedRegion { outer, holes: Vec::new() }).collect();
+    for hole in holes {
+        let probe = hole.lp.segs.first().map(|s| s.start()).ok_or_else(|| fail("empty hole"))?;
+        let owner = joined
+            .iter_mut()
+            .filter(|r| r.outer.lp.contains(probe))
+            .min_by(|a, b| a.outer.lp.signed_area().total_cmp(&b.outer.lp.signed_area()))
+            .ok_or_else(|| fail("a hole of touching profiles lies outside them"))?;
+        owner.holes.push(hole);
+    }
+    Ok((joined, true))
 }
 
 fn validate_profiles(regions: &[Region2], tol: f64) -> Result<()> {
