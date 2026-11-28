@@ -676,6 +676,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                                 &grid_painter,
                                 chip_rect,
                                 f,
+                                crate::timeline::feature_status(app, fid),
                                 is_active,
                                 is_selected,
                                 is_prereq,
@@ -1732,6 +1733,7 @@ fn paint_action_chip(
     p: &egui::Painter,
     rect: Rect,
     f: &Feature,
+    status: Option<crate::ui_kit::Status>,
     is_active: bool,
     is_selected: bool,
     is_prereq: bool,
@@ -1742,7 +1744,12 @@ fn paint_action_chip(
     accent: solidcraft_theme::TabAccent,
     t: &Tokens,
 ) {
-    let stroke_color = if is_selected {
+    // A feature in error is marked as in the Browser and the history bar (#23390): the error
+    // fill and edge, and the error or warning icon in the top-right corner.
+    let error = status == Some(crate::ui_kit::Status::Error);
+    let stroke_color = if error {
+        t.form_error
+    } else if is_selected {
         if is_active { t.text } else { t.text_dim }
     } else if is_prereq {
         if is_active { prereq_color } else { t.text_dim }
@@ -1754,7 +1761,9 @@ fn paint_action_chip(
         t.border.gamma_multiply(0.5)
     };
 
-    let bg_color = if is_selected {
+    let bg_color = if error {
+        t.form_error_fill
+    } else if is_selected {
         if is_active { accent.soft } else { t.panel }
     } else if is_suppressed {
         t.panel.gamma_multiply(0.7)
@@ -1764,7 +1773,7 @@ fn paint_action_chip(
         t.panel
     };
 
-    let stroke_width = if is_selected || is_prereq || is_dependent { 1.5 } else { 1.0 };
+    let stroke_width = if error || is_selected || is_prereq || is_dependent { 1.5 } else { 1.0 };
     p.rect_filled(rect, 4.0, bg_color);
     if is_suppressed {
         let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
@@ -1790,6 +1799,11 @@ fn paint_action_chip(
         crate::icons::paint_accented(p, icon_rect, icon, feat_accent, 1.0);
     } else {
         crate::icons::paint_greyscale(p, icon_rect, icon, feat_accent, 1.0);
+    }
+    if let Some(status) = status {
+        let side = t.space_10;
+        let mark = Rect::from_min_size(rect.right_top() - vec2(side, 0.0), vec2(side, side));
+        crate::icons::paint_icon(p, mark, if status == crate::ui_kit::Status::Error { "error" } else { "warning" }, 1.0);
     }
 }
 
