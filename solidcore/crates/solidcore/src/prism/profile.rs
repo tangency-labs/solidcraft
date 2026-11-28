@@ -29,6 +29,7 @@ use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::Bounded;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -1091,6 +1092,54 @@ pub fn to_local(frame: &Frame, q: Point3) -> Point2 {
 pub fn height(frame: &Frame, q: Point3) -> f64 {
     let (o, _, _, n) = axes(frame);
     (q - o).dot(n)
+}
+
+/// Which side of `frame`'s plane `q` lies on, past `tol`, proved: `Some(true)` where its
+/// [`height`] is proved above `tol` (on the side the normal `x × y` points to), `Some(false)`
+/// where it is proved below `-tol`, and `None` where neither is: within `tol` of the plane, or
+/// so near `tol` that the rounding of the height cannot tell, and for numbers that are not
+/// finite or a `tol` that is negative.
+///
+/// The rounding of the height `(q - o)·(x × y)` as [`height`] computes it, against the same
+/// expression exact on the given numbers (Higham §3.1): each component of `w = q - o` rounds
+/// once, by at most `u |w_i|`; each component of `n = x × y` is a difference of two products
+/// and within `gamma_2 c_i` of exact, `c_i` the sum of those products' sizes; the dot product's
+/// three products and two sums move it by at most `gamma_3 Σ |w_i n_i|`, over the computed `w`
+/// and `n`. With `|exact w_i| <= |w_i| / (1 - u)`, the computed height is within
+/// `gamma_4 Σ |w_i n_i| + gamma_3 Σ |w_i| c_i` of the exact one. The bound's own roundings,
+/// at most eight in a chain, take `1 + gamma_10`, and products that underflow, each off by at
+/// most half the least subnormal, are covered by `f64::MIN_POSITIVE (2 + |w|_1)`.
+#[must_use]
+pub fn side(frame: &Frame, q: Point3, tol: f64) -> Option<bool> {
+    if !(tol >= 0.0) {
+        return None;
+    }
+    let (o, x, y, n) = axes(frame);
+    let w = q - o;
+    let c = Vec3::new(
+        (x.y * y.z).abs() + (x.z * y.y).abs(),
+        (x.z * y.x).abs() + (x.x * y.z).abs(),
+        (x.x * y.y).abs() + (x.y * y.x).abs(),
+    );
+    let terms = (w.x * n.x).abs() + (w.y * n.y).abs() + (w.z * n.z).abs();
+    let crossed = w.x.abs() * c.x + w.y.abs() * c.y + w.z.abs() * c.z;
+    let size = w.x.abs() + w.y.abs() + w.z.abs();
+    let h = Bounded {
+        value: w.dot(n),
+        bound: (gamma(4) * terms + gamma(3) * crossed) * (1.0 + gamma(10))
+            + f64::MIN_POSITIVE * (2.0 + size),
+    };
+    let below = Bounded {
+        value: -h.value,
+        ..h
+    };
+    if h.above(tol).is_yes() {
+        Some(true)
+    } else if below.above(tol).is_yes() {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Whether `frame`'s axes are unit and square to each other, to within 1e-12.

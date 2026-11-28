@@ -183,6 +183,12 @@ pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis
     Ok(mesh)
 }
 
+/// Which side of the section's `plane` a loft to a point's `apex` lies on, `true` along its
+/// normal: solidcore's proof, refused within its distance of the plane.
+fn apex_above(plane: &Plane, apex: Vec3) -> Result<bool> {
+    solidcore_ops::sweep::apex_above(plane, apex).map_err(|_| KernelError::Invalid("the apex lies in the section's plane".into()))
+}
+
 /// A solid from a planar loop of straight segments to an apex point off its plane (a pyramid):
 /// SMLib's loft to a point.
 pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
@@ -196,11 +202,8 @@ pub(crate) fn loft_to_point_plan(plane: &Plane, lp: &Loop2, apex: Vec3) -> Resul
     if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
         return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
     }
-    if ((apex - plane.origin).dot(plane.normal())).abs() < 1e-9 {
-        return Err(KernelError::Invalid("the apex lies in the section's plane".into()));
-    }
     // Wind the base so its normal points away from the apex.
-    let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
+    let above = apex_above(plane, apex)?;
     let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
     Ok(crate::smlib_sweeps::pieces([&base]))
 }
@@ -216,10 +219,7 @@ pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[
     if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
         return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
     }
-    if ((apex - plane.origin).dot(plane.normal())).abs() < 1e-9 {
-        return Err(KernelError::Invalid("the apex lies in the section's plane".into()));
-    }
-    let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
+    let above = apex_above(plane, apex)?;
     let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
     crate::smlib_sweeps::loft_to_point_with_rails(plane, &crate::smlib_sweeps::pieces([&base]), apex, rails, fit)
 }

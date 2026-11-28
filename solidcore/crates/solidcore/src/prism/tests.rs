@@ -4826,6 +4826,72 @@ fn the_cuts_between_two_planes_keep_the_side_each_plane_faces_along_the_travel()
     }
 }
 
+#[test]
+fn a_point_is_on_a_side_of_a_plane_only_where_the_rounding_of_its_height_proves_it() {
+    use super::profile::side;
+    use crate::geom::vector3d::Vec3;
+    let tol = 1e-9;
+    // Plainly above, below and on the plane z = 0, and the other way round with the plane
+    // turned over; within `tol` of it, on neither side.
+    assert_eq!(side(&xy(), Vec3::new(3.0, 4.0, 30.0), tol), Some(true));
+    assert_eq!(side(&xy(), Vec3::new(3.0, 4.0, -30.0), tol), Some(false));
+    assert_eq!(
+        side(&flipped(&xy()), Vec3::new(3.0, 4.0, 30.0), tol),
+        Some(false)
+    );
+    assert_eq!(side(&xy(), Vec3::new(1.0, 1.0, 0.0), tol), None);
+    assert_eq!(side(&xy(), Vec3::new(0.0, 0.0, 5e-10), tol), None);
+    // On the world's own axes every product is exact, so a height just past `tol` is proved
+    // even 100 km out.
+    assert_eq!(side(&xy(), Vec3::new(1e8, -1e8, 2e-9), tol), Some(true));
+    // A plane at a slant through the origin, and a point 100 km out on it: its height computes
+    // to 3.7e-9, past `tol`, but is 7.4e-10 on the given numbers (exact rational arithmetic),
+    // within it. The rounding of the two products, each of about 2.6e7, is larger than that gap:
+    // neither side is proved. A micrometre higher is.
+    let slant = Frame {
+        origin: [0.0; 3],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 0.27245581322708806, 0.9621682960058319],
+    };
+    let out = Vec3::new(0.0, 27245581.322708808, 96216829.6005832);
+    assert_eq!(side(&slant, out, tol), None);
+    assert_eq!(
+        side(&slant, Vec3::new(0.0, out.y, out.z + 1e-6), tol),
+        Some(true)
+    );
+    // The skewed plane and the point in it of the test above: the exact height is 6.5e-20, the
+    // computed one -3.0e-18, turned by the rounded cross product's own error. With no
+    // tolerance at all, the sign is still not proved.
+    let skewed = Frame {
+        origin: [0.0; 3],
+        x_axis: [0.7630602430259357, 0.5337981110040966, -0.6271414980178043],
+        y_axis: [
+            -0.2825470651847899,
+            -0.21302882140758705,
+            0.2364626900932829,
+        ],
+    };
+    let inside = Vec3::new(
+        -0.2427861617614619,
+        -0.17197831559588642,
+        0.20013036254154304,
+    );
+    assert_eq!(side(&skewed, inside, 0.0), None);
+    // Numbers that are not finite, and a tolerance that is negative, prove nothing.
+    assert_eq!(side(&xy(), Vec3::new(0.0, 0.0, f64::NAN), tol), None);
+    assert_eq!(side(&xy(), Vec3::new(0.0, 0.0, f64::INFINITY), tol), None);
+    assert_eq!(side(&xy(), Vec3::new(3.0, 4.0, 30.0), -1.0), None);
+    // Nor do a height or a bound that overflow: a point at the largest coordinates, and axes so
+    // long that their cross product does.
+    assert_eq!(side(&xy(), Vec3::new(f64::MAX, f64::MAX, 1.0), tol), None);
+    let huge = Frame {
+        origin: [0.0; 3],
+        x_axis: [1e200, 0.0, 0.0],
+        y_axis: [0.0, 1e200, 0.0],
+    };
+    assert_eq!(side(&huge, Vec3::new(0.0, 0.0, 1.0), tol), None);
+}
+
 /// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to
 /// planes and butt joints, and the refusals.
 mod member {
