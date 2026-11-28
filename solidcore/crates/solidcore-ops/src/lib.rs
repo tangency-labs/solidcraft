@@ -104,6 +104,7 @@ pub mod provenance;
 pub mod query;
 pub mod record_check;
 pub mod round_face;
+pub mod scan_align;
 pub mod section_corners;
 pub mod session;
 pub mod shaft_spline;

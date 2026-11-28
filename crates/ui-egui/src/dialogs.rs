@@ -54,6 +54,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.replace_face", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.boundary_fill", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.align", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "scan.align", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.remove", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     // Pattern parameters are dialog-only - no viewport modifier chords.
     ToolModifiers { tool: "solid.pattern.path", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -417,6 +418,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// A turn about the target's direction after the move (blank: none).
                 angle: String,
             },
+            /// 3-2-1 scan datum alignment for a point cloud or mesh occurrence(s).
+            ScanAlign(Box<crate::dialogs_scan_align::ScanAlignForm>),
             /// Remove bodies from here on in the timeline.
             Remove,
             /// Pattern bodies along a path of sketch curves. Orientation and Flip are kept in
@@ -1228,6 +1231,7 @@ impl Dialog {
                     ],
                 )
             }
+            "scan.align" => crate::dialogs_scan_align::start(s),
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
             "solid.pattern.path" => Dialog::new(
                 Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20"), start: String::new(), fraction: false },
@@ -1495,7 +1499,7 @@ impl Dialog {
                 .then(|| sketch_curve_edge(s, sel))
                 .flatten();
             let sel = as_edge.as_ref().unwrap_or(sel);
-            if matches!(d.kind, Kind::Align { components: true, .. }) {
+            if matches!(d.kind, Kind::Align { components: true, .. }) || matches!(&d.kind, Kind::ScanAlign(f) if f.target_cloud.is_none()) {
                 let occ = match sel {
                     Sel::Occurrence { path } if !path.is_empty() => Some(Sel::Occurrence { path: path.clone() }),
                     Sel::Body { name } => occurrence_path_of_body(s, name).map(|path| Sel::Occurrence { path }),
@@ -1781,6 +1785,7 @@ impl Dialog {
                 | Kind::ReplaceFace
                 | Kind::DeleteFaces { .. }
                 | Kind::Align { .. }
+                | Kind::ScanAlign(_)
                 | Kind::Remove
                 | Kind::PathPattern { .. }
                 | Kind::Pipe { .. }
@@ -1912,6 +1917,7 @@ impl Dialog {
     pub(crate) fn takes_components(&self) -> bool {
         self.active == 0
             && (matches!(self.kind, Kind::Align { components: true, .. })
+                || matches!(&self.kind, Kind::ScanAlign(f) if f.target_cloud.is_none())
                 || (is_pattern(&self.kind) && self.inputs.first().is_some_and(|i| i.accept == selection::OCCURRENCES)))
     }
 
@@ -2092,8 +2098,8 @@ impl Dialog {
             return Some(sel);
         }
         // A mesh body has no vertices or edges to pick, and its own surface is its triangles: a
-        // point input of a construction takes the exact point the pointer's ray meets on one (#16400).
-        if matches!(self.kind, Kind::Construct { .. })
+        // point input of a construction or Align Scan takes the exact point the pointer's ray meets on one (#16400, #14353).
+        if matches!(self.kind, Kind::Construct { .. } | Kind::ScanAlign(_))
             && inp.accept & selection::VERTICES != 0
             && let Hit::Face { body, point, .. } = h
             && is_mesh_body(s, body)
@@ -3539,6 +3545,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ReplaceFace => "REPLACE FACE",
         Kind::DeleteFaces { .. } => "DELETE FACE",
         Kind::Align { .. } => "ALIGN",
+        Kind::ScanAlign(_) => "scan_align.title",
         Kind::BoundaryFill { .. } => "BOUNDARY FILL",
         Kind::Remove => "REMOVE",
         Kind::ChatContext => "PICK CONTEXT",
@@ -3970,7 +3977,7 @@ pub(crate) fn pick_depth(s: &Session, path: &[u64]) -> usize {
 const ALIGN_SHARED_WARNING: &str = "This component is inside a subassembly placed more than once: aligning it moves it in every placement.";
 
 /// Does aligning these Components picks move a placement shared by several subassembly copies?
-fn align_moves_shared(s: &Session, items: &[Sel]) -> bool {
+pub(crate) fn align_moves_shared(s: &Session, items: &[Sel]) -> bool {
     occurrence_paths(s, items).iter().any(|path| s.occurrence_shared(path))
 }
 
@@ -7245,6 +7252,10 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
 /// The commands the live preview runs: OK's, with a joint's motion while it animates, and a
 /// component Move/Copy moves by its placement drawn as its bodies moved.
 pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    if matches!(&d.kind, Kind::ScanAlign(f) if f.target_cloud.is_some()) {
+        // Point clouds preview their rigid alignment directly via `dialogs_scan_align::preview_cloud_transform`.
+        return Ok(Vec::new());
+    }
     let mut cmds = apply_commands(app, d)?;
     // An Insert SVG/DXF window previews the drawing once, as drawn (its middle at the sketch's
     // origin), and moves that preview for each position, size and angle: importing again for
@@ -8057,6 +8068,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             (if *components { "occurrence.align" } else { "solid.align" }, p)
         }
+        Kind::ScanAlign(form) => crate::dialogs_scan_align::command(app, d, form)?,
         Kind::Remove => {
             need(0, "bodies")?;
             ("solid.remove", json!({"bodies": sels(d, 0).body_names()}))
