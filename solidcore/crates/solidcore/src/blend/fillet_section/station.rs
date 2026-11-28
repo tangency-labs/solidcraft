@@ -4078,7 +4078,10 @@ mod tests {
         let first = NurbsMemo::of(&k, &bs).unwrap();
         let again = NurbsMemo::of(&k, &bs).unwrap();
         assert_eq!(*first, fresh);
-        assert!(Arc::ptr_eq(&first, &again), "the second read was not the memo's");
+        assert!(
+            Arc::ptr_eq(&first, &again),
+            "the second read was not the memo's"
+        );
         // a copy sharing the cell, edited: the edit detaches, the original reads as before
         let mut edited = bs.clone().into_owned();
         edited.nurb.detach();
