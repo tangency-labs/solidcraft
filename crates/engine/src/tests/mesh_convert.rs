@@ -659,6 +659,64 @@ fn unsaved_designs_of_one_name_send_to_different_files_and_one_design_to_one() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// `name` is the sent file's name, as given: the slicer and the printer show it. Without it the
+/// file keeps the name made from the design and the bodies.
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_names_the_file_as_asked() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("solidcraft-open-in-slicer-name-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake-slicer");
+    std::fs::write(&script, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let spec = script.to_string_lossy().into_owned();
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = imported_box();
+    crate::slicers::set_chosen_programs(std::slice::from_ref(&spec));
+    let mut send = |extra: Value| {
+        let mut p = json!({"slicer": spec, "bodies": ["Mesh"], "wait": "no"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("file.send_to_slicer", &p)
+    };
+    let (unnamed, named, again, stl, null) = (
+        send(json!({})),
+        send(json!({"name": "Bracket-Base rev C"})),
+        send(json!({"name": "Bracket-Base rev C"})),
+        send(json!({"name": "Bracket-Base rev C", "format": "stl"})),
+        send(json!({"name": null})),
+    );
+    crate::slicers::set_chosen_programs(&[]);
+    let (unnamed, named, again, stl, null) = (unnamed.unwrap(), named.unwrap(), again.unwrap(), stl.unwrap(), null.unwrap());
+    let file = |r: &Value| std::path::PathBuf::from(r["path"].as_str().unwrap());
+    assert_eq!(file(&named).file_name().unwrap(), "Bracket-Base rev C.3mf");
+    assert_eq!(file(&named).parent(), file(&unnamed).parent(), "in the same private folder");
+    assert!(std::fs::read(file(&named)).unwrap().starts_with(b"PK"));
+    assert_eq!((file(&again), again["numbered"].as_bool()), (file(&named), Some(false)), "sending again replaces the file");
+    assert_eq!(file(&stl).file_name().unwrap(), "Bracket-Base rev C.stl");
+    let old = file(&unnamed).file_stem().unwrap().to_string_lossy().into_owned();
+    let code = old.rsplit_once('-').map(|(_, code)| code).unwrap_or_default();
+    assert!(code.len() == 16 && code.chars().all(|c| c.is_ascii_hexdigit()), "{old}: without `name`, the design's name and its code as before");
+    assert_eq!(file(&null), file(&unnamed), "a null name is no name");
+    std::fs::remove_dir_all(file(&named).parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A `name` that could leave the slicer folder, or that a file system refuses, is turned down
+/// before anything is written or started.
+#[test]
+fn send_to_slicer_refuses_a_name_that_is_not_a_plain_file_name() {
+    let mut s = imported_box();
+    for name in [json!("../up"), json!("a\\b"), json!("C:part"), json!(""), json!("  "), json!("part."), json!(".hidden"), json!(7), json!(["a"])] {
+        let e = s.execute("file.send_to_slicer", &json!({"slicer": "no such slicer anywhere", "bodies": ["Mesh"], "name": name})).unwrap_err();
+        assert!(e.to_string().contains("`name`"), "{name}: {e}");
+    }
+    // A name that passes is not what stops this call: the slicer is.
+    let e = s.execute("file.send_to_slicer", &json!({"slicer": "no such slicer anywhere", "bodies": ["Mesh"], "name": "Bracket"})).unwrap_err();
+    assert!(e.to_string().contains("no slicer"), "{e}");
+}
+
 /// The first Save As gives the design a path, and with it a new file name, once. Later sends keep
 /// the name that comes from the saved path.
 #[cfg(unix)]

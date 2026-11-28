@@ -41,7 +41,7 @@
 //! `ClosureTraversal` (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
 //! arena slot (lookups only, as the fork; no iteration).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::error::topology::TopologyFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
@@ -549,7 +549,7 @@ fn shell_connectivity(
 ) -> Result<()> {
     marks.mark(k, Entity::Vertexuse(start), mark);
     let breadth_first = !asked.is_empty();
-    let mut stack = std::collections::VecDeque::from([start]);
+    let mut stack = VecDeque::from([start]);
     while let Some(vu) = if breadth_first {
         stack.pop_front()
     } else {
@@ -623,6 +623,163 @@ fn shell_connectivity(
         }
     }
     Ok(())
+}
+
+/// Outcome of bidirectional connectivity check between two vertices in a shell after
+/// removing a wire edge between them (not upstream; indexed-mark deletion path only).
+pub(crate) enum WireSplitCheck {
+    /// `v1` and `v2` remain connected in `shell`.
+    Connected,
+    /// `v1` and `v2` are disconnected in `shell`.
+    Split {
+        /// Whether `v1`'s component was completely traversed (as opposed to `v2`'s finishing first).
+        v1_exhausted: bool,
+        /// Whether `v1`'s explored portion visited any face use.
+        v1_has_faceuse: bool,
+        /// First edge use encountered on `v1`'s side, if any.
+        v1_first_edgeuse: Option<EdgeuseId>,
+    },
+    /// Either `v1` or `v2` has no vertex use in `shell`; caller runs the standard walk.
+    Fallback,
+}
+
+/// Bidirectional BFS connectivity test for [`crate::topology::brep::p4::delete_edge`]'s
+/// wire branch (not upstream). Alternates steps from `v1` and `v2` inside `shell`, stopping
+/// immediately when the two frontiers meet (`Connected`) or when either side exhausts its
+/// connected component (`Split`), avoiding whole-shell traversals on large shells.
+///
+/// # Errors
+/// Those of [`shell_traversal`].
+pub(crate) fn shell_wire_split_check(
+    k: &mut Kernel,
+    b: &Brep,
+    v1: VertexId,
+    v2: VertexId,
+    shell: ShellId,
+    lock: &MarkLock,
+) -> Result<WireSplitCheck> {
+    lock.new_mark(std::slice::from_mut(&mut k.context))?;
+    check_mark(lock.mark_type())?;
+
+    let mut start1 = None;
+    for &vu in &b.vertex(v1)?.vertexuses {
+        if vertexuse::shell(b, vu)? == Some(shell) {
+            start1 = Some(vu);
+            break;
+        }
+    }
+    let mut start2 = None;
+    for &vu in &b.vertex(v2)?.vertexuses {
+        if vertexuse::shell(b, vu)? == Some(shell) {
+            start2 = Some(vu);
+            break;
+        }
+    }
+    let (Some(start1), Some(start2)) = (start1, start2) else {
+        return Ok(WireSplitCheck::Fallback);
+    };
+    if start1 == start2 {
+        return Ok(WireSplitCheck::Connected);
+    }
+
+    let mut queues = [VecDeque::from([start1]), VecDeque::from([start2])];
+    let mut seen_vu = [BTreeSet::from([start1]), BTreeSet::from([start2])];
+    let mut seen_v: [BTreeSet<VertexId>; 2] = [BTreeSet::new(), BTreeSet::new()];
+    let mut seen_f: [BTreeSet<FaceId>; 2] = [BTreeSet::new(), BTreeSet::new()];
+    let mut v1_has_faceuse = false;
+    let mut v1_first_edgeuse: Option<EdgeuseId> = None;
+
+    let mut side = 0usize;
+    loop {
+        let Some(vu) = queues.get_mut(side).and_then(VecDeque::pop_front) else {
+            return Ok(WireSplitCheck::Split {
+                v1_exhausted: side == 0,
+                v1_has_faceuse,
+                v1_first_edgeuse,
+            });
+        };
+        let other = 1 - side;
+        let mut propagate = Vec::new();
+        let fu = if vertexuse::is_edge_vertexuse(b, vu)? {
+            let e = link(vertexuse::edgeuse(b, vu)?, NO_EDGEUSE)?;
+            if side == 0 && v1_first_edgeuse.is_none() {
+                v1_first_edgeuse = Some(e);
+            }
+            let mate = link(eu::mate(b, e)?, NO_EDGEUSE_MATE)?;
+            if eu::shell(b, mate)? == Some(shell) {
+                let mate_vu = link(b.edgeuse(mate)?.vertexuse, NO_START)?;
+                if seen_vu.get(other).is_some_and(|s| s.contains(&mate_vu)) {
+                    return Ok(WireSplitCheck::Connected);
+                }
+                if seen_vu.get_mut(side).is_some_and(|s| s.insert(mate_vu)) {
+                    if let Some(q) = queues.get_mut(side) {
+                        q.push_back(mate_vu);
+                    }
+                }
+            }
+            if eu::is_loop_edgeuse(b, e)? {
+                vertexuse::faceuse(b, vu)?
+            } else {
+                None
+            }
+        } else if vertexuse::is_loop_vertexuse(b, vu)? {
+            vertexuse::faceuse(b, vu)?
+        } else {
+            None
+        };
+        if let Some(fu) = fu {
+            if side == 0 {
+                v1_has_faceuse = true;
+            }
+            let f = link(b.faceuse(fu)?.face, NO_FACE)?;
+            if seen_f.get_mut(side).is_some_and(|s| s.insert(f)) {
+                k.work_counters.add_shell_traversal_face();
+                propagate.push(fu);
+            }
+        }
+        let v = link(b.vertexuse(vu)?.vertex, NO_VERTEX)?;
+        if seen_v.get(other).is_some_and(|s| s.contains(&v)) {
+            return Ok(WireSplitCheck::Connected);
+        }
+        if seen_v.get_mut(side).is_some_and(|s| s.insert(v)) {
+            for &next in &b.vertex(v)?.vertexuses {
+                if seen_vu.get(other).is_some_and(|s| s.contains(&next)) {
+                    return Ok(WireSplitCheck::Connected);
+                }
+                if !seen_vu.get(side).is_some_and(|s| s.contains(&next))
+                    && vertexuse::shell(b, next)? == Some(shell)
+                {
+                    if let Some(s) = seen_vu.get_mut(side) {
+                        s.insert(next);
+                    }
+                    if let Some(q) = queues.get_mut(side) {
+                        q.push_back(next);
+                    }
+                }
+            }
+        }
+        for fu in propagate {
+            for &lu in &b.faceuse(fu)?.loopuses {
+                for next in face::loopuse_vertexuses(b, lu)? {
+                    let next = link(next, NO_LOOP_VERTEXUSE)?;
+                    if seen_vu.get(other).is_some_and(|s| s.contains(&next)) {
+                        return Ok(WireSplitCheck::Connected);
+                    }
+                    if !seen_vu.get(side).is_some_and(|s| s.contains(&next))
+                        && vertexuse::shell(b, next)? == Some(shell)
+                    {
+                        if let Some(s) = seen_vu.get_mut(side) {
+                            s.insert(next);
+                        }
+                        if let Some(q) = queues.get_mut(side) {
+                            q.push_back(next);
+                        }
+                    }
+                }
+            }
+        }
+        side = other;
+    }
 }
 
 /// Advance the mark and traverse shell connectivity through the first vertex use
@@ -1160,6 +1317,116 @@ mod tests {
         // a vertex the shell does not join is left, after the whole walk
         let stray = VertexId::from_index(u32::MAX);
         assert_eq!(walk(&[start, stray]), (6, 8, BTreeSet::from([stray])));
+    }
+
+    #[test]
+    fn wire_split_check_detects_connected_and_split_wire_components() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let region = b.infinite_region();
+        // Build two disconnected 2-edge wire chains in the same shell (simulating the state
+        // right after removing a bridging wire edge between two vertices of a shell).
+        let shell = b.add_shell().unwrap();
+        if let Some(r) = region {
+            b.shell_mut(shell).unwrap().region = Some(r);
+            b.region_mut(r).unwrap().shells.push(shell);
+        }
+        let add_wire = |b: &mut Brep, v1: VertexId, v2: VertexId| -> EdgeId {
+            let e = b.add_edge(v1, v2).unwrap();
+            for (v, orientation) in [(v1, OrientType::Same), (v2, OrientType::Opposite)] {
+                let eu = b
+                    .add_edgeuse_record(Edgeuse {
+                        edge: Some(e),
+                        owner: EdgeuseOwner::Shell(Some(shell)),
+                        orientation,
+                        ..Edgeuse::default()
+                    })
+                    .unwrap();
+                let vu = b
+                    .add_vertexuse_record(Vertexuse {
+                        vertex: Some(v),
+                        owner: VertexuseOwner::Edgeuse(Some(eu)),
+                        ..Vertexuse::default()
+                    })
+                    .unwrap();
+                b.edgeuse_mut(eu).unwrap().vertexuse = Some(vu);
+                b.vertex_mut(v).unwrap().vertexuses.push(vu);
+                b.edge_mut(e).unwrap().edgeuses.push(eu);
+            }
+            e
+        };
+        let v0 = b.add_vertex(Vec3::new(0.0, 0.0, 0.0)).unwrap();
+        let v1 = b.add_vertex(Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let v2 = b.add_vertex(Vec3::new(2.0, 0.0, 0.0)).unwrap();
+        let v3 = b.add_vertex(Vec3::new(10.0, 0.0, 0.0)).unwrap();
+        let v4 = b.add_vertex(Vec3::new(11.0, 0.0, 0.0)).unwrap();
+        let _ = add_wire(&mut b, v0, v1);
+        let _ = add_wire(&mut b, v1, v2);
+        let _ = add_wire(&mut b, v3, v4);
+
+        let mut lock = MarkLock::new(
+            std::slice::from_mut(&mut k.context),
+            0,
+            crate::geom::context::ALL_MARKS,
+        )
+        .unwrap();
+        // v0 and v2 are connected through v1.
+        assert!(matches!(
+            shell_wire_split_check(&mut k, &b, v0, v2, shell, &lock).unwrap(),
+            WireSplitCheck::Connected
+        ));
+        // v0 and v3 are in separate components of the same shell.
+        assert!(matches!(
+            shell_wire_split_check(&mut k, &b, v0, v3, shell, &lock).unwrap(),
+            WireSplitCheck::Split {
+                v1_has_faceuse: false,
+                v1_first_edgeuse: Some(_),
+                ..
+            }
+        ));
+        // Add a longer chain on v0's side ending in a face use so v2's tiny wire component
+        // (v3-v4) exhausts before v1's search reaches the face (`v1_exhausted == false`,
+        // `v1_has_faceuse == false`).
+        let v5 = b.add_vertex(Vec3::new(3.0, 0.0, 0.0)).unwrap();
+        let v6 = b.add_vertex(Vec3::new(4.0, 0.0, 0.0)).unwrap();
+        let _ = add_wire(&mut b, v2, v5);
+        let _ = add_wire(&mut b, v5, v6);
+        let f_id = b
+            .add_face_record(crate::topology::Face::new(shell))
+            .unwrap();
+        let fu_id = b
+            .add_faceuse_record(crate::topology::Faceuse {
+                face: Some(f_id),
+                shell: Some(shell),
+                ..crate::topology::Faceuse::default()
+            })
+            .unwrap();
+        let lu_id = b
+            .add_loopuse_record(crate::topology::Loopuse {
+                faceuse: Some(fu_id),
+                ..crate::topology::Loopuse::default()
+            })
+            .unwrap();
+        let vu_face = b
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(v6),
+                owner: VertexuseOwner::Loopuse(Some(lu_id)),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        b.vertex_mut(v6).unwrap().vertexuses.push(vu_face);
+        b.loopuse_mut(lu_id).unwrap().start =
+            crate::topology::LoopuseStart::Vertexuse(Some(vu_face));
+        b.faceuse_mut(fu_id).unwrap().loopuses.push(lu_id);
+        assert!(matches!(
+            shell_wire_split_check(&mut k, &b, v0, v3, shell, &lock).unwrap(),
+            WireSplitCheck::Split {
+                v1_exhausted: false,
+                v1_has_faceuse: false,
+                v1_first_edgeuse: Some(_),
+            }
+        ));
+        lock.release(std::slice::from_mut(&mut k.context)).unwrap();
     }
 
     #[test]

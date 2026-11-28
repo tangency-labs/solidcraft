@@ -2512,7 +2512,8 @@ impl<'target> FilletSession<'target> {
                 // its other corners are made as in any pass
                 corner.roll_over = roll_over_ends.contains(&vertex);
                 // #22151: the Mixed corner of a round is a Coons fill, no rolling ball's
-                // surface: refused at its vertex until the Roll-over build takes it. Two
+                // surface: refused at its vertex, and noted as the Roll-over's cusp, which the
+                // caller builds in two passes, B1 first (`rollover::classify_cusp`). Two
                 // chamfers meet their faces G0, and their Coons patches are the corner's
                 // faces (`calc_mixed_edge_geom`): they still build.
                 let round_at_mixed = corner
@@ -2536,6 +2537,17 @@ impl<'target> FilletSession<'target> {
                             })
                     });
                 if round_at_mixed {
+                    // a classification that fails is no Roll-over: the refusal stands
+                    if roll_over_classify {
+                        let all_eus = corner.all_eus.clone().unwrap_or_default();
+                        match crate::blend::blend_corner::rollover::classify_cusp(
+                            k, target, vertex, &edgeuses, &all_eus,
+                        ) {
+                            Ok(Some(found)) => roll_overs.push(found),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                            Ok(None) | Err(_) => {}
+                        }
+                    }
                     let location = crate::topology::vertex::point(target, vertex).ok();
                     return Ok(CornerCreation::Refused {
                         location,
