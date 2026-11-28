@@ -1377,6 +1377,57 @@ pub fn arc_third_point_2d(
         .min_by(|x, y| length_2d(sub_2d(*x, h)).total_cmp(&length_2d(sub_2d(*y, h))))
 }
 
+/// Not upstream: the nearest quadrant or midpoint on a bounded circular arc.
+/// Returns the point and whether it is a midpoint. A complete circle has no
+/// midpoint, and midpoint-only mode excludes quadrants.
+#[must_use]
+pub fn nearest_round_snap_2d(
+    centre: [f64; 2],
+    radius: f64,
+    [start, sweep]: [f64; 2],
+    cursor: [f64; 2],
+    tolerance: f64,
+    midpoint_only: bool,
+) -> Option<([f64; 2], bool)> {
+    use core::f64::consts::{FRAC_PI_2, TAU};
+
+    if !centre.into_iter().chain(cursor).all(f64::is_finite)
+        || !radius.is_finite()
+        || radius <= 0.0
+        || !start.is_finite()
+        || !sweep.is_finite()
+        || sweep <= 0.0
+        || !tolerance.is_finite()
+        || tolerance <= 0.0
+    {
+        return None;
+    }
+    let full = sweep >= TAU - 1e-12;
+    let mut best: Option<(f64, [f64; 2], bool)> = None;
+    let mut consider = |point: [f64; 2], midpoint: bool| {
+        let distance = distance_2d(point, cursor);
+        if distance < tolerance && best.is_none_or(|old| distance < old.0) {
+            best = Some((distance, point, midpoint));
+        }
+    };
+    if !full {
+        let (s, c) = det::sin_cos(start + sweep * 0.5);
+        consider(along_2d(centre, [c, s], radius), true);
+    }
+    if !midpoint_only {
+        for (i, dir) in [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]
+            .into_iter()
+            .enumerate()
+        {
+            let off = (i as f64 * FRAC_PI_2 - start).rem_euclid(TAU);
+            if full || off <= sweep + 1e-12 || off >= TAU - 1e-12 {
+                consider(along_2d(centre, dir, radius), false);
+            }
+        }
+    }
+    best.map(|(_, point, midpoint)| (point, midpoint))
+}
+
 /// Not upstream: the distance between two points.
 #[must_use]
 pub fn distance_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -2105,6 +2156,33 @@ mod tests {
         );
         assert_eq!(
             left_side_inside_circle_2d(c, 3.04, f64::NAN, c, 3.04, 1e-9),
+            None
+        );
+    }
+
+    #[test]
+    fn round_snap_points_respect_arc_bounds_and_midpoint_mode() {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
+
+        let centre = [3.0, -2.0];
+        let snap = |angles, cursor, midpoint_only| {
+            nearest_round_snap_2d(centre, 10.0, angles, cursor, 0.5, midpoint_only)
+        };
+        for point in [[13.0, -2.0], [3.0, 8.0], [-7.0, -2.0], [3.0, -12.0]] {
+            assert_eq!(snap([0.0, TAU], point, false), Some((point, false)));
+            assert_eq!(snap([0.0, TAU], point, true), None);
+        }
+        let arc = [-FRAC_PI_4, PI];
+        let offset = 50.0_f64.sqrt();
+        let midpoint = [3.0 + offset, -2.0 + offset];
+        let (point, is_midpoint) = snap(arc, midpoint, true).unwrap();
+        assert!(is_midpoint && distance_2d(point, midpoint) < 1e-9);
+        assert_eq!(snap(arc, [13.0, -2.0], false), Some(([13.0, -2.0], false)));
+        assert_eq!(snap(arc, [-7.0, -2.0], false), None);
+        assert_eq!(snap([0.0, FRAC_PI_2], [13.0, -2.0], true), None);
+        assert_eq!(snap(arc, [f64::NAN, 0.0], false), None);
+        assert_eq!(
+            nearest_round_snap_2d(centre, 10.0, arc, midpoint, f64::INFINITY, true),
             None
         );
     }

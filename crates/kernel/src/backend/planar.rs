@@ -44,6 +44,18 @@ impl Planar for Solidcore {
         sketch_arc::arc_third_point(s, e, h, radius, sweep)
     }
 
+    fn nearest_round_snap(
+        &self,
+        centre: [f64; 2],
+        radius: f64,
+        angles: [f64; 2],
+        cursor: [f64; 2],
+        tolerance: f64,
+        midpoint_only: bool,
+    ) -> Option<([f64; 2], bool)> {
+        sketch_arc::nearest_round_snap(centre, radius, angles, cursor, tolerance, midpoint_only)
+    }
+
     fn distance(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
         sketch_arc::distance(a, b)
     }

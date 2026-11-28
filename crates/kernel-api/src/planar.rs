@@ -52,6 +52,16 @@ pub trait Planar: Backend {
     /// (radians; the sweep wins when both are given): on the arc of that size whose middle is
     /// nearest the cursor. `None`: no such arc.
     fn arc_third_point(&self, s: [f64; 2], e: [f64; 2], h: [f64; 2], radius: Option<f64>, sweep: Option<f64>) -> Option<[f64; 2]>;
+    /// The nearest quadrant or midpoint of a bounded circular arc, and whether it is a midpoint.
+    fn nearest_round_snap(
+        &self,
+        centre: [f64; 2],
+        radius: f64,
+        angles: [f64; 2],
+        cursor: [f64; 2],
+        tolerance: f64,
+        midpoint_only: bool,
+    ) -> Option<([f64; 2], bool)>;
     /// The distance between two points (an arc's radius, from its centre and an end).
     fn distance(&self, a: [f64; 2], b: [f64; 2]) -> f64;
     /// Whether the region on the left of the piece from `a` to `b` of a counter-clockwise loop

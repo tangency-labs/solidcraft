@@ -6,6 +6,19 @@
 
 use solidcore::math;
 
+/// The nearest quadrant or midpoint of a bounded circular arc, and whether it is a midpoint.
+#[must_use]
+pub fn nearest_round_snap(
+    centre: [f64; 2],
+    radius: f64,
+    angles: [f64; 2],
+    cursor: [f64; 2],
+    tolerance: f64,
+    midpoint_only: bool,
+) -> Option<([f64; 2], bool)> {
+    math::nearest_round_snap_2d(centre, radius, angles, cursor, tolerance, midpoint_only)
+}
+
 /// The distance between two points (an arc's radius, from its centre and an end).
 #[must_use]
 pub fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {

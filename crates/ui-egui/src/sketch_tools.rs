@@ -875,7 +875,7 @@ pub fn refine_snap(
                 }
                 _ => continue,
             };
-            let d = q.dist(lp);
+            let d = solidcraft_kernel::planar::distance(q.into(), lp.into());
             if d < mid_tol && best_snap.as_ref().is_none_or(|old| d < old.0) {
                 best_snap = Some((d, c.id.clone(), q, label, line_mid));
             }

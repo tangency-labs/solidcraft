@@ -57,38 +57,8 @@ impl Shape {
     /// part of the curve are candidates.
     pub fn nearest_round_snap(&self, p: Vec2, tol: f64, midpoint_only: bool) -> Option<(Vec2, bool)> {
         let Shape::Round { c, r, start, sweep } = *self else { return None };
-        if !p.is_finite()
-            || !tol.is_finite()
-            || tol <= 0.0
-            || !c.is_finite()
-            || !r.is_finite()
-            || r <= 0.0
-            || !start.is_finite()
-            || !sweep.is_finite()
-            || sweep <= 0.0
-        {
-            return None;
-        }
-        let full = sweep >= TAU - 1e-12;
-        let mut best: Option<(f64, Vec2, bool)> = None;
-        let mut consider = |q: Vec2, midpoint: bool| {
-            let d = q.dist(p);
-            if d < tol && best.is_none_or(|old| d < old.0) {
-                best = Some((d, q, midpoint));
-            }
-        };
-        if !full {
-            consider(self.point(sweep * 0.5), true);
-        }
-        if !midpoint_only {
-            for (i, dir) in [Vec2::X, Vec2::Y, -Vec2::X, -Vec2::Y].into_iter().enumerate() {
-                let off = (i as f64 * std::f64::consts::FRAC_PI_2 - start).rem_euclid(TAU);
-                if full || off <= sweep + 1e-12 || off >= TAU - 1e-12 {
-                    consider(c + dir * r, false);
-                }
-            }
-        }
-        best.map(|(_, q, midpoint)| (q, midpoint))
+        solidcraft_kernel::planar::nearest_round_snap(c.into(), r, [start, sweep], p.into(), tol, midpoint_only)
+            .map(|(q, midpoint)| (q.into(), midpoint))
     }
 
     pub fn point(&self, t: f64) -> Vec2 {
