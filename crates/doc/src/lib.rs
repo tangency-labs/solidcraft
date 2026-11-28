@@ -199,6 +199,7 @@ pub use document::*;
 pub use eval::EdgeRef;
 pub use eval::EvalCache;
 pub use eval::ExtrudeEnds;
+pub use eval::FeatureChecksProgress;
 pub use eval::FeatureResult;
 pub use eval::KeptResults;
 pub use eval::KeptSeparate;

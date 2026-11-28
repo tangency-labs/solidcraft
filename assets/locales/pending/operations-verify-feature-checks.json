@@ -1,0 +1,34 @@
+{
+  "en": {
+    "operations.feature_check": "Checking features",
+    "operations.verify_signature": "Checking signature"
+  },
+  "ar": {
+    "operations.feature_check": "جارٍ فحص الميزات",
+    "operations.verify_signature": "جارٍ فحص التوقيع"
+  },
+  "de": {
+    "operations.feature_check": "Features werden geprüft",
+    "operations.verify_signature": "Signatur wird geprüft"
+  },
+  "he": {
+    "operations.feature_check": "בודק תכונות",
+    "operations.verify_signature": "בודק חתימה"
+  },
+  "ja": {
+    "operations.feature_check": "フィーチャーを確認中",
+    "operations.verify_signature": "署名を確認中"
+  },
+  "ko": {
+    "operations.feature_check": "피처 확인 중",
+    "operations.verify_signature": "서명 확인 중"
+  },
+  "vi": {
+    "operations.feature_check": "Đang kiểm tra các tính năng",
+    "operations.verify_signature": "Đang kiểm tra chữ ký"
+  },
+  "zh": {
+    "operations.feature_check": "正在检查特征",
+    "operations.verify_signature": "正在检查签名"
+  }
+}

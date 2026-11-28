@@ -22,6 +22,8 @@ use solidcore_step::read::R;
 use crate::body::Body;
 use crate::{KernelError, Result};
 pub use checks::HealedBody;
+pub use checks::ImportCheckProgress;
+pub use checks::ImportCheckStage;
 pub use checks::ImportChecks;
 pub use checks::ImportHeals;
 use p21::{Entity, Exchange, Param};

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "operations.import_check": "Checking parts",
+    "operations.import_heal": "Healing parts"
+  },
+  "ar": {
+    "operations.import_check": "جارٍ فحص الأجزاء",
+    "operations.import_heal": "جارٍ إصلاح الأجزاء"
+  },
+  "de": {
+    "operations.import_check": "Teile werden geprüft",
+    "operations.import_heal": "Teile werden repariert"
+  },
+  "he": {
+    "operations.import_check": "בודק חלקים",
+    "operations.import_heal": "מתקן חלקים"
+  },
+  "ja": {
+    "operations.import_check": "パーツを確認中",
+    "operations.import_heal": "パーツを修復中"
+  },
+  "ko": {
+    "operations.import_check": "부품 확인 중",
+    "operations.import_heal": "부품 복구 중"
+  },
+  "vi": {
+    "operations.import_check": "Đang kiểm tra các chi tiết",
+    "operations.import_heal": "Đang sửa các chi tiết"
+  },
+  "zh": {
+    "operations.import_check": "正在检查零件",
+    "operations.import_heal": "正在修复零件"
+  }
+}

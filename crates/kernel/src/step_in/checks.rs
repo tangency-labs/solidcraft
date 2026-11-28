@@ -15,8 +15,14 @@
 //! class of its placements is checked again on it, so the warnings are the healed parts'. The
 //! heals, like the warnings, are in read order whatever the threads, and are dropped with a run
 //! a token stops.
+//!
+//! A window shows a run as one row per stage, with how far it is ([`ImportCheckProgress`]) and a
+//! Cancel ([`ImportChecks::cancel`]); a stopped run keeps nothing it found.
 
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{
+    Arc, Condvar, Mutex, PoisonError,
+    atomic::{AtomicU64, Ordering},
+};
 
 use std::collections::HashMap;
 
@@ -311,26 +317,36 @@ fn heal_parts(
     outcomes: &mut [Outcome],
     heals: &Heals,
     workers: usize,
+    progress: Option<&Shared>,
 ) -> (HashMap<u64, (IssueKind, String)>, Option<Arc<ImportHeals>>, bool) {
     let items = if heals.as_read { Vec::new() } else { to_heal(jobs, outcomes) };
     if items.is_empty() {
         return (HashMap::new(), None, false);
     }
+    if let Some(progress) = progress {
+        progress.begin(ImportCheckStage::Healing, items.len());
+    }
     let done: Vec<ItemHeal> = {
         let outcomes: &[Outcome] = outcomes;
-        crate::par::map_on_threads(&items, workers.max(1), |(item, of)| heal_item(jobs, outcomes, *item, of, heals))
-            .into_iter()
-            .zip(&items)
-            .map(|(done, (item, _))| {
-                done.unwrap_or_else(|| {
-                    let label = jobs.iter().find(|j| j.item == *item).map(|j| j.label.clone()).unwrap_or_default();
-                    ItemHeal {
-                        note: Some((IssueKind::NeedsRepair, format!("{label}: the tolerance heal failed: it failed in the kernel"))),
-                        ..ItemHeal::default()
-                    }
-                })
+        crate::par::map_on_threads(&items, workers.max(1), |(item, of)| {
+            let done = heal_item(jobs, outcomes, *item, of, heals);
+            if let Some(progress) = progress {
+                progress.item_finished();
+            }
+            done
+        })
+        .into_iter()
+        .zip(&items)
+        .map(|(done, (item, _))| {
+            done.unwrap_or_else(|| {
+                let label = jobs.iter().find(|j| j.item == *item).map(|j| j.label.clone()).unwrap_or_default();
+                ItemHeal {
+                    note: Some((IssueKind::NeedsRepair, format!("{label}: the tolerance heal failed: it failed in the kernel"))),
+                    ..ItemHeal::default()
+                }
             })
-            .collect()
+        })
+        .collect()
     };
     let mut notes = HashMap::new();
     let mut bodies = Vec::new();
@@ -365,11 +381,11 @@ struct Settled {
 
 /// Heal what the checks of `jobs` fail ([`heal_parts`]) and say what they found: the issues of
 /// `jobs` given their outcomes (in the same order), each healed item's note before its first.
-fn settle(jobs: &[Job], mut outcomes: Vec<Outcome>, heals: &Heals, workers: usize) -> Settled {
+fn settle(jobs: &[Job], mut outcomes: Vec<Outcome>, heals: &Heals, workers: usize, progress: Option<&Shared>) -> Settled {
     let (mut notes, healed, mut stopped) = if outcomes.iter().any(|o| matches!(o, Outcome::Stopped)) {
         (HashMap::new(), None, true)
     } else {
-        heal_parts(jobs, &mut outcomes, heals, workers)
+        heal_parts(jobs, &mut outcomes, heals, workers, progress)
     };
     let mut issues = Vec::new();
     for (job, outcome) in jobs.iter().zip(&outcomes) {
@@ -410,28 +426,66 @@ fn run(
     let own = shared.stop.clone();
     // A test that holds the runs open ([`ImportChecks::hold_open_for_tests`]) lets this one end.
     drop(HOLD_OPEN.read().unwrap_or_else(PoisonError::into_inner));
+    shared.begin(ImportCheckStage::Checking, jobs.len());
     // Whatever happens here, a waiter is woken: a panic outside the per-check guard ends the run
     // as stopped (its list incomplete) instead of leaving `wait` blocked.
     let settled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         solidcraft_smlib::stop::scoped(over, || {
             own.within(|| {
                 crate::validation::within(scope, || {
-                    let outcomes = crate::par::map_on_threads(jobs, workers.max(1), check)
-                        .into_iter()
-                        .map(|o| o.unwrap_or_else(|| Outcome::CouldNotRun("SMLib's check could not run: it failed in the kernel".into())))
-                        .collect();
-                    settle(jobs, outcomes, heals, workers)
+                    let outcomes = crate::par::map_on_threads(jobs, workers.max(1), |job| {
+                        let outcome = check(job);
+                        shared.item_finished();
+                        outcome
+                    })
+                    .into_iter()
+                    .map(|o| o.unwrap_or_else(|| Outcome::CouldNotRun("SMLib's check could not run: it failed in the kernel".into())))
+                    .collect();
+                    settle(jobs, outcomes, heals, workers, Some(shared))
                 })
             })
         })
     }));
-    shared.finish(settled.unwrap_or_else(|_| Settled { issues: Arc::default(), stopped: true, heals: None }));
+    let mut settled = settled.unwrap_or_else(|_| Settled { issues: Arc::default(), stopped: true, heals: None });
+    // A Cancel can arrive after the last check returned but before this settlement: the run is
+    // stopped, and nothing it found is kept.
+    if shared.stop.is_stopped() {
+        settled.stopped = true;
+        settled.heals = None;
+    }
+    shared.finish(settled);
 }
 
 /// Held for writing by a test that keeps the check runs open ([`ImportChecks::hold_open_for_tests`]).
 static HOLD_OPEN: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
+/// A new run's number, which names its row in the operations panel.
+static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
+
+/// Which of an import's two background stages is under way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImportCheckStage {
+    /// SMLib's check of the parts, one or more at a time.
+    Checking,
+    /// Healing the parts the checks failed.
+    Healing,
+}
+
+/// How far an import's background checks are, for a window's operations panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportCheckProgress {
+    /// The stage under way.
+    pub stage: ImportCheckStage,
+    /// Parts (or, healing, items) finished of `total`.
+    pub done: usize,
+    pub total: usize,
+    /// A token stopped the run: it is finishing, and nothing it finds is kept.
+    pub cancelled: bool,
+}
 struct Shared {
+    /// The run's number: names its row in the operations panel while it runs, so a later check
+    /// of the same import is not taken for this one.
+    serial: u64,
     /// Stops the checks when nobody holds the import any more.
     stop: solidcraft_smlib::stop::Stop,
     settled: Mutex<Option<Settled>>,
@@ -439,9 +493,43 @@ struct Shared {
     /// Called once when the run ends ([`Shared::finish`]): a window's request for the frame its
     /// result needs, instead of polling [`ImportChecks::is_running`] while it runs.
     wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// The stage under way and how far it is ([`ImportChecks::progress`]).
+    progress: Mutex<Progress>,
+}
+
+/// What [`Shared::progress`] reports, kept together so a window never sees a stage's new
+/// total beside the last stage's count.
+#[derive(Clone, Copy, Debug)]
+struct Progress {
+    stage: ImportCheckStage,
+    done: usize,
+    total: usize,
 }
 
 impl Shared {
+    /// Start stage `stage` of `total` items, none finished yet.
+    fn begin(&self, stage: ImportCheckStage, total: usize) {
+        if let Ok(mut progress) = self.progress.lock() {
+            *progress = Progress { stage, done: 0, total };
+        }
+    }
+
+    /// One item of the stage under way is done.
+    fn item_finished(&self) {
+        if let Ok(mut progress) = self.progress.lock() {
+            progress.done = progress.done.saturating_add(1).min(progress.total);
+        }
+    }
+
+    /// How far the run is, `None` once it ended (its result is [`Shared::settled`]).
+    fn progress(&self) -> Option<ImportCheckProgress> {
+        if self.settled.lock().unwrap_or_else(PoisonError::into_inner).is_some() {
+            return None;
+        }
+        let progress = *self.progress.lock().unwrap_or_else(PoisonError::into_inner);
+        Some(ImportCheckProgress { stage: progress.stage, done: progress.done, total: progress.total, cancelled: self.stop.is_stopped() })
+    }
+
     fn finish(&self, settled: Settled) {
         // The lock is released before `wake` is taken: `set_wake` locks them in the other order.
         *self.settled.lock().unwrap_or_else(PoisonError::into_inner) = Some(settled);
@@ -517,10 +605,12 @@ impl PartialEq for ImportChecks {
 impl ImportChecks {
     fn shared(settled: Option<Settled>) -> (ImportChecks, Arc<Shared>) {
         let shared = Arc::new(Shared {
+            serial: NEXT_RUN.fetch_add(1, Ordering::Relaxed),
             stop: solidcraft_smlib::stop::Stop::new(),
             settled: Mutex::new(settled),
             done: Condvar::new(),
             wake: Mutex::new(None),
+            progress: Mutex::new(Progress { stage: ImportCheckStage::Checking, done: 0, total: 0 }),
         });
         (ImportChecks(Some(Arc::new(Handle(shared.clone())))), shared)
     }
@@ -538,7 +628,11 @@ impl ImportChecks {
     #[doc(hidden)]
     pub fn running_for_tests() -> (ImportChecks, impl FnOnce(Vec<ImportIssue>) + Send) {
         let (checks, shared) = ImportChecks::shared(None);
-        (checks, move |issues: Vec<ImportIssue>| shared.finish(Settled { issues: Arc::new(issues), stopped: false, heals: None }))
+        (checks, move |issues: Vec<ImportIssue>| {
+            // Cancelled is cancelled, as a real run's token leaves it: its findings are not kept.
+            let stopped = shared.stop.is_stopped();
+            shared.finish(Settled { issues: Arc::new(issues), stopped, heals: None })
+        })
     }
 
     /// Keep every check run started from now on from ending until the returned guard is
@@ -556,7 +650,7 @@ impl ImportChecks {
         if jobs.is_empty() {
             return ImportChecks::default();
         }
-        ImportChecks::shared(Some(settle(jobs, outcomes, heals, 1))).0
+        ImportChecks::shared(Some(settle(jobs, outcomes, heals, 1, None))).0
     }
 
     /// Start checking `jobs` on up to `workers` threads, then healing the parts they fail
@@ -568,6 +662,8 @@ impl ImportChecks {
             return ImportChecks::default();
         }
         let (checks, shared) = ImportChecks::shared(None);
+        // Before the worker starts: the operations panel shows the check from the first frame.
+        shared.begin(ImportCheckStage::Checking, jobs.len());
         let scope = crate::validation::current();
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -597,6 +693,30 @@ impl ImportChecks {
         self.issues().is_none()
     }
 
+    /// The run's number, for the operations panel's row key; `None` when there is no run.
+    pub fn run_id(&self) -> Option<u64> {
+        self.0.as_ref().map(|handle| handle.0.serial)
+    }
+
+    /// How far the checks are and which stage they are at, for a window's operations panel;
+    /// `None` once they have ended (or when there is no run).
+    pub fn progress(&self) -> Option<ImportCheckProgress> {
+        self.0.as_ref()?.0.progress()
+    }
+
+    /// Ask the run to stop at its next check (the operations panel's Cancel): what it has not
+    /// checked is left, no part is healed, and nothing it found is kept.
+    pub fn cancel(&self) {
+        if let Some(handle) = &self.0 {
+            handle.0.stop.stop();
+        }
+    }
+
+    /// The run was asked to stop and is finishing its current step.
+    pub fn cancelling(&self) -> bool {
+        self.0.as_ref().is_some_and(|handle| handle.0.stop.is_stopped())
+    }
+
     /// Call `wake` once when the checks end, or at once if they have ended: a window asks for the
     /// one frame the result needs, instead of asking [`Self::is_running`] every frame while they
     /// run. A report with no run (nothing to check, or read from a saved design) wakes nothing.
@@ -612,7 +732,9 @@ impl ImportChecks {
     pub fn issues(&self) -> Option<Arc<Vec<ImportIssue>>> {
         match &self.0 {
             None => Some(Arc::default()),
-            Some(h) => h.0.settled().map(|s| s.issues),
+            // A stopped run keeps nothing it found, but it has ended: `Some` with no issues, not
+            // `None`, which would still say it is running.
+            Some(h) => h.0.settled().map(|s| if s.stopped { Arc::default() } else { s.issues }),
         }
     }
 
@@ -636,5 +758,33 @@ impl ImportChecks {
                 (!s.stopped).then_some(s.issues)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The operations panel reads the stage and how far it is without waiting on the workers,
+    /// and its Cancel stops the run: the progress stays until the run ends.
+    #[test]
+    fn progress_names_the_stage_and_cancel_stops_the_run() {
+        let (checks, shared) = ImportChecks::shared(None);
+        assert_eq!(checks.progress(), Some(ImportCheckProgress { stage: ImportCheckStage::Checking, done: 0, total: 0, cancelled: false }));
+        shared.begin(ImportCheckStage::Checking, 3);
+        shared.item_finished();
+        assert_eq!(checks.progress(), Some(ImportCheckProgress { stage: ImportCheckStage::Checking, done: 1, total: 3, cancelled: false }));
+        // The heal starts with its own total, not the check's.
+        shared.begin(ImportCheckStage::Healing, 2);
+        shared.item_finished();
+        assert_eq!(checks.progress(), Some(ImportCheckProgress { stage: ImportCheckStage::Healing, done: 1, total: 2, cancelled: false }));
+        assert!(!checks.cancelling());
+        checks.cancel();
+        assert!(checks.cancelling());
+        assert_eq!(checks.progress().map(|p| p.cancelled), Some(true));
+        assert!(checks.is_running(), "the worker finishes its step first");
+        shared.finish(Settled { issues: Arc::default(), stopped: true, heals: None });
+        assert!(!checks.is_running());
+        assert_eq!(checks.progress(), None, "an ended run has no progress");
     }
 }

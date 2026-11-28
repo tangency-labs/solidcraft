@@ -2121,6 +2121,18 @@ impl FeatureResult {
     }
 }
 
+/// How far a window's SMLib checks of the last features' bodies are ([`Model::running_feature_checks`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeatureChecksProgress {
+    /// Names the run's operations-panel row.
+    pub serial: u64,
+    /// Checks ended of `total`.
+    pub done: usize,
+    pub total: usize,
+    /// The window asked them to stop, and they are finishing their current check.
+    pub cancelling: bool,
+}
+
 /// Incremental evaluator: holds the state after every feature.
 #[derive(Clone, Debug, Default)]
 pub struct Model {
@@ -6080,29 +6092,74 @@ impl Model {
         self.feature_checks.is_some()
     }
 
+    /// How far the SMLib checks the last evaluation left running are: the operations panel's
+    /// row. `None` when no check is running.
+    pub fn running_feature_checks(&self) -> Option<FeatureChecksProgress> {
+        let (serial, done, total, cancelling) = self.feature_checks.as_ref()?.progress()?;
+        Some(FeatureChecksProgress { serial, done, total, cancelling })
+    }
+
+    /// Ask the SMLib checks the last evaluation left running to stop at their next check (the
+    /// operations panel's Cancel). Their features are checked again by the next evaluation;
+    /// nothing a stopped check found is kept. `false` when no check is running.
+    pub fn cancel_feature_checks(&self) -> bool {
+        let Some(pending) = &self.feature_checks else { return false };
+        if pending.cancelled() {
+            return true;
+        }
+        // Ended already: there is nothing to cancel (its outcome is about to be taken).
+        if pending.progress().is_none() {
+            return false;
+        }
+        pending.cancel();
+        true
+    }
+
+    /// A batch of checks that wait until the returned function runs, or the batch is cancelled:
+    /// for callers' tests of what happens while feature checks are under way.
+    #[doc(hidden)]
+    pub fn running_feature_checks_for_tests(&mut self) -> impl FnOnce() + Send + 'static {
+        let (checks, end) = overlap::Checks::running_for_tests();
+        self.feature_checks = Some(overlap::Pending::new(checks));
+        end
+    }
+
     /// Settle the SMLib checks the last evaluation left running ([`Model::set_background_checks`])
     /// once they have ended, or, with `wait`, after waiting for them. Their held results go into
     /// the cache as the checks before them pass. A check that refused a feature's bodies marks
     /// that feature and every result after it stale (keeping their geometry until the next
     /// `evaluate`), and the next `evaluate` fails the feature, on the same inputs, with the
-    /// check's error. Returns whether an evaluation is owed to such a refusal: settled now or by
-    /// an earlier call, and not evaluated since.
+    /// check's error. A cancelled check marks those features stale too, to be checked again.
+    /// Returns whether an evaluation is owed to such a refusal: settled now or by an earlier
+    /// call, and not evaluated since.
     pub fn settle_feature_checks(&mut self, wait: bool) -> bool {
         if let Some(pending) = self.feature_checks.clone()
             && let Some(outcome) = pending.outcome(wait, &self.cache, &self.kept)
         {
             self.feature_checks = None;
-            if let Some(refused) = outcome {
-                if let Some(at) = self.results.iter().position(|r| r.id == refused.id) {
-                    for r in self.results.iter_mut().skip(at) {
+            match outcome {
+                overlap::Outcome::Refused(refused) => {
+                    let refused = *refused;
+                    if let Some(at) = self.results.iter().position(|r| r.id == refused.id) {
+                        for r in self.results.iter_mut().skip(at) {
+                            r.stale = true;
+                        }
+                    }
+                    // The fingerprints from the refused feature on are no longer the results'.
+                    self.fingerprinted = None;
+                    self.placement_inputs = None;
+                    self.carried_refusal = Some(refused);
+                    self.feature_refusal_owed = true;
+                }
+                overlap::Outcome::Cancelled { from } => {
+                    // The checks were stopped: their features are checked again next evaluation.
+                    for r in self.results.iter_mut().skip(from) {
                         r.stale = true;
                     }
+                    self.fingerprinted = None;
+                    self.placement_inputs = None;
                 }
-                // The fingerprints from the refused feature on are no longer the results'.
-                self.fingerprinted = None;
-                self.placement_inputs = None;
-                self.carried_refusal = Some(refused);
-                self.feature_refusal_owed = true;
+                overlap::Outcome::Passed => {}
             }
         }
         self.feature_refusal_owed
@@ -6132,6 +6189,27 @@ impl Model {
             })
     }
 
+    /// The imports whose SMLib check of their parts is still running, by feature, with how far
+    /// each is: the operations panel's rows ([`kernel::ImportChecks::progress`]).
+    pub fn running_import_checks(&self) -> impl Iterator<Item = (u64, kernel::ImportChecks)> + '_ {
+        self.results.iter().filter_map(|r| {
+            let report = r.import_report.as_ref()?;
+            report.checking().then(|| (r.id, report.checks.clone()))
+        })
+    }
+
+    /// Ask import `id`'s SMLib check of its parts to stop at its next check (the operations
+    /// panel's Cancel): the import stays as read and nothing the check found is kept.
+    pub fn cancel_import_check(&self, id: u64) -> bool {
+        let Some(checks) = self.results.iter().find(|r| r.id == id).and_then(|r| r.import_report.as_ref()).map(|r| &r.checks) else {
+            return false;
+        };
+        if !checks.is_running() {
+            return false;
+        }
+        checks.cancel();
+        true
+    }
     /// Fold what the ended checks of each import found into its result: its report's issues and
     /// its warning, as an import that waited for them has them. An import whose checks found a
     /// part to repair, that no one was told of yet, joins [`Self::take_import_notices`] (in
@@ -6201,6 +6279,18 @@ impl Model {
                 continue;
             }
             let run = &report.checks;
+            // A token stopped this run (the operations panel's Cancel, or a stopped file
+            // operation): what it found is incomplete and no part was healed, so none of it is
+            // kept. The import stays as read, and a later evaluation checks it again.
+            if run.stopped() {
+                // Nothing it found is kept, and the import's own result must be evaluated again
+                // so a replacement check runs: a current result would reuse the cancelled one.
+                held.release(r.id);
+                r.stale = true;
+                let as_read = kernel::ImportReport { checks: Default::default(), ..(**report).clone() };
+                r.import_report = (!as_read.issues.is_empty()).then(|| Arc::new(as_read));
+                continue;
+            }
             // The evaluation that brings healed parts in takes the read the model holds, whose
             // run ended with the heals the model then has, and is not news.
             let heals = run.heals();
@@ -6734,6 +6824,9 @@ impl Model {
         let mut back: Option<overlap::Refused> = None;
         // The model as it was before each feature ran, for the features a pattern copies.
         let mut before_states: SourceStates = SourceStates::new();
+        // A feature index whose check was stopped: the results from there on must be checked
+        // again, as a refusal's are (without a refusal to carry).
+        let mut cancelled_from: Option<usize> = None;
         'pass: loop {
             if let Some(refused) = back.take() {
                 let s = refused.saved;
@@ -6763,9 +6856,17 @@ impl Model {
                 }
             }
             for (i, f) in doc.features.iter().enumerate().skip(start) {
-                if let Some(refused) = checks.settle(false, &self.cache, &self.kept) {
-                    back = Some(refused);
-                    continue 'pass;
+                if let Some(outcome) = checks.settle(false, &self.cache, &self.kept) {
+                    match outcome {
+                        overlap::Settlement::Refused(refused) => {
+                            back = Some(*refused);
+                            continue 'pass;
+                        }
+                        overlap::Settlement::Cancelled { from } => {
+                            cancelled_from = Some(from);
+                            break 'pass;
+                        }
+                    }
                 }
                 // The model as it was before this feature ran: a pattern that copies this feature
                 // builds the copy where the feature was built, when the model it is built against
@@ -7353,12 +7454,28 @@ impl Model {
             }
             // Every check still running ends before the results stand, unless they are left to end
             // beside the caller ([`Model::set_background_checks`]): those that ended are settled.
-            if let Some(refused) = checks.settle(!self.background_checks, &self.cache, &self.kept) {
-                back = Some(refused);
-                continue 'pass;
+            if let Some(outcome) = checks.settle(!self.background_checks, &self.cache, &self.kept) {
+                match outcome {
+                    overlap::Settlement::Refused(refused) => {
+                        back = Some(*refused);
+                        continue 'pass;
+                    }
+                    overlap::Settlement::Cancelled { from } => {
+                        cancelled_from = Some(from);
+                        break 'pass;
+                    }
+                }
             }
             // Main's evaluate loop ends the pass here; Pattern-of-components reconcile runs from Session::refresh.
             break;
+        }
+        if let Some(from) = cancelled_from {
+            // A stopped check proves nothing about its feature: those results are checked again.
+            for r in out.iter_mut().skip(from) {
+                r.stale = true;
+            }
+            self.fingerprinted = None;
+            self.placement_inputs = None;
         }
         self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());

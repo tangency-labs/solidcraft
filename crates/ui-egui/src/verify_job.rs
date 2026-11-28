@@ -1,12 +1,17 @@
 //! Checking a saved design's signature off the window's thread: verification reads every
 //! authoritative part to hash it, which takes long enough on a large design that the window must
 //! keep drawing meanwhile. The report is taken up by [`tick`] when the worker answers.
+//!
+//! While it runs, the check is a row of the operations panel (the progress stripe: the read has no
+//! steps to count). Its Cancel drops the answer: the worker's read cannot be cut short, and
+//! nothing it finds is applied.
 
 use std::sync::mpsc;
 
 use solidcraft_engine::io::ProvenanceReport;
 
 use crate::SolveApp;
+use crate::operations::Outcome;
 
 /// A signature check running on a worker.
 pub struct Verifying {
@@ -16,6 +21,8 @@ pub struct Verifying {
     /// while the check runs makes the report answer for a version that is no longer there.
     disk: Option<solidcraft_engine::io::design_lock::FileStamp>,
     done: mpsc::Receiver<Result<Option<ProvenanceReport>, String>>,
+    /// Names the check's operations-panel row, so a later check is not taken for this one.
+    pub(crate) serial: u64,
 }
 
 /// Start checking the active design's signature. `false` when nothing started (there is no file,
@@ -52,7 +59,7 @@ fn start_with(app: &mut SolveApp, after_reuse: bool) -> bool {
             let _ = tx.send(report);
         });
         if spawned.is_ok() {
-            app.verifying = Some(Verifying { path, disk, done: rx });
+            app.verifying = Some(Verifying { path, disk, done: rx, serial: crate::operations::serial() });
             app.set_status(solidcraft_ui_text::tr("ui.verify_checking").to_string(), false);
             return true;
         }
@@ -73,6 +80,12 @@ pub fn tick(app: &mut SolveApp) {
         Err(mpsc::TryRecvError::Disconnected) => Err("the check stopped".to_string()),
     };
     let Some(verifying) = app.verifying.take() else { return };
+    let key = format!("verify:{}", verifying.serial);
+    let outcome = match &answer {
+        Ok(_) => Outcome::Done,
+        Err(why) => Outcome::Failed(why.clone()),
+    };
+    crate::operations::ended(app, &key, outcome);
     apply(app, Some(verifying.path), verifying.disk, answer);
 }
 
@@ -115,6 +128,7 @@ fn apply(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serde_json::json;
 
     #[test]
@@ -150,6 +164,26 @@ mod tests {
         let (text, _, error) = h.app.status.as_ref().expect("the error is shown");
         assert!(text.contains("Could not check the signature"), "{text}");
         assert!(error);
+    }
+
+    /// The signature check is an operation: its row cancels it, and the answer the worker still
+    /// sends is dropped rather than applied to the design.
+    #[test]
+    fn cancelling_a_signature_check_drops_its_answer() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        // Hold the check: its answer never comes, so the row stays until it is cancelled.
+        let (_tx, rx) = mpsc::channel();
+        h.app.verifying = Some(Verifying { path: "/tmp/held.solidcraft".into(), disk: None, done: rx, serial: 41 });
+        let row = crate::operations::current(&h.app).into_iter().find(|r| r.key == "verify:41").expect("the check is an operation");
+        assert_eq!(row.label, solidcraft_ui_text::tr("operations.verify_signature"));
+        assert!(row.cancellable());
+        crate::operations::cancel(&mut h.app, "verify:41").unwrap();
+        assert!(h.app.verifying.is_none(), "the answer is dropped");
+        assert!(crate::operations::current(&h.app).iter().all(|r| !r.key.starts_with("verify:")), "the row goes");
+        let (text, _, _) = h.app.status.clone().expect("the cancel is said");
+        assert!(text.contains("Checking signature canceled"), "{text}");
     }
 
     #[test]

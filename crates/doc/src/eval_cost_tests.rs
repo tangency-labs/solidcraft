@@ -4722,6 +4722,62 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
 }
 
+/// The operations panel's Cancel of an import's check: its run ends stopped, nothing it found
+/// is kept (the import stays as read, and is checked again when it is evaluated), and it is not
+/// shown as a warning or a repair.
+#[test]
+fn a_cancelled_import_check_keeps_nothing_it_found() {
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let end = model.running_import_check_for_tests(import);
+    let (id, checks) = model.running_import_checks().next().expect("the check is an operation");
+    assert_eq!(id, import);
+    assert!(checks.progress().is_some(), "the operations panel has its progress");
+    assert!(model.cancel_import_check(import));
+    assert!(checks.cancelling(), "the row says it is stopping");
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::NeedsRepair,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "would need repair".into(),
+    };
+    end(vec![issue]);
+    assert!(!model.checking_imports());
+    model.settle_import_checks();
+    let r = model.result(import).expect("the import is still there");
+    assert!(r.import_report.as_ref().is_none_or(|i| i.issues.is_empty()), "nothing it found is kept: {:?}", r.import_report);
+    assert!(r.warning.as_deref().is_none_or(|w| !w.contains("would need repair")), "{:?}", r.warning);
+    assert!(r.stale, "the import is evaluated again, so a replacement check runs");
+    assert!(model.saved_if_checked(&doc).is_none(), "no model until it is checked again");
+}
+
+/// The operations panel's Cancel of the SMLib checks of the last features' bodies: the batch
+/// stops, its held results are dropped, and the features are marked stale to be checked again,
+/// so no model is kept until then.
+#[test]
+fn a_cancelled_feature_check_marks_the_features_stale_and_keeps_no_model() {
+    let mut doc = Document::new("cancelled feature check");
+    block(&mut doc, "A", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(!model.checking_features(), "the evaluation waited for its check");
+    let end = model.running_feature_checks_for_tests();
+    let progress = model.running_feature_checks().expect("the check is an operation");
+    assert_eq!((progress.done, progress.total, progress.cancelling), (0, 1, false));
+    assert!(model.cancel_feature_checks());
+    assert!(model.running_feature_checks().expect("still running").cancelling, "the row says it is stopping");
+    model.settle_feature_checks(true);
+    assert!(!model.checking_features());
+    assert!(model.is_stale(), "the feature is checked again");
+    assert!(model.saved_if_checked(&doc).is_none(), "no model until it is checked again");
+    drop(end);
+}
+
 /// #20633: a window is woken once when an import's check of its parts ends, and not at all while
 /// it runs, so an untouched window draws nothing for the minutes a large import's check takes.
 #[test]

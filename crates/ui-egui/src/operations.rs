@@ -65,6 +65,9 @@ pub struct Row {
     pub steps: Option<(usize, usize)>,
     /// The steps are bytes (a file read or written): the bar says how far in per cent.
     pub percent: bool,
+    /// `steps` counts completed units (a batch's checks), not the step under way: the bar says
+    /// `done / total`, including `0 / total`.
+    pub completed: bool,
     /// Waiting for the one before it.
     pub queued: bool,
     /// Done, and waiting for the person to finish what they are doing (or for its design's tab)
@@ -100,6 +103,12 @@ enum Cancel {
     SketchRefresh,
     /// A delete's check.
     DeleteCheck,
+    /// An import's SMLib check of its parts, or the heal of the parts it failed.
+    ImportCheck(u64),
+    /// The SMLib checks of the last features' bodies.
+    FeatureChecks,
+    /// A saved design's signature check.
+    Verify,
     /// Opening a feature's editor.
     FeatureEdit,
     /// An agent's command.
@@ -121,6 +130,7 @@ impl Row {
             label,
             steps: None,
             percent: false,
+            completed: false,
             queued: false,
             waiting: false,
             cancelling: false,
@@ -167,6 +177,9 @@ impl Row {
         if self.percent {
             return Some(format!("{}%", (done.min(total) as f64 * 100.0 / total as f64).floor()));
         }
+        if self.completed {
+            return Some(format!("{} / {total}", done.min(total)));
+        }
         Some(format!("{} / {total}", (done + 1).min(total)))
     }
 }
@@ -194,6 +207,23 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
             cancelling: read.cancelled,
             cancel: Some(Cancel::DrawingRead),
             ..Row::new(format!("insert_read:{}", read.serial), crate::dialogs_insert_drawing::reading_label(&read.name))
+        });
+    }
+    // An import's SMLib check of its parts, then the heal of the parts it failed: both run
+    // beside the window after a large import has shown. One row each, since they are two stages
+    // of one background run (the check's row fades as the heal's appears).
+    for (id, checks) in app.session.model.running_import_checks() {
+        let Some(progress) = checks.progress() else { continue };
+        let Some(run) = checks.run_id() else { continue };
+        rows.push(import_check_row(id, run, progress));
+    }
+    if let Some(check) = app.session.model.running_feature_checks() {
+        rows.push(feature_check_row(check));
+    }
+    if let Some(verifying) = &app.verifying {
+        rows.push(Row {
+            cancel: Some(Cancel::Verify),
+            ..Row::new(format!("verify:{}", verifying.serial), solidcraft_ui_text::tr("operations.verify_signature").to_string())
         });
     }
     if let Some(saving) = &app.saving {
@@ -299,6 +329,36 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     rows
 }
 
+/// The operations panel's row for an import's background check or heal: one stage each, since
+/// they run one after the other, named by the stage and the run's number.
+fn import_check_row(id: u64, run: u64, progress: solidcraft_engine::kernel::ImportCheckProgress) -> Row {
+    let (stage, label) = match progress.stage {
+        solidcraft_engine::kernel::ImportCheckStage::Checking => ("check", solidcraft_ui_text::tr("operations.import_check")),
+        solidcraft_engine::kernel::ImportCheckStage::Healing => ("heal", solidcraft_ui_text::tr("operations.import_heal")),
+    };
+    Row {
+        // One step: the work inside it is a part's, so the bar's stripe says it is running.
+        steps: (progress.total > 1).then_some((progress.done, progress.total)),
+        cancelling: progress.cancelled,
+        cancel: Some(Cancel::ImportCheck(id)),
+        ..Row::new(format!("import-{stage}:{id}:{run}"), label.to_string())
+    }
+}
+
+/// The operations panel's row for the SMLib checks of the last features' bodies: one row for the
+/// batch, how many feature checks ended of how many started.
+fn feature_check_row(progress: solidcraft_engine::doc::FeatureChecksProgress) -> Row {
+    Row {
+        // One check: the bar's stripe says it is running. The count is completed checks, not
+        // the one under way.
+        steps: (progress.total > 1).then_some((progress.done, progress.total)),
+        completed: true,
+        cancelling: progress.cancelling,
+        cancel: Some(Cancel::FeatureChecks),
+        ..Row::new(format!("feature-check:{}", progress.serial), solidcraft_ui_text::tr("operations.feature_check").to_string())
+    }
+}
+
 /// Long work's steps (a file read or written), and whether they are bytes ([`Row::percent`]).
 fn work_steps(progress: &solidcraft_engine::doc::progress::Progress) -> Option<((usize, usize), bool)> {
     progress.work().map(|(stage, done, total)| ((done, total), bytes_stage(stage)))
@@ -360,6 +420,24 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
         Cancel::DeleteCheck => {
             if let Some(check) = app.delete_check.take() {
                 check.progress.cancel();
+            }
+        }
+        // It stops at its next check: the import stays as read, nothing it found is kept.
+        Cancel::ImportCheck(id) => {
+            if !app.session.model.cancel_import_check(id) {
+                return Err(format!("no operation `{}` is under way", row.key));
+            }
+        }
+        Cancel::FeatureChecks => {
+            if !app.session.model.cancel_feature_checks() {
+                return Err(format!("no operation `{}` is under way", row.key));
+            }
+        }
+        // Dropping the check's answer is the cancel: the worker's read cannot be cut short, and
+        // nothing it finds is applied.
+        Cancel::Verify => {
+            if app.verifying.take().is_none() {
+                return Err(format!("no operation `{}` is under way", row.key));
             }
         }
         Cancel::FeatureEdit => {
@@ -848,6 +926,13 @@ mod tests {
         assert_eq!(row("a", Some((0, 1))).status(), None, "one step: just the bar");
         assert_eq!(row("a", None).fraction(), None);
         assert_eq!(row("a", Some((5, 0))).fraction(), None, "hostile counts");
+        // Completed counts say how many are done, including none.
+        let mut completed = row("a", Some((2, 12)));
+        completed.completed = true;
+        assert_eq!(completed.status().as_deref(), Some("2 / 12"));
+        let mut none = row("a", Some((0, 12)));
+        none.completed = true;
+        assert_eq!(none.status().as_deref(), Some("0 / 12"));
     }
 
     /// A history command computing off the window thread shows as a row with its command's name
@@ -858,6 +943,9 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 20})).unwrap();
+        // The boxes' own SMLib checks are not the rows this test is about.
+        h.app.session.settle_feature_checks(true);
+        assert!(!h.app.session.model.checking_features());
         let features = h.app.session.doc.features.len();
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
         h.app.run_heavy("edit.undo", json!({})).unwrap();
@@ -962,5 +1050,88 @@ mod tests {
         h.frame();
         assert!(h.app.operations.rect.is_none() && crate::scenario::rect_of("operations:panel").is_none());
         drop(release);
+    }
+
+    /// The feature checks' batch shows as one row: its count, the stripe while one check runs,
+    /// and X cancels the batch.
+    #[test]
+    fn a_feature_check_is_an_operation_with_progress_and_cancel() {
+        use solidcraft_engine::doc::FeatureChecksProgress;
+        let row = feature_check_row(FeatureChecksProgress { serial: 9, done: 2, total: 5, cancelling: false });
+        assert_eq!((row.key.as_str(), row.label.as_str()), ("feature-check:9", solidcraft_ui_text::tr("operations.feature_check")));
+        assert_eq!(row.steps, Some((2, 5)));
+        assert_eq!(row.status().as_deref(), Some("2 / 5"), "completed checks, not the one under way");
+        assert!(row.cancellable() && !row.cancelling);
+        let one = feature_check_row(FeatureChecksProgress { serial: 9, done: 0, total: 1, cancelling: true });
+        assert_eq!(one.steps, None, "one check: the stripe says it runs");
+        assert!(one.cancelling && !one.cancellable());
+    }
+
+    /// An import's SMLib check of its parts, then the heal of the parts it fails, run beside the
+    /// window after a large import has shown: each is a row of the operations panel with its
+    /// progress and Cancel, and Cancel stops it without keeping what it found.
+    #[test]
+    fn an_imports_check_and_heal_are_operations_with_their_progress_and_cancel() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-check-operation-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.insert_path_with(&path.to_string_lossy(), &Default::default(), false).unwrap();
+        let id =
+            app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).expect("the import").id;
+        // Hold a check running: this file is small, so its check otherwise ends at once.
+        let end = app.session.model.running_import_check_for_tests(id);
+        let row = current(&app).into_iter().find(|r| r.key.starts_with(&format!("import-check:{id}:"))).expect("the check is an operation");
+        let key = row.key.clone();
+        assert_eq!(row.label, solidcraft_ui_text::tr("operations.import_check"));
+        assert!(row.cancellable() && row.fraction().is_none(), "one part at a time: the bar's stripe says it runs");
+        // Cancel stops it: the row says so, its X is done, and nothing it found is kept.
+        control(&mut app, &json!({"cancel": key.clone()})).unwrap();
+        let row = current(&app).into_iter().find(|r| r.key == key).expect("still running");
+        assert!(row.cancelling && !row.cancellable(), "cancelling: {row:?}");
+        let finished = control(&mut app, &json!({})).unwrap()["finished"].clone();
+        assert!(finished.as_array().unwrap().iter().any(|f| f["key"] == key && f["outcome"] == "cancelled"), "{finished}");
+        // It ends: no row, and the import stays as read.
+        end(Vec::new());
+        assert!(current(&app).iter().all(|r| !r.key.starts_with("import-check:")), "gone");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A running batch of feature checks is an operation the window cancels; settling marks the
+    /// features stale and takes the row away.
+    #[test]
+    fn a_running_feature_check_is_cancelled_from_the_panel() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let end = h.app.session.model.running_feature_checks_for_tests();
+        let progress = h.app.session.model.running_feature_checks().expect("the check is an operation");
+        let key = format!("feature-check:{}", progress.serial);
+        let row = current(&h.app).into_iter().find(|r| r.key == key).expect("the check's row");
+        assert_eq!(row.label, solidcraft_ui_text::tr("operations.feature_check"));
+        assert!(row.cancellable() && row.fraction().is_none());
+        control(&mut h.app, &json!({"cancel": key.clone()})).unwrap();
+        assert!(h.app.session.model.running_feature_checks().expect("still running").cancelling);
+        h.app.session.settle_feature_checks(true);
+        assert!(!h.app.session.model.checking_features());
+        assert!(h.app.session.model.is_stale(), "the feature is checked again");
+        assert!(current(&h.app).iter().all(|r| r.key != key), "the row goes");
+        drop(end);
+    }
+
+    /// The two stages are two rows: the check with its parts, the heal with its own (one item at a
+    /// time is the stripe), each named by the run's number so a later check of the same import is
+    /// a new operation.
+    #[test]
+    fn an_imports_check_and_heal_rows_name_their_stage() {
+        use solidcraft_engine::kernel::{ImportCheckProgress, ImportCheckStage};
+        let checking = import_check_row(7, 3, ImportCheckProgress { stage: ImportCheckStage::Checking, done: 3, total: 100, cancelled: false });
+        assert_eq!((checking.key.as_str(), checking.label.as_str()), ("import-check:7:3", solidcraft_ui_text::tr("operations.import_check")));
+        assert_eq!(checking.steps, Some((3, 100)));
+        assert!(!checking.cancelling && checking.cancellable());
+        let healing = import_check_row(7, 3, ImportCheckProgress { stage: ImportCheckStage::Healing, done: 0, total: 1, cancelled: true });
+        assert_eq!((healing.key.as_str(), healing.label.as_str()), ("import-heal:7:3", solidcraft_ui_text::tr("operations.import_heal")));
+        assert_eq!(healing.steps, None, "one item: the stripe says it runs");
+        assert!(healing.cancelling && !healing.cancellable());
     }
 }

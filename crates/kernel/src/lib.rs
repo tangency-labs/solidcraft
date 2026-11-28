@@ -582,6 +582,8 @@ pub use splitface::{FieldKind, PieceSides, split_piece_sides};
 pub use step::step_export;
 pub use step::step_export_with_face_ids;
 pub use step_in::HealedBody;
+pub use step_in::ImportCheckProgress;
+pub use step_in::ImportCheckStage;
 pub use step_in::ImportChecks;
 pub use step_in::ImportHeals;
 pub use step_in::ImportIssue;
