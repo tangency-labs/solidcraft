@@ -35,7 +35,7 @@ fn fail(s: &str) -> KernelError {
     KernelError::Invalid(format!("cylinder emboss: {s}"))
 }
 /// Why an emboss onto a picked face is refused when a profile lies off it, and what to do.
-const NOT_FITTING: &str = "the text is not fitting the selected target face. Either scale the face up or the text down";
+const NOT_FITTING: &str = "the sketch is not fitting the selected target face. Either scale the face up or the sketch down";
 /// A refusal of an emboss onto a picked face.
 fn refuse(s: &str) -> KernelError {
     KernelError::Invalid(format!("emboss: {s}"))
@@ -2274,9 +2274,14 @@ mod tests {
         // face) is refused, not cut short at the edge.
         let over =
             Region2 { outer: Loop2::polygon(&[Vec2::new(15., -5.), Vec2::new(25., -5.), Vec2::new(25., 5.), Vec2::new(15., 5.)]), holes: vec![] };
+        let under =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(-25., -5.), Vec2::new(-15., -5.), Vec2::new(-15., 5.), Vec2::new(-25., 5.)]), holes: vec![] };
+        let refusal = "invalid input: emboss: the sketch is not fitting the selected target face. Either scale the face up or the sketch down";
         for depth in [2., -2.] {
             let e = emboss_project_face(&block, top, at, &sketch, &[square(5.), over.clone()], depth).unwrap_err();
-            assert!(e.to_string().contains("profile 2 of 2 lies off it"), "{e}");
+            assert_eq!(e.to_string(), format!("{refusal} (profile 2 of 2 lies off it)"));
+            let e = emboss_project_face(&block, top, at, &sketch, &[over.clone(), under.clone()], depth).unwrap_err();
+            assert_eq!(e.to_string(), format!("{refusal} (profiles 1 and 2 of 2 lie off it)"));
         }
     }
 
