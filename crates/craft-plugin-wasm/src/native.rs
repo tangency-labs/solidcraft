@@ -1821,13 +1821,27 @@ fn engine_for(stack_bytes: usize, tier: Tier, parallel: bool, disk: Option<wasmt
 
 fn compile_component(engine: &Engine, bytes: &[u8]) -> Result<Component> {
     check_outer_interfaces(bytes)?;
-    Component::from_binary(engine, bytes).map_err(|e| {
-        // Inspect the parser error itself, not plugin names in the compilation context.
-        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
-            return component_parse_error(error);
-        }
-        trap(format!("component compilation failed: {e:#}"))
-    })
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Component::from_binary(engine, bytes))) {
+        Ok(compiled) => compiled.map_err(|e| {
+            // Inspect the parser error itself, not plugin names in the compilation context.
+            if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
+                return component_parse_error(error);
+            }
+            trap(format!("component compilation failed: {e:#}"))
+        }),
+        Err(panic) => refuse_multi_memory(panic),
+    }
+}
+
+/// Lowering between two inner instances that each have their own memory takes an adapter over
+/// both, which Wasmtime writes whatever the engine allows and then panics on, multi-memory being
+/// off (#23498). That one panic is the component's doing; any other goes on unwinding.
+fn refuse_multi_memory<T>(panic: Box<dyn std::any::Any + Send>) -> Result<T> {
+    let text = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied());
+    if text.is_some_and(|text| text.starts_with("invalid adapter module generated: multiple memories")) {
+        return Err(component_error("this component needs WebAssembly multi-memory, which SolidCraft does not enable"));
+    }
+    std::panic::resume_unwind(panic)
 }
 
 enum ImportOutput {

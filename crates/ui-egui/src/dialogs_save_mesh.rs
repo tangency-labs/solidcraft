@@ -355,7 +355,8 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
             let t = Tokens::get();
             ui.painter().rect_filled(rect, t.radius_sm.saturating_sub(1), t.chip);
             let letter = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-            ui.painter().text(
+            crate::ui_kit::paint_anchored(
+                ui.painter(),
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 letter,
@@ -624,7 +625,8 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             }
             paint_icon(ui, egui::Rect::from_min_size(rect.left_center() + vec2(3.0, -ICON / 2.0), vec2(ICON, ICON)), tex, &e.slicer.name);
             let text = fitted(ui, &e.slicer.name, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
-            let (elided, at) = (text.elided, rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0));
+            let rise = egui::galley_cap_ink_rise(ui.painter(), &text);
+            let (elided, at) = (text.elided, rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0 - rise));
             ui.painter().galley(at, text, Tokens::get().text);
             crate::scenario::publish_handle(&format!("dialog:Slicer:{}", e.slicer.name), rect.center());
             if e.user {
@@ -648,7 +650,8 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
                 ui.painter().rect_filled(rect, 2.0, fill);
             }
             let text = fitted(ui, easyprint_label, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
-            ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0), text, Tokens::get().text);
+            let rise = egui::galley_cap_ink_rise(ui.painter(), &text);
+            ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0 - rise), text, Tokens::get().text);
             crate::scenario::publish_handle("dialog:Slicer:EasyPrint", rect.center());
             if resp.clicked() {
                 chosen = Some(EASYPRINT.to_string());
@@ -666,7 +669,8 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         if resp.hovered() {
             ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, Tokens::get().hover);
         }
-        ui.painter().text(
+        crate::ui_kit::paint_anchored(
+            ui.painter(),
             rect.left_center() + vec2(ICON + 9.0, 0.0),
             egui::Align2::LEFT_CENTER,
             solidcraft_ui_text::tr_label("Custom…"),

@@ -21,6 +21,8 @@ fn top_view() -> Harness {
         distance: 100.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     h
 }
@@ -352,6 +354,7 @@ fn a_profile_hidden_by_a_face_is_still_the_profiles_pick() {
         distance: 200.0,
         fov: 0.0,
         up: Default::default(),
+        frame: None,
     };
     h.app.start("solid.extrude");
     h.settle();
@@ -398,6 +401,8 @@ fn a_section_pick_skips_edges_and_vertices_in_the_removed_half() {
         distance: 200.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     // Section XZ at 15 mm: keeps y 0..15, removes y 15..30.
     h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 15, 0], "normal": [0, 1, 0]}}}));
@@ -464,6 +469,8 @@ fn point_cloud_points_pick_in_view_pick_viewport_and_construct_tools() {
         distance: 100.0,
         fov: 0.0,
         up: Default::default(),
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(960.0, 600.0));
     let cam = h.app.cam;

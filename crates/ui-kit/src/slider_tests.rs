@@ -69,6 +69,7 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
                                         integer,
                                         workspace_accent: false,
                                         off_endpoint: false,
+                                        logarithmic: false,
                                     },
                                 );
                             });
