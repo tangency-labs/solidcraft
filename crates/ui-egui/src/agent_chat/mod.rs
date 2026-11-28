@@ -664,6 +664,8 @@ pub struct AgentChat {
     tools_bridged: bool,
     /// The latest completed turn's notice; older notices remain in the transcript.
     turn_warning: Option<String>,
+    /// Latest token / context-window usage reported by the backend (`None` until reported).
+    pub usage: Option<backend::Usage>,
     held: Vec<Held>,
     next_approval: u64,
     /// The chat's control endpoint: the port, and its requests.
@@ -778,6 +780,7 @@ impl AgentChat {
     pub(crate) fn disconnect_document(&mut self, session: &mut solidcraft_engine::Session, wait: bool) {
         finish_turn(self, session);
         self.clear_config();
+        self.usage = None;
         self.stop_backend(wait);
         if self.state.is_some() {
             self.state = Some(State::Off);
@@ -1172,6 +1175,14 @@ impl AgentChat {
                 }
             }
             Event::AuthStatus(s) => self.auth_status = Some(s),
+            Event::Usage(usage) => {
+                if !usage.is_empty() {
+                    match &mut self.usage {
+                        Some(current) => current.merge(usage),
+                        None => self.usage = Some(usage),
+                    }
+                }
+            }
             Event::TurnEnded { reason } => {
                 if self.state() == State::Busy {
                     self.state = Some(State::Ready);
@@ -1361,6 +1372,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         None
     };
     let http = app.services.agent_http.clone();
+    let http_stream = app.services.agent_http_stream.clone();
     let chat = &mut app.agent_chat;
     if chat.tools_port.is_none()
         && let Some(start) = chat.control_starter.as_mut()
@@ -1404,6 +1416,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         key,
                         allow_insecure_http: entry.allow_insecure_http,
                         http,
+                        http_stream,
                         request_timeout_s: entry.request_timeout_s,
                         reasoning_effort: entry.reasoning_effort.clone(),
                         openai_responses: entry.openai_responses,
@@ -1442,6 +1455,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
             chat.auth.clear();
             chat.auth_status = None;
             chat.agent.clear();
+            chat.usage = None;
         }
         Err(e) => {
             chat.notice(trf("ui.agent_chat_failed_start", &[("error", &e)]), true);
@@ -2173,6 +2187,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.all_selected = false;
     chat.times.clear();
     chat.turn_warning = None;
+    chat.usage = None;
     chat.gallery = None;
     chat.chips_version += 1;
     chat.pending.clear();
@@ -3580,6 +3595,16 @@ pub fn status(app: &SolveApp) -> Value {
         // The same items as one list, as `picked` gave them before the pills (for scripts that read it).
         let picked: Vec<Value> = c.pills.iter().flat_map(|p| &p.context.items).map(|i| json!({"label": i.label, "detail": i.detail})).collect();
         state.insert("picked".into(), Value::Array(picked));
+        state.insert(
+            "usage".into(),
+            c.usage.map_or(Value::Null, |u| {
+                json!({
+                    "inputTokens": u.input_tokens,
+                    "outputTokens": u.output_tokens,
+                    "contextWindow": u.context_window,
+                })
+            }),
+        );
     }
     state
 }

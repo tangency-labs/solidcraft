@@ -1247,6 +1247,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         easyprint_upload: Some(std::sync::Arc::new(easyprint_upload)),
         browser_files: None,
         agent_http: Some(std::sync::Arc::new(agent_http)),
+        agent_http_stream: Some(std::sync::Arc::new(agent_http_stream)),
         secrets: Some(std::sync::Arc::new(Keychain("SolidCraft agent chat"))),
         tickets_http: Some(std::sync::Arc::new(tickets_http)),
         #[cfg(feature = "usage-stats")]
@@ -1345,10 +1346,10 @@ fn workshop_get(url: &str) -> Result<solidcraft_ui_egui::workshop::Signed, Strin
     Ok(solidcraft_ui_egui::workshop::Signed { body, signature, key_id })
 }
 
-/// HTTP for the agent chat's API agents (OpenAI-compatible endpoints, docs/agent-chat.md): to the
-/// URL the user configured, which may be plain HTTP on this computer (Ollama, LM Studio). No
-/// redirects (a key must not follow one elsewhere), at most 16 MB back.
-fn agent_http(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Result<(u16, Vec<u8>), String> {
+/// Shared `ureq` transport for the agent chat's API agents (OpenAI-compatible and
+/// Anthropic-compatible endpoints): plain HTTP allowed for localhost, no redirects (a key must
+/// not follow one elsewhere).
+fn agent_http_response(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Result<ureq::http::Response<ureq::Body>, String> {
     use std::time::Duration;
     let tls = ureq::tls::TlsConfig::builder()
         .root_certs(ureq::tls::RootCerts::PlatformVerifier)
@@ -1363,7 +1364,7 @@ fn agent_http(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Resul
         .max_redirects(0)
         .build()
         .into();
-    let mut response = if r.method == "POST" {
+    if r.method == "POST" {
         let mut req = agent.post(&r.url);
         for (k, v) in &r.headers {
             req = req.header(k, v);
@@ -1376,10 +1377,53 @@ fn agent_http(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Resul
         }
         req.call()
     }
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
+
+/// HTTP for the agent chat's API agents (OpenAI-compatible endpoints, docs/agent-chat.md): to the
+/// URL the user configured, which may be plain HTTP on this computer (Ollama, LM Studio). No
+/// redirects (a key must not follow one elsewhere), at most 16 MB back.
+fn agent_http(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Result<(u16, Vec<u8>), String> {
+    let mut response = agent_http_response(r)?;
     let status = response.status().as_u16();
     let body = response.body_mut().with_config().limit(16 << 20).read_to_vec().map_err(|e| e.to_string())?;
     Ok((status, body))
+}
+
+/// Streaming SSE HTTP for the agent chat's API agents: delivers lines to `on_line` as they arrive
+/// when the server answers `200` with `text/event-stream`, stopping immediately when `on_line`
+/// returns `false` (cancellation). Non-SSE or error responses fall back to reading the full body.
+fn agent_http_stream(
+    r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest,
+    on_line: &mut dyn FnMut(&str) -> bool,
+) -> Result<solidcraft_ui_egui::agent_chat::backend::HttpStreamResponse, String> {
+    use solidcraft_ui_egui::agent_chat::backend::HttpStreamResponse;
+    use std::io::BufRead;
+    let mut response = agent_http_response(r)?;
+    let status = response.status().as_u16();
+    let content_type = response.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    if status == 200 && content_type.to_ascii_lowercase().contains("text/event-stream") {
+        let reader = response.body_mut().with_config().limit(64 << 20).reader();
+        let mut lines = std::io::BufReader::new(reader);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match lines.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let trimmed = line.trim_end_matches(['\r', '\n']);
+                    if !on_line(trimmed) {
+                        break;
+                    }
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(HttpStreamResponse { status, content_type, streamed: true, body: Vec::new() })
+    } else {
+        let body = response.body_mut().with_config().limit(16 << 20).read_to_vec().map_err(|e| e.to_string())?;
+        Ok(HttpStreamResponse { status, content_type, streamed: false, body })
+    }
 }
 
 /// Open with EasyPrint: upload the model to Printables' import endpoint on a worker and answer on

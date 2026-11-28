@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 use super::MODEL_LIST_CAP;
 use super::acp::ModelInfo;
 use super::agents::{Protocol, ServiceTier};
-use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, PromptPart, StartContext, ToolStatus};
+use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, HttpStreamFn, PromptPart, StartContext, ToolStatus, Usage};
 use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
 /// Longest tool result handed back to the model.
@@ -639,13 +639,13 @@ fn openai_chat_messages(system: &str, history: &[Value]) -> Vec<Value> {
 
 /// The tool loop's Reply from shown text and tool calls; the kept assistant
 /// message stays OpenAI-shaped so the loop stores one history shape for Go.
-fn go_reply_from_parts(text: Vec<(bool, String)>, calls: Vec<Call>, kept_calls: Vec<Value>) -> Reply {
+fn go_reply_from_parts(text: Vec<(bool, String)>, calls: Vec<Call>, kept_calls: Vec<Value>, usage: Option<Usage>) -> Reply {
     let joined: String = text.iter().map(|(_, t)| t.as_str()).collect();
     let mut assistant = json!({"role": "assistant", "content": if joined.is_empty() { Value::Null } else { Value::String(joined) }});
     if !kept_calls.is_empty() {
         assistant["tool_calls"] = Value::Array(kept_calls);
     }
-    Reply { text, calls, assistant, stop: "" }
+    Reply { text, calls, assistant, stop: "", streamed: false, usage }
 }
 
 /// Shared text + capped tool-call accumulator for the three Go reply parsers.
@@ -671,8 +671,8 @@ impl GoCallAccum {
         self.kept_calls.push(json!({"id": id, "type": "function", "function": {"name": name, "arguments": raw_args}}));
     }
 
-    fn into_reply(self) -> Reply {
-        go_reply_from_parts(self.text, self.calls, self.kept_calls)
+    fn into_reply(self, usage: Option<Usage>) -> Reply {
+        go_reply_from_parts(self.text, self.calls, self.kept_calls, usage)
     }
 }
 
@@ -708,7 +708,7 @@ fn go_responses_reply(body: &Value) -> Reply {
             }
         }
     }
-    acc.into_reply()
+    acc.into_reply(body_usage(body))
 }
 
 fn responses_url(base: &str) -> String {
@@ -784,7 +784,7 @@ fn responses_reply(body: &Value) -> Result<Reply, String> {
         calls.clear();
         kept.retain(|item| item["type"] != "function_call");
     }
-    Ok(Reply { text, calls, assistant: json!({"role": "assistant", "responses_output": kept}), stop })
+    Ok(Reply { text, calls, assistant: json!({"role": "assistant", "responses_output": kept}), stop, streamed: false, usage: body_usage(body) })
 }
 
 /// An Anthropic messages answer as the tool loop's Reply (history stays OpenAI-shaped).
@@ -809,7 +809,7 @@ fn go_messages_reply(body: &Value) -> Reply {
             }
         }
     }
-    acc.into_reply()
+    acc.into_reply(body_usage(body))
 }
 
 /// A Gemini answer as the tool loop's Reply (history stays OpenAI-shaped).
@@ -833,7 +833,7 @@ fn go_gemini_reply(body: &Value) -> Reply {
             }
         }
     }
-    acc.into_reply()
+    acc.into_reply(body_usage(body))
 }
 
 /// A Gemini answer's thought signatures, in function-call part order, to replay
@@ -859,6 +859,8 @@ pub struct ApiConfig {
     pub key: Option<String>,
     pub allow_insecure_http: bool,
     pub http: HttpFn,
+    /// Optional streaming HTTP transport (SSE); when `None`, falls back to non-streaming `http`.
+    pub http_stream: Option<HttpStreamFn>,
     /// How long one model request may take, in seconds (the endpoint's setting).
     pub request_timeout_s: u64,
     /// The reasoning effort to send as `reasoning_effort`; empty sends nothing and the
@@ -921,6 +923,7 @@ impl ApiBackend {
                 wake,
                 cancel: stop,
                 no_reasoning: Default::default(),
+                no_stream_options: Default::default(),
                 service_tier: ServiceTier::Default,
             };
             w.run(cmd_rx);
@@ -1016,6 +1019,8 @@ struct Worker {
     cancel: Arc<AtomicBool>,
     /// Set once the endpoint refused tools together with a reasoning effort: later requests ask for none.
     no_reasoning: std::cell::Cell<bool>,
+    /// Set once an OpenAI-compatible endpoint refused `stream_options`: later requests omit it.
+    no_stream_options: std::cell::Cell<bool>,
     service_tier: ServiceTier,
 }
 
@@ -1203,8 +1208,13 @@ impl Worker {
                     return;
                 }
             };
-            for (thought, text) in reply.text {
-                self.emit(Event::Text { thought, text });
+            if !reply.streamed {
+                for (thought, text) in reply.text {
+                    self.emit(Event::Text { thought, text });
+                }
+            }
+            if let Some(usage) = reply.usage {
+                self.emit(Event::Usage(usage));
             }
             self.history.push(reply.assistant);
             if reply.calls.is_empty() {
@@ -1288,11 +1298,12 @@ impl Worker {
         if self.cfg.protocol == Protocol::OpenAi && super::agents::is_opencode_go(&self.cfg.base_url) {
             return self.go_request();
         }
+        if let Some(stream) = &self.cfg.http_stream {
+            return self.request_stream(stream);
+        }
         let responses = self.uses_responses();
         let mut body = if responses { self.responses_body() } else { self.body() };
-        if self.service_tier != ServiceTier::Default {
-            body["service_tier"] = json!(self.service_tier.id());
-        }
+        self.add_service_tier(&mut body);
         let (status, v) = self.post(&body)?;
         if responses {
             return if status == 200 { responses_reply(&v) } else { Err(http_error(status, &v)) };
@@ -1312,6 +1323,72 @@ impl Worker {
             body["reasoning_effort"] = json!("none");
             let (status, v) = self.post(&body)?;
             return if status == 200 { Ok(reply(self.cfg.protocol, &v)) } else { Err(http_error(status, &v)) };
+        }
+        if status != 200 {
+            return Err(http_error(status, &v));
+        }
+        Ok(reply(self.cfg.protocol, &v))
+    }
+
+    /// The service tier the user picked, when it is not the endpoint's default.
+    fn add_service_tier(&self, body: &mut Value) {
+        if self.service_tier != ServiceTier::Default {
+            body["service_tier"] = json!(self.service_tier.id());
+        }
+    }
+
+    fn request_stream(&self, stream: &HttpStreamFn) -> Result<Reply, String> {
+        if self.uses_responses() {
+            let mut body = self.responses_body();
+            self.add_service_tier(&mut body);
+            body["stream"] = json!(true);
+            return match self.post_stream(stream, StreamKind::Responses, &body)? {
+                StreamOutcome::Streamed(r) => r,
+                StreamOutcome::Json(200, v) => responses_reply(&v),
+                StreamOutcome::Json(status, v) => Err(http_error(status, &v)),
+            };
+        }
+        let kind = match self.cfg.protocol {
+            Protocol::OpenAi => StreamKind::OpenAiChat,
+            Protocol::Anthropic => StreamKind::Anthropic,
+        };
+        let mut body = self.body();
+        self.add_service_tier(&mut body);
+        body["stream"] = json!(true);
+        if kind == StreamKind::OpenAiChat && !self.no_stream_options.get() {
+            body["stream_options"] = json!({"include_usage": true});
+        }
+        let (mut status, mut v) = match self.post_stream(stream, kind, &body)? {
+            StreamOutcome::Streamed(r) => return r,
+            StreamOutcome::Json(status, v) => (status, v),
+        };
+        if kind == StreamKind::OpenAiChat && status == 400 && !self.no_stream_options.get() && http_error(status, &v).contains("stream_options") {
+            self.no_stream_options.set(true);
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("stream_options");
+            }
+            match self.post_stream(stream, kind, &body)? {
+                StreamOutcome::Streamed(r) => return r,
+                StreamOutcome::Json(s, val) => {
+                    status = s;
+                    v = val;
+                }
+            }
+        }
+        let refused = self.cfg.protocol == Protocol::OpenAi
+            && status == 400
+            && !self.tools.is_empty()
+            && !self.no_reasoning.get()
+            && self.reasoning_effort().is_none()
+            && http_error(status, &v).contains("reasoning_effort");
+        if refused {
+            self.no_reasoning.set(true);
+            body["reasoning_effort"] = json!("none");
+            return match self.post_stream(stream, kind, &body)? {
+                StreamOutcome::Streamed(r) => r,
+                StreamOutcome::Json(200, v) => Ok(reply(self.cfg.protocol, &v)),
+                StreamOutcome::Json(status, v) => Err(http_error(status, &v)),
+            };
         }
         if status != 200 {
             return Err(http_error(status, &v));
@@ -1522,8 +1599,11 @@ impl Worker {
         self.cfg.protocol == Protocol::OpenAi && self.cfg.openai_responses
     }
 
-    fn post(&self, body: &Value) -> Result<(u16, Value), String> {
+    fn post_headers_and_url(&self, accept_sse: bool) -> (String, Vec<(String, String)>) {
         let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+        if accept_sse {
+            headers.push(("Accept".to_string(), "text/event-stream, application/json".to_string()));
+        }
         let url = match self.cfg.protocol {
             Protocol::OpenAi if self.uses_responses() => responses_url(&self.cfg.base_url),
             Protocol::OpenAi => format!("{}/chat/completions", self.cfg.base_url),
@@ -1538,7 +1618,18 @@ impl Worker {
                 Protocol::Anthropic => headers.push(("x-api-key".into(), k.clone())),
             }
         }
+        (url, headers)
+    }
+
+    fn post(&self, body: &Value) -> Result<(u16, Value), String> {
+        let (url, headers) = self.post_headers_and_url(false);
         self.post_to(url, headers, body)
+    }
+
+    fn post_stream(&self, stream: &HttpStreamFn, kind: StreamKind, body: &Value) -> Result<StreamOutcome, String> {
+        let (url, headers) = self.post_headers_and_url(true);
+        let req = HttpRequest { method: "POST", url, headers, body: Some(body.to_string().into_bytes()), timeout_s: self.limit_s() };
+        self.send_stream(stream, kind, req)
     }
 
     /// POST for one Go protocol attempt: its own URL, always the session header,
@@ -1579,6 +1670,75 @@ impl Worker {
             }
         };
         Ok((status, serde_json::from_slice(&bytes).unwrap_or(Value::Null)))
+    }
+
+    /// Runs a streaming SSE request on its own thread, emitting live chunks as lines arrive and
+    /// checking cancellation between every line so Stop is instant.
+    fn send_stream(&self, stream: &HttpStreamFn, kind: StreamKind, req: HttpRequest) -> Result<StreamOutcome, String> {
+        let (tx, rx) = channel();
+        let stream = stream.clone();
+        let events = self.events.clone();
+        let wake = self.wake.clone();
+        let turn_cancel = self.cancel.clone();
+        let req_cancel = Arc::new(AtomicBool::new(false));
+        let stop = req_cancel.clone();
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || {
+            let cancelled = || stop.load(Ordering::Relaxed) || turn_cancel.load(Ordering::Relaxed);
+            let mut framer = SseFramer::default();
+            let mut parser = SseParser::new(kind);
+            let mut emit_chunk = |thought: bool, text: &str| {
+                if !text.is_empty() && !cancelled() {
+                    let _ = events.send(Event::Text { thought, text: text.to_string() });
+                    wake();
+                }
+            };
+            let result = stream(&req, &mut |line: &str| {
+                if cancelled() {
+                    return false;
+                }
+                if let Some((ev, data)) = framer.push_line(line) {
+                    parser.on_event(&ev, &data, &mut emit_chunk);
+                }
+                !cancelled()
+            });
+            let outcome = result.map(|resp| {
+                if resp.streamed {
+                    if !cancelled()
+                        && let Some((ev, data)) = framer.flush()
+                    {
+                        parser.on_event(&ev, &data, &mut emit_chunk);
+                    }
+                    if cancelled() {
+                        StreamOutcome::Streamed(Err("cancelled by the user".into()))
+                    } else {
+                        StreamOutcome::Streamed(parser.into_reply(&mut emit_chunk))
+                    }
+                } else {
+                    StreamOutcome::Json(resp.status, serde_json::from_slice(&resp.body).unwrap_or(Value::Null))
+                }
+            });
+            let _ = tx.send(outcome);
+        });
+        let backstop = Duration::from_secs(self.limit_s().saturating_add(5));
+        loop {
+            if self.cancel.load(Ordering::Relaxed) {
+                req_cancel.store(true, Ordering::Relaxed);
+                return Err("cancelled by the user".into());
+            }
+            match rx.recv_timeout(CANCEL_POLL) {
+                Ok(r) => return r.map_err(|e| request_error(e, started.elapsed(), self.limit_s())),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if started.elapsed() < backstop => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    req_cancel.store(true, Ordering::Relaxed);
+                    return Err(timed_out(self.limit_s()));
+                }
+                Err(_) => {
+                    req_cancel.store(true, Ordering::Relaxed);
+                    return Err("the request ended without an answer".into());
+                }
+            }
+        }
     }
 }
 
@@ -1717,6 +1877,533 @@ struct Reply {
     /// Why the answer stopped, as the turn-end reason the chat knows: empty for a normal end,
     /// `max_tokens` for an answer cut off at its length limit, `refusal` when the model declined.
     stop: &'static str,
+    /// Whether text/thought chunks were already emitted live during SSE streaming.
+    streamed: bool,
+    /// Token / context-window usage reported with this answer, if any.
+    usage: Option<Usage>,
+}
+
+fn parse_usage_obj(u: &Value) -> Option<Usage> {
+    let base_input = u.get("input_tokens").or_else(|| u.get("prompt_tokens")).or_else(|| u.get("promptTokenCount")).and_then(Value::as_u64);
+    let cache_create = u.get("cache_creation_input_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let cache_read = u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let input_tokens = match base_input {
+        Some(n) => Some(n.saturating_add(cache_create).saturating_add(cache_read)),
+        None if cache_create > 0 || cache_read > 0 => Some(cache_create.saturating_add(cache_read)),
+        None => None,
+    };
+    let output_tokens =
+        u.get("output_tokens").or_else(|| u.get("completion_tokens")).or_else(|| u.get("candidatesTokenCount")).and_then(Value::as_u64);
+    let context_window = u.get("context_window").or_else(|| u.get("contextWindow")).or_else(|| u.get("max_tokens")).and_then(Value::as_u64);
+    let usage = Usage { input_tokens, output_tokens, context_window };
+    (!usage.is_empty()).then_some(usage)
+}
+
+fn body_usage(body: &Value) -> Option<Usage> {
+    body.get("usage").or_else(|| body.get("usageMetadata")).and_then(parse_usage_obj)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StreamKind {
+    OpenAiChat,
+    Anthropic,
+    Responses,
+}
+
+enum StreamOutcome {
+    Streamed(Result<Reply, String>),
+    Json(u16, Value),
+}
+
+fn push_merged_text(out: &mut Vec<(bool, String)>, thought: bool, chunk: &str) {
+    if chunk.is_empty() {
+        return;
+    }
+    if let Some((last_thought, last_text)) = out.last_mut()
+        && *last_thought == thought
+    {
+        last_text.push_str(chunk);
+    } else {
+        out.push((thought, chunk.to_string()));
+    }
+}
+
+/// Frames `text/event-stream` lines into `(event, data)` messages.
+#[derive(Default)]
+struct SseFramer {
+    event: String,
+    data: String,
+}
+
+impl SseFramer {
+    fn push_line(&mut self, line: &str) -> Option<(String, String)> {
+        if line.is_empty() {
+            return self.flush();
+        }
+        if line.starts_with(':') {
+            return None;
+        }
+        if let Some(rest) = line.strip_prefix("event:") {
+            self.event = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            let payload = rest.strip_prefix(' ').unwrap_or(rest);
+            if !self.data.is_empty() {
+                self.data.push('\n');
+            }
+            self.data.push_str(payload);
+        }
+        None
+    }
+
+    fn flush(&mut self) -> Option<(String, String)> {
+        if self.data.is_empty() {
+            self.event.clear();
+            return None;
+        }
+        let event = std::mem::take(&mut self.event);
+        let data = std::mem::take(&mut self.data);
+        Some((event, data))
+    }
+}
+
+#[derive(Default)]
+struct OpenAiStreamCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+/// Incremental SSE parser for OpenAI Chat Completions (`stream: true`).
+#[derive(Default)]
+struct OpenAiSse {
+    text: Vec<(bool, String)>,
+    content: String,
+    reasoning_content: String,
+    reasoning: String,
+    refusal: String,
+    finish_reason: Option<String>,
+    calls: std::collections::BTreeMap<usize, OpenAiStreamCall>,
+    usage: Usage,
+    error: Option<String>,
+}
+
+impl OpenAiSse {
+    fn on_event(&mut self, _event: &str, data: &str, emit: &mut dyn FnMut(bool, &str)) {
+        let trimmed = data.trim();
+        if trimmed.is_empty() || trimmed == "[DONE]" {
+            return;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(trimmed) else { return };
+        if v.get("error").is_some() && v.get("choices").is_none() {
+            self.error = Some(http_error(200, &v));
+            return;
+        }
+        if let Some(u) = body_usage(&v) {
+            self.usage.merge(u);
+        }
+        let Some(choice) = v.pointer("/choices/0") else { return };
+        if let Some(r) = choice.get("finish_reason").and_then(Value::as_str) {
+            self.finish_reason = Some(r.to_string());
+        }
+        let Some(delta) = choice.get("delta") else { return };
+        if let Some(s) = delta.get("reasoning_content").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            self.reasoning_content.push_str(s);
+            push_merged_text(&mut self.text, true, s);
+            emit(true, s);
+        }
+        if let Some(s) = delta.get("reasoning").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            self.reasoning.push_str(s);
+            push_merged_text(&mut self.text, true, s);
+            emit(true, s);
+        }
+        if let Some(s) = delta.get("content").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            self.content.push_str(s);
+            push_merged_text(&mut self.text, false, s);
+            emit(false, s);
+        }
+        if let Some(s) = delta.get("refusal").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            self.refusal.push_str(s);
+        }
+        if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
+            for tc in calls {
+                let idx = tc.get("index").and_then(Value::as_u64).map_or_else(
+                    || {
+                        if tc.get("id").and_then(Value::as_str).is_some_and(|s| !s.is_empty()) {
+                            self.calls.len()
+                        } else {
+                            self.calls.len().saturating_sub(1)
+                        }
+                    },
+                    |n| n as usize,
+                );
+                if idx >= 64 {
+                    continue;
+                }
+                let entry = self.calls.entry(idx).or_default();
+                if let Some(id) = tc.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    entry.id = id.to_string();
+                }
+                if let Some(name) = tc.pointer("/function/name").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    entry.name.push_str(name);
+                }
+                if let Some(args) = tc.pointer("/function/arguments").and_then(Value::as_str) {
+                    entry.arguments.push_str(args);
+                }
+            }
+        }
+    }
+
+    fn into_reply(self) -> Result<Reply, String> {
+        if let Some(e) = self.error {
+            return Err(e);
+        }
+        let refused = !self.refusal.trim().is_empty();
+        let stop = if refused { "refusal" } else { stop_reason(self.finish_reason.as_deref()) };
+        let mut calls = Vec::new();
+        let mut raw = Vec::new();
+        if stop != "max_tokens" {
+            for (i, (_, tc)) in self.calls.into_iter().take(32).enumerate() {
+                let id = if tc.id.is_empty() { format!("call-{i}") } else { tc.id };
+                let args_str = tc.arguments;
+                let arguments = tool_arguments(Some(&Value::String(args_str.clone())));
+                raw.push(json!({"id": id, "type": "function", "function": {"name": tc.name, "arguments": args_str}}));
+                calls.push(Call { id, name: tc.name, arguments });
+            }
+        }
+        let mut assistant = json!({"role": "assistant", "content": if self.content.is_empty() { Value::Null } else { Value::String(self.content) }});
+        if !self.reasoning_content.is_empty() {
+            assistant["reasoning_content"] = Value::String(self.reasoning_content);
+        }
+        if !self.reasoning.is_empty() {
+            assistant["reasoning"] = Value::String(self.reasoning);
+        }
+        if !self.refusal.is_empty() {
+            assistant["refusal"] = Value::String(self.refusal);
+        }
+        if !raw.is_empty() {
+            assistant["tool_calls"] = Value::Array(raw);
+        }
+        let usage = (!self.usage.is_empty()).then_some(self.usage);
+        Ok(Reply { text: self.text, calls, assistant, stop, streamed: true, usage })
+    }
+}
+
+enum AnthropicStreamBlock {
+    Text(String),
+    Thinking { thinking: String, signature: String },
+    ToolUse { id: String, name: String, input_json: String, initial_input: Option<Value> },
+    Raw(Value),
+}
+
+/// Incremental SSE parser for the Anthropic Messages API (`stream: true`).
+#[derive(Default)]
+struct AnthropicSse {
+    text: Vec<(bool, String)>,
+    blocks: std::collections::BTreeMap<usize, AnthropicStreamBlock>,
+    stop_reason: Option<String>,
+    usage: Usage,
+    error: Option<String>,
+}
+
+impl AnthropicSse {
+    fn on_event(&mut self, event: &str, data: &str, emit: &mut dyn FnMut(bool, &str)) {
+        let trimmed = data.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(trimmed) else { return };
+        let kind = v.get("type").and_then(Value::as_str).unwrap_or(event);
+        match kind {
+            "message_start" => {
+                if let Some(u) = v.pointer("/message/usage").and_then(parse_usage_obj) {
+                    self.usage.merge(u);
+                }
+            }
+            "content_block_start" => {
+                let idx = v.get("index").and_then(Value::as_u64).map_or(self.blocks.len(), |n| n as usize);
+                if idx >= 128 {
+                    return;
+                }
+                let Some(cb) = v.get("content_block") else { return };
+                let block = match cb.get("type").and_then(Value::as_str) {
+                    Some("text") => {
+                        let initial = cb.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+                        if !initial.is_empty() {
+                            push_merged_text(&mut self.text, false, &initial);
+                            emit(false, &initial);
+                        }
+                        AnthropicStreamBlock::Text(initial)
+                    }
+                    Some("thinking") => {
+                        let initial = cb.get("thinking").and_then(Value::as_str).unwrap_or("").to_string();
+                        let signature = cb.get("signature").and_then(Value::as_str).unwrap_or("").to_string();
+                        if !initial.is_empty() {
+                            push_merged_text(&mut self.text, true, &initial);
+                            emit(true, &initial);
+                        }
+                        AnthropicStreamBlock::Thinking { thinking: initial, signature }
+                    }
+                    Some("tool_use") => {
+                        let id = cb.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+                        let name = cb.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                        let initial_input = cb.get("input").filter(|inp| inp.as_object().is_some_and(|o| !o.is_empty())).cloned();
+                        AnthropicStreamBlock::ToolUse { id, name, input_json: String::new(), initial_input }
+                    }
+                    _ => AnthropicStreamBlock::Raw(cb.clone()),
+                };
+                self.blocks.insert(idx, block);
+            }
+            "content_block_delta" => {
+                let idx = v.get("index").and_then(Value::as_u64).map_or(0, |n| n as usize);
+                if idx >= 128 {
+                    return;
+                }
+                let Some(delta) = v.get("delta") else { return };
+                match delta.get("type").and_then(Value::as_str) {
+                    Some("text_delta") => {
+                        if let Some(s) = delta.get("text").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                            if let Some(AnthropicStreamBlock::Text(buf)) = self.blocks.get_mut(&idx) {
+                                buf.push_str(s);
+                            } else {
+                                self.blocks.insert(idx, AnthropicStreamBlock::Text(s.to_string()));
+                            }
+                            push_merged_text(&mut self.text, false, s);
+                            emit(false, s);
+                        }
+                    }
+                    Some("thinking_delta") => {
+                        if let Some(s) = delta.get("thinking").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                            if let Some(AnthropicStreamBlock::Thinking { thinking, .. }) = self.blocks.get_mut(&idx) {
+                                thinking.push_str(s);
+                            } else {
+                                self.blocks.insert(idx, AnthropicStreamBlock::Thinking { thinking: s.to_string(), signature: String::new() });
+                            }
+                            push_merged_text(&mut self.text, true, s);
+                            emit(true, s);
+                        }
+                    }
+                    Some("signature_delta") => {
+                        if let Some(sig) = delta.get("signature").and_then(Value::as_str)
+                            && let Some(AnthropicStreamBlock::Thinking { signature, .. }) = self.blocks.get_mut(&idx)
+                        {
+                            signature.push_str(sig);
+                        }
+                    }
+                    Some("input_json_delta") => {
+                        if let Some(part) = delta.get("partial_json").and_then(Value::as_str)
+                            && let Some(AnthropicStreamBlock::ToolUse { input_json, .. }) = self.blocks.get_mut(&idx)
+                        {
+                            input_json.push_str(part);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            "message_delta" => {
+                if let Some(r) = v.pointer("/delta/stop_reason").and_then(Value::as_str) {
+                    self.stop_reason = Some(r.to_string());
+                }
+                if let Some(u) = v.get("usage").and_then(parse_usage_obj) {
+                    self.usage.merge(u);
+                }
+            }
+            "error" => {
+                self.error = Some(http_error(200, &v));
+            }
+            _ => {}
+        }
+    }
+
+    fn into_reply(self) -> Result<Reply, String> {
+        if let Some(e) = self.error {
+            return Err(e);
+        }
+        let stop = stop_reason(self.stop_reason.as_deref());
+        let mut calls = Vec::new();
+        let mut kept = Vec::new();
+        for (idx, block) in self.blocks.into_iter().take(128) {
+            match block {
+                AnthropicStreamBlock::Text(text) => {
+                    kept.push(json!({"type": "text", "text": text}));
+                }
+                AnthropicStreamBlock::Thinking { thinking, signature } => {
+                    let mut obj = json!({"type": "thinking", "thinking": thinking});
+                    if !signature.is_empty() {
+                        obj["signature"] = Value::String(signature);
+                    }
+                    kept.push(obj);
+                }
+                AnthropicStreamBlock::ToolUse { id, name, input_json, initial_input } => {
+                    if stop == "max_tokens" || calls.len() >= 32 {
+                        continue;
+                    }
+                    let call_id = if id.is_empty() { format!("toolu-{idx}") } else { id };
+                    let arguments = if !input_json.trim().is_empty() {
+                        tool_arguments(Some(&Value::String(input_json)))
+                    } else if let Some(v) = initial_input {
+                        tool_arguments(Some(&v))
+                    } else {
+                        Ok(json!({}))
+                    };
+                    let kept_input = arguments.clone().unwrap_or_else(|_| json!({}));
+                    kept.push(json!({"type": "tool_use", "id": call_id, "name": name, "input": kept_input}));
+                    calls.push(Call { id: call_id, name, arguments });
+                }
+                AnthropicStreamBlock::Raw(raw) => kept.push(raw),
+            }
+        }
+        let usage = (!self.usage.is_empty()).then_some(self.usage);
+        Ok(Reply { text: self.text, calls, assistant: json!({"role": "assistant", "content": kept}), stop, streamed: true, usage })
+    }
+}
+
+/// Incremental SSE parser for the OpenAI Responses API (`stream: true`).
+#[derive(Default)]
+struct ResponsesSse {
+    text: Vec<(bool, String)>,
+    emitted_output_text: bool,
+    final_response: Option<Value>,
+    done_items: Vec<Value>,
+    usage: Usage,
+    error: Option<String>,
+}
+
+impl ResponsesSse {
+    fn on_event(&mut self, event: &str, data: &str, emit: &mut dyn FnMut(bool, &str)) {
+        let trimmed = data.trim();
+        if trimmed.is_empty() || trimmed == "[DONE]" {
+            return;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(trimmed) else { return };
+        let kind = v.get("type").and_then(Value::as_str).unwrap_or(event);
+        match kind {
+            "response.output_text.delta" => {
+                if let Some(s) = v.get("delta").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    self.emitted_output_text = true;
+                    push_merged_text(&mut self.text, false, s);
+                    emit(false, s);
+                }
+            }
+            "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+                if let Some(s) = v.get("delta").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    push_merged_text(&mut self.text, true, s);
+                    emit(true, s);
+                }
+            }
+            "response.output_item.done" => {
+                if let Some(item) = v.get("item")
+                    && self.done_items.len() < 128
+                {
+                    self.done_items.push(item.clone());
+                }
+            }
+            "response.completed" | "response.incomplete" => {
+                if let Some(resp) = v.get("response") {
+                    if let Some(u) = body_usage(resp) {
+                        self.usage.merge(u);
+                    }
+                    self.final_response = Some(resp.clone());
+                }
+            }
+            "response.failed" | "error" => {
+                let err = v.get("response").unwrap_or(&v);
+                self.error = Some(http_error(200, err));
+            }
+            _ => {}
+        }
+    }
+
+    fn into_reply(self, emit: &mut dyn FnMut(bool, &str)) -> Result<Reply, String> {
+        if let Some(e) = self.error {
+            return Err(e);
+        }
+        if let Some(resp) = self.final_response {
+            let mut reply = responses_reply(&resp)?;
+            if !self.emitted_output_text {
+                for (thought, text) in &reply.text {
+                    emit(*thought, text);
+                }
+            }
+            let mut combined = self.text;
+            if !self.emitted_output_text {
+                for (thought, text) in reply.text {
+                    push_merged_text(&mut combined, thought, &text);
+                }
+            }
+            reply.text = combined;
+            reply.streamed = true;
+            if !self.usage.is_empty() {
+                let mut merged = reply.usage.unwrap_or_default();
+                merged.merge(self.usage);
+                reply.usage = Some(merged);
+            }
+            return Ok(reply);
+        }
+        if !self.done_items.is_empty() {
+            let synthetic = json!({"status": "completed", "output": self.done_items});
+            let mut reply = responses_reply(&synthetic)?;
+            if !self.emitted_output_text {
+                for (thought, text) in &reply.text {
+                    emit(*thought, text);
+                }
+            }
+            reply.streamed = true;
+            if !self.usage.is_empty() {
+                reply.usage = Some(self.usage);
+            }
+            return Ok(reply);
+        }
+        if !self.text.is_empty() {
+            let joined: String = self.text.iter().filter(|(thought, _)| !*thought).map(|(_, t)| t.as_str()).collect();
+            let kept = if joined.is_empty() {
+                Vec::new()
+            } else {
+                vec![json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": joined}]})]
+            };
+            let usage = (!self.usage.is_empty()).then_some(self.usage);
+            return Ok(Reply {
+                text: self.text,
+                calls: Vec::new(),
+                assistant: json!({"role": "assistant", "responses_output": kept}),
+                stop: "",
+                streamed: true,
+                usage,
+            });
+        }
+        Err(solidcraft_ui_text::tr("ui.ai_invalid_responses_reply").to_string())
+    }
+}
+
+enum SseParser {
+    OpenAiChat(OpenAiSse),
+    Anthropic(AnthropicSse),
+    Responses(ResponsesSse),
+}
+
+impl SseParser {
+    fn new(kind: StreamKind) -> Self {
+        match kind {
+            StreamKind::OpenAiChat => Self::OpenAiChat(OpenAiSse::default()),
+            StreamKind::Anthropic => Self::Anthropic(AnthropicSse::default()),
+            StreamKind::Responses => Self::Responses(ResponsesSse::default()),
+        }
+    }
+
+    fn on_event(&mut self, event: &str, data: &str, emit: &mut dyn FnMut(bool, &str)) {
+        match self {
+            Self::OpenAiChat(p) => p.on_event(event, data, emit),
+            Self::Anthropic(p) => p.on_event(event, data, emit),
+            Self::Responses(p) => p.on_event(event, data, emit),
+        }
+    }
+
+    fn into_reply(self, emit: &mut dyn FnMut(bool, &str)) -> Result<Reply, String> {
+        match self {
+            Self::OpenAiChat(p) => p.into_reply(),
+            Self::Anthropic(p) => p.into_reply(),
+            Self::Responses(p) => p.into_reply(emit),
+        }
+    }
 }
 
 /// The turn-end reason for an Anthropic `stop_reason` or an OpenAI `finish_reason`. Anything
@@ -1793,7 +2480,7 @@ fn openai_reply(body: &Value) -> Reply {
     if !raw.is_empty() {
         assistant["tool_calls"] = Value::Array(raw);
     }
-    Reply { text, calls, assistant, stop }
+    Reply { text, calls, assistant, stop, streamed: false, usage: body_usage(body) }
 }
 
 fn anthropic_reply(body: &Value) -> Reply {
@@ -1850,7 +2537,7 @@ fn anthropic_reply(body: &Value) -> Reply {
         }
         _ => json!({"role": "assistant", "content": content.clone()}),
     };
-    Reply { text, calls, assistant, stop }
+    Reply { text, calls, assistant, stop, streamed: false, usage: body_usage(body) }
 }
 
 /// Keeps the newest `keep` pictures of the view in the history (both user-attached pictures and
@@ -2529,6 +3216,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -2582,6 +3270,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -2646,6 +3335,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -2717,6 +3407,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -2770,6 +3461,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -2823,6 +3515,7 @@ mod tests {
                 key: None,
                 allow_insecure_http: false,
                 http,
+                http_stream: None,
                 request_timeout_s: 300,
                 reasoning_effort: String::new(),
                 openai_responses,
@@ -2940,6 +3633,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -3016,6 +3710,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -3337,6 +4032,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -3392,6 +4088,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -3537,6 +4234,7 @@ mod tests {
             allow_insecure_http: false,
             key: None,
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -3580,6 +4278,7 @@ mod tests {
             allow_insecure_http,
             key: Some("k".into()),
             http: http.clone(),
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -3625,6 +4324,7 @@ mod tests {
             allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: effort.to_string(),
             openai_responses: false,
@@ -3644,6 +4344,7 @@ mod tests {
             wake: Arc::new(|| {}),
             cancel: Arc::new(AtomicBool::new(false)),
             no_reasoning: Default::default(),
+            no_stream_options: Default::default(),
             service_tier: ServiceTier::Default,
         };
         (w, seen)
@@ -3922,6 +4623,7 @@ mod tests {
             allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -3974,6 +4676,7 @@ mod tests {
             allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -4027,6 +4730,7 @@ mod tests {
             allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
+            http_stream: None,
             request_timeout_s: 300,
             reasoning_effort: String::new(),
             openai_responses: false,
@@ -4080,6 +4784,244 @@ mod tests {
         drop(sent);
         assert!(test_anthropic_endpoint(&http, "http://10.0.0.2/anthropic", Some("k"), "m").is_err());
         assert!(test_anthropic_endpoint(&http, "https://api.anthropic.com", None, "").is_err());
+    }
+
+    fn feed_sse(kind: StreamKind, raw: &str) -> (Result<Reply, String>, Vec<(bool, String)>) {
+        let mut framer = SseFramer::default();
+        let mut parser = SseParser::new(kind);
+        let mut emitted = Vec::new();
+        let mut emit = |thought: bool, text: &str| emitted.push((thought, text.to_string()));
+        for line in raw.lines() {
+            if let Some((ev, data)) = framer.push_line(line) {
+                parser.on_event(&ev, &data, &mut emit);
+            }
+        }
+        if let Some((ev, data)) = framer.flush() {
+            parser.on_event(&ev, &data, &mut emit);
+        }
+        let reply = parser.into_reply(&mut emit);
+        (reply, emitted)
+    }
+
+    #[test]
+    fn openai_sse_streams_thinking_text_tool_calls_and_usage() {
+        let sse = concat!(
+            ": keep-alive\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Plan \"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"first.\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"measure\",\"arguments\":\"{\\\"bo\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"dy\\\":\\\"b1\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":85}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let (reply, emitted) = feed_sse(StreamKind::OpenAiChat, sse);
+        let reply = reply.unwrap();
+        assert!(reply.streamed);
+        assert_eq!(
+            emitted,
+            vec![(true, "Plan ".to_string()), (true, "first.".to_string()), (false, "Hello ".to_string()), (false, "world".to_string()),]
+        );
+        assert_eq!(reply.text, vec![(true, "Plan first.".to_string()), (false, "Hello world".to_string())]);
+        assert_eq!(reply.calls.len(), 1);
+        assert_eq!(reply.calls[0].id, "call_1");
+        assert_eq!(reply.calls[0].name, "measure");
+        assert_eq!(reply.calls[0].arguments, Ok(json!({"body": "b1"})));
+        assert_eq!(reply.assistant["content"], "Hello world");
+        assert_eq!(reply.assistant["reasoning_content"], "Plan first.");
+        assert_eq!(reply.assistant["tool_calls"][0]["id"], "call_1");
+        assert_eq!(reply.usage, Some(Usage { input_tokens: Some(1200), output_tokens: Some(85), context_window: None }));
+    }
+
+    #[test]
+    fn anthropic_sse_streams_thinking_text_tool_calls_and_usage() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":500,\"cache_read_input_tokens\":1500,\"output_tokens\":1}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Check size.\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_abc\"}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Meas\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"uring.\"}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"measure\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"unit\\\":\\\"mm\\\"}\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":64}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let (reply, emitted) = feed_sse(StreamKind::Anthropic, sse);
+        let reply = reply.unwrap();
+        assert!(reply.streamed);
+        assert_eq!(emitted, vec![(true, "Check size.".to_string()), (false, "Meas".to_string()), (false, "uring.".to_string())]);
+        assert_eq!(reply.calls.len(), 1);
+        assert_eq!(reply.calls[0].id, "toolu_1");
+        assert_eq!(reply.calls[0].name, "measure");
+        assert_eq!(reply.calls[0].arguments, Ok(json!({"unit": "mm"})));
+        assert_eq!(reply.assistant["content"][0]["signature"], "sig_abc");
+        assert_eq!(reply.assistant["content"][1]["text"], "Measuring.");
+        assert_eq!(reply.assistant["content"][2]["input"], json!({"unit": "mm"}));
+        assert_eq!(reply.usage, Some(Usage { input_tokens: Some(2000), output_tokens: Some(64), context_window: None }));
+    }
+
+    #[test]
+    fn responses_sse_streams_reasoning_text_and_completed_usage() {
+        let sse = concat!(
+            "event: response.reasoning_summary_text.delta\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"Thinking...\"}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"All \"}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done.\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"All done.\"}]}],\"usage\":{\"input_tokens\":310,\"output_tokens\":42}}}\n\n",
+        );
+        let (reply, emitted) = feed_sse(StreamKind::Responses, sse);
+        let reply = reply.unwrap();
+        assert!(reply.streamed);
+        assert_eq!(emitted, vec![(true, "Thinking...".to_string()), (false, "All ".to_string()), (false, "done.".to_string())]);
+        assert_eq!(reply.usage, Some(Usage { input_tokens: Some(310), output_tokens: Some(42), context_window: None }));
+        assert_eq!(reply.assistant["responses_output"][0]["content"][0]["text"], "All done.");
+    }
+
+    #[test]
+    fn api_backend_streams_live_chunks_and_falls_back_to_plain_json() {
+        use super::super::backend::HttpStreamResponse;
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let log = seen.clone();
+        let http: HttpFn = Arc::new(|_| Ok((200, b"{\"data\":[]}".to_vec())));
+        let turn_num = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = turn_num.clone();
+        let http_stream: HttpStreamFn = Arc::new(move |r: &HttpRequest, on_line: &mut dyn FnMut(&str) -> bool| {
+            log.lock().unwrap().push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+            let n = count.fetch_add(1, Ordering::Relaxed);
+            if n == 0 {
+                let lines = [
+                    r#"data: {"choices":[{"delta":{"reasoning_content":"Think"}}]}"#,
+                    "",
+                    r#"data: {"choices":[{"delta":{"content":"Hi "}}]}"#,
+                    "",
+                    r#"data: {"choices":[{"delta":{"content":"there"}}]}"#,
+                    "",
+                    r#"data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20}}"#,
+                    "",
+                    "data: [DONE]",
+                    "",
+                ];
+                for line in lines {
+                    if !on_line(line) {
+                        break;
+                    }
+                }
+                Ok(HttpStreamResponse { status: 200, content_type: "text/event-stream".into(), streamed: true, body: Vec::new() })
+            } else {
+                // Plain JSON fallback when server replies with application/json.
+                let body = json!({
+                    "choices": [{"message": {"role": "assistant", "content": "Fallback ok."}}],
+                    "usage": {"prompt_tokens": 250, "completion_tokens": 12}
+                })
+                .to_string()
+                .into_bytes();
+                Ok(HttpStreamResponse { status: 200, content_type: "application/json".into(), streamed: false, body })
+            }
+        });
+        let cfg = ApiConfig {
+            name: "StreamTest".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "m".into(),
+            allow_insecure_http: false,
+            key: None,
+            http,
+            http_stream: Some(http_stream),
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+            openai_responses: false,
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+
+        b.prompt(&[PromptPart::Text("first".into())]);
+        let events = wait_for_turn(&mut b);
+        let texts: Vec<(bool, String)> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Text { thought, text } => Some((*thought, text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, vec![(true, "Think".to_string()), (false, "Hi ".to_string()), (false, "there".to_string())]);
+        assert!(events.contains(&Event::Usage(Usage { input_tokens: Some(100), output_tokens: Some(20), context_window: None })), "{events:?}");
+
+        b.prompt(&[PromptPart::Text("second".into())]);
+        let events = wait_for_turn(&mut b);
+        assert!(events.iter().any(|e| matches!(e, Event::Text { thought: false, text } if text == "Fallback ok.")), "{events:?}");
+        assert!(events.contains(&Event::Usage(Usage { input_tokens: Some(250), output_tokens: Some(12), context_window: None })), "{events:?}");
+
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent[0]["stream"], true);
+        assert_eq!(sent[0]["stream_options"]["include_usage"], true);
+        b.shutdown(true);
+    }
+
+    #[test]
+    fn api_backend_stream_cancels_between_sse_lines() {
+        use super::super::backend::HttpStreamResponse;
+        let (first_chunk_tx, first_chunk_rx) = channel::<()>();
+        let first_chunk_tx = std::sync::Mutex::new(first_chunk_tx);
+        let (resume_tx, resume_rx) = channel::<()>();
+        let resume_rx = std::sync::Mutex::new(resume_rx);
+        let stopped_early = Arc::new(AtomicBool::new(false));
+        let stopped_flag = stopped_early.clone();
+        let http: HttpFn = Arc::new(|_| Ok((200, b"{\"data\":[]}".to_vec())));
+        let http_stream: HttpStreamFn = Arc::new(move |_r: &HttpRequest, on_line: &mut dyn FnMut(&str) -> bool| {
+            let _ = on_line(r#"data: {"choices":[{"delta":{"content":"First"}}]}"#);
+            let _ = on_line("");
+            let _ = first_chunk_tx.lock().unwrap().send(());
+            let _ = resume_rx.lock().unwrap().recv_timeout(Duration::from_secs(10));
+            if !on_line(r#"data: {"choices":[{"delta":{"content":"Second"}}]}"#) {
+                stopped_flag.store(true, Ordering::Relaxed);
+            }
+            Ok(HttpStreamResponse { status: 200, content_type: "text/event-stream".into(), streamed: true, body: Vec::new() })
+        });
+        let cfg = ApiConfig {
+            name: "CancelStream".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "m".into(),
+            allow_insecure_http: false,
+            key: None,
+            http,
+            http_stream: Some(http_stream),
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+            openai_responses: false,
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        b.prompt(&[PromptPart::Text("stream it".into())]);
+        assert!(first_chunk_rx.recv_timeout(Duration::from_secs(10)).is_ok());
+        b.cancel();
+        let _ = resume_tx.send(());
+        let events = wait_for_turn(&mut b);
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "cancelled"), "{events:?}");
+        assert!(!events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Second")), "{events:?}");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !stopped_early.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(stopped_early.load(Ordering::Relaxed), "on_line must return false after cancel");
+        b.shutdown(true);
     }
 
     fn test_png_base64(tag: u8) -> String {

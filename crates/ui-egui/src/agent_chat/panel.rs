@@ -1385,6 +1385,13 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                             };
                             ui.label(RichText::new(count).color(Tokens::get().text_dim).size(Tokens::get().font_small));
                         }
+                        if let Some(usage) = chat.usage.filter(|u| !u.is_empty()) {
+                            let (short, tip) = format_usage(usage);
+                            let readout = ui
+                                .label(RichText::new(short).color(Tokens::get().text_dim).size(Tokens::get().font_small))
+                                .backing_on_hover_text(tip);
+                            solidcraft_ui_registry::publish_rect("agent_chat:usage", readout.rect);
+                        }
                     },
                 );
             });
@@ -1401,6 +1408,50 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
         chat.actions.push(PanelAction::StartPick { at: caret(ui.ctx()) });
     }
     ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc }
+}
+
+/// Compact human-readable token count (`850`, `12.4k`, `200k`, `1.2M`).
+#[cfg(not(target_arch = "wasm32"))]
+fn format_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        let m = n as f64 / 1_000_000.0;
+        if n.is_multiple_of(1_000_000) || m >= 100.0 { format!("{m:.0}M") } else { format!("{m:.1}M") }
+    } else if n >= 1_000 {
+        let k = n as f64 / 1_000.0;
+        if n.is_multiple_of(1_000) || k >= 100.0 { format!("{k:.0}k") } else { format!("{k:.1}k") }
+    } else {
+        n.to_string()
+    }
+}
+
+/// Compact token/context readout and detailed hover tooltip for the composer footer.
+#[cfg(not(target_arch = "wasm32"))]
+fn format_usage(usage: backend::Usage) -> (String, String) {
+    let short = match (usage.input_tokens, usage.output_tokens, usage.context_window) {
+        (Some(inp), Some(out), Some(win)) if win > 0 => {
+            format!("{} / {} ({} out)", format_tokens(inp), format_tokens(win), format_tokens(out))
+        }
+        (Some(inp), None, Some(win)) if win > 0 => {
+            let pct = (inp.saturating_mul(100) / win).min(100);
+            format!("{} / {} ({pct}%)", format_tokens(inp), format_tokens(win))
+        }
+        (Some(inp), Some(out), _) => format!("{} in · {} out", format_tokens(inp), format_tokens(out)),
+        (Some(inp), None, _) => format!("{} in", format_tokens(inp)),
+        (None, Some(out), _) => format!("{} out", format_tokens(out)),
+        (None, None, Some(win)) => format!("{} ctx", format_tokens(win)),
+        (None, None, None) => String::new(),
+    };
+    let mut lines = Vec::new();
+    if let Some(inp) = usage.input_tokens {
+        lines.push(format!("Input tokens: {inp}"));
+    }
+    if let Some(out) = usage.output_tokens {
+        lines.push(format!("Output tokens: {out}"));
+    }
+    if let Some(win) = usage.context_window {
+        lines.push(format!("Context window: {win}"));
+    }
+    (short, lines.join("\n"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

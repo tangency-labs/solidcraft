@@ -576,12 +576,17 @@ pub enum Incoming {
         session: String,
         options: Vec<ConfigOption>,
     },
+    /// Token and context-window usage reported by the agent (`usage_update`).
+    Usage {
+        session: String,
+        usage: super::backend::Usage,
+    },
     /// A request we don't serve (file system, terminal, …): answer "method not found".
     Unsupported {
         rpc: Value,
         method: String,
     },
-    /// Anything else (mode and command lists, usage): nothing to show.
+    /// Anything else (mode and command lists): nothing to show.
     Ignored,
 }
 
@@ -712,8 +717,26 @@ fn update(u: &Value, session: &str) -> Incoming {
                 })
                 .unwrap_or_default(),
         },
+        Some("usage_update") => match usage_update(u) {
+            Some(usage) => Incoming::Usage { session: session.into(), usage },
+            None => Incoming::Ignored,
+        },
         _ => Incoming::Ignored,
     }
+}
+
+fn usage_u64(v: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|k| v.get(*k).and_then(Value::as_u64))
+}
+
+fn usage_update(u: &Value) -> Option<super::backend::Usage> {
+    let nested = u.get("usage");
+    let pick = |keys: &[&str]| usage_u64(u, keys).or_else(|| nested.and_then(|n| usage_u64(n, keys)));
+    let input_tokens = pick(&["inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "used"]);
+    let output_tokens = pick(&["outputTokens", "output_tokens", "completionTokens", "completion_tokens"]);
+    let context_window = pick(&["contextWindow", "context_window", "size", "maxTokens", "max_tokens"]);
+    let usage = super::backend::Usage { input_tokens, output_tokens, context_window };
+    (!usage.is_empty()).then_some(usage)
 }
 
 /// The answer to a permission request: the option picked, or `None` for "cancelled".
@@ -1157,5 +1180,35 @@ mod tests {
         assert_eq!(config_options(&json!({})), ConfigParse::Absent);
         assert_eq!(config_options(&json!({"configOptions":null})), ConfigParse::Invalid);
         assert_eq!(config_options(&json!({"configOptions":[{"type":"select","id":"broken"}]})), ConfigParse::Invalid);
+    }
+
+    #[test]
+    fn usage_updates_parse_context_and_token_counts() {
+        let std_acp = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"usage_update","used":12400,"size":200000}}}"#;
+        assert_eq!(
+            parse(std_acp),
+            Some(Incoming::Usage {
+                session: "s1".into(),
+                usage: super::super::backend::Usage { input_tokens: Some(12_400), output_tokens: None, context_window: Some(200_000) },
+            })
+        );
+        let detailed = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s2","update":{"sessionUpdate":"usage_update","inputTokens":3500,"outputTokens":420,"contextWindow":128000}}}"#;
+        assert_eq!(
+            parse(detailed),
+            Some(Incoming::Usage {
+                session: "s2".into(),
+                usage: super::super::backend::Usage { input_tokens: Some(3_500), output_tokens: Some(420), context_window: Some(128_000) },
+            })
+        );
+        let nested = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s3","update":{"sessionUpdate":"usage_update","usage":{"prompt_tokens":900,"completion_tokens":150},"max_tokens":64000}}}"#;
+        assert_eq!(
+            parse(nested),
+            Some(Incoming::Usage {
+                session: "s3".into(),
+                usage: super::super::backend::Usage { input_tokens: Some(900), output_tokens: Some(150), context_window: Some(64_000) },
+            })
+        );
+        let empty = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"usage_update"}}}"#;
+        assert_eq!(parse(empty), Some(Incoming::Ignored));
     }
 }

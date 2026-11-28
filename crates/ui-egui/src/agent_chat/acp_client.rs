@@ -263,7 +263,10 @@ impl AcpBackend {
             Incoming::ConfigOptions { session, options } if self.session.as_deref() == Some(session.as_str()) => {
                 out.push(Event::ConfigOptions(options))
             }
-            Incoming::ModeChanged(_) | Incoming::ModelChanged(_) | Incoming::ConfigOptions { .. } => {}
+            Incoming::Usage { session, usage } if session.is_empty() || self.session.as_deref() == Some(session.as_str()) => {
+                out.push(Event::Usage(usage));
+            }
+            Incoming::ModeChanged(_) | Incoming::ModelChanged(_) | Incoming::ConfigOptions { .. } | Incoming::Usage { .. } => {}
             Incoming::Unsupported { rpc, method } => {
                 self.send(&acp::reply_error(rpc, acp::METHOD_NOT_FOUND, &format!("SolidCraft does not serve `{method}`")));
             }
