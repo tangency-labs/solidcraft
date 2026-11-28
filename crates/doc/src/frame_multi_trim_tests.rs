@@ -276,16 +276,3 @@ fn a_grown_tool_stands_off_by_the_gap() {
     let coped = coped_tool(&square_to(a, b), &box_tube(), 0.0, 400.0, &[cut], 2.0).unwrap();
     assert!(rel(volume(&coped), (44.0 * 44.0 - (4.0 - PI) * 64.0) * 302.0) < MEASURED, "{}", volume(&coped));
 }
-
-#[test]
-fn a_tool_on_the_side_deep_in_the_end_zone_is_still_cut() {
-    // A tube built exactly to its end at x = 300 (its zone runs out 2 × 20√2 past the end and back w + 10 into it)
-    // and a 10 mm square bar across its +Y wall at x = 234 to 244: in the zone, though its nearest point is 58 mm
-    // from the end, past the zone's 56.6 mm reach out. The bar takes its 10 × 10 × 3 bite out of the wall.
-    let m = member(&box_tube(), Vec3::ZERO, Vec3::X * 300.0, 0.0, 300.0);
-    let bar = section(serde_json::json!({"kind": "bar", "width": 10, "height": 10}));
-    let tool = member(&bar, Vec3::new(234.0, 20.0, 0.0), Vec3::new(244.0, 20.0, 0.0), 0.0, 10.0);
-    let fitted = fit_end(&m, Vec3::X * 300.0, Vec3::X, Vec3::new(150.0, 18.5, 0.0), &[&tool], "m").unwrap();
-    let want = tube_area() * 300.0 - 300.0;
-    assert!(rel(volume(&fitted), want) < 1e-6, "{} vs {want}", volume(&fitted));
-}

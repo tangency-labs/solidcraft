@@ -117,13 +117,21 @@ fn nearest([x, y]: [Option<f64>; 2]) -> Option<f64> {
 ///
 /// # Errors
 ///
-/// [`crate::error::SolidError::InvalidInput`] for a zero or non-finite `toward`.
+/// [`SolidError::InvalidInput`] for a non-finite `end`, section corner or `rect` corner, and a
+/// zero or non-finite `toward`.
 pub fn reach_through_box(
     end: Point3,
     toward: Vec3,
     sections: &[[Point3; 4]],
     rect: &[Point3; 4],
 ) -> Result<Option<f64>> {
+    let finite = |p: &Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(finite(&end) && sections.iter().flatten().all(finite) && rect.iter().all(finite)) {
+        return Err(SolidError::InvalidInput {
+            operation: "reach_through_box",
+            reason: "the end and the corners must be finite points",
+        });
+    }
     let t = toward.unitize()?;
     let exit = |p: Point3| slab_exits(p, t, rect).and_then(nearest);
     let mut reach = exit(end);
@@ -580,5 +588,13 @@ mod tests {
             None
         );
         assert!(reach_through_box(end, Vec3::new(0.0, 0.0, 0.0), &[section], &rect).is_err());
+        // A non-finite point is refused, not measured.
+        let far = Point3::new(f64::INFINITY, 0.0, 0.0);
+        assert!(reach_through_box(far, toward, &[], &rect).is_err());
+        let bad = [section[0], section[1], section[2], far];
+        assert!(reach_through_box(end, toward, &[bad], &rect).is_err());
+        assert!(
+            reach_through_box(end, toward, &[section], &[rect[0], rect[1], rect[2], far]).is_err()
+        );
     }
 }
