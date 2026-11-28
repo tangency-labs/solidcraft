@@ -37,8 +37,8 @@
 {"case":"capped_rot_square_axis_z_inside_90","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1025.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"capped_rot_square_axis_z_on_edge_270","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1025.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"capped_rot_square_axis_z_on_edge_90","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1025.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"capped_rot_square_axis_z_outside_270","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,6.0,12.0,8.0]}}
-{"case":"capped_rot_square_axis_z_outside_90","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[471.970061249135,471.970061249135,63899.32528473925],[539.1501020818915,583.9381437902824,74649.21776030972],[104.80000000000001,115.4,2971.1]],"n":563}}}
+{"case":"capped_rot_square_axis_z_outside_270","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
+{"case":"capped_rot_square_axis_z_outside_90","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"circular_rule_before_apex","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[145.10478562802774,172.99125781036207,14165.48259063364]],"n":190}}}
 {"case":"circular_rule_to_apex","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[90.18989509217766,110.14311076696652,9610.62793646584]],"n":190}}}
 {"case":"corner_does_not_marry_generators","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[176.21809037781338,185.51358110525808,17836.890154760426]],"n":190}}}

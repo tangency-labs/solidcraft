@@ -1030,6 +1030,18 @@ fn cap_with_a_pattern(doc: &mut Document, component: u64) {
     );
 }
 
+/// The cap's pattern: the post stands at radius 3 and the bore is cut at radius 15, each at the
+/// four places a circular pattern round the Z axis puts them. The post is read in the hollow it
+/// stands in (17 mm above the base) and the bore in the disc it goes through (10 mm above it).
+fn assert_pattern_posts_and_bores(body: &crate::kernel::Body) {
+    for (x, y) in [(3.0, 0.0), (0.0, 3.0), (-3.0, 0.0), (0.0, -3.0)] {
+        assert!(body.contains(Vec3::new(x, y, 17.0)), "the post stands at ({x}, {y}, 17)");
+    }
+    for (x, y) in [(15.0, 0.0), (0.0, 15.0), (-15.0, 0.0), (0.0, -15.0)] {
+        assert!(!body.contains(Vec3::new(x, y, 10.0)), "the bore is cut at ({x}, {y}, 10)");
+    }
+}
+
 /// A pattern that holds several features builds with all of them (#14305): the bore it holds is
 /// cut at each of its copies, and the post it holds stands at each of its copies. The copy of a
 /// feature that points at a face with its To Object is built where the feature was built, so the
@@ -1047,13 +1059,9 @@ fn a_pattern_that_holds_several_features_builds_with_all_of_them() {
     // posts it added.
     let st = m.state();
     assert_eq!(st.bodies.len(), 1);
-    let pi = std::f64::consts::PI;
-    let disc = pi * 400.0 * 20.0;
-    let hollow = pi * 25.0 * 10.0 / 3.0;
-    let bores = 4.0 * pi * 20.0;
-    let v = measure(&st.bodies[0].body).unwrap().volume;
-    assert!(v < disc - hollow - bores + 100.0, "the bores are cut and the posts are added: {v} mm³");
-    assert!(v > disc - hollow - bores, "the bores are cut and the posts are added: {v} mm³");
+    // The post stands at each of the four places the pattern puts it and the bore is cut at each
+    // of its four places: a pattern that copies the bores alone leaves the posts out.
+    assert_pattern_posts_and_bores(&st.bodies[0].body);
 }
 
 /// The same pattern in a document with two components: a cold rebuild prefetches each component's
@@ -1085,13 +1093,8 @@ fn a_pattern_in_a_component_of_many_builds_with_all_of_its_features() {
     assert_eq!(summary(&m.state()), from_scratch(&doc));
     let st = m.state();
     assert_eq!(st.bodies.len(), 2);
-    let pi = std::f64::consts::PI;
-    let disc = pi * 400.0 * 20.0;
-    let hollow = pi * 25.0 * 10.0 / 3.0;
-    let bores = 4.0 * pi * 20.0;
-    let v = measure(&st.body("Body1").unwrap().body).unwrap().volume;
-    assert!(v < disc - hollow - bores + 100.0, "the bores are cut and the posts are added: {v} mm³");
-    assert!(v > disc - hollow - bores, "the bores are cut and the posts are added: {v} mm³");
+    // The same posts and bores as in a document with one component: the pattern copies them all.
+    assert_pattern_posts_and_bores(&st.body("Body1").unwrap().body);
 }
 
 /// A cut of several bodies cuts again only those that changed: the rod, which `w` does not
