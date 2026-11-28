@@ -634,3 +634,47 @@ fn view_dxf_front_view_of_a_tray_with_round_corner_reliefs_is_exported_not_refus
     assert!(stats["occlusion_work"].as_u64().unwrap() < 2_000_000, "{stats}");
     assert!(v["visible"].as_u64().unwrap() > 0 && v["hidden"].as_u64().unwrap() > 0, "{v}");
 }
+
+/// #22913: with Section Analysis on, the view is exported as the section cuts it, not refused: the
+/// side each plane's normal points to is left out, and the cut faces' outlines are drawn. A
+/// `section` of its own stands in for the session's; `[]` draws the bodies whole.
+#[test]
+fn view_dxf_exports_the_view_as_the_section_cuts_it() {
+    let mut s = sample();
+    let top = camera(StandardView::Top);
+    let width = |v: &Value| {
+        let xs: Vec<f64> = lines(v).iter().flat_map(|(a, b)| [a.x, b.x]).collect();
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max) - xs.iter().copied().fold(f64::INFINITY, f64::min)
+    };
+    assert!((width(&export(&mut s, top, "omit")) - 40.).abs() < 1e-3);
+    // Section Analysis on the YZ plane at x = 20: half the plate is left.
+    run(&mut s, "inspect.section", json!({"plane":"YZ","at":20}));
+    let cut = export(&mut s, top, "omit");
+    assert!((width(&cut) - 20.).abs() < 1e-3, "{}", width(&cut));
+    assert!((width(&run(&mut s, CMD, json!({"camera":top,"section":[]}))) - 40.).abs() < 1e-3);
+    run(&mut s, "inspect.section", json!({"clear":true}));
+    // Cut across y at 12, the side toward -y left out: from above, 40 by 18 of the plate is left.
+    let height = |v: &Value| {
+        let ys: Vec<f64> = lines(v).iter().flat_map(|(a, b)| [a.y, b.y]).collect();
+        ys.iter().copied().fold(f64::NEG_INFINITY, f64::max) - ys.iter().copied().fold(f64::INFINITY, f64::min)
+    };
+    let across_y = run(&mut s, CMD, json!({"camera":top,"section":[{"origin":[0,12,0],"normal":[0,-1,0]}]}));
+    assert!((width(&across_y) - 40.).abs() < 1e-3 && (height(&across_y) - 18.).abs() < 1e-3, "{} by {}", width(&across_y), height(&across_y));
+    // From the front, the blind hole is hidden in the plate; cut through its axis, its section shows:
+    // a line across the hole's top, 4 mm up, from x = 7 to 13 (the view is centred on (20, 15, 5)).
+    let front = camera(StandardView::Front);
+    let across_the_hole = |v: &Value| {
+        lines(v)
+            .iter()
+            .any(|(a, b)| (a.y + 1.).abs() < 1e-3 && (b.y + 1.).abs() < 1e-3 && (a.x.min(b.x) + 13.).abs() < 1e-3 && (a.x.max(b.x) + 7.).abs() < 1e-3)
+    };
+    assert!(!across_the_hole(&export(&mut s, front, "omit")));
+    let through_the_axis = json!([{"origin":[0,10,0],"normal":[0,-1,0]}]);
+    let section = run(&mut s, CMD, json!({"camera":front,"section":through_the_axis}));
+    assert!(across_the_hole(&section), "{:?}", lines(&section));
+    // Bad planes are refused, and so is a section that leaves nothing.
+    let refused = |s: &mut Session, section: Value| s.execute(CMD, &json!({"camera":front,"section":section})).unwrap_err().to_string();
+    assert!(refused(&mut s, json!([{"origin":[0,0,0],"normal":[0,0,0]}])).contains("normal that isn't zero"));
+    assert!(refused(&mut s, json!([{"origin":[0,0,-1],"normal":[0,0,1]}])).contains("cuts away every visible body"));
+    assert!(refused(&mut s, json!([{"origin":[0,0,0]}])).contains("each with an origin and a normal"));
+}

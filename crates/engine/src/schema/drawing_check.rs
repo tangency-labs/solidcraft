@@ -62,7 +62,7 @@ impl FindingKind {
 }
 
 /// What kind of record a finding names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckedKind {
     View,

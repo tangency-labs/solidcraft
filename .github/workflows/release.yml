@@ -15,6 +15,8 @@
 #   macOS universal         .dmg, and the CLI as a .zip (both archs built in parallel)  packaging/macos
 #   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
 #   Web                     a .zip of the static site                              packaging/web
+#   Python                  the client's wheel (python/, no binary) and each platform's released
+#                           solidcraft-cli alone, which the client downloads        packaging/python
 #
 # The main installers are also attached without the version in their names
 # (solidcraft-windows-x64.msi, solidcraft-linux-x86_64.AppImage, ...) so that
@@ -667,9 +669,78 @@ jobs:
           path: dist/release/*
           if-no-files-found: error
 
+  python:
+    name: Python wheel and CLI archives
+    # The client's one wheel (py3-none-any, no binary) and each platform's released solidcraft-cli
+    # on its own, which the client downloads on first use and checks against SHA256SUMS.txt
+    # (docs/python-api.md, "Packaging"). The archives repackage the packages' signed bytes; nothing
+    # is rebuilt. pypi.yml uploads the wheel when the release is published.
+    needs: [version, linux, freebsd, macos, windows]
+    if: needs.version.outputs.build == 'true'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-python
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-linux-*
+          path: packages
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-freebsd-x86_64
+          path: packages
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-windows-*
+          path: packages
+          merge-multiple: true
+      - name: Build the wheel and the CLI archives
+        run: packaging/python/wheels.sh packages dist/python
+      - run: ls -l dist/python
+      # Uploaded before the check below installs anything from PyPI, so nothing that check runs
+      # can change the files that ship (and that SHA256SUMS.txt lists).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-python
+          path: |
+            dist/python/*.whl
+            dist/python/solidcraft-cli-*
+          if-no-files-found: error
+      - name: Check the wheel downloads its CLI from these files
+        # Installed into a clean environment with no SOLIDCRAFT_CLI and nothing on PATH, so the
+        # client must download the Linux x86_64 archive, from a file:// copy of this release's
+        # files with their own SHA256SUMS.txt, check it and cache it; then the client's tests run
+        # against it. pytest comes from python/tests/requirements.txt, exact versions with their
+        # hashes; the NumPy test skips without NumPy, so it is not installed here.
+        run: |
+          mirror="$RUNNER_TEMP/mirror"
+          mkdir -p "$mirror"
+          cp dist/python/solidcraft-cli-* "$mirror/"
+          (cd "$mirror" && sha256sum -- * > SHA256SUMS.txt)
+          python3 -m venv "$RUNNER_TEMP/wheel-check"
+          "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --require-hashes --only-binary :all: -r python/tests/requirements.txt
+          "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --no-deps dist/python/solidcraft-*-py3-none-any.whl
+          export SOLIDCRAFT_DOWNLOAD_URL="file://$mirror" XDG_CACHE_HOME="$RUNNER_TEMP/cache"
+          export PATH="$RUNNER_TEMP/wheel-check/bin:/usr/bin:/bin"
+          # `solidcraft` (what `uvx solidcraft` runs) downloads the CLI, says so once, and runs it.
+          env -u SOLIDCRAFT_CLI solidcraft --version 2>"$RUNNER_TEMP/first.err"
+          cat "$RUNNER_TEMP/first.err"
+          grep -q "downloading solidcraft-cli $VERSION" "$RUNNER_TEMP/first.err"
+          test -x "$XDG_CACHE_HOME/solidcraft/cli/$VERSION/solidcraft-cli"
+          mkdir -p "$RUNNER_TEMP/x"
+          tar -xzf "dist/python/solidcraft-cli-$VERSION-linux-x86_64.tar.gz" -C "$RUNNER_TEMP/x"
+          cmp "$XDG_CACHE_HOME/solidcraft/cli/$VERSION/solidcraft-cli" "$RUNNER_TEMP/x/solidcraft-cli-$VERSION-linux-x86_64/solidcraft-cli"
+          cd "$RUNNER_TEMP" && env -u SOLIDCRAFT_CLI "$RUNNER_TEMP/wheel-check/bin/python" -m pytest -q -p no:cacheprovider "$GITHUB_WORKSPACE/python/tests"
+
   release:
     name: GitHub Release or dry-run artifacts
-    needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
+    needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web, python]
     # Not for the release gate (packages_only): it builds and checks the packages, nothing more.
     if: needs.version.outputs.build == 'true' && !inputs.packages_only
     runs-on: blacksmith-8vcpu-ubuntu-2404
