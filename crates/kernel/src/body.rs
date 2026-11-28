@@ -1237,6 +1237,24 @@ impl Body {
         }
     }
 
+    /// For each edge of `self`, the faces it bounds (each once) and its exact polyline points.
+    pub fn edge_faces_and_points(&self) -> Vec<(Vec<u32>, Vec<Vec3>)> {
+        if self.is_mesh() {
+            return Vec::new();
+        }
+        let chord = (self.size() * 1e-3).max(1e-4);
+        self.record
+            .edges
+            .iter()
+            .map(|e| {
+                // Each face once: a seam bounds its one face from both sides.
+                let fs: Vec<u32> = crate::history::faces_of(e).into_iter().map(|f| f as u32).collect();
+                let pts = edge_points(e, chord).unwrap_or_default();
+                (fs, pts)
+            })
+            .collect()
+    }
+
     /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`.
     pub fn raycast_face(&self, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
         let form = self.ops_body()?;
