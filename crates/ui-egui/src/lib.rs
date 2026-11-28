@@ -3317,6 +3317,23 @@ impl SolveApp {
             }
         }
         self.prepared_edit_starts.remove(&self.session.uid);
+        // Finishing the sketch puts the timeline back and drops the selection, because a face
+        // picked on a later feature would no longer exist. A profile of this sketch still does,
+        // and Extrude and Revolve are started to use it (#22673).
+        let kept_profiles = if matches!(id, "solid.extrude" | "solid.revolve") {
+            previous_sketch
+                .map(|sketch| {
+                    self.session
+                        .selection
+                        .iter()
+                        .filter(|sel| matches!(sel, solidcraft_engine::Sel::Profile { sketch: owner, .. } if *owner == sketch))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let finished = match crate::sketch_view::prepare_edit(self, id, &Value::Null) {
             Ok(event) => event,
             Err(error) => {
@@ -3324,6 +3341,11 @@ impl SolveApp {
                 return;
             }
         };
+        for sel in kept_profiles {
+            if !self.session.selection.iter().any(|have| crate::selection::same_item(have, &sel)) {
+                self.session.selection.push(sel);
+            }
+        }
         let finished_sketch = finished.filter(|event| matches!(event.domain, solidcraft_engine::SketchDomain::Model)).map(|event| event.sketch);
         if starts_edit {
             self.prepared_edit_starts.insert(self.session.uid, id.into());
