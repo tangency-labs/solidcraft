@@ -321,6 +321,46 @@ pub fn line_plane_deviation(
     Some((d.dot(n).abs(), (line_point - plane_point).dot(n).abs()))
 }
 
+/// The range `(lowest, highest)` of the speed across a plane of `points` on it, under the screw
+/// motion about the line through `axis_point` along `axis_dir` that rises `pitch` per turn: per
+/// radian of turn a point `r` from `axis_point` moves `k × r + (pitch / 2π) k` (`k` the unit
+/// axis), so its speed along the plane's unit normal `n` (the cross product of its axes) is
+/// `n · (k × r) + (pitch / 2π)(n · k)`, affine over the plane. A section on the plane sweeps
+/// without passing back over itself while that speed keeps one sign over it. `None` for a number
+/// that is not finite, axes that do not span a plane, a direction of no length or no points.
+#[must_use]
+pub fn screw_speed_range(
+    plane_x: Vec3,
+    plane_y: Vec3,
+    axis_point: Point3,
+    axis_dir: Vec3,
+    pitch: f64,
+    points: &[Point3],
+) -> Option<(f64, f64)> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(plane_x)
+        && finite(plane_y)
+        && finite(axis_point)
+        && finite(axis_dir)
+        && pitch.is_finite())
+        || points.is_empty()
+    {
+        return None;
+    }
+    let n = plane_x.cross(plane_y).unitize().ok()?;
+    let k = axis_dir.unitize().ok()?;
+    let rise = pitch / (2.0 * PI) * n.dot(k);
+    let mut range = (f64::INFINITY, f64::NEG_INFINITY);
+    for &p in points {
+        if !finite(p) {
+            return None;
+        }
+        let speed = n.dot(k.cross(p - axis_point)) + rise;
+        range = (range.0.min(speed), range.1.max(speed));
+    }
+    Some(range)
+}
+
 /// Whether the plane through `plane_point` square to `plane_normal` (any length) holds the axis
 /// of `surface` within `tol` (the model's tolerance) wherever the axis passes the points
 /// `extent` (the corners of a box around the face), or for a sphere its centre: whether

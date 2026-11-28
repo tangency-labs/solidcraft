@@ -2011,8 +2011,8 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
             .collect()
     };
     let before = super::motion::positions(s);
-    let r = if hold {
-        json!({"stopped_by_contact": null, "stopped_by_loop": null})
+    let (r, drive_sol) = if hold {
+        (json!({"stopped_by_contact": null, "stopped_by_loop": null}), None)
     } else {
         let doc = s.doc_mut();
         let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
@@ -2025,11 +2025,14 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
             j.exprs.set_value(i, None);
         }
         let stop_at_budget = bool_(p, "stop_at_budget").unwrap_or(false);
-        if let Some(index) = index {
+        let (r, sol) = if let Some(index) = index {
             super::motion::drive_joint_index(s, id, q, index, stop_at_budget)?
         } else {
             super::motion::drive_joint(s, id, q, given, stop_at_budget)?
-        }
+        };
+        // That solve placed every occurrence for this model: the refresh after the command keeps it.
+        s.joints_placed();
+        (r, Some(sol))
     };
     if !hold {
         let mut pending = std::mem::take(&mut s.pending_joint_bases);
@@ -2044,7 +2047,11 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.pending_joint_bases = pending;
     }
-    let sol = solution(s, &BTreeMap::new(), response_analysis(p));
+    let analysis = response_analysis(p);
+    let sol = match drive_sol {
+        Some(sol) if analysis == joints::Analysis::Placement => sol,
+        _ => solution(s, &BTreeMap::new(), analysis),
+    };
     // When the drive already placed every occurrence and joint identically to a fresh solve
     // (and no expression or coupling changed), the refresh after the command can skip re-solving.
     if !hold && !s.doc.has_capture_position_timeline() {
@@ -2386,6 +2393,70 @@ pub fn reach_preview(
         doc.apply_joint_solution(&sol);
     }
     reached
+}
+
+/// One frame of a joint-handle drag, shown before it is applied: drive joint `id`'s coordinate
+/// `index` to `wanted` (clamped, stopping short if a closed loop opens) on `doc`, the drag's own
+/// copy of the design, without touching the live session or evaluating features.
+/// Returns `(reached_value, stopped_by_loop_joint_name)`.
+pub fn drive_preview(doc: &mut Document, st: &ModelState, id: u64, index: usize, wanted: f64) -> (f64, Option<String>) {
+    let Some(joint) = doc.assembly.joints.iter().find(|j| j.id == id) else {
+        return (wanted, None);
+    };
+    let dofs = joint.kind.dofs().len();
+    if index >= dofs {
+        return (wanted, None);
+    }
+    let from = joint.values.get(index).copied().unwrap_or(0.0);
+    let mut clamped = wanted;
+    if let Some((lo, hi)) = joint.limits.get(index).copied().flatten() {
+        clamped = clamped.clamp(lo.min(hi), hi.max(lo));
+    }
+    let baseline = doc.clone();
+    let held = joints::Held::from([((id, index), from)]);
+    let try_at = |t: f64| {
+        let mut trial = baseline.clone();
+        let mut val = from + (clamped - from) * t;
+        if let Some(j) = trial.assembly.joints.iter_mut().find(|j| j.id == id) {
+            let mut q = j.values.clone();
+            if q.len() < dofs {
+                q.resize(dofs, 0.0);
+            }
+            if let Some(slot) = q.get_mut(index) {
+                *slot = val;
+            }
+            joints::clamp(j, &mut q);
+            j.exprs.set_value(index, None);
+            val = q.get(index).copied().unwrap_or(val);
+            j.values = q;
+        }
+        let sol = joints::solve_holding_with_analysis(&trial, st, &held, joints::Analysis::Placement);
+        if !sol.world.is_empty() {
+            trial.apply_joint_solution(&sol);
+        }
+        (trial, sol, val)
+    };
+    let (best_doc, sol, best_val) = try_at(1.0);
+    if !sol.conflicts.is_empty() {
+        let open_at_start: BTreeSet<u64> = try_at(0.0).1.conflicts.iter().map(|c| c.0).collect();
+        let opened = |s: &joints::Solution| s.conflicts.iter().find(|c| !open_at_start.contains(&c.0)).map(|c| c.1.clone());
+        if let Some(mut name) = opened(&sol) {
+            let (mut lo, mut hi) = (0.0, 1.0);
+            for _ in 0..14 {
+                let mid = (lo + hi) / 2.0;
+                let (_, mid_sol, _) = try_at(mid);
+                match opened(&mid_sol) {
+                    None => lo = mid,
+                    Some(n) => (hi, name) = (mid, n),
+                }
+            }
+            let (lo_doc, _, lo_val) = try_at(lo);
+            *doc = lo_doc;
+            return (lo_val, Some(name));
+        }
+    }
+    *doc = best_doc;
+    (best_val, None)
 }
 
 /// The centre of the box around an occurrence's bodies, in its own coordinates (its origin when
