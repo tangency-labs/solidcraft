@@ -3179,7 +3179,7 @@ fn delete_face_in(
     }
 
     // Check if face is in brep
-    if !p1::faces(b, None)?.contains(&f) {
+    if !b.face_list().contains(&f) {
         return Err(SolidError::topology(OP, TopologyFailure::NotInBrep));
     }
 
