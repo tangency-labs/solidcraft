@@ -13,8 +13,8 @@ pub const UNIT_FROM: &str = "x-solidcraft-unit-from";
 /// On a property: an `https` page the field's help button opens.
 pub const HELP: &str = "x-solidcraft-help";
 /// On a string `oneOf` choice, or on a list of them (`uniqueItems` with `items` a string `oneOf`):
-/// `{"version": 1, "style": "buttons"}` draws the options as a row of icon buttons.
-pub const CHOICE: &str = "x-solidcraft-choice";
+/// the name of the ui-kit control the dialog draws it with, one of [`controls`].
+pub const CONTROL: &str = "x-solidcraft-control";
 
 const MAX_TITLE: usize = 80;
 const MAX_URL: usize = 2048;
@@ -49,26 +49,28 @@ pub(crate) fn validate(schema: &Value, field: &str) -> Result<()> {
         {
             return Err(invalid(at(HELP), format!("must be an https:// link of at most {MAX_URL} characters")));
         }
-        if let Some(choice) = property.get(CHOICE)
-            && !(choice.as_object().is_some_and(|c| {
-                c.len() == 2 && c.get("version").and_then(Value::as_u64) == Some(1) && c.get("style").and_then(Value::as_str) == Some("buttons")
-            }) && icon_choice(property))
+        if let Some(control) = property.get(CONTROL)
+            && !control.as_str().is_some_and(|name| controls(property).contains(&name))
         {
             return Err(invalid(
-                at(CHOICE),
-                "must be {\"version\": 1, \"style\": \"buttons\"} on a string oneOf choice, or on an array with uniqueItems and items that are one",
+                at(CONTROL),
+                "must name a ui-kit control for the field: dropdown, dropdown_icons, segmented or segmented_icons on a string oneOf; segmented_icons or checkbox on an array with uniqueItems whose items are one",
             ));
         }
     }
     Ok(())
 }
 
-/// A string `oneOf` choice, or a list of distinct ones: the properties [`CHOICE`] may draw.
-pub fn icon_choice(property: &Value) -> bool {
+/// The ui-kit controls [`CONTROL`] may name for `property`: a string `oneOf` choice, or a list of
+/// distinct ones; none for any other property.
+pub fn controls(property: &Value) -> &'static [&'static str] {
     let string_choice = |p: &Value| p.get("type").and_then(Value::as_str) == Some("string") && p.get("oneOf").is_some_and(Value::is_array);
     match property.get("type").and_then(Value::as_str) {
-        Some("array") => property.get("uniqueItems") == Some(&Value::Bool(true)) && property.get("items").is_some_and(string_choice),
-        _ => string_choice(property),
+        Some("array") if property.get("uniqueItems") == Some(&Value::Bool(true)) && property.get("items").is_some_and(string_choice) => {
+            &["segmented_icons", "checkbox"]
+        }
+        _ if string_choice(property) => &["dropdown", "dropdown_icons", "segmented", "segmented_icons"],
+        _ => &[],
     }
 }
 

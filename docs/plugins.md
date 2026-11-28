@@ -1080,30 +1080,33 @@ relative path to an `.svg` file inside the package:
   entry has the generic plugin icon. Importers use the same image checks and fallback as commands.
 - On a `oneOf` option it is that option's picture in the dropdown. Pictures show when every option
   of the choice names one that passed the check below; otherwise the dropdown shows the titles alone.
-- **Icon buttons.** `"x-solidcraft-choice": {"version": 1, "style": "buttons"}` on the choice
-  draws its options as a row of icon buttons instead of the dropdown. Each button's tooltip is the
-  option's title. The selected button has the dialog's accent fill, and its icon is drawn with the
-  lighter lines the app uses on a dark surface, so it follows the theme, the accent and the
-  colour-vision setting. The dialog draws the dropdown instead when an option has no picture that
-  passed the check, or when the row is wider than the dialog.
-- **Toggle buttons.** On an `array` with `uniqueItems: true` whose `items` is exactly
-  `{"type": "string", "oneOf": [...]}`, the same annotation draws one toggle button per option.
-  The value is the list of the selected consts, in the order of the options; `minItems` and
-  `maxItems` are the counts Run checks, and `default` is a list of consts. Without the annotation,
-  or when the buttons cannot be drawn, the list shows one checkbox per option. Options of such a
-  list take no `x-solidcraft-when`.
+- **The control.** `"x-solidcraft-control"` names the ui-kit control the dialog draws the field
+  with, the same one the app's own dialogs call (see docs/ui-kit.md), so a plugin field looks and
+  behaves like a built-in one. On a string `oneOf` choice it is `dropdown` (titles only),
+  `dropdown_icons` (the default: pictures when every option has one), `segmented` (a row of text
+  segments) or `segmented_icons` (a row of icon segments, as the Gusset dialog's side; each
+  segment's tooltip is the option's title). `segmented_icons` falls back to the dropdown when an
+  option has no picture that passed the check, or when the segments would be narrower than a row is
+  high.
+- **Lists of options.** An `array` with `uniqueItems: true` whose `items` is exactly
+  `{"type": "string", "oneOf": [...]}` lets the user pick several options. The value is the list of
+  the selected consts, in the order of the options; `minItems` and `maxItems` are the counts Run
+  checks, and `default` is a list of consts. It is drawn as one checkbox per option (`checkbox`, the
+  default) or, with `"x-solidcraft-control": "segmented_icons"`, as icon segments that each toggle,
+  falling back to the checkboxes as above. Options of such a list take no `x-solidcraft-when`; when
+  a dialog hook narrows the choices, a selected option it takes away is dropped.
 
   ```json
   "sides": {"type": "array", "title": "Edge banding", "uniqueItems": true, "default": ["front"],
-    "x-solidcraft-choice": {"version": 1, "style": "buttons"},
+    "x-solidcraft-control": "segmented_icons",
     "items": {"type": "string", "oneOf": [
       {"const": "front", "title": "Front", "x-solidcraft-icon": "icons/front.svg"},
       {"const": "back", "title": "Back", "x-solidcraft-icon": "icons/back.svg"}
     ]}}
   ```
 
-  The annotation changes only how the dialog draws the field. The manifest check refuses any other
-  `version` or `style`, and the annotation on a property that is not one of these two.
+  The control changes only how the dialog draws the field. The manifest check refuses any other
+  name, and a name on a property it does not fit.
 - The image is drawn like the app's own icons, and must be one: SolidCraft's icon SVG subset
   (the check the built-in icons pass, see `crates/look/icons/design/tools/lint_icons.py`).
   `viewBox="0 0 64 64"`; absolute `M L C Q A Z` paths, circles, groups with a clip or opacity,
