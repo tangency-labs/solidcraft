@@ -681,3 +681,60 @@ fn the_split_underside_of_an_extrude_from_an_offset_start_takes_a_sketch() {
         assert!((healthy(&t, name).0.origin.z - z).abs() < 1e-9, "{name}");
     }
 }
+
+/// A sketch attached to a piece of the low cap of an extrude from an offset start still finds that
+/// cap when the offset moves across the sketch plane, so the caps lie on both sides of it and are
+/// named `bottom` and `top` by their height: the cap answers to the end it closes wherever its
+/// start lies, and the design reopens with the sketch on it. The plate sits on a base with a rib
+/// across its top, which cuts the plate and is kept (as in `grooved_cover`), all placed by `off`.
+/// A tapered plate's caps answer to their ends too.
+#[test]
+fn a_sketch_on_a_split_low_cap_follows_it_when_the_offset_crosses_the_sketch_plane() {
+    split_low_cap_across_the_sketch_plane(None);
+    split_low_cap_across_the_sketch_plane(Some("3 deg"));
+}
+
+fn split_low_cap_across_the_sketch_plane(taper: Option<&str>) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "off", "expression": "10 mm"}));
+    let rectangle = |s: &mut Session, name: &str, p0: [f64; 2], p1: [f64; 2]| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+        run(s, "sketch.finish", json!({}));
+    };
+    rectangle(&mut s, "BaseSketch", [-20., -15.], [20., 15.]);
+    run(&mut s, "solid.extrude", json!({"sketch": "BaseSketch", "distance": 5, "start_offset": "off - 5 mm", "name": "Base"}));
+    rectangle(&mut s, "RibSketch", [-2., -15.], [2., 15.]);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "RibSketch", "distance": 1, "start_offset": "off", "operation": "join", "targets": ["Body1"], "name": "Rib"}),
+    );
+    rectangle(&mut s, "PlateSketch", [-20., -15.], [20., 15.]);
+    let mut plate = json!({"sketch": "PlateSketch", "distance": 5, "start_offset": "off", "operation": "new_body", "name": "Plate"});
+    if let Some(taper) = taper {
+        plate["taper"] = json!(taper);
+    }
+    run(&mut s, "solid.extrude", plate);
+    run(&mut s, "solid.combine", json!({"target": "Body2", "tools": ["Body1"], "operation": "cut", "keep_tools": true, "name": "Groove"}));
+    no_errors(&s);
+    let plate_id = s.doc.find_feature("Plate").map(|f| f.id).unwrap();
+    let faces = run(&mut s, "model.faces", json!({"body": "Body2"}));
+    let face = faces["faces"].as_array().unwrap().iter().find(|f| {
+        let c = &f["centroid"];
+        (c[2].as_f64().unwrap() - 10.).abs() < 1e-6 && c[0].as_f64().unwrap() < 0.
+    });
+    let face = face.unwrap_or_else(|| panic!("{taper:?}: no underside piece: {faces}"));
+    let pick = json!({"body": "Body2", "face": face["point"].clone(), "index": face["index"].clone()});
+    run(&mut s, "sketch.create", json!({"plane": pick, "name": "Under"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let FaceAttachmentStatus::Healthy { target, plane, .. } = status(&s, "Under") else { panic!("{:?}", status(&s, "Under")) };
+    assert_eq!(target.name, format!("F{plate_id}:cap:low"), "{taper:?}");
+    assert!((plane.origin.z - 10.).abs() < 1e-9, "{taper:?}: {plane:?}");
+    // The plate now runs from z -2 to 3, across the sketch plane.
+    run(&mut s, "parameters.change", json!({"name": "off", "expression": "-2 mm"}));
+    no_errors(&s);
+    assert!((healthy(&s, "Under").0.origin.z + 2.).abs() < 1e-9, "{taper:?}");
+    let t = reopened(&s);
+    assert!((healthy(&t, "Under").0.origin.z + 2.).abs() < 1e-9, "{taper:?}");
+}

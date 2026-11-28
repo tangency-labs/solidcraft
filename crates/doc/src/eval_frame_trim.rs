@@ -157,7 +157,7 @@ fn build(m: &Laid, ends: &[Option<Plane>; 2], feature: u64) -> Result<Traced> {
                 sketch: None,
                 region: None,
                 caps: [None, Some(format!("face:{cap}"))],
-                cap_synonyms: [None, None],
+                cap_synonyms: Default::default(),
                 thin: None,
             };
             let tool = roles.tool(tool, None).rebuilt(feature);
