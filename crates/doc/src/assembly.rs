@@ -66,11 +66,12 @@ pub fn is_identity(m: &Mat) -> bool {
     m.iter().flatten().zip(IDENTITY.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-12)
 }
 
+pub(crate) use solidcraft_kernel::affine::linear_determinant;
+
 /// Inverse of an affine transform.
 pub fn mat_inverse(m: &Mat) -> Option<Mat> {
     let a = |r: usize, c: usize| m[c][r];
-    let det = a(0, 0) * (a(1, 1) * a(2, 2) - a(1, 2) * a(2, 1)) - a(0, 1) * (a(1, 0) * a(2, 2) - a(1, 2) * a(2, 0))
-        + a(0, 2) * (a(1, 0) * a(2, 1) - a(1, 1) * a(2, 0));
+    let det = linear_determinant(m);
     if det.abs() < 1e-14 || !det.is_finite() {
         return None;
     }
@@ -579,6 +580,16 @@ impl FeatureKind {
             // An Emboss cylinder is picked in its component's frame (`EmbossFace`).
             Geo::Pinned(_) | Geo::Profiles(..) => {}
         });
+        // A transform copied or transferred with its body carries its displacement as a
+        // vector, not a position. Reflecting its rotation reverses the sense of its axis.
+        if let FeatureKind::TransformFace { translate, rotate_axis, .. } = self
+            && m[..3] != IDENTITY[..3]
+        {
+            map_vector_expr(m, translate);
+            if linear_determinant(m) < 0.0 {
+                rotate_axis.0 = -rotate_axis.0;
+            }
+        }
     }
 }
 

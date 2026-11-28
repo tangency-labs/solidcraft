@@ -107,7 +107,7 @@ found by the edge nearest its point, as it always was, and takes that edge's nam
 sketch is next edited.
 
 A command that takes a face as a point can be given a name `model.faces` lists instead
-(`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, the `faces`
+(`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.transform_face`, `solid.split_face`, the `faces`
 of `solid.replace_face`, the `face` of `sheet.convert`). It is found with the same lookup
 (`naming::locate_one`: the face with that name, or the one face answering to it, on the given
 body or any body; a name that finds several faces is refused). The command takes a point on that

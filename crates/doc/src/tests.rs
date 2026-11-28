@@ -4107,6 +4107,62 @@ fn thread_additional_faces_round_trip_without_moving_legacy_face_name_slots() {
 }
 
 #[test]
+fn transform_face_mirror_replays_the_resolved_pick_and_reflects_the_pivot_and_turn() {
+    let mut doc = Document::new("Mirrored walls");
+    let block = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-5.0, -5.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(block).unwrap().body_names = vec!["Block".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let right = naming::face_names_at(&model.state(), &[Vec3::new(5.0, 0.0, 5.0)]);
+    assert!(!right[0].is_empty());
+    let seed = doc
+        .add_feature(
+            FeatureKind::TransformFace {
+                // The right face was picked before the block grew wider.
+                face: Vec3::new(4.0, 0.0, 5.0).into(),
+                body: "Block".into(),
+                translate: point_expr(Vec3::X),
+                rotate_axis: Vec3::Y.into(),
+                origin: Some(point_expr(Vec3::new(5.0, 0.0, 0.0))),
+                angle: Some("45 deg".into()),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(seed).unwrap().face_names = right;
+    doc.add_feature(
+        FeatureKind::Mirror {
+            features: vec![seed.into()],
+            plane: PlaneRef::Origin { name: "YZ".into() },
+            bodies: vec![],
+            combine: false,
+            placements: vec![],
+        },
+        None,
+    )
+    .unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    // The walls are x = ±(6 + z): widths 12 and 32 at the two ends, 10 mm apart.
+    let volume = measure(&st.body("Block").unwrap().body).unwrap().volume;
+    assert!(rel(volume, 2200.0) < 1e-9, "{volume}");
+}
+
+#[test]
 fn thread_target_body_identities_follow_face_slots_and_reference_remapping() {
     let mut kind: FeatureKind = serde_json::from_value(serde_json::json!({
         "type":"thread", "face":[3,0,2],

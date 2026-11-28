@@ -94,6 +94,10 @@ impl Modelling for Solidcore {
         crate::polyhedron::offset_faces(body, at, distance)
     }
 
+    fn transform_face(&self, body: &Body, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+        crate::offset_backend::transform_face(body, at, translate, origin, axis, angle)
+    }
+
     fn draft(&self, body: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
         crate::polyhedron::draft(body, faces, neutral, pull, angle)
     }

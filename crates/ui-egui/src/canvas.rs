@@ -460,6 +460,11 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // Test its geometry before navigation, including the first frame entering a handle.
     crate::joint_handles::owns_pointer(app, proj, p)
         || app.dialog.as_ref().and_then(|d| crate::dialogs_move::triad(app, d)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
+        || app
+            .dialog
+            .as_ref()
+            .and_then(|d| crate::dialogs::transform_face::triad(app, d))
+            .is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app.dialog.as_ref().and_then(|d| sketch_move_triad(app, d, anchor(app, d)?.0)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app
             .dialog
@@ -506,6 +511,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             app.dialog = Some(d);
             return;
         }
+    }
+    if matches!(d.kind, Kind::TransformFace { .. }) {
+        if let Some(t) = crate::dialogs::transform_face::triad(app, &d)
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_transform_face_triad"), &t, snap_step(app.cam.half_height()))
+        {
+            crate::dialogs::transform_face::drag(app, &mut d, g);
+        }
+        app.dialog = Some(d);
+        return;
     }
     // Move: the triad at the pivot; dragging it sets the distances and angles. Its value box
     // sits beside it and reads the move's main value, so a drag shows its number and typing
