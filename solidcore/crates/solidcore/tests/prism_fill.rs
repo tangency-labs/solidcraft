@@ -16,7 +16,7 @@ use solidcore::math::{Point2, Vec2};
 use solidcore::prism::fill::{
     fill, Channel, Contour, FillFailure, FillNote, FillOptions, FillSide, Filled,
 };
-use solidcore::prism::profile::{loop_crosses, Seg2};
+use solidcore::prism::profile::{loop_crosses, Loop2, Seg2};
 use solidcore::{Kernel, SolidError};
 
 /// Gap between the plates in every example.
@@ -1756,33 +1756,6 @@ fn concave_fits_build_when_retried_on_every_scale() {
             (0.002, false),
         ] {
             for rho in [0.5, 2.0, 5.0, 10.0, 30.0, 100.0, 300.0, 1000.0] {
-                // shortcut: these walls curving up (angle, radius, size) get a fit whose section
-                // is refused as of no area (its area's bound straddles zero); left out until
-                // the area band (#21152) is settled
-                let no_area = [
-                    (0.2, 0.5, 10.0),
-                    (0.2, 0.5, 100.0),
-                    (0.2, 0.5, 1e3),
-                    (0.05, 2.0, 100.0),
-                    (0.05, 5.0, 100.0),
-                    (0.05, 5.0, 1e3),
-                    (0.05, 10.0, 10.0),
-                    (0.05, 10.0, 100.0),
-                    (0.05, 10.0, 1e3),
-                    (0.05, 30.0, 10.0),
-                    (0.05, 30.0, 100.0),
-                    (0.05, 30.0, 1e3),
-                    (0.05, 30.0, 1e4),
-                    (0.01, 100.0, 100.0),
-                    (0.01, 100.0, 1e3),
-                    (0.01, 300.0, 10.0),
-                    (0.01, 300.0, 100.0),
-                    (0.01, 300.0, 1e3),
-                    (0.002, 1000.0, 100.0),
-                ];
-                if !down && no_area.contains(&(t, rho, f)) {
-                    continue;
-                }
                 walls.push((Some((t, rho, down)), vec![toe_arc(t, rho, down)]));
             }
         }
@@ -1892,4 +1865,170 @@ fn a_depth_cut_on_a_large_section_lies_at_its_level() {
     let got = area(&w);
     let want = 0.8 * f * f + 2.0 * f * d - 0.9 * d * d;
     assert!((got - want).abs() < 1e-3, "area {got}, want {want}");
+}
+
+#[test]
+fn nearly_straight_arcs_far_from_the_origin_keep_a_tight_area_bound() {
+    // the concave face of a 200 wide channel 0.00084 deep (#21152): radius 5.9e6, its centre
+    // 5.9e6 up. Its term against its value to 60 digits (Python's decimal: the chord's term
+    // from the exact ends plus r^2 (θ - sin θ) / 2); the old reading, r^2 θ + r c x (s1 - s0)
+    // - r c y (c1 - c0), bounded it at 0.06
+    let arc = Seg2::Arc {
+        center: p(0.0, 5_933_563.257_067_442),
+        radius: 5_933_563.257_910_106,
+        start: -1.570_779_473_515_398_8,
+        sweep: -3.370_655_899_603_755e-5,
+    };
+    let (value, bound) = arc.area_term().unwrap();
+    let exact = -0.112_355_238_245_863_43;
+    assert!(
+        (value - exact).abs() <= bound,
+        "{value} vs {exact}, bound {bound}"
+    );
+    assert!(bound < 1e-6, "{bound}");
+    // a half turn about the origin and one far from it: the bound still holds
+    for (c, exact) in [(p(0.0, 0.0), PI / 2.0), (p(1e6, -2e6), PI / 2.0 - 2e6)] {
+        let half = Seg2::Arc {
+            center: c,
+            radius: 1.0,
+            start: 0.0,
+            sweep: PI,
+        };
+        let (value, bound) = half.area_term().unwrap();
+        assert!(
+            (value - exact).abs() <= bound,
+            "{value} vs {exact}, bound {bound}"
+        );
+    }
+}
+
+#[test]
+fn a_small_circle_far_from_the_origin_keeps_its_area_sign() {
+    // two half turns of radius 1 about (1e8, 1e8): area π. Read from its chord alone, each
+    // arc's bound is about 12 (the ends' coordinates squared), so the loop had no sign
+    // (CodeRabbit on #22552); read about its centre it is 4e-7, as before #22552, and the
+    // tighter reading is the one kept
+    let c = p(1e8, 1e8);
+    let half = |start: f64| Seg2::Arc {
+        center: c,
+        radius: 1.0,
+        start,
+        sweep: PI,
+    };
+    let (_, bound) = half(0.0).area_term().unwrap();
+    assert!(bound < 1e-6, "{bound}");
+    let circle = Loop2 {
+        segs: vec![half(0.0), half(PI)],
+    };
+    let area = circle.signed_area().unwrap();
+    assert_eq!(area.sign(), Some(true), "{area:?}");
+    assert!((area.value - PI).abs() <= area.bound, "{area:?}");
+}
+
+#[test]
+fn an_arc_whose_end_angle_rounds_away_keeps_an_honest_area_bound() {
+    // CodeRabbit on #22653: from 2^53 a sweep of 1 rounds `start + sweep` back to `start`, so
+    // the reading about the centre gave 0.5 with a bound of 3e-15; the exact term is
+    // (1 + sin 1) / 2, about 0.92. That reading's bound now holds the end angle's rounding
+    let start = 2f64.powi(53);
+    let arc = Seg2::Arc {
+        center: p(start.cos(), start.sin()),
+        radius: 1.0,
+        start,
+        sweep: 1.0,
+    };
+    let (value, bound) = arc.area_term().unwrap();
+    let exact = (1.0 + 1f64.sin()) * 0.5;
+    assert!(
+        (value - exact).abs() <= bound,
+        "{value} vs {exact}, bound {bound}"
+    );
+}
+
+#[test]
+fn very_wide_blends_and_near_flat_walls_build_or_refuse_with_a_fit_that_builds() {
+    // #21152: blended toes running 1000 past toes 7.9 apart, at small heights, were refused as
+    // no area (the arc's area bound) or not one closed loop (its ends' rounding past 10 eps)
+    let (l, r) = v_walls(6.0, 60.0, 0.0);
+    let blend = |height: f64| Case {
+        face: Contour::ConvexBlended {
+            height,
+            overlap: 1000.0,
+        },
+        depth_normal: Some(Vec2::new(0.0, 1.0)),
+        ..channel(l.clone(), r.clone())
+    };
+    for h in [1e-3, 2e-3, 5e-3, 1e-2, 0.1] {
+        let s = section(&blend(h));
+        assert!(s.region.signed_area().unwrap().sign() == Some(true), "{h}");
+    }
+    let (why, fit) = refused(&blend(1e-4));
+    assert_eq!(
+        why,
+        FillFailure::FaceTooShallow {
+            side: FillSide::Face,
+            size: 1e-4
+        }
+    );
+    section(&blend(fit.unwrap()));
+    // concave faces against the walls brett19 found refused at their fit (#18947, 24 Nov):
+    // straight walls at 0.001 to 1e-4 degrees, arcs curving up and down; and arcs of radius 1e5
+    // to 3e6 times the half chord
+    let grow = |s: Seg2, f: f64| match s {
+        Seg2::Line { a, b } => line(p(a.x * f, a.y * f), p(b.x * f, b.y * f)),
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => Seg2::Arc {
+            center: p(center.x * f, center.y * f),
+            radius: radius * f,
+            start,
+            sweep,
+        },
+        other => other,
+    };
+    let mut walls = Vec::new();
+    for (deg, f) in [(0.001, 100.0), (0.001, 1e4), (3e-4, 100.0), (1e-4, 100.0)] {
+        let t = f64::to_radians(deg);
+        walls.push((line(p(1.0, 0.0), p(1.0 - 0.5 * t.cos(), -0.5 * t.sin())), f));
+    }
+    for (t, rho, down, sizes) in [
+        (0.002, 3000.0, false, &[100.0, 1e3][..]),
+        (0.002, 1e4, false, &[10.0, 100.0, 1e3][..]),
+        (0.2, 1.0, false, &[10.0, 100.0, 1e3][..]),
+        (3e-5, 30.0, true, &[100.0][..]),
+        (3e-5, 1000.0, true, &[100.0][..]),
+        (1e-4, 1000.0, true, &[100.0][..]),
+        (0.002, 1e5, false, &[1.0, 100.0][..]),
+        (0.002, 1e6, false, &[1.0, 100.0][..]),
+        (0.002, 3e6, false, &[1.0, 100.0][..]),
+    ] {
+        for &f in sizes {
+            walls.push((toe_arc(t, rho, down), f));
+        }
+    }
+    let mut refused_fits = Vec::new();
+    for (wall, f) in walls {
+        let right = vec![grow(wall, f)];
+        let top = right[0].start().x;
+        section(&channel(mirror(&right), right.clone()));
+        for want in [0.5, 0.9, 2.0] {
+            let mut c = Case {
+                face: Contour::Concave { depth: want * top },
+                ..channel(mirror(&right), right.clone())
+            };
+            let Err(err) = run(&c) else { continue };
+            let Some(fit) = err.fit() else {
+                refused_fits.push((f, want, err));
+                continue;
+            };
+            c.face = Contour::Concave { depth: fit.size };
+            if let Err(err) = run(&c) {
+                refused_fits.push((f, want, err));
+            }
+        }
+    }
+    assert!(refused_fits.is_empty(), "{refused_fits:?}");
 }

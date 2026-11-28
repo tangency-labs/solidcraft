@@ -59,7 +59,6 @@ use crate::curve::curve::Curve;
 use crate::error::blend::trace::defect;
 use crate::error::blend::{SolverFailure, TraceFailure};
 use crate::error::{Result, SolidError};
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
@@ -133,6 +132,15 @@ impl LawCornerPieces {
         self.corners
             .iter()
             .any(|corner| matches!(corner.kind, LawCornerKind::Dip | LawCornerKind::Peak))
+    }
+
+    /// The corners in the joined surface's u, in order: each piece's end but the last's
+    /// (not the fork's, #22141). The surface turns there whatever the corner's kind, so its
+    /// faces are split there.
+    #[must_use]
+    pub fn corner_knots(&self) -> Vec<f64> {
+        let corners = self.joined_ends.len().saturating_sub(1);
+        self.joined_ends.iter().take(corners).copied().collect()
     }
 
     /// The corner loop of the fork's `SmGnSectionFSG::CircleSurface` (7babe17): `pieces`
@@ -240,21 +248,29 @@ fn smos_max(a: f64, b: f64) -> f64 {
 }
 
 /// `SmFilletSolver::FindLawCornerPieces` (58d03ef): the kept pieces, not matched yet, of
-/// a fillet surface that turns (a C0 knot across u) at each of their corners, marked
-/// matched; `None` when there are none. They are matched by the corners, not by the
-/// surface: a fillet geom's surface is replaced on the way (extended at its ends,
-/// `SmFilletGeom`), keeping its corners, and an extension at an end may add a turn of its
-/// own where it joins.
+/// a fillet surface joined at each of their corners, marked matched; `None` when there
+/// are none. They are matched by the corners, not by the surface: a fillet geom's surface
+/// is replaced on the way (extended at its ends, `SmFilletGeom`), keeping its corners, and
+/// an extension at an end may add a joint of its own.
+///
+/// Not the fork's (#22141): a corner is matched to a joint of the surface's net, an
+/// interior u knot of multiplicity its u degree (the pieces are joined with no knot
+/// removed, [`CircularCrossSectionFsg::piecewise_surface`](crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg::piecewise_surface)),
+/// not to a C0 knot the continuity search finds (`FindKnotsByMaxContinuity`): that search
+/// samples the surface and takes a kink whose normals are within one degree for G1, and
+/// both sides of a law corner touch its ball, so the normals there differ only by the
+/// angle between the two touch circles: a corner where the law's slope jumps a little was
+/// missed, and its round left one face that turns inside.
 ///
 /// # Errors
 ///
-/// Those of `FindKnotsByMaxContinuity`.
+/// Those of `GetKnots` and `GetDegree`.
 pub fn find_law_corner_pieces(
     k: &Kernel,
     kept: &mut [LawCornerPieces],
     surface: &Surface,
 ) -> Result<Option<usize>> {
-    let (u_knots, _) = surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?;
+    let u_knots = net_joints(k, surface)?;
     // the fork's virtual `GetNaturalUVDomain()`: for a fillet's B-spline surface, its own
     // domain
     let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -276,6 +292,26 @@ pub fn find_law_corner_pieces(
         }
     }
     Ok(None)
+}
+
+/// The interior u knots of `surface` of multiplicity its u degree or more: where its net is
+/// joined, C0 by its parametrization (not the fork's, #22141).
+///
+/// # Errors
+///
+/// Those of `GetKnots` and `GetDegree`.
+fn net_joints(k: &Kernel, surface: &Surface) -> Result<Vec<f64>> {
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    let degree = surface.degree_with_nurb(k, SurfParamType::U)?;
+    let (knots, multiplicities) = surface.knots_with_nurb(k, SurfParamType::U, None)?;
+    let last = knots.len().saturating_sub(1);
+    Ok(knots
+        .iter()
+        .zip(&multiplicities)
+        .enumerate()
+        .filter(|&(i, (_, &m))| i > 0 && i < last && m >= degree)
+        .map(|(_, (&knot, _))| knot)
+        .collect())
 }
 
 /// `SmFilletSolver::HasBuiltLawCorners` (58d03ef): whether a round of the solver has a

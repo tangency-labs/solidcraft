@@ -22,7 +22,9 @@
 //!    manifold result. Their counts are main's, except in [`ONE_CIRCLE`]. There, main split an
 //!    inner circle into two arcs at a degree-2 vertex. This branch keeps it as one closed
 //!    circle, like the outer circles, so it has one edge and one vertex fewer and every circle
-//!    edge is closed ([`assert_one_circle`]);
+//!    edge is closed ([`assert_one_circle`]). The four [`CROSSING_INSETS`] rows are not held to
+//!    main's body: main's faces cross there, and the inset is refused
+//!    (tangency-labs/solidcraft#21674, [`crossing_inset_refused`]);
 //! 3. the certified volume enclosure overlaps main's, so the two bodies' volumes may be the same
 //!    (only that: some enclosures are wide);
 //! 4. each body has no more unproved edges than main's. An edge is proved when
@@ -91,6 +93,69 @@ const ONE_CIRCLE: [&str; 3] = [
     "api_shell_cylinder_top_extend_merge_in",
     "api_shell_cylinder_top_face",
 ];
+
+/// The offset rows that main built and that are now refused (tangency-labs/solidcraft#21674):
+/// unmerged extended insets of a body with a blind hole whose floor is thinner than twice the
+/// wall, the bottom under it offset too (the open face is the top or a side). Main's body was
+/// not the inset, and its faces crossed. By main's committed rows (`source.before.geometry`
+/// and `result.geometry`, each the B-rep's tolerance and its vertices' box) and
+/// `executive.geometry_parameters[0]`, the wall `w`:
+/// - `box_diff_cyl_big_rad` (`f1`, `f2`): the block's bottom is at z -40.0000076, `w` is 10,
+///   and main's result has a vertex at z -39.3333340, the inset of the hole's floor
+///   (z -29.3333340, 10.6666737 above the bottom, less than `2 w`);
+/// - `cyl_on_box_w_tan_hole` (`f1`, `f2`): the bottom is at z -58.4980240, `w` is 11.1404,
+///   and main's result has a vertex at z -55.0139161, the inset of the hole's floor
+///   (z -43.8735161, 14.6245079 above the bottom, less than `2 w`).
+///
+/// Every point of a solid's inset by `w` is at least `w` from the solid's complement, so at
+/// least `w` above the lowest plane the solid reaches; where the face on that plane is left
+/// open instead, it keeps its vertices and the lowest vertex stays on the plane (the `f0`
+/// rows, which still build). Main's lowest vertex is 0.6666737 and 3.4841079 above that
+/// plane: neither 0 nor at least `w`. The bottom's own inset is at `w` above it (z
+/// -30.0000076 and -47.3576240), so the hole's inset wall and floor passed through the inset
+/// bottom, 9.3333263 and 7.6562921 below it: the true inset has a through-hole there, which
+/// an unmerged offset, keeping the input's topology (main's counts are the source's), cannot
+/// make. The kernel's soundness check does not test for faces that cross, so main's fact
+/// reads sound.
+const CROSSING_INSETS: [&str; 4] = [
+    "pe_Fillet_box_diff_cyl_big_rad_f1_d0_in_ext",
+    "pe_Fillet_box_diff_cyl_big_rad_f2_d0_in_ext",
+    "pe_Fillet_cyl_on_box_w_tan_hole_f1_d0_in_ext",
+    "pe_Fillet_cyl_on_box_w_tan_hole_f2_d0_in_ext",
+];
+
+/// A [`CROSSING_INSETS`] row, `encoded`: it is refused (status 1001, `SM_ERR`, no result),
+/// and the offset the executive built and kept (`executive_offset.geometry`) shows why, by
+/// the measure of [`CROSSING_INSETS`]: its lowest vertex is above the source's lowest plane
+/// by more than the tolerance (the face there is offset, not left open) and by less than the
+/// wall less the tolerance, where an inset's is the wall above it.
+fn crossing_inset_refused(encoded: &Value) -> Result<(), String> {
+    let ints = |key: &str| encoded["ints"][key].clone();
+    if ints("status") != serde_json::json!([1001])
+        || ints("result.present") != serde_json::json!([0])
+    {
+        return Err(format!(
+            "status {} with result.present {}, not a refusal",
+            ints("status"),
+            ints("result.present")
+        ));
+    }
+    let value = |key: &str, i: usize| {
+        encoded["values"][key][i]
+            .as_f64()
+            .ok_or_else(|| format!("no {key}[{i}]"))
+    };
+    let wall = value("executive.geometry_parameters", 0)?;
+    let tolerance = value("source.before.geometry", 0)?;
+    let rise = value("executive_offset.geometry", 3)? - value("source.before.geometry", 3)?;
+    if tolerance < rise && rise < wall - tolerance {
+        Ok(())
+    } else {
+        Err(format!(
+            "the built offset's lowest vertex is {rise} above the source's, wall {wall}"
+        ))
+    }
+}
 
 /// The unit `id`.
 fn unit(id: &str) -> Box<dyn UnitDiff> {
@@ -294,6 +359,11 @@ fn assert_rows(id: &str, rows: &[Row]) {
         }
         match (&row.fact, found.as_slice()) {
             (None, []) => {}
+            (Some(_), []) if CROSSING_INSETS.contains(&case) => {
+                if let Err(why) = crossing_inset_refused(&encoded) {
+                    failures.push(format!("{case}: {why}"));
+                }
+            }
             (Some(main), [now]) => {
                 if now.sound() != main.sound
                     || now.check.as_ref().ok().map(Vec::len) != main.lines

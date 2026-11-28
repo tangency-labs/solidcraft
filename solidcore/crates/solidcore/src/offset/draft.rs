@@ -62,6 +62,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::{above, distance, unit, unit_error};
 use crate::geom::tol::are_same;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::ControlPointForm;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
@@ -358,12 +359,12 @@ fn plane_draft(
     // sin(angle), sin(alpha) = (d x n) . p, positive by the lean's sign
     let lean_dir = axis.cross(n);
     let sin_alpha = lean_dir.dot(p);
-    let ratio = angle.sin() / sin_alpha;
+    let ratio = det::sin(angle) / sin_alpha;
     if !above(sin_alpha, 0.0) || ratio.is_nan() || above(ratio.abs(), 1.0) {
         return Err(DraftRefusal::AngleBeyondHinge);
     }
-    let turn = ratio.asin();
-    let normal = n * turn.cos() + lean_dir * turn.sin();
+    let turn = det::asin(ratio);
+    let normal = n * det::cos(turn) + lean_dir * det::sin(turn);
     Ok(PlaneDraft {
         hinge,
         axis,
@@ -534,7 +535,7 @@ fn cone_draft(
     if !above(r0, 0.0) {
         return Ok(Err(DraftRefusal::NeutralPlanePastApex));
     }
-    let turned = (slope.atan() - s * angle).tan();
+    let turned = det::tan(det::atan(slope) - s * angle);
     if !turned.is_finite() {
         return Ok(Err(DraftRefusal::ConeCloses));
     }
@@ -658,7 +659,7 @@ impl Cone {
         let support = AnalyticSupport::Cone {
             placement,
             base_radius: d.r0,
-            semi_angle_deg: (d.sense * d.turned).atan().to_degrees(),
+            semi_angle_deg: det::atan(d.sense * d.turned).to_degrees(),
         };
         let surface = support.build(k, form)?;
         match surface.kind() {
@@ -1039,7 +1040,7 @@ pub fn largest_clear_angle(
                     continue 'shells;
                 }
                 side = h.signum();
-                let psi = d.slope.atan() - ((off_axis(p) - d.r0) / h).atan();
+                let psi = det::atan(d.slope) - det::atan((off_axis(p) - d.r0) / h);
                 if psi * lean > 0.0 && shell_least.is_none_or(|(at, _)| psi.abs() < at) {
                     shell_least = Some((psi.abs(), g));
                 }
@@ -1330,7 +1331,7 @@ mod tests {
         assert!(matches!(s.kind(), SurfaceKind::Plane(_)));
         let expected = Implicit::Plane {
             origin: Point3::new(10.0, 0.0, 0.0),
-            normal: Vec3::new(THETA.cos(), 0.0, THETA.sin()),
+            normal: Vec3::new(det::cos(THETA), 0.0, det::sin(THETA)),
         };
         assert!(on(&k, &s, &expected));
         // (a plane off by a micron is not it)
@@ -1339,7 +1340,7 @@ mod tests {
             &s,
             &Implicit::Plane {
                 origin: Point3::new(10.001, 0.0, 0.0),
-                normal: Vec3::new(THETA.cos(), 0.0, THETA.sin())
+                normal: Vec3::new(det::cos(THETA), 0.0, det::sin(THETA))
             }
         ));
         let blend = s.procedural_blend().unwrap();
@@ -1366,10 +1367,10 @@ mod tests {
         // face turns by phi, sin phi = sin t / 0.8, about it, to the normal
         // (cos phi, 0.6 sin phi, 0.8 sin phi): its component along the pull is sin t, so the
         // face is at exactly t to the pull
-        let sp = THETA.sin() / 0.8;
+        let sp = det::sin(THETA) / 0.8;
         let cp = (1.0 - sp * sp).sqrt();
         let drafted = Vec3::new(cp, 0.6 * sp, 0.8 * sp);
-        assert!((drafted.dot(Vec3::Z) - THETA.sin()).abs() < 1e-15);
+        assert!((drafted.dot(Vec3::Z) - det::sin(THETA)).abs() < 1e-15);
         assert!(on(
             &k,
             &s,
@@ -1379,7 +1380,7 @@ mod tests {
             }
         ));
         // turned by t about the hinge instead, the face would be at asin(0.8 sin t), 4 degrees
-        let (c, sn) = (THETA.cos(), THETA.sin());
+        let (c, sn) = (det::cos(THETA), det::sin(THETA));
         assert!(!on(
             &k,
             &s,
@@ -1450,8 +1451,8 @@ mod tests {
             radius: 5.0,
             tan_angle: t,
         };
-        assert!(on(&k, &s, &cone(-THETA.tan())));
-        assert!(!on(&k, &s, &cone(THETA.tan())));
+        assert!(on(&k, &s, &cone(-det::tan(THETA))));
+        assert!(!on(&k, &s, &cone(det::tan(THETA))));
         assert_eq!(s.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
         let SurfaceKind::Cone(c) = b
             .face(f)
@@ -1470,7 +1471,7 @@ mod tests {
             .orientation
             == OrientType::Same;
         let hole = Surface::from(c.drafted_about_plane(&k, !outward, &up()).unwrap().unwrap());
-        assert!(on(&k, &hole, &cone(THETA.tan())));
+        assert!(on(&k, &hole, &cone(det::tan(THETA))));
     }
 
     /// Radial drafting preserves the source axis and the angular frame. Re-fitting
@@ -1528,7 +1529,7 @@ mod tests {
                 .unwrap();
         let f = curved_face(&k, &b);
         let s = draft_surface(&k, &b, f, &up()).unwrap().unwrap();
-        let t = ((-0.1_f64).atan() - THETA).tan();
+        let t = det::tan(det::atan(-0.1_f64) - THETA);
         assert!(on(
             &k,
             &s,
@@ -1549,7 +1550,7 @@ mod tests {
             Point3::ZERO,
             Vec3::Z,
             Vec3::Z,
-            source.tan_semi_angle().atan(),
+            det::atan(source.tan_semi_angle()),
         )
         .unwrap();
         let straight = draft_surface(&k, &b, f, &cancel).unwrap().unwrap();
@@ -1590,6 +1591,23 @@ mod tests {
         }
         let below = Draft::new(Point3::new(0.0, 0.0, 15.0), Vec3::Z, Vec3::Z, THETA).unwrap();
         assert!(draft_surface(&k, &b, f, &below).unwrap().is_ok());
+    }
+
+    /// #22807: an R 10, height 100 cylinder drafted 6 degrees about its base closes to a point at
+    /// z = 10 / tan(6 deg) ~ 95.14 < 100, so it is refused as `DraftRefusal::ConeCloses`; 5 degrees
+    /// stays open past the top (apex at ~114.3) and succeeds.
+    #[test]
+    fn a_cylinder_that_closes_before_its_top_is_refused_as_cone_closes() {
+        let mut k = Kernel::default();
+        let b = create_cylinder(&mut k, Point3::ZERO, 10.0, 100.0).unwrap();
+        let f = curved_face(&k, &b);
+        let steep = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, 6.0_f64.to_radians()).unwrap();
+        assert_eq!(
+            draft_surface(&k, &b, f, &steep).unwrap().unwrap_err(),
+            DraftRefusal::ConeCloses
+        );
+        let open = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, 5.0_f64.to_radians()).unwrap();
+        assert!(draft_surface(&k, &b, f, &open).unwrap().is_ok());
     }
 
     #[test]
@@ -1772,7 +1790,7 @@ mod tests {
                 origin: Point3::ZERO,
                 axis: Vec3::Z,
                 radius: 5.0,
-                tan_angle: THETA.tan()
+                tan_angle: det::tan(THETA)
             }
         ));
         assert_eq!(s.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
@@ -1859,9 +1877,9 @@ mod tests {
         assert_eq!((through.drafted, through.through), (f, wall));
         // the point is on the wall, behind the side's plane and past the drafted one:
         // 40 - z tan 30 degrees < x < 40
-        let r = ((through.at.x - 37.0).powi(2) + (through.at.y - 20.0).powi(2)).sqrt();
+        let r = (det::powi(through.at.x - 37.0, 2) + det::powi(through.at.y - 20.0, 2)).sqrt();
         assert!((r - 1.0).abs() < 1e-9, "not on the wall: {:?}", through.at);
-        let reached = 40.0 - through.at.z * THIRTY.tan();
+        let reached = 40.0 - through.at.z * det::tan(THIRTY);
         assert!(
             reached < through.at.x && through.at.x < 40.0,
             "{:?} {}",
@@ -1897,10 +1915,10 @@ mod tests {
             &s,
             &Implicit::Plane {
                 origin: Point3::new(40.0, 0.0, 0.0),
-                normal: Vec3::new(THIRTY.cos(), 0.0, THIRTY.sin())
+                normal: Vec3::new(det::cos(THIRTY), 0.0, det::sin(THIRTY))
             }
         ));
-        let reaches = 40.0 - 15.0 * THIRTY.tan();
+        let reaches = 40.0 - 15.0 * det::tan(THIRTY);
         assert!(
             reaches < 35.0,
             "the drafted plane does not reach the floor: {reaches}"

@@ -266,7 +266,7 @@ fn move_uses(s: &mut Session, from: &str, to: &str) {
     let d = s.doc_mut();
     let bodies: Vec<String> = d.materials.iter().filter(|(_, m)| m.eq_ignore_ascii_case(from)).map(|(b, _)| b.clone()).collect();
     for b in bodies {
-        if to == DEFAULT_MATERIAL {
+        if to == DEFAULT_MATERIAL && !d.has_copy_material_lineage(&b) {
             d.materials.remove(&b);
         } else {
             d.materials.insert(b, to.to_string());

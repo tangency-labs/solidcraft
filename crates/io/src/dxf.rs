@@ -7,12 +7,13 @@
 
 use solidcore_record::{MAX_BEZIER_DEGREE, Vec2};
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::services::dxf::import::{scale_point, scale_value};
+use solidcraft_kernel::dxf::import::{scale_point, scale_value};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 // Shared X2 model; the partial reader below consumes the real metadata API.
 use crate::{DxfEntityWeight, DxfFile, DxfLayerId, DxfLinetype, DxfShape, DxfStandardWeight, IoError, Result};
 
+mod binary;
 mod source_import;
 mod text_entity;
 mod text_value;
@@ -29,8 +30,9 @@ impl ParsedDxf {
         if text.len() > MAX_DRAWING_BYTES {
             return Err(IoError::Invalid("the DXF file is too large".into()));
         }
+        // A binary DXF is read from its bytes (`dxf_text_from_bytes`); its text alone has lost them.
         if text.starts_with("AutoCAD Binary DXF") {
-            return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
+            return Err(IoError::Invalid("a binary DXF is read from its file, not as text: give its path".into()));
         }
         // A DWG renamed or picked as a drawing would otherwise read as "no ENTITIES section".
         if crate::is_dwg(text.as_bytes()) {
@@ -749,12 +751,12 @@ fn layered_ellipse(entity: &Ent, k: f64) -> Result<DxfShape> {
     let ratio = layered_required(entity, 40)?;
     let t0 = layered_required(entity, 41)?;
     let t1 = layered_required(entity, 42)?;
-    match solidcraft_kernel::services::dxf::import::ellipse_support(c, major, ratio) {
-        solidcraft_kernel::services::dxf::import::EllipseSupport::Valid => {}
-        solidcraft_kernel::services::dxf::import::EllipseSupport::InvalidMajor => {
+    match solidcraft_kernel::dxf::import::ellipse_support(c, major, ratio) {
+        solidcraft_kernel::dxf::import::EllipseSupport::Valid => {}
+        solidcraft_kernel::dxf::import::EllipseSupport::InvalidMajor => {
             return Err(IoError::Invalid("invalid or degenerate layered DXF ellipse support".into()));
         }
-        solidcraft_kernel::services::dxf::import::EllipseSupport::CollapsedMinor => {
+        solidcraft_kernel::dxf::import::EllipseSupport::CollapsedMinor => {
             return Err(IoError::Invalid("DXF ellipse minor axis collapses in the represented units".into()));
         }
     }
@@ -1226,15 +1228,19 @@ fn layered_linetype_definition(record: &Ent, k: f64, types: &mut LayeredLinetype
     } else {
         return Err(IoError::Invalid("not supported yet: custom DXF linetype".into()));
     };
-    if !expected.is_empty() && k != 1.0 {
-        return Err(IoError::Invalid("not supported yet: non-millimetre patterned DXF linetype".into()));
-    }
     if layered_number(record, 70)?.unwrap_or(0.0) != 0.0
         || layered_required(record, 72)? != 65.0
         || layered_required(record, 73)? != expected.len() as f64
     {
         return Err(IoError::Invalid("not supported yet: noncanonical DXF linetype definition".into()));
     }
+    // The canonical patterns are in millimetres; the file's own patterns are in its units
+    // (the writer converts them, so a non-millimetre file holds the millimetre values over k).
+    // Millimetre files keep the exact canonical values; the others agree to the file's
+    // 1e-9 length grid.
+    let close = |got: f64, want: f64| {
+        if k == 1.0 { got == want } else { (got - want).abs() <= 1e-8 }
+    };
     // Public canonical decimal lengths, not a recomputation whose binary sum
     // may differ from the decimal field emitted by Out's fixed precision.
     let total = if name.eq_ignore_ascii_case("DASHED") {
@@ -1244,12 +1250,13 @@ fn layered_linetype_definition(record: &Ent, k: f64, types: &mut LayeredLinetype
     } else {
         0.0
     };
-    if layered_required(record, 40)? != total {
+    if !close(layered_required(record, 40)?, total / k) {
         return Err(IoError::Invalid("not supported yet: noncanonical DXF linetype length".into()));
     }
     let mut patterns = record.f.iter().filter(|(code, _)| *code == 49).map(|(_, value)| *value);
     for value in expected {
-        if patterns.next() != Some(*value) {
+        let got = patterns.next().ok_or_else(|| IoError::Invalid("not supported yet: noncanonical DXF linetype pattern".into()))?;
+        if !close(got, *value / k) {
             return Err(IoError::Invalid("not supported yet: noncanonical DXF linetype pattern".into()));
         }
     }
@@ -1334,6 +1341,10 @@ fn layered_declare_layer(record: &Ent, types: &LayeredLinetypes, file: &mut DxfF
 pub fn read_dxf(text: &str) -> Result<Vec<Geom2>> {
     read_dxf_file_with_profile(text, DxfReadProfile::SketchImport)?.sketch_geometry()
 }
+
+/// The DXF file's bytes as text for [`read_dxf`] and [`read_dxf_file`]: a binary DXF read into
+/// its ASCII groups, any other file as text.
+pub use binary::dxf_text_from_bytes;
 
 /// Borrow record boundaries from the already admitted token stream. Both
 /// entity admission and serialization tests use these same boundaries.
@@ -2505,6 +2516,24 @@ mod tests {
             matches!(&geometry[1], Geom2::Text { text, at, height, angle } if text == "first chunk   a\nb" && *at == Vec2::new(25.4, 50.8) && (*height - 76.2).abs() < 1e-12 && *angle == 0.0),
             "MTEXT's group 3 chunks come before its group 1 tail: {geometry:?}"
         );
+    }
+
+    #[test]
+    fn sketch_import_places_reversed_ocs_circles_in_world_xy() {
+        let dxf = concat!(
+            "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n5\n0\nENDSEC\n",
+            "0\nSECTION\n2\nENTITIES\n",
+            "0\nCIRCLE\n10\n-4\n20\n2\n40\n1\n210\n0\n220\n0\n230\n-1\n",
+            "0\nCIRCLE\n10\n-6\n20\n3\n40\n2\n230\n-1\n",
+            "0\nCIRCLE\n10\n-8\n20\n4\n40\n3\n230\n1\n",
+            "0\nCIRCLE\n10\n-9\n20\n5\n40\n4\n",
+            "0\nENDSEC\n0\nEOF\n",
+        );
+        let geometry = read_dxf(dxf).unwrap();
+        assert_eq!(geometry.len(), 4);
+        for (shape, (x, y, radius)) in geometry.iter().zip([(40.0, 20.0, 10.0), (60.0, 30.0, 20.0), (-80.0, 40.0, 30.0), (-90.0, 50.0, 40.0)]) {
+            assert!(matches!(shape, Geom2::Circle(c, r) if *c == Vec2::new(x, y) && *r == radius), "{shape:?}");
+        }
     }
 
     #[test]
@@ -4040,7 +4069,11 @@ mod tests {
         assert_eq!(reread.entities()[0].geometry(), owned.entities()[0].geometry());
 
         let inches = write_dxf_drawing_units(&[], &entities, 1).unwrap();
-        assert!(read_dxf_file(&inches).unwrap_err().to_string().contains("non-millimetre patterned DXF linetype"));
+        let owned_inches = read_dxf_file(&inches).unwrap();
+        assert!(
+            matches!(owned_inches.entities()[0].geometry(), DxfShape::Polyline { points } if points == &[Vec2::ZERO, Vec2::new(50.8, 0.0)]),
+            "{owned_inches:?}"
+        );
         assert!(matches!(&read_dxf(&inches).unwrap()[..], [Geom2::Line(a, b)] if *a == Vec2::ZERO && *b == Vec2::new(50.8, 0.0)));
 
         let simple_inches = "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n2\n21\n0\n0\nENDSEC\n0\nEOF\n";

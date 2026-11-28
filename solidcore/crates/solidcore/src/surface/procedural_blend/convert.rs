@@ -305,7 +305,7 @@ fn to_u32(x: usize) -> Result<u32> {
 }
 
 /// A NURBS curve's stored numbers.
-fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
+pub(crate) fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
     let nurb = c
         .nurb
         .as_ref()
@@ -556,7 +556,7 @@ fn stored_point(
 }
 
 /// The curve a record holds, its NURB as stored (no knot fix-up).
-fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
+pub(crate) fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
     let p = degree_of(r.degree)?;
     non_decreasing(&r.knots)?;
     let mut pw = Vec::new();
@@ -956,7 +956,7 @@ impl RecertifyMemo {
     /// starts again empty. A key larger than the cap on its own is not kept, and the memo is
     /// left as it was, since emptying it would not make room for that key.
     fn remember(&mut self, key: String, bound: f64, cap: usize) {
-        if key.len() > cap {
+        if key.len() > cap || self.bounds.contains_key(key.as_str()) {
             return;
         }
         if self.bytes + key.len() > cap {
@@ -988,13 +988,20 @@ fn recertify_remembered(
     }
     // (writing to a `String` never fails)
     let _ = write!(key, "\n{record:?}");
-    if let Some(&hit) = k.recertify_memo.borrow().bounds.get(key.as_str()) {
+    if let Some(&hit) = k
+        .recertify_memo
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .bounds
+        .get(key.as_str())
+    {
         return Ok(hit);
     }
     k.work_counters.add_blend_recertified();
     let bound = pb.recertify(k)?;
     k.recertify_memo
-        .borrow_mut()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remember(key, bound, RECERTIFY_MEMO_BYTES);
     Ok(bound)
 }

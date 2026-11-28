@@ -19,9 +19,9 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, CoilAxis, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef,
-    FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef,
-    StringList, TouchingParam, feature_common, present,
+    AngleExpr, CoilAxis, CoilEndCutParam, CoilHeightMeasureParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint,
+    EmbossModeParam, FaceRef, FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    RibDirectionParam, SketchRef, StringList, TouchingParam, feature_common, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -289,7 +289,9 @@ pub struct BoundaryFillParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CoilParams {
-    /// The helix's diameter, greater than zero. Required without `sketch`; refused with it.
+    /// The helix's diameter, greater than zero. Refused with `sketch`. Without `sketch` it is
+    /// required unless `axis` is a circular edge, a cylinder face or a flat end face with a round
+    /// outline, whose diameter the coil then takes and follows.
     #[serde(default)]
     pub diameter: Option<LengthExpr>,
     /// The number of turns, greater than zero; it may be fractional.
@@ -302,10 +304,16 @@ pub struct CoilParams {
     /// are both given.
     #[serde(default)]
     pub height: Option<LengthExpr>,
+    /// What `height` measures: the helix's centre line (the default) or the coil overall, end to
+    /// end, where the section reaches past the centre line at both ends. With `overall`, the
+    /// command works out the centre-line height that gives it. Needs `height`, refused with
+    /// `sketch`; with square ends it needs `pitch` too.
+    #[serde(default)]
+    pub height_measure: Option<CoilHeightMeasureParam>,
     /// The distance along `axis` between one turn and the next.
     #[serde(default)]
     pub pitch: Option<LengthExpr>,
-    /// The section's diameter when circular, or its side when square, greater than zero. The
+    /// The section's diameter when circular, or its side when square or triangular, greater than zero. The
     /// section must stay clear of the coil's axis. Required without `sketch`; refused with it.
     #[serde(default)]
     pub section_size: Option<LengthExpr>,
@@ -379,8 +387,10 @@ pub struct EmbossParams {
     /// The bodies to emboss, by name. With `face`, only these are searched for it.
     #[serde(default)]
     pub targets: Option<NameList>,
-    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. Default:
-    /// inferred when exactly one supported tangent cylinder matches the selected profiles.
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. A point on
+    /// a ring of faces tangent to each other (a side of flats and rounds) stands for the ring: when the profiles lie
+    /// on another face of it, that face is taken. Default: inferred when exactly one supported tangent cylinder
+    /// matches the selected profiles.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]
     pub face: Option<EmbossFacePoint>,

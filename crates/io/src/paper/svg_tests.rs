@@ -61,7 +61,7 @@ fn an_a3_drawing_border_is_this_document() {
     let (text, report) = svg(&scene);
     let expected = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
         <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"420mm\" height=\"297mm\" viewBox=\"0 0 420 297\" fill=\"none\" stroke=\"#000\" \
-        stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\">\n\
+        stroke-linecap=\"round\" stroke-linejoin=\"round\">\n\
         <g data-object=\"1\" data-kind=\"drawing_border\">\n\
         <path stroke-width=\"0.7\" d=\"M20 287L410 287L410 10L20 10Z\"/>\n\
         <path fill=\"#000\" stroke=\"none\" fill-rule=\"evenodd\" d=\"M0 297L10 297L10 292L0 292Z\"/>\n\
@@ -535,7 +535,9 @@ fn what_cannot_be_embedded_is_refused() {
     assert!(crate::paper::png::picture_png(4, &grid, window, &Provider::default(), 1 << 20).unwrap().len() > 6000);
 }
 
-/// A dashed stroke carries its pattern in millimetres, its offset only when its phase isn't 0.
+/// A dashed stroke carries the pattern its round caps need in millimetres, its offset only when
+/// that phase isn't 0. At 1 mm wide, [4.2, 1.05] is [3.2, 2.05] and its phase moves back 0.5: from
+/// 0 it is 4.75 (within 5.25), from 0.5 it is 0.
 #[test]
 fn a_dashed_stroke_has_its_dasharray_and_offset() {
     let path = |phase_mm| {
@@ -544,8 +546,20 @@ fn a_dashed_stroke_has_its_dasharray_and_offset() {
         let (text, _) = svg(&scene);
         text.lines().find(|l| l.starts_with("<path")).unwrap().to_string()
     };
-    assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" d=\"M5 287L105 287\"/>");
-    assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" stroke-dashoffset=\"0.5\" d=\"M5 287L105 287\"/>");
+    assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"3.2 2.05\" stroke-dashoffset=\"4.75\" d=\"M5 287L105 287\"/>");
+    assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"3.2 2.05\" d=\"M5 287L105 287\"/>");
+}
+
+/// A chain line's dot, a dash no longer than the line is wide, is written a nanometre long and not
+/// 0: Qt's SVG renderer draws nothing for a dash 0 long (#20988). At 0.5 mm wide, [12, 1.5, 0.5,
+/// 1.5] is [11.5, 2, 0, 2] from 15.25.
+#[test]
+fn a_dot_is_a_dash_one_nanometre_long() {
+    let pattern = Some(Dashes { lengths_mm: vec![12.0, 1.5, 0.5, 1.5], phase_mm: 0.0 });
+    let scene = sheet(vec![Item::Stroke { path: vec![line(p(5.0, 10.0), p(105.0, 10.0))], closed: false, width_mm: 0.5, pattern }]);
+    let (text, _) = svg(&scene);
+    let path = text.lines().find(|l| l.starts_with("<path")).unwrap();
+    assert_eq!(path, "<path stroke-width=\"0.5\" stroke-dasharray=\"11.5 2 0.000001 2\" stroke-dashoffset=\"15.25\" d=\"M5 287L105 287\"/>");
 }
 
 #[test]
@@ -568,7 +582,10 @@ fn weld_identification_keeps_the_shared_svg_dash_pattern() {
         .unwrap();
     let carrier = drawing.items.into_iter().find(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).unwrap();
     let (text, _) = svg(&sheet(vec![carrier]));
-    assert!(text.contains("stroke-dasharray=\"2.4 0.6\""), "{text}");
-    assert!(text.contains("stroke-dashoffset=\"0.7\""), "{text}");
+    // The identification line's pattern is 2.4 mm dashes and 0.6 mm gaps from 0.7 mm. Under the
+    // round caps each dash is stroked a line width (0.2 mm) shorter about its middle and each gap
+    // as much longer, so the pattern written is [2.2, 0.8] from 0.6.
+    assert!(text.contains("stroke-dasharray=\"2.2 0.8\""), "{text}");
+    assert!(text.contains("stroke-dashoffset=\"0.6\""), "{text}");
     assert!(text.contains("M0 295L7 295"), "{text}");
 }

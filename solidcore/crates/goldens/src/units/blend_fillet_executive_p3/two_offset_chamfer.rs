@@ -515,3 +515,114 @@ mod round_definition_rows {
         }
     }
 }
+
+/// WR-458, WR-633 and WR-650 (#18921): the chamfer rows the offset surface's extension
+/// from its base (and a cylinder's as itself) moves. `issue-880-half-arc-rim-1-setbacks-1-1`
+/// was a refusal on main (status 1001) and is now a chamfer: valid input that no longer
+/// refuses, certified here as a closed manifold solid with its certified volume.
+/// Each row, on the body the record measures ([`chamfered`], as [`run`] takes it):
+/// - the chamfer succeeds and the vertex, edge and face counts are the golden's;
+/// - `check_brep` Level 2 reports nothing and the body is one closed manifold solid;
+/// - no blend face it made is a bare (approximated) face;
+/// - its chamfer faces are definitions whose nets re-certify;
+/// - the volume the integrator converges to lies in the body's certified volume
+///   enclosure, widened by the definitions' spread, and every other mass value lies in
+///   its certified band ([`mass_bands`]).
+///
+/// [`mass_bands`]: super::end_to_end::round_definition_proof::mass_bands
+#[cfg(test)]
+mod wr458_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::super::end_to_end::round_definition_proof::{
+        certified_blends, mass_bands, volume_band,
+    };
+    use super::super::end_to_end::round_definition_rows::no_bare_blend_face;
+    use super::*;
+    use solidcore::blend::definition_check::BlendFaceLog;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// A moved row: name, and the status and counts now.
+    type Row = (&'static str, [i64; 4]);
+
+    const ROWS: &[Row] = &[
+        ("issue-880-half-arc-rim-0-setbacks-1-1", [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-0-setbacks-1-2", [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-1-setbacks-1-1", [0, 8, 13, 7]),
+        ("issue-880-half-arc-rim-whole-offsets-1-1", [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1-2", [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1.4437-1.4437", [0, 6, 10, 6]),
+    ];
+
+    /// One test per row: each row's certificates take minutes.
+    macro_rules! row_tests {
+        ($($test:ident => $name:literal,)*) => {
+            $(
+                #[test]
+                fn $test() {
+                    check($name);
+                }
+            )*
+
+            /// The rows the generated tests take, in [`ROWS`]'s order.
+            const ROW_TESTS: &[&str] = &[$($name),*];
+        };
+    }
+
+    row_tests! {
+        issue_880_half_arc_rim_0_setbacks_1_1 => "issue-880-half-arc-rim-0-setbacks-1-1",
+        issue_880_half_arc_rim_0_setbacks_1_2 => "issue-880-half-arc-rim-0-setbacks-1-2",
+        issue_880_half_arc_rim_1_setbacks_1_1 => "issue-880-half-arc-rim-1-setbacks-1-1",
+        issue_880_half_arc_rim_whole_offsets_1_1 => "issue-880-half-arc-rim-whole-offsets-1-1",
+        issue_880_half_arc_rim_whole_offsets_1_2 => "issue-880-half-arc-rim-whole-offsets-1-2",
+        issue_880_half_arc_rim_whole_offsets_1_4437_1_4437 => "issue-880-half-arc-rim-whole-offsets-1.4437-1.4437",
+    }
+
+    /// Every row of [`ROWS`] has exactly one test.
+    #[test]
+    fn every_moved_row_has_its_own_test() {
+        let rows: Vec<&str> = ROWS.iter().map(|row| row.0).collect();
+        assert_eq!(rows, ROW_TESTS);
+    }
+
+    /// The [`ROWS`] row named `row`, as the module says.
+    fn check(row: &str) {
+        let cases = crate::fixtures::load_fixture_dir(
+            &crate::case::repo_root(),
+            "blend.fillet_executive_p3",
+        )
+        .unwrap();
+        let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
+        assert_eq!(picked.len(), 1, "{row}: one row of that name");
+        for &&(name, after) in &picked {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let input = case
+                .parse::<super::super::Inputs>()
+                .unwrap()
+                .two_offset_chamfer
+                .expect("a two-offset chamfer");
+            let mut k = Kernel {
+                blend_face_log: Some(BlendFaceLog::default()),
+                ..Kernel::default()
+            };
+            let Ok(mut done) = chamfered(&mut k, &input).unwrap() else {
+                panic!("{name}: set-up stopped short");
+            };
+            assert!(done.result.is_ok(), "{name}: {:?}", done.result);
+            no_bare_blend_face(&k, &done.body, name);
+            let counts = [
+                0,
+                p1::vertices(&done.body, None).unwrap().len() as i64,
+                p1::edges(&done.body, None).unwrap().len() as i64,
+                p1::faces(&done.body, None).unwrap().len() as i64,
+            ];
+            assert_eq!(counts, after, "{name}");
+            let lines = check_brep(&mut k, &mut done.body, CheckLevel::Level2).unwrap().lines();
+            assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+            assert!(is_manifold_solid(&done.body).unwrap(), "{name}: not one closed manifold solid");
+            let blends = certified_blends(&k, &mut done.body, name);
+            let estimates = volume_band(&k, &mut done.body, &blends, name);
+            mass_bands(&k, &mut done.body, &estimates, name);
+        }
+    }
+}

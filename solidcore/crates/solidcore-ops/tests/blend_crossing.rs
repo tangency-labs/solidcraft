@@ -2,9 +2,9 @@
 //! narrower block on top and a window through both, rounded along every edge of both end faces.
 //! And rounds whose bands never meet, one of them ending at a crease (SolidCraft #16729).
 //! And rounds on the top edges of a block whose corners a sphere trims, whose rails cross past
-//! the edges' ends (SolidCraft #18563). And rounds along a tab's two top edges, the outer one's
-//! tangent chain running on round a ring's top edge to meet the inner one at a corner
-//! (SolidCraft #21749).
+//! the edges' ends (SolidCraft #18563), mitred where they cross (SolidCraft #22798). And rounds
+//! along a tab's two top edges, the outer one's tangent chain running on round a ring's top edge
+//! to meet the inner one at a corner (SolidCraft #21749).
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 
 mod common;
@@ -397,68 +397,185 @@ fn sphere_trimmed_block(s: f64) -> (Body, [usize; 4]) {
     (part, top)
 }
 
+/// The volume of [`sphere_trimmed_block`] (at scale 1) with the top edges on the sides `rounded`
+/// (`+x`, `-x`, `+y`, `-y`) rounded `r`, the rounds meeting in mitres where their bands cross:
+/// the closed form of SolidCraft #22798. The section at height `z` is the rectangle of the
+/// block, each rounded side moved in by `g(z)`, cut by the sphere's disc of radius
+/// `rho(z) = sqrt(35.75^2 - (z - 12.5)^2)`, where `g = 0` below `z = 25 - r` and
+/// `g = r - sqrt(r^2 - (z - 25 + r)^2)` above it (each round's quarter circle): the mitred rounds
+/// take off the union of what each takes off, so every section is that rectangle. The area of an
+/// axis-aligned rectangle cut by a centred disc is closed form (the rectangle's strips and the
+/// disc's segments, `F` below); the volume is its integral over `z`, by Simpson's rule in
+/// `20 000` steps below the rounds and in `t` with `z = 25 - r + r sin t` across them. The same
+/// integral gives 59826.9762 for the part and 59790.3724 at `r = 1` on all four edges, which
+/// SolidCraft builds without mitres.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn mitred_sphere_block_volume(r: f64, rounded: [bool; 4]) -> f64 {
+    // the area under the circle y = sqrt(rho^2 - x^2) from 0 to x
+    let f = |x: f64, rho: f64| {
+        let x = x.clamp(-rho, rho);
+        0.5 * (x * (rho * rho - x * x).max(0.0).sqrt() + rho * rho * (x / rho).asin())
+    };
+    // the area of [xl, xh] x [yl, yh] inside the disc of radius rho
+    let area = |rho: f64, [xl, xh, yl, yh]: [f64; 4]| {
+        if rho <= 0.0 {
+            return 0.0;
+        }
+        let mut cuts = vec![xl, xh, -rho, rho];
+        for b in [yl, yh] {
+            if b.abs() < rho {
+                let w = (rho * rho - b * b).sqrt();
+                cuts.extend([w, -w]);
+            }
+        }
+        cuts.retain(|&c| (xl..=xh).contains(&c));
+        cuts.sort_by(f64::total_cmp);
+        let mut sum = 0.0;
+        for w in cuts.windows(2) {
+            let (a, c) = (w[0], w[1]);
+            let m = 0.5 * (a + c);
+            if m.abs() >= rho {
+                continue;
+            }
+            let h = (rho * rho - m * m).sqrt();
+            let upper = if yh <= h {
+                yh * (c - a)
+            } else {
+                f(c, rho) - f(a, rho)
+            };
+            let lower = if yl >= -h {
+                yl * (c - a)
+            } else {
+                f(a, rho) - f(c, rho)
+            };
+            sum += upper - lower;
+        }
+        sum
+    };
+    let section = |z: f64, g: f64| {
+        let rho = (35.75_f64.powi(2) - (z - 12.5).powi(2)).max(0.0).sqrt();
+        let [px, mx, py, my] = rounded.map(|on| if on { g } else { 0.0 });
+        area(rho, [-30.0 + mx, 30.0 - px, -20.0 + my, 20.0 - py])
+    };
+    let simpson = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 20_000;
+        let h = (b - a) / f64::from(n);
+        let mut sum = f(a) + f(b);
+        for i in 1..n {
+            sum += if i % 2 == 1 { 4.0 } else { 2.0 } * f(a + f64::from(i) * h);
+        }
+        sum * h / 3.0
+    };
+    let below = simpson(&|z| section(z, 0.0), 0.0, 25.0 - r);
+    let across = simpson(
+        &|t: f64| section(25.0 - r + r * t.sin(), r - r * t.cos()) * r * t.cos(),
+        0.0,
+        core::f64::consts::FRAC_PI_2,
+    );
+    below + across
+}
+
 /// Rounding the four top edges of [`sphere_trimmed_block`]: past the edges' ends, the rails of
 /// two neighbouring rounds on the top face run on as the lines `x = 30 - r` and `y = 20 - r`
 /// until they meet the sphere. They cross at `(30 - r, 20 - r)`, inside the top face while
-/// `(30 - r)^2 + (20 - r)^2 < rho^2`, so the largest round that fits solves
-/// `2 r^2 - 100 r + 1300 - rho^2 = 0`: `r = 25 - sqrt(625 - (1300 - rho^2) / 2)`, about 1.850.
-/// (At that radius the rounds' surfaces meet only at that point: their mitre's other points lie
-/// outside the sphere.) A larger round, on all four edges or on two neighbours alone, is refused
-/// for want of room and leaves the part as it was (the band check finds the overlap past the
-/// edges' ends; the largest size that fits is not named there). A smaller one builds a valid
-/// closed body of 14 faces, 38 edges and 26 vertices: the part's 10 faces, 26 edges and 18
+/// `(30 - r)^2 + (20 - r)^2 < rho^2`, that is for `r` above
+/// `25 - sqrt(625 - (1300 - rho^2) / 2)`, about 1.850. Below that the rounds' bands lie apart: a
+/// valid closed body of 14 faces, 38 edges and 26 vertices, the part's 10 faces, 26 edges and 18
 /// vertices (six planes and the four sphere faces between them; eight vertices round the top
 /// face, eight round the bottom, and two that split the side circles on the faces x = 30 and
 /// y = -20 at z = 12.5), and each round adds a face, three edges and two vertices.
+///
+/// Above it (SolidCraft #22798) two neighbouring rounds, whose edges share no vertex, are mitred
+/// where they cross, as at a box corner whose upright edge is sharp: their cylinders meet in the
+/// conic on the bisecting plane `x - (30 - r) = y - (20 - r)`, from the rails' crossing on the
+/// top face down to the sphere, and the top face keeps the rectangle inside the rails. Each
+/// corner's mitre takes the place of the top face's arc there, so the counts are as below the
+/// crossing; the volume is [`mitred_sphere_block_volume`]'s. On two neighbours alone, and in
+/// either order of selection, the same; two opposite edges never cross and build at 2 as before,
+/// two faces, six edges and four vertices more than the part.
 #[test]
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
-fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused() {
+fn rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_mitred() {
     let rho2 = 35.75_f64.powi(2) - 12.5_f64.powi(2);
     let fit = 25.0 - (625.0 - (1300.0 - rho2) / 2.0).sqrt();
     assert!((fit - 1.850).abs() < 1e-3, "{fit}");
+    let all = [true; 4];
+    // the issue's derivation, at its own 400 000 steps
+    assert!(rel(mitred_sphere_block_volume(0.0, all), 59_826.976_152_287) < 1e-10);
+    assert!(rel(mitred_sphere_block_volume(2.0, all), 59_677.697_9) < 1e-9);
     for s in [1.0, 40.0] {
         let (part, top) = sphere_trimmed_block(s);
         assert_eq!(part.counts().unwrap(), [10, 26, 18], "part at scale {s}");
-        let before = volume(&part);
-        // all four edges, and the two neighbours at one corner alone; the body is left as it was
-        for edges in [&top[..], &[top[0], top[3]][..]] {
-            for r in [2.0, fit + 0.01] {
+        let s3 = s.powi(3);
+        // top: +x, -x, -y, +y
+        let neighbours = [top[0], top[3]];
+        let cases: [(&[usize], [bool; 4], [usize; 3]); 4] = [
+            (&top, all, [14, 38, 26]),
+            (&neighbours, [true, false, true, false], [12, 32, 22]),
+            (&[top[3], top[0]], [true, false, true, false], [12, 32, 22]),
+            (&[top[0], top[1]], [true, true, false, false], [12, 32, 22]),
+        ];
+        for (edges, rounded, counts) in cases {
+            for r in [1.0, fit - 0.01, fit + 0.01, 2.0] {
                 let c = part.copy().unwrap();
-                match blend(&c, Blend::Round, edges, &[r * s], &[], Corners::Filled) {
-                    Err(Error::NoRoom) => {}
-                    other => panic!("scale {s}, {} edges, round {r}: {other:?}", edges.len()),
+                let made = blend(&c, Blend::Round, edges, &[r * s], &[], Corners::Filled)
+                    .unwrap_or_else(|e| panic!("scale {s}, edges {edges:?}, round {r}: {e:?}"));
+                // one face a round
+                assert_eq!(
+                    made.made.len(),
+                    edges.len(),
+                    "scale {s}, {edges:?}, round {r}"
+                );
+                assert_eq!(
+                    c.counts().unwrap(),
+                    counts,
+                    "scale {s}, {edges:?}, round {r}"
+                );
+                assert!(
+                    c.check(CheckLevel::All).unwrap().is_valid(),
+                    "scale {s}, {edges:?}, round {r}"
+                );
+                let want = mitred_sphere_block_volume(r, rounded) * s3;
+                assert!(
+                    rel(volume(&c), want) < 1e-9,
+                    "scale {s}, {edges:?}, round {r}: {} against {want}",
+                    volume(&c)
+                );
+                // the mitre at the corner (30, 20) is the conic on the bisecting plane, exact:
+                // its points are `m(t)` on the round about x = 30 - r, z = 25 - r, from the
+                // rails' crossing (t = 0, inside the sphere) to the sphere, where `t_end` is
+                // found by bisection; its point halfway lies on the result's edge there
+                if r > fit && s == 1.0 && rounded[0] && rounded[2] {
+                    let m = |t: f64| {
+                        [
+                            30.0 - r + r * t.sin(),
+                            20.0 - r + r * t.sin(),
+                            25.0 - r + r * t.cos(),
+                        ]
+                    };
+                    let outside = |p: [f64; 3]| {
+                        p[0] * p[0] + p[1] * p[1] + (p[2] - 12.5).powi(2) > 35.75_f64.powi(2)
+                    };
+                    let (mut lo, mut hi) = (0.0, core::f64::consts::FRAC_PI_2);
+                    assert!(!outside(m(lo)) && outside(m(hi)), "round {r}");
+                    for _ in 0..80 {
+                        let mid = 0.5 * (lo + hi);
+                        if outside(m(mid)) {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                        }
+                    }
+                    let on = m(0.5 * lo);
+                    let (_, read) = kernel_copy(&c);
+                    let mitre = read.edge_list()[edge_at(&c, on)];
+                    let curve = read.edge(mitre).unwrap().curve.clone().unwrap();
+                    assert!(
+                        matches!(curve.kind(), solidcore::curve::curve::CurveKind::Ellipse(_)),
+                        "{edges:?}, round {r}: the mitre is no conic"
+                    );
                 }
-                assert_eq!(c.counts().unwrap(), [10, 26, 18], "scale {s}, round {r}");
-                assert!(rel(volume(&c), before) < 1e-12, "scale {s}, round {r}");
             }
-        }
-        // two opposite edges share the top face but their bands lie apart: they build at 2, two
-        // faces, six edges and four vertices more than the part
-        let c = part.copy().unwrap();
-        blend(
-            &c,
-            Blend::Round,
-            &[top[0], top[1]],
-            &[2.0 * s],
-            &[],
-            Corners::Filled,
-        )
-        .unwrap_or_else(|e| panic!("scale {s}, opposite edges: {e:?}"));
-        assert_eq!(
-            c.counts().unwrap(),
-            [12, 32, 22],
-            "scale {s}, opposite edges"
-        );
-        assert!(c.check(CheckLevel::All).unwrap().is_valid(), "scale {s}");
-        for r in [1.0, fit - 0.01] {
-            let c = part.copy().unwrap();
-            blend(&c, Blend::Round, &top, &[r * s], &[], Corners::Filled)
-                .unwrap_or_else(|e| panic!("scale {s}, round {r}: {e:?}"));
-            assert_eq!(c.counts().unwrap(), [14, 38, 26], "scale {s}, round {r}");
-            assert!(
-                c.check(CheckLevel::All).unwrap().is_valid(),
-                "scale {s}, round {r}"
-            );
         }
     }
 }

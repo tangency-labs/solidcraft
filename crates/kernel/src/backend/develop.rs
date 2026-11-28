@@ -8,7 +8,9 @@ use solidcore_ops::develop::{BendOps as _, LapOps as _, Rigid2Ops as _, Rigid3Op
 use solidcore_record::brep::Curve;
 use solidcore_record::develop::{Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Rigid2, Rigid3, Sheet, Surface};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_kernel_api::develop::{BeadAgainst, BeadRefusal, ContourRefusal, Develop, Folded, JointRefusal, PanelRefusal, Refusal, RuleRefusal};
+use solidcraft_kernel_api::develop::{
+    BeadAgainst, BeadRefusal, ContourRefusal, CornerTailRefusal, Develop, Folded, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
+};
 
 use super::Solidcore;
 
@@ -46,6 +48,9 @@ fn joint_refusal(r: ops::JointRefusal) -> JointRefusal {
         ops::JointRefusal::RipPoints => JointRefusal::RipPoints,
         ops::JointRefusal::RipNotFinite => JointRefusal::RipNotFinite,
         ops::JointRefusal::RipLap => JointRefusal::RipLap,
+        ops::JointRefusal::OverlapRange => JointRefusal::OverlapRange,
+        ops::JointRefusal::OverlapTurn => JointRefusal::OverlapTurn,
+        ops::JointRefusal::OverlapArcRadius => JointRefusal::OverlapArcRadius,
         ops::JointRefusal::RipOffSurface => JointRefusal::RipOffSurface,
         ops::JointRefusal::RipOffOutline => JointRefusal::RipOffOutline,
         ops::JointRefusal::RipAgainstOutline => JointRefusal::RipAgainstOutline,
@@ -104,6 +109,22 @@ fn contour_refusal(r: ops::ContourRefusal) -> ContourRefusal {
     }
 }
 
+fn corner_tail_refusal(r: ops::CornerTailRefusal) -> CornerTailRefusal {
+    match r {
+        ops::CornerTailRefusal::NoLength => CornerTailRefusal::NoLength,
+        ops::CornerTailRefusal::AlongBend => CornerTailRefusal::AlongBend,
+        ops::CornerTailRefusal::AmbiguousTrim => CornerTailRefusal::AmbiguousTrim,
+        ops::CornerTailRefusal::MissingContour => CornerTailRefusal::MissingContour,
+        ops::CornerTailRefusal::ModifiedTrim => CornerTailRefusal::ModifiedTrim,
+        ops::CornerTailRefusal::CurvedEdgePastTrim => CornerTailRefusal::CurvedEdgePastTrim,
+        ops::CornerTailRefusal::ParallelEdgePastTrim => CornerTailRefusal::ParallelEdgePastTrim,
+        ops::CornerTailRefusal::ShortTrim => CornerTailRefusal::ShortTrim,
+        ops::CornerTailRefusal::ModifiedSide => CornerTailRefusal::ModifiedSide,
+        ops::CornerTailRefusal::AmbiguousSide => CornerTailRefusal::AmbiguousSide,
+        ops::CornerTailRefusal::CannotSetBack => CornerTailRefusal::CannotSetBack,
+    }
+}
+
 impl Develop for Solidcore {
     type Fold = ops::Fold;
     type Bent = ops::Bent;
@@ -128,6 +149,23 @@ impl Develop for Solidcore {
 
     fn offset_contour(&self, segs: &[Seg2], depth: f64, thickness: f64, flip: bool, smooth: f64) -> Result<Vec<Seg2>, ContourRefusal> {
         ops::offset_contour(segs, depth, thickness, flip, smooth).map_err(contour_refusal)
+    }
+
+    fn retarget_corner_tail(
+        &self,
+        region: &Region2,
+        edge: [Vec2; 2],
+        anchor_origin: Vec2,
+        anchor_direction: Vec2,
+        bend_length: f64,
+        old_cut: f64,
+        new_cut: f64,
+    ) -> Result<Region2, CornerTailRefusal> {
+        ops::retarget_corner_tail(region, edge, anchor_origin, anchor_direction, bend_length, old_cut, new_cut).map_err(corner_tail_refusal)
+    }
+
+    fn set_back_past(&self, region: &Region2, from: Vec2, direction: Vec2, rise: f64, height: f64, into: Vec2, by: f64) -> Option<Region2> {
+        ops::set_back_past(region, from, direction, rise, height, into, by)
     }
 
     fn tear_slit(&self, from: Vec2, to: Vec2, depth: f64, ends: &Anchor, at: f64, outline: &Loop2, place: &Rigid2) -> Option<[Vec2; 2]> {

@@ -1,4 +1,4 @@
-//! `cargo xtask app-geometry [--print]`: apps compute no geometry (`solidcore/docs/layers.md` §4,
+//! `cargo xtask app-geometry [--print] [--base REF]`: apps compute no geometry (`solidcore/docs/layers.md` §4,
 //! RFC 0003 row 0.1). Vector maths on coordinates, solves and mesh queries belong in the kernel
 //! (solidcore); the crates here hold state and call it. The check keeps a ledger of the functions
 //! that still compute geometry, [`LIST`], and the ledger only shrinks: a refactor PR deletes its
@@ -28,9 +28,12 @@
 //!
 //! The check judges a change by what it adds, so drift on main never fails a branch or a merge
 //! group. It scans the tree at the base the change started from, [`base`]: `git merge-base HEAD
+//! REF` with `--base REF` (as `cargo xtask ci --base REF` passes on, so a clone whose `origin` is a
+//! fork that is behind is judged against `upstream/main`, #22688), else `git merge-base HEAD
 //! origin/main`, else `HEAD~1` (a pull request's merge commit or a merge-queue group's merge or
 //! squash commit, whose first parent is the code it lands on; CI fetches two commits for that), else,
-//! with no git history at all, the ledger itself. Then:
+//! with no git history at all, the ledger itself. A `--base` git can't find a merge base with fails
+//! the check rather than judging against something else. Then:
 //! - a site the tree has and the base does not FAILS, unless the ledger names it (a rename moves
 //!   its line);
 //! - a site the base already had and the ledger does not name is reported (it came from main);
@@ -92,20 +95,39 @@ impl Call {
     }
 }
 
+const USAGE: &str = "usage: cargo xtask app-geometry [--print] [--base REF]";
+
+/// `--print`, and the `--base` given.
+fn parse(args: &[&str]) -> Result<(bool, Option<String>), String> {
+    let (mut print, mut base) = (false, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match *a {
+            "--print" => print = true,
+            "--base" => base = Some(it.next().ok_or(USAGE)?.to_string()),
+            other => return Err(format!("unknown argument `{other}`\n{USAGE}")),
+        }
+    }
+    Ok((print, base))
+}
+
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
+    let (print, base_ref) = parse(args)?;
     let found = scan(root, false)?;
-    if args.contains(&"--print") {
+    if print {
         for (site, uses) in &found {
             println!("{site} {}", uses.join(","));
         }
         return Ok(());
     }
     let text = std::fs::read_to_string(root.join(LIST)).map_err(|e| format!("{LIST}: {e}"))?;
-    let base = match base(root) {
+    let base = match base(root, base_ref.as_deref()) {
         Ok((rev, sites)) => {
             println!("app-geometry: judging what this tree adds to {rev}");
             Some(sites)
         }
+        // A base asked for by name is the one to judge against, or none.
+        Err(e) if base_ref.is_some() => return Err(e),
         Err(e) => {
             println!("app-geometry: no git base ({e}); judging against {LIST}");
             None
@@ -115,18 +137,28 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// The base this tree started from, and its sites: the first of `git merge-base HEAD
-/// origin/main` and `HEAD~1` that git has, its crates read with `git archive`.
-fn base(root: &Path) -> Result<(String, BTreeSet<String>), String> {
+/// The base this tree started from, and its sites: `git merge-base HEAD <base_ref>` when a base is
+/// given, else the first of `git merge-base HEAD origin/main` and `HEAD~1` that git has, its crates
+/// read with `git archive`.
+fn base(root: &Path, base_ref: Option<&str>) -> Result<(String, BTreeSet<String>), String> {
     let git = |args: &[&str]| -> Option<String> {
         let out = Command::new("git").arg("-C").arg(root).args(args).stderr(Stdio::null()).output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned()).filter(|s| !s.is_empty())
     };
-    let (rev, how) = git(&["merge-base", "HEAD", "origin/main"])
-        .map(|r| (r, "merge base with origin/main"))
-        .or_else(|| git(&["rev-parse", "--verify", "-q", "HEAD~1^{commit}"]).map(|r| (r, "HEAD~1")))
-        .ok_or("neither `git merge-base HEAD origin/main` nor HEAD~1 is available")?;
-    let dir = std::env::temp_dir().join(format!("xtask-app-geometry-{}", std::process::id()));
+    let (rev, how) = match base_ref {
+        Some(r) => git(&["merge-base", "HEAD", r])
+            .map(|rev| (rev, format!("merge base with {r}")))
+            .ok_or_else(|| format!("app-geometry: `git merge-base HEAD {r}` found no merge base: is `{r}` a commit git has (fetched)?"))?,
+        None => git(&["merge-base", "HEAD", "origin/main"])
+            .map(|r| (r, "merge base with origin/main".to_string()))
+            .or_else(|| git(&["rev-parse", "--verify", "-q", "HEAD~1^{commit}"]).map(|r| (r, "HEAD~1".to_string())))
+            .ok_or("neither `git merge-base HEAD origin/main` nor HEAD~1 is available")?,
+    };
+    // One directory per call: tests in one process call this side by side, and a shared directory
+    // would be emptied under the other call.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("xtask-app-geometry-{}-{call}", std::process::id()));
     let sites = sites_at(root, &rev, &dir);
     let _ = std::fs::remove_dir_all(&dir);
     Ok((format!("{} ({how})", &rev[..rev.len().min(10)]), sites?))
@@ -468,5 +500,24 @@ mod tests {
     #[test]
     fn the_workspace_has_no_new_app_geometry() {
         run(Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(), &[]).unwrap();
+    }
+
+    /// #22688: `--base REF` names the base (as `ci --base REF` passes it on); a base git has no merge
+    /// base with fails rather than falling back to origin/main or HEAD~1; anything else is refused.
+    #[test]
+    fn a_base_is_taken_by_name_and_one_git_lacks_fails() {
+        assert_eq!(parse(&[]).unwrap(), (false, None));
+        assert_eq!(parse(&["--print", "--base", "upstream/main"]).unwrap(), (true, Some("upstream/main".into())));
+        assert!(parse(&["--base"]).is_err());
+        assert!(parse(&["--bse", "x"]).unwrap_err().contains("unknown argument `--bse`"));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let e = super::base(root, Some("no-such-ref-22688")).map(|_| ()).unwrap_err();
+        assert!(e.contains("no-such-ref-22688") && e.contains("no merge base"), "{e}");
+        let e = run(root, &["--base", "no-such-ref-22688"]).unwrap_err();
+        assert!(e.contains("no-such-ref-22688"), "{e}");
+        // HEAD itself is a base git always has: its merge base with HEAD is HEAD.
+        if let Ok((rev, _)) = super::base(root, Some("HEAD")) {
+            assert!(rev.contains("merge base with HEAD"), "{rev}");
+        }
     }
 }

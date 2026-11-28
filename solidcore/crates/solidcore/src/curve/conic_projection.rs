@@ -7,6 +7,7 @@
 
 use crate::curve::fit_projection;
 use crate::eval::Frame;
+use crate::math::det;
 use crate::math::{Vec2, Vec3};
 use crate::prism::profile::{to_local, to_world, Seg2};
 use crate::prism::read::{PlanarPiece, PlanarSpline};
@@ -66,7 +67,7 @@ fn normal(f: &Frame) -> Vec3 {
 }
 
 fn length2(p: Vec2) -> f64 {
-    p.x.hypot(p.y)
+    det::hypot(p.x, p.y)
 }
 
 fn distance2(a: Vec2, b: Vec2) -> f64 {
@@ -131,14 +132,14 @@ pub(crate) fn project_ellipse(
     let xx = u.x * u.x + v.x * v.x;
     let yy = u.y * u.y + v.y * v.y;
     let xy = u.x * u.y + v.x * v.y;
-    let large = ((xx + yy + (xx - yy).hypot(2.0 * xy)) * 0.5).sqrt();
+    let large = ((xx + yy + det::hypot(xx - yy, 2.0 * xy)) * 0.5).sqrt();
     let small = (u.x * v.y - u.y * v.x).abs() / large;
     let major_radius = scale * large;
     let minor = scale * small;
     if !(minor > major_radius * f64::EPSILON * 128.0 && minor > 1e-7) {
         return Ok(None);
     }
-    let angle = (2.0 * xy).atan2(xx - yy) * 0.5;
+    let angle = det::atan2(2.0 * xy, xx - yy) * 0.5;
     let center = to_local(target, vec3(source.origin));
     let coordinate_roundoff =
         (vec3(source.origin).length() + vec3(target.origin).length() + major_radius)
@@ -147,11 +148,11 @@ pub(crate) fn project_ellipse(
     if minor <= coordinate_roundoff {
         return Ok(None);
     }
-    let major = center + Vec2::new(angle.cos(), angle.sin()) * major_radius;
+    let major = center + Vec2::new(det::cos(angle), det::sin(angle)) * major_radius;
     if !(max_coord.is_finite()
         && max_coord > 0.0
-        && center.x.abs() + scale * u.x.hypot(v.x) < max_coord
-        && center.y.abs() + scale * u.y.hypot(v.y) < max_coord
+        && center.x.abs() + scale * det::hypot(u.x, v.x) < max_coord
+        && center.y.abs() + scale * det::hypot(u.y, v.y) < max_coord
         && major.x.is_finite()
         && major.y.is_finite())
     {
@@ -525,13 +526,13 @@ pub fn project_arcs(
             .ceil()
             .clamp(1.0, 8.0) as u32;
         let step = sweep / f64::from(count);
-        let w = (step / 2.0).cos();
+        let w = det::cos(step / 2.0);
         let at = |angle: f64, scale: f64| {
             to_local(
                 target,
                 to_world(
                     source,
-                    center + Vec2::new(angle.cos(), angle.sin()) * scale,
+                    center + Vec2::new(det::cos(angle), det::sin(angle)) * scale,
                     0.0,
                 ),
             )
@@ -604,8 +605,12 @@ mod tests {
             Projection::Line(a, b) => vec![*a, *b],
             other => panic!("a tiny selected arc must not become a full ellipse: {other:?}"),
         };
-        let expected =
-            |t: f64| to_local(&target, to_world(&source, Vec2::new(t.cos(), t.sin()), 0.));
+        let expected = |t: f64| {
+            to_local(
+                &target,
+                to_world(&source, Vec2::new(det::cos(t), det::sin(t)), 0.),
+            )
+        };
         assert!(points.first().unwrap().distance(expected(0.)) < 1e-7);
         assert!(points.last().unwrap().distance(expected(0.0005)) < 1e-7);
         assert!(points.iter().all(|p| p.distance(expected(0.)) < 0.001));

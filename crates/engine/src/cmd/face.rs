@@ -157,6 +157,40 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
     }
 }
 
+/// Resolve a single face on this exact model (placed or local). Unlike Offset Face,
+/// Transform Face must know which owner's frame to use before interpreting the motion.
+pub(crate) fn transform_face_owner<'a>(
+    st: &'a solidcraft_doc::ModelState,
+    face: &Value,
+    body: Option<&str>,
+) -> Result<&'a solidcraft_doc::ModelBody> {
+    let cmd = "solid.transform_face";
+    let point = match face_ref_form(face).map_err(|why| bad(cmd, why))? {
+        FaceRefForm::Name(name) => {
+            let hit = solidcraft_doc::naming::locate_one(st, body, name).map_err(|why| bad(cmd, why))?;
+            return st.bodies.get(hit.body).ok_or_else(|| bad(cmd, format!("no face is named `{name}`")));
+        }
+        FaceRefForm::Point(p) => p,
+    };
+    let holds = |b: &solidcraft_doc::ModelBody| -> Result<bool> {
+        Ok(!b.body.is_mesh() && near_bounds(b, point) && b.body.face_at_point(point).map_err(|e| bad(cmd, e.to_string()))?.is_some())
+    };
+    if let Some(name) = body {
+        let b = st.body(name).ok_or_else(|| bad(cmd, super::no_body(name, st.bodies.iter().map(|b| b.name.as_str()))))?;
+        return holds(b)?.then_some(b).ok_or_else(|| bad(cmd, format!("the picked point is not on a face of `{name}`")));
+    }
+    let mut owner: Option<&solidcraft_doc::ModelBody> = None;
+    for b in &st.bodies {
+        if holds(b)? {
+            if let Some(other) = owner {
+                return Err(bad(cmd, format!("the face pick is ambiguous between `{}` and `{}`; give `body`", other.name, b.name)));
+            }
+            owner = Some(b);
+        }
+    }
+    owner.ok_or_else(|| bad(cmd, "the picked point is not on a body face"))
+}
+
 /// The body a command that works on one body's faces applies to: `body` when given, or else the
 /// one body every picked point lies on, so the feature keeps it (its evaluation otherwise takes
 /// the body whose box is nearest the first point, and coincident faces tie there).
@@ -204,14 +238,16 @@ fn bodies_on_boundary(st: &solidcraft_doc::ModelState, p: Vec3) -> Vec<String> {
     }
     st.bodies
         .iter()
-        .filter(|b| {
-            let Ok(bounds) = b.body.exact_bounds() else { return true };
-            let (lo, hi, grow) = (bounds.min, bounds.max, 1e-3);
-            p.x >= lo.x - grow && p.x <= hi.x + grow && p.y >= lo.y - grow && p.y <= hi.y + grow && p.z >= lo.z - grow && p.z <= hi.z + grow
-        })
+        .filter(|b| near_bounds(b, p))
         .filter(|b| matches!(b.body.classify_point(p), Ok(solidcraft_kernel::PointClass::OnBoundary)))
         .map(|b| b.name.clone())
         .collect()
+}
+
+fn near_bounds(b: &solidcraft_doc::ModelBody, p: Vec3) -> bool {
+    let Ok(bounds) = b.body.exact_bounds() else { return true };
+    let (lo, hi, grow) = (bounds.min, bounds.max, 1e-3);
+    p.x >= lo.x - grow && p.x <= hi.x + grow && p.y >= lo.y - grow && p.y <= hi.y + grow && p.z >= lo.z - grow && p.z <= hi.z + grow
 }
 
 /// What [`faces_body`] found for a command's face picks.
@@ -499,7 +535,9 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body:
     let tris: Vec<[Vec3; 3]> = m.triangles.iter().zip(&m.tri_face).filter(|(_, tf)| **tf == f).filter_map(|(t, _)| m.tri(t)).collect();
     let normal = tris.iter().find_map(|[a, b, c]| (*b - *a).cross(*c - *a).normalized()).ok_or_else(|| bad(cmd, "degenerate face"))?;
     if tris.iter().any(|[a, b, c]| (*b - *a).cross(*c - *a).normalized().is_some_and(|n| n.dot(normal) < 1.0 - 1e-6)) {
-        return Err(bad(cmd, "only planar faces can be extruded"));
+        // Offset Face is the way to move a curved face, so an extrude says so.
+        let hint = if cmd == "solid.extrude" { "; to move a curved face, use Offset Face" } else { "" };
+        return Err(bad(cmd, format!("only planar faces can be extruded{hint}")));
     }
     // A point well inside the face: the centroid of its largest triangle.
     let inside = tris

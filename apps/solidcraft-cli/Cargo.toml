@@ -20,6 +20,8 @@ raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 # The profiler, compiled in so any build can say where its time goes (`--profile`,
 # SOLIDCRAFT_PROFILE=1); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]
+# Solidcore's own profiler, dumped to the file SOLIDCRAFT_KERNEL_PROFILE names.
+solidcore-profile = ["solidcraft-engine/solidcore-profile"]
 
 [dependencies]
 solidcraft-viewport-gpu = { workspace = true }

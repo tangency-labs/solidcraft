@@ -3,6 +3,7 @@
 //! and their exact Jacobian ([`Dual`]). Numerical differences lose their digits at large
 //! coordinates, and the freedom count read from them goes wrong there (#10608).
 
+use crate::math::det;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Most unknowns one constraint reads: three coordinates of each of its points.
@@ -40,7 +41,7 @@ impl Num for f64 {
         f64::sqrt(self)
     }
     fn atan2(self, x: f64) -> f64 {
-        f64::atan2(self, x)
+        det::atan2(self, x)
     }
 }
 
@@ -145,7 +146,7 @@ impl Num for Dual {
                 .for_each(|(o, (dy, dx))| *o = (x.v * dy - self.v * dx) / r2);
         }
         Dual {
-            v: self.v.atan2(x.v),
+            v: det::atan2(self.v, x.v),
             d,
         }
     }
@@ -314,11 +315,76 @@ pub fn plane_angle_residual<T: Num>(
     }
 }
 
+/// Why two segments that share an end have no corner an arc can round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoCorner {
+    /// One of the segments has no length.
+    NoLength,
+    /// The segments continue each other in one straight line.
+    Straight,
+    /// The segments lie on each other.
+    Overlapping,
+    /// The radius is not positive, or gives no finite arc.
+    OutOfRange,
+}
+
+/// Two directions closer than this to one line, in radians, make no corner. Over a millimetre
+/// of segment such a turn moves a point 1e-6 mm, the distance the 3D sketch takes for none (as
+/// [`same_plane`] does for height). The arc's formulas stay finite below it: the value only
+/// says where a slight turn is reported as one straight line.
+const NO_CORNER: f64 = 1e-6;
+
+/// The arc of radius `radius` that rounds the corner at `corner` between the segments running to
+/// `far_a` and `far_b`, tangent to both: its end on the first segment, its middle point and its
+/// end on the second, and the length each segment loses. With θ the angle between the segments
+/// at the corner, each loses `radius` / tan(θ/2), and the centre is `radius` / sin(θ/2) from the
+/// corner along the bisector. The arc lies in the plane of the two segments.
+pub fn corner_round(
+    corner: V<f64>,
+    far_a: V<f64>,
+    far_b: V<f64>,
+    radius: f64,
+) -> Result<([[f64; 3]; 3], f64), NoCorner> {
+    let (a, b) = (far_a - corner, far_b - corner);
+    let (la, lb) = (a.len(), b.len());
+    // A segment shorter than 1e-12 has no direction, the floor `unit` divides by.
+    if !(la > 1e-12 && lb > 1e-12 && la.is_finite() && lb.is_finite()) {
+        return Err(NoCorner::NoLength);
+    }
+    let (u, v) = (a.scale(1.0 / la), b.scale(1.0 / lb));
+    let angle = u.cross(v).len().atan2(u.dot(v));
+    if angle > std::f64::consts::PI - NO_CORNER {
+        return Err(NoCorner::Straight);
+    }
+    if angle < NO_CORNER {
+        return Err(NoCorner::Overlapping);
+    }
+    if !(radius > 0.0 && radius.is_finite()) {
+        return Err(NoCorner::OutOfRange);
+    }
+    let half = 0.5 * angle;
+    // The sum is 2 cos(θ/2) long: at least 1e-6 after the checks above, so it has a direction.
+    let sum = u + v;
+    let bisector = sum.scale(1.0 / sum.len());
+    let setback = radius / half.tan();
+    let centre = corner + bisector.scale(radius / half.sin());
+    let arc = [
+        (corner + u.scale(setback)).xyz(),
+        (centre - bisector.scale(radius)).xyz(),
+        (corner + v.scale(setback)).xyz(),
+    ];
+    if setback.is_finite() && arc.iter().flatten().all(|x| x.is_finite()) {
+        Ok((arc, setback))
+    } else {
+        Err(NoCorner::OutOfRange)
+    }
+}
+
 /// Three points spaced a third of a turn apart on an orthonormal circle frame.
 pub fn circle_points(c: V<f64>, x: V<f64>, y: V<f64>, radius: f64, from: f64) -> [[f64; 3]; 3] {
     [0.0, 1.0, 2.0].map(|k| {
         let t = from + k * std::f64::consts::TAU / 3.0;
-        (c + x.scale(radius * t.cos()) + y.scale(radius * t.sin())).xyz()
+        (c + x.scale(radius * det::cos(t)) + y.scale(radius * det::sin(t))).xyz()
     })
 }
 
@@ -333,7 +399,7 @@ pub fn arc_circle_points(c: [f64; 2], start: [f64; 2], frame: &super::Frame) -> 
         V::of(frame.x_axis),
         V::of(frame.y_axis),
         radius,
-        dy.atan2(dx),
+        det::atan2(dy, dx),
     )
 }
 

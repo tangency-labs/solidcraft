@@ -668,6 +668,20 @@ pub fn calculate_bounding_box_in(
     Ok(face_box)
 }
 
+/// (not upstream) The value of a step of a proof that is only ever a saving (a box that rules a
+/// pair out): `Some` on success, `None` on any failure but a cancellation, which gives up the
+/// proof rather than the operation ([`proved_bounding_box`], `boolean::apart`).
+///
+/// # Errors
+/// A cancellation.
+pub(crate) fn probe<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Not upstream: a box that provably holds every point of the face within its zone
 /// tolerance, or `None` when none is known; for ruling out pairs of faces that cannot meet
 /// (the boolean's face pairs). [`calculate_bounding_box`]'s box of a curved face is its
@@ -700,13 +714,6 @@ pub fn proved_bounding_box(
     scratch: &mut Option<Brep>,
 ) -> Result<Option<Extent3d>> {
     // a box is only ever a saving: every failure but a cancellation gives none
-    fn probe<T>(r: Result<T>) -> Result<Option<T>> {
-        match r {
-            Ok(v) => Ok(Some(v)),
-            Err(e) if e.is_cancelled() => Err(e),
-            Err(_) => Ok(None),
-        }
-    }
     let Some(Some(surface)) = probe(fp2::surface(b, f))? else {
         return Ok(None);
     };
@@ -1550,6 +1557,7 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent2d::Extent2d;
     use crate::geom::vector2d::Vec2;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -1662,7 +1670,7 @@ mod tests {
         Plane::new(
             origin,
             chord,
-            side * theta.cos() + Vec3::Z * theta.sin(),
+            side * det::cos(theta) + Vec3::Z * det::sin(theta),
             Vec2::new(1.0, 1.0),
             &domain,
         )
@@ -1715,7 +1723,7 @@ mod tests {
         let c = bump(h);
         let ivl = Extent1d::from_min_max(0.0, 1.0);
         for (ratio, parts) in [(1.005, true), (0.99, false)] {
-            let theta = (ratio * band / h).asin();
+            let theta = det::asin(ratio * band / h);
             let plane = tilted_plane(Point3::new(0.0, 0.0, 0.0), Vec3::X, Vec3::Y, theta);
             let mid = c.evaluate_point(&k, 0.5).unwrap();
             let mid_gap = (mid - plane.position().origin())
@@ -1760,7 +1768,7 @@ mod tests {
         let side = Vec3::new(-w, -w, 0.0);
         let chord = Vec3::new(-w, w, 0.0);
         for (ratio, parts) in [(1.005, true), (0.99, false)] {
-            let theta = (ratio * band / across).asin();
+            let theta = det::asin(ratio * band / across);
             let plane = tilted_plane(Point3::new(r, 0.0, 0.0), chord, side, theta);
             let level = PlaneLevel::new(&flat(), &plane).unwrap();
             assert_eq!(
@@ -1773,10 +1781,10 @@ mod tests {
         let quarter = Extent1d::from_min_max(0.0, 0.25);
         let end = c.evaluate_point(&k, 0.25).unwrap();
         let end_across = (end - Point3::new(r, 0.0, 0.0)).dot(side).abs();
-        let theta = (1.005 * band / across).asin();
+        let theta = det::asin(1.005 * band / across);
         let plane = tilted_plane(Point3::new(r, 0.0, 0.0), chord, side, theta);
         let level = PlaneLevel::new(&flat(), &plane).unwrap();
-        assert!(end_across * theta.sin() < band);
+        assert!(end_across * det::sin(theta) < band);
         assert!(!edge_parts(&c, &quarter, &level, band).unwrap());
     }
 }

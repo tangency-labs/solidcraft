@@ -1472,3 +1472,31 @@ fn construction_switches_a_selected_point_and_the_menu_offers_it() {
     let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
     assert!(!items.iter().any(|i| i.id == "sketch.construction"), "the origin is not offered Normal / Construction");
 }
+
+/// A drawing tool started over an open sketch window closes it: the window kept the keyboard,
+/// so typing a size did nothing and Tab walked the window's buttons instead of the boxes.
+#[test]
+fn starting_a_drawing_tool_closes_the_open_sketch_window() {
+    let mut h = line_and_circle();
+    let before = curve_ids(&h).len();
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert!(h.app.dialog.is_some());
+    h.step(&json!({"start": "sketch.rectangle.two_point"})).unwrap();
+    assert!(h.app.dialog.is_none(), "the Mirror window is closed");
+    h.step(&json!({"click": {"sketch": [40, 40]}})).unwrap();
+    h.step(&json!({"move": {"sketch": [55, 48]}})).unwrap();
+    h.step(&json!({"text": "20"})).unwrap();
+    h.step(&json!({"key": "Tab"})).unwrap();
+    h.step(&json!({"text": "30"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert_eq!(curve_ids(&h).len(), before + 4, "the typed rectangle is drawn");
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let ends: Vec<_> =
+        sk.curves[before..].iter().filter_map(|c| c.kind.ends()).filter_map(|(a, b)| Some([sk.point(a)?, sk.point(b)?])).flatten().collect();
+    let span = |values: Vec<f64>| values.iter().copied().fold(f64::MIN, f64::max) - values.iter().copied().fold(f64::MAX, f64::min);
+    let (x, y) = (span(ends.iter().map(|p| p.x).collect()), span(ends.iter().map(|p| p.y).collect()));
+    assert!((x - 20.0).abs() < 1e-6 && (y - 30.0).abs() < 1e-6, "typed 20 by 30, drawn {x} by {y}");
+}

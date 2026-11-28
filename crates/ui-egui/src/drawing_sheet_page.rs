@@ -202,6 +202,9 @@ pub struct Page {
     /// The object under the pointer on the last frame, as the selection names it: what a
     /// right-click's menu is about.
     hover: Option<solidcraft_engine::Sel>,
+    /// The sheet the last frame drew and where its paper was on screen: a right-click's menu finds
+    /// the model line under the pointer with it ([`line_under`]).
+    drawn_at: Option<(u64, OnScreen)>,
     /// What the last frame showed, for `ui.inspect`.
     shown: Option<Value>,
 }
@@ -220,6 +223,7 @@ impl Default for Page {
             pictures: PictureTextures::default(),
             view_tools: Default::default(),
             hover: None,
+            drawn_at: None,
             shown: None,
         }
     }
@@ -271,6 +275,11 @@ pub(crate) fn show_view(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool 
         message(ui, ui.max_rect(), app.tr("sheet_views.missing"), Tokens::get().error);
         return true;
     };
+    // New drawing… closed the drawing this focused Sheet shows: the setup page takes its place.
+    if app.session.view_context.focused() == id && crate::drawing_workspace::left_for_new(app).is_some() {
+        crate::drawing_workspace::show_setup(app, ui);
+        return true;
+    }
     let subject = descriptor.subject;
     let (drawing, sheet) = match crate::sheet_views::resolve(app, subject.as_deref()) {
         Ok(owner) => owner,
@@ -357,6 +366,7 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
         page.pictures = PictureTextures::default();
         page.view_tools = Default::default();
         page.hover = None;
+        page.drawn_at = None;
         page.shown = None;
     }
 }
@@ -364,6 +374,16 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
 /// The object of the open drawing under the pointer on the last frame, as the selection names it.
 pub(crate) fn hovered(app: &SolveApp) -> Option<solidcraft_engine::Sel> {
     app.drawing_workspace.page.hover.clone()
+}
+
+/// The model line under screen point `at` on the sheet the last frame drew, within the band the
+/// page's hover uses: the view it is in and the body that drew it. `None` over paper with no line,
+/// off the paper, or before the sheet has been drawn.
+pub(crate) fn line_under(app: &mut SolveApp, at: Pos2) -> Option<(u64, solidcraft_engine::drawing_view::Shown)> {
+    let (sheet, on_screen) = app.drawing_workspace.page.drawn_at?;
+    let point = on_screen.paper(at);
+    let band = HOVER_BAND / on_screen.scale;
+    drawing_scene::line_at(&mut app.session, sheet, point, band).ok().flatten().map(|hit| (hit.view, hit.body))
 }
 
 /// Fit Sheet: the sheet is framed again on the next frame.
@@ -755,6 +775,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale)).or(annotation);
     app.drawing_workspace.page.hover =
         hit.filter(|hit| drawing.has_object(hit.object)).map(|hit| solidcraft_engine::Sel::Drawing { drawing: drawing.id, object: hit.object });
+    app.drawing_workspace.page.drawn_at = Some((sheet, at));
     // A right-click, as in the model and a sketch: it finishes the tool in hand, or else opens the
     // menu on what is under the pointer.
     if owns_tools
@@ -1239,8 +1260,7 @@ impl Marks {
                     }
                     let width = ((width_mm * at.scale) as f32).max(hair);
                     let points: Vec<Pos2> = points.iter().map(|p| at.screen(*p)).collect();
-                    let stroke = Stroke::new(width, ink);
-                    painter.add(if *closed { egui::Shape::closed_line(points, stroke) } else { egui::Shape::line(points, stroke) });
+                    round_line(painter, &points, *closed, Stroke::new(width, ink));
                 }
                 Mark::Fill { triangles, outlines, bounds } => {
                     if !bounds.meets(&visible) {
@@ -1255,7 +1275,7 @@ impl Marks {
                     }
                     for outline in outlines {
                         let points: Vec<Pos2> = outline.iter().map(|p| at.screen(*p)).collect();
-                        painter.add(egui::Shape::closed_line(points, Stroke::new(hair * 0.5, ink)));
+                        round_line(painter, &points, true, Stroke::new(hair * 0.5, ink));
                     }
                 }
                 Mark::Picture { source, rect, opacity, clip, within } => {
@@ -1299,6 +1319,41 @@ impl Marks {
             }
         }
         flush(painter, &mut mesh);
+    }
+}
+
+/// The cosine of the sharpest turn a line is drawn through in one piece: past 30° egui's miter
+/// (which has no limit) would show past the round join the writers draw, by more than 3.5% of the
+/// half width.
+const SMOOTH_TURN_COS: f64 = 0.866;
+
+/// Points of a line closer than this on screen are one point, in pixels.
+const SAME_POINT_PX: f64 = 1e-3;
+
+/// A line through `points` with round caps and round joins, as every writer strokes it
+/// ([`solidcraft_geom::paper`]): egui strokes with butt caps and unlimited miters, so the line is
+/// drawn in the runs the kernel cuts it into at each sharper turn, with a disc one width across at
+/// the ends of every run. A line that closes without a sharp turn is one loop with no ends.
+fn round_line(painter: &egui::Painter, points: &[Pos2], closed: bool, stroke: Stroke) {
+    let points: Vec<[f64; 2]> = points.iter().map(|p| [f64::from(p.x), f64::from(p.y)]).collect();
+    let runs = solidcraft_kernel::planar::stroke_runs(&points, closed, SAME_POINT_PX, SMOOTH_TURN_COS);
+    let r = stroke.width / 2.0;
+    let on_screen = |p: &[f64; 2]| pos2(p[0] as f32, p[1] as f32);
+    for run in &runs {
+        let piece: Vec<Pos2> = run.points.iter().map(on_screen).collect();
+        if run.closed {
+            painter.add(egui::Shape::closed_line(piece, stroke));
+            continue;
+        }
+        if let Some(start) = piece.first() {
+            painter.circle_filled(*start, r, stroke.color);
+        }
+        if piece.len() > 1 {
+            painter.add(egui::Shape::line(piece, stroke));
+        }
+    }
+    if let Some(end) = runs.last().filter(|run| !run.closed && run.points.len() > 1).and_then(|run| run.points.last()) {
+        painter.circle_filled(on_screen(end), r, stroke.color);
     }
 }
 
@@ -1527,7 +1582,8 @@ fn marks_owned_detail(scene: &Scene, tol: f64, detail: bool) -> Result<(Vec<Mark
                     let points = flatten(path, tol, &mut budget)?;
                     match pattern {
                         Some(dashes) => {
-                            for points in dashed(&points, *closed, dashes, &mut budget)? {
+                            // Each dash's round caps lie within its length, as the writers draw it.
+                            for points in dashed(&points, *closed, &dashes.under_round_caps(*width_mm), &mut budget)? {
                                 out.push(line(points, false, *width_mm));
                             }
                         }
@@ -1598,20 +1654,22 @@ fn flatten(path: &[Seg2], tol: f64, budget: &mut usize) -> Result<Vec<Vec2>, Fau
 /// The dashes of a line through `points` with pattern `dashes`, along its whole length (round a
 /// closed one), in paper millimetres.
 fn dashed(points: &[Vec2], closed: bool, dashes: &Dashes, budget: &mut usize) -> Result<Vec<Vec<Vec2>>, Fault> {
-    let lengths: Vec<f64> = dashes.lengths_mm.iter().copied().filter(|l| l.is_finite() && *l > 0.0).collect();
-    if lengths.len() < 2 {
+    // A dash may be 0 long: a dot under round caps.
+    let lengths: Vec<f64> = dashes.lengths_mm.iter().copied().filter(|l| l.is_finite() && *l >= 0.0).collect();
+    let period: f64 = lengths.iter().sum();
+    if lengths.len() < 2 || period <= 0.0 {
         return Ok(vec![points.to_vec()]);
     }
     let mut path = points.to_vec();
     if closed && let Some(first) = points.first() {
         path.push(*first);
     }
-    // Where in the pattern the line starts.
-    let period: f64 = lengths.iter().sum();
+    // Where in the pattern the line starts: on a dot when the phase ends exactly at one, as the
+    // writers start.
     let mut into = dashes.phase_mm.rem_euclid(period);
     let mut index = 0usize;
     while let Some(l) = lengths.get(index)
-        && into >= *l
+        && (into > *l || (into == *l && *l > 0.0))
     {
         into -= l;
         index = (index + 1) % lengths.len();

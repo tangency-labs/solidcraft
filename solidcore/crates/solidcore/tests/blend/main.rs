@@ -159,6 +159,8 @@ mod issue_2307_peg_chamfers;
 mod issue_2307_tab_run_after_hole_rim;
 #[path = "../issue_2314_tab_corner_arcs.rs"]
 mod issue_2314_tab_corner_arcs;
+#[path = "../issue_23288_fillet_past_center_hole.rs"]
+mod issue_23288_fillet_past_center_hole;
 #[path = "../issue_2343_curved_setback.rs"]
 mod issue_2343_curved_setback;
 #[path = "../issue_2349_closed_angle.rs"]
@@ -253,6 +255,8 @@ mod setback_on_an_arc_is_certified;
 mod solidcraft_1986_join_cylindrical_wall;
 #[path = "../variable_round_law_corner_refused.rs"]
 mod variable_round_law_corner_refused;
+#[path = "../wr21288_mirrored_sections_once.rs"]
+mod wr21288_mirrored_sections_once;
 #[path = "../wr212_refusal_keeps_owners.rs"]
 mod wr212_refusal_keeps_owners;
 #[path = "../wr300_variable_rounds_meet_at_law_radii.rs"]

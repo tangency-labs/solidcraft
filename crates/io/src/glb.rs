@@ -271,6 +271,42 @@ impl GlbOptions {
     }
 }
 
+/// One body's planned GLB placement and which unique mesh job produces its geometry.
+struct PlannedBody<'a> {
+    body: &'a solidcraft_doc::ModelBody,
+    name: String,
+    parent: Option<usize>,
+    job: usize,
+}
+
+/// One unique tessellation job for GLB export (shared by every placement of a reused definition).
+enum MeshJob<'a> {
+    /// A component definition's body, optionally moved by its component-frame offset.
+    Source { body: &'a solidcraft_kernel::Body, offset: Option<Mat> },
+    /// A placed body moved back into its occurrence's component frame.
+    Moved { body: &'a solidcraft_kernel::Body, inv: Mat },
+    /// A body exported directly in world coordinates.
+    World { body: &'a solidcraft_kernel::Body },
+}
+
+fn run_mesh_job(
+    job: &MeshJob<'_>,
+    quality: MeshQuality,
+    mut mesh_at: impl FnMut(&solidcraft_kernel::Body, MeshQuality) -> Result<Mesh>,
+) -> Result<Mesh> {
+    match job {
+        MeshJob::Source { body, offset } => {
+            let mesh = mesh_at(body, quality)?;
+            Ok(match offset {
+                Some(offset) => moved(mesh, offset),
+                None => mesh,
+            })
+        }
+        MeshJob::Moved { body, inv } => Ok(moved(mesh_at(body, quality)?, inv)),
+        MeshJob::World { body } => mesh_at(body, quality),
+    }
+}
+
 /// The GLB of the given bodies of `world`, the model placed in the world (all when `bodies` is
 /// empty): each with the colour, metallic, roughness and opacity the design shows it with, as
 /// the render workspace resolves them (a face's look over its body's, a body's over its
@@ -281,10 +317,19 @@ impl GlbOptions {
 /// Without `opts.hierarchy` every body is written in the world under the root, by its world
 /// name. `name` names the scene.
 pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies: &[String], name: &str, opts: &GlbOptions) -> Result<Vec<u8>> {
-    export_glb_with_mesh(doc, model, world, bodies, name, opts, display_mesh_at)
+    export_glb_with(doc, model, world, bodies, name, opts, |jobs, quality| {
+        if jobs.len() <= 1 {
+            return jobs.iter().map(|job| run_mesh_job(job, quality, display_mesh_at)).collect();
+        }
+        solidcraft_kernel::map_on_threads(jobs, crate::EXPORT_THREADS, |job| run_mesh_job(job, quality, display_mesh_at))
+            .into_iter()
+            .map(|r| r.unwrap_or_else(|| Err(IoError::Invalid("GLB mesh worker failed".into()))))
+            .collect()
+    })
 }
 
 /// The export path with a mesher supplied, so tests can count and reorder tessellations.
+#[cfg(test)]
 fn export_glb_with_mesh(
     doc: &Document,
     model: &ModelState,
@@ -293,6 +338,18 @@ fn export_glb_with_mesh(
     name: &str,
     opts: &GlbOptions,
     mut mesh_at: impl FnMut(&solidcraft_kernel::Body, MeshQuality) -> Result<Mesh>,
+) -> Result<Vec<u8>> {
+    export_glb_with(doc, model, world, bodies, name, opts, |jobs, quality| jobs.iter().map(|job| run_mesh_job(job, quality, &mut mesh_at)).collect())
+}
+
+fn export_glb_with(
+    doc: &Document,
+    model: &ModelState,
+    world: &ModelState,
+    bodies: &[String],
+    name: &str,
+    opts: &GlbOptions,
+    mesh_jobs: impl FnOnce(&[MeshJob<'_>], MeshQuality) -> Result<Vec<Mesh>>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_glb");
     let sel = selected(world, bodies)?;
@@ -309,20 +366,13 @@ fn export_glb_with_mesh(
             definitions.entry((component, source.definition_name())).and_modify(|id| *id = None).or_insert(Some(id));
         }
     }
-    // Reuse the first output body's mesh; the cache itself keeps no extra mesh allocation.
+    // Plan unique mesh jobs first so reused component definitions tessellate once and independent
+    // bodies can tessellate in parallel without losing deterministic node/material ordering.
     let mut canonical: BTreeMap<usize, usize> = BTreeMap::new();
     let mut tree = Tree::default();
-    let mut materials: Vec<GlbMaterial> = Vec::new();
-    // Two materials are one when glTF writes them the same.
-    let mut index: BTreeMap<String, usize> = BTreeMap::new();
-    let mut add = |m: GlbMaterial| {
-        *index.entry(m.json().to_string()).or_insert_with(|| {
-            materials.push(m);
-            materials.len() - 1
-        })
-    };
-    let mut out: Vec<GlbBody> = Vec::with_capacity(sel.len());
-    let mut total = 0;
+    let mut jobs: Vec<MeshJob<'_>> = Vec::with_capacity(sel.len());
+    let mut uses: Vec<usize> = Vec::with_capacity(sel.len());
+    let mut planned: Vec<PlannedBody<'_>> = Vec::with_capacity(sel.len());
     for b in sel {
         // Under its occurrence, in the component's frame, named as the component names it; a body
         // not placed through an occurrence stays in the world under its world name.
@@ -330,7 +380,7 @@ fn export_glb_with_mesh(
             .get(&b.name)
             .and_then(|(_, _, path)| tree.node(doc, path))
             .and_then(|(node, m)| solidcraft_doc::mat_inverse(&m).map(|inv| (node, inv)));
-        let (body_name, mesh, parent, source_id) = match placed {
+        let (body_name, parent, job) = match placed {
             Some((node, inv)) => {
                 let source = frames
                     .get(&b.name)
@@ -342,23 +392,64 @@ fn export_glb_with_mesh(
                             && source.definition_name() == b.definition_name()
                             && doc.model_body_offset(source).is_none_or(solidcraft_doc::is_placement)
                     });
-                let mesh = match source {
-                    Some((id, source)) => match canonical.get(&id).and_then(|&first| out.get(first)) {
-                        Some(first) => first.mesh.clone(),
+                let job = match source {
+                    Some((id, source)) => match canonical.get(&id).copied() {
+                        Some(existing) => existing,
                         None => {
-                            let mesh = mesh_at(&source.body, opts.quality)?;
-                            match doc.model_body_offset(source) {
-                                Some(offset) => moved(mesh, offset),
-                                None => mesh,
-                            }
+                            let idx = jobs.len();
+                            jobs.push(MeshJob::Source { body: &source.body, offset: doc.model_body_offset(source).copied() });
+                            uses.push(0);
+                            canonical.insert(id, idx);
+                            idx
                         }
                     },
-                    None => moved(mesh_at(&b.body, opts.quality)?, &inv),
+                    None => {
+                        let idx = jobs.len();
+                        jobs.push(MeshJob::Moved { body: &b.body, inv });
+                        uses.push(0);
+                        idx
+                    }
                 };
-                (b.definition_name().to_string(), mesh, Some(node), source.map(|(id, _)| id))
+                (b.definition_name().to_string(), Some(node), job)
             }
-            None => (b.name.clone(), mesh_at(&b.body, opts.quality)?, None, None),
+            None => {
+                let idx = jobs.len();
+                jobs.push(MeshJob::World { body: &b.body });
+                uses.push(0);
+                (b.name.clone(), None, idx)
+            }
         };
+        if let Some(count) = uses.get_mut(job) {
+            *count += 1;
+        }
+        planned.push(PlannedBody { body: b, name: body_name, parent, job });
+    }
+    let mut meshes: Vec<Option<Mesh>> = mesh_jobs(&jobs, opts.quality)?.into_iter().map(Some).collect();
+    let mut materials: Vec<GlbMaterial> = Vec::new();
+    // Two materials are one when glTF writes them the same.
+    let mut index: BTreeMap<String, usize> = BTreeMap::new();
+    let mut add = |m: GlbMaterial| {
+        *index.entry(m.json().to_string()).or_insert_with(|| {
+            materials.push(m);
+            materials.len() - 1
+        })
+    };
+    let mut out: Vec<GlbBody> = Vec::with_capacity(planned.len());
+    let mut total = 0;
+    for plan in planned {
+        let b = plan.body;
+        let mesh = match uses.get_mut(plan.job) {
+            Some(rem) if *rem > 1 => {
+                *rem -= 1;
+                meshes.get(plan.job).and_then(Option::as_ref).cloned()
+            }
+            Some(rem) => {
+                *rem = 0;
+                meshes.get_mut(plan.job).and_then(Option::take)
+            }
+            None => None,
+        }
+        .ok_or_else(|| IoError::Invalid(format!("{}: missing exported mesh", b.name)))?;
         let mut faces = BTreeMap::new();
         let material = match opts.glass.get(&b.name) {
             Some(optics) => {
@@ -395,14 +486,9 @@ fn export_glb_with_mesh(
                 material
             }
         };
-        let body = GlbBody { name: body_name, mesh, material, faces, parent };
-        // Refused as soon as the meshes kept so far are too large, not after meshing them all.
+        let body = GlbBody { name: plan.name, mesh, material, faces, parent: plan.parent };
         total = add_to_budget(total, &body)?;
-        let body_index = out.len();
         out.push(body);
-        if let Some(id) = source_id {
-            canonical.entry(id).or_insert(body_index);
-        }
     }
     glb(name, &tree.nodes, &out, &materials)
 }

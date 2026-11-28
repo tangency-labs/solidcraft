@@ -29,6 +29,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::profile::{cross2, derivative, halves, point_of, product, Seg2, H2};
@@ -290,7 +291,8 @@ fn circle_span(
         let (yy, ey) = product(&y, &y)?;
         let (ww, ew) = product(&w, &w)?;
         let max = |v: &[f64]| v.iter().map(|x| x.abs()).fold(0.0, f64::max);
-        let scale = max(&x).powi(2) + max(&y).powi(2) + radius * radius * max(&w).powi(2);
+        let scale =
+            det::powi(max(&x), 2) + det::powi(max(&y), 2) + radius * radius * det::powi(max(&w), 2);
         #[allow(clippy::cast_precision_loss)]
         let (n, n2) = (c.len() as f64, (c.len() * c.len()) as f64);
         let coordinate_error = source_error
@@ -327,7 +329,7 @@ fn circle_span(
             && c.iter()
                 .all(|p| (point_of(*p) - center).dot(mid) > coordinate_error * mid.length());
         if radial && (positive || negative) && half_plane {
-            let sweep = cross2(a, b).atan2(a.dot(b));
+            let sweep = det::atan2(cross2(a, b), a.dot(b));
             if !((positive && sweep > 0.0) || (negative && sweep < 0.0))
                 || (total != 0.0 && total.signum() != sweep.signum())
             {
@@ -419,7 +421,24 @@ fn read_pieces(
         let tilt = r * n.cross(super::profile::axes(frame).3).length();
         (nl.is_finite() && tilt <= tol).then(|| (to_local(frame, c), r))
     });
+    let zone = if k.tolerances.zone_tol_3d.is_finite() && k.tolerances.zone_tol_3d > 0.0 {
+        k.tolerances.zone_tol_3d
+    } else {
+        tol
+    };
+    // A curve bending more than the kernel's zone tolerance off its chord is no straight line,
+    // however large the reading tolerance `tol` (which scales with the body's size): flattening
+    // a short piece of a large spline to its chord puts it off its wall and leaves a zero-area
+    // crescent when planar booleans compare the two (#22818).
+    let bend_tol = tol.min(zone.max(error * 10.0));
+    let rational = is_rational(&spans);
     let proved = |work: &mut usize| {
+        // Only a labelled circle or a rational NURBS can be an exact circular arc; a short
+        // trimmed span of a polynomial spline lies within `tol` of its osculating circle yet
+        // must stay the free-form curve it is.
+        if label.is_none() && !rational {
+            return None;
+        }
         label
             .or_else(|| through_three(k, run, (ts, te), frame, a, tol))
             .and_then(|(center, radius)| {
@@ -429,9 +448,9 @@ fn read_pieces(
     if a.distance(b) > tol
         && spans
             .iter()
-            .all(|s| line_span(s, a, b, tol, error).is_some())
+            .all(|s| line_span(s, a, b, bend_tol, error).is_some())
     {
-        // Within `tol` of its chord the piece is that line, unless `arc_before_line` says it
+        // Within `bend_tol` of its chord the piece is that line, unless `arc_before_line` says it
         // is the arc it is proved on within `tol`; one that is no arc stays the line.
         let found = if arc_before_line(&spans, k.tolerances.zone_tol_3d) {
             proved(work)
@@ -440,11 +459,12 @@ fn read_pieces(
         };
         return Some(found.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
     }
+    let free_bend = (bend_tol - 2.0 * error).max(0.0);
     proved(work)
-        .or_else(|| free_form(&spans, a, b, tol))
+        .or_else(|| free_form(&spans, a, b, tol, free_bend))
         .or_else(|| {
             if each_span {
-                span_by_span(&spans, a, b, tol)
+                span_by_span(&spans, a, b, tol, free_bend)
             } else {
                 None
             }
@@ -577,8 +597,8 @@ fn arc(
         sweep += ds;
     }
     let ac = a - center;
-    let start = ac.y.atan2(ac.x);
-    let end = center + Vec2::new((start + sweep).cos(), (start + sweep).sin()) * radius;
+    let start = det::atan2(ac.y, ac.x);
+    let end = center + Vec2::new(det::cos(start + sweep), det::sin(start + sweep)) * radius;
     // the arc ends where the curve does, as closely as a profile loop must close
     if end.distance(b) + error > tol.min(ARC_END_TOL) {
         return None;
@@ -639,9 +659,15 @@ pub(super) fn principal(a: f64) -> f64 {
 }
 
 /// Several spans end to end from `a` to `b`, each the segment it is: a polynomial span along its
-/// chord a line, the others as [`free_form`] reads them. Spans whose ends meet are left out;
-/// each segment starts where the one before ended.
-fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Seg2>> {
+/// chord (within `bend_tol`) a line, the others as [`free_form`] reads them. Spans whose ends
+/// meet are left out; each segment starts where the one before ended.
+fn span_by_span(
+    spans: &[Vec<H2>],
+    a: Point2,
+    b: Point2,
+    tol: f64,
+    bend_tol: f64,
+) -> Option<Vec<Seg2>> {
     let spans: Vec<&Vec<H2>> = spans
         .iter()
         .filter(|s| {
@@ -663,9 +689,11 @@ fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec
             point_of(*span.last()?)
         };
         let pts: Vec<Point2> = span.iter().map(|p| point_of(*p)).collect();
-        let seg = match free_form(std::slice::from_ref(span), start, end, tol) {
+        let seg = match free_form(std::slice::from_ref(span), start, end, tol, bend_tol) {
             Some(mut s) => s.pop()?,
-            None if span.iter().all(|p| (p[2] - 1.0).abs() <= 1e-12) && off_chord(&pts) <= tol => {
+            None if span.iter().all(|p| (p[2] - 1.0).abs() <= 1e-12)
+                && off_chord(&pts) <= bend_tol =>
+            {
                 Seg2::Line { a: start, b: end }
             }
             None => return None,
@@ -674,6 +702,18 @@ fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec
         start = end;
     }
     Some(out)
+}
+
+/// Whether any Bézier span of `spans` has weights differing by more than their rounding.
+fn is_rational(spans: &[Vec<H2>]) -> bool {
+    spans.iter().any(|s| {
+        let (lo, hi) = s
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p[2]), hi.max(p[2]))
+            });
+        hi - lo > lo.abs().max(hi.abs()) * f64::EPSILON * 64.0
+    })
 }
 
 /// Whether a piece within the reading tolerance of the chord between its ends is read as the
@@ -685,16 +725,8 @@ fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec
 /// a flat prism side 1e-5 off its cylinder.
 #[must_use]
 pub fn arc_before_line(spans: &[Vec<H2>], zone: f64) -> bool {
-    let rational = spans.iter().any(|s| {
-        let (lo, hi) = s
-            .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
-                (lo.min(p[2]), hi.max(p[2]))
-            });
-        hi - lo > lo.abs().max(hi.abs()) * f64::EPSILON * 64.0
-    });
     let pts: Vec<Point2> = spans.iter().flatten().map(|p| point_of(*p)).collect();
-    rational && off_chord(&pts) > zone
+    is_rational(spans) && off_chord(&pts) > zone
 }
 
 /// How far the points lie off the chord between the first and the last.
@@ -716,15 +748,21 @@ fn off_chord(pts: &[Point2]) -> f64 {
 /// One Bézier span that is neither a line nor an arc, as the exact free-form segment it is (a
 /// polynomial Bézier, a polynomial quadratic as the conic of weight 1, a conic), its ends `a` and
 /// `b`. `None` for several spans, degrees past [`MAX_BEZIER_DEGREE`], rational spans other than
-/// conics, and control polygons with no area.
-fn free_form(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Seg2>> {
+/// conics, and control polygons within `bend_tol` of their chord.
+fn free_form(
+    spans: &[Vec<H2>],
+    a: Point2,
+    b: Point2,
+    tol: f64,
+    bend_tol: f64,
+) -> Option<Vec<Seg2>> {
     let [span] = spans else { return None };
     let pts: Vec<Point2> = span.iter().map(|p| point_of(*p)).collect();
     let (first, last) = (*pts.first()?, *pts.last()?);
     if first.distance(a) > tol
         || last.distance(b) > tol
         || first.distance(last) <= tol
-        || !(off_chord(&pts) > tol)
+        || !(off_chord(&pts) > bend_tol)
     {
         return None;
     }

@@ -532,6 +532,144 @@ fn a_bend_note_sits_beside_each_bend_line_when_asked_for() {
     assert!(note.is_some_and(|e| note_layout(e).0 == 5.0));
 }
 
+/// The value of a header variable.
+fn header_var(dxf: &str, var: &str) -> String {
+    let lines: Vec<&str> = dxf.lines().collect();
+    let pairs: Vec<(i32, &str)> = lines.chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    pairs[pairs.iter().position(|(c, v)| *c == 9 && *v == var).unwrap_or_default() + 1].1.to_string()
+}
+
+/// The drawing's units: `mm` (the default) is unchanged, and `inches` writes every coordinate,
+/// the extents, the DASHED pattern, the bend-note radii and the pocket layers in inches.
+/// The lengths a shape holds, in a stable order, so two drawings of the same part compare by
+/// geometry: the reader brings both back to millimetres, and the inch file's 1e-9 inch grid
+/// stays within 3e-8 mm of the millimetre one.
+fn lengths(s: &DxfShape) -> Vec<f64> {
+    let mut out = Vec::new();
+    let pt = |p: Vec2, o: &mut Vec<f64>| {
+        o.push(p.x);
+        o.push(p.y);
+    };
+    match s {
+        DxfShape::Insert { at, scale, column_spacing, row_spacing, .. } => {
+            pt(*at, &mut out);
+            pt(*scale, &mut out);
+            out.extend([*column_spacing, *row_spacing]);
+        }
+        DxfShape::SourceEllipse { c, major, major_radius, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+            out.push(*major_radius);
+        }
+        DxfShape::SourceSpline { ctrl, fit, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+            for p in fit {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::SourcePolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::SourceOmitted { .. } => {}
+        DxfShape::Point(p) => pt(*p, &mut out),
+        DxfShape::Line(a, b) => {
+            pt(*a, &mut out);
+            pt(*b, &mut out);
+        }
+        DxfShape::Polyline { points } => {
+            for p in points {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::LwPolyline { verts, .. } => {
+            for (p, _) in verts {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::BulgedPolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::Circle { c, r } | DxfShape::Arc { c, r, .. } => {
+            pt(*c, &mut out);
+            out.push(*r);
+        }
+        DxfShape::Ellipse { c, major, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+        }
+        DxfShape::Spline { ctrl, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::Text { at, height, .. } | DxfShape::AlignedText { at, height, .. } => {
+            pt(*at, &mut out);
+            out.push(*height);
+        }
+    }
+    out
+}
+
+#[test]
+fn the_drawing_writes_its_coordinates_in_the_units_it_is_asked_for() {
+    let mut s = tray_with(&[]);
+    let mm = export(&mut s, json!({}));
+    assert_eq!(export(&mut s, json!({"units": "mm"})), mm);
+    assert_eq!((header_var(&mm, "$INSUNITS"), header_var(&mm, "$MEASUREMENT")), ("4".to_string(), "1".to_string()));
+    let inches = export(&mut s, json!({"units": "inches"}));
+    assert_eq!((header_var(&inches, "$INSUNITS"), header_var(&inches, "$MEASUREMENT")), ("1".to_string(), "0".to_string()));
+    assert!(s.execute("sheet.export_dxf", &json!({"units": "feet"})).is_err());
+    // The same entities in the same order: the inch file's lengths, read back in millimetres,
+    // are the millimetre file's to the grid.
+    let (mm_es, in_es) = (entities(&mm), entities(&inches));
+    assert_eq!(mm_es.len(), in_es.len());
+    for (m, i) in mm_es.iter().zip(&in_es) {
+        assert_eq!(m.0, i.0, "the files must hold the same entities in the same order");
+        assert_eq!(m.2, i.2, "{}", m.0);
+        let (want, got) = (lengths(&m.1), lengths(&i.1));
+        assert_eq!(want.len(), got.len(), "{}", m.0);
+        assert!(want.iter().zip(&got).all(|(a, b)| (a - b).abs() < 3e-8), "{}: {want:?} vs {got:?}", m.0);
+    }
+    // The file's DASHED pattern is half and quarter inches.
+    let types: Vec<(i32, &str)> =
+        inches.lines().collect::<Vec<_>>().chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    let at = types.iter().position(|(c, v)| *c == 2 && *v == "DASHED").unwrap();
+    let pattern: Vec<f64> = types[at..].iter().take_while(|(c, _)| *c != 0).filter(|(c, _)| *c == 49).map(|(_, v)| v.parse().unwrap()).collect();
+    assert_eq!(pattern, vec![0.5, -0.25]);
+    // The bend notes read their radii in inches too: 1 mm is 0.0394 of them.
+    let mut notes = |params: Value| -> Vec<String> {
+        entities(&export(&mut s, params))
+            .iter()
+            .filter(|e| e.0 == "TEXT")
+            .map(|e| {
+                let DxfShape::Text { text, .. } = &e.1 else { panic!("{e:?}") };
+                text.clone()
+            })
+            .collect()
+    };
+    let plain_notes = notes(json!({"bend_notes": true}));
+    let inch_notes = notes(json!({"bend_notes": true, "units": "inches"}));
+    assert_eq!(inch_notes.len(), plain_notes.len());
+    for (plain, inch) in plain_notes.iter().zip(&inch_notes) {
+        let text = plain.replacen("R1", "R0.0394", 1);
+        assert_eq!(inch.as_str(), text.as_str(), "{plain} -> {inch}");
+    }
+    // A pocket layer names its depth in the drawing's units.
+    let mut s = plate_with(&[]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70, 40], "p1": [90, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    let dxf = export(&mut s, json!({"units": "inches"}));
+    assert!(dxf.contains("POCKET_BOTTOM_Z0.000000_TO_0.039370_IN"), "1 mm deep, in inches");
+}
+
 #[test]
 fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
     // The included angle is 180° less the bend angle: 122° for a 58° bend, 90° for a 90° one.
@@ -551,6 +689,42 @@ fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
         // Without notes the setting changes nothing in the file.
         assert_eq!(plain.first(), plain.get(1), "{deg}°");
     }
+}
+
+/// `markings: false` leaves the letter contours and the bend notes out; the outline, the cut-outs
+/// and the bends stay, and a letter's pocket is no longer etched.
+#[test]
+fn the_markings_option_leaves_the_letters_and_the_notes_out() {
+    let mut s = tray_with(&marks());
+    let plain = entities(&export(&mut s, json!({})));
+    assert!(plain.iter().any(|e| layer_of(e) == "TEXT"), "the default export has the letters");
+    // The letters and their counters are gone, as are the notes when asked for together.
+    let bare = export(&mut s, json!({"markings": false}));
+    let es = entities(&bare);
+    assert!(
+        !es.iter().any(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH"),
+        "{:?}",
+        es.iter().filter(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH").map(|e| (e.0.clone(), layer_of(e))).collect::<Vec<_>>()
+    );
+    assert!(es.iter().any(|e| layer_of(e) == "OUTLINE") && es.iter().any(|e| layer_of(e) == "BEND_UP"));
+    assert!(entities(&export(&mut s, json!({"markings": false, "bend_notes": true}))).iter().all(|e| e.0 != "TEXT"));
+    // The hole and the slot are no letters: they stay on CUT.
+    let cut = es.iter().filter(|e| layer_of(e) == "CUT").collect::<Vec<_>>();
+    assert_eq!((count_of(&cut, "CIRCLE"), count_of(&cut, "LINE")), (1, 4), "{cut:?}");
+    assert_eq!(export(&mut s, json!({"markings": true})), export(&mut s, json!({})));
+    assert!(s.execute("sheet.export_dxf", &json!({"markings": "no"})).is_err());
+    // A pocket that is letters (a shallow text cut) is a marking and goes with them.
+    let mut p = Session::default();
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut p, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut p, "sketch.text", json!({"text": "AB", "at": [40, 28], "height": 8}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    assert!(export(&mut p, json!({})).contains("ETCH"));
+    assert!(!export(&mut p, json!({"markings": false})).contains("ETCH"));
 }
 
 /// A body whose base flange names its rule keeps that rule's notes whichever rule is active when
@@ -1310,23 +1484,23 @@ mod byte_regressions {
         ("degree-nine-arcs.dxf", 14320, "f2c93d198e789b6c21120dc02ff332510ff1e03884cedd44352a7489b4871296"),
         ("text-outlines-exact.dxf", 13638, "41723dc58a73570726bdbcb260f45f9937d47cc6b1ab6023421755b8d298952a"),
         ("text-outlines-arcs.dxf", 25311, "505175f5297a6d43a5def8f5399647a419262362538b5631779c04d135d62105"),
-        ("tray-default.dxf", 25299, "f85c3373d0930e8097c4123be4a9d767b9b4ba1d672c3d591849727474327fa1"),
-        ("tray-exact-cut-bends-true-roles.dxf", 26208, "68d383ada43f98c31a92847f3f9b3b32b83a31b0585d02029d112d95aa54163c"),
-        ("tray-exact-cut-bends-true-single.dxf", 25027, "9acb9220246b5caf35cc7b9d0b2e23b3ff6837961884748a6efa2a3fe412232a"),
-        ("tray-exact-cut-bends-false-roles.dxf", 25690, "5ca0ca25c2bf31bdd9b7df22f7ba7f407e8064ae41e9ad3e33b79aa6bb6b10bf"),
-        ("tray-exact-cut-bends-false-single.dxf", 24535, "6aab380c007bfae85d9da2d05c3a001cfe63adda17df5827f127835e20cc4664"),
-        ("tray-exact-etch-bends-true-roles.dxf", 26208, "cb5b159282810c31d2c2dc458e2b070011af73ff14f7184afa1e55db9fcff785"),
-        ("tray-exact-etch-bends-true-single.dxf", 25027, "9acb9220246b5caf35cc7b9d0b2e23b3ff6837961884748a6efa2a3fe412232a"),
-        ("tray-exact-etch-bends-false-roles.dxf", 25690, "e28f584e54d8d758caa58961eea5a915d3026b7f0265b1073d6809cedcf5b120"),
-        ("tray-exact-etch-bends-false-single.dxf", 24535, "6aab380c007bfae85d9da2d05c3a001cfe63adda17df5827f127835e20cc4664"),
-        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "82c3eb0931a213b0e76d86bf7c5e5d1b36f1641f6b11e5ab045c3bf4d6892bad"),
-        ("tray-arcs-cut-bends-true-single.dxf", 41076, "248b29fe4f5fde255fe746609289f617ec9b53ff9cfd489a3b2e217be3d79e70"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "fb036b96f843dad73bfbf31ed7e29555ce7ac53e953b4f856b9fcaf35a432d9b"),
-        ("tray-arcs-cut-bends-false-single.dxf", 40580, "5bfb406e95429d82b69fcd445340b6d8cf58d241d6571fb9c3df3c9bccdebd5b"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "a5264746d1b89fd12c439f84545aa58e9b3e64c0876ea4ca45f2cd37d3aa2b6f"),
-        ("tray-arcs-etch-bends-true-single.dxf", 41076, "248b29fe4f5fde255fe746609289f617ec9b53ff9cfd489a3b2e217be3d79e70"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "593cd9d43b801c2b99d01bc00498af5481424c3c7809bd9d542a9e04eebc16f0"),
-        ("tray-arcs-etch-bends-false-single.dxf", 40580, "5bfb406e95429d82b69fcd445340b6d8cf58d241d6571fb9c3df3c9bccdebd5b"),
+        ("tray-default.dxf", 25299, "20ffc66c741bd7a20a6109ffeaa316e64c0752e4aa1d66fee42897d9173acf67"),
+        ("tray-exact-cut-bends-true-roles.dxf", 26208, "21e69f838d19ff08f96a9cb79ccc351a8b2ed52a81c7062bc6b4bdcf5d5a0250"),
+        ("tray-exact-cut-bends-true-single.dxf", 25027, "88baef3b702457b8829da93cea52a09dcebcf286faf48dcc19498579beb2ca9b"),
+        ("tray-exact-cut-bends-false-roles.dxf", 25690, "62fd581d1627cc5e299d0cdacde5e249b87aefc5f3d0b54e513af41003f45807"),
+        ("tray-exact-cut-bends-false-single.dxf", 24535, "8ea0502d6366eee9513c4f9ff700069e911b1c2bc90cdccde0c1c3101a058275"),
+        ("tray-exact-etch-bends-true-roles.dxf", 26208, "4c96679f61e1b803bcd1c2a6b807474dfe623bac3337a11b36aee1e7e92ef393"),
+        ("tray-exact-etch-bends-true-single.dxf", 25027, "88baef3b702457b8829da93cea52a09dcebcf286faf48dcc19498579beb2ca9b"),
+        ("tray-exact-etch-bends-false-roles.dxf", 25690, "c213b81f8cc746e4bc7deb50c7aba4e631de03d9ea2b8d5541ad4d2963f6e192"),
+        ("tray-exact-etch-bends-false-single.dxf", 24535, "8ea0502d6366eee9513c4f9ff700069e911b1c2bc90cdccde0c1c3101a058275"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "ed44548ee39a189bd2858e6554d9201daabfbaa6a16416777c91f125e709058b"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41076, "6b92972b81c91f4e6e090fef957b36fed3644d89e17214b9e7ab2258e3afe329"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "189710e8e0e748ff3f759f7fb3bdbf2accbf9b12ef4af00a039872b26a5f4399"),
+        ("tray-arcs-cut-bends-false-single.dxf", 40580, "1b59b2469641185af58a9a4f763236b80c6dfa48a0ef133b2531d8773d9a7b0a"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "8b108fb6a7c09e9438e24afb18c54c291a0e3bf679009d24475c20a82757967b"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41076, "6b92972b81c91f4e6e090fef957b36fed3644d89e17214b9e7ab2258e3afe329"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "c5534debd952d41bf7871329b7036886e315711de546c2fb5d4d526106b13e41"),
+        ("tray-arcs-etch-bends-false-single.dxf", 40580, "1b59b2469641185af58a9a4f763236b80c6dfa48a0ef133b2531d8773d9a7b0a"),
         ("rule-bend-down-exact-bends-true-roles.dxf", 6391, "ee6762b7787eda81ac0b7abd6eaf3e431fd01b94df59d37aa71a9f115e0189ed"),
         ("rule-bend-down-exact-bends-false-single.dxf", 5594, "214a4e1b608e0cc9ec3d086205f62abe8b6e0ef40bbf63ea364b6cfafe69c86c"),
         ("rule-bend-down-arcs-bends-true-roles.dxf", 6391, "ee6762b7787eda81ac0b7abd6eaf3e431fd01b94df59d37aa71a9f115e0189ed"),
@@ -1362,14 +1536,14 @@ mod byte_regressions {
         ("ellipse-arcs.dxf", 16674, "2042450483bee76a36d2e5b37e3a54511b97efab479a1fce8a0e8b9c220d0331"),
         ("pocket-and-engraved-text-arcs.dxf", 39080, "0732cbc0dc9533c5eb27833ed78ed5db18cf0299d599a8c7cba062017913e41d"),
         ("text-outlines-arcs.dxf", 25311, "300f58b5681ffe089b1f900f548da740b9aa16ba2f10f21a5e4b3a5c0bb8a7fb"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "9c16c793111306b3ff290c1df312e74b0ccd984ff27a64f73c3152d32717ff88"),
-        ("tray-arcs-cut-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
-        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "f650a184c9795df766c4c917a6617f4000eee6a7f6f779c67604b86c97ca706a"),
-        ("tray-arcs-cut-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "7808677679865a0191f4a51a0591e640cc2d4b153633c9a0bcaa418490d856e6"),
-        ("tray-arcs-etch-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "85f4af3fdf6d6818af84a466850642a2158de48ce5678e7629b4072607650eed"),
-        ("tray-arcs-etch-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "92e08a366d571e3913acacc18bf15db3d8019825f26b77f55249044f7ccfd90f"),
+        ("tray-arcs-cut-bends-false-single.dxf", 40580, "f35a606f0ca9614b075289f0a5180aceb9b7c6d0a1f4fa4eaf0393fe5d9323ff"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "a68a59e8710f2203c26a2c084aa15bdaf8dd0f55f2275489306cf3f102646db3"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41076, "95df5164371ee7765b8cc08d4ab2275b3d6fd0df1bd1c805fc39fc63381819e6"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "4fda3aa8107a10d494e70ce2118dafd7aad2641cdc6143c13d7995fcb8a59527"),
+        ("tray-arcs-etch-bends-false-single.dxf", 40580, "f35a606f0ca9614b075289f0a5180aceb9b7c6d0a1f4fa4eaf0393fe5d9323ff"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "849acaa9a2d47b72bf767f042dfa6c9f60867fe72ccfd92fa9e98cac33d9770e"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41076, "95df5164371ee7765b8cc08d4ab2275b3d6fd0df1bd1c805fc39fc63381819e6"),
     ];
 
     struct BytePins {

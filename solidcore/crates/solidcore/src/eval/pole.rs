@@ -28,6 +28,7 @@
 use super::spline::{Partials, MAX_PARTIAL_ORDER};
 use super::vec::VecExt;
 use super::EvalError;
+use crate::math::det;
 use crate::math::Vec3;
 
 /// The highest order `k` of the expansion the partials reach.
@@ -80,7 +81,7 @@ fn directional(d: &Partials, first: usize, m: usize, [a, b]: [f64; 2]) -> Option
             (r, m - r + 1)
         };
         let s = *d.get(i)?.get(j)?;
-        x += s * (binomial(m, r) * a.powi(r as i32) * b.powi((m - r) as i32));
+        x += s * (binomial(m, r) * det::powi(a, r as i32) * det::powi(b, (m - r) as i32));
     }
     Some(x)
 }
@@ -122,8 +123,8 @@ pub fn limit_along(
                     (r, m - r + 1)
                 };
                 binomial(m, r)
-                    * dir[0].abs().powi(r as i32)
-                    * dir[1].abs().powi((m - r) as i32)
+                    * det::powi(dir[0].abs(), r as i32)
+                    * det::powi(dir[1].abs(), (m - r) as i32)
                     * err(i, j)
             })
             .sum()

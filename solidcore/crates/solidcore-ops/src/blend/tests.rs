@@ -151,4 +151,15 @@ fn a_session_failure_says_what_the_session_noted() {
     // an error that is no blend failure is not one for the note
     let other = SolidError::invalid_input("test", "refused");
     assert_eq!(noted_failure(&info, &other), None);
+    // a failure whose error info also names a location reports the failing edge point
+    let mut located = noting(
+        FilletErrorType::BadMerge,
+        "Fillet Error: a blend past its faces does not sew into the body along its creases and rails",
+    );
+    located.location = Some(solidcore::Point3::new(-10.0, 2.5, 4.0));
+    assert_eq!(
+        said(&located),
+        "the blend failed (status 1001): the fillet body is not built: a blend past its faces \
+         does not sew into the body along its creases and rails, at the edge at (-10.000, 2.500, 4.000)"
+    );
 }

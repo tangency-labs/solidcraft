@@ -27,7 +27,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};
 
-use solidcore_record::brep::{Loop as Bounds, Shell, Surface as Record};
+use solidcore_record::brep::{Face as RecordFace, Loop as Bounds, Shell};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{Bent, Fold, Query, Rigid2, Rigid3, Surface, curve_through};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
@@ -318,29 +318,15 @@ pub(crate) fn reached(q: &Query, folded: &Folded, walls: &[usize], sag: f64) -> 
     Ok(out)
 }
 
-/// Whether faces `a` and `b` lie on one surface within `tol`: a cut leaves the faces it didn't
-/// make on the surfaces they had.
-fn same_surface(a: (Option<FaceSurface>, &Record), b: (Option<FaceSurface>, &Record), tol: f64) -> bool {
-    let parallel = |x: Vec3, y: Vec3| x.cross(y).len() <= 1e-9;
-    let off_line = |p: Vec3, o: Vec3, d: Vec3| ((p - o) - d * (p - o).dot(d)).len();
+/// Whether faces `a` and `b` lie on one surface within `tol` inside `region`
+/// ([`solidcraft_kernel::same_surface`] for analytic surfaces,
+/// [`solidcraft_kernel::same_face_record_surface`] for spline and blend surfaces): a cut leaves
+/// the faces it didn't make on the surfaces they had, even when a boolean shifts operands far from
+/// the origin and back to the last few units of floating-point rounding.
+fn same_surface(a: (Option<FaceSurface>, &RecordFace), b: (Option<FaceSurface>, &RecordFace), tol: f64, region: &solidcraft_geom::Aabb3) -> bool {
     match (a.0, b.0) {
-        (Some(FaceSurface::Plane { normal: n, point: p }), Some(FaceSurface::Plane { normal: m, point: q })) => {
-            parallel(*n, *m) && (q - p).dot(*n).abs() <= tol
-        }
-        (Some(FaceSurface::Cylinder { origin: o, axis: d, radius: r }), Some(FaceSurface::Cylinder { origin: p, axis: e, radius: s })) => {
-            parallel(*d, *e) && (r - s).abs() <= tol && off_line(p, o, *d) <= tol
-        }
-        (Some(FaceSurface::Cone { apex: o, axis: d, half_angle: h }), Some(FaceSurface::Cone { apex: p, axis: e, half_angle: k })) => {
-            d.dot(*e) > 0.0 && parallel(*d, *e) && (h - k).abs() <= 1e-9 && o.dist(p) <= tol
-        }
-        (Some(FaceSurface::Sphere { center: o, radius: r }), Some(FaceSurface::Sphere { center: p, radius: s })) => {
-            o.dist(p) <= tol && (r - s).abs() <= tol
-        }
-        (
-            Some(FaceSurface::Torus { center: o, axis: d, major: r, minor: m }),
-            Some(FaceSurface::Torus { center: p, axis: e, major: s, minor: n }),
-        ) => parallel(*d, *e) && o.dist(p) <= tol && (r - s).abs() <= tol && (m - n).abs() <= tol,
-        (None, None) => a.1 == b.1,
+        (Some(x), Some(y)) => solidcraft_kernel::same_surface(&x, &y, tol, region),
+        (None, None) => solidcraft_kernel::same_face_record_surface(a.1, b.1, tol),
         _ => false,
     }
 }
@@ -355,6 +341,8 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
     let (ra, rb) = (was.record(), now.record());
     let (qa, qb) = (Query::new(ra), Query::new(rb));
     let (sag, accept) = ((was.size() * 1e-4).max(1e-4), tol * 10.0);
+    let bounds = |b: &Body| b.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
+    let region = bounds(was).union(&bounds(now));
     let edges_of = |loops: &[Bounds]| -> Vec<usize> {
         loops
             .iter()
@@ -366,15 +354,15 @@ pub(crate) fn walls(was: &Body, now: &Body, tol: f64) -> Vec<usize> {
             .map(|oe| oe.edge as usize)
             .collect()
     };
-    let old: Vec<((Option<FaceSurface>, &Record), &[Bounds])> =
-        ra.faces.iter().enumerate().map(|(f, face)| ((face_surface(was, f), &face.surface), face.loops.as_slice())).collect();
+    let old: Vec<((Option<FaceSurface>, &RecordFace), &[Bounds])> =
+        ra.faces.iter().enumerate().map(|(f, face)| ((face_surface(was, f), face), face.loops.as_slice())).collect();
     rb.faces
         .iter()
         .enumerate()
         .filter(|(f, face)| {
-            let here = (face_surface(now, *f), &face.surface);
+            let here = (face_surface(now, *f), *face);
             let under: Vec<(usize, &[Bounds])> =
-                old.iter().enumerate().filter(|(_, (o, _))| same_surface(here, *o, tol)).map(|(o, (_, loops))| (o, *loops)).collect();
+                old.iter().enumerate().filter(|(_, (o, _))| same_surface(here, *o, tol, &region)).map(|(o, (_, loops))| (o, *loops)).collect();
             if under.is_empty() {
                 return true;
             }

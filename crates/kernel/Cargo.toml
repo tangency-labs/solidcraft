@@ -28,6 +28,10 @@ log = { workspace = true }
 spade = { workspace = true }
 web-time = { workspace = true }
 
+# Open CASCADE behind its C ABI module, linked dynamically; only with `backend-occt`
+# (vendor/occt-capi/README.md has the licence terms).
+occt-capi = { path = "../../vendor/occt-capi", optional = true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { workspace = true }
 sysinfo = { workspace = true }
@@ -35,3 +39,16 @@ sysinfo = { workspace = true }
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+
+[[example]]
+# The Open CASCADE experiment's row of the kernel support matrix (docs/kernel-support.md).
+name = "occt_matrix"
+required-features = ["backend-occt"]
+
+[features]
+# Solidcore's own profiler, written as JSON Lines through `write_kernel_profiles`.
+solidcore-profile = ["solidcraft-smlib/solidcore-profile"]
+# Open CASCADE (OCCT) as a second kernel beside solidcore, for measurement only
+# (docs/kernel-support.md): the operations it takes go to it, the rest stay on solidcore.
+# Off by default; no build we ship, no release and no CI job turns it on.
+backend-occt = ["dep:occt-capi"]

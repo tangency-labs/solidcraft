@@ -67,14 +67,17 @@
    "volume": 12000
   }
  },
+ {"call": "engine.execute", "params": {"command": "select.clear", "params": {}}},
  {
   "start": "parameters.change"
  },
+ {"click": {"handle": "params:view:dimensions"}},
+ {"click": {"handle": "dialog:table:parameters:group:model:Sketch1"}},
  {
   "shot": "s10_params"
  },
  {
-  "widget": "40"
+  "click": {"handle": "param:d1"}
  },
  {
   "key": "A",
@@ -99,8 +102,13 @@
   }
  },
  {
-  "click": {"handle": "param:comment:d1:expand"}
+  "click": {"handle": "param:name_it:d1"}
  },
+ {"key": "A", "cmd": true},
+ {"text": "mounting_width"},
+ {"key": "Enter"},
+ {"expect": {"param": {"mounting_width": 55}}},
+ {"click": {"handle": "param:comment:mounting_width:expand"}},
  {
   "text": "Overall mounting width including the clearance required for installation and later adjustment."
  },

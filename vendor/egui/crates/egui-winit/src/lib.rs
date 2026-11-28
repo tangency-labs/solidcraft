@@ -2162,6 +2162,16 @@ fn process_viewport_command(
                 window.set_undecorated_shadow(!v && window.fullscreen().is_none());
             }
         }
+        ViewportCommand::TitlebarButtonsHidden(hidden) => {
+            #[cfg(target_os = "macos")]
+            {
+                use winit::platform::macos::WindowExtMacOS as _;
+
+                window.set_titlebar_buttons_hidden(hidden);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = hidden;
+        }
         ViewportCommand::WindowLevel(l) => window.set_window_level(match l {
             egui::viewport::WindowLevel::AlwaysOnBottom => WindowLevel::AlwaysOnBottom,
             egui::viewport::WindowLevel::AlwaysOnTop => WindowLevel::AlwaysOnTop,

@@ -176,6 +176,92 @@ fn every_primitive_is_valid_at_every_level() {
     }
 }
 
+/// The check of some faces and edges of a valid body passes at every level, named through the
+/// body's record order; a face or edge past the record's is an argument error.
+#[test]
+fn a_local_check_passes_where_the_body_does() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let order = b.to_record().unwrap().1;
+    let all_faces: Vec<usize> = (0..order.faces.len()).collect();
+    let all_edges: Vec<usize> = (0..order.edges.len()).collect();
+    for level in [CheckLevel::Basic, CheckLevel::Geometry, CheckLevel::All] {
+        for (faces, edges) in [
+            (vec![0], vec![]),
+            (vec![1, 2], vec![0, 3]),
+            (all_faces.clone(), all_edges.clone()),
+        ] {
+            let r = b.check_local(&order, &faces, &edges, level).unwrap();
+            assert!(r.is_valid(), "{faces:?} {edges:?}, {level:?}: {r}");
+            assert_eq!(r.text, "");
+        }
+    }
+    let past = |faces: &[usize], edges: &[usize]| {
+        matches!(
+            b.check_local(&order, faces, edges, CheckLevel::All),
+            Err(Error::Argument)
+        )
+    };
+    assert!(past(&[order.faces.len()], &[]));
+    assert!(past(&[], &[order.edges.len()]));
+}
+
+/// The local check runs the tolerance pass on the edges it is given. A box edge whose curve is
+/// moved 0.01 off its two faces (its tolerance is 5e-6) fails it there, with the pass's own
+/// reports (`SmBrep` list 2 about the edge's uses): its vertex/edge gaps (tests 0 and 2) and its
+/// edge/face gap (test 4). The whole check refuses the body too. The local check of an edge with
+/// no vertex or face of the moved one still passes.
+#[test]
+fn a_local_check_tests_the_gaps_of_the_edges_it_is_given() {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::vector3d::{Point3, Vec3};
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let order = b.to_record().unwrap().1;
+    let moved = crate::order::edge(&order, 0).unwrap();
+    // an edge with no vertex and no face of the moved one
+    let apart = with_body("move an edge", &b, |k, br| {
+        // the identity frame at (0.01, 0.01, 0.01): a move, as a placement holds it
+        let shift = Axis2Placement::from_stored(
+            Point3::new(0.01, 0.01, 0.01),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        br.edge_mut(moved)?
+            .curve
+            .as_mut()
+            .expect("a box edge has its curve")
+            .transform(k, &shift, None)?;
+        let ends = |br: &Brep, e| solidcore::topology::edge::vertices(br, e, None);
+        let faces = |br: &Brep, e| solidcore::topology::edge::faces(br, e, None);
+        let (mv, mf) = (ends(br, moved)?, faces(br, moved)?);
+        for i in 1..order.edges.len() {
+            let e = crate::order::edge(&order, i).expect("a record edge");
+            if ends(br, e)?.iter().all(|v| !mv.contains(v))
+                && faces(br, e)?.iter().all(|f| !mf.contains(f))
+            {
+                return Ok(i);
+            }
+        }
+        panic!("a box has an edge apart from each of its edges");
+    })
+    .unwrap();
+    assert!(!b.check(CheckLevel::Basic).unwrap().is_valid());
+    let local = b.check_local(&order, &[], &[0], CheckLevel::Basic).unwrap();
+    assert!(!local.is_valid(), "{local}");
+    let pass = |test: u32| {
+        local.text.lines().any(|l| {
+            l.starts_with(&format!("SmBrep::Test #{test} ")) && l.ends_with("[owner SmEdgeuse]")
+        })
+    };
+    assert!(pass(4), "the edge/face gap: {local}");
+    assert!(pass(0) && pass(2), "the vertex/edge gaps: {local}");
+    let r = b
+        .check_local(&order, &[], &[apart], CheckLevel::Basic)
+        .unwrap();
+    assert!(r.is_valid(), "edge {apart}: {r}");
+}
+
 /// A vertex whose tolerance is below the body's fails the check with its numbered line; a
 /// vertex pointing at no vertexuse fails `ValidatePointers`, and `AssertValid` is then skipped.
 #[test]
@@ -1415,6 +1501,220 @@ fn periodic_seam_completion_replaces_a_seam_that_overshoots_the_cut() {
     );
 }
 
+/// A boundary crossing the cut whose pcurve is fitted to its edge rather than on the edge's own
+/// parameter (as a STEP file's intersection edge is, #22462): the 45-degree sheet of
+/// [`periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell`], its top arc's
+/// pcurve a quadratic in u through the arc's ends whose middle control point is 1e-6 past the
+/// cut, so that where the arc meets the cut the pcurve is 5e-7 past it. The seam splits the arc
+/// there, and the arc's trim at the same parameter, so the piece the face keeps, on u in
+/// [3.5, 4], reaches that sliver across the cut, which no whole-period translation fits: at the
+/// end of its parameter with the arc running round the axis, at its start with the arc written
+/// the other way. That piece is cut where its pcurve meets the cut: the sheet completes as the
+/// exact one does, two faces of seven edges, each within the base period, the piece ending on
+/// the cut.
+#[test]
+fn periodic_seam_completion_ends_a_fitted_pcurve_on_the_cut_it_crosses() {
+    for reversed in [false, true] {
+        fitted_pcurve_sheet_completes(reversed);
+    }
+}
+
+/// The sheet of [`periodic_seam_completion_ends_a_fitted_pcurve_on_the_cut_it_crosses`], its top
+/// arc written against the axis when `reversed`, completed and checked.
+fn fitted_pcurve_sheet_completes(reversed: bool) {
+    use solidcore_record::brep::{
+        Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
+        Region, Shell, Surface, Vertex, VERSION,
+    };
+
+    all_fixes();
+    let (r, h, w) = (5.0, 3.0, std::f64::consts::FRAC_1_SQRT_2);
+    // The top arc's pcurve is off the arc's parameter by up to `lead / 2` in u, which is at most
+    // 7.1e-6 mm on the radius-5 circle (whose speed is at most 2 r / w = 14.2 per unit of u); the
+    // arc's tolerance, 1e-5, holds it.
+    let (lead, top_tolerance) = (1e-6, 1e-5);
+    let ring = [
+        [r, 0.0, 1.0],
+        [r * w, r * w, w],
+        [0.0, r, 1.0],
+        [-r * w, r * w, w],
+        [-r, 0.0, 1.0],
+        [-r * w, -r * w, w],
+        [0.0, -r, 1.0],
+        [r * w, -r * w, w],
+        [r, 0.0, 1.0],
+    ];
+    let average = |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|d| 0.5 * (a[d] + b[d]));
+    let (left, right) = (average(ring[7], ring[8]), average(ring[0], ring[1]));
+    let (lo, hi) = (
+        average(average(ring[6], ring[7]), left),
+        average(right, average(ring[1], ring[2])),
+    );
+    // Its knots are symmetric about 4, so the arc written the other way is its points reversed.
+    let arc = |z: f64, against: bool| {
+        let mut points = [lo, left, ring[8], right, hi];
+        if against {
+            points.reverse();
+        }
+        Curve::RationalSpline {
+            knots: vec![3.5, 3.5, 3.5, 4.0, 4.0, 4.5, 4.5, 4.5],
+            homogeneous: points.map(|p| [p[0], p[1], z * p[2], p[2]]).to_vec(),
+        }
+    };
+    let point = |p: [f64; 3], z| [p[0] / p[2], p[1] / p[2], z];
+    let vertices = [point(lo, 0.0), point(hi, 0.0), point(hi, h), point(lo, h)]
+        .map(|point| Vertex {
+            point,
+            tolerance: 1e-6,
+        })
+        .to_vec();
+    let surface = Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4., 4.],
+        v_knots: vec![0., 0., h, h],
+        homogeneous: ring
+            .iter()
+            .map(|p| vec![[p[0], p[1], 0.0, p[2]], [p[0], p[1], h * p[2], p[2]]])
+            .collect(),
+    };
+    let ruling = |a: usize, b: usize| Curve::Spline {
+        knots: vec![0.0, 0.0, h, h],
+        points: vec![vertices[a].point, vertices[b].point],
+    };
+    let curves = [
+        arc(0.0, false),
+        ruling(1, 2),
+        arc(h, reversed),
+        ruling(0, 3),
+    ];
+    let intervals = [[3.5, 4.5], [0.0, h], [3.5, 4.5], [0.0, h]];
+    let top_ends = if reversed { [2, 3] } else { [3, 2] };
+    let ends = [[0, 1], [1, 2], top_ends, [0, 3]];
+    let directions = [true, true, reversed, false];
+    let top_points = if reversed {
+        vec![[4.5, h], [4.0 + lead, h], [3.5, h]]
+    } else {
+        vec![[3.5, h], [4.0 + lead, h], [4.5, h]]
+    };
+    let tolerances = [1e-6, 1e-6, top_tolerance, 1e-6];
+    let line = |a: [f64; 2], b: [f64; 2], [t0, t1]: [f64; 2]| Curve2::Spline {
+        knots: vec![t0, t0, t1, t1],
+        points: vec![a, b],
+    };
+    let pcurves = [
+        line([3.5, 0.0], [4.5, 0.0], intervals[0]),
+        line([4.5, 0.0], [4.5, h], intervals[1]),
+        Curve2::Spline {
+            knots: vec![3.5, 3.5, 3.5, 4.5, 4.5, 4.5],
+            points: top_points,
+        },
+        line([3.5, 0.0], [3.5, h], intervals[3]),
+    ];
+    let edges = curves
+        .into_iter()
+        .enumerate()
+        .map(|(i, curve)| Edge {
+            curve,
+            nurbs: None,
+            interval: intervals[i],
+            vertices: ends[i],
+            tolerance: tolerances[i],
+            uses: vec![EdgeUseRef {
+                face: 0,
+                r#loop: 0,
+                position: i as u32,
+                upper: !directions[i],
+            }],
+        })
+        .collect();
+    let boundary = pcurves
+        .into_iter()
+        .enumerate()
+        .map(|(i, pcurve)| OrientedEdge {
+            edge: i as u32,
+            forward: directions[i],
+            pcurve,
+        })
+        .collect();
+    let source = Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![Region {
+            shells: vec![0],
+            void: false,
+        }],
+        shells: vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: Vec::new(),
+        }],
+        faces: vec![Face {
+            surface,
+            nurbs: None,
+            domain: [[0.0, 4.0], [0.0, h]],
+            loops: vec![Loop::Edges { edges: boundary }],
+        }],
+        edges,
+        vertices,
+    };
+    crate::record_check::validate(&source).unwrap();
+    crate::record_check::agreement(&source).unwrap();
+    let (completed, origins) = crate::pcurve::complete_periodic_seams(&source)
+        .unwrap()
+        .unwrap();
+    assert_eq!(origins, [0, 0], "reversed {reversed}");
+    assert_eq!(
+        (
+            completed.faces.len(),
+            completed.edges.len(),
+            completed.vertices.len()
+        ),
+        (2, 7, 6),
+        "reversed {reversed}"
+    );
+    crate::record_check::validate(&completed).unwrap();
+    crate::record_check::agreement(&completed).unwrap();
+    // Each face is its 45 degrees, [3.5, 4] or [0, 0.5], within the base period: the top arc's
+    // pieces end at most `lead / 2` inside a face's side, and no further.
+    let round = 1e-9 * 4.0;
+    for face in &completed.faces {
+        assert!(
+            face.domain[0][0] >= -round && face.domain[0][1] <= 4.0 + round,
+            "reversed {reversed}: {:?}",
+            face.domain
+        );
+        assert!(
+            (face.domain[0][1] - face.domain[0][0] - 0.5).abs() <= round,
+            "reversed {reversed}: {:?}",
+            face.domain
+        );
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points: Vec<[f64; 2]> = match &u.pcurve {
+                    Curve2::Spline { points, .. } => points.clone(),
+                    Curve2::RationalSpline { homogeneous, .. } => homogeneous
+                        .iter()
+                        .map(|p| [p[0] / p[2], p[1] / p[2]])
+                        .collect(),
+                };
+                for p in &points {
+                    assert!(
+                        p[0] >= face.domain[0][0] - round && p[0] <= face.domain[0][1] + round,
+                        "reversed {reversed}, edge {}: {points:?} outside {:?}",
+                        u.edge,
+                        face.domain
+                    );
+                }
+            }
+        }
+    }
+    let (body, _) = Body::from_record(&completed, true).unwrap();
+    let check = body.check(CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "reversed {reversed}: {check}");
+}
+
 /// A wall of a closed periodic surface, bounded by two rims each made of four quarter arcs. A
 /// rim's trims are lifted continuously from u = 0.5 to u = 4.5, so its last arc crosses the cut
 /// (u = 4) at the middle of its parameter, and the seam has to split it there. Completing the
@@ -1582,6 +1882,18 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     crate::record_check::validate(&completed).unwrap();
     crate::record_check::agreement(&completed).unwrap();
     assert!(crate::pcurve::import_check_failure(&completed).is_none());
+    // The completed record is the kernel's own, so it is not held to the item cap for input:
+    // the budget is the file's, set where the file is read. A record past that cap may still
+    // disagree with its geometry, but its size is not the reason it is refused.
+    let mut large = completed.clone();
+    large.edges[0].curve = Curve::Polyline {
+        points: (0..solidcore_record::brep::MAX_ITEMS)
+            .map(|i| [i as f64 * 1e-6, 0., 0.])
+            .collect(),
+    };
+    assert_eq!(large.validate().map_err(|e| e.0), Err("item budget"));
+    let why = crate::pcurve::import_check_failure(&large).unwrap_or_default();
+    assert!(!why.contains("the completed record is invalid"), "{why}");
     // A completion that leaves a trim over only the first half of its edge's interval, as
     // rebuilding a split edge's trim by sampling did for a real model, is refused by the
     // record's validity check, so the import keeps the record it had.
@@ -1680,4 +1992,36 @@ fn pcurves_of_malformed_records_are_refused_as_invalid() {
     assert!(matches!(one(&collapsed, [0., 1.]), Err(Error::Invalid(_))));
     // And a well-formed one still gets its pcurve.
     assert!(one(&line, [0., 1.]).is_ok());
+}
+
+/// The public reducer must carry the new Core orientation refusal through Ops,
+/// rather than flattening its typed cause into an unexplained `SM_ERR` status.
+#[test]
+fn mesh_reduction_preserves_the_uncertified_orientation_reason() {
+    use solidcore::error::mass::MassFailure;
+    let positions = [[0., 0., 0.], [2., 0., 0.], [0., 2., 0.], [0.5, 0.5, 0.]];
+    // Four nondegenerate coplanar facets form a zero-volume tetrahedral incidence;
+    // the fifth record repeats the first, so this is only the new duplicate path.
+    let indices = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3, 0, 2, 1];
+    let error = crate::reduce_mesh(&positions, &indices, None, 4).unwrap_err();
+    assert_eq!(
+        error,
+        Error::Refused {
+            operation: "mesh.reduce",
+            reason: MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON,
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "mesh.reduce: {}",
+            MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON
+        )
+    );
+    // Existing mass failures still retain their old status-only policy.
+    let other = solidcore::error::Failure::new("mass::op", MassFailure::Integrand).into_error();
+    assert_eq!(
+        crate::error::status(other),
+        Error::Status(solidcore::error::SM_ERR)
+    );
 }

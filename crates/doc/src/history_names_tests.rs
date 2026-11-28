@@ -387,6 +387,101 @@ fn a_top_face_keeps_its_exact_name_after_a_thread_narrows_the_hole() {
     assert!(from_origins(&only, &[one], 1).is_none());
 }
 
+/// The pieces of a round panel's cap a fold parted are named by the fold's role of each
+/// (`F2:top#[F30:fold:stay]`, `F2:top#[F30:fold:1]`, #21300), and keep the number by place earlier
+/// builds gave them (`F2:top#2`, `F2:top#1`) as their former name. A later sheet feature that keeps
+/// both pieces (Unfold) carries each name to the same piece only: neither answers to the other's
+/// name, new or former, so a reference on one never moves to the other.
+#[test]
+fn a_folded_sheet_cap_piece_answers_only_to_its_own_names_after_a_later_sheet_feature() {
+    let doc = crate::Document {
+        features: serde_json::from_value(serde_json::json!([
+            {"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+                "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+                "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                           {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}},
+            {"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"},
+            {"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+             "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"},
+            {"id": 31, "name": "Unfold1", "type": "sheet_unfold"}
+        ]))
+        .unwrap(),
+        ..crate::Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let names = crate::naming::names(body);
+    let caps: Vec<usize> = (0..names.faces.len()).filter(|&f| crate::naming::strip_piece(&names.faces[f]) != names.faces[f]).collect();
+    let cap_names: Vec<&String> = caps.iter().map(|&f| &names.faces[f]).collect();
+    let formers = [("top", "stay", 2), ("top", "1", 1), ("bottom", "stay", 2), ("bottom", "1", 1)];
+    for (side, role, number) in formers {
+        let (want, former) = (format!("F2:{side}#[F30:fold:{role}]"), format!("F2:{side}#{number}"));
+        let Some(&f) = caps.iter().find(|&&f| names.faces[f] == want) else { panic!("{cap_names:?}") };
+        assert!(names.verified(f), "{want}");
+        assert_eq!(names.info[f].former.as_deref(), Some(former.as_str()), "{want}");
+        // Its own names find it, and only it.
+        for name in [&want, &former] {
+            let found: Vec<&String> = caps.iter().filter(|&&g| matches(&names, g, name) == Some(Match::Exact)).map(|&g| &names.faces[g]).collect();
+            assert_eq!(found, [&want], "{name}");
+        }
+    }
+    for &f in &caps {
+        let others: Vec<&String> =
+            names.info[f].aliases.iter().chain(&names.info[f].synonyms).filter(|a| **a != names.faces[f] && cap_names.contains(a)).collect();
+        assert!(others.is_empty(), "{} answers to {others:?}", names.faces[f]);
+    }
+}
+
+/// Two folds of one round panel (#21300): the second, Fold F31, folds the part the first left.
+/// The bends around the pieces of the cap tell them apart (the middle piece lies between both), so
+/// they are named by them as before, exactly, with no former name: the folds' roles name only
+/// pieces nothing around them tells apart.
+#[test]
+fn the_pieces_of_a_round_cap_two_folds_parted_are_named_by_the_bends_around_them_as_before() {
+    let doc = crate::Document {
+        features: serde_json::from_value(serde_json::json!([
+            {"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"c": 2, "k": 0, "l": 4},
+                "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"},
+                           {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"},
+                           {"a": 4, "b": 5, "construction": true, "id": "l2", "type": "line"}],
+                "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                           {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]},
+                           {"fixed": false, "id": "f1a", "pos": [-45.0, 20.0]}, {"fixed": false, "id": "f1b", "pos": [45.0, 20.0]}]}},
+            {"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"},
+            {"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+             "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"},
+            {"a": [-45.0, 20.0, 0.0], "b": [45.0, 20.0, 0.0], "angle": "90 deg", "curve": "l2", "id": 31, "name": "Fold2",
+             "position": "centerline", "stays": "right", "sketch": 1, "type": "sheet_fold"}
+        ]))
+        .unwrap(),
+        ..crate::Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let names = crate::naming::names(body);
+    let mut tops: Vec<(&str, Option<&str>, bool)> = (0..names.faces.len())
+        .filter(|&f| crate::naming::strip_piece(&names.faces[f]) == "F2:top" && names.faces[f] != "F2:top")
+        .map(|f| (names.faces[f].as_str(), names.info[f].former.as_deref(), names.verified(f)))
+        .collect();
+    tops.sort_unstable();
+    let got: Vec<&str> = tops.iter().map(|t| t.0).collect();
+    assert_eq!(
+        got,
+        ["F2:top#[F30:bend.inner:F2:top,F31:bend.inner:F2:top]", "F2:top#[F30:bend.inner:F2:top]", "F2:top#[F31:bend.inner:F2:top]"],
+        "{tops:?}"
+    );
+    assert!(tops.iter().all(|t| t.2 && t.1.is_none()), "{tops:?}");
+}
+
 /// #22047: a piece whose neighbour list loses one adjacent face (e.g. a shortened bevel or corner
 /// cut) is still uniquely identified by its surviving neighbours, both in one design and across a
 /// link, while numbered ties, split pieces, pattern copies and zero-overlap whole faces are

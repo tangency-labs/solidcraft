@@ -162,7 +162,7 @@ impl PanelController for StubController {
     }
 
     fn presentation(&self) -> PanelPresentation {
-        PanelPresentation { title: self.title.clone(), icon: "list".into(), status: None, attention: false, actions: Vec::new() }
+        PanelPresentation { title: self.title.clone(), icon: "list".into(), status: None, attention: false, actions: Vec::new(), menu_heading: None }
     }
 
     fn prepare_lifecycle(&self, _event: &LifecycleEvent) -> PanelResult<()> {
@@ -228,6 +228,7 @@ impl TestHost {
             features: PanelFeatures { closable: true, collapsible: true, popout: true, multi_instance: true, ..PanelFeatures::default() },
             side_height_policy: SideHeightPolicy::Content,
             fixed_bottom_height: None,
+            bottom_always_open: false,
             header_actions: Vec::new(),
             text_heavy: false,
         };

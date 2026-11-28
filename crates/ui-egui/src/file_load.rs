@@ -296,10 +296,10 @@ struct Running {
     rx: Receiver<Job>,
     phase: Arc<AtomicU8>,
     progress: Arc<Progress>,
-    preview_rx: Option<Receiver<egui::ColorImage>>,
-    preview: Option<egui::TextureHandle>,
+    preview_rx: Option<Receiver<crate::ui_kit::PreviewImage>>,
+    preview: Option<crate::ui_kit::PreviewTextures>,
     /// Pictures of the model as far as it is built (the picture, features built).
-    partial_rx: Option<Receiver<(egui::ColorImage, usize)>>,
+    partial_rx: Option<Receiver<(crate::ui_kit::PreviewImage, usize)>>,
     /// The picture shown is of the first this many features (`None`: the saved preview).
     built: Option<usize>,
     /// A STEP file read a piece per frame on this thread (the web app), instead of on a worker.
@@ -503,6 +503,7 @@ impl FileLoad {
                 _ => std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
             },
             steps: None,
+            importer_status: None,
             percent: false,
             queued: true,
             cancelled: false,
@@ -510,6 +511,7 @@ impl FileLoad {
         };
         let running = self.running.as_ref().map(|r| FileOperation {
             steps: steps(r),
+            importer_status: if r.cancelled() { None } else { importer_status(&r.progress) },
             percent: r.request.kind != Kind::UpdateLinks && work(r).is_some_and(|(stage, _, _)| crate::operations::bytes_stage(stage)),
             queued: false,
             cancelled: r.cancelled(),
@@ -534,6 +536,7 @@ pub(crate) struct FileOperation {
     pub command: &'static str,
     pub name: String,
     pub steps: Option<(usize, usize)>,
+    pub importer_status: Option<String>,
     /// The steps are bytes (the file being read).
     pub percent: bool,
     pub queued: bool,
@@ -727,8 +730,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             Kind::ExportDxf | Kind::ExportSheet => {
                 let (command, params) = request.command();
                 let r = app.run(command, params);
-                if r.is_ok() && !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                if let Ok(reply) = &r
+                    && !request.path.is_empty()
+                {
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), reply), false);
                 }
                 r
             }
@@ -1015,6 +1020,10 @@ fn start(app: &mut SolveApp) {
     } else {
         Session::default()
     };
+    // A view DXF without planes of its own is cut by the Section Analysis on show (#22913).
+    if request.kind == Kind::ExportDxf {
+        scratch.set_section_state(app.session.section_state());
+    }
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
@@ -1410,11 +1419,9 @@ fn step_opening(
 /// the finished model), or `None` when there is nothing to show yet, too much to draw, or the
 /// load ended meanwhile (`stop`).
 #[cfg(not(target_arch = "wasm32"))]
-fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -> bool) -> Option<egui::ColorImage> {
-    use solidcraft_engine::geom::Aabb3;
-    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
-    let mut scene = Scene::default();
-    let mut bounds = Aabb3::EMPTY;
+fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -> bool) -> Option<crate::ui_kit::PreviewImage> {
+    use solidcraft_viewport::{Rgb, SceneMesh};
+    let mut meshes = Vec::new();
     let mut triangles = 0usize;
     for body in &world.bodies {
         if stop() {
@@ -1425,29 +1432,17 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
         if triangles > 4_000_000 {
             return None;
         }
-        bounds = bounds.union(&mesh.bounds());
-        scene.meshes.push(SceneMesh::solid(mesh, Rgb(176, 186, 199)));
+        meshes.push(SceneMesh::solid(mesh, Rgb(176, 186, 199)));
     }
-    if bounds.is_empty() {
-        return None;
-    }
-    let mut camera = Camera::default();
-    camera.set_view(StandardView::Iso);
-    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
-    scene.radius = bounds.diagonal();
-    if stop() || !preview_work_fits(&scene, &camera) {
-        return None;
-    }
-    preview_image(&scene, &camera)
+    preview_image(meshes, |scene, camera| !stop() && preview_work_fits(scene, camera))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::ColorImage> {
+fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<crate::ui_kit::PreviewImage> {
     use solidcore_record::Vec3;
-    use solidcraft_engine::geom::{Aabb3, Mesh};
-    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
-    let mut scene = Scene::default();
-    let mut bounds = Aabb3::EMPTY;
+    use solidcraft_engine::geom::Mesh;
+    use solidcraft_viewport::{Rgb, SceneMesh};
+    let mut meshes = Vec::new();
     for cached in preview.meshes {
         let mut mesh = Mesh {
             positions: cached.positions.as_chunks::<3>().0.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect(),
@@ -1469,33 +1464,20 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
         for normal in &mut mesh.normals {
             *normal = normal.normalized().unwrap_or(Vec3::Z);
         }
-        bounds = bounds.union(&mesh.bounds());
         let [r, g, b] = cached.color.unwrap_or([0.69, 0.73, 0.78]).map(|c| (c * 255.0).round() as u8);
-        scene.meshes.push(SceneMesh::solid(Arc::new(mesh), Rgb(r, g, b)));
+        meshes.push(SceneMesh::solid(Arc::new(mesh), Rgb(r, g, b)));
     }
-    if bounds.is_empty() {
-        return None;
-    }
-    let mut camera = Camera::default();
-    camera.set_view(StandardView::Iso);
-    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
-    scene.radius = bounds.diagonal();
-    if !preview_work_fits(&scene, &camera) {
-        return None;
-    }
-    preview_image(&scene, &camera)
+    preview_image(meshes, preview_work_fits)
 }
 
-/// The preview picture, drawn on the GPU by the renderer the app installs (none: no picture).
+/// The loading preview's picture, drawn as every file preview is
+/// ([`solidcraft_engine::thumbnail`]).
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_image(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> Option<egui::ColorImage> {
-    match solidcraft_engine::capture::rgba(scene, camera, 320, 200) {
-        Ok(picture) => Some(egui::ColorImage::from_rgba_unmultiplied([320, 200], &picture.rgba)),
-        Err(e) => {
-            log::warn!("no preview picture: {e}");
-            None
-        }
-    }
+fn preview_image(
+    meshes: Vec<solidcraft_viewport::SceneMesh>,
+    fits: impl FnOnce(&solidcraft_viewport::Scene, &solidcraft_viewport::Camera) -> bool,
+) -> Option<crate::ui_kit::PreviewImage> {
+    solidcraft_engine::thumbnail::render_meshes(meshes, fits).map(|picture| crate::home::preview_image(&picture))
 }
 
 /// Bound drawing work as well as file size: repeated full-screen triangles (a hostile file) must
@@ -1624,14 +1606,14 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(running) = &mut app.file_load.running {
         if !running.cancelled() && running.matches(&app.session) {
             if let Some(image) = running.preview_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
-                running.preview = Some(ctx.load_texture("opening-preview", image, egui::TextureOptions::LINEAR));
+                running.preview = Some(crate::ui_kit::PreviewTextures::load(ctx, "opening-preview", image));
                 running.built = None;
             }
             // The model as far as it is built, unless the file's saved picture (all of it) is up.
             if let Some((image, built)) = running.partial_rx.as_ref().and_then(|rx| rx.try_iter().last())
                 && (running.preview.is_none() || running.built.is_some())
             {
-                running.preview = Some(ctx.load_texture("opening-preview", image, egui::TextureOptions::LINEAR));
+                running.preview = Some(crate::ui_kit::PreviewTextures::load(ctx, "opening-preview", image));
                 running.built = Some(built);
             }
         } else {
@@ -1868,7 +1850,7 @@ pub(crate) fn cancel_waiting(app: &mut SolveApp, serial: u64) {
     let running = app.file_load.waiting.remove(at);
     app.file_load.drop_warm(serial);
     crate::operations::ended(app, &format!("file:{serial}"), Outcome::Cancelled);
-    app.set_status("file operation cancelled", false);
+    app.set_status(solidcraft_ui_text::tr("file_load.cancelled"), false);
     running.request.answer(Err("file operation cancelled".into()));
 }
 
@@ -1886,12 +1868,12 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
         let request = &running.request;
         match job {
             Ok(made) if request.kind.exports() && request.print => {
-                crate::drawing_workspace::print::written(app, &request.path);
+                crate::drawing_workspace::print::written(app, &request.path, &made.result);
                 request.answer(Ok(made.result));
             }
             Ok(made) if request.kind.exports() && (!request.sheet_in_reply() || !running.cancelled()) => {
                 if !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), &made.result), false);
                 }
                 request.answer(Ok(made.result));
             }
@@ -2105,6 +2087,13 @@ pub(crate) fn phase(app: &SolveApp) -> Option<&'static str> {
 /// (the kernel's `converting`), then the model is built and shown; a design is read, its
 /// features rebuilt, then shown. `work` is the kernel's last report, which stays at its end
 /// once the step is over; `features` is (built, total).
+fn importer_status(progress: &solidcraft_engine::doc::progress::Progress) -> Option<String> {
+    progress.importer().map(|(plugin, preparing)| {
+        let key = if preparing { "file_load.plugin_preparing" } else { "file_load.plugin_importing" };
+        solidcraft_ui_text::format(key, &[("plugin", &plugin)])
+    })
+}
+
 fn load_steps(
     cad: bool,
     phase: u8,
@@ -2167,9 +2156,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let export = r.request.kind.exports();
     // What Cancel says once it has stopped the job.
     let stopped = match r.request.kind {
-        Kind::ExportDxf => solidcraft_ui_text::tr_label("dxf.cancelled"),
-        Kind::ExportSheet => solidcraft_ui_text::tr_label("drawing_export.cancelled"),
-        _ => "file operation cancelled",
+        Kind::ExportDxf => solidcraft_ui_text::tr("dxf.cancelled"),
+        Kind::ExportSheet => solidcraft_ui_text::tr("drawing_export.cancelled"),
+        _ => solidcraft_ui_text::tr("file_load.cancelled"),
     };
     let work = r.work().filter(|(_, d, t)| export || (phase == 0 && d < t));
     let screen = ctx.content_rect();
@@ -2231,7 +2220,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             if let Some(preview) = r.preview.as_ref().filter(|_| !cancelled) {
                 let w = ui.available_width();
-                ui.image((preview.id(), egui::vec2(w, w * 200.0 / 320.0)));
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(w, w * 200.0 / 320.0), egui::Sense::hover());
+                ui_kit::file_preview(ui, response.id.with("preview"), rect, Some(preview.art()), response.hovered(), 1.0);
                 let note = match r.built {
                     Some(built) => solidcraft_ui_text::format("file_load.built", &[("built", &built.to_string()), ("total", &total.to_string())]),
                     None => solidcraft_ui_text::tr("file_load.preview_note").to_string(),
@@ -2241,7 +2231,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             // An open or an import goes through three steps the card lists; the other operations
             // (and a cancelled one) say what they are doing in a line.
             let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
-            if stepped {
+            if let Some(status) = (!cancelled).then(|| importer_status(&r.progress)).flatten() {
+                ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);
+            } else if stepped {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
                 let (labels, current, detail) = load_steps(cad, phase, r.progress.work(), (done, total));
@@ -2334,6 +2326,7 @@ mod tests {
                 disabled: false,
                 groups: Default::default(),
                 entries: vec![entry],
+                declarations: Default::default(),
                 ribbon_groups: Vec::new(),
                 images: Default::default(),
                 swatches: Default::default(),
@@ -3189,7 +3182,8 @@ M30
             let base = app.session.doc.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             let (preview_tx, preview_rx) = std::sync::mpsc::channel();
-            preview_tx.send(egui::ColorImage::new([2, 2], vec![egui::Color32::RED; 4])).unwrap();
+            let picture = egui::ColorImage::new([2, 2], vec![egui::Color32::RED; 4]);
+            preview_tx.send(crate::ui_kit::PreviewImage { picture, shadow: None }).unwrap();
             app.file_load.running = Some(Running {
                 request: Request::new("old.solidcraft", if insert { Kind::Insert } else { Kind::Open }),
                 base,
@@ -3237,8 +3231,8 @@ M30
                 corner_normals: Default::default(),
             }],
         };
-        let picture = saved_picture(preview).unwrap();
-        assert_eq!(picture.size, [320, 200]);
+        let picture = saved_picture(preview).unwrap().picture;
+        assert_eq!(picture.size, solidcraft_engine::thumbnail::SIZE);
         assert!(picture.pixels.iter().any(|p| u16::from(p.r()) > u16::from(p.g()) * 2));
     }
 

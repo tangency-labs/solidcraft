@@ -207,6 +207,244 @@ fn off_message(off: Off, uv: [f64; 2]) -> EvalError {
     }
 }
 
+/// Whole-surface certified bounds for [`along`] on a [`super::spline::Nurbs`] net, computed once
+/// when the surface is built.
+///
+/// When `certified` holds, every control point of the net is finite, all weights share one sign
+/// and are certified non-zero against de Boor rounding (`min |w| > 2 γ_(12p+4) max |w|`), and
+/// both knot vectors are finite, non-decreasing, and end on a non-empty span. Then for each
+/// direction `d`, any iso-line along `d` over the whole knot range is guaranteed evaluable with
+/// one-signed finite weights and per-point rounding bound at most `err_bound[d]`, and its
+/// Euclidean diameter is guaranteed strictly larger than `reach + err` whenever
+/// `reach < non_collapsed_below[d]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct CollapseBounds {
+    pub(super) certified: bool,
+    pub(super) non_collapsed_below: [f64; 2],
+    pub(super) err_bound: [f64; 2],
+}
+
+impl CollapseBounds {
+    pub(super) const NONE: CollapseBounds = CollapseBounds {
+        certified: false,
+        non_collapsed_below: [0.0; 2],
+        err_bound: [f64::INFINITY; 2],
+    };
+
+    /// Compute whole-surface bounds for a NURBS net; returns [`Self::NONE`] whenever any
+    /// prerequisite (finite net, one-signed certified weights, valid non-decreasing knots) does
+    /// not hold.
+    pub(super) fn of(
+        degree: [usize; 2],
+        knots: &[Vec<f64>; 2],
+        count: [usize; 2],
+        ctrl: &[[f64; 4]],
+    ) -> CollapseBounds {
+        let [pu, pv] = degree;
+        let [nu, nv] = count;
+        if pu == 0
+            || pv == 0
+            || pu > MAX_SPLINE_DEGREE
+            || pv > MAX_SPLINE_DEGREE
+            || nu <= pu
+            || nv <= pv
+            || nu.checked_mul(nv) != Some(ctrl.len())
+            || knots[0].len() != nu + pu + 1
+            || knots[1].len() != nv + pv + 1
+        {
+            return Self::NONE;
+        }
+        let valid_knots = |k: &[f64], p: usize, n: usize| -> bool {
+            let finite = k.iter().all(|x| x.is_finite());
+            let mono = k
+                .windows(2)
+                .all(|w| w.first().zip(w.get(1)).is_some_and(|(a, b)| a <= b));
+            let range = match (k.first(), k.get(p), k.get(n - 1), k.get(n), k.last()) {
+                (Some(&first), Some(&lo), Some(&prev), Some(&hi), Some(&last)) => {
+                    lo < hi && prev < hi && (hi - lo).is_finite() && (last - first).is_finite()
+                }
+                _ => false,
+            };
+            finite && mono && range
+        };
+        if !valid_knots(&knots[0], pu, nu) || !valid_knots(&knots[1], pv, nv) {
+            return Self::NONE;
+        }
+        let Some(first_c) = ctrl.first() else {
+            return Self::NONE;
+        };
+        let sign = first_c[3] > 0.0;
+        let (mut w_min, mut w_max, mut x_max) = (f64::INFINITY, 0.0f64, 0.0f64);
+        for c in ctrl {
+            if !c.iter().all(|x| x.is_finite()) || c[3] == 0.0 || (c[3] > 0.0) != sign {
+                return Self::NONE;
+            }
+            let w = c[3].abs();
+            w_min = w_min.min(w);
+            w_max = w_max.max(w);
+            x_max = x_max.max(c[0].abs()).max(c[1].abs()).max(c[2].abs());
+        }
+        let mut err_bound = [0.0; 2];
+        let mut non_collapsed_below = [0.0; 2];
+        for d in 0..2 {
+            let o = 1 - d;
+            let po = degree.get(o).copied().unwrap_or(0);
+            let g = gamma(12 * po + 4);
+            let ew = g * w_max;
+            let ex = g * x_max;
+            if !(w_min > 2.0 * ew) {
+                return Self::NONE;
+            }
+            let p_bound = 3f64.sqrt() * (x_max + ex) / (w_min - ew);
+            let e_bound =
+                (3f64.sqrt() * ex + p_bound * ew) / (w_min - 2.0 * ew) + 2.0 * UNIT * p_bound;
+            if !(p_bound.is_finite() && e_bound.is_finite()) {
+                return Self::NONE;
+            }
+            if let Some(slot) = err_bound.get_mut(d) {
+                *slot = e_bound;
+            }
+            let pd = degree.get(d).copied().unwrap_or(0);
+            let nd = count.get(d).copied().unwrap_or(0);
+            let no = count.get(o).copied().unwrap_or(0);
+            let Some(kd) = knots.get(d) else {
+                return Self::NONE;
+            };
+            let Some((first_d, end_d, _, _)) = indices(pd, kd, nd, None) else {
+                return Self::NONE;
+            };
+            let mut min_hi = [f64::INFINITY; 3];
+            let mut max_lo = [f64::NEG_INFINITY; 3];
+            for j in first_d..=end_d {
+                let mut col_lo = [f64::INFINITY; 3];
+                let mut col_hi = [f64::NEG_INFINITY; 3];
+                for i in 0..no {
+                    let (iu, iv) = if d == 0 { (j, i) } else { (i, j) };
+                    let Some(c) = ctrl.get(iv * nu + iu) else {
+                        return Self::NONE;
+                    };
+                    let inv = 1.0 / c[3];
+                    let p = [c[0] * inv, c[1] * inv, c[2] * inv];
+                    if !p.iter().all(|x| x.is_finite()) {
+                        return Self::NONE;
+                    }
+                    for ((lo, hi), x) in col_lo.iter_mut().zip(col_hi.iter_mut()).zip(p) {
+                        *lo = lo.min(x);
+                        *hi = hi.max(x);
+                    }
+                }
+                for ((mh, ml), (ch, cl)) in min_hi
+                    .iter_mut()
+                    .zip(max_lo.iter_mut())
+                    .zip(col_hi.into_iter().zip(col_lo))
+                {
+                    *mh = mh.min(ch);
+                    *ml = ml.max(cl);
+                }
+            }
+            let sep = (0..3)
+                .map(|c| {
+                    max_lo
+                        .get(c)
+                        .zip(min_hi.get(c))
+                        .map_or(0.0, |(a, b)| (a - b).max(0.0))
+                })
+                .fold(0.0f64, f64::max);
+            let diag_lb = (sep - 2.0 * e_bound).max(0.0);
+            let err_floor = 2.0 * 3f64.sqrt() * e_bound / (1.0 - gamma(6));
+            if diag_lb > err_floor && diag_lb.is_finite() {
+                if let Some(slot) = non_collapsed_below.get_mut(d) {
+                    *slot = diag_lb;
+                }
+            }
+        }
+        CollapseBounds {
+            certified: true,
+            non_collapsed_below,
+            err_bound,
+        }
+    }
+}
+
+/// Precomputed knot span and de Boor weights for one parameter `t` along a knot vector: shared
+/// across all columns of an iso-line so the knot search and divisions run once per iso-line.
+struct DeBoorPlan {
+    p: usize,
+    first: usize,
+    g: f64,
+    alphas: [[f64; MAX_SPLINE_DEGREE + 1]; MAX_SPLINE_DEGREE],
+}
+
+impl DeBoorPlan {
+    fn new(p: usize, knots: &[f64], n: usize, t: f64) -> Result<DeBoorPlan, Off> {
+        if p > MAX_SPLINE_DEGREE || n <= p {
+            return Err(Off::Malformed);
+        }
+        let t = onto_knots(knots, p, n, t).ok_or(Off::Range)?;
+        let end = n.min(knots.len());
+        let k = match knots.get(p + 1..end) {
+            Some(after) => p + after.partition_point(|x| *x <= t),
+            None => p,
+        };
+        let first = k.checked_sub(p).ok_or(Off::Malformed)?;
+        let mut alphas = [[0.0f64; MAX_SPLINE_DEGREE + 1]; MAX_SPLINE_DEGREE];
+        for r in 1..=p {
+            let row = alphas.get_mut(r - 1).ok_or(Off::Malformed)?;
+            for j in r..=p {
+                let i = first.checked_add(j).ok_or(Off::Malformed)?;
+                let lo = *knots.get(i).ok_or(Off::Malformed)?;
+                let hi_at = i
+                    .checked_add(p + 1)
+                    .and_then(|x| x.checked_sub(r))
+                    .ok_or(Off::Malformed)?;
+                let span = *knots.get(hi_at).ok_or(Off::Malformed)? - lo;
+                if !(span > 0.0) {
+                    return Err(Off::Malformed);
+                }
+                *row.get_mut(j).ok_or(Off::Malformed)? = (t - lo) / span;
+            }
+        }
+        Ok(DeBoorPlan {
+            p,
+            first,
+            g: gamma(12 * p + 4),
+            alphas,
+        })
+    }
+
+    fn eval(&self, at: impl Fn(usize) -> Option<Hom>) -> Result<Hom, Off> {
+        let p = self.p;
+        let mut d = [Hom::default(); MAX_SPLINE_DEGREE + 1];
+        let (mut ex, mut ew, mut sx, mut sw) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        for (j, slot) in d.iter_mut().take(p + 1).enumerate() {
+            let q = at(self.first.checked_add(j).ok_or(Off::Malformed)?).ok_or(Off::Malformed)?;
+            ex = ex.max(q.ex);
+            ew = ew.max(q.ew);
+            sx = sx.max(q.h[0].abs()).max(q.h[1].abs()).max(q.h[2].abs());
+            sw = sw.max(q.h[3].abs());
+            *slot = q;
+        }
+        for r in 1..=p {
+            let row = self.alphas.get(r - 1).ok_or(Off::Malformed)?;
+            for j in (r..=p).rev() {
+                let a = *row.get(j).ok_or(Off::Malformed)?;
+                let prev = d
+                    .get(j.checked_sub(1).ok_or(Off::Malformed)?)
+                    .ok_or(Off::Malformed)?
+                    .h;
+                let cur = d.get_mut(j).ok_or(Off::Malformed)?;
+                for (c, q) in cur.h.iter_mut().zip(prev) {
+                    *c = (1.0 - a) * q + a * *c;
+                }
+            }
+        }
+        let mut out = *d.get(p).ok_or(Off::Malformed)?;
+        out.ex = ex + self.g * sx;
+        out.ew = ew + self.g * sw;
+        Ok(out)
+    }
+}
+
 /// The point at `t` of the homogeneous B-spline of degree `p` on `knots` over `n` control
 /// points given by `at` (each with its rounding), by de Boor's algorithm on a scratch array,
 /// with its rounding: the inputs' plus `γ_(12p+4)` of their largest coordinate (each of the `p`
@@ -218,58 +456,7 @@ fn de_boor(
     at: impl Fn(usize) -> Option<Hom>,
     t: f64,
 ) -> Result<Hom, Off> {
-    if p > MAX_SPLINE_DEGREE || n <= p {
-        return Err(Off::Malformed);
-    }
-    let t = onto_knots(knots, p, n, t).ok_or(Off::Range)?;
-    let last = n.checked_sub(1).ok_or(Off::Malformed)?;
-    let mut k = p;
-    while k < last
-        && knots
-            .get(k.checked_add(1).ok_or(Off::Malformed)?)
-            .is_some_and(|x| *x <= t)
-    {
-        k = k.checked_add(1).ok_or(Off::Malformed)?;
-    }
-    let first = k.checked_sub(p).ok_or(Off::Malformed)?;
-    let mut d = [Hom::default(); MAX_SPLINE_DEGREE + 1];
-    let (mut ex, mut ew, mut sx, mut sw) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    for (j, slot) in d.iter_mut().take(p + 1).enumerate() {
-        let q = at(first.checked_add(j).ok_or(Off::Malformed)?).ok_or(Off::Malformed)?;
-        ex = ex.max(q.ex);
-        ew = ew.max(q.ew);
-        sx = sx.max(q.h[0].abs()).max(q.h[1].abs()).max(q.h[2].abs());
-        sw = sw.max(q.h[3].abs());
-        *slot = q;
-    }
-    for r in 1..=p {
-        for j in (r..=p).rev() {
-            let i = first.checked_add(j).ok_or(Off::Malformed)?;
-            let lo = *knots.get(i).ok_or(Off::Malformed)?;
-            let hi_at = i
-                .checked_add(p + 1)
-                .and_then(|x| x.checked_sub(r))
-                .ok_or(Off::Malformed)?;
-            let span = *knots.get(hi_at).ok_or(Off::Malformed)? - lo;
-            if !(span > 0.0) {
-                return Err(Off::Malformed);
-            }
-            let a = (t - lo) / span;
-            let prev = d
-                .get(j.checked_sub(1).ok_or(Off::Malformed)?)
-                .ok_or(Off::Malformed)?
-                .h;
-            let cur = d.get_mut(j).ok_or(Off::Malformed)?;
-            for (c, q) in cur.h.iter_mut().zip(prev) {
-                *c = (1.0 - a) * q + a * *c;
-            }
-        }
-    }
-    let g = gamma(12 * p + 4);
-    let mut out = *d.get(p).ok_or(Off::Malformed)?;
-    out.ex = ex + g * sx;
-    out.ew = ew + g * sw;
-    Ok(out)
+    DeBoorPlan::new(p, knots, n, t)?.eval(at)
 }
 
 /// An iso-line's homogeneous control points, gathered: their Euclidean bounding box, the
@@ -351,16 +538,16 @@ fn indices(p: usize, knots: &[f64], n: usize, range: Option<(f64, f64)>) -> Opti
     let last = n.checked_sub(1)?;
     // The last span k in [p, n − 1] whose start is at or before t (`strict`: before t).
     let span = |t: f64, strict: bool| -> Option<usize> {
-        let mut k = p;
-        while k < last {
-            let next = *knots.get(k.checked_add(1)?)?;
-            if next < t || (!strict && next <= t) {
-                k = k.checked_add(1)?;
-            } else {
-                break;
-            }
+        if last < p {
+            return None;
         }
-        Some(k)
+        let after = knots.get(p + 1..n)?;
+        let count = if strict {
+            after.partition_point(|x| *x < t)
+        } else {
+            after.partition_point(|x| *x <= t)
+        };
+        Some(p + count)
     };
     let start = span(a, false)?;
     let first = start.checked_sub(p)?;
@@ -371,6 +558,9 @@ fn indices(p: usize, knots: &[f64], n: usize, range: Option<(f64, f64)>) -> Opti
 /// Whether the iso-line whose control points are `pts(j)`, `j` in the span's indices (degree
 /// `p` on `knots` over `n`, taken over the span's range), is one point, or within `reach`
 /// after a map that stretches by at most `scale` and shrinks by at least `floor` (module doc).
+/// When `early` is `Some(threshold)`, the caller certifies that every column in `first..=end` is
+/// finite with one-signed certified non-zero weights and that any partial bounding box with
+/// diagonal above `threshold` already guarantees `Ok(false)`.
 #[allow(clippy::too_many_arguments)]
 fn iso_line(
     p: usize,
@@ -381,10 +571,37 @@ fn iso_line(
     reach: f64,
     scale: f64,
     floor: f64,
+    early: Option<f64>,
 ) -> Result<bool, EvalError> {
     let mut row = Row::new();
-    for j in first..=end {
-        row.push(pts(j)?)?;
+    if let Some(threshold) = early {
+        row.push(pts(first)?)?;
+        if end > first {
+            row.push(pts(end)?)?;
+            if (row.hi - row.lo).len() > threshold {
+                return Ok(false);
+            }
+            let mid = first + (end - first) / 2;
+            if mid > first && mid < end {
+                row.push(pts(mid)?)?;
+                if (row.hi - row.lo).len() > threshold {
+                    return Ok(false);
+                }
+            }
+            for j in first + 1..end {
+                if j == mid {
+                    continue;
+                }
+                row.push(pts(j)?)?;
+                if (row.hi - row.lo).len() > threshold {
+                    return Ok(false);
+                }
+            }
+        }
+    } else {
+        for j in first..=end {
+            row.push(pts(j)?)?;
+        }
     }
     let (diag, err) = row.diameter();
     if diag <= err && !row.infinite {
@@ -522,10 +739,13 @@ pub fn iso_within(
                     .map(Hom::exact)
             };
             // The iso-line's control points: each column's point at t0, de Boor along o.
+            let plan = DeBoorPlan::new(po, ko, no, t0).map_err(|e| off_message(e, uv))?;
             let mut line = Vec::new();
+            line.try_reserve(nd)
+                .map_err(|_| refused("an iso-line allocation overflow"))?;
             let (mut ex, mut ew) = (0.0f64, 0.0f64);
             for j in 0..nd {
-                let h = de_boor(po, ko, no, |i| net(j, i), t0).map_err(|e| off_message(e, uv))?;
+                let h = plan.eval(|i| net(j, i)).map_err(|e| off_message(e, uv))?;
                 (ex, ew) = (ex.max(h.ex), ew.max(h.ew));
                 line.push(h.h);
             }
@@ -606,6 +826,17 @@ fn along(
                 knots.get(o).map_or(none, Vec::as_slice),
             );
             let t0 = q.get(o).copied().unwrap_or(f64::NAN);
+            let bounds = n.collapse_bounds();
+            if range.is_none()
+                && bounds.certified
+                && bounds
+                    .non_collapsed_below
+                    .get(d)
+                    .is_some_and(|&lim| reach < lim)
+            {
+                let _ = onto_knots(ko, po, no, t0).ok_or_else(|| off_message(Off::Range, uv))?;
+                return Ok(false);
+            }
             // Control point `along` (index along d) and `across` (along o) of the net.
             let net = |along: usize, across: usize| -> Option<Hom> {
                 let (i, j) = if d == 0 {
@@ -617,13 +848,23 @@ fn along(
                     .copied()
                     .map(Hom::exact)
             };
-            // The iso-line's control point j: its column's point at t0, de Boor along o.
-            let pts = |j: usize| -> Result<Hom, EvalError> {
-                de_boor(po, ko, no, |i| net(j, i), t0).map_err(|e| off_message(e, uv))
-            };
             let span = indices(pd, kd, nd, range)
                 .ok_or_else(|| malformed("a range off the spline, or knots that do not fit"))?;
-            iso_line(pd, kd, nd, span, &pts, reach, 1.0, 1.0)
+            // The knot span and de Boor weights at t0 depend only on t0 and ko: compute once for
+            // every column of the iso-line.
+            let plan = DeBoorPlan::new(po, ko, no, t0).map_err(|e| off_message(e, uv))?;
+            let pts = |j: usize| -> Result<Hom, EvalError> {
+                plan.eval(|i| net(j, i)).map_err(|e| off_message(e, uv))
+            };
+            let early = if bounds.certified {
+                let e_bound = bounds.err_bound.get(d).copied().unwrap_or(f64::INFINITY);
+                let err_floor = 2.0 * 3f64.sqrt() * e_bound / (1.0 - gamma(6));
+                let threshold = reach.max(err_floor);
+                threshold.is_finite().then_some(threshold)
+            } else {
+                None
+            };
+            iso_line(pd, kd, nd, span, &pts, reach, 1.0, 1.0, early)
         }
         EvalSurface::Revolved {
             profile,
@@ -661,7 +902,7 @@ fn along(
                 let span = indices(p, knots, ctrl.len(), range).ok_or_else(|| {
                     malformed("a range off the profile, or knots that do not fit")
                 })?;
-                iso_line(p, knots, ctrl.len(), span, &pts, reach, top, bottom)
+                iso_line(p, knots, ctrl.len(), span, &pts, reach, top, bottom, None)
             }
         }
     }

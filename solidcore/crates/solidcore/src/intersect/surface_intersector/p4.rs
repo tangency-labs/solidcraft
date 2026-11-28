@@ -399,6 +399,17 @@ pub trait IntersectorVirtuals<'s> {
     ) -> Result<SpanAccuracy> {
         self.intersector_mut().test_span_accuracy(k, point, next)
     }
+
+    /// Not upstream (#21179): whether the traced point `next` is the through point
+    /// `through` because the override's step landed on it, whatever the span's own test
+    /// says. The default has no such steps.
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn landed_on_through_point(&mut self, _next: TsectId, _through: TsectId) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 /// The basic `SmSurfaceIntersector` bodies.

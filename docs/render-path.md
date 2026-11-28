@@ -26,7 +26,7 @@ The path tracer runs on Vulkan, or on Metal on macOS (#3217). On Windows, the vi
 must already use Vulkan: opening a driver that startup deliberately avoided is unsafe.
 A Direct3D 12 session offers **Restart with Vulkan** in Render. The same saved choice is
 available in **Preferences > Graphics > Graphics API**. The host reads it before creating
-any adapter or device. Automatic starts Vulkan first on Windows.
+any adapter or device. Automatic leaves the choice to wgpu.
 Elsewhere, an unsupported viewport backend may reopen the same GPU through Vulkan or Metal.
 Where there is no suitable driver or device (Remote Desktop, WARP, older drivers), the path
 executor reports itself unavailable and CPU image methods remain usable.
@@ -77,9 +77,17 @@ production input. Final PNG and raw EXR remain identical with preview work disab
 to the installed GPU host and validates the captured production representation
 under a temporary bounded work reservation. Check creates no job and releases the
 reservation afterward. Start validates the same conversions and certificates before
-assigning its session/serial/generation identity. Begin currently rebuilds immutable
-uploads and optical certificates; no preparation cache or cross-scene proof reuse
-is claimed. Progress
+assigning its session/serial/generation identity. Each path device retains at most
+one immutable prepared geometry/BVH upload in a single-entry cache keyed by the
+exact SHA-256 content fingerprint of the captured meshes, appearances and optical
+properties, the camera-target rebase origin, and `nested_media`. Re-rendering the
+same geometry around the same camera target (orbit/zoom, exposure, tone-mapping,
+lighting, environment, denoiser, resolution or sample changes) reuses the uploaded
+geometry and BVH storage buffers directly and skips CPU BVH construction; any
+mismatch evicts the previous entry before building or uploading the replacement,
+and allocation failure or device loss clears the cache immediately. Preflight
+validation peeks the cache read-only on a hit without allocating or retaining GPU
+state on a miss. Progress
 reports complete samples per pixel; a partially computed sample is not counted.
 Cancel, status, retained-image ownership and atomic PNG export use the same host
 protocol as CPU jobs. Defaults are 64 samples, depth 8 and seed 0; the bounds are
@@ -129,9 +137,17 @@ image mode, not an automatic quality preset or a convergence certificate. Option
 `texture_filtering: true` enables the production mip/footprint sampler; omission
 preserves the original LOD0 behavior.
 
-Each job builds a BVH over its immutable captured meshes with a sixteen-bin
-surface-area heuristic on triangle centres; there is no cross-document cache to
-confuse scene generations. A split is accepted only when a median split of its
+Each distinct captured scene builds a BVH over its immutable meshes with a
+sixteen-bin surface-area heuristic on triangle centres, parallelized across CPU
+cores with Rayon for upper subtrees (at least 4,096 triangles, with parallel
+binning at or above 16,384 triangles) while producing the exact bit-for-bit
+identical node array and triangle permutation as the sequential build. A
+single-entry per-device preparation cache keyed by the full content SHA-256 of
+geometry, appearances and optics, the exact camera-target rebase origin, and
+`nested_media` reuses the immutable VRAM geometry and BVH buffers across
+repeated jobs with identical prepared inputs; CPU upload byte vectors are dropped
+immediately after upload, and any mismatch, error or device loss evicts the
+cached entry. A split is accepted only when a median split of its
 larger side would still keep the tree within 30 levels, the shader's 32-entry
 traversal stack; otherwise that node falls back to the median split. Traversal
 tests both child boxes at their parent and visits the nearer first. On the

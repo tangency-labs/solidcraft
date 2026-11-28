@@ -12,7 +12,7 @@ use solidcore_record::profile::line_family::MAX_DASHES;
 use solidcore_record::{Region2, Vec2};
 use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::services::profile::MAX_FAMILIES;
+use solidcraft_kernel::hatch::MAX_FAMILIES;
 use solidcraft_sketch::{CurveKind, Profile, find_profiles_checked};
 
 use super::hatch::{MAX_DESCRIPTION_CHARS, MAX_NAME_BYTES, Pattern};

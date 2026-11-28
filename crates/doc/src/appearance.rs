@@ -331,7 +331,7 @@ impl Document {
                     .bodies
                     .iter()
                     .filter(|b| owner(b) == id)
-                    .map(|b| self.materials.get(b.definition_name()).and_then(|m| self.material_look(m)));
+                    .map(|b| self.resolved_body_material(b.definition_name()).and_then(|m| self.material_look(m)));
                 let material = materials.next().flatten().filter(|first| materials.all(|look| look.as_ref() == Some(first)));
                 Ok(AppearanceChain { face: None, body: None, component: self.appearances.components.get(&id).cloned(), material })
             }
@@ -343,7 +343,7 @@ impl Document {
             face: None,
             body: self.appearances.bodies.get(name).cloned(),
             component: (component != 0).then(|| self.appearances.components.get(&component).cloned()).flatten(),
-            material: self.materials.get(name).and_then(|material| self.material_look(material)),
+            material: self.resolved_body_material(name).and_then(|material| self.material_look(material)),
         }
     }
 
@@ -593,7 +593,7 @@ mod tests {
             .iter()
             .map(|face| solidcraft_kernel::FacePaint { face: face.index, color: [1., 0., 0.], opacity: 0.5, name: None })
             .collect();
-        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: None })), 1)
+        crate::ModelBody::new("Imported".into(), body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: None, layer: None })), 1)
     }
 
     fn check_imported_appearance_precedence(body: &crate::ModelBody) {

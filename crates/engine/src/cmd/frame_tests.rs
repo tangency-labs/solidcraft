@@ -5460,19 +5460,20 @@ fn multi_trim_undoes() {
 
 #[test]
 fn the_gap_follows_its_parameter() {
-    // Review Focus 3. A mitred end set back by gap g loses g/√2 of length (half of g square to the 45° plane): the
+    // Review Focus 3. The parameter is `gap` because `g` is the gram unit.
+    // A mitred end set back by gap g loses g/√2 of length (half of g square to the 45° plane): the
     // frame's gap g everywhere, and 2g at the corner (0, 0) set with `frame.multi_trim`.
     let mut s = Session::default();
-    run(&mut s, "parameters.add", json!({"name": "g", "expression": "2 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "2 mm"}));
     rectangle_frame(&mut s);
     let (bottom, left) = (line_at_y(&s, "Frame", 0.0), line_at_x(&s, "Frame", 0.0));
     let (top, right) = (line_at_y(&s, "Frame", 400.0), line_at_x(&s, "Frame", 600.0));
     let names = json!({bottom.clone(): "B", left.clone(): "L", top: "T", right: "R"});
-    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": bar45(), "corner": "mitre", "gap": "g", "names": names, "name": "Rect"}));
-    run(&mut s, "frame.multi_trim", json!({"feature": "Rect", "members": [bottom, left], "kind": "mitre", "gap": "2 * g"}));
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": bar45(), "corner": "mitre", "gap": "gap", "names": names, "name": "Rect"}));
+    run(&mut s, "frame.multi_trim", json!({"feature": "Rect", "members": [bottom, left], "kind": "mitre", "gap": "2 * gap"}));
     let r2 = 2f64.sqrt();
     for g in [2.0, 4.0] {
-        run(&mut s, "parameters.change", json!({"name": "g", "expression": format!("{g} mm")}));
+        run(&mut s, "parameters.change", json!({"name": "gap", "expression": format!("{g} mm")}));
         let got = blrt(&mut s);
         for (k, (l, ends)) in [(600.0, 3.0 * g), (400.0, 3.0 * g), (600.0, 2.0 * g), (400.0, 2.0 * g)].into_iter().enumerate() {
             assert!(rel(got[k], 2025.0 * (l - ends / r2)) < 1e-6, "g {g}, {k}: {got:?}");
@@ -8451,19 +8452,19 @@ fn separate_curves_and_point_pairs_keep_none_member_identity_and_analytic_volume
 
 #[test]
 fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
-    use solidcraft_kernel::services::{FailureCode, session};
+    use solidcraft_kernel::runtime::{ErrorClass, FailureCode, take_failure_code};
     use solidcraft_kernel::{PathFailure, PathRefusal, orient_stock, stock_line};
 
-    let expected_code = FailureCode { call: "frame_member", kind: FailureCode::OPS, operation: "FrameMember" };
+    let expected_code = FailureCode { call: "frame_member", kind: FailureCode::OPS, operation: "FrameMember", class: ErrorClass::Unclassed };
     let origin = solidcore_record::Vec3::ZERO;
     let error = stock_line(origin, origin).unwrap_err();
     assert!(matches!(&error, PathFailure::Refused { why: PathRefusal::Line, .. }), "{error:?}");
     assert_eq!(error.to_string(), "the line has no length or has invalid coordinates");
-    assert_eq!(session::take_failure_code(), Some(expected_code));
+    assert_eq!(take_failure_code(), Some(expected_code));
 
     let first = stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
     let second = stock_line([20.0, 0.0, 0.0].into(), [30.0, 0.0, 0.0].into()).unwrap();
-    assert_eq!(session::take_failure_code(), None, "a successful query clears the previous refusal");
+    assert_eq!(take_failure_code(), None, "a successful query clears the previous refusal");
     let mut path = [first, second];
     let before = path;
     let error = orient_stock(&mut path).unwrap_err();
@@ -8471,10 +8472,10 @@ fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
     assert_eq!(*why, PathRefusal::Connection(1));
     assert_eq!(path, before, "a refused traversal leaves its input unchanged");
     assert_eq!(error.to_string(), "curve 1 is not connected end to end in path order; pick the curves in order along the path");
-    assert_eq!(session::take_failure_code(), Some(expected_code), "the code contains no curve index or model data");
+    assert_eq!(take_failure_code(), Some(expected_code), "the code contains no curve index or model data");
 
     stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
-    assert_eq!(session::take_failure_code(), None);
+    assert_eq!(take_failure_code(), None);
 }
 
 #[test]
@@ -9869,4 +9870,63 @@ fn saved_plate_planes_cannot_silently_ignore_a_wrapped_offset() {
     let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
     assert!(reopened.model.result(id).unwrap().error.as_deref().unwrap().contains("direct persistent planar face"));
     assert!(reopened.model.state().body("EndPlate").is_none());
+}
+
+#[test]
+fn an_angled_channel_brace_reaches_the_far_face_at_both_ends_fitted_in_its_frame_or_to_an_earlier_one() {
+    // A 2800 x 1000 frame of 150 x 75 channel, webs out, with two parallel braces from its top rail to its bottom one
+    // at about 32°: one in the frame's own feature (a T at each end), one in a second feature fitted to the first (Fit
+    // Ends), turned half round. Each end is square to its brace, so one side of it trails its line's end by 31.6; it
+    // must still reach across the rail's open side to the inside of its web (y 1031.5 and -31.5) at both ends. Only
+    // the line's end was reached before: the first brace stopped 12.1 short at the bottom rail, the second (not
+    // extended at all) 49.6 short there. With the frame set off its lines by an anchor (on either side), each section's
+    // corners are where the anchor puts them, and each brace still reaches the inside of each rail's web: measured as
+    // if centred, a trailing corner was missed.
+    let cases = [("0", None), ("180", None), ("0", Some("left")), ("0", Some("right")), ("180", Some("left")), ("180", Some("right"))];
+    for (angle, anchor) in cases {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [2800, 0]], "ids": ["l1"]}));
+        run(&mut s, "sketch.line", json!({"points": [[2800, 1000], [0, 1000]], "ids": ["l3"]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 1000], [0, 0]], "ids": ["l4"]}));
+        run(&mut s, "sketch.line", json!({"points": [[150, 1000], [1719.5, 0]], "ids": ["l5"]}));
+        run(&mut s, "sketch.line", json!({"points": [[1080.5, 1000], [2650, 0]], "ids": ["l6"]}));
+        run(&mut s, "sketch.line", json!({"points": [[780.5, 1000], [2350, 0]], "ids": ["l7"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let profile = json!({"kind": "channel", "height": 150, "width": 75, "web": 6, "flange": 9.5, "root_radius": 10});
+        let mut frame = json!({"sketch": "S", "profile": profile, "corner": "auto", "coped": true, "fit_ends": true});
+        if let Some(a) = anchor {
+            frame["anchor"] = json!(a);
+        }
+        let mut first = frame.clone();
+        first["lines"] = json!(["l3", "l4", "l1", "l5"]);
+        run(&mut s, "frame.member", first);
+        let mut second = frame;
+        (second["lines"], second["angle"]) = (json!([if anchor.is_some() { "l7" } else { "l6" }]), json!(angle));
+        run(&mut s, "frame.member", second);
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let bodies = m["bodies"].as_array().unwrap();
+        let at = |b: &Value, k: &str, i: usize| b["bbox"][k][i].as_f64().unwrap();
+        // By their length across the sketch: the rails' about 2800, the braces' about 1600, the post's its depth.
+        let wide = |b: &Value| at(b, "max", 0) - at(b, "min", 0);
+        let braces: Vec<&Value> = bodies.iter().filter(|b| (1000.0..2500.0).contains(&wide(b))).collect();
+        assert_eq!(braces.len(), 2, "{m}");
+        // The inside of each rail's web: 6 in from its outer side (webs out).
+        let rails: Vec<&Value> = bodies.iter().filter(|b| wide(b) > 2700.0).collect();
+        assert_eq!(rails.len(), 2, "{m}");
+        let bottom = rails.iter().map(|b| at(b, "min", 1)).fold(f64::INFINITY, f64::min) + 6.0;
+        let top = rails.iter().map(|b| at(b, "max", 1)).fold(f64::NEG_INFINITY, f64::max) - 6.0;
+        for b in &braces {
+            let (lo, hi) = (at(b, "min", 1), at(b, "max", 1));
+            assert!(
+                (lo - bottom).abs() < 1e-6 && (hi - top).abs() < 1e-6,
+                "angle {angle}, anchor {anchor:?}: {} spans y {lo} to {hi}, not {bottom} to {top}",
+                b["name"]
+            );
+        }
+        let vol = |b: &Value| b["volume_mm3"].as_f64().unwrap();
+        assert!(anchor.is_some() || (vol(braces[0]) - vol(braces[1])).abs() < 1e-3, "angle {angle}: the braces differ: {braces:?}");
+        let o = overlap_all(&mut s);
+        assert!(o < 1e-3, "angle {angle}, anchor {anchor:?}: the members overlap by {o} mm³");
+    }
 }

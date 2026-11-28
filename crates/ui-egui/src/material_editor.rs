@@ -51,7 +51,7 @@ impl Editor {
         let materials: Vec<_> = bodies
             .iter()
             .map(|body| {
-                let assigned = doc.materials.get(body).map(String::as_str).unwrap_or(solidcraft_engine::doc::DEFAULT_MATERIAL);
+                let assigned = doc.resolved_body_material(body).unwrap_or(solidcraft_engine::doc::DEFAULT_MATERIAL);
                 doc.material_name(assigned).filter(|name| doc.material_density(name).is_some())
             })
             .collect();

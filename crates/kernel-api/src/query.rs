@@ -1,7 +1,8 @@
 //! Exact queries of a body's record ([`Queries`]): points and tangents of its edges, where a point
 //! lies on its faces and which way they face, how far a point is from an edge, the faces a ray
 //! meets, the stretches of its edges on its outline. A record made ready for queries is the
-//! kernel's own form ([`Queries::Query`]), held by the router.
+//! kernel's own form ([`Queries::Query`]), held by the router; so is a face's exact surface
+//! ([`Queries::FaceSurface`]), which finds the point of it nearest a given point.
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::Brep;
@@ -19,6 +20,40 @@ pub struct OutlineStretch {
     pub ends: [Vec3; 2],
     /// It is the whole edge.
     pub whole: bool,
+}
+
+/// The point of a face's surface nearest a given point ([`Queries::face_surface_closest`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SurfacePoint {
+    /// Its (u, v), the face's.
+    pub uv: [f64; 2],
+    /// The point.
+    pub point: [f64; 3],
+    /// Its distance from the given point.
+    pub distance: f64,
+}
+
+/// Where a ray meets a face of a body (the router's `Body::face_hits_by_ray`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceHit {
+    /// The record face.
+    pub face: usize,
+    /// The point on the ray where it meets the face.
+    pub point: [f64; 3],
+    /// The distance from the ray's origin to the point, along the ray.
+    pub distance: f64,
+}
+
+/// The closest points of a curve or point and a body's chosen faces and edges, by the kernel's
+/// minimum-distance solve on the exact geometry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MembersClosest {
+    /// The solve's distance between the two points (a solve's, not certified).
+    pub distance: f64,
+    /// On the curve or point.
+    pub from: [f64; 3],
+    /// On the faces or edges.
+    pub to: [f64; 3],
 }
 
 /// A query the kernel refuses, in its words: a view not a finite unit vector, a size not
@@ -69,4 +104,14 @@ pub trait Queries: Backend {
     /// and point, nearest first; the first face it cannot meet exactly (a torus, a spline, a
     /// revolution or a blend) as the error.
     fn query_ray(&self, query: &Self::Query<'_>, o: Vec3, d: Vec3, accept: f64) -> Result<Vec<(f64, usize, Vec3)>, usize>;
+
+    /// A body face's exact surface, in the kernel's own form.
+    type FaceSurface: std::fmt::Debug;
+    /// Face `face` of `record`'s exact surface.
+    fn face_surface(&self, record: &Brep, face: usize) -> Result<Self::FaceSurface, QueryRefused>;
+    /// The face's parameter box, `[[u0, u1], [v0, v1]]`, in its own (u, v).
+    fn face_surface_domain(&self, surface: &Self::FaceSurface) -> [[f64; 2]; 2];
+    /// The point of the face's surface nearest `p`, from the guess `guess` (the face's (u, v)),
+    /// within the face's parameter box.
+    fn face_surface_closest(&self, surface: &Self::FaceSurface, p: [f64; 3], guess: [f64; 2]) -> Result<SurfacePoint, QueryRefused>;
 }

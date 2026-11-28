@@ -1,0 +1,1 @@
+| assets/platforms/windows/solidcraft-registry.wxi | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft (split out of solidcraft.wxs) | Apache-2.0 |

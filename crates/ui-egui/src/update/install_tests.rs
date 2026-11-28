@@ -50,7 +50,8 @@ fn signatures_must_match_the_key_the_list_and_the_release() {
 fn methods_per_installation() {
     let exe = Path::new("/x/solidcraft.exe");
     assert_eq!(method(&InstallKind::AppImage("/a/S.AppImage".into()), Some(exe)), Some(Method::AppImage("/a/S.AppImage".into())));
-    assert_eq!(method(&InstallKind::WindowsMsi, Some(exe)), Some(Method::Msi));
+    assert_eq!(method(&InstallKind::WindowsMsi, Some(exe)), Some(Method::Msi { per_user: false }));
+    assert_eq!(method(&InstallKind::WindowsMsiPerUser, Some(exe)), Some(Method::Msi { per_user: true }));
     assert_eq!(method(&InstallKind::WindowsPortable, Some(exe)), Some(Method::PortableZip(exe.into())));
     assert_eq!(method(&InstallKind::WindowsExe, Some(exe)), Some(Method::Exe(exe.into())));
     assert_eq!(method(&InstallKind::MacApp("/A/S.app".into()), Some(exe)), Some(Method::Dmg));
@@ -227,8 +228,23 @@ fn installers_and_disk_images_are_handed_over() {
     let pkg = dir.join("solidcraft-windows-x64.msi");
     std::fs::write(&pkg, b"msi").unwrap();
     assert_eq!(
-        apply(&Method::Msi, &pkg).unwrap(),
+        apply(&Method::Msi { per_user: false }, &pkg).unwrap(),
         Outcome::Installer("msiexec".into(), vec!["/i".into(), pkg.to_string_lossy().to_string(), "/passive".into(), "REBOOT=ReallySuppress".into()],)
+    );
+    // "Just for me": the same command in the per-user context.
+    assert_eq!(
+        apply(&Method::Msi { per_user: true }, &pkg).unwrap(),
+        Outcome::Installer(
+            "msiexec".into(),
+            vec![
+                "/i".into(),
+                pkg.to_string_lossy().to_string(),
+                "/passive".into(),
+                "REBOOT=ReallySuppress".into(),
+                "ALLUSERS=2".into(),
+                "MSIINSTALLPERUSER=1".into()
+            ],
+        )
     );
     assert_eq!(apply(&Method::Dmg, &pkg).unwrap(), Outcome::Opened(pkg.clone()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -255,7 +271,7 @@ fn windows_installer_is_followed_by_the_new_version() {
 #[test]
 fn windows_passive_update_always_suppresses_system_reboot() {
     let pkg = Path::new(r"C:\Users\a b\Temp\solidcraft-update\x.msi");
-    let Outcome::Installer(program, args) = apply(&Method::Msi, pkg).unwrap() else { panic!("expected MSI command") };
+    let Outcome::Installer(program, args) = apply(&Method::Msi { per_user: false }, pkg).unwrap() else { panic!("expected MSI command") };
     assert_eq!(program, PathBuf::from("msiexec"));
     assert_eq!(&args[0..3], ["/i", pkg.to_str().unwrap(), "/passive"]);
     assert!(args.iter().any(|arg| arg == "REBOOT=ReallySuppress"));

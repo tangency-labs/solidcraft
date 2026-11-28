@@ -484,13 +484,10 @@ fn issue_16735_the_volume_does_not_depend_on_the_origin() {
 }
 
 /// [`volume_does_not_depend_on_the_origin`] on the half-chamfered parts, whose chamfer face
-/// is evaluated by its definition. It fails today: at (1, 2) the volume about (0, 0, -100)
-/// reads 5.0e-7 below the one about the world origin, and the first moments differ by
-/// 2.6e-5 (#17778: suspected to be the clamped integration `Unclamped::where_trims_may_leave`
-/// documents for a face kind with no B-spline part). The fitted net these parts were built
-/// as before #16580 agreed to 1.9e-8 and 8.5e-7.
+/// is evaluated by its definition. At (1, 2) the volume about (0, 0, -100) read 5.0e-7 below
+/// the one about the world origin, and the first moments differed by 2.6e-5 (#17778); the
+/// fitted net these parts were built as before #16580 agreed to 1.9e-8 and 8.5e-7.
 #[test]
-#[ignore = "#17778: a procedural blend face's volume depends on the integration origin"]
 fn issue_16735_the_chamfered_volume_does_not_depend_on_the_origin() {
     for offsets in [(1.0, 2.0), (EQUAL, EQUAL)] {
         volume_does_not_depend_on_the_origin(Some(offsets));
@@ -619,10 +616,10 @@ fn crease_degrees(
         d[1][0].cross(d[0][1])
     };
     let (a, b) = (normal(before, true), normal(after, false));
-    (a.dot(b) / (a.length() * b.length()))
-        .clamp(-1.0, 1.0)
-        .acos()
-        .to_degrees()
+    // atan2 of the sine and the cosine, not the cosine's acos: near 0 the acos of a dot
+    // rounded one ulp short of 1 is already 8.5e-7 degrees (two ulps 1.2e-6), so a crease
+    // of none read as one at the 1e-6 bound
+    a.cross(b).length().atan2(a.dot(b)).to_degrees()
 }
 
 /// #16651: the half rim's chamfer with the rounds as their definitions. Where the chamfer

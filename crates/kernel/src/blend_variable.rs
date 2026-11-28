@@ -90,6 +90,24 @@ impl RadiusSpline {
         RadiusSpline { degree: 3, knots, radii }
     }
 
+    /// [`RadiusSpline::through`] (position, radius) points in any order, checked: 2 to 100 of
+    /// them, positions from 0 to 1 with both ends given (points at one position are one).
+    pub fn of_points(points: &[(f64, f64)], smooth: bool) -> Result<RadiusSpline> {
+        if points.len() < 2 || points.len() > 100 {
+            return Err(KernelError::Invalid("a variable radius needs 2…100 points".into()));
+        }
+        if points.iter().any(|(t, _)| !(t.is_finite() && (0.0..=1.0).contains(t))) {
+            return Err(KernelError::Invalid("radius positions run from 0 to 1 along the edge".into()));
+        }
+        let mut pts = points.to_vec();
+        pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-9);
+        if pts.first().map(|p| p.0) != Some(0.0) || pts.last().map(|p| p.0) != Some(1.0) || pts.len() < 2 {
+            return Err(KernelError::Invalid("give the radius at both ends of the edge".into()));
+        }
+        Ok(RadiusSpline::through(&pts, smooth))
+    }
+
     /// Greville abscissae: where each control radius sits along the edge.
     pub fn greville(&self) -> Vec<f64> {
         (0..self.radii.len()).map(|j| self.knots.iter().skip(j + 1).take(self.degree).sum::<f64>() / self.degree as f64).collect()
@@ -185,19 +203,7 @@ impl RadiusSpline {
 /// straight between them or `smooth`. One end's radius may be zero.
 pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &[(f64, f64)], smooth: bool) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_variable_points");
-    if points.len() < 2 || points.len() > 100 {
-        return Err(KernelError::Invalid("a variable radius needs 2…100 points".into()));
-    }
-    if points.iter().any(|(t, _)| !(t.is_finite() && (0.0..=1.0).contains(t))) {
-        return Err(KernelError::Invalid("radius positions run from 0 to 1 along the edge".into()));
-    }
-    let mut pts = points.to_vec();
-    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
-    pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-9);
-    if pts.first().map(|p| p.0) != Some(0.0) || pts.last().map(|p| p.0) != Some(1.0) || pts.len() < 2 {
-        return Err(KernelError::Invalid("give the radius at both ends of the edge".into()));
-    }
-    fillet_variable_spline(body, edge_at, start, &RadiusSpline::through(&pts, smooth))
+    fillet_variable_spline(body, edge_at, start, &RadiusSpline::of_points(points, smooth)?)
 }
 
 /// Fillet one edge with the radius `spline` along it, its positions from the end nearest
@@ -211,6 +217,27 @@ pub fn fillet_variable_spline(body: &Body, edge_at: Vec3, start: Vec3, spline: &
         return Err(KernelError::Invalid("the edge pick and the start point must be finite".into()));
     }
     crate::blend_smlib::fillet_variable(body, edge_at, start, spline)
+}
+
+/// Fillet the edges at `edges`, one tangent chain (as [`crate::tangent_chain`] gives it), with
+/// one radius `spline` along the whole chain: 0 at the chain's end nearest `start`, 1 at its
+/// other end, each edge taking the part its share of the chain's length gives, so the radius
+/// agrees where two edges meet. One end's radius may be zero. A closed chain, or edges that do
+/// not join end to end, are not supported, and a round SMLib's check refuses is refused.
+pub fn fillet_variable_spline_chain(body: &Body, edges: &[Vec3], start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_variable_spline_chain");
+    body.require_brep("fillet")?;
+    spline.check()?;
+    if edges.is_empty() || !(edges.iter().all(|p| p.is_finite()) && start.is_finite()) {
+        return Err(KernelError::Invalid("the edge picks and the start point must be finite, and at least one edge picked".into()));
+    }
+    let made = crate::blend_smlib::fillet_variable_chain(body, edges, start, spline)?;
+    // SMLib can build a law that varies along a chain through a curved edge with its round's
+    // edges off its surfaces; refused here, so a caller can round the picked edge alone instead
+    if let Some(failure) = crate::validation::failing_check(&made)? {
+        return Err(KernelError::Failed(format!("SMLib's check refuses the round along the chain: {failure}")));
+    }
+    Ok(made)
 }
 
 /// A straight edge between two planar faces as the variable blend sees it: the body's record,

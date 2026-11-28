@@ -570,7 +570,7 @@ fn run_side_edge_on_along_its_line(
     };
     // The fork's tangency-labs/smlib@779cb9b: so does a straight side edge on a cylinder or
     // cone, a ruling of it (its UV trim a line): the surface continues as itself past its
-    // domain (`offset_extension_as_itself`), along that line. A closed rim's seam is one: a
+    // domain (it extends as itself, WR-633), along that line. A closed rim's seam is one: a
     // disc's rim rounded past its 2 mm wall meets the seam's line below the wall.
     let uv_linear = uv_trim.is_linear(k, EFF_ZERO, false)?.linear;
     if !(side_3d.is_linear(k, EFF_ZERO, false)?.linear

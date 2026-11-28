@@ -134,6 +134,10 @@ pub struct AddParams {
     /// More leaders, for a note on a view: 16 leaders in all, its anchor's included.
     #[serde(default)]
     pub branches: Vec<BranchParam>,
+    /// Where an edge anchor's leader ends on the edge: `middle` (the default) or `picked`, the
+    /// edge's `point`. Branches end on their edges' middles.
+    #[serde(default)]
+    pub at_edge: super::drawing_balloon::AtEdge,
 }
 
 /// What `drawing.note.inspect` takes.

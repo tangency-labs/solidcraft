@@ -1,0 +1,32 @@
+{
+  "ar": {
+    "file_load.cancelled": "أُلغيت عملية الملف"
+  },
+  "de": {
+    "file_load.cancelled": "Dateivorgang abgebrochen"
+  },
+  "en": {
+    "file_load.cancelled": "File operation canceled"
+  },
+  "en-GB": {
+    "file_load.cancelled": "File operation cancelled"
+  },
+  "he": {
+    "file_load.cancelled": "פעולת הקובץ בוטלה"
+  },
+  "ja": {
+    "file_load.cancelled": "ファイル操作をキャンセルしました"
+  },
+  "ko": {
+    "file_load.cancelled": "파일 작업이 취소되었습니다"
+  },
+  "ru": {
+    "file_load.cancelled": "Операция с файлом отменена"
+  },
+  "vi": {
+    "file_load.cancelled": "Đã hủy thao tác với tệp"
+  },
+  "zh": {
+    "file_load.cancelled": "文件操作已取消"
+  }
+}

@@ -8,7 +8,14 @@ use super::*;
 const LINE_MM: f64 = 0.25;
 
 fn balloon(at: [f64; 2]) -> Balloon {
-    Balloon { id: 7, view: 8, edge: ModelEdge { body: "B".into(), origin_feature: 1, name: "e".into(), path: vec![1] }, at, parts_list: None }
+    Balloon {
+        id: 7,
+        view: 8,
+        edge: ModelEdge { body: "B".into(), origin_feature: 1, name: "e".into(), path: vec![1] },
+        at,
+        parts_list: None,
+        along: None,
+    }
 }
 
 /// `balloon` showing `item`, in the built-in font, in English.

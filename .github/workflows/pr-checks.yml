@@ -2,6 +2,8 @@
 # for an issue a lower-numbered one already closes, the "Changes a default:" line is filled in, a PR
 # adding to the showcase shows a picture, and a kernel fix that changes or deletes existing test or
 # golden lines says why on a "Test change:" line. None is a required status check. The logic is in scripts/pr-checks/pr-checks.js (tested in ci.yml).
+# They run as steps of one job (this workflow fires on every label change and edit, so one runner instead of five);
+# each check step carries on past a failure and the last step fails the job, naming the checks that failed.
 name: PR checks
 
 on:
@@ -20,83 +22,85 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  duplicate:
-    name: Duplicate PR check
+  checks:
+    name: PR checks
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts/pr-checks
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const checks = require('./scripts/pr-checks/pr-checks.js');
-            const r = await checks.checkDuplicate({ github, context, core });
-            core.info(JSON.stringify(r));
-
-  defaults:
-    name: Defaults line check
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts/pr-checks
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const checks = require('./scripts/pr-checks/pr-checks.js');
-            const r = await checks.checkDefaults({ github, context, core });
-            core.info(JSON.stringify(r));
-
-  picture:
-    name: Picture check
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts/pr-checks
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const checks = require('./scripts/pr-checks/pr-checks.js');
-            const r = await checks.checkPicture({ github, context, core });
-            core.info(JSON.stringify(r));
-
-  test-change:
-    name: Test change check
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts/pr-checks
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const checks = require('./scripts/pr-checks/pr-checks.js');
-            const r = await checks.checkTestChange({ github, context, core });
-            core.info(JSON.stringify(r));
-
-  # Labelling needs write access, which a fork PR's token never has, so it is its own job and best
-  # effort: a fork PR just doesn't get the `changes-default` label from here.
-  label:
-    name: Label changes-default
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    continue-on-error: true
+    timeout-minutes: 10
     permissions:
       contents: read
+      # only for the changes-default label step; a fork PR's token stays read-only whatever this says
       pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: scripts/pr-checks
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - name: Duplicate PR check
+        id: duplicate
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkDuplicate({ github, context, core });
+            core.info(JSON.stringify(r));
+      - name: Defaults line check
+        id: defaults
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkDefaults({ github, context, core });
+            core.info(JSON.stringify(r));
+      - name: Picture check
+        id: picture
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkPicture({ github, context, core });
+            core.info(JSON.stringify(r));
+      - name: Test change check
+        id: test-change
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkTestChange({ github, context, core });
+            core.info(JSON.stringify(r));
+      # Labelling needs write access, which a fork PR's token never has, so it is best effort and never
+      # fails the job: a fork PR just doesn't get the `changes-default` label from here.
+      - name: Label changes-default
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const checks = require('./scripts/pr-checks/pr-checks.js');
             await checks.syncDefaultLabel({ github, context, core });
+      - name: Summary
+        if: always()
+        env:
+          DUPLICATE: ${{ steps.duplicate.outcome }}
+          DEFAULTS: ${{ steps.defaults.outcome }}
+          PICTURE: ${{ steps.picture.outcome }}
+          TEST_CHANGE: ${{ steps.test-change.outcome }}
+        run: |
+          failed=()
+          {
+            echo '| Check | Result |'
+            echo '| --- | --- |'
+            for pair in "Duplicate PR check=$DUPLICATE" "Defaults line check=$DEFAULTS" "Picture check=$PICTURE" "Test change check=$TEST_CHANGE"; do
+              name=${pair%%=*}; outcome=${pair#*=}
+              echo "| $name | ${outcome:-not run} |"
+              [ "$outcome" = success ] || failed+=("$name")
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ ${#failed[@]} -gt 0 ]; then
+            list=$(printf '%s, ' "${failed[@]}"); list=${list%, }
+            echo "::error title=PR checks::Failed: $list. The step of the same name above says why and what to change."
+            exit 1
+          fi
+          echo "All four checks passed."

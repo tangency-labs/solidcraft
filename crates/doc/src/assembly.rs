@@ -66,11 +66,12 @@ pub fn is_identity(m: &Mat) -> bool {
     m.iter().flatten().zip(IDENTITY.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-12)
 }
 
+pub(crate) use solidcraft_kernel::affine::linear_determinant;
+
 /// Inverse of an affine transform.
 pub fn mat_inverse(m: &Mat) -> Option<Mat> {
     let a = |r: usize, c: usize| m[c][r];
-    let det = a(0, 0) * (a(1, 1) * a(2, 2) - a(1, 2) * a(2, 1)) - a(0, 1) * (a(1, 0) * a(2, 2) - a(1, 2) * a(2, 0))
-        + a(0, 2) * (a(1, 0) * a(2, 1) - a(1, 1) * a(2, 0));
+    let det = linear_determinant(m);
     if det.abs() < 1e-14 || !det.is_finite() {
         return None;
     }
@@ -579,6 +580,16 @@ impl FeatureKind {
             // An Emboss cylinder is picked in its component's frame (`EmbossFace`).
             Geo::Pinned(_) | Geo::Profiles(..) => {}
         });
+        // A transform copied or transferred with its body carries its displacement as a
+        // vector, not a position. Reflecting its rotation reverses the sense of its axis.
+        if let FeatureKind::TransformFace { translate, rotate_axis, .. } = self
+            && m[..3] != IDENTITY[..3]
+        {
+            map_vector_expr(m, translate);
+            if linear_determinant(m) < 0.0 {
+                rotate_axis.0 = -rotate_axis.0;
+            }
+        }
     }
 }
 
@@ -843,8 +854,12 @@ impl Document {
         let mut out = Vec::new();
         let owners = self.model_body_components(st);
         let names = WorldNames::new(self, st);
+        let mut by_component: std::collections::HashMap<u64, Vec<_>> = std::collections::HashMap::new();
+        for (b, owner) in st.bodies.iter().zip(&owners) {
+            by_component.entry(*owner).or_default().push(b);
+        }
         for (comp, path, m) in self.placements() {
-            for (b, _) in st.bodies.iter().zip(&owners).filter(|(_, owner)| **owner == comp) {
+            for b in by_component.get(&comp).into_iter().flatten().copied() {
                 let name = names.name(&b.name, comp, &path);
                 let w = match self.model_body_offset(b) {
                     Some(o) => mat_mul(&m, o),
@@ -1104,7 +1119,7 @@ impl Document {
 }
 
 /// The most occurrences a design holds.
-const MAX_OCCURRENCES: usize = 100_000;
+pub(crate) const MAX_OCCURRENCES: usize = 100_000;
 
 /// Is `a` inside `b` (or `b` itself), following each component up to the one it was created in?
 /// `parent_of` gives that parent, `None` for an unknown component. The walk stops after 1000

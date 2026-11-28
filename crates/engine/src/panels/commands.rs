@@ -152,7 +152,7 @@ impl CatalogueState {
         }
         let mut metadata = 0_usize;
         for (id, item) in &self.workspaces {
-            valid_id(&id.0)?;
+            valid_workspace_id(&id.0)?;
             valid_id(&item.title_key)?;
             if item.id != *id || !self.builtins.contains_key(&item.default_preset) {
                 return Err(error(Rule::MissingTarget, "workspace requires a registered immutable default"));
@@ -172,7 +172,7 @@ impl CatalogueState {
             bytes = bytes.saturating_add(stored.bytes.len() + stored.rejected.as_ref().map_or(0, |r| r.len()));
         }
         for (id, stored) in &self.remembered {
-            valid_id(&id.0)?;
+            valid_workspace_id(&id.0)?;
             metadata = metadata.saturating_add(id.0.len());
             bytes = bytes.saturating_add(stored.bytes.len() + stored.rejected.as_ref().map_or(0, |r| r.len()));
         }
@@ -245,7 +245,7 @@ impl InMemoryCatalogue {
         Ok(())
     }
     pub fn register_workspace(&mut self, mut descriptor: WorkspaceDescriptor) -> PanelResult<()> {
-        valid_id(&descriptor.id.0)?;
+        valid_workspace_id(&descriptor.id.0)?;
         valid_id(&descriptor.title_key)?;
         if self.state.workspaces.contains_key(&descriptor.id) {
             return Err(error(Rule::DuplicateId, "workspace already registered"));
@@ -429,7 +429,7 @@ fn validate_selector(target: &Option<wire::Target>, id: &Option<String>) -> Pane
             wire::Target::Instance(id) => valid_id(&id.0),
             wire::Target::Section(id) => valid_id(&id.0),
             wire::Target::Column(id) => valid_id(&id.0),
-            wire::Target::Workspace(id) => valid_id(&id.0),
+            wire::Target::Workspace(id) => valid_workspace_id(&id.0),
             wire::Target::NativeHost(id) => valid_id(&id.0),
         },
         (None, Some(id)) => valid_id(id),
@@ -509,7 +509,7 @@ fn validate_command(command: &PanelCommand) -> PanelResult<()> {
         PanelCommand::Delete(p) => {
             preset_name(&p.name)?;
         }
-        PanelCommand::Workspace(p) => valid_id(&p.workspace.0)?,
+        PanelCommand::Workspace(p) => valid_workspace_id(&p.workspace.0)?,
         _ => {}
     }
     Ok(())

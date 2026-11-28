@@ -1658,6 +1658,17 @@ mod tests {
         assert!(sew(&hostile).unwrap_err().to_string().contains("budget"));
     }
 
+    /// Two boxes sharing a face touch face to face: at each edge of that face two faces leave
+    /// the same way and lie on each other, so which faces bound which box there is ambiguous. The
+    /// touching sew refuses that rather than guess (a sheet's fold must never hand it such faces).
+    #[test]
+    fn faces_lying_on_each_other_at_an_edge_are_refused_as_ambiguous() {
+        let mut faces = box_faces(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0));
+        faces.extend(box_faces(Vec3::X * 2.0, Vec3::new(2.0, 3.0, 4.0)));
+        let e = sew_touching_traced(&faces).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("ambiguous edge contact"), "{e}");
+    }
+
     #[test]
     fn flat_arcs_far_from_the_origin_keep_their_ends_and_their_faces_planes() {
         // A 12 x 30 x 2 slab 1000 mm out whose y = 0 side bows 0.00008 mm (a 225 m radius).

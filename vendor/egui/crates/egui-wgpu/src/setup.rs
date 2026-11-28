@@ -151,9 +151,8 @@ impl From<WgpuSetupExisting> for WgpuSetup {
 ///
 /// This can be used for fully custom adapter selection.
 /// If available, `wgpu::Surface` is passed to allow checking for surface compatibility.
-/// Return `Ok(None)` to use the normal wgpu adapter request.
 pub type NativeAdapterSelectorMethod = Arc<
-    dyn Fn(&[wgpu::Adapter], Option<&wgpu::Surface<'_>>) -> Result<Option<wgpu::Adapter>, String>
+    dyn Fn(&[wgpu::Adapter], Option<&wgpu::Surface<'_>>) -> Result<wgpu::Adapter, String>
         + Send
         + Sync,
 >;
@@ -190,13 +189,13 @@ pub struct WgpuSetupCreateNew {
     /// `eframe` 's winit & web integrations will attempt to fill the display handle automatically if it is left empty.
     pub display_handle: Option<Box<dyn EguiDisplayHandle>>,
 
-    /// Power preference when the selector is absent, returns `Ok(None)`, or when targeting web.
+    /// Power preference for the adapter if [`Self::native_adapter_selector`] is not set or targeting web.
     pub power_preference: wgpu::PowerPreference,
 
     /// Optional selector for native adapters.
     ///
     /// This field has no effect when targeting web!
-    /// Otherwise, this method can select an adapter or return `Ok(None)` to request one with [`Self::power_preference`].
+    /// Otherwise, if set [`Self::power_preference`] is ignored and the adapter is instead selected by this method.
     /// Note that [`Self::instance_descriptor`]'s [`wgpu::InstanceDescriptor::backends`]
     /// are still used to filter the adapter enumeration in the first place.
     ///
@@ -270,20 +269,9 @@ impl WgpuSetupCreateNew {
                     required_limits: wgpu::Limits {
                         // When using a depth buffer, we have to be able to create a texture
                         // large enough for the entire surface, and we want to support 4k+ displays.
-                        // SolidCraft: ask for all the adapter offers (16384 on most desktop GPUs),
-                        // never less than 8192, so a window spanning large monitors still fits.
-                        max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.max(8192),
+                        max_texture_dimension_2d: 8192,
                         ..base_limits
-                    }
-                    // SolidCraft: never ask for more than the adapter offers. Older drivers
-                    // (Debian 11's Mesa 20.3, for one) report less than wgpu's defaults, e.g.
-                    // 2 colour attachments, and requesting the defaults refused the device so no
-                    // window opened. A GPU at or above the defaults gets the same request as before.
-                    .or_worse_values_from(&adapter.limits()),
-                    // SolidCraft: without it only the sample counts WebGPU guarantees (1x, 4x)
-                    // are allowed, even where the adapter supports 2x and 8x.
-                    required_features: adapter.features()
-                        & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                    },
                     ..Default::default()
                 }
             }),

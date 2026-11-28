@@ -279,7 +279,26 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let near = |k: usize, p: Vec3| near_with(&own_ends, k, p);
     let tool = |k: usize| member_tool(&segments, &regions, &placed, &own_ends, k, coped, gap);
     let fitting = grown_earlier.as_deref().unwrap_or(&earlier);
-    fit_to_earlier(&mut made, &segments, &unjointed, fitting, &mut Own { laid, near: &near, tool: &tool, tools }, &middle, &crossed)?;
+    // An open section's end fitted to an earlier member is square to its own line, so at an angle one side trails the
+    // line's end: built on until each corner of its section box has left the far side of the room the earlier member
+    // takes ([`open_reach`]), then cut to that member's shape as any fit is.
+    let open = frame_multi_trim::is_open(&regions).then(|| frame_multi_trim::box_corners(&regions));
+    let extend = |m: usize, at_start: bool, member: &Traced| -> Result<Traced> {
+        let (Some(corners), Some((id, a, b))) = (open.as_ref(), segments.get(m)) else { return Ok(member.clone()) };
+        let reach = open_reach((*a, *b), at_start, &placed(m, if at_start { *a } else { *b }), corners, &earlier_reach)?;
+        if reach <= 0.0 {
+            return Ok(member.clone());
+        }
+        let plane = placed(m, *a);
+        let length = a.dist(*b);
+        let span = if at_start { (-reach, 0.0) } else { (length, length + reach) };
+        let more = member_body(plane, unreversed(m, *a), &regions, *b - *a, span, id)?;
+        Ok(match kernel::boolean(&member.body, &more.body, BoolOp::Union)? {
+            Some(joined) => Traced::step(joined, &[member, &more]),
+            None => member.clone(),
+        })
+    };
+    fit_to_earlier(&mut made, &segments, &unjointed, fitting, &mut Own { laid, near: &near, tool: &tool, tools }, (&middle, &extend), &crossed)?;
     let mut split = if resolving {
         // How far each member reaches from its line: its section, and its ends built past the line's.
         let section = ats.iter().map(|at| section_reach(&regions, *at)).fold(0.0, f64::max);
@@ -1466,6 +1485,10 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
     let (end, toward) = if f.at_start { (*a, *a - *b) } else { (*b, *b - *a) };
     let length = a.dist(*b);
     let corners = frame_multi_trim::box_corners(regions);
+    // The end is square to the member, so at an angle one side of it trails the line's end: every point of the
+    // member's own section box runs on until it too leaves the far side, and the end reaches the farthest of them.
+    let own = placed(f.member, end);
+    let sections: Vec<[Vec3; 4]> = corners.as_chunks::<4>().0.iter().map(|r| r.map(|q| own.to_world(q))).collect();
     let reach = f
         .against
         .iter()
@@ -1473,16 +1496,28 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
             let (_, c, d) = segments.get(t)?;
             let at = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d).1;
             let plane = placed(t, at);
-            let exits = corners
+            corners
                 .as_chunks::<4>()
                 .0
                 .iter()
-                .filter_map(|r| solidcraft_kernel::services::section_corners::exit_through_box(end, toward, r.map(|q| plane.to_world(q))));
-            exits.reduce(f64::max)
+                .filter_map(|r| solidcraft_kernel::planar::reach_through_box(end, toward, &sections, r.map(|q| plane.to_world(q))))
+                .reduce(f64::max)
         })
         .fold(0.0, f64::max);
     // Never more than the member's own length: a far side that far off is no joint this end makes.
     if reach.is_finite() { reach.clamp(0.0, length) } else { 0.0 }
+}
+
+/// How far past its line's end (`at_start`: its start) a member on `line` is built to fit the earlier members (`earlier`,
+/// each its line and the room its section takes about it) on an open section: until every point of its own section box
+/// (`corners`, four to a box, placed square to the line at that end by `own`) has left the far side of the room of an
+/// earlier member the end lies in (a point along an edge can leave a round room later than the corners). At most the
+/// member's length; 0 where the end meets none.
+fn open_reach((a, b): (Vec3, Vec3), at_start: bool, own: &Plane, corners: &[Vec2], earlier: &[Reach]) -> Result<f64> {
+    let (end, toward) = if at_start { (a, a - b) } else { (b, b - a) };
+    let sections: Vec<[Vec3; 4]> = corners.as_chunks::<4>().0.iter().map(|r| r.map(|q| own.to_world(q))).collect();
+    solidcraft_kernel::planar::reach_through_rounds(end, toward, &sections, earlier, a.dist(b))
+        .map_err(|e| DocError::Invalid(format!("how far a fitted end reaches can't be measured: {e}")))
 }
 
 /// Auto's ends (#4003 spec A4-A6), as [`corner_ends`] gives stage 1's, and the ends cut to fit, in laying order:
@@ -1844,7 +1879,7 @@ fn fit_to_earlier(
     ends: &[(usize, bool, bool)],
     earlier: &[(String, Traced)],
     own: &mut Own,
-    middle: &dyn Fn(usize) -> Vec3,
+    (middle, extend): (&dyn Fn(usize) -> Vec3, &dyn Fn(usize, bool, &Traced) -> Result<Traced>),
     crossed: &[bool],
 ) -> Result<()> {
     let named = |role: &str, name: &str, body: &kernel::Body| {
@@ -1874,6 +1909,14 @@ fn fit_to_earlier(
         let against: Vec<&Traced> = against.iter().collect();
         let slot = made.get_mut(m).ok_or_else(|| DocError::Invalid(format!("no member {m}")))?;
         let Some(member) = slot.as_ref() else { continue };
+        // A free end fitted to an earlier member reaches its far side first (an open section at an angle).
+        let reached;
+        let member = if free && !earlier.is_empty() {
+            reached = extend(m, at_start, member)?;
+            &reached
+        } else {
+            member
+        };
         *slot = if crossed.get(m) == Some(&true) {
             frame_multi_trim::fit_piece_end(member, end, toward, middle(m), &against, id)?
         } else {
@@ -2949,7 +2992,7 @@ fn round_record(
 ) -> Result<Option<crate::frame_cope::RoundMember>> {
     use crate::frame_cope::{Bounds, RoundMember, Terminal};
     use solidcore_record::frame::Segment;
-    use solidcraft_kernel::services::tube_cope;
+    use solidcraft_kernel::tube_cope;
     let MemberProfile::Library { profile } = profile else { return Ok(None) };
     let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e, kind| val(vals, e, kind))? else { return Ok(None) };
     // An off-centre circular profile sweeps about a different centreline at a bend.

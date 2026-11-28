@@ -987,6 +987,7 @@ fn with_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn o() -> Point3 {
         Point3::new(0.0, 0.0, 0.0)
@@ -1137,7 +1138,7 @@ mod tests {
         let mut whole = create_torus(k, o(), 2.0, 2.0).unwrap();
         let volume =
             crate::mass::integrator::properties::brep_volume_default(k, &mut whole, 1e-8).unwrap();
-        let exact = 2.0 * std::f64::consts::PI.powi(2) * 2.0 * 4.0;
+        let exact = 2.0 * det::powi(std::f64::consts::PI, 2) * 2.0 * 4.0;
         assert!((volume - exact).abs() <= 1e-6 * exact, "{volume} {exact}");
         let part = create_partial_torus(k, o(), 2.0, 2.0, 0.0, 90.0).unwrap();
         assert!(!part.face_list().is_empty());

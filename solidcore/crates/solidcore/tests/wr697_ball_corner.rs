@@ -29,7 +29,7 @@ use solidcore::blend::definition_check::{
 use solidcore::blend::fillet_executive::api::{chamfer_fillet, fillet_edges_per_edge};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, FitSize};
-use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
+use solidcore::blend::fillet_geom::p1::FilletCornerType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::{Curve, CurveKind};
@@ -1252,54 +1252,41 @@ fn l_block() -> (Kernel, Brep, Vec<EdgeId>) {
     (k, b, edges)
 }
 
-// Chamfers of both convexities at a vertex of three, as bevels: the event declines them, and the
-// pinned bevel cannot find their common point, so the refusal must name the vertex. Today it
-// fails with code 3, "Vertex Computation Failure".
+// Chamfers of both convexities at a vertex of three are the chamfer event's mitre
+// (tangency-labs/solidcraft#23136), asked or not: 11 faces (the L block's 8 and the three
+// chamfers), clean.
+//
+// In V's frame (u = x - 20, v = y - 15, w = 20 - z; the material u < 0 or v < 0) with the
+// upright's chamfer c and the top chamfers a (along x) and b (along y): the upright's adds the
+// wedge u, v > 0, u + v < c over the height, 10 c^2; the top chamfers' planes v = w - a and
+// u = w - b, run on over the wedge, take what is above both. At depth w that is, of the L, the
+// strip v > w - a along x (length 20) with the strip u > w - b along y (length 15) and the
+// rectangle between them at V, (a - w) (20 + b - w) + 15 (b - w) while w < a, b, and one
+// strip's rest past the smaller size; and of the wedge the triangle of legs
+// c - max(0, w - a) - max(0, w - b), down to the mitre point at w = (a + b + c) / 2.
+// - a = b = c = 2: 35 s^2 / 2 + s^3 / 3 of the L and s^3 / 2 + s^3 / 12 of the wedge, 77 + 1/3
+//   in all: 18000 + 40 - 77 - 1/3.
+// - c = 3, a = 1, b = 2: of the L 33 + 1/3 for w < 1 (52 - 38 w + w^2) and 7 + 1/3 for
+//   1 < w < 2 ((2 - w) (16 - w)); of the wedge 9/2 for w < 1, 19/6 for 1 < w < 2
+//   ((4 - w)^2 / 2) and 2/3 for 2 < w < 3 ((6 - 2 w)^2 / 2): 49 in all: 18000 + 90 - 49.
 #[test]
-fn chamfers_of_both_convexities_at_a_vertex_are_refused_as_bevels_naming_the_vertex() {
-    for d in [[2.0; 3], [3.0, 1.0, 2.0]] {
-        let (mut k, mut b, edges) = l_block();
-        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        let xs = [FilletSurfaceGeneratorType::Linear; 3];
-        s.prepare_per_edge_constant_radius(&mut k, &edges, &d, &xs, 1, 1.0)
-            .unwrap();
-        s.create_corners(&k, None).unwrap();
-        for id in s.fillet_corners().unwrap() {
-            s.set_corner_bevel(id, true).unwrap();
+fn chamfers_of_both_convexities_at_a_vertex_are_mitred() {
+    for (d, want) in [
+        ([2.0; 3], 18000.0 + 40.0 - 77.0 - 1.0 / 3.0),
+        ([3.0, 1.0, 2.0], 18041.0),
+    ] {
+        for corner in [None, Some(BlendChamferCorner::Mitre)] {
+            let (mut k, mut b, edges) = l_block();
+            chamfer_asking(&mut k, &mut b, &edges, &d, corner).unwrap();
+            let (n, lines, v) = report(&mut k, &mut b);
+            assert!(lines.is_empty(), "{d:?} {corner:?}: {lines:?}");
+            assert_eq!(n.0, 11, "{d:?} {corner:?}");
+            assert!(
+                (v - want).abs() <= 1e-12 * want,
+                "{d:?} {corner:?}: {v} vs {want}"
+            );
         }
-        let done = s.do_filleting(&mut k, None);
-        let info = s.error_info();
-        assert!(done.is_err(), "{d:?}: built");
-        assert_eq!(
-            info.code,
-            FilletErrorType::CornerUnsupported as i32,
-            "{d:?}: {}",
-            info.comment
-        );
-        let at = info.location.unwrap();
-        assert!(
-            (at.x - 20.0).abs() <= 1e-12
-                && (at.y - 15.0).abs() <= 1e-12
-                && (at.z - 20.0).abs() <= 1e-12,
-            "{d:?}: refused at {at:?}"
-        );
-        assert!(
-            info.comment
-                .contains("chamfers of convex and of concave edges meet at the vertex"),
-            "{d:?}: {}",
-            info.comment
-        );
     }
-}
-
-// Without bevels the same three chamfers keep the pinned corner patch: it builds, 12 faces, clean.
-#[test]
-fn chamfers_of_both_convexities_without_bevels_keep_the_pinned_corner() {
-    let (mut k, mut b, edges) = l_block();
-    chamfer(&mut k, &mut b, &edges, &[2.0; 3], BlendChamferCorner::Mitre).unwrap();
-    let (n, lines, _) = report(&mut k, &mut b);
-    assert!(lines.is_empty(), "{lines:?}");
-    assert_eq!(n.0, 12);
 }
 
 fn pyramid() -> (Kernel, Brep, Vec<EdgeId>) {

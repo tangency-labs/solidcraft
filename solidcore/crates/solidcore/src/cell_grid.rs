@@ -31,6 +31,13 @@
 //!   field, or stays solid. Triangles, circles and polygons have no chords, so only the
 //!   tilings (hexagon, square, triangle) snap; circles and polygons act as `Whole`.
 //!
+//! # A sketched cell
+//! [`plan_sketch`] repeats one cell of the user's own, a closed profile of lines and arcs, on a
+//! lattice of two vectors (given as `pitch_x`, `pitch_y` and a stagger) with the cell turned and
+//! mirrored as asked, and refuses a layout whose cells overlap or come nearer than the web, checked
+//! exactly. It clips with [`Clip::Whole`] or [`Clip::Free`]; [`Clip::Snap`] is refused. See
+//! [`SketchCell`].
+//!
 //! Not upstream: SolidCraft's cell grid planner, a kernel primitive because it computes
 //! geometry any client could use (docs/layers.md §1). The field is the kernel's own planar profile
 //! ([`crate::prism::profile::Loop2`]); a curve that is neither a line nor an arc is flattened, as
@@ -43,14 +50,17 @@
 
 mod exact;
 mod free;
+mod gap;
 pub(crate) mod lattice;
 pub(crate) mod region;
+mod sketch;
 pub(crate) mod snap;
 mod vec;
 
 #[cfg(test)]
 mod tests;
 
+use crate::math::det;
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Region2, Seg2, MAX_BEZIER_DEGREE};
 
@@ -62,6 +72,7 @@ use region::{
 use vec::{ring_next, Vec2Ext};
 
 pub use lattice::MAX_CELLS;
+pub use sketch::{plan_sketch, sketch_cell_center, SketchCell, MAX_CELL_REACH, MAX_CELL_SEGMENTS};
 
 /// Most sides of a polygon cell.
 pub const MAX_SIDES: u32 = 64;
@@ -186,6 +197,12 @@ impl CellGridSpec {
                 self.web
             )));
         }
+        self.validate_placement()
+    }
+
+    /// The checks that do not depend on the cell: the snap inset, the margin, the angle and the
+    /// anchor.
+    fn validate_placement(&self) -> Result<(), CellGridError> {
         if self.snap_inset > MAX_SNAP_INSET {
             return Err(CellGridError::Parameter(format!(
                 "the snap inset must be from 0 to {MAX_SNAP_INSET} lattice lines, not {}",
@@ -244,6 +261,12 @@ pub enum CellGridError {
     #[error("cell grid: the field: {0}")]
     /// The field is refused.
     Field(String),
+    #[error("cell grid: the cell sketch: {0}")]
+    /// The sketched cell's profile or layout numbers are refused.
+    Profile(String),
+    #[error("cell grid: the layout: {0}")]
+    /// The pitch and web put neighbouring sketched cells on top of each other or too close.
+    Layout(String),
     #[error("cell grid: the field reaches {cells} lattice cells, more than the {max} allowed: use larger cells or a smaller field")]
     /// The field reaches more lattice cells than allowed.
     TooManyCells {
@@ -896,10 +919,7 @@ fn flatten_conic(a: Vec2, apex: Vec2, b: Vec2, w: f64, tol: f64) -> Option<Vec<V
         let h = if d.x * d.x + d.y * d.y < f64::MIN_POSITIVE / f64::EPSILON {
             // The chord's squared length is too small to be a normal number, so `to_segment`'s
             // division is not within the bound of (c): the nearer end's distance stands in.
-            (p1 - p0)
-                .x
-                .hypot((p1 - p0).y)
-                .min((p1 - p2).x.hypot((p1 - p2).y))
+            det::hypot((p1 - p0).x, (p1 - p0).y).min(det::hypot((p1 - p2).x, (p1 - p2).y))
         } else {
             exact::to_segment(p1, p0, p2)
         };

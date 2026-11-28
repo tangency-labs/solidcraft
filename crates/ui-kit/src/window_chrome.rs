@@ -590,7 +590,7 @@ pub fn resize_zones(ui: &mut Ui) {
     let layer = LayerId::new(Order::Foreground, Id::unique("titlebar-resize"));
     let zui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
     for (i, (r, dir, cursor)) in zones(w, edge).into_iter().enumerate() {
-        let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
+        let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::DRAG).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
             hand_press_to_os(&ctx, ViewportCommand::BeginResize(dir));
         }

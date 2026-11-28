@@ -85,10 +85,11 @@ pub(crate) fn derived_loop_edges(b: &Brep, l: LoopId) -> Option<Vec<LoopEdge>> {
 /// The faces of `s` through its face uses in list order, each once.
 pub(crate) fn derived_shell_faces(b: &Brep, s: ShellId) -> Option<Vec<FaceId>> {
     let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
     if let ShellMembers::Faceuses(list) = &b.shells().get(s)?.members {
         for &fu in list {
             let f = b.faceuses().get(fu)?.face?;
-            if !out.contains(&f) {
+            if seen.insert(f) {
                 out.push(f);
             }
         }

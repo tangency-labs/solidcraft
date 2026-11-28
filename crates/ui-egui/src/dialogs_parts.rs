@@ -12,7 +12,6 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Kind, combo, form_row};
 use crate::selection::{EDGES, FACES, SelInput};
-use solidcraft_theme::Tokens;
 
 /// One family of the library.
 #[derive(Clone, Debug, PartialEq)]
@@ -182,7 +181,7 @@ fn default_size(f: &Family) -> usize {
 }
 
 /// A picture of the part alone.
-fn picture(p: &Value) -> Option<egui::ColorImage> {
+fn picture(p: &Value) -> Option<crate::ui_kit::PreviewImage> {
     let mut s = Session::default();
     let mut q = p.clone();
     if let Value::Object(m) = &mut q {
@@ -200,7 +199,6 @@ fn picture(p: &Value) -> Option<egui::ColorImage> {
 
 /// The dialog's rows.
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInput]) -> bool {
-    let t = Tokens::get();
     let lib = match &k.lib {
         Some(l) => l.clone(),
         None => {
@@ -279,18 +277,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         let tex = insert_params(&lib, k, &[])
             .ok()
             .and_then(|p| picture(&p))
-            .map(|img| ui.ctx().load_texture("sc_part_picture", img, egui::TextureOptions::LINEAR));
+            .map(|img| std::sync::Arc::new(crate::ui_kit::PreviewTextures::load(ui.ctx(), "sc_part_picture", img)));
         ui.data_mut(|d| match tex {
             Some(t) => {
                 d.insert_temp(tex_id, t);
             }
-            None => d.remove::<egui::TextureHandle>(tex_id),
+            None => d.remove::<std::sync::Arc<crate::ui_kit::PreviewTextures>>(tex_id),
         });
         k.picture = Some(key);
     }
-    ui.vertical(|ui| match ui.data(|d| d.get_temp::<egui::TextureHandle>(tex_id)) {
-        Some(tx) => {
-            ui.add(egui::Image::new(&tx).fit_to_exact_size(vec2(180.0, 112.0)).corner_radius(t.radius_sm));
+    ui.vertical(|ui| match ui.data(|d| d.get_temp::<std::sync::Arc<crate::ui_kit::PreviewTextures>>(tex_id)) {
+        Some(textures) => {
+            let (rect, response) = ui.allocate_exact_size(vec2(180.0, 135.0), egui::Sense::hover());
+            crate::ui_kit::file_preview(ui, response.id.with("preview"), rect, Some(textures.art()), response.hovered(), 1.0);
         }
         None => {
             crate::ui_kit::text(ui, solidcraft_ui_text::tr_label("no picture"), crate::ui_kit::Text::Note("parts_picture"));

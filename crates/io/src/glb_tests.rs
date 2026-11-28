@@ -1112,3 +1112,46 @@ fn canonical_mesh_falls_back_without_a_safe_definition() {
         assert_eq!(calls, world.bodies.len());
     }
 }
+
+/// Parallel GLB tessellation produces byte-for-byte identical output to serial tessellation across
+/// multi-body assemblies with both reused components and distinct bodies (hierarchy on and off).
+#[test]
+fn parallel_glb_export_matches_serial_byte_for_byte() {
+    let mut doc = Document::new("MultiPart");
+    for i in 0..6 {
+        let part = doc.add_component(Some(&format!("Part{i}")), 0).unwrap();
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(0.0, 0.0, 0.0)),
+                    length: format!("{}", 10 + i * 2).into(),
+                    width: "14".into(),
+                    height: "18".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = part;
+        let first = doc.occurrences.iter_mut().find(|o| o.component == part).unwrap();
+        first.transform = solidcraft_doc::rigid(Vec3::new(i as f64 * 40.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+        // Place a second reused occurrence for even-indexed parts.
+        if i % 2 == 0 {
+            doc.add_occurrence(part, 0, solidcraft_doc::rigid(Vec3::new(i as f64 * 40.0, 50.0, 0.0), Vec3::ZERO, Vec3::Z, 0.5)).unwrap();
+        }
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    assert_eq!(world.bodies.len(), 9);
+
+    for hierarchy in [true, false] {
+        let opts = GlbOptions::new(MeshQuality::Standard, hierarchy);
+        let parallel = export_glb(&doc, &model.state(), &world, &[], "multi", &opts).unwrap();
+        let serial = export_glb_with_mesh(&doc, &model.state(), &world, &[], "multi", &opts, display_mesh_at).unwrap();
+        assert_eq!(parallel, serial, "hierarchy={hierarchy}");
+        let (gltf, _) = parse(&parallel);
+        assert_eq!(gltf["meshes"].as_array().unwrap().len(), if hierarchy { 6 } else { 9 });
+    }
+}

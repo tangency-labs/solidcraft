@@ -2,20 +2,26 @@
 //! gives way to it. Native only, as the shared control client is: the browser build drives the
 //! app through the page instead.
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use solidcraft_control::client::{CallError, Connection, Request, outcome};
+use solidcraft_control::client::{CallError, Connection, Request, WaitProgress, outcome};
 use solidcraft_engine::control_pending;
 use solidcraft_engine::panels::ActionSink;
 use solidcraft_engine::panels::commands::LayoutCatalogue;
 use solidcraft_engine::schema::ParamCheck;
+use solidcraft_mcp_server::ProgressReporter;
 
-use super::{Backend, Headless, step_command};
+use super::{Backend, DesignState, Headless, step_command};
 
 /// How long the app may take to answer `mcp.options`: the window answers it within a frame, so a
 /// longer wait means the app is busy and the server asks again on a later call.
 const OPTIONS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How long the app may take to answer `document.revision` when observing design changes.
+const REVISION_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long to wait for a request still running (tests shorten them).
 #[cfg(test)]
@@ -85,6 +91,19 @@ impl Remote {
     #[cfg(test)]
     pub(crate) fn set_waits(&mut self, waits: Waits) {
         self.conn.set_waits(waits);
+    }
+
+    /// Shorter progress interval for tests verifying `control.pending` progress notifications.
+    #[cfg(test)]
+    pub(crate) fn set_progress_interval(&mut self, interval: Duration) {
+        self.conn.set_progress_interval(interval);
+    }
+
+    /// Send `control.cancel` immediately on a fresh side-channel connection (out-of-band MCP
+    /// `notifications/cancelled`). Unlike [`Backend::call`] for `control.cancel`, this connects
+    /// first because a side channel starts unconnected.
+    pub(crate) fn cancel_side_channel(&mut self) -> Result<Value, String> {
+        self.conn.quick("control.cancel", Self::scoped(json!({})), OPTIONS_TIMEOUT).map_err(Into::into)
     }
 
     /// See whether the app is there now (`new` does not); the error says why not. The connection
@@ -304,6 +323,21 @@ impl Backend for Remote {
     fn side_channel(&self) -> Option<Remote> {
         Some(Remote::new(self.conn.addr(), self.conn.explicit_token()).with_param_check(self.param_check))
     }
+    fn set_progress(&mut self, progress: Option<ProgressReporter>) {
+        let sink = progress.map(|reporter| {
+            Arc::new(move |update: &WaitProgress| {
+                reporter.report(update.progress as f64, update.total.map(|t| t as f64), Some(&update.message));
+            }) as Arc<dyn Fn(&WaitProgress) + Send + Sync>
+        });
+        self.conn.set_progress_sink(sink);
+    }
+    fn set_cancel_flag(&mut self, cancel: Option<Arc<AtomicBool>>) {
+        self.conn.set_cancel_flag(cancel);
+    }
+    fn design_state(&mut self) -> Option<DesignState> {
+        let reply = self.conn.quick("document.revision", Self::scoped(json!({})), REVISION_TIMEOUT).ok()?;
+        DesignState::from_revision_reply(&reply)
+    }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         // This runs on the serve loop before a tool call, so it never waits: not behind a request
         // still running (ask again on a later call), and one try with no retry, because a retry
@@ -343,12 +377,29 @@ pub struct Auto {
     /// The port of the running app, when there is one.
     discover: Box<dyn FnMut() -> Option<u16>>,
     token: Option<String>,
+    progress: Option<ProgressReporter>,
+    cancel_flag: Option<Arc<AtomicBool>>,
+    render_gpu: bool,
 }
 
 impl Auto {
     pub fn new(headless: Headless, discover: Box<dyn FnMut() -> Option<u16>>, token: Option<&str>) -> Self {
         let had_work = Self::headless_has_work(&headless);
-        Auto { headless: Some(headless), remote: None, had_work, discover, token: token.map(str::to_owned) }
+        Auto {
+            headless: Some(headless),
+            remote: None,
+            had_work,
+            discover,
+            token: token.map(str::to_owned),
+            progress: None,
+            cancel_flag: None,
+            render_gpu: false,
+        }
+    }
+
+    pub fn with_render_gpu(mut self, render_gpu: bool) -> Self {
+        self.render_gpu = render_gpu;
+        self
     }
 
     fn headless_has_work(h: &Headless) -> bool {
@@ -373,8 +424,14 @@ impl Auto {
         }
         if let Some(port) = (self.discover)() {
             solidcraft_engine::note!("solidcraft mcp: the SolidCraft app is running now; bridged to 127.0.0.1:{port}");
+            if self.render_gpu {
+                solidcraft_engine::note!("solidcraft mcp: --render-gpu is ignored while bridged to the running app");
+            }
             let level = self.param_check();
-            self.remote = Some(Remote::new(&format!("127.0.0.1:{port}"), self.token.as_deref()).with_param_check(level));
+            let mut remote = Remote::new(&format!("127.0.0.1:{port}"), self.token.as_deref()).with_param_check(level);
+            remote.set_progress(self.progress.clone());
+            remote.set_cancel_flag(self.cancel_flag.clone());
+            self.remote = Some(remote);
             self.headless = None;
         }
     }
@@ -458,6 +515,25 @@ impl Backend for Auto {
     }
     fn side_channel(&self) -> Option<Remote> {
         self.remote.as_ref().and_then(Remote::side_channel)
+    }
+    fn set_progress(&mut self, progress: Option<ProgressReporter>) {
+        self.progress = progress.clone();
+        if let Some(r) = &mut self.remote {
+            r.set_progress(progress);
+        }
+    }
+    fn set_cancel_flag(&mut self, cancel: Option<Arc<AtomicBool>>) {
+        self.cancel_flag = cancel.clone();
+        if let Some(r) = &mut self.remote {
+            r.set_cancel_flag(cancel);
+        }
+    }
+    fn design_state(&mut self) -> Option<DesignState> {
+        match (&mut self.remote, &mut self.headless) {
+            (Some(r), _) => r.design_state(),
+            (None, Some(h)) => h.design_state(),
+            (None, None) => None,
+        }
     }
     fn notice(&self) -> Option<String> {
         self.headless.as_ref().map(|_| {

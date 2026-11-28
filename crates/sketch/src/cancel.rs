@@ -9,7 +9,7 @@
 
 use std::cell::RefCell;
 
-pub use solidcraft_kernel::services::cancel::CancelToken;
+pub use solidcraft_kernel::runtime::CancelToken;
 
 thread_local! {
     static CURRENT: RefCell<Option<CancelToken>> = const { RefCell::new(None) };

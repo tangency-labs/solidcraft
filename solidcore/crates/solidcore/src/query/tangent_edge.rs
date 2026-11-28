@@ -11,6 +11,7 @@
 //! | [`g2_all_along`], [`G2`] | (none)   |
 //! | `bernstein_roots` (private) | (none) |
 //! | [`tube_regularity`], [`TubeRegularity`] | (none) |
+//! | [`side_along`], [`SideAlong`] | (none; SMLib's `EvaluateBinormal` gives one point's) |
 //!
 //! **The polynomials.** Each use of the edge carries its pcurve `(u(t), v(t)) = (X, Y) / W`
 //! on the edge's own parameter `t`, and its face's surface is its NURBS form `A / w` in the
@@ -240,6 +241,7 @@ use crate::blend::fillet_section::station::{as_b_spline, span, Nurbs};
 use crate::error::{Result, SolidError};
 use crate::geom::interval_vector::{cross, dot, norm, square};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -1342,7 +1344,7 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
         return None;
     }
     // acos and asin within 2 ulps (the platform's): 8 u of the angle covers each
-    let by_cos = cos.lo.acos() * (1.0 + 8.0 * UNIT);
+    let by_cos = det::acos(cos.lo) * (1.0 + 8.0 * UNIT);
     // the sine form only where both lengths are proved positive; its argument is the upper
     // end of an outward-rounded quotient (so rounded up), clamped at 1 (asin 1 = pi / 2, no
     // tighter than the cosine's acute bound, which is then kept)
@@ -1351,7 +1353,7 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
         return Some(by_cos);
     }
     let sin = (norm(cross(d, b)) / (nd * nb)).hi.min(1.0);
-    let by_sin = sin.asin() * (1.0 + 8.0 * UNIT);
+    let by_sin = det::asin(sin) * (1.0 + 8.0 * UNIT);
     Some(by_sin.min(by_cos))
 }
 
@@ -1361,7 +1363,7 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
 fn obtuse_bound(p_lo: f64, q_lo: f64) -> Option<f64> {
     let bounded = p_lo > 0.0 && p_lo.is_finite() && q_lo <= 0.0 && q_lo.is_finite();
     // atan2 within 2 ulps (the platform's)
-    bounded.then(|| p_lo.atan2(q_lo) * (1.0 + 8.0 * UNIT))
+    bounded.then(|| det::atan2(p_lo, q_lo) * (1.0 + 8.0 * UNIT))
 }
 
 /// The bound on the angle between the nets' normals from enclosures of `P` and `Q` over a
@@ -1373,7 +1375,7 @@ fn box_bound(p: I3, q: Ivl) -> Option<f64> {
     }
     let ratio = norm(p) / q;
     // atan within 2 ulps (the platform's)
-    Some(ratio.hi.atan() * (1.0 + 8.0 * UNIT))
+    Some(det::atan(ratio.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// The pieces between consecutive `breaks` of some length.
@@ -1413,7 +1415,7 @@ fn crossing_cut(s0: f64, s1: f64, at: f64) -> Option<f64> {
 /// An upper bound of the Lebesgue constant of `n` Chebyshev points, `1 + (2/pi) ln n`
 /// (module docs), rounded up.
 fn lebesgue(n: usize) -> f64 {
-    let bound = 1.0 + 2.0 / std::f64::consts::PI * (n as f64).ln();
+    let bound = 1.0 + 2.0 / std::f64::consts::PI * det::ln(n as f64);
     // ln within 2 ulps (4 u, the platform's), the quotient, product and sum: gamma_4 more,
     // under the 16 u taken
     bound * (1.0 + 16.0 * UNIT)
@@ -1499,7 +1501,7 @@ fn piece_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
     }
     let ratio = p_norm / floor;
     // atan within 2 ulps (the platform's)
-    Some(ratio.hi.atan() * (1.0 + 8.0 * UNIT))
+    Some(det::atan(ratio.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// A bound on the angle all over a piece where `Q` is bounded away from 0, from its enclosed
@@ -1545,7 +1547,7 @@ fn acute_piece_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
     // atan within 2 ulps (the platform's)
     tan.hi
         .is_finite()
-        .then(|| tan.hi.atan() * (1.0 + 8.0 * UNIT))
+        .then(|| det::atan(tan.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// The bound the decision takes on the angle all over a piece: [`piece_bound`], or
@@ -1560,7 +1562,7 @@ fn chebyshev(s0: f64, s1: f64, n: usize) -> impl Iterator<Item = f64> {
     let (m, h) = (0.5 * (s0 + s1), 0.5 * (s1 - s0));
     (0..n).map(move |j| {
         let angle = (2 * j + 1) as f64 * std::f64::consts::PI / (2 * n) as f64;
-        m + h * angle.cos()
+        m + h * det::cos(angle)
     })
 }
 
@@ -1630,7 +1632,7 @@ impl Pair {
         let defined = norm(fa).is_positive() && norm(fc).is_positive();
         let angle_lo = defined.then(|| {
             // atan2(y, x) grows with y >= 0 and falls with x: its lower end at (|P|_lo, Q_hi)
-            let a = norm(p).lo.atan2(q.hi);
+            let a = det::atan2(norm(p).lo, q.hi);
             // atan2 within 2 ulps (the platform's)
             a - 8.0 * UNIT * a.abs()
         });
@@ -2928,7 +2930,6 @@ pub fn tube_regularity(
     d: f64,
     outward: bool,
 ) -> Result<TubeRegularity> {
-    use crate::curve::curve::CurveKind;
     let Some(e) = eu1::edge(b, eu)? else {
         return Ok(TubeRegularity::NotCertified);
     };
@@ -2947,26 +2948,7 @@ pub fn tube_regularity(
             _ => return Ok(TubeRegularity::NotCertified),
         }
     };
-    let Some(curve) = edge::curve(b, e)? else {
-        return Ok(TubeRegularity::NotCertified);
-    };
-    let line;
-    let base = match curve.kind() {
-        CurveKind::BSpline(c) => c,
-        CurveKind::Ellipse(c) => c.base(),
-        CurveKind::Parabola(c) => c.base(),
-        CurveKind::Hyperbola(c) => c.base(),
-        CurveKind::Line(c) => match c.base_with_nurb() {
-            Ok(l) => {
-                line = l;
-                &*line
-            }
-            Err(err) if err.is_unported_or_cancelled() => return Err(err),
-            Err(_) => return Ok(TubeRegularity::NotCertified),
-        },
-        _ => return Ok(TubeRegularity::NotCertified),
-    };
-    let Ok(cn) = NurbsCurve::of(base) else {
+    let Some(cn) = edge_nurbs(b, e)? else {
         return Ok(TubeRegularity::NotCertified);
     };
     let sigma = Ivl::from(if outward { side } else { -side });
@@ -2982,7 +2964,7 @@ pub fn tube_regularity(
     let mut largest = None;
     if upper.is_finite() && upper > 0.0 {
         for j in (1..=8).rev() {
-            let r = upper * (1.0 - (-f64::from(j)).exp2());
+            let r = upper * (1.0 - det::exp2(-f64::from(j)));
             if r < d && matches!(tube_run(k, &cn, &pair, sigma, r, true)?, TubeRun::Regular) {
                 largest = Some(r);
                 break;
@@ -2990,6 +2972,309 @@ pub fn tube_regularity(
         }
     }
     Ok(TubeRegularity::Folds { largest })
+}
+
+/// Edge `e`'s curve as NURBS data (a line, a conic or a B-spline curve); `None` for a curve with
+/// no NURBS form (or none whose data reads).
+///
+/// # Errors
+///
+/// A cancellation or an unported routine while reading it; those of reading the edge.
+fn edge_nurbs(b: &Brep, e: EdgeId) -> Result<Option<NurbsCurve>> {
+    use crate::curve::curve::CurveKind;
+    let Some(curve) = edge::curve(b, e)? else {
+        return Ok(None);
+    };
+    let line;
+    let base = match curve.kind() {
+        CurveKind::BSpline(c) => c,
+        CurveKind::Ellipse(c) => c.base(),
+        CurveKind::Parabola(c) => c.base(),
+        CurveKind::Hyperbola(c) => c.base(),
+        CurveKind::Line(c) => match c.base_with_nurb() {
+            Ok(l) => {
+                line = l;
+                &*line
+            }
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            Err(_) => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+    Ok(NurbsCurve::of(base).ok())
+}
+
+/// `H = A' W - A W'` over `s` within one knot span of the curve (the span of its middle),
+/// enclosed: `W^2` times the curve's derivative, so the same direction, and a polynomial in the
+/// curve's parameter on the span. `None` where the basis is not enclosed.
+fn curve_h(cn: &NurbsCurve, s: Ivl) -> Option<I3> {
+    let p = cn.p;
+    let k = span(&cn.u, p, cn.n, s.mid());
+    let (n, dn) = basis(&cn.u, k, p, s)?;
+    let zero = Ivl::from(0.0);
+    let (mut a, mut da, mut w, mut dw) = ([zero; 3], [zero; 3], zero, zero);
+    for j in 0..=p {
+        let i = (k + j).checked_sub(p)?;
+        let c = cn.pw.get(4 * i..4 * i + 4)?;
+        let (nj, dj) = (*n.get(j)?, *dn.get(j)?);
+        for ((ax, dax), &cx) in a.iter_mut().zip(da.iter_mut()).zip(c) {
+            *ax = *ax + nj * Ivl::from(cx);
+            *dax = *dax + dj * Ivl::from(cx);
+        }
+        let cw = Ivl::from(*c.get(3)?);
+        w = w + nj * cw;
+        dw = dw + dj * cw;
+    }
+    let [x, y, z] = a;
+    let [dx, dy, dz] = da;
+    Some([dx * w - x * dw, dy * w - y * dw, dz * w - z * dw])
+}
+
+/// Halvings of one piece [`side_along`] makes before leaving it undecided: a piece is then
+/// 2^-24 of one between the knots. A work budget.
+const MAX_SIDE_HALVINGS: u32 = 24;
+
+/// Pieces [`side_along`] decides on one edge use before leaving it undecided. A work budget,
+/// not a tolerance.
+const MAX_SIDE_PIECES: usize = 4096;
+
+/// The answer of [`side_along`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SideAlong {
+    /// All along the edge, the binormal into the face has at most the part asked along the
+    /// direction.
+    Within,
+    /// The part is more at `at` (the edge's parameter): a point where it is proved, or the
+    /// middle of a piece all over which it is.
+    RunsOn {
+        /// Where it runs on.
+        at: f64,
+    },
+    /// A piece around `at` is not placed on either side, even halved, or the budget ran out.
+    Undecided {
+        /// The middle of the piece.
+        at: f64,
+    },
+}
+
+/// Whether the face of edge use `eu` runs on along `along` across the edge anywhere: the part
+/// along `along` of the unit binormal into the face (normal to the edge, in the face) is at
+/// most `max_part` all along the edge, proved over the whole edge interval, not at points.
+///
+/// The binormal is `sigma (F x H)` made unit: `F` the face use's normal along the pcurve,
+/// enclosed over a piece of the edge as [`tangent_all_along`] encloses it (module docs: the net's
+/// homogeneous point and partials over the pcurve's box, in rounded interval arithmetic), `H`
+/// the edge curve's derivative times `W^2` enclosed from its NURBS form (`curve_h`), and
+/// `sigma` the sign that turns it into the binormal [`evaluate_binormal`] gives, read once where
+/// the product is proved non-zero (a cosine under `SAME_SURFACE_COS` is refused, as for the
+/// face's normal). On a piece on one cell of the face's net, `sigma F . (H x along)` is a
+/// polynomial in the edge's parameter, bounded from its values at the piece's Chebyshev points
+/// as [`tangent_all_along`] bounds `Q` (module docs), and the piece is placed where that bound
+/// is within `max_part` times the floor of `|F x H| |along|` (a point past it runs on: a witness).
+/// Else `P = sigma (F x H) . along / (|F x H| |along|)` is enclosed over the piece: an
+/// upper end within `max_part` places the piece, a lower end past it is a piece all of which runs
+/// on ([`SideAlong::RunsOn`]), and any other piece is halved, at most `MAX_SIDE_HALVINGS` times
+/// and to at most `MAX_SIDE_PIECES` pieces, past which it is left undecided and the rest are
+/// still decided: a piece that runs on decides the edge, else one left undecided makes it
+/// [`SideAlong::Undecided`]. A piece whose product is not proved non-zero is halved the same way.
+/// The part's numerator is taken as `F . (H x along)`, the same triple product, so that zeros
+/// of `H x along` stay exact.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an `along` that is not finite or has no length, a `max_part`
+/// not finite in `(-1, 1)`, or a face use whose normal or binormal is not proved non-zero
+/// anywhere along the edge; [`SolidError::Unsupported`] for a procedural blend's or sweep's face
+/// (its net only approximates it), an edge whose curve has no NURBS form, and as [`tangent_all_along`]
+/// for the face and its pcurve; [`SolidError::Cancelled`] when the kernel's cancel token is
+/// cancelled; those of the evaluations.
+pub fn side_along(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    along: Vec3,
+    max_part: f64,
+) -> Result<SideAlong> {
+    let finite = [along.x, along.y, along.z].iter().all(|c| c.is_finite());
+    let part_ok = max_part.is_finite() && max_part > -1.0 && max_part < 1.0;
+    if !finite || !part_ok {
+        return Err(invalid("a direction and a part that are finite"));
+    }
+    let d = [Ivl::from(along.x), Ivl::from(along.y), Ivl::from(along.z)];
+    let nd = norm(d);
+    if !nd.is_positive() {
+        return Err(invalid("a direction of no length"));
+    }
+    let e = eu1::edge(b, eu)?.ok_or_else(|| invalid("an edge use without edge"))?;
+    let mut u = Use::new(k, b, eu)?;
+    // a procedural surface's net only approximates it (the definitions contract; the kinds
+    // `exact_nurbs_surface` turns down): the side is read on the net alone, so such a face is
+    // refused, not decided on the net
+    let procedural = {
+        let f = eu1::face(b, eu)?.ok_or_else(|| invalid("an edge use without face"))?;
+        b.face(f)?.surface.as_ref().is_some_and(|s| {
+            s.procedural_sweep().is_some() || matches!(s.kind(), SurfaceKind::ProceduralBlend(_))
+        })
+    };
+    if procedural || u.definition.is_some() {
+        return Err(unsupported(
+            "the side of an edge on a procedural blend or sweep (its net only approximates it)",
+        ));
+    }
+    let cn =
+        edge_nurbs(b, e)?.ok_or_else(|| unsupported("an edge whose curve has no NURBS form"))?;
+    let ivl = edge::interval(b, e)?;
+    let (t0, t1) = (ivl.min(), ivl.max());
+    let mut breaks = vec![t0, t1];
+    breaks.extend(u.nurb.knots().iter().copied().filter(|&t| t > t0 && t < t1));
+    breaks.extend(cn.u.iter().copied().filter(|&t| t > t0 && t < t1));
+    breaks.sort_by(f64::total_cmp);
+    breaks.dedup();
+    // `F` and `H = W^2 C'` over `s` (`None` where either is not enclosed)
+    let factors = |u: &Use, s: Ivl| -> Result<Option<(I3, I3)>> {
+        let Some(f) = u.f_box(s)? else {
+            return Ok(None);
+        };
+        Ok(curve_h(&cn, s).map(|h| (f, h)))
+    };
+    // the degree of `F . (H x d)` along a piece on one cell: `F`'s plus `H`'s (`W^2 C'` is
+    // `A' W - A W'`, of degree `2p - 2`, or `p - 1` where the weights are one value)
+    let rational = {
+        let w: Vec<f64> = cn.pw.chunks(4).filter_map(|c| c.get(3).copied()).collect();
+        w.first()
+            .is_some_and(|&first| w.iter().any(|&x| x != first))
+    };
+    let h_degree = if rational {
+        (2 * cn.p).saturating_sub(2)
+    } else {
+        cn.p.saturating_sub(1)
+    };
+    let degree = u.degree.saturating_add(h_degree);
+    let nodes = degree + 1;
+    let lebesgue_n = lebesgue(nodes);
+    // the face use's sense, then sigma, each at the first point where it can be read
+    let mut sigma = None;
+    'read: for (s0, s1) in pieces(&breaks) {
+        for t in chebyshev(s0, s1, 4) {
+            if u.sign.is_none() && !u.read_sign(k, b, t)? {
+                continue;
+            }
+            let Some(g) = factors(&u, Ivl::from(t))?.map(|(f, c1)| cross(f, c1)) else {
+                continue;
+            };
+            if !norm(g).is_positive() {
+                continue;
+            }
+            let mid = Vec3::new(g[0].mid(), g[1].mid(), g[2].mid());
+            let binormal =
+                evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())?.binormal;
+            let len = mid.length() * binormal.length();
+            if len.is_nan() || len <= 0.0 {
+                continue;
+            }
+            let c = mid.dot(binormal) / len;
+            if c.abs() < SAME_SURFACE_COS {
+                return Err(unsupported(
+                    "an edge use whose binormal and its NURBS forms' disagree",
+                ));
+            }
+            sigma = Some(Ivl::from(c.signum()));
+            break 'read;
+        }
+    }
+    let Some(sigma) = sigma else {
+        return Err(invalid(
+            "an edge use whose binormal is not proved non-zero anywhere along it",
+        ));
+    };
+    let mut stack: Vec<(f64, f64, u32)> = pieces(&breaks)
+        .into_iter()
+        .map(|(a, z)| (a, z, 0))
+        .collect();
+    let mut count = 0usize;
+    let mut undecided: Option<f64> = None;
+    while let Some((a, z, depth)) = stack.pop() {
+        if count % POLL_POINTS == 0 {
+            k.check_cancelled(OP)?;
+        }
+        count += 1;
+        let at = 0.5 * (a + z);
+        // the budget counts every piece, the knots' own too
+        if count > MAX_SIDE_PIECES {
+            return Ok(SideAlong::Undecided { at });
+        }
+        let piece = Ivl::new(a, z);
+        // on one cell, `sigma F . (H x d)` is a polynomial of degree `degree` in `t`: bounded from
+        // its values at the piece's Chebyshev points (module docs, `poly_range`), which are
+        // narrow where it is 0, against the floor of `|F x H| |d|` over the piece
+        if degree <= MAX_DEGREE && u.one_cell(piece)? {
+            let mut values = Vec::new();
+            let mut witness = None;
+            for t in chebyshev(a, z, nodes) {
+                let Some((f, h)) = factors(&u, Ivl::from(t))? else {
+                    values.clear();
+                    break;
+                };
+                let n = sigma * dot(f, cross(h, d));
+                let den = norm(cross(f, h)) * nd;
+                if den.is_positive() && (n / den).lo > max_part {
+                    witness = Some(t);
+                    break;
+                }
+                values.push(n);
+            }
+            if let Some(at) = witness {
+                return Ok(SideAlong::RunsOn { at });
+            }
+            let d2 = (degree as f64) * (degree as f64);
+            let eta = node_error(a, z) * d2 * (1.0 + gamma(2));
+            let floor = factors(&u, piece)?.map(|(f, h)| (norm(cross(f, h)) * nd).lo);
+            let placed = match (poly_range(&values, lebesgue_n, eta), floor) {
+                (Some(range), Some(floor)) => {
+                    !values.is_empty()
+                        && floor > 0.0
+                        && range.hi <= (Ivl::from(max_part) * Ivl::from(floor)).lo
+                }
+                _ => false,
+            };
+            if placed {
+                continue;
+            }
+        }
+        // the part as F . (H x d) / (|F x H| |d|), the triple product of (F x H) . d: where d
+        // and H have exact zeros (a direction along an axis, a curve in a coordinate plane) the
+        // zeros of H x d stay exact, where (F x H) . d would carry F's widths into them
+        let part = match factors(&u, piece)? {
+            Some((f, h)) => {
+                let ng = norm(cross(f, h));
+                ng.is_positive()
+                    .then(|| sigma * dot(f, cross(h, d)) / (ng * nd))
+            }
+            None => None,
+        };
+        match part {
+            Some(p) if p.hi <= max_part => {}
+            Some(p) if p.lo > max_part => return Ok(SideAlong::RunsOn { at }),
+            _ => {
+                if depth < MAX_SIDE_HALVINGS
+                    && count + stack.len() + 2 <= MAX_SIDE_PIECES
+                    && a < at
+                    && at < z
+                {
+                    stack.push((at, z, depth + 1));
+                    stack.push((a, at, depth + 1));
+                } else {
+                    // a piece around a point where the part crosses `max_part` is never placed:
+                    // go on, as another piece may run on all over
+                    undecided.get_or_insert(at);
+                }
+            }
+        }
+    }
+    if let Some(at) = undecided {
+        return Ok(SideAlong::Undecided { at });
+    }
+    Ok(SideAlong::Within)
 }
 
 #[cfg(test)]
@@ -3086,7 +3371,7 @@ mod tests {
         let phi = 4.0_f64.to_radians();
         let place = Axis2Placement::new(
             Point3::new(0.0, 20.0, 16.0),
-            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+            Vec3::new(-det::sin(phi), 0.0, -det::cos(phi)),
             Vec3::new(0.0, 1.0, 0.0),
         );
         crate::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();
@@ -3308,12 +3593,12 @@ mod tests {
         let (eps, delta) = (1e-3_f64, 1e-9_f64);
         let w = |x: f64| Ivl::new(x - delta, x + delta);
         let d = [w(1.0), w(0.0), w(0.0)];
-        let b = [w(eps.cos()), w(eps.sin()), w(0.0)];
+        let b = [w(det::cos(eps)), w(det::sin(eps)), w(0.0)];
         let got = angle_between(d, b).expect("acute");
         assert!(got >= eps, "{got} below the true angle {eps}");
         assert!(got <= eps + 4.0 * delta + 1e-12, "{got}");
         let cos = dot(d, b) / (norm(d) * norm(b));
-        let by_cos = cos.lo.acos();
+        let by_cos = det::acos(cos.lo);
         assert!(by_cos > got, "the cosine form {by_cos} is the looser");
         assert!(angle_between([w(1.0), w(0.0), w(0.0)], [w(-1.0), w(0.0), w(0.0)]).is_none());
     }
@@ -3414,7 +3699,7 @@ mod tests {
                 Node {
                     p: i3([p, 0.0, 0.0]),
                     q: Ivl::from(1.0),
-                    angle_lo: Some(p.abs().atan2(1.0)),
+                    angle_lo: Some(det::atan2(p.abs(), 1.0)),
                 }
             })
             .collect();
@@ -3423,7 +3708,7 @@ mod tests {
             (at_points - std::f64::consts::FRAC_PI_4).abs() < 1e-12,
             "{at_points}"
         );
-        let between = (5.0_f64 / 3.0).atan();
+        let between = det::atan(5.0_f64 / 3.0);
         let bound = piece_bound(&nodes, lebesgue(n), 0.0).unwrap();
         assert!(bound >= between, "{bound} under {between}");
         assert!(bound > 50.0_f64.to_radians(), "{bound}");
@@ -3431,7 +3716,7 @@ mod tests {
         // atan(L) with the bound's own factors: L's 16 u (atan grows by at most its argument's
         // relative change), the atan's 8 u and the interval quotient's outward rounding, under
         // 32 u; 64 u takes it
-        let most = lebesgue(n).atan() * (1.0 + 64.0 * UNIT);
+        let most = det::atan(lebesgue(n)) * (1.0 + 64.0 * UNIT);
         assert!(bound <= most, "{bound} over {most}");
     }
 
@@ -3452,7 +3737,7 @@ mod tests {
         let eta = 0.05;
         let room = 1.0 - lam * eta;
         let (p_norm, q_norm) = (lam / room, lam / room);
-        let want = (p_norm / (1.0 - lam * eta * q_norm)).atan();
+        let want = det::atan(p_norm / (1.0 - lam * eta * q_norm));
         let got = piece_bound(&nodes, lam, eta).unwrap();
         assert!(
             got >= want && got <= want * (1.0 + 1e-12),
@@ -3476,7 +3761,7 @@ mod tests {
             })
             .collect();
         let floor = 1.1875 - lam * 0.1875;
-        let want = (lam * 0.1 / floor).atan();
+        let want = det::atan(lam * 0.1 / floor);
         let got = piece_bound(&nodes, lam, 0.0).unwrap();
         assert!((got - want).abs() <= 1e-12 * want, "{got} vs {want}");
     }
@@ -3589,7 +3874,7 @@ mod tests {
             let room = 1.0 - lam * eta;
             let under = lam * (0.25 + eta * lam * 0.5 / room) - 0.25;
             let e_lo = 1.0 - lam * (eta * lam / room);
-            let want = 1.0_f64.atan2(-(1.0 + under / e_lo));
+            let want = det::atan2(1.0_f64, -(1.0 + under / e_lo));
             let got = bound(eta);
             assert!(
                 got >= want && got <= want * (1.0 + 1e-12),
@@ -3615,11 +3900,11 @@ mod tests {
                 angle_lo: None,
             })
             .collect();
-        let between = (1.0_f64 / 3.0).atan2(-1.0);
+        let between = det::atan2(1.0_f64 / 3.0, -1.0);
         assert!(between > 0.75 * std::f64::consts::PI + 0.4);
         let bound = piece_bound(&nodes, lam, 0.0).unwrap();
         assert!(bound >= between, "{bound} under {between}");
-        let floor = (2.0 - lam).atan2(-1.0);
+        let floor = det::atan2(2.0 - lam, -1.0);
         assert!((bound - floor).abs() <= 1e-12, "{bound} against {floor}");
     }
 
@@ -3670,7 +3955,7 @@ mod tests {
                 .fold(Ivl::from(0.0), |v, &x| v * Ivl::from(t) + Ivl::from(x))
         };
         let angle_lo = |p: I3, q: Ivl| {
-            let a = norm(p).lo.atan2(q.hi);
+            let a = det::atan2(norm(p).lo, q.hi);
             a - 8.0 * UNIT * a.abs()
         };
         let (mut obtuse, mut between, mut acute, mut tighter) = (0, 0, 0, 0);
@@ -3754,7 +4039,7 @@ mod tests {
         let mut seen = 0;
         for (mut b, want, overs) in [
             (cylinder, FRAC_PI_2, [1e-9, 1e-6, 1e-3]),
-            (frustum, (-0.6_f64).acos(), [1e-6, 1e-4, 1e-2]),
+            (frustum, det::acos(-0.6_f64), [1e-6, 1e-4, 1e-2]),
         ] {
             for e in get_edges(&b).unwrap() {
                 let below = tangent_all_along(&k, &mut b, e, want - 1e-9).unwrap();
@@ -3787,7 +4072,7 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn p_and_q_in_proportion_are_bounded_by_their_acute_angle() {
-        let want = 0.5_f64.atan();
+        let want = det::atan(0.5_f64);
         for n in [2, 3, 11] {
             let lam = lebesgue(n);
             for eta in [0.0, 0.01] {
@@ -3798,7 +4083,7 @@ mod tests {
                     "{n} {eta}: {got} vs {want}"
                 );
                 let alone = piece_bound(&nodes, lam, eta).unwrap();
-                assert!(alone >= (0.5 * lam).atan(), "{n} {eta}: {alone}");
+                assert!(alone >= det::atan(0.5 * lam), "{n} {eta}: {alone}");
             }
         }
     }
@@ -3823,10 +4108,10 @@ mod tests {
         for eta in [0.0, 0.01] {
             let room = 1.0 - lam * eta;
             let r = lam * a * 0.75_f64.sqrt() / room / (1.0 - lam * eta * lam / room);
-            let want = (1.0 + r * r).sqrt().atan();
+            let want = det::atan((1.0 + r * r).sqrt());
             let got = part_bound(&nodes, lam, eta).unwrap();
             assert!((got - want).abs() <= 1e-12, "{eta}: {got} vs {want}");
-            assert!(got >= (1.0 + a * a).sqrt().atan());
+            assert!(got >= det::atan((1.0 + a * a).sqrt()));
         }
     }
 
@@ -3849,10 +4134,10 @@ mod tests {
         for eta in [0.0, 0.01] {
             let room = 1.0 - lam * eta;
             let against = 0.275 + lam * (0.375 + eta * lam * 0.65 / room);
-            let want = (against / (1.0 - lam * eta * lam / room)).atan();
+            let want = det::atan(against / (1.0 - lam * eta * lam / room));
             let got = part_bound(&nodes, lam, eta).unwrap();
             assert!((got - want).abs() <= 1e-12, "{eta}: {got} vs {want}");
-            assert!(got >= 0.9_f64.atan(), "{eta}: {got}");
+            assert!(got >= det::atan(0.9_f64), "{eta}: {got}");
         }
     }
 
@@ -3873,7 +4158,7 @@ mod tests {
             let room = 1.0 - lam * eta;
             let under = lam * (0.25 + eta * lam * 0.5 / room) - 0.25;
             let q_lo = 1.5 - lam * (0.5 + eta * lam * 2.0 / room);
-            let want = (0.5 + under / q_lo).atan();
+            let want = det::atan(0.5 + under / q_lo);
             let got = bound(eta);
             assert!(
                 got >= want && got <= want * (1.0 + 1e-12),
@@ -3911,7 +4196,7 @@ mod tests {
         use crate::primitive::api_primitives::create_cone;
         use crate::query::api_queries::{edge_closest_point, get_edges};
         let half = 0.5_f64.to_radians();
-        let steep = 0.6_f64.acos();
+        let steep = det::acos(0.6_f64);
         let mut k = Kernel::default();
         // (the true angle, the angle asked)
         let mut rows: Vec<(f64, f64)> = [0.25_f64, 0.3, 0.4, 0.49, 0.499]
@@ -3919,7 +4204,7 @@ mod tests {
             .to_vec();
         rows.extend([1e-1, 1e-2, 1e-4].map(|over| (steep, steep + over)));
         for (angle, asked) in rows {
-            let h = 3.0 * angle.tan();
+            let h = 3.0 * det::tan(angle);
             let o = Point3::new(0.0, 0.0, 0.0);
             let mut b = create_cone(&mut k, o, 5.0, 2.0, h).unwrap();
             let top = Point3::new(0.0, 2.0, h);
@@ -4016,9 +4301,9 @@ mod g2_tests {
         let i3 = |v: [f64; 3]| v.map(Ivl::from);
         let st = Starred {
             s: [
-                i3([-r * u.sin(), r * u.cos(), 0.0]),
+                i3([-r * det::sin(u), r * det::cos(u), 0.0]),
                 i3([0.0, 0.0, 1.0]),
-                i3([-r * u.cos(), -r * u.sin(), 0.0]),
+                i3([-r * det::cos(u), -r * det::sin(u), 0.0]),
                 i3([0.0; 3]),
                 i3([0.0; 3]),
             ],

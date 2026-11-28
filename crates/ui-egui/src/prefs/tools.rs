@@ -37,6 +37,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             "extrude_auto_to_object",
                         ),
                         (setting::auto_operation, "prefs.auto_operation_note", "auto_operation"),
+                        (setting::new_body_default, "prefs.new_body_default_note", "new_body_default"),
                         (setting::extrude_arrow_face_stops, "prefs.extrude_arrow_face_stops_note", "extrude_arrow_face_stops"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
@@ -224,8 +225,18 @@ fn create_card(ui: &mut egui::Ui, rows: impl FnOnce(&mut egui::Ui)) {
 /// right, a rule above every row but the first. Search uses the same block gate as `tool_group`.
 /// The features with a placement marker, by their name keys: Preferences search finds the
 /// Placed features row by any of them.
-const PLACED_FEATURES: [&str; 9] =
-    ["cmd.plastic_rest", "cmd.plastic_boss", "cmd.plastic_snap_fit", "ui.box", "ui.cylinder", "ui.cone", "ui.sphere", "ui.torus", "ui.coil"];
+const PLACED_FEATURES: &[&str] = &[
+    "cmd.plastic_rest",
+    "cmd.plastic_boss",
+    "cmd.plastic_snap_fit",
+    "ui.box",
+    "ui.cylinder",
+    "ui.cone",
+    "ui.sphere",
+    "ui.torus",
+    "ui.coil",
+    "cmd.solid_emboss",
+];
 
 /// A tool's row; `hint` is more text the search finds the row by (it is not shown).
 fn create_row(ui: &mut egui::Ui, label: &str, hint: Option<&str>, icons: &[&str], first: bool, add: impl FnOnce(&mut egui::Ui)) {

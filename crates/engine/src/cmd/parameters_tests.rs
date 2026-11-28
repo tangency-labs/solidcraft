@@ -145,6 +145,94 @@ fn unit_errors_and_cycles_are_refused() {
     assert!((r["value"].as_f64().unwrap_or(0.0) - 50.8).abs() < 1e-9, "{r}");
 }
 
+/// A product of lengths evaluates as the volume or area it is (#4811), shown in mm³ or mm², and
+/// `kind` can ask for a mass, a volume or an area.
+#[test]
+fn products_of_lengths_evaluate_as_volumes_and_areas() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "10 mm"}));
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a^3"}));
+    assert_eq!((r["kind"].as_str(), r["display_value"].as_f64()), (Some("volume"), Some(1000.0)), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a * 2 mm", "kind": "area"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("area"), Some(20.0)), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a^2", "kind": "volume"}));
+    assert!(r["error"].as_str().unwrap_or("").contains("expected a volume, got an area"), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "2", "kind": "mass"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("mass"), Some(2000.0)), "a bare mass is kilograms (in grams): {r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "4", "kind": "number"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("unitless"), Some(4.0)), "{r}");
+    let e = err(&mut s, "expr.evaluate", json!({"expression": "1", "kind": "weight"}));
+    assert!(e.contains("(length, angle, unitless, mass, volume, area or number)"), "{e}");
+}
+
+/// Masses, volumes and areas as parameters (#4811): `50 g` is a mass, shown in kilograms; a bare
+/// number in a kilogram parameter is kilograms; a unit's name can't be a parameter's; the units
+/// are offered as a word is typed; and the table exports and imports with its units.
+#[test]
+fn mass_volume_and_area_parameters() {
+    let mut s = Session::default();
+    let r = run(&mut s, "parameters.add", json!({"name": "grease", "expression": "50 g"}));
+    assert_eq!((r["unit"].as_str(), r["value"].as_f64(), r["display_value"].as_f64()), (Some("kg"), Some(50.0), Some(0.05)), "{r}");
+    run(&mut s, "parameters.add", json!({"name": "kit", "expression": "2", "unit": "kg"}));
+    run(&mut s, "parameters.add", json!({"name": "total", "expression": "kit + grease * 4"}));
+    run(&mut s, "parameters.add", json!({"name": "sheet", "expression": "2.5 m²"}));
+    run(&mut s, "parameters.add", json!({"name": "oil", "expression": "500 ml", "unit": "cm³"}));
+    let l = run(&mut s, "parameters.list", json!({}));
+    let shown = |n: &str| (row(&l, n)["unit"].as_str().map(str::to_string), row(&l, n)["display_value"].as_f64());
+    assert_eq!(shown("kit"), (Some("kg".into()), Some(2.0)), "{l}");
+    assert_eq!(shown("total"), (Some("kg".into()), Some(2.2)), "{l}");
+    assert_eq!(shown("sheet"), (Some("mm²".into()), Some(2.5e6)), "{l}");
+    // A bare number beside a mass means the same in a preview and in the parameter it makes: kg.
+    let preview = run(&mut s, "expr.evaluate", json!({"expression": "kit + 1"}));
+    let made = run(&mut s, "parameters.add", json!({"name": "more", "expression": "kit + 1"}));
+    assert_eq!((preview["value"].as_f64(), preview["display_value"].as_f64()), (Some(3000.0), Some(3.0)), "{preview}");
+    assert_eq!((made["unit"].as_str(), made["value"].as_f64(), made["display_value"].as_f64()), (Some("kg"), Some(3000.0), Some(3.0)), "{made}");
+    let bare = run(&mut s, "expr.evaluate", json!({"expression": "3", "kind": "mass"}));
+    let typed = run(&mut s, "parameters.add", json!({"name": "three", "expression": "3", "unit": "kg"}));
+    assert_eq!((bare["value"].as_f64(), typed["value"].as_f64()), (Some(3000.0), Some(3000.0)));
+    assert_eq!(shown("oil"), (Some("cm³".into()), Some(500.0)), "{l}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "kit / 2", "unit": "lb"}));
+    assert_eq!(r["display_value"].as_f64(), Some(solidcraft_doc::expr::round_reported(1000.0 / 453.592_37)), "reported to 12 digits: {r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "kit"}));
+    assert_eq!((r["kind"].as_str(), r["display_value"].as_f64()), (Some("mass"), Some(2.0)), "shown in kg: {r}");
+    // A mass is not a length, either way round.
+    let e = err(&mut s, "parameters.add", json!({"name": "bad", "expression": "kit", "unit": "mm"}));
+    assert!(e.contains("expected a length, got a mass"), "{e}");
+    let e = err(&mut s, "parameters.change", json!({"name": "kit", "expression": "2 mm"}));
+    assert!(e.contains("expected a mass, got a length"), "{e}");
+    // A unit's name can't be a parameter's, new or renamed; an unknown unit names the known ones.
+    for unit in ["g", "kg", "lb", "ml", "cm³", "m²"] {
+        assert!(err(&mut s, "parameters.add", json!({"name": unit, "expression": "1"})).contains("unit name"), "{unit}");
+        assert!(err(&mut s, "parameters.rename", json!({"name": "kit", "new_name": unit})).contains("unit name"), "{unit}");
+    }
+    assert!(err(&mut s, "parameters.add", json!({"name": "x", "expression": "1", "unit": "tonne"})).contains("kg"));
+    // The units are offered as the word is typed, with their kind.
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "2 * k"}));
+    let kg = c["suggestions"].as_array().and_then(|a| a.iter().find(|x| x["text"] == "kg")).cloned();
+    assert_eq!(kg.map(|x| (x["kind"].clone(), x["detail"].clone())), Some((json!("unit"), json!("mass"))), "{c}");
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "cm"}));
+    assert!(c["suggestions"].as_array().is_some_and(|a| a.iter().any(|x| x["text"] == "cm³")), "{c}");
+    // Export and import keep the units.
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(csv.contains("grease,kg,50 g,0.05,,false"), "{csv}");
+    let mut t = Session::default();
+    run(&mut t, "parameters.import", json!({"text": csv}));
+    assert_eq!(t.doc.param("oil").map(|p| p.unit.as_str()), Some("cm³"));
+    assert_eq!(t.doc.param_values().0.get("total"), s.doc.param_values().0.get("total"));
+}
+
+/// `parameters.change` sends its readers to the guide for the units, so the guide names every
+/// unit expressions know.
+#[test]
+fn the_guide_lists_every_unit() {
+    let guide = include_str!("../../../../docs/book/src/guide/parameters.md");
+    let change = super::COMMANDS.iter().find(|c| c.id == "parameters.change").map_or("", |c| c.params);
+    assert!(change.contains("docs/book/src/guide/parameters.md"), "{change}");
+    for (unit, _, _) in solidcraft_doc::expr::UNITS {
+        assert!(guide.contains(&format!("`{unit}`")), "{unit} is missing from the guide");
+    }
+}
+
 #[test]
 fn rename_updates_every_reference() {
     let mut s = Session::default();
@@ -1229,6 +1317,34 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
     close(added(&mut s, json!({"name": "v", "expression": "3"})), "cm", 30.0, 3.0);
 }
 
+/// Areas and volumes follow the design's length unit as lengths do: in an inch design an area
+/// reads in in² and a volume in in³, a bare number in such a parameter is one of those, and a unit
+/// given keeps its own.
+#[test]
+fn areas_and_volumes_take_the_design_unit() {
+    let added = |s: &mut Session, p: Value| {
+        let r = run(s, "parameters.add", p);
+        (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
+    };
+    let close = |got: (String, f64, f64), unit: &str, val: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, val) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {val} ({shown})");
+    };
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    close(added(&mut s, json!({"name": "face", "expression": "645.16 mm²"})), "in²", 645.16, 1.0);
+    close(added(&mut s, json!({"name": "pocket", "expression": "1 in * 2 in * 3 in"})), "in³", 6.0 * 16_387.064, 6.0);
+    close(added(&mut s, json!({"name": "more", "expression": "face + 1"})), "in²", 2.0 * 645.16, 2.0);
+    close(added(&mut s, json!({"name": "metric", "expression": "1 cm²", "unit": "cm²"})), "cm²", 100.0, 1.0);
+    close(added(&mut s, json!({"name": "deck", "expression": "1 ft²"})), "in²", 92_903.04, 144.0);
+    close(added(&mut s, json!({"name": "tank", "expression": "1 ft³"})), "in³", 28_316_846.592, 1728.0);
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "ft"}));
+    close(added(&mut s, json!({"name": "deck", "expression": "2 ft * 3 ft"})), "ft²", 6.0 * 92_903.04, 6.0);
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "m"}));
+    close(added(&mut s, json!({"name": "sheet", "expression": "2.5 m²"})), "m²", 2.5e6, 2.5);
+}
+
 /// Hostile parameters.add input in an inch design is refused with a reason and adds nothing.
 #[test]
 fn a_hostile_parameter_in_an_inch_design_is_refused() {
@@ -1568,4 +1684,118 @@ fn exports_round_reported_numbers() {
     let rows: Vec<Value> = serde_json::from_str(&json_text).unwrap_or_default();
     let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
     assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
+}
+
+/// #14426: a named driven sketch dimension appears as a read-only parameter in `parameters.list`,
+/// drives downstream features and later sketches, updates automatically when upstream geometry
+/// changes, and follows `parameters.rename`.
+#[test]
+fn driven_dimension_as_read_only_parameter_drives_extrude_and_later_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "30 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 40]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "w"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": "h"}));
+    let driven = run(&mut s, "sketch.dimension", json!({"entities": ["p1", "p3"], "driven": true, "name": "diag"}));
+    assert_eq!(driven["driven"], true, "{driven}");
+    assert_eq!(driven["param"], "diag", "{driven}");
+    assert!((driven["measured"].as_f64().unwrap_or_default() - 50.0).abs() < 1e-6, "{driven}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let all = run(&mut s, "parameters.list", json!({}));
+    let diag = row(&all, "diag");
+    assert_eq!(diag["source"], "driven", "{all}");
+    assert_eq!(diag["read_only"], true, "{all}");
+    assert_eq!(diag["feature"], "Sketch1", "{all}");
+    assert!((diag["value"].as_f64().unwrap_or_default() - 50.0).abs() < 1e-6, "{diag}");
+    let only_driven = run(&mut s, "parameters.list", json!({"filter": "driven"}));
+    assert_eq!(only_driven["parameters"].as_array().map(Vec::len), Some(1), "{only_driven}");
+
+    let ev = run(&mut s, "expr.evaluate", json!({"expression": "diag * 2"}));
+    assert!((ev["value"].as_f64().unwrap_or_default() - 100.0).abs() < 1e-6, "{ev}");
+
+    run(&mut s, "solid.extrude", json!({"distance": "diag / 2", "body_name": "Block"}));
+    assert!(rel(volume(&mut s), 30.0 * 40.0 * 25.0) < 1e-6);
+
+    // A later sketch's driving dimension can also reference `diag`.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [150, 0]]}));
+    let d2 = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "diag"}));
+    assert!((d2["measured"].as_f64().unwrap_or_default() - 50.0).abs() < 1e-6, "{d2}");
+    run(&mut s, "sketch.finish", json!({}));
+    let sketch2_id = s.doc.find_feature("Sketch2").map(|f| f.id).unwrap_or_default();
+
+    // Editing upstream `w` updates `diag`, recomputes the extrude and updates `Sketch2`.
+    let ch = run(&mut s, "parameters.change", json!({"name": "w", "expression": "60 mm"}));
+    assert_eq!(ch["errors"], json!([]), "{ch}");
+    let expected_diag = (60.0_f64.powi(2) + 40.0_f64.powi(2)).sqrt();
+    let updated = run(&mut s, "parameters.list", json!({"filter": "driven"}));
+    assert!((row(&updated, "diag")["value"].as_f64().unwrap_or_default() - expected_diag).abs() < 1e-3, "{updated}");
+    assert!(rel(volume(&mut s), 60.0 * 40.0 * (expected_diag / 2.0)) < 1e-6);
+    let state = s.model.state();
+    let ss2 = state.sketch(sketch2_id).unwrap();
+    let (a, b) = (ss2.sketch.points[1].pos, ss2.sketch.points[2].pos);
+    assert!(((a.x - b.x).hypot(a.y - b.y) - expected_diag).abs() < 1e-5);
+
+    // Renaming the driven parameter updates downstream references without breaking geometry.
+    let ren = run(&mut s, "parameters.rename", json!({"name": "diag", "new_name": "hyp"}));
+    assert!(ren["references_updated"].as_u64().unwrap_or_default() >= 2, "{ren}");
+    let users = run(&mut s, "parameters.users", json!({"name": "hyp"}));
+    assert!(!users["users"].as_array().unwrap_or(&Vec::new()).is_empty(), "{users}");
+    assert!(rel(volume(&mut s), 60.0 * 40.0 * (expected_diag / 2.0)) < 1e-6);
+}
+
+/// #14426: self-references, forward-references and attempts to overwrite or delete a read-only
+/// driven dimension parameter are cleanly rejected, and `sketch.toggle_driven` can name a driven
+/// dimension.
+#[test]
+fn driven_dimension_parameter_rejects_cycles_forward_refs_and_mutations() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "30 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 40]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "p1", "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "w"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": "h"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["p1", "p3"], "driven": true, "name": "diag"}));
+
+    // Direct self-reference in the same sketch is rejected.
+    let extra = run(&mut s, "sketch.line", json!({"points": [[80, 0], [100, 0]]}));
+    let extra_line = extra["curve"].as_str().unwrap_or("l5").to_string();
+    let self_err = err(&mut s, "sketch.dimension", json!({"entities": [extra_line], "value": "diag"}));
+    assert!(self_err.contains("circular reference"), "{self_err}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    // Indirect self-reference via an upstream driving parameter is rejected.
+    let cycle_err = err(&mut s, "parameters.change", json!({"name": "w", "expression": "diag"}));
+    assert!(cycle_err.contains("circular reference"), "{cycle_err}");
+
+    // Read-only driven parameter cannot be edited, overwritten, deleted or imported over.
+    assert!(err(&mut s, "parameters.change", json!({"name": "diag", "expression": "100"})).contains("read-only"));
+    assert!(err(&mut s, "parameters.change", json!({"changes": {"diag": "100"}})).contains("read-only"));
+    assert!(err(&mut s, "parameters.add", json!({"name": "diag", "expression": "100"})).contains("already a parameter"));
+    assert!(err(&mut s, "parameters.delete", json!({"name": "diag"})).contains("driven dimension"));
+    assert!(err(&mut s, "parameters.import", json!({"text": "name,expression\ndiag,100 mm\n"})).contains("read-only"));
+
+    // An unnamed driven dimension in a later sketch can be named via `sketch.toggle_driven`.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [25, 0]]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "driven": true}));
+    let sketch2_id = s.doc.find_feature("Sketch2").map(|f| f.id).unwrap_or_default();
+    let driven_cid = s.doc.sketch(sketch2_id).unwrap().constraints.iter().find(|c| c.driven).map(|c| c.id.clone()).unwrap();
+    let named = run(&mut s, "sketch.toggle_driven", json!({"constraint": driven_cid, "driven": true, "name": "late_dim"}));
+    assert_eq!(named["param"], "late_dim", "{named}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let list = run(&mut s, "parameters.list", json!({"filter": "driven"}));
+    assert_eq!(row(&list, "late_dim")["feature"], "Sketch2", "{list}");
+    assert!((row(&list, "late_dim")["value"].as_f64().unwrap_or_default() - 25.0).abs() < 1e-6, "{list}");
+
+    // Forward-reference from an earlier sketch's driving parameter to `late_dim` is rejected.
+    let fwd_err = err(&mut s, "parameters.change", json!({"name": "w", "expression": "late_dim"}));
+    assert!(fwd_err.contains("forward reference"), "{fwd_err}");
 }

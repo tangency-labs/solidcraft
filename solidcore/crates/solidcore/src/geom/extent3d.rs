@@ -60,6 +60,7 @@
 //! | [`Extent3d::max_distance_to_point`]    | (not upstream) the farthest of the corners from a point |
 //! | [`Extent3d::span_along`]               | (not upstream) the box's reach along a direction |
 //! | [`Extent3d::meets_ray`]                | (not upstream) whether a forward ray meets the padded box |
+//! | [`Extent3d::meets_line`]               | (not upstream) whether an endless line meets the box, within a share of its size |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Deviations:
@@ -1160,6 +1161,29 @@ impl Extent3d {
         t_lo <= t_hi
     }
 
+    /// (not upstream) Whether the endless line `point + t * dir` meets the box, its sides
+    /// included. Each side counts `share` of the box's size on that axis beyond it, at least
+    /// `share` of a unit, so a line read back from a face of the solid the box bounds still
+    /// meets it. Never for an empty box (inside out, as [`Extent3d::new`] makes it), one that is
+    /// not [defined](Extent3d::is_defined), or a zero `dir`.
+    #[must_use]
+    pub fn meets_line(&self, point: Point3, dir: Vec3, share: f64) -> bool {
+        if !self.is_defined() || self.has_negative_volume() {
+            return false;
+        }
+        let size = self.size();
+        let tol = Vec3::new(
+            size.x.abs().max(1.0),
+            size.y.abs().max(1.0),
+            size.z.abs().max(1.0),
+        ) * share;
+        let grown = Extent3d::from_points(self.min - tol, self.max + tol);
+        matches!(
+            grown.intersect_line(point, dir),
+            Ok(LineHit::Touch { .. } | LineHit::Through { .. })
+        )
+    }
+
     /// True when `min > max` on some axis (e.g. a fresh extent)
     /// (`HasNegativeVolume`).
     #[must_use]
@@ -1275,6 +1299,35 @@ mod tests {
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
         Vec3::new(x, y, z)
+    }
+
+    /// An endless line meets a box it runs through, one that grazes a side within the given
+    /// share of the box's size, and never one that passes farther off, a zero direction or a
+    /// fresh box.
+    #[test]
+    fn a_line_meets_a_box_it_runs_through_or_grazes_within_the_share() {
+        let e = Extent3d::from_points(p(0.0, 0.0, 0.0), p(20.0, 20.0, 10.0));
+        let up = p(0.0, 0.0, 1.0);
+        assert!(
+            e.meets_line(p(10.0, 10.0, -5.0), up, 1e-6),
+            "through the middle"
+        );
+        assert!(e.meets_line(p(20.0, 10.0, 0.0), up, 1e-6), "along a side");
+        assert!(
+            e.meets_line(p(20.0 + 1e-6, 10.0, 0.0), up, 1e-6),
+            "a millionth off"
+        );
+        assert!(!e.meets_line(p(20.1, 10.0, 0.0), up, 1e-6), "farther off");
+        assert!(
+            !e.meets_line(p(10.0, 10.0, 0.0), Vec3::ZERO, 1e-6),
+            "no direction"
+        );
+        let mut fresh = e;
+        fresh.init();
+        assert!(
+            !fresh.meets_line(p(10.0, 10.0, 0.0), up, 1e-6),
+            "a fresh box"
+        );
     }
 
     /// The farthest point of a box from a point is its farthest corner, from inside, from

@@ -343,3 +343,434 @@ fn a_shared_part_bigger_than_the_smaller_body_is_not_an_overlap() {
     // The pin entirely inside the plate shares all of itself: that is the smaller body, not more.
     assert_eq!(super::overlap_out_of_bounds(1005.3, &pin_box, plate, pin), None);
 }
+
+/// Per-body `OnceLock` mass caching in `impossible_overlap_cached` matches `impossible_overlap`
+/// identically across valid and bogus overlaps and reuses the cached mass when a body overlaps
+/// multiple neighbours.
+#[test]
+fn cached_impossible_overlap_matches_uncached_and_reuses_body_mass() {
+    use std::sync::OnceLock;
+
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+    use solidcraft_kernel::MassMeasure;
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 10, "corner": [0, 0, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 10, "corner": [10, 10, 5], "operation": "new", "body_name": "PinA"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 10, "corner": [40, 10, 5], "operation": "new", "body_name": "PinB"}));
+    let st = s.world_state().unwrap();
+    let plate = &st.body("Plate").unwrap().body;
+    let pin_a = &st.body("PinA").unwrap().body;
+    let pin_b = &st.body("PinB").unwrap().body;
+
+    let masses: Vec<super::MassSlot> = (0..3).map(|_| OnceLock::new()).collect();
+    let bounds = |min: [f64; 3], max: [f64; 3]| Aabb3 { min: Vec3::new(min[0], min[1], min[2]), max: Vec3::new(max[0], max[1], max[2]) };
+    let meas = |volume: f64, bbox: Aabb3| MassMeasure { volume, area: 100.0, centroid: bbox.center(), bbox, measured_by: "smlib", notes: Vec::new() };
+
+    // Valid overlap of Plate (0) and PinA (1): 6 x 6 x 5 = 180 mm³ inside [10..16, 10..16, 5..10].
+    let valid_a = meas(180.0, bounds([10.0, 10.0, 5.0], [16.0, 16.0, 10.0]));
+    assert_eq!(super::impossible_overlap_cached(&valid_a, (0, plate), (1, pin_a), &masses), super::impossible_overlap(&valid_a, plate, pin_a));
+    assert_eq!(super::impossible_overlap_cached(&valid_a, (0, plate), (1, pin_a), &masses), None);
+    assert!(masses[0].get().is_some() && masses[1].get().is_some() && masses[2].get().is_none());
+
+    // Bogus volume larger than PinB (160 mm³) reusing Plate's cached mass slot (0).
+    let valid_b = meas(50_000.0, bounds([40.0, 10.0, 5.0], [44.0, 14.0, 10.0]));
+    let cached_too_big = super::impossible_overlap_cached(&valid_b, (0, plate), (2, pin_b), &masses);
+    let uncached_too_big = super::impossible_overlap(&valid_b, plate, pin_b);
+    assert_eq!(cached_too_big, uncached_too_big);
+    assert!(cached_too_big.as_deref().is_some_and(|w| w.contains("more than the smaller body")));
+    assert!(masses[2].get().is_some());
+
+    // Bogus bbox reaching outside Plate ∩ PinB.
+    let outside_b = meas(80.0, bounds([35.0, 10.0, 5.0], [44.0, 14.0, 10.0]));
+    let cached_out = super::impossible_overlap_cached(&outside_b, (0, plate), (2, pin_b), &masses);
+    let uncached_out = super::impossible_overlap(&outside_b, plate, pin_b);
+    assert_eq!(cached_out, uncached_out);
+    assert!(cached_out.as_deref().is_some_and(|w| w.contains("reaches outside")));
+}
+
+/// Unchecked measurement-only overlaps must satisfy strict geometric bounds (positive finite
+/// volume and area, bounded by both operands' boxes and volumes, no larger than their own
+/// bounding box, and centroid inside their own bounding box).
+#[test]
+fn unchecked_overlap_sanity_accepts_bounded_overlap_and_rejects_corrupted_results() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+    use solidcraft_kernel::MassMeasure;
+
+    let bounds = |min: [f64; 3], max: [f64; 3]| Aabb3 { min: Vec3::new(min[0], min[1], min[2]), max: Vec3::new(max[0], max[1], max[2]) };
+    let meas = |volume: f64, area: f64, centroid: [f64; 3], bbox: Aabb3| MassMeasure {
+        volume,
+        area,
+        centroid: Vec3::new(centroid[0], centroid[1], centroid[2]),
+        bbox,
+        measured_by: "smlib",
+        notes: Vec::new(),
+    };
+
+    let box_a = bounds([0.0, 0.0, 0.0], [100.0, 100.0, 100.0]);
+    let box_b = bounds([80.0, 0.0, 0.0], [180.0, 100.0, 100.0]);
+    let (op_a, op_b) = ((1_000_000.0, &box_a), (1_000_000.0, &box_b));
+    let shared_box = bounds([80.0, 10.0, 10.0], [90.0, 20.0, 20.0]);
+
+    // Valid overlap inside both operands and inside its own 10 x 10 x 10 = 1000 mm³ box.
+    let good = meas(650.0, 420.0, [85.0, 15.0, 15.0], shared_box);
+    assert_eq!(super::unchecked_overlap_out_of_bounds(&good, op_a, op_b), None);
+
+    // Corrupted / inverted / non-finite / out-of-bounds results are all rejected.
+    let bad_cases = [
+        ("zero volume", meas(0.0, 420.0, [85.0, 15.0, 15.0], shared_box)),
+        ("negative volume", meas(-650.0, 420.0, [85.0, 15.0, 15.0], shared_box)),
+        ("nan volume", meas(f64::NAN, 420.0, [85.0, 15.0, 15.0], shared_box)),
+        ("zero area", meas(650.0, 0.0, [85.0, 15.0, 15.0], shared_box)),
+        ("empty bbox", meas(650.0, 420.0, [85.0, 15.0, 15.0], Aabb3::EMPTY)),
+        ("nan centroid", meas(650.0, 420.0, [f64::NAN, 15.0, 15.0], shared_box)),
+        ("volume exceeds own bbox", meas(5_000.0, 420.0, [85.0, 15.0, 15.0], shared_box)),
+        ("centroid outside own bbox", meas(650.0, 420.0, [75.0, 15.0, 15.0], shared_box)),
+        ("bbox outside operand intersection", meas(650.0, 420.0, [85.0, 15.0, 15.0], bounds([70.0, 10.0, 10.0], [90.0, 20.0, 20.0]))),
+        ("volume exceeds smaller operand", meas(1_500_000.0, 420.0, [90.0, 50.0, 50.0], bounds([80.0, 0.0, 0.0], [100.0, 100.0, 100.0]))),
+    ];
+    for (label, m) in bad_cases {
+        assert!(super::unchecked_overlap_out_of_bounds(&m, op_a, op_b).is_some(), "{label} must be rejected");
+    }
+
+    // Invalid operand measurements also reject the unchecked overlap.
+    assert!(super::unchecked_overlap_out_of_bounds(&good, (0.0, &box_a), op_b).is_some());
+    assert!(super::unchecked_overlap_out_of_bounds(&good, op_a, (-10.0, &box_b)).is_some());
+    assert!(super::unchecked_overlap_out_of_bounds(&good, (1_000_000.0, &Aabb3::EMPTY), op_b).is_some());
+
+    // A small operand paired with a huge operand must scale volume, AABB, and centroid slack to
+    // the small operand / overlap box rather than the huge operand's diagonal.
+    let huge_box = bounds([0.0, 0.0, 0.0], [1_000.0, 1_000.0, 1_000.0]);
+    let tiny_box = bounds([500.0, 500.0, 500.0], [501.0, 501.0, 501.0]);
+    let (huge, tiny) = ((1_000_000_000.0, &huge_box), (1.0, &tiny_box));
+    assert_eq!(super::unchecked_overlap_out_of_bounds(&meas(0.5, 4.0, [500.5, 500.5, 500.5], tiny_box), huge, tiny), None);
+    assert_eq!(super::unchecked_overlap_out_of_bounds(&meas(1.0, 6.0, [500.5, 500.5, 500.5], tiny_box), huge, tiny), None);
+    for (label, m) in [
+        ("2 mm³ against 1 mm³ tiny operand", meas(2.0, 6.0, [500.5, 500.5, 500.5], tiny_box)),
+        ("0.5 mm³ inside 0.125 mm³ overlap box", meas(0.5, 1.5, [500.25, 500.25, 500.25], bounds([500.0, 500.0, 500.0], [500.5, 500.5, 500.5]))),
+        ("bbox 0.001 mm outside tiny overlap", meas(0.5, 4.0, [500.5, 500.5, 500.5], bounds([499.999, 500.0, 500.0], [501.0, 501.0, 501.0]))),
+        ("centroid 0.001 mm outside tiny overlap box", meas(0.5, 4.0, [501.001, 500.5, 500.5], tiny_box)),
+    ] {
+        assert!(super::unchecked_overlap_out_of_bounds(&m, huge, tiny).is_some(), "{label} must be rejected");
+    }
+    let far_box = bounds([2_000.0, 0.0, 0.0], [2_001.0, 1.0, 1.0]);
+    assert!(
+        super::unchecked_overlap_out_of_bounds(&meas(0.5, 4.0, [500.5, 500.5, 500.5], tiny_box), huge, (1.0, &far_box)).is_some(),
+        "disjoint operand boxes must be rejected"
+    );
+}
+
+/// When SMLib's `CheckLevel::All` alone refuses a temporary intersection solid (both operands
+/// valid), `resolve_overlap_with` recovers a sanity-checked overlap via `Validation::Off`, while
+/// keeping operand-invalid refusals, boolean operation errors, corrupted unchecked volumes, and
+/// below-threshold unchecked results safely in `unchecked`.
+#[test]
+fn result_only_check_refusal_falls_back_when_sane_and_stays_unchecked_otherwise() {
+    use std::cell::Cell;
+
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+    use solidcraft_kernel::{KernelError, MassMeasure};
+
+    let result_only_err = || KernelError::Failed("SMLib boolean: SMLib's check refuses the result: 9 failed tests:\nSmFace::Test #33".into());
+    let operand_bad_err =
+        || KernelError::Failed("SMLib boolean: SMLib's check refuses the result (the first operand already fails it): 1 failed test".into());
+    let op_err = || KernelError::Failed("SMLib boolean: operation: relate conflict".into());
+
+    let sane_measure = |volume: f64| MassMeasure {
+        volume,
+        area: 1200.0,
+        centroid: Vec3::new(85.0, 15.0, 15.0),
+        bbox: Aabb3 { min: Vec3::new(80.0, 10.0, 10.0), max: Vec3::new(90.0, 20.0, 20.0) },
+        measured_by: "smlib",
+        notes: Vec::new(),
+    };
+
+    // 1. Both checked orders fail with result-only check refusal -> unchecked fallback succeeds.
+    let unchecked_calls = Cell::new(0usize);
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |_| Err::<Option<f64>, _>(result_only_err()),
+        run_unchecked: |swapped: bool| {
+            unchecked_calls.set(unchecked_calls.get() + 1);
+            assert!(!swapped, "first recoverable order (a, b) is tried first");
+            Ok(Some(6_000.0))
+        },
+        measure: |&v: &f64| Ok(sane_measure(v)),
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| None,
+        accept_unchecked_volume: |v| v >= 0.001,
+        is_disjoint: || false,
+        is_cancelled: || false,
+    });
+    assert_eq!(unchecked_calls.get(), 1);
+    assert!(matches!(&got, super::OverlapOutcome::Measured(m) if (m.volume - 6_000.0).abs() < 1e-9), "{got:?}");
+
+    // 2. First order fails as operation error, swapped order fails result-only check -> recovers swapped order.
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |swapped: bool| Err::<Option<f64>, _>(if swapped { result_only_err() } else { op_err() }),
+        run_unchecked: |swapped: bool| {
+            assert!(swapped, "only the swapped order had a result-only check refusal");
+            Ok(Some(5_478.0))
+        },
+        measure: |&v: &f64| Ok(sane_measure(v)),
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| None,
+        accept_unchecked_volume: |v| v >= 0.001,
+        is_disjoint: || false,
+        is_cancelled: || false,
+    });
+    assert!(matches!(&got, super::OverlapOutcome::Measured(m) if (m.volume - 5_478.0).abs() < 1e-9), "{got:?}");
+
+    // 3. Result-only check refusal, but unchecked result fails sanity bounds -> stays Unchecked.
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |_| Err::<Option<f64>, _>(result_only_err()),
+        run_unchecked: |_| Ok(Some(999_999.0)),
+        measure: |&v: &f64| Ok(sane_measure(v)),
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| Some("more than the smaller body".into()),
+        accept_unchecked_volume: |v| v >= 0.001,
+        is_disjoint: || false,
+        is_cancelled: || false,
+    });
+    assert!(
+        matches!(&got, super::OverlapOutcome::Unchecked { reason, measure_distance: true } if reason.contains("SMLib's check refuses the result:")),
+        "{got:?}"
+    );
+
+    // 4. Result-only check refusal, but unchecked result has zero/negative/below-threshold volume ->
+    //    stays Unchecked (never falsely clears a failed check as Empty or contact).
+    for bad_vol in [0.0, -50.0, 1e-6] {
+        let got = super::resolve_overlap_with(super::OverlapOps {
+            run_checked: |_| Err::<Option<f64>, _>(result_only_err()),
+            run_unchecked: |_| Ok(Some(bad_vol)),
+            measure: |&v: &f64| Ok(sane_measure(v)),
+            check_checked_bounds: |_: &MassMeasure| None,
+            check_unchecked_bounds: |_: &MassMeasure| None,
+            accept_unchecked_volume: |v| v >= 0.001,
+            is_disjoint: || false,
+            is_cancelled: || false,
+        });
+        assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: true, .. }), "vol {bad_vol}: {got:?}");
+    }
+
+    // 5. Operand-invalid check refusal and boolean operation errors NEVER invoke unchecked fallback.
+    for err_fn in [operand_bad_err as fn() -> KernelError, op_err as fn() -> KernelError] {
+        let unchecked_calls = Cell::new(0usize);
+        let got = super::resolve_overlap_with(super::OverlapOps {
+            run_checked: |_| Err::<Option<f64>, _>(err_fn()),
+            run_unchecked: |_| {
+                unchecked_calls.set(unchecked_calls.get() + 1);
+                Ok(Some(500.0))
+            },
+            measure: |&v: &f64| Ok(sane_measure(v)),
+            check_checked_bounds: |_: &MassMeasure| None,
+            check_unchecked_bounds: |_: &MassMeasure| None,
+            accept_unchecked_volume: |v| v > 0.0,
+            is_disjoint: || false,
+            is_cancelled: || false,
+        });
+        assert_eq!(unchecked_calls.get(), 0, "must not bypass operand-invalid or operation errors");
+        assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: true, .. }), "{got:?}");
+    }
+
+    // 6. When checked (b, a) succeeds cleanly, unchecked fallback is never invoked.
+    let unchecked_calls = Cell::new(0usize);
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |swapped: bool| if swapped { Ok(Some(123.0)) } else { Err(result_only_err()) },
+        run_unchecked: |_| {
+            unchecked_calls.set(unchecked_calls.get() + 1);
+            Ok(Some(999.0))
+        },
+        measure: |&v: &f64| Ok(sane_measure(v)),
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| None,
+        accept_unchecked_volume: |v| v > 0.0,
+        is_disjoint: || false,
+        is_cancelled: || false,
+    });
+    assert_eq!(unchecked_calls.get(), 0);
+    assert!(matches!(&got, super::OverlapOutcome::Measured(m) if (m.volume - 123.0).abs() < 1e-9), "{got:?}");
+
+    // 7. Certified disjoint interiors take precedence over unchecked fallback.
+    let unchecked_calls = Cell::new(0usize);
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |_| Err::<Option<f64>, _>(result_only_err()),
+        run_unchecked: |_| {
+            unchecked_calls.set(unchecked_calls.get() + 1);
+            Ok(Some(500.0))
+        },
+        measure: |&v: &f64| Ok(sane_measure(v)),
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| None,
+        accept_unchecked_volume: |v| v > 0.0,
+        is_disjoint: || true,
+        is_cancelled: || false,
+    });
+    assert_eq!(unchecked_calls.get(), 0);
+    assert!(matches!(got, super::OverlapOutcome::Empty), "{got:?}");
+
+    // 8. Pre-existing cancellation stops before starting any checked or unchecked overlap attempt.
+    let checked_calls = Cell::new(0usize);
+    let unchecked_calls = Cell::new(0usize);
+    let measure_calls = Cell::new(0usize);
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |_| {
+            checked_calls.set(checked_calls.get() + 1);
+            Err::<Option<f64>, _>(result_only_err())
+        },
+        run_unchecked: |_| {
+            unchecked_calls.set(unchecked_calls.get() + 1);
+            Ok(Some(500.0))
+        },
+        measure: |&v: &f64| {
+            measure_calls.set(measure_calls.get() + 1);
+            Ok(sane_measure(v))
+        },
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| None,
+        accept_unchecked_volume: |v| v > 0.0,
+        is_disjoint: || false,
+        is_cancelled: || true,
+    });
+    assert_eq!((checked_calls.get(), unchecked_calls.get(), measure_calls.get()), (0, 0, 0));
+    assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: false, .. }), "{got:?}");
+
+    // 9. Cancellation occurring during an unchecked overlap stops before measuring that body.
+    let cancelled = Cell::new(false);
+    let unchecked_calls = Cell::new(0usize);
+    let measure_calls = Cell::new(0usize);
+    let got = super::resolve_overlap_with(super::OverlapOps {
+        run_checked: |_| Err::<Option<f64>, _>(result_only_err()),
+        run_unchecked: |_| {
+            unchecked_calls.set(unchecked_calls.get() + 1);
+            cancelled.set(true);
+            Ok(Some(500.0))
+        },
+        measure: |&v: &f64| {
+            measure_calls.set(measure_calls.get() + 1);
+            Ok(sane_measure(v))
+        },
+        check_checked_bounds: |_: &MassMeasure| None,
+        check_unchecked_bounds: |_: &MassMeasure| None,
+        accept_unchecked_volume: |v| v > 0.0,
+        is_disjoint: || false,
+        is_cancelled: || cancelled.get(),
+    });
+    assert_eq!(unchecked_calls.get(), 1);
+    assert_eq!(measure_calls.get(), 0, "must not measure an unchecked overlap after cancellation");
+    assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: false, .. }), "{got:?}");
+}
+
+/// An expired deadline stops `measure_overlap` and `check_pair` from starting new overlap
+/// attempts or measurements.
+#[test]
+fn measure_overlap_stops_when_deadline_expires() {
+    use std::cell::Cell;
+
+    use solidcore_record::Vec3;
+
+    let a = solidcraft_kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let b = solidcraft_kernel::box_solid(Vec3::new(5.0, 0.0, 0.0), Vec3::new(15.0, 10.0, 10.0)).unwrap();
+    let expired = web_time::Instant::now();
+    let measure_calls = Cell::new(0usize);
+    let got = super::measure_overlap(
+        &a,
+        &b,
+        |body| {
+            measure_calls.set(measure_calls.get() + 1);
+            solidcraft_kernel::measure_mass(body)
+        },
+        |_| None,
+        |v| v > 0.0,
+        false,
+        || web_time::Instant::now() >= expired,
+    );
+    assert_eq!(measure_calls.get(), 0, "expired deadline must stop before measuring");
+    assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: false, .. }), "{got:?}");
+
+    let names = ("A".to_string(), "B".to_string());
+    let stopped = super::check_pair((0, &a), (1, &b), &names, a.size(), false, &[], || web_time::Instant::now() >= expired);
+    assert!(matches!(stopped, super::Outcome::Unchecked(_)), "expired deadline must leave pair unchecked");
+    let active = super::check_pair((0, &a), (1, &b), &names, a.size(), false, &[], || false);
+    assert!(matches!(active, super::Outcome::Hit(h) if (h.volume_mm3 - 500.0).abs() < 1e-6), "active deadline must find the 500 mm³ overlap");
+}
+
+/// Whole-body overlap verification rejects a fabricated 100%-volume overlap for a Ø12 x 2 disk
+/// sitting inside a Ø12.4 x 4.2 pocket (all interior points of the disk classify strictly outside
+/// the pocketed housing), while accepting a genuine 100%-volume overlap when the same disk is
+/// embedded inside a solid block without a pocket.
+#[test]
+fn whole_body_overlap_contradicted_rejects_pocket_seated_disk_and_accepts_embedded_disk() {
+    let (cx, cy) = (688.2, 656.8);
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 100, "width": 50, "height": 5, "corner": [cx - 25.0, cy - 25.0, 0.0], "operation": "new", "body_name": "Housing"}),
+    );
+    run(&mut s, "solid.cylinder", json!({"radius": 6.2, "height": 5.2, "base": [cx, cy, 0.8], "operation": "cut", "targets": ["Housing"]}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 100, "width": 50, "height": 5, "corner": [cx - 25.0, cy - 25.0, 0.0], "operation": "new", "body_name": "SolidBlock"}),
+    );
+    run(&mut s, "solid.cylinder", json!({"radius": 6.0, "height": 2.0, "base": [cx, cy, 3.0], "operation": "new", "body_name": "Disk"}));
+
+    // End-to-end interference check: pocket-seated disk has zero interference with Housing.
+    let i = run(&mut s, "inspect.interference", json!({"bodies": ["Disk", "Housing"]}));
+    assert_eq!(i["count"], 0, "{i}");
+    assert_eq!(i["unchecked"], json!([]), "{i}");
+
+    // Direct sanity-gate unit check: even if a boolean returned a phantom overlap equal to 100% of
+    // Disk, both `impossible_overlap` and `unchecked_overlap_invalid` reject it against Housing
+    // and accept it against SolidBlock.
+    let st = s.world_state().unwrap();
+    let housing = &st.body("Housing").unwrap().body;
+    let solid_block = &st.body("SolidBlock").unwrap().body;
+    let disk = &st.body("Disk").unwrap().body;
+    let disk_mass = solidcraft_kernel::measure_mass(disk).unwrap();
+
+    let rejected_checked = super::impossible_overlap(&disk_mass, disk, housing);
+    assert!(rejected_checked.as_deref().is_some_and(|r| r.contains("interior points classify outside")), "{rejected_checked:?}");
+    let rejected_swapped = super::impossible_overlap(&disk_mass, housing, disk);
+    assert!(rejected_swapped.as_deref().is_some_and(|r| r.contains("interior points classify outside")), "{rejected_swapped:?}");
+    let rejected_unchecked = super::unchecked_overlap_invalid(&disk_mass, disk, housing);
+    assert!(rejected_unchecked.as_deref().is_some_and(|r| r.contains("interior points classify outside")), "{rejected_unchecked:?}");
+
+    assert_eq!(super::impossible_overlap(&disk_mass, disk, solid_block), None);
+    assert_eq!(super::unchecked_overlap_invalid(&disk_mass, disk, solid_block), None);
+}
+
+/// Whole-body overlap verification also rejects a fabricated 100%-volume overlap when the smaller
+/// body lies inside the larger body's bounding box and partially overlaps it (e.g. a screw whose
+/// shank overlaps a tapped hole while its head sits in an empty counterbore pocket): some interior
+/// points are `Inside` and others are strictly `Outside`, proving the shared part cannot equal
+/// 100% of the screw.
+#[test]
+fn whole_body_overlap_contradicted_rejects_partial_overlap_claiming_entire_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 16, "corner": [-20, -20, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 2.1, "height": 16, "base": [0, 0, 0], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6.0, "height": 6, "base": [0, 0, 10], "operation": "cut", "targets": ["Plate"]}));
+    // Screw inside Plate's bbox: shank Ø5 (overlaps Ø4.2 tap inside z = 2..10) + head Ø8.5 in empty counterbore (z = 10..15).
+    run(&mut s, "solid.cylinder", json!({"radius": 2.5, "height": 8, "base": [0, 0, 2], "operation": "new", "body_name": "Screw"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4.25, "height": 5, "base": [0, 0, 10], "operation": "join", "targets": ["Screw"]}));
+
+    let st = s.world_state().unwrap();
+    let plate = &st.body("Plate").unwrap().body;
+    let screw = &st.body("Screw").unwrap().body;
+    let screw_mass = solidcraft_kernel::measure_mass(screw).unwrap();
+
+    // Fabricated 100% whole-screw overlap is caught by interior-point verification (bbox fits inside Plate).
+    let rejected = super::impossible_overlap(&screw_mass, screw, plate);
+    assert!(rejected.as_deref().is_some_and(|r| r.contains("interior points classify outside")), "{rejected:?}");
+    let rejected_swapped = super::impossible_overlap(&screw_mass, plate, screw);
+    assert!(rejected_swapped.as_deref().is_some_and(|r| r.contains("interior points classify outside")), "{rejected_swapped:?}");
+
+    // Genuine partial thread overlap (~15% of screw volume) is accepted untouched.
+    let mut partial_mass = screw_mass.clone();
+    partial_mass.volume = screw_mass.volume * 0.15;
+    assert_eq!(super::impossible_overlap(&partial_mass, screw, plate), None);
+}

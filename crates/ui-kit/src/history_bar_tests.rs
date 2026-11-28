@@ -803,3 +803,27 @@ fn scrolled_to_its_end_the_strip_shows_the_marker_after_the_last_step() {
         assert_eq!(rig.at("test:Step 39"), last, "moving the marker must not clamp the horizontal scroll position");
     }
 }
+
+#[test]
+fn an_unrelated_shared_menu_keeps_offscreen_history_virtualized() {
+    let rig = Rig::new(&many(2000), 2000);
+    let (_, before) = rig.output(Vec::new(), Modifiers::NONE);
+    let mut menu = rig.ctx.run_ui(
+        RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 300.0))), focused: true, ..Default::default() },
+        |ui| {
+            crate::Menu::popup(
+                ui.ctx(),
+                egui::Id::unique("unrelated-menu"),
+                crate::MenuAnchor::Point(pos2(10.0, 10.0)),
+                &[crate::Item::action("save", "Save", "")],
+                false,
+            );
+        },
+    );
+    menu.textures_delta.clear();
+    assert!(crate::Menu::any_open(&rig.ctx));
+    QUIET_READS.with(|reads| reads.set(0));
+    let (_, during) = rig.output(Vec::new(), Modifiers::NONE);
+    assert_eq!(chips_painted(&rig, &during), chips_painted(&rig, &before));
+    assert_eq!(QUIET_READS.with(Cell::get), 1);
+}

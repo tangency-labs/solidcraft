@@ -1,6 +1,7 @@
 //! Trim: a face cut along curves into regions with interior points, a sheet cut by another
-//! complete sheet into picked connected regions, faces discarded from a body, and a body cut
-//! along curves dropped square onto its faces, keeping the regions points pick.
+//! complete sheet into picked connected regions (or split into all of them), faces discarded
+//! from a body, and a body cut along curves dropped square onto its faces, keeping the regions
+//! points pick.
 //!
 //! A face is cut by the kernel's merge of curves on a surface (`MergeCurvesOnSurface`, as
 //! `SmBrep::ProjectAndTrim` merges its projections): the curves, each within the tolerance of
@@ -13,7 +14,8 @@
 //!
 //! A sheet is cut by the boolean's imprint of both trimmed boundaries, with its common edge
 //! identities delimiting connected regions. Exact distances to the trimmed faces pick regions
-//! to retain; the remaining faces are removed with the same operation.
+//! to retain; the remaining faces are removed with the same operation. A split keeps every
+//! region, each as its own copy with the other regions' faces removed.
 //!
 //! A body is cut along dropped curves face by face and chain by chain (a chain: curves that
 //! meet end to end): the kernel's drop of a chain's curves square onto the face's surface
@@ -41,7 +43,7 @@ use solidcore::geom::tol::are_same_to_tol;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::face_internal_point;
 use solidcore::topology::brep::p10::merge_curves_on_surface;
-use solidcore::topology::brep::p2::is_sheets;
+use solidcore::topology::brep::p2::{is_manifold_solid, is_sheets};
 use solidcore::topology::brep::p3::{
     brep_copy, brep_copy_mapped, edit_brep, with_kernel_callbacks,
 };
@@ -262,18 +264,24 @@ pub fn split_face_by_curves(
     Ok((b, regions))
 }
 
-/// A copy of sheet `body` trimmed by the complete bounded cutting `sheet`, retaining the
-/// connected regions nearest `points`. Intersections are the boolean's common edges, not
-/// extended face surfaces; original face joins remain traversable unless the cutter meets
-/// them. Picks use distances to exact trimmed faces, with the body's own tolerance deciding
-/// an ambiguous pick on the cut. Both operands and their provenance are preserved.
+/// Sheet `body` imprinted with the complete bounded cutting `sheet` in a copy: the copy, its
+/// record order, the connected region of each record face (named by the region's lowest
+/// face), and the copy's tolerance. Faces are in one region when they meet at an edge the
+/// imprint did not make; the imprint's common edges delimit the regions. Original face joins
+/// remain traversable unless the cutter meets them. With `closed`, `body` may also be one
+/// closed manifold shell (a closed sheet), whose regions are cut the same way. Both operands
+/// are unchanged.
 ///
 /// # Errors
-/// [`Error::Argument`] for an empty or excessive pick list, nonfinite coordinates, the same
-/// operand twice, or an operand that is not one or more sheets; [`Error::CurveDoesNotCut`] when the
-/// intersection does not separate the target; [`Error::Unsupported`] for an ambiguous pick;
-/// the kernel's errors.
-pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body> {
+/// [`Error::Argument`] for the same operand twice or an operand that is not one or more sheets
+/// (nor, with `closed`, a closed manifold body); [`Error::CurveDoesNotCut`] when no common edge
+/// separates two regions; the kernel's errors.
+fn sheet_regions(
+    name: &'static str,
+    body: &Body,
+    sheet: &Body,
+    closed: bool,
+) -> Result<(Body, Order, Vec<usize>, f64)> {
     fn root(region: &[usize], mut i: usize) -> Result<usize> {
         for _ in 0..=region.len() {
             let next = *region.get(i).ok_or(Error::Exception)?;
@@ -284,38 +292,33 @@ pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body
         }
         Err(Error::Exception)
     }
-    if std::ptr::eq(body, sheet)
-        || points.is_empty()
-        || points.len() > MAX_REGION_PICKS
-        || points.iter().flatten().any(|x| !x.is_finite())
-    {
+    if std::ptr::eq(body, sheet) {
         return Err(Error::Argument);
     }
-    let (cut, common, tolerance) =
-        run_on("trim_sheet", &[("brep", body), ("sheet", sheet)], |k| {
-            let mut a = {
-                let b = body.lock();
-                if !is_sheets(k, &b)? {
-                    return Ok(Err(Error::Argument));
-                }
-                brep_copy(k, &b)?
-            };
-            let mut t = {
-                let b = sheet.lock();
-                if !is_sheets(k, &b)? {
-                    return Ok(Err(Error::Argument));
-                }
-                brep_copy(k, &b)?
-            };
-            matched_tolerances(k, &mut a, &mut t)?;
-            let intersection = boolean_with_curves(k, a, t, BooleanOperation::Imprint)?;
-            let cut = match finish(k, intersection.outcome.result, Expect::FACES)? {
-                Ok(cut) => cut,
-                Err(error) => return Ok(Err(error)),
-            };
-            let tolerance = cut.tolerance();
-            Ok(Ok((cut, intersection.intersection_edges, tolerance)))
-        })??;
+    let (cut, common, tolerance) = run_on(name, &[("brep", body), ("sheet", sheet)], |k| {
+        let mut a = {
+            let b = body.lock();
+            if !(is_sheets(k, &b)? || (closed && is_manifold_solid(&b)?)) {
+                return Ok(Err(Error::Argument));
+            }
+            brep_copy(k, &b)?
+        };
+        let mut t = {
+            let b = sheet.lock();
+            if !is_sheets(k, &b)? {
+                return Ok(Err(Error::Argument));
+            }
+            brep_copy(k, &b)?
+        };
+        matched_tolerances(k, &mut a, &mut t)?;
+        let intersection = boolean_with_curves(k, a, t, BooleanOperation::Imprint)?;
+        let cut = match finish(k, intersection.outcome.result, Expect::FACES)? {
+            Ok(cut) => cut,
+            Err(error) => return Ok(Err(error)),
+        };
+        let tolerance = cut.tolerance();
+        Ok(Ok((cut, intersection.intersection_edges, tolerance)))
+    })??;
     let common: HashSet<_> = common.into_iter().collect();
     let cut = Body::new(cut);
     let (record, order) = cut.to_record()?;
@@ -353,6 +356,29 @@ pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body
     if !separated {
         return Err(Error::CurveDoesNotCut);
     }
+    Ok((cut, order, region, tolerance))
+}
+
+/// A copy of sheet `body` trimmed by the complete bounded cutting `sheet`, retaining the
+/// connected regions nearest `points`. Intersections are the boolean's common edges, not
+/// extended face surfaces; original face joins remain traversable unless the cutter meets
+/// them ([`sheet_regions`]). Picks use distances to exact trimmed faces, with the body's own
+/// tolerance deciding an ambiguous pick on the cut. Both operands and their provenance are
+/// preserved.
+///
+/// # Errors
+/// [`Error::Argument`] for an empty or excessive pick list, nonfinite coordinates, the same
+/// operand twice, or an operand that is not one or more sheets; [`Error::CurveDoesNotCut`] when the
+/// intersection does not separate the target; [`Error::Unsupported`] for an ambiguous pick;
+/// the kernel's errors.
+pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body> {
+    if points.is_empty()
+        || points.len() > MAX_REGION_PICKS
+        || points.iter().flatten().any(|x| !x.is_finite())
+    {
+        return Err(Error::Argument);
+    }
+    let (cut, order, region, tolerance) = sheet_regions("trim_sheet", body, sheet, false)?;
     // Each region's nearest face decides its distance. Two faces in the same region do not
     // make a pick ambiguous (a point can lie on an original face join). Only the two nearest
     // distinct regions matter. The second nearest distance never increases, so a discarded
@@ -403,6 +429,38 @@ pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body
     } else {
         remove_faces(&cut, &order, &dropped)
     }
+}
+
+/// Sheet `body` split by the complete bounded cutting `sheet` into its connected regions, each
+/// region a copy of `body` cut where `sheet` meets it, with the faces of every other region
+/// taken away. The regions are those [`trim_sheet`] picks from (the boolean's common edges
+/// delimit them; the cutter's faces are never extended), in the order of their lowest record
+/// face in the cut copy. Every face of the cut copy is in exactly one region, so the regions
+/// together are the whole of `body`. `body` may also be closed (a closed sheet: a full turn of
+/// a surface), whose regions are then open sheets. Both operands and their provenance are
+/// preserved.
+///
+/// # Errors
+/// [`Error::Argument`] for the same operand twice, a `sheet` that is not one or more sheets, or
+/// a `body` that is neither that nor a closed manifold body;
+/// [`Error::CurveDoesNotCut`] when the intersection does not separate the target; the kernel's
+/// errors.
+pub fn split_sheet(body: &Body, sheet: &Body) -> Result<Vec<Body>> {
+    let (cut, order, region, _) = sheet_regions("split_sheet", body, sheet, true)?;
+    let mut roots: Vec<usize> = region.clone();
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+        .iter()
+        .map(|r| {
+            let others: Vec<usize> = region
+                .iter()
+                .enumerate()
+                .filter_map(|(f, x)| (x != r).then_some(f))
+                .collect();
+            remove_faces(&cut, &order, &others)
+        })
+        .collect()
 }
 
 /// A body cut along dropped curves in a copy of it: the copy, the cut lines' edges and the

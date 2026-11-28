@@ -228,6 +228,25 @@ fn a_note_on_an_edge_follows_the_model_and_keeps_its_place_when_lost() {
     assert_eq!((lost.get("point"), &lost["record"]["at"], &lost["record"]["content"]), (None, &place, &json!([{"text": "Deburr"}])), "{lost}");
 }
 
+/// With `at_edge: picked` the leader ends where the edge was picked, a quarter of the way along
+/// it, and stays a quarter of the way along when the edge grows (#22195).
+#[test]
+fn a_note_on_an_edge_can_end_where_it_was_picked_and_follows_the_edge() {
+    let (mut s, _, view, [bracket, _]) = placed();
+    let anchor = json!({"edge": {"view": ids::encode(view), "edge": {"point": [20, 0, 0], "path": [bracket]}}});
+    let added = run(&mut s, ADD, json!({"anchor": anchor, "at": [60, 40], "content": "Here", "at_edge": "picked"}));
+    ends_at(&added, [20.0, 0.0, 0.0]);
+    let id = added["note"].clone();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 100}}));
+    run(&mut s, "drawing.open", drawing);
+    let grown = run(&mut s, INSPECT, json!({"note": id}));
+    assert_eq!(grown["status"], "ok", "{grown}");
+    ends_at(&grown, [25.0, 0.0, 0.0]);
+}
+
 /// An edit changes what it is told, once, and an edit with nothing new makes no step. What it belongs
 /// to stays. A view's note goes with its view's copy and delete; a sheet's stays, and is selected and
 /// deleted by its id.

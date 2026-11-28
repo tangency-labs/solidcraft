@@ -27,6 +27,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use crate::math::det;
 use std::borrow::Cow;
 
 use crate::curve::curve::Curve;
@@ -164,7 +165,7 @@ pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64, at: Point3)
     let [moved, _] = turned(interval);
     let near = t.to_radians() + (lo - moved);
     let d = at - p3(frame.origin);
-    let angle = (d.dot(p3(frame.y_axis)) / ry).atan2(d.dot(p3(frame.x_axis)) / rx);
+    let angle = det::atan2(d.dot(p3(frame.y_axis)) / ry, d.dot(p3(frame.x_axis)) / rx);
     angle + TAU * ((near - angle) / TAU).round()
 }
 
@@ -194,6 +195,19 @@ pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
 /// proved on the conic, or it is not proved to turn anticlockwise at most once round; those
 /// of the constructors.
 pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve> {
+    conic_on_form_if_proved(k, conic, form)?.ok_or_else(|| {
+        SolidError::invalid_input(OP, "a conic's NURBS form is off the record's conic")
+    })
+}
+
+/// [`conic_on_form`], with `None` where the form is not proved on the record's conic: a label
+/// its form does not prove, which a reader drops so the edge is its exact NURBS, as a face's
+/// analytic label is dropped ([`face_surface`](crate::surface::face_surface::face_surface)).
+///
+/// # Errors
+///
+/// Those of [`conic_on_form`] but the form being off the conic.
+pub fn conic_on_form_if_proved(k: &Kernel, conic: &Record, form: &Record) -> Result<Option<Curve>> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
     let (frame, rx, ry, circle) = match conic {
         Record::Circle { frame, radius } => (frame, *radius, *radius, true),
@@ -213,7 +227,7 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
     }
     let (o, x, y) = axes(frame)?;
     if !on_conic(&nurbs, o, x, y, rx, ry, circle)? {
-        return Err(bad("a conic's NURBS form is off the record's conic"));
+        return Ok(None);
     }
     let domain = form_angles(&nurbs, o, x, y, rx, ry)?.ok_or_else(|| {
         bad("a conic's NURBS form does not run anticlockwise round it at most once")
@@ -228,7 +242,7 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
     } else {
         Ellipse::new(k, o, x, y, domain, rx, ry, &opts)?
     };
-    Ok(Curve::from(e))
+    Ok(Some(Curve::from(e)))
 }
 
 /// Map a pcurve's entire natural support onto `interval` and scale its UV
@@ -733,7 +747,7 @@ fn form_angles(
     ry: f64,
 ) -> Result<Option<Extent1d>> {
     let d = nurbs.evaluate_point(nurbs.natural_interval().min())? - o;
-    let a0 = (d.dot(y) / ry).atan2(d.dot(x) / rx).to_degrees();
+    let a0 = det::atan2(d.dot(y) / ry, d.dot(x) / rx).to_degrees();
     let Some(mut sweep) = conic_turn(nurbs, o, x, y, rx, ry)? else {
         return Ok(None);
     };

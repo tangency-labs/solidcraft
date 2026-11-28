@@ -229,6 +229,51 @@ fn a_pack_round_trips_through_json_and_csv() {
     assert!(csv.lines().nth(1).is_some_and(|l| l.starts_with("\"'=1+1")), "{csv}");
 }
 
+/// A pack row has a K-factor and no 90° bend deduction or allowance (#6794). A rule that unfolds
+/// from one goes into a pack with the K-factor it works out to, so the pack unfolds as the rule
+/// does; a pack that names the value is read without it.
+#[test]
+fn a_rule_that_unfolds_from_a_90_degree_value_goes_into_a_pack_with_its_k_factor() {
+    // T 2, R 2, BD90 3.5 mm: BA90 = 2·(R + T) − 3.5 = 4.5, K = (4.5/(π/2) − 2)/2 = 0.432394487827058.
+    // The rule's own K-factor text is not read, and is not what the pack gets.
+    let chart = SheetRule {
+        thickness: "2 mm".into(),
+        bend_radius: "2 mm".into(),
+        k_factor: "0.3".into(),
+        unfold_method: "deduction".into(),
+        unfold_value: "3.5 mm".into(),
+        ..SheetRule::named("Chart")
+    };
+    let no_parameters = std::collections::BTreeMap::new();
+    let k = crate::Document::default().rule_values(&no_parameters, &chart).unwrap().k_factor;
+    assert!((k - 0.432394487827058).abs() < 1e-12, "{k}");
+    let row = PackRule::of(chart.clone()).expect("a chart rule of plain numbers has a K-factor");
+    assert_eq!((row.rule.unfold_method.as_str(), row.rule.unfold_value.as_str()), ("k_factor", ""));
+    assert_eq!(row.rule.k_factor.parse::<f64>(), Ok(k));
+    // A 90° value or a thickness that reads a design's parameter has no K-factor outside that
+    // design: no row, rather than one with the stored K-factor (0.3) the rule does not unfold by.
+    assert!(PackRule::of(SheetRule { unfold_value: "BD90".into(), ..chart.clone() }).is_none());
+    assert!(PackRule::of(SheetRule { thickness: "Stock".into(), ..chart.clone() }).is_none());
+    // A K-factor rule goes in as it is, a parameter in it too.
+    let plain = SheetRule { k_factor: "0.44".into(), ..SheetRule::named("Plain") };
+    assert_eq!(PackRule::of(plain.clone()).map(|row| row.rule), Some(plain));
+    let pack = RulePack { rules: vec![row.clone()], ..RulePack::default() };
+    for text in [write_json(&pack), write_csv(&pack)] {
+        assert!(!text.contains("unfold"), "{text}");
+        let back = read(text.as_bytes()).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        assert!(back.skipped.is_empty(), "{:?}", back.skipped);
+        assert_eq!(back.pack.rules[0].rule, row.rule);
+        assert_eq!(crate::Document::default().rule_values(&no_parameters, &back.pack.rules[0].rule).unwrap().k_factor, k);
+    }
+    // A pack that names the two settings is read as a K-factor rule, and says what it skipped.
+    let text = r#"{"format":"solidcraft-sheet-rules","version":1,"rules":[
+        {"name":"A","thickness":"2 mm","k_factor":"0.4","bend_radius":"2 mm","unfold_method":"deduction","unfold_value":"3.5 mm"}]}"#;
+    let read = read(text.as_bytes()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(read.skipped, ["unfold_method", "unfold_value"]);
+    let rule = &read.pack.rules[0].rule;
+    assert_eq!((rule.unfold_method.as_str(), rule.unfold_value.as_str(), rule.k_factor.as_str()), ("k_factor", "", "0.4"));
+}
+
 #[test]
 fn a_short_csv_pack_takes_the_default_rule_for_what_it_leaves_out() {
     let csv = "\u{feff}Name,Thickness,K_Factor,Bend_Radius,Material\r\nShop CRS 16,1.52 mm,0.42,\"0.8 * Thickness\",CRS\r\n\r\nShop AL 3,3 mm,0.45,3 mm,\r\n";

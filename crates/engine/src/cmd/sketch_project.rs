@@ -1018,6 +1018,16 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// `{midpoint: {edge: [x,y,z], body?}}`, projects the edge and becomes `{midpoint: <its curve>}`,
 /// the middle of the projected line (#17920).
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
+    project_operands_with(s, p, cmd, keys, LinkKind::Project)
+}
+
+/// A model edge picked against 3D geometry keeps its height, as in Include 3D Geometry.
+/// Vertex picks use the sketch's existing linked vertex projection.
+pub(super) fn project_3d_coincident_operands(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    project_operands_with(s, p, cmd, &["a", "b"], LinkKind::Include)
+}
+
+fn project_operands_with(s: &mut Session, p: &Value, cmd: &str, keys: &[&str], edge_kind: LinkKind) -> Result<Value> {
     let middle_of = |v: &Value| v.get("midpoint").filter(|m| m.get("edge").is_some() && model_ref(m)).cloned();
     if !keys.iter().any(|k| p.get(*k).is_some_and(|v| model_ref(v) || middle_of(v).is_some())) {
         return Ok(p.clone());
@@ -1033,9 +1043,10 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     for key in keys {
         let Some(v) = p.get(*key) else { continue };
         if let Some(m) = middle_of(v) {
-            out[*key] = json!({"midpoint": project_ref(s, &doc, id, &mut sk, &m, cmd)?});
+            out[*key] = json!({"midpoint": project_ref(s, &doc, id, &mut sk, &m, cmd, LinkKind::Project)?});
         } else if model_ref(v) {
-            out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+            let kind = if v.get("edge").is_some() { edge_kind } else { LinkKind::Project };
+            out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd, kind)?);
         }
     }
     sketch_store::write(&mut doc, id, sk)?;
@@ -1050,13 +1061,17 @@ pub(crate) fn model_ref(v: &Value) -> bool {
     v.get("edge").is_some() || v.get("vertex").is_some() || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"))
 }
 
-/// Project one model reference into the sketch and report the entity it stands for: an edge's
-/// projected curve (a point when it is seen end on) or a vertex's projected point.
-fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str) -> Result<String> {
+/// Link a model reference and return its included wire, projected curve, or projected point.
+fn project_ref(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str, kind: LinkKind) -> Result<String> {
     // An edge of another component's copy follows that copy, as Project does.
     let (src, placement) = pick(s, doc, id, sk, v, cmd, false)?;
     let what = src.describe();
-    let link = add_link(s, doc, id, sk, LinkKind::Project, src, placement).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+    let link = add_link(s, doc, id, sk, kind, src, placement).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+    if kind == LinkKind::Include
+        && let Some(wire) = sk.link_wires(&link).first().and_then(|wire| sk.wires.get(*wire))
+    {
+        return Ok(wire.id.clone());
+    }
     // An edge or axis stands for its curve (a point when it is seen end on), a vertex for its point.
     let curve = if v.get("edge").is_some() || v.get("axis").is_some() {
         sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone())
@@ -1096,7 +1111,7 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
         if !model_ref(entity) {
             continue;
         }
-        *entity = json!(project_ref(s, &doc, id, &mut sk, entity, cmd)?);
+        *entity = json!(project_ref(s, &doc, id, &mut sk, entity, cmd, LinkKind::Project)?);
     }
     let mut params = p.clone();
     if let Some(o) = params.as_object_mut() {

@@ -330,7 +330,7 @@ fn bracket() -> (f64, f64) {
 ///
 /// Without WR-641's flag this failed under SolidCraft's fixes (#2500), 1001
 /// `CalcFilletIntSideFace` at the End on the boss: the trace's extension before the End's
-/// section, on the torus's offset extended round its tube (`offset_extension_as_itself`), ran
+/// section, on the torus's offset extended round its tube (WR-633), ran
 /// round the offsets' closed oval past its own span (the end-point and loop checks compare UV,
 /// which the wrapped extension does not repeat), the fillet surface covered that span twice,
 /// and the End's rail ends dropped onto the second sheet. The extension now stops where it

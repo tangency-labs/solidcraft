@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: friction</title>
+  <path d="M6 24L28 24L28 40L6 40Z" fill="#b8c3cf"/>
+  <path d="M6 24L28 24L28 40L6 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M36 24L58 24L58 40L36 40Z" fill="#b8c3cf"/>
+  <path d="M36 24L58 24L58 40L36 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28 24L30 16L34 16L36 24L36 40L34 48L30 48L28 40Z" fill="#328bd3"/>
+  <path d="M28 24L30 16L34 16L36 24L36 40L34 48L30 48L28 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

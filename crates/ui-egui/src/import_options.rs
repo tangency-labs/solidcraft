@@ -349,7 +349,7 @@ mod tests {
             let v = Values::for_path(path, &[], &none).expect("imports");
             assert!(v.fields.iter().all(|f| f.param != "up"), "{path}: its up axis is the stand-up offer's");
         }
-        let board = Values::for_path("b.kicad_pcb", &["components", "copper", "silkscreen", "color"], &none).unwrap();
+        let board = Values::for_path("b.kicad_pcb", &["components", "copper", "silkscreen", "holes", "color"], &none).unwrap();
         assert_eq!(board.fields.iter().map(|f| f.param).collect::<Vec<_>>(), ["thickness", "representation"], "`skip` leaves options out");
     }
 
@@ -678,11 +678,12 @@ mod tests {
                 ("components", Choice::Bool(true)),
                 ("copper", Choice::Choice(1)),
                 ("silkscreen", Choice::Bool(true)),
+                ("holes", Choice::Choice(1)),
                 ("color", Choice::Color([13, 84, 46])),
                 ("thickness", Choice::Number(2.2)),
                 ("representation", Choice::Choice(0)),
             ],
-            "every option the old window had, and the board as a solid or a mesh"
+            "every option the old window had, the holes, and the board as a solid or a mesh"
         );
         assert!(v.params().is_empty(), "untouched, the board opens as `doc.open` opens it");
         // At the answer, the thickness read from the board and the table's colour are still the
@@ -690,17 +691,25 @@ mod tests {
         assert!(v.params_now(&p, &Map::new()).is_empty(), "untouched, nothing is sent at the answer either");
         // A project file finds its board; a board that cannot be read starts at the table's 1.6 mm.
         let project = Values::for_path(&board.with_extension("kicad_pro").to_string_lossy(), &[], &Map::new()).unwrap();
-        assert_eq!(project.fields[4].initial, Choice::Number(2.2));
+        assert_eq!(project.fields[5].initial, Choice::Number(2.2));
         let missing = Values::for_path("missing.kicad_pcb", &[], &Map::new()).unwrap();
-        assert_eq!(missing.fields[4].initial, Choice::Number(1.6));
+        assert_eq!(missing.fields[5].initial, Choice::Number(1.6));
 
-        let changes = [Choice::Bool(false), Choice::Choice(2), Choice::Bool(false), Choice::Color([1, 2, 3]), Choice::Number(2.4), Choice::Choice(1)];
+        let changes = [
+            Choice::Bool(false),
+            Choice::Choice(2),
+            Choice::Bool(false),
+            Choice::Choice(3),
+            Choice::Color([1, 2, 3]),
+            Choice::Number(2.4),
+            Choice::Choice(1),
+        ];
         for (field, value) in v.fields.iter_mut().zip(changes) {
             field.value = value;
         }
         assert_eq!(
             Value::Object(v.params()),
-            json!({"components": false, "copper": "mesh", "silkscreen": false, "color": "#010203", "thickness": 2.4, "representation": "mesh"})
+            json!({"components": false, "copper": "mesh", "silkscreen": false, "holes": "all", "color": "#010203", "thickness": 2.4, "representation": "mesh"})
         );
         // The copper back at the overlay it started at is not sent again.
         v.fields[1].value = Choice::Choice(1);
@@ -768,6 +777,8 @@ mod tests {
             "Copper (traces, vias, zones, pads)",
             "Overlay on the board",
             "Include silkscreen",
+            "Holes",
+            "Mounting holes",
             "Board color",
             "Board thickness",
             "Board",
@@ -785,10 +796,10 @@ mod tests {
             })
             .expect("the copper row drew its label");
         assert!(drawn.contains("pads)") && !drawn.contains('…'), "the copper label is cut short: {drawn:?}");
-        for handle in ["components", "copper", "silkscreen", "color", "thickness", "representation"] {
+        for handle in ["components", "copper", "silkscreen", "holes", "color", "thickness", "representation"] {
             assert!(crate::scenario::handle_at(&format!("import_options:{handle}")).is_some(), "no `{handle}` row");
         }
-        assert_eq!(h.app.import_options.as_ref().unwrap().values.fields[4].value, Choice::Number(2.2), "the board's thickness");
+        assert_eq!(h.app.import_options.as_ref().unwrap().values.fields[5].value, Choice::Number(2.2), "the board's thickness");
         h.step(&json!({"click": {"handle": "import_options:cancel"}})).unwrap();
         h.frames(2);
         assert!(h.app.import_options.is_none() && h.app.file_load.idle() && h.app.session.doc.features.is_empty(), "Cancel read the board");
@@ -803,8 +814,8 @@ mod tests {
         h.frames(2);
         // The colour picker and the number field are the kit's, tested there: set their values.
         if let Some(ask) = h.app.import_options.as_mut() {
-            ask.values.fields[3].value = Choice::Color([200, 30, 30]);
-            ask.values.fields[4].value = Choice::Number(1.2);
+            ask.values.fields[4].value = Choice::Color([200, 30, 30]);
+            ask.values.fields[5].value = Choice::Number(1.2);
         }
         h.frames(1);
         let held = h.app.import_options.clone().expect("still open");

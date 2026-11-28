@@ -2564,6 +2564,52 @@ fn raise_band_on_a_rounded_rim() {
     }
 }
 
+/// An outside lip on a shelled cylinder (#20625): the band's outer wall rises from the rim's kept
+/// circle, whose interval is on its NURBS form (arc length), not its angle. Taken as an angle,
+/// the wall's form came out half a turn from its edges for radii 35, 40 and 45: its pcurves ran
+/// past its domain, SMLib's check refused it ("Edge endpoints within face domain") and the next
+/// join failed. Every pcurve ends inside its face's domain (SMLib's tests 70 to 72), and a box
+/// joined under the floor adds its 20 × 10 × 1 to the band's area times its height.
+#[test]
+fn raise_band_outside_a_round_rim_keeps_its_wall_form_under_its_edges() {
+    use solidcore_record::brep::{Curve2, Loop};
+    for r in [20.0, 30.0, 35.0, 40.0, 45.0, 50.0] {
+        let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, r), holes: vec![] }], 0.0, 20.0).unwrap().pop().unwrap();
+        let sh = shell(&b, &[Vec3::new(0.0, 0.0, 20.0)], 4.0).unwrap();
+        let v0 = measure(&sh).unwrap().volume;
+        let lip = crate::lip::raise_band(&sh, Vec3::new(r - 2.0, 0.0, 20.0), 2.0, 4.0, true).unwrap();
+        let rec = crate::native::brep_record(&lip).unwrap();
+        for (fi, f) in rec.faces.iter().enumerate() {
+            for l in &f.loops {
+                let Loop::Edges { edges } = l else { continue };
+                for u in edges {
+                    let pts: Vec<[f64; 2]> = match &u.pcurve {
+                        Curve2::Spline { points, .. } => points.clone(),
+                        Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+                    };
+                    for p in [pts.first(), pts.last()].into_iter().flatten() {
+                        for d in 0..2 {
+                            let [lo, hi] = f.domain[d];
+                            assert!(
+                                p[d] >= lo - 1e-4 && p[d] <= hi + 1e-4,
+                                "r {r}: face {fi} edge {}: pcurve end {p:?} off domain {:?}",
+                                u.edge,
+                                f.domain
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let tab = box_solid(Vec3::new(-10.0, -5.0, -1.0), Vec3::new(10.0, 5.0, 0.0)).unwrap();
+        let joined = boolean(&lip, &tab, BoolOp::Union).unwrap().unwrap();
+        let band = PI * (r * r - (r - 2.0) * (r - 2.0));
+        let want = v0 + band * 4.0 + 200.0;
+        let v = measure(&joined).unwrap().volume;
+        assert!(rel(v, want) < 1e-5, "r {r}: {v} vs {want}");
+    }
+}
+
 /// A lip wider than its rim (#16742): the band reaches past the rim's outer wall, so what is left of
 /// the face is the underside of the overhang. It faces down, away from the rim's top, and the
 /// ring's two edges round with a small fillet. Volume added is the band's area times its height.
@@ -2629,6 +2675,127 @@ fn raise_band_on_a_sloped_rim_of_ellipses_is_refused_as_not_supported_yet() {
     let text = raise_band(&sloped, at, 1.5, 3.0, false).unwrap_err().to_string();
     assert!(text.contains("not supported yet") && text.contains("ellipse"), "{text}");
     assert!(raise_band(&ring, Vec3::new(-26.0, 0.0, 20.0), 1.5, 3.0, false).is_ok());
+}
+
+/// #21608: a shelled D, three sides of a 60 × 40 rectangle closed by an arc that meets them at
+/// sharp corners, bulging out (s = 1) or biting in (s = −1). The band's far edge moves the lines
+/// by the width and the arc's radius by it, so it closes where they cross. Both bands, inside and
+/// outside, add their area times the height and keep the counts of the lip's faces.
+#[test]
+fn raise_band_where_an_arc_meets_lines_at_sharp_corners() {
+    let (w, h, t) = (1.5, 2.0, 3.0);
+    let half = (20.0f64 / 30.0).atan();
+    let big = (30.0f64 * 30.0 + 20.0 * 20.0).sqrt();
+    for s in [1.0, -1.0] {
+        let cx = 30.0 * s;
+        let d_shape = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::ZERO, b: Vec2::new(60.0, 0.0) },
+                Seg2::Line { a: Vec2::new(60.0, 0.0), b: Vec2::new(60.0, 40.0) },
+                Seg2::Line { a: Vec2::new(60.0, 40.0), b: Vec2::new(0.0, 40.0) },
+                Seg2::Arc { center: Vec2::new(cx, 20.0), radius: big, start: 20f64.atan2(-cx), sweep: 2.0 * s * half },
+            ],
+        };
+        let b = extrude(&Plane::XY, &[Region2 { outer: d_shape, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+        let sh = shell(&b, &[Vec3::new(30.0, 20.0, 15.0)], t).unwrap();
+        let v0 = measure(&sh).unwrap().volume;
+        // The D moved in by d: lines y = d, x = 60 − d, y = 40 − d, and the circle of radius
+        // big − s·d meeting y = d at x₁; a rectangle from x₁, with the circle's segment beyond
+        // the chord x = x₁ added (bulging out) or taken away (biting in).
+        let area = |d: f64| {
+            let rho = big - s * d;
+            let x1 = cx - s * (rho * rho - (20.0 - d) * (20.0 - d)).sqrt();
+            let theta = 2.0 * ((20.0 - d) / rho).asin();
+            (60.0 - d - x1) * (40.0 - 2.0 * d) + s * rho * rho / 2.0 * (theta - theta.sin())
+        };
+        for outside in [false, true] {
+            let lip = raise_band(&sh, Vec3::new(30.0, 1.5, 15.0), w, h, outside).unwrap();
+            assert!(lip.validity().is_empty(), "s {s}, outside {outside}: {:?}", lip.validity());
+            let band = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+            let v = measure(&lip).unwrap().volume;
+            assert!(rel(v, v0 + band * h) < 1e-6, "s {s}, outside {outside}: {v} vs {}", v0 + band * h);
+            // The shell's 11 faces less the rim, the rim's rest, 4 walls on each side and the top;
+            // 4 new edges round the band's edge, 4 up from it and from the loop, 8 on the top.
+            assert_eq!((lip.face_count(), lip.edge_count(), lip.vertex_count()), (20, 44, 28), "s {s}, outside {outside}");
+            // A groove's profile is the same band: its area, as a slab 1 thick.
+            let (plane, region) = rim_band(&sh, Vec3::new(30.0, 1.5, 15.0), w, 0.0, outside).unwrap();
+            let slab = extrude(&plane, &[region], 0.0, 1.0).unwrap().pop().unwrap();
+            let want = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+            let got = measure(&slab).unwrap().volume;
+            assert!(rel(got, want) < 1e-6, "groove s {s}, outside {outside}: {got} vs {want}");
+        }
+    }
+}
+
+/// #21608: a shelled lens, two arcs of radius 25 about (±15, 0) meeting at sharp corners (0, ±20):
+/// the band's far edge closes where the two moved circles cross. Moved in by d, the lens is two
+/// segments of radius 25 − d on the chord x = 0. A band wider than 25 − 15 parts the circles
+/// at the corners, and is refused.
+#[test]
+fn raise_band_where_two_arcs_meet_at_sharp_corners() {
+    let (big, c, t, w, h) = (25.0f64, 15.0f64, 3.0, 1.5, 2.0);
+    let half = (20.0f64 / c).atan();
+    let lens = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::new(-c, 0.0), radius: big, start: -half, sweep: 2.0 * half },
+            Seg2::Arc { center: Vec2::new(c, 0.0), radius: big, start: PI - half, sweep: 2.0 * half },
+        ],
+    };
+    let b = extrude(&Plane::XY, &[Region2 { outer: lens, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&b, &[Vec3::new(0.0, 0.0, 15.0)], t).unwrap();
+    let v0 = measure(&sh).unwrap().volume;
+    let area = |d: f64| {
+        let rho = big - d;
+        let theta = 2.0 * ((rho * rho - c * c).sqrt() / rho).asin();
+        rho * rho * (theta - theta.sin())
+    };
+    let at = Vec3::new(10.0 - 1.5, 0.0, 15.0);
+    for outside in [false, true] {
+        let lip = raise_band(&sh, at, w, h, outside).unwrap();
+        assert!(lip.validity().is_empty(), "outside {outside}: {:?}", lip.validity());
+        let band = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+        let v = measure(&lip).unwrap().volume;
+        assert!(rel(v, v0 + band * h) < 1e-6, "outside {outside}: {v} vs {}", v0 + band * h);
+        // The shell's 7 faces less the rim, the rim's rest, 2 walls on each side and the top.
+        assert_eq!((lip.face_count(), lip.edge_count(), lip.vertex_count()), (12, 22, 14), "outside {outside}");
+    }
+    let text = raise_band(&sh, at, 11.0, h, true).unwrap_err().to_string();
+    assert!(text.contains("can't go round"), "{text}");
+}
+
+/// A plate shaped as two 20 × 20 squares joined by a neck 10 long and 4 wide, with a hole in one
+/// square. A band 1.5 wide along the outer loop still fits through the neck: it adds its area
+/// (840 − 591) times its height and 25 faces, 60 edges and 36 vertices. A band 3 wide moves the
+/// neck's two sides past each other, so its far edge crosses itself: refused.
+#[test]
+fn raise_band_refuses_a_band_whose_far_edge_crosses_itself_at_a_neck() {
+    let dumbbell = Loop2::polygon(&[
+        Vec2::new(0.0, -10.0),
+        Vec2::new(20.0, -10.0),
+        Vec2::new(20.0, -2.0),
+        Vec2::new(30.0, -2.0),
+        Vec2::new(30.0, -10.0),
+        Vec2::new(50.0, -10.0),
+        Vec2::new(50.0, 10.0),
+        Vec2::new(30.0, 10.0),
+        Vec2::new(30.0, 2.0),
+        Vec2::new(20.0, 2.0),
+        Vec2::new(20.0, 10.0),
+        Vec2::new(0.0, 10.0),
+    ]);
+    let plate = Region2 { outer: dumbbell, holes: vec![Loop2::circle(Vec2::new(10.0, 0.0), 3.0)] };
+    let plate = extrude(&Plane::XY, &[plate], 0.0, 5.0).unwrap().pop().unwrap();
+    let v0 = measure(&plate).unwrap().volume;
+    let at = Vec3::new(45.0, 0.0, 5.0);
+    let lip = raise_band(&plate, at, 1.5, 2.0, true).unwrap();
+    assert!(lip.validity().is_empty(), "{:?}", lip.validity());
+    let v = measure(&lip).unwrap().volume;
+    assert!(rel(v, v0 + 249.0 * 2.0) < 1e-6, "{v} vs {}", v0 + 249.0 * 2.0);
+    let counts = |b: &Body| (b.face_count(), b.edge_count(), b.vertex_count());
+    let (f, e, n) = counts(&plate);
+    assert_eq!(counts(&lip), (f + 25, e + 60, n + 36));
+    let text = raise_band(&plate, at, 3.0, 2.0, true).unwrap_err().to_string();
+    assert!(text.contains("crosses itself"), "{text}");
 }
 
 #[test]
@@ -3882,4 +4049,132 @@ fn a_panic_the_mesher_catches_counts_as_guarded() {
     assert!(matches!(&result, Err(solidcore_tess::TessError::Internal(m)) if m.contains("previous_region")), "{result:?}");
     assert_eq!(panics.load(Ordering::SeqCst), 1, "the triangulation library panics once");
     assert_eq!(unguarded.load(Ordering::SeqCst), 0, "the panic is inside a guard the crash reports see");
+}
+
+/// A curve chain picked by edge index walks from that edge, even where a picked point would be
+/// ambiguous: every edge of a box (each a chain of its own) at the corner all three share, and an
+/// index the body does not have is refused.
+#[test]
+fn a_curve_chain_by_edge_index_starts_from_that_edge() {
+    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let at_corner: Vec<usize> = [Vec3::new(5.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 15.0)].map(|p| edge_near(&b, p)).to_vec();
+    for &e in &at_corner {
+        let chain = crate::curve_chain_of_edges(&b, &[e], solidcraft_geom::TANGENT_CHAIN).unwrap();
+        assert_eq!(chain, vec![e], "edge {e}");
+    }
+    let count = b.record().edges.len();
+    assert!(crate::curve_chain_of_edges(&b, &[count], solidcraft_geom::TANGENT_CHAIN).is_err());
+    assert!(crate::curve_chain_of_edges(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
+}
+
+/// A face chain picked by face index runs round a slot's side: from a flat side, across the
+/// tangent edges onto both half cylinders and the other flat side, never onto the top or bottom it
+/// meets at sharp edges (#22845). An index the body does not have is refused.
+#[test]
+fn a_face_chain_by_face_index_runs_round_a_slots_tangent_side() {
+    let slab = box_solid(Vec3::new(-10.0, -15.0, 0.0), Vec3::new(10.0, 15.0, 12.0)).unwrap();
+    let mut b = slab;
+    for y in [-15.0, 15.0] {
+        let end = cylinder(Vec3::new(0.0, y, 0.0), Vec3::new(0.0, 0.0, 1.0), 10.0, 12.0).unwrap();
+        b = crate::boolean(&b, &end, crate::BoolOp::Union).unwrap().unwrap();
+    }
+    let face = |p: Vec3| b.face_at_point(p).unwrap().unwrap();
+    let side = face(Vec3::new(10.0, 0.0, 6.0));
+    let chain = crate::tangent_face_chain_of_faces(&b, &[side], solidcraft_geom::TANGENT_CHAIN).unwrap();
+    assert_eq!(chain.first(), Some(&side));
+    for p in [Vec3::new(-10.0, 0.0, 6.0), Vec3::new(0.0, 25.0, 6.0), Vec3::new(0.0, -25.0, 6.0)] {
+        assert!(chain.contains(&face(p)), "{p:?} in {chain:?}");
+    }
+    for p in [Vec3::new(0.0, 0.0, 12.0), Vec3::new(0.0, 0.0, 0.0)] {
+        assert!(!chain.contains(&face(p)), "{p:?} not in {chain:?}");
+    }
+    let count = b.record().faces.len();
+    assert!(crate::tangent_face_chain_of_faces(&b, &[count], solidcraft_geom::TANGENT_CHAIN).is_err());
+    assert!(crate::tangent_face_chain_of_faces(&b, &[], solidcraft_geom::TANGENT_CHAIN).is_err());
+}
+
+/// Whether a path of body edges lies in one plane is decided over each free-form span's whole
+/// length from its control points, not from its directions at sampled points. A degree 9 span
+/// along x whose height is the integral of `c (t - 1/8) (t - 2/8) … (t - 1)` runs level at eight
+/// of the nine points the old check sampled and rises 0.01 mm off the plane between them; it is
+/// refused. A rational span in a tilted plane with uneven weights, followed by a line in that
+/// plane, is accepted with the plane's normal, and refused once one control point is 0.001 mm
+/// off the plane.
+#[test]
+fn a_free_form_span_that_bows_out_of_plane_between_samples_has_no_plane() {
+    use crate::build::PathSeg;
+    use solidcraft_geom::bspline::HPoint;
+    const N: usize = 9;
+    let binomial = |n: usize, k: usize| (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64);
+    // The height's derivative, power basis, lowest first: zero at t = 1/8 … 1.
+    let mut dz = vec![1.0];
+    for k in 1..=8 {
+        let mut next = vec![0.0; dz.len() + 1];
+        for (i, c) in dz.iter().enumerate() {
+            next[i] -= c * k as f64 / 8.0;
+            next[i + 1] += c;
+        }
+        dz = next;
+    }
+    let z: Vec<f64> = std::iter::once(0.0).chain(dz.iter().enumerate().map(|(i, c)| c / (i + 1) as f64)).collect();
+    // Bernstein coefficients of a power-basis polynomial of degree N or less.
+    let bernstein =
+        |a: &[f64]| -> Vec<f64> { (0..=N).map(|j| (0..=j.min(a.len() - 1)).map(|i| binomial(j, i) / binomial(N, i) * a[i]).sum()).collect() };
+    // The span bends in the plane z = 0 (`y = 10 t (1 - t)`), so that plane is the only one it
+    // can lie in, and the height lifts it off that plane.
+    let (sideways, heights) = (bernstein(&[0.0, 10.0, -10.0]), bernstein(&z));
+    let span = |scale: f64| {
+        let ctrl: Vec<HPoint> =
+            (0..=N).map(|i| HPoint::weighted(Vec3::new(40.0 * i as f64 / N as f64, sideways[i], heights[i] * scale), 1.0)).collect();
+        SpaceBezier::new(&ctrl).unwrap()
+    };
+    let flat = span(0.0);
+    let n = PathSeg::plane_normal(&[PathSeg::Bezier(flat)], 1e-6).unwrap();
+    assert!(n.cross(Vec3::Z).len() < 1e-9, "{n:?}");
+    let peak = (0..=4000).map(|i| flat.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    assert!(peak == 0.0);
+    let unit = span(1.0);
+    let rise = (0..=4000).map(|i| unit.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    let bowed = span(0.01 / rise);
+    let rise = (0..=4000).map(|i| bowed.point(i as f64 / 4000.0).unwrap().z.abs()).fold(0.0, f64::max);
+    assert!((rise - 0.01).abs() < 1e-6, "{rise}");
+    for k in 1..=8 {
+        let d = bowed.derivative(k as f64 / 8.0).unwrap();
+        assert!(d.z.abs() <= 1e-9 * d.len(), "level at {k}/8: {d:?}");
+    }
+    assert_eq!(PathSeg::plane_normal(&[PathSeg::Bezier(bowed)], 1e-6), None);
+
+    // A rational span in the plane through the origin tilted 30° about x, then a line in it.
+    let (s, c) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
+    let normal = Vec3::new(0.0, -s, c);
+    let at = |u: f64, v: f64, lift: f64| Vec3::new(u, v * c, v * s) + normal * lift;
+    let tilted = |lift: f64| {
+        let pts = [at(0.0, 0.0, 0.0), at(5.0, 8.0, lift), at(15.0, -6.0, 0.0), at(20.0, 3.0, 0.0)];
+        let ctrl: Vec<HPoint> = pts.iter().zip([1.0, 3.0, 0.5, 1.0]).map(|(p, w)| HPoint::weighted(*p, w)).collect();
+        SpaceBezier::new(&ctrl).unwrap()
+    };
+    let path = |lift: f64| {
+        let b = tilted(lift);
+        vec![PathSeg::Bezier(b), PathSeg::Line { a: b.end(), b: at(30.0, 10.0, 0.0) }]
+    };
+    let n = PathSeg::plane_normal(&path(0.0), 1e-6).unwrap();
+    assert!(n.cross(normal).len() < 1e-9, "{n:?}");
+    assert_eq!(PathSeg::plane_normal(&path(1e-3), 1e-6), None);
+}
+
+/// A drawing leader on an edge's polyline (#22195): the fraction of its length nearest a picked
+/// point, and the point a fraction along it, are each other's inverse and measure by length.
+#[test]
+fn polyline_fraction_and_point_measure_by_length() {
+    let line = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 30.0, 0.0)];
+    let f = polyline_fraction_at(&line, Vec3::new(12.0, 10.0, 5.0)).unwrap();
+    assert!((f - 0.5).abs() < 1e-12, "{f}");
+    let p = polyline_point_at(&line, f).unwrap();
+    assert!(p.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "{p:?}");
+    assert_eq!(polyline_fraction_at(&line, Vec3::new(-5.0, 1.0, 0.0)), Some(0.0));
+    assert_eq!(polyline_point_at(&line, 2.0), Some(line[2]));
+    let still = [Vec3::new(1.0, 1.0, 1.0); 2];
+    assert_eq!(polyline_fraction_at(&still, Vec3::new(0.0, 0.0, 0.0)), None);
+    assert_eq!(polyline_point_at(&still, 0.5), None);
+    assert_eq!(polyline_point_at(&line, f64::NAN), None);
 }

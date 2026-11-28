@@ -120,7 +120,7 @@ impl CatalogueState {
             }
         }
         for _ in 0..reader.count(MAX_WORKSPACES)? {
-            let id = WorkspaceId::new(reader.text(MAX_ID_BYTES)?)?;
+            let id = WorkspaceId::new(reader.text(MAX_WORKSPACE_ID_BYTES)?)?;
             let title_key = reader.text(MAX_ID_BYTES)?;
             valid_id(&title_key)?;
             let default_preset = reader.text(256)?;
@@ -130,7 +130,7 @@ impl CatalogueState {
             next.workspaces.insert(id.clone(), WorkspaceDescriptor { id, title_key, default_preset });
         }
         for _ in 0..reader.count(MAX_WORKSPACES)? {
-            let workspace = WorkspaceId::new(reader.text(MAX_ID_BYTES)?)?;
+            let workspace = WorkspaceId::new(reader.text(MAX_WORKSPACE_ID_BYTES)?)?;
             if next.remembered.contains_key(&workspace) {
                 return Err(error(Rule::DuplicateId, "duplicate remembered workspace identity"));
             }

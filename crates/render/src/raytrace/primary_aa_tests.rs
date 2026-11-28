@@ -2009,6 +2009,22 @@ fn cpu_aging_all_kinds_match_independent_full_coverage_optical_values_and_keep_n
     }
 }
 #[test]
+fn cpu_aging_covers_the_paint_flakes_as_it_covers_the_coat() {
+    let coat = solidcraft_viewport::clear_coat::ClearCoat::new(0.8, 0.2, 1.7).unwrap();
+    let flakes = solidcraft_viewport::flakes::FlakeLayer::new(0.8, 0.05, 0.7, 0.3, Vec3::new(0.9, 0.9, 0.9), 1.0, 0.2).unwrap();
+    let input = crate::surface_patterns::ShadingSurface {
+        surface: OpaqueSurface::new(Vec3::new(0.2, 0.3, 0.4), 1.0, 0.4, 1.6).unwrap().with_clear_coat(coat).with_flakes(flakes),
+        shading_normal: Vec3::Z,
+    };
+    let quarter = job::aging::AgingLayer { strength: 0.25, ..solid_age() };
+    let changed = age_surface(&[quarter], input, Vec3::ZERO, Vec3::Z, true).surface;
+    let remaining = changed.flakes().unwrap();
+    assert!((remaining.coverage() - 0.6).abs() < 1e-4, "{}", remaining.coverage());
+    assert_eq!((remaining.size_mm(), remaining.spread(), remaining.depth()), (flakes.size_mm(), flakes.spread(), flakes.depth()));
+    let full = age_surface(&[solid_age()], input, Vec3::ZERO, Vec3::Z, true).surface;
+    assert_eq!((full.clear_coat(), full.flakes()), (None, None), "a full aged layer hides the coat and the flakes");
+}
+#[test]
 fn cpu_aging_uses_original_material_class_layer_order_targets_and_coat_attenuation() {
     let coat = solidcraft_viewport::clear_coat::ClearCoat::new(0.8, 0.2, 1.7).unwrap();
     let input = crate::surface_patterns::ShadingSurface {

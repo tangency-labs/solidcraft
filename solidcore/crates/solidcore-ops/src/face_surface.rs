@@ -87,7 +87,9 @@ impl FaceSurface {
                 None,
                 Some(solidcore_convert::blend::blend(definition)),
             ),
-            (Surface::Blend { .. }, None) => return Err(Error::Argument),
+            (Surface::Blend { .. } | Surface::Sweep { .. }, None) => return Err(Error::Argument),
+            // A sweep is built on its net (its definition is not yet given back).
+            (Surface::Sweep { .. }, Some(net)) => (conv(net)?, None, None),
             (label, form) => (conv(label)?, form.as_ref().map(conv).transpose()?, None),
         };
         let mut boundary = Vec::new();
@@ -107,7 +109,10 @@ impl FaceSurface {
         let domain = f.domain;
         let labelled = !matches!(
             f.surface,
-            Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::Blend { .. }
+            Surface::Spline { .. }
+                | Surface::RationalSpline { .. }
+                | Surface::Blend { .. }
+                | Surface::Sweep { .. }
         );
         let surface_label = f.surface.clone();
         run("face_surface::of", move |k: &mut Kernel| {
@@ -197,4 +202,127 @@ impl FaceSurface {
             })
         })
     }
+}
+
+/// An analytic surface by its parameters, for [`same_surface`] (the kernel's
+/// `query::same_surface::Analytic`). Directions need not be unit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum Analytic {
+    /// The plane through `point` with normal `normal` (either way round).
+    Plane {
+        /// A point of the plane.
+        point: [f64; 3],
+        /// Its normal.
+        normal: [f64; 3],
+    },
+    /// The cylinder of radius `radius` about the line through `origin` along `axis`.
+    Cylinder {
+        /// A point of the axis.
+        origin: [f64; 3],
+        /// The axis's direction (either way round).
+        axis: [f64; 3],
+        /// The radius.
+        radius: f64,
+    },
+    /// The cone with apex `apex`, axis `axis` pointing into the cone, and half-angle
+    /// `half_angle` (radians).
+    Cone {
+        /// The apex.
+        apex: [f64; 3],
+        /// The axis, pointing into the cone.
+        axis: [f64; 3],
+        /// The half-angle, in radians.
+        half_angle: f64,
+    },
+    /// The sphere of radius `radius` about `centre`.
+    Sphere {
+        /// The centre.
+        centre: [f64; 3],
+        /// The radius.
+        radius: f64,
+    },
+    /// The torus about the line through `centre` along `axis`: its ring (major) and tube
+    /// (minor) radii.
+    Torus {
+        /// The centre of the ring.
+        centre: [f64; 3],
+        /// The axis (either way round).
+        axis: [f64; 3],
+        /// The ring's radius.
+        major: f64,
+        /// The tube's radius.
+        minor: f64,
+    },
+}
+
+impl Analytic {
+    fn kernel(self) -> solidcore::query::same_surface::Analytic {
+        use solidcore::query::same_surface::Analytic as K;
+        let v = |p: [f64; 3]| solidcore::Vec3::new(p[0], p[1], p[2]);
+        match self {
+            Self::Plane { point, normal } => K::Plane {
+                point: v(point),
+                normal: v(normal),
+            },
+            Self::Cylinder {
+                origin,
+                axis,
+                radius,
+            } => K::Cylinder {
+                origin: v(origin),
+                axis: v(axis),
+                radius,
+            },
+            Self::Cone {
+                apex,
+                axis,
+                half_angle,
+            } => K::Cone {
+                apex: v(apex),
+                axis: v(axis),
+                half_angle,
+            },
+            Self::Sphere { centre, radius } => K::Sphere {
+                centre: v(centre),
+                radius,
+            },
+            Self::Torus {
+                centre,
+                axis,
+                major,
+                minor,
+            } => K::Torus {
+                centre: v(centre),
+                axis: v(axis),
+                major,
+                minor,
+            },
+        }
+    }
+}
+
+/// Whether `a` and `b` are one surface within `tol` inside the box from `min` to `max`
+/// (`solidcore::query::same_surface::same_surface`): cones (a cylinder is one of half-angle
+/// 0), spheres and tori by the definitions the boolean compares them by, planes when every point
+/// of either inside the box surely lies within `tol` of the other; surfaces of two kinds never.
+/// The test whether two faces anywhere on two bodies lie on one surface, with the bodies' box.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a `tol` that is negative or not finite, a box that is empty, not
+/// finite or of no extent, a number that is not finite, a direction of zero length, or a cone's
+/// half-angle of a right angle or more.
+pub fn same_surface(
+    a: Analytic,
+    b: Analytic,
+    tol: f64,
+    min: [f64; 3],
+    max: [f64; 3],
+) -> Result<bool> {
+    let region = solidcore::geom::extent3d::Extent3d::from_bounds(
+        min[0], min[1], min[2], max[0], max[1], max[2],
+    );
+    solidcore::query::same_surface::same_surface(&a.kernel(), &b.kernel(), tol, &region)
+        .map_err(crate::error::status)
 }

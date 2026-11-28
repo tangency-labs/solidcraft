@@ -50,10 +50,46 @@ enum Kind {
     Number { max: u32 },
     /// A `REG_SZ`: one of the agent permission modes (`ask`, `edits`, `all`).
     Permission,
+    /// A `REG_SZ`: one of these ids, in any case.
+    Choice(&'static [&'static str]),
+    /// A `REG_SZ`: `dark`, `light` or the id of a built-in theme, in any case.
+    Theme,
+    /// A `REG_SZ`: the name of a font family. One the computer does not have leaves the
+    /// built-in font showing.
+    Font,
+    /// A `REG_SZ`: a length in millimetres from `min` to `max`, with a point or a comma.
+    Millimetres { min: f64, max: f64 },
     /// A `REG_SZ`: the path of a theme file to follow, as `theme_follow` takes it (at most
     /// [`crate::theme_files::MAX_FOLLOW_PATH`] bytes, no control characters, never empty).
     ThemeFile,
 }
+
+/// `MeshExportFormat`: the formats the Save Mesh dialog offers.
+const MESH_FORMATS: &[&str] = &["stl", "3mf", "3mf-tagged"];
+/// `MeshExportQuality`: how closely an exported mesh follows curved faces.
+const MESH_QUALITIES: &[&str] = &["standard", "fine", "finest"];
+/// `DxfOrigin`: the zero point of Export Current View as DXF.
+const DXF_ORIGINS: &[&str] = &["target", "origin"];
+/// `Layout`: the workspace layouts (Preferences › Interface › Panel style).
+const LAYOUTS: &[&str] = &["floating", "compact"];
+/// `Slicer`: the slicer Send to Slicer uses, a known slicer or EasyPrint (in the engine's order).
+const SLICERS: &[&str] = &[
+    "prusa",
+    "bambu",
+    "orca",
+    "cura",
+    "superslicer",
+    "creality",
+    "elegoo",
+    "anycubic",
+    "ideamaker",
+    "lychee",
+    "qidi",
+    "chitubox",
+    "creatware",
+    "slic3r",
+    "easyprint",
+];
 
 /// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
 /// name, and what the value may be.
@@ -73,10 +109,21 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: CHECK_FOR_UPDATES, pref: "check_updates", kind: Kind::Switch },
     Lock { policy: "ConnectAiApps", pref: "connect_ai_apps", kind: Kind::Switch },
     Lock { policy: "DefaultUnits", pref: "default_units", kind: Kind::Units },
+    Lock { policy: "DxfDashedHiddenLines", pref: "view_dxf_dashed", kind: Kind::Switch },
+    Lock { policy: "DxfOrigin", pref: "view_dxf_zero", kind: Kind::Choice(DXF_ORIGINS) },
+    Lock { policy: "DxfTolerance", pref: "view_dxf_tolerance", kind: Kind::Millimetres { min: 0.001, max: 1.0 } },
+    Lock { policy: "InterfaceFont", pref: "ui_font", kind: Kind::Font },
     Lock { policy: "Language", pref: "language", kind: Kind::Language },
+    Lock { policy: "Layout", pref: "layout", kind: Kind::Choice(LAYOUTS) },
+    Lock { policy: "MeshExportFormat", pref: "save_mesh_format", kind: Kind::Choice(MESH_FORMATS) },
+    Lock { policy: "MeshExportQuality", pref: "save_mesh_quality", kind: Kind::Choice(MESH_QUALITIES) },
     Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
+    Lock { policy: "RibbonLabels", pref: "ribbon_labels", kind: Kind::Switch },
     Lock { policy: "ShowDiscordButton", pref: "show_discord_button", kind: Kind::Switch },
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
+    Lock { policy: "Slicer", pref: "send_slicer", kind: Kind::Choice(SLICERS) },
+    Lock { policy: "StatusBar", pref: "status_bar", kind: Kind::Switch },
+    Lock { policy: "Theme", pref: "theme", kind: Kind::Theme },
     Lock { policy: THEME_FILE, pref: "theme_follow", kind: Kind::ThemeFile },
 ];
 
@@ -94,6 +141,7 @@ pub const ALLOWS: &[(&str, &str)] = &[("AllowEasyPrint", "easyprint"), ("AllowPr
 pub enum Setting {
     Switch(bool),
     Number(u32),
+    Decimal(f64),
     Text(String),
 }
 
@@ -243,6 +291,27 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
         (Kind::Permission, Value::Text(text)) if text.len() <= MAX_CHOICE => {
             crate::agent_chat::agents::Mode::parse(&text.trim().to_ascii_lowercase()).map(|mode| Setting::Text(mode.id().into()))
         }
+        (Kind::Choice(ids), Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            ids.iter().find(|id| id.eq_ignore_ascii_case(text.trim())).map(|id| Setting::Text((*id).into()))
+        }
+        (Kind::Theme, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            let text = text.trim();
+            let builtin = crate::theme_files::builtin().iter().map(|t| t.id.as_str());
+            ["dark", "light"].into_iter().chain(builtin).find(|id| id.eq_ignore_ascii_case(text)).map(|id| Setting::Text(id.into()))
+        }
+        (Kind::Font, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            let text = text.trim();
+            let family = !text.is_empty() && !text.chars().any(|c| c.is_control() || c == '/' || c == '\\');
+            family.then(|| Setting::Text(text.into()))
+        }
+        (Kind::Millimetres { min, max }, Value::Number(n)) => {
+            let mm = f64::from(*n);
+            (min..=max).contains(&mm).then_some(Setting::Decimal(mm))
+        }
+        (Kind::Millimetres { min, max }, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            let mm = text.trim().replace(',', ".").parse::<f64>().ok()?;
+            (mm.is_finite() && (min..=max).contains(&mm)).then_some(Setting::Decimal(mm))
+        }
         (Kind::ThemeFile, Value::Text(text)) => crate::theme_files::follow_path(text).ok().filter(|path| !path.is_empty()).map(Setting::Text),
         _ => None,
     }
@@ -260,10 +329,21 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "connect_ai_apps" => Setting::Switch(p.connect_ai_apps),
         "default_units" => Setting::Text(p.default_units.clone()),
         "language" => Setting::Text(p.language.clone()),
+        "layout" => Setting::Text(layout_id(p.layout).into()),
         "reopen_designs" => Setting::Switch(p.reopen_designs),
+        "ribbon_labels" => Setting::Switch(p.ribbon_labels),
+        "save_mesh_format" => Setting::Text(p.save_mesh_format.clone()),
+        "save_mesh_quality" => Setting::Text(p.save_mesh_quality.clone()),
+        "send_slicer" => Setting::Text(p.send_slicer.clone()),
         "show_discord_button" => Setting::Switch(p.show_discord_button),
         "show_donate_button" => Setting::Switch(p.show_donate_button),
+        "status_bar" => Setting::Switch(p.status_bar),
+        "theme" => Setting::Text(p.theme.clone()),
         "theme_follow" => Setting::Text(p.theme_follow.clone()),
+        "ui_font" => Setting::Text(p.ui_font.clone()),
+        "view_dxf_dashed" => Setting::Switch(p.view_dxf_dashed),
+        "view_dxf_tolerance" => Setting::Decimal(p.view_dxf_tolerance),
+        "view_dxf_zero" => Setting::Text(p.view_dxf_zero.clone()),
         _ => return None,
     })
 }
@@ -284,11 +364,32 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("connect_ai_apps", Setting::Switch(on)) => p.connect_ai_apps = *on,
         ("default_units", Setting::Text(text)) => p.default_units.clone_from(text),
         ("language", Setting::Text(text)) => p.language.clone_from(text),
+        ("layout", Setting::Text(text)) => {
+            p.layout = if text == "compact" { crate::ui_kit::LayoutMode::Docked } else { crate::ui_kit::LayoutMode::Floating };
+        }
         ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
+        ("ribbon_labels", Setting::Switch(on)) => p.ribbon_labels = *on,
+        ("save_mesh_format", Setting::Text(text)) => p.save_mesh_format.clone_from(text),
+        ("save_mesh_quality", Setting::Text(text)) => p.save_mesh_quality.clone_from(text),
+        ("send_slicer", Setting::Text(text)) => p.send_slicer.clone_from(text),
         ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
+        ("status_bar", Setting::Switch(on)) => p.status_bar = *on,
+        ("theme", Setting::Text(text)) => p.theme.clone_from(text),
         ("theme_follow", Setting::Text(path)) => p.theme_follow.clone_from(path),
+        ("ui_font", Setting::Text(text)) => p.ui_font.clone_from(text),
+        ("view_dxf_dashed", Setting::Switch(on)) => p.view_dxf_dashed = *on,
+        ("view_dxf_tolerance", Setting::Decimal(mm)) => p.view_dxf_tolerance = *mm,
+        ("view_dxf_zero", Setting::Text(text)) => p.view_dxf_zero.clone_from(text),
         _ => {}
+    }
+}
+
+/// The id of `layout`, as `ui.prefs` and the `Layout` policy name it.
+fn layout_id(layout: crate::ui_kit::LayoutMode) -> &'static str {
+    match layout {
+        crate::ui_kit::LayoutMode::Floating => "floating",
+        crate::ui_kit::LayoutMode::Docked => "compact",
     }
 }
 
@@ -353,7 +454,11 @@ impl Policy {
         let json = serde_json::from_str::<serde_json::Value>(text).unwrap_or_default();
         let layer = |object: Option<&serde_json::Value>| {
             Layer::read(&|name| match object?.get(name)? {
-                serde_json::Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()).map(Value::Number),
+                // A number with a fraction (a macOS real, say) is read as its text.
+                serde_json::Value::Number(n) => match n.as_u64() {
+                    Some(n) => u32::try_from(n).ok().map(Value::Number),
+                    None => Some(Value::Text(n.to_string())),
+                },
                 serde_json::Value::String(s) => Some(Value::Text(s.clone())),
                 _ => None,
             })
@@ -415,7 +520,7 @@ fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
     if app.policy.locks("theme_follow") {
         app.prefs_window.follow.launch = None;
     }
-    let mut units = false;
+    let (mut units, mut theme) = (false, keep_own);
     for (pref, setting) in app.policy.mandatory.settings.clone() {
         let Some(current) = get(&app.preferences, pref) else { continue };
         if current == setting {
@@ -426,9 +531,19 @@ fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
         }
         set(&mut app.preferences, pref, &setting);
         units |= pref == "default_units";
+        theme |= pref == "theme";
     }
     if units {
         crate::prefs::default_units_changed(app);
+    }
+    // Dark or light follows the theme in force (a theme file's palette follows it in the frame).
+    if theme && app.policy.locks("theme") {
+        let id = app.preferences.theme.clone();
+        app.ui.dark = crate::theme_files::find(&id, &app.preferences.custom_themes).map_or(id == "dark", |f| f.base.is_dark());
+    }
+    // The workspace shows the layout in force (an embedded window still docks its panels).
+    if app.policy.locks("layout") {
+        app.ui.layout = app.preferences.layout;
     }
 }
 
@@ -464,16 +579,38 @@ pub fn unchanged(app: &SolveApp, pref: &str, value: &serde_json::Value) -> bool 
 
 /// `add`, disabled and followed by "Set by your organization" while a mandatory value sets the
 /// preference (`locked`).
+/// The note keeps its room on the control's line: a full-width control or a fixed-height row
+/// would otherwise push it onto a second line that nobody sees.
 pub fn row<R>(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     if !locked {
         return add(ui);
     }
-    ui.horizontal_wrapped(|ui| {
-        let inner = ui.add_enabled_ui(false, add).inner;
+    let room = note_width(ui);
+    ui.horizontal(|ui| {
+        let control = egui::vec2((ui.available_width() - room).max(0.0), ui.available_height());
+        let inner = ui.allocate_ui(control, |ui| ui.add_enabled_ui(false, add).inner).inner;
         crate::ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("policy.set_by_organization"));
         inner
     })
     .inner
+}
+
+/// [`row`] for a tool dialog's narrow panel: the note goes on its own line under the control, so
+/// the control keeps its width and the panel does not grow past the window.
+pub fn row_below<R>(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    if !locked {
+        return add(ui);
+    }
+    let inner = ui.add_enabled_ui(false, add).inner;
+    crate::ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("policy.set_by_organization"));
+    inner
+}
+
+/// The width "Set by your organization" takes beside a locked control, with the gap before it.
+pub fn note_width(ui: &egui::Ui) -> f32 {
+    let t = solidcraft_theme::Tokens::get();
+    let note = solidcraft_ui_text::tr("policy.set_by_organization").to_owned();
+    ui.painter().layout_no_wrap(note, egui::FontId::proportional(t.font_body), t.form_dim).size().x.ceil() + ui.spacing().item_spacing.x
 }
 
 // ---- user interface ---------------------------------------------------------------------------
@@ -967,6 +1104,271 @@ mod tests {
     }
 
     #[test]
+    fn interface_and_export_switches_are_set_by_the_policy_and_keep_each_persons_choice() {
+        use egui::accesskit::{Role, Toggled};
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let p = &mut h.app.preferences;
+        (p.ribbon_labels, p.status_bar, p.view_dxf_dashed) = (true, false, false);
+        h.app.policy = Policy::from_json(r#"{"RibbonLabels": 0, "StatusBar": 1, "DxfDashedHiddenLines": 1}"#);
+        h.frame();
+        let p = &h.app.preferences;
+        assert_eq!((p.ribbon_labels, p.status_bar, p.view_dxf_dashed), (false, true, true), "the organization's values are in force");
+        for (pref, own) in [("ribbon_labels", true), ("status_bar", false), ("view_dxf_dashed", false)] {
+            assert_eq!(saved(&h.app)[pref], json!(own), "{pref} is saved as the person chose it");
+            let refused = h.call("ui.prefs", json!({ pref: !own }));
+            assert_eq!(refused["ok"], json!(false), "{pref}: {refused}");
+        }
+        // The View-to-DXF dialog starts with the organization's choice and keeps it when another is clicked.
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "dialog:dxf:omit"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewDxf { dashed: true, .. })));
+        assert!(h.widget("Set by your organization").is_some(), "the export dialog says who set the choice");
+        h.app.dialog = None;
+        // Preferences shows the status bar row greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(3);
+        crate::prefs::reveal_preference(&mut h, "prefs:status_bar");
+        let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+        let boxes: Vec<_> = tree.nodes.iter().filter(|(_, n)| n.role() == Role::CheckBox && n.label() == Some("Status bar")).collect();
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].1.is_disabled(), "the status bar row is locked");
+        assert_eq!(boxes[0].1.toggled(), Some(Toggled::True));
+        assert!(h.widget("Set by your organization").is_some());
+    }
+
+    #[test]
+    fn export_choices_are_set_by_the_policy_and_an_unknown_one_is_no_policy() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let p = &mut h.app.preferences;
+        (p.save_mesh_format, p.save_mesh_quality, p.view_dxf_zero) = ("stl".into(), "standard".into(), "target".into());
+        h.app.policy = Policy::from_json(r#"{"MeshExportFormat": "3MF", "MeshExportQuality": " finest ", "DxfOrigin": "origin"}"#);
+        h.frame();
+        let p = &h.app.preferences;
+        assert_eq!((p.save_mesh_format.as_str(), p.save_mesh_quality.as_str(), p.view_dxf_zero.as_str()), ("3mf", "finest", "origin"));
+        for (pref, own, other) in
+            [("save_mesh_format", "stl", "3mf-tagged"), ("save_mesh_quality", "standard", "fine"), ("view_dxf_zero", "target", "origin")]
+        {
+            assert_eq!(saved(&h.app)[pref], json!(own), "{pref} is saved as the person chose it");
+            let refused = h.call("ui.prefs", json!({ pref: other }));
+            assert_eq!(refused["ok"], json!(false), "{pref}: {refused}");
+        }
+        // Export STL… opens Save As Mesh with the organization's format, greyed out and noted.
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        crate::dialogs_save_mesh::start_with_format(&mut h.app, "stl");
+        h.frames(3);
+        let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the Save As Mesh dialog is open") };
+        assert_eq!((k.format, k.quality), (1, 2), "3MF at Finest");
+        assert!(h.widget("Set by your organization").is_some(), "the dialog says who set the format");
+        h.app.dialog = None;
+        // The View-to-DXF dialog keeps the model origin when the camera target is clicked.
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "dialog:dxf:zero_target"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewDxf { zero_origin: true, .. })));
+        // A value none of the choices is no policy: nothing is locked.
+        let policy = Policy::from_json(r#"{"MeshExportFormat": "obj", "MeshExportQuality": "", "DxfOrigin": "corner"}"#);
+        assert!(policy.locked().is_empty() && !policy.managed(), "{:?}", policy.locked());
+    }
+
+    #[test]
+    fn the_dxf_tolerance_is_set_by_the_policy_and_a_value_out_of_range_is_no_policy() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.view_dxf_tolerance = 0.1;
+        h.app.policy = Policy::from_json(r#"{"DxfTolerance": " 0,005 "}"#);
+        h.frame();
+        assert_eq!(h.app.preferences.view_dxf_tolerance, 0.005);
+        assert_eq!(saved(&h.app)["view_dxf_tolerance"], json!(0.1), "the tolerance is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"view_dxf_tolerance": 0.5}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        // The export dialog starts with the organization's tolerance, greyed out and noted.
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        let Some(crate::dialogs::Kind::ViewDxf { tolerance, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the DXF dialog is open") };
+        assert_eq!(*tolerance, 0.005);
+        assert!(h.widget("Set by your organization").is_some(), "the dialog says who set the tolerance");
+        // Another tolerance reaching the export is replaced by the organization's and not saved.
+        h.app.services.pick_save = Some(Box::new(|_, _| Box::pin(std::future::ready(None))));
+        crate::dialogs_view_dxf::run(&mut h.app, false, 0.5, false).unwrap();
+        h.frame();
+        assert_eq!(h.app.preferences.view_dxf_tolerance, 0.005);
+        assert_eq!(saved(&h.app)["view_dxf_tolerance"], json!(0.1));
+        // A number works as well as text: a macOS real, or a whole millimetre.
+        for (json, mm) in [(r#"{"DxfTolerance": 0.02}"#, 0.02), (r#"{"DxfTolerance": 1}"#, 1.0), (r#"{"DxfTolerance": "0.001"}"#, 0.001)] {
+            assert_eq!(Policy::from_json(json).mandatory.settings.get("view_dxf_tolerance"), Some(&Setting::Decimal(mm)), "{json}");
+        }
+        // Out of range, not a number or too long is no policy: nothing is locked.
+        let long = format!("0.{}", "1".repeat(MAX_CHOICE));
+        for hostile in [
+            json!(0),
+            json!(2),
+            json!(0.0001),
+            json!(-0.01),
+            json!("0"),
+            json!("1.5"),
+            json!("abc"),
+            json!("NaN"),
+            json!("inf"),
+            json!(""),
+            json!(long),
+        ] {
+            let policy = Policy::from_json(&json!({"DxfTolerance": hostile}).to_string());
+            assert!(policy.locked().is_empty() && !policy.managed(), "{hostile}: {:?}", policy.locked());
+        }
+    }
+
+    #[test]
+    fn the_workspace_layout_is_set_by_the_policy_and_the_layout_command_keeps_it() {
+        use crate::ui_kit::LayoutMode;
+        use egui::accesskit::Role;
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        (h.app.preferences.layout, h.app.ui.layout) = (LayoutMode::Floating, LayoutMode::Floating);
+        h.app.policy = Policy::from_json(r#"{"Layout": " Compact "}"#);
+        h.frame();
+        assert_eq!((h.app.preferences.layout, h.app.ui.layout), (LayoutMode::Docked, LayoutMode::Docked), "the workspace is docked");
+        assert_eq!(saved(&h.app)["layout"], json!("floating"), "the layout is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"layout": "compact"}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        // The toolbar's layout switch and an agent's view.layout leave the organization's layout.
+        drop(h.app.run("view.layout", json!({"mode": "floating"})));
+        h.frame();
+        assert_eq!((h.app.preferences.layout, h.app.ui.layout), (LayoutMode::Docked, LayoutMode::Docked));
+        // Preferences shows the Panel style greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        h.frames(3);
+        let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+        let compact: Vec<_> = tree.nodes.iter().filter(|(_, n)| n.role() == Role::Button && n.label() == Some("Compact")).collect();
+        assert!(compact.iter().any(|(_, n)| n.is_disabled() && n.toggled() == Some(egui::accesskit::Toggled::True)), "{compact:?}");
+        assert!(h.widget("Set by your organization").is_some());
+        // A layout none of the choices is no policy.
+        assert!(Policy::from_json(r#"{"Layout": "docked"}"#).locked().is_empty());
+    }
+
+    #[test]
+    fn the_slicer_is_set_by_the_policy_from_send_to_slicer_and_open_in_easyprint() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.preferences.send_slicer = "prusa".into();
+        h.app.policy = Policy::from_json(r#"{"Slicer": " Orca "}"#);
+        h.frame();
+        assert_eq!(h.app.preferences.send_slicer, "orca");
+        assert_eq!(saved(&h.app)["send_slicer"], json!("prusa"), "the slicer is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"send_slicer": "cura"}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        // Send to Slicer and Open in EasyPrint both start on the organization's slicer, greyed out and
+        // noted; it stays when it is not installed, and sending keeps the person's own choice.
+        let _language = solidcraft_ui_text::scope("en");
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        for id in ["file.send_to_slicer", "file.open_in_easyprint"] {
+            h.app.dialog = None;
+            h.app.start(id);
+            h.frames(3);
+            let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("{id}: no dialog") };
+            assert_eq!(k.slicer, "orca", "{id}");
+            assert!(h.widget("Set by your organization").is_some(), "{id}: the dialog says who set the slicer");
+        }
+        assert_eq!(saved(&h.app)["send_slicer"], json!("prusa"));
+        // A slicer none of the choices is no policy, and the choices are the engine's slicers and EasyPrint.
+        assert!(Policy::from_json(r#"{"Slicer": "custom"}"#).locked().is_empty());
+        let known: Vec<_> = solidcraft_engine::slicers::ids().chain(["easyprint"]).collect();
+        assert_eq!(SLICERS, known.as_slice());
+    }
+
+    #[test]
+    fn the_theme_is_set_by_the_policy_and_cannot_be_imported_or_followed_over() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.theme = "light".into();
+        h.app.ui.dark = false;
+        h.app.policy = Policy::from_json(r#"{"Theme": " Nord "}"#);
+        h.frame();
+        assert_eq!(h.app.preferences.theme, "nord");
+        assert!(h.app.ui.dark, "Nord is a dark theme");
+        assert_eq!(saved(&h.app)["theme"], json!("light"), "the theme is saved as the person chose it");
+        for refused in [
+            h.call("ui.prefs", json!({"theme": "dark"})),
+            h.call("ui.prefs", json!({"theme_import": {"format": crate::theme_files::FORMAT, "name": "ACME", "base": "light"}})),
+            h.call("ui.prefs", json!({"theme_follow": "acme.json"})),
+        ] {
+            assert_eq!(refused["ok"], json!(false), "{refused}");
+        }
+        assert!(crate::prefs::import_theme(&mut h.app, &json!({"format": crate::theme_files::FORMAT, "name": "ACME", "base": "light"})).is_err());
+        assert!(h.app.preferences.custom_themes.is_empty(), "nothing was imported");
+        // The person's followed file, written back unchanged, is kept for when the policy goes.
+        h.app.preferences.theme_follow = "acme.json".into();
+        for echo in [json!({"theme": "light"}), json!({"theme": "light", "theme_follow": "acme.json"})] {
+            let out = h.call("ui.prefs", echo);
+            assert_eq!(out["ok"], json!(true), "{out}");
+            assert_eq!(h.app.preferences.theme_follow, "acme.json", "{out}");
+        }
+        assert_eq!(h.call("ui.prefs", json!({"theme_follow": "other.json"}))["ok"], json!(false));
+        assert_eq!(h.app.preferences.theme, "nord");
+        // Preferences shows the theme greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Appearance"}));
+        h.frames(3);
+        assert!(h.widget("Set by your organization").is_some());
+        // Dark and Light are themes too; following the system or a theme that is not built in is no policy.
+        let dark = Policy::from_json(r#"{"Theme": "DARK"}"#);
+        assert_eq!(dark.mandatory.settings.get("theme"), Some(&Setting::Text("dark".into())));
+        for hostile in ["system", "acme", ""] {
+            assert!(Policy::from_json(&format!(r#"{{"Theme": "{hostile}"}}"#)).locked().is_empty(), "{hostile}");
+        }
+    }
+
+    #[test]
+    fn the_interface_font_is_set_by_the_policy_and_an_unknown_one_leaves_the_built_in_font() {
+        use serde_json::json;
+        crate::i18n::install();
+        let family = solidcraft_engine::sketch::DEFAULT_FONT_FAMILY;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.policy = Policy::from_json(&json!({ "InterfaceFont": format!(" {family} ") }).to_string());
+        h.frames(2);
+        assert_eq!(h.app.preferences.ui_font, family);
+        assert_eq!(h.app.applied_ui_font, family, "the interface is drawn in the organization's font");
+        assert_eq!(saved(&h.app)["ui_font"], json!(""), "the font is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"ui_font": "ACME Sans"}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        assert_eq!(h.app.preferences.ui_font, family);
+        // Preferences shows the font greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Appearance"}));
+        h.frames(3);
+        assert!(h.widget("Set by your organization").is_some());
+        // A family the computer does not have still locks the choice; the built-in font shows.
+        let unknown = Policy::from_json(r#"{"InterfaceFont": "ACME Sans 1290"}"#);
+        assert!(unknown.locks("ui_font"));
+        assert!(crate::fonts::ui_font("ACME Sans 1290").is_none());
+        // Only a family name: no font file, nothing empty, nothing too long.
+        let long = "x".repeat(MAX_CHOICE + 1);
+        for hostile in ["", "  ", r"C:\Fonts\acme.ttf", "/usr/share/fonts/acme.ttf", "ACME\u{7}Sans", long.as_str()] {
+            assert!(Policy::from_json(&json!({ "InterfaceFont": hostile }).to_string()).locked().is_empty(), "{hostile:?}");
+        }
+    }
+
+    #[test]
     fn a_theme_file_policy_is_followed_and_cannot_be_stopped_or_changed() {
         use egui::Color32;
         use serde_json::json;
@@ -1057,8 +1459,20 @@ mod tests {
             assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
             assert!(adml.contains(&format!(r#"<string id="{name}">"#)), "{name} is missing from solidcraft.adml");
         }
+        for lock in LOCKS {
+            if let Kind::Choice(ids) = lock.kind {
+                for id in ids {
+                    assert!(admx.contains(&format!("<string>{id}</string>")), "{} offers no {id}", lock.policy);
+                }
+            }
+        }
         for unit in crate::prefs::UNITS {
             assert!(admx.contains(&format!("<string>{unit}</string>")), "DefaultUnits offers no {unit}");
+        }
+        solidcraft_look::install_tables();
+        assert!(crate::theme_files::builtin().len() > 2, "the built-in themes are installed");
+        for id in ["dark", "light"].into_iter().chain(crate::theme_files::builtin().iter().map(|t| t.id.as_str())) {
+            assert!(admx.contains(&format!("<string>{id}</string>")), "Theme offers no {id}");
         }
     }
 

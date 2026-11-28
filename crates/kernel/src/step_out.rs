@@ -1,5 +1,5 @@
-//! STEP (ISO 10303-21) export of SolidCraft bodies: AP242 product structure, assemblies, names
-//! and colours, written by solidcore-step ([`solidcore_step::write::product`]) from each body's
+//! STEP (ISO 10303-21) export of SolidCraft bodies: AP242 product structure, assemblies, names,
+//! colours and layers, written by solidcore-step ([`solidcore_step::write::product`]) from each body's
 //! record and paint.
 
 use solidcore_step::write::product::{self, Colour, ExportError};
@@ -69,6 +69,7 @@ fn export_body<'a>(b: &ExportBody<'a>) -> product::ExportBody<'a> {
         record: b.body.record(),
         color: b.color.map(|c| colour(c, paint.map_or(1.0, |p| p.opacity), paint.and_then(|p| p.name.as_deref()))),
         faces: paint.map(|p| p.faces.iter().map(|f| (f.face, colour(f.color, f.opacity, f.name.as_deref()))).collect()).unwrap_or_default(),
+        layer: paint.and_then(|p| p.layer.clone()).unwrap_or_default(),
     }
 }
 
@@ -141,6 +142,20 @@ mod tests {
             assert_eq!(matches.len(), 1, "one imported face for each box face");
             assert!(read.body.point_lies_on_face(matches[0].0, center, 1e-8).unwrap().is_some(), "{source:?} at {center:?}");
         }
+    }
+
+    /// A body's paint layer is written as the layer it is assigned to, and read back as it.
+    #[test]
+    fn a_paint_layer_is_written_and_read_back() {
+        let paint = crate::Paint { opacity: 1.0, faces: Vec::new(), name: None, layer: Some("Frame/Rails".into()) };
+        let on = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap().with_paint(Some(paint));
+        let off = crate::box_solid(Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 1.0, 1.0)).unwrap();
+        let bodies = [ExportBody { name: "On".into(), body: &on, color: None }, ExportBody { name: "Off".into(), body: &off, color: None }];
+        let text = step_export_bodies(&bodies, &StepHeader::default()).unwrap();
+        assert_eq!(text.matches("PRESENTATION_LAYER_ASSIGNMENT('Frame/Rails','',(").count(), 1, "{text}");
+        let read = crate::step_import(&text).unwrap();
+        let layers: Vec<(&str, Option<&str>)> = read.bodies.iter().map(|b| (b.name.as_str(), b.layer.as_deref())).collect();
+        assert_eq!(layers, [("On", Some("Frame/Rails")), ("Off", None)], "{text}");
     }
 
     #[test]

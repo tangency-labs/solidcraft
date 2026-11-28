@@ -64,7 +64,7 @@ fn slot<'a>(values: &'a mut [String], key: &str) -> Option<&'a mut String> {
 
 /// The manager's bend radius (mm) for a sheet `thickness` mm thick, worked out as the rule
 /// would: `Thickness` in it is that thickness.
-fn radius_mm(values: &[String], doc: &Document, thickness: f64) -> Option<f64> {
+pub(crate) fn radius_mm(values: &[String], doc: &Document, thickness: f64) -> Option<f64> {
     let text = RULE_FIELDS.iter().position(|(k, _)| *k == "bend_radius").and_then(|index| values.get(index))?;
     let (vals, _) = doc.param_values();
     let unit = expr::length_unit_or_mm(&doc.units);
@@ -85,7 +85,15 @@ fn radius_mm(values: &[String], doc: &Document, thickness: f64) -> Option<f64> {
 /// display stay as the manager shows them; a pack's own radius and K-factor are taken. Returns
 /// the notes the section shows.
 fn fill(sm: &mut Sm, entry: &PackRule, doc: &Document, method: BendMethod) -> Vec<(String, bool)> {
-    let Sm::Rules { pick, name, values, material, active, loaded, .. } = sm else { return Vec::new() };
+    let Sm::Rules { pick, name, values, unfold, material, active, loaded, .. } = sm else { return Vec::new() };
+    // The pick gives a new thickness and its K-factor. A 90° bend deduction or allowance was the
+    // chart's value for the old thickness, so the rule unfolds from its K-factor again (#6794).
+    *unfold = crate::dialogs_sheet::unfold_index("k_factor");
+    // The 90° value was for the old thickness too: cleared, so a later switch to Bend Deduction
+    // or Bend Allowance starts from the pick's K-factor.
+    if let Some(value) = slot(values, "unfold_value") {
+        value.clear();
+    }
     if let Some(thickness) = slot(values, "thickness") {
         *thickness = crate::length_input::stored(doc, &entry.rule.thickness);
     }
@@ -282,19 +290,40 @@ fn import(app: &mut SolveApp, path: &str) -> (String, bool) {
 
 fn export(app: &mut SolveApp, path: &str) -> (String, bool) {
     let (rules, left_out) = app.preferences.personal_sheet_rules.sheet_rules();
-    let count = rules.len();
-    if count == 0 {
-        // Every personal rule has values a newer version saved: nothing this version can write.
-        return (tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")), true);
+    // A rule that unfolds from a 90° value goes in with the K-factor it works out to. One whose
+    // value reads a design's parameters has no K-factor outside that design: left out and named.
+    let mut needs_design = Vec::new();
+    let rows: Vec<PackRule> = rules
+        .into_iter()
+        .filter_map(|rule| {
+            let name = rule.name.clone();
+            let row = PackRule::of(rule);
+            if row.is_none() {
+                needs_design.push(name);
+            }
+            row
+        })
+        .collect();
+    let mut not_written = Vec::new();
+    if !left_out.is_empty() {
+        not_written.push(tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")));
     }
-    let pack = RulePack { rules: rules.into_iter().map(PackRule::of).collect(), ..RulePack::default() };
+    if !needs_design.is_empty() {
+        not_written.push(tr("sheet.library.export_needs_design").replace("{names}", &needs_design.join(", ")));
+    }
+    let count = rows.len();
+    if count == 0 {
+        // No personal rule this version can write as a pack row.
+        return (not_written.join(" "), true);
+    }
+    let pack = RulePack { rules: rows, ..RulePack::default() };
     let text = if path.to_lowercase().ends_with(".csv") { library::write_csv(&pack) } else { library::write_json(&pack) };
     match solidcraft_engine::io::vfs::write(path, text.as_bytes()) {
         Ok(()) => {
             let mut message = tr("sheet.library.exported").replace("{count}", &count.to_string());
-            if !left_out.is_empty() {
+            for note in &not_written {
                 message.push(' ');
-                message.push_str(&tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")));
+                message.push_str(note);
             }
             (message, false)
         }

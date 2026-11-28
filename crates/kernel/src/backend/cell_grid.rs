@@ -2,7 +2,7 @@
 //! interface existed, its refusal's words kept whole.
 
 use solidcore_ops::cell_grid as ops;
-use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell};
+use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell, SketchCell};
 use solidcore_record::{Loop2, Region2};
 use solidcraft_kernel_api::{CellGrid, CellGridLimits};
 
@@ -23,6 +23,10 @@ impl CellGrid for Solidcore {
 
     fn plan_cell_grid(&self, field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan> {
         ops::plan_cell_grid(field, spec).map_err(refused)
+    }
+
+    fn plan_sketch_cell_grid(&self, field: &[Loop2], cell: &SketchCell, spec: &CellGridSpec) -> Result<CellGridPlan> {
+        ops::plan_sketch_cell_grid(field, cell, spec).map_err(refused)
     }
 
     fn cell_regions(&self, cell: &GridCell) -> Result<Vec<Region2>> {

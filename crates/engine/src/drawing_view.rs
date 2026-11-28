@@ -3,9 +3,12 @@
 //! their pictures (W17b) will too.
 //!
 //! A view shows the bodies the design places, where its occurrences place it ([`shown`]), less what
-//! it chooses to leave out ([`ShownSet::of_view`]). The browser's eye counts for nothing: hiding a
-//! part in the model never changes a drawing. A body placed through a reference occurrence is a
-//! reference part: it doesn't set the view's extents when model parts are there too ([`measure`]).
+//! it chooses to leave out ([`ShownSet::of_view`]): subtrees, and single bodies of a part ([`Filter`]).
+//! By default the browser's eye counts for nothing: hiding a part in the model never changes a drawing.
+//! A view set to show only what the design shows (`shows: "design"`, #22107) leaves out what the
+//! browser hides too ([`DrawnView`]).
+//! A body placed through a reference occurrence is a reference part: it doesn't set the view's extents
+//! when model parts are there too ([`measure`]).
 
 use std::borrow::Cow;
 use std::cell::OnceCell;
@@ -16,10 +19,10 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::cutting_line::SectionKind;
-use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind};
+use solidcraft_doc::drawing::dimension::Dimension;
 use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
-use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
+use solidcraft_doc::drawing_view::{Exploded, HiddenBody, Pose, Shows, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_detail::{Boundary, Shape};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
@@ -27,6 +30,7 @@ use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::{Aabb2, EPS};
 use solidcraft_render::VisualStyle;
 
+use crate::occurrences::DesignHidden;
 use crate::params::bad;
 use crate::{Result, Session};
 
@@ -187,53 +191,188 @@ impl ShownSet {
         self.state.bodies.get(shown.index)
     }
 
-    /// The bodies under one of the `source` occurrence paths (all of them when there is none;
-    /// `[]` takes the design's own bodies) and under no `hide` path, in the same order.
-    pub fn keep(mut self, source: Option<&[Vec<u64>]>, hide: &[Vec<u64>]) -> ShownSet {
-        let source: Option<HashSet<&[u64]>> = source.map(|paths| paths.iter().map(Vec::as_slice).collect());
-        let hide: HashSet<&[u64]> = hide.iter().map(Vec::as_slice).collect();
-        self.bodies.retain(|b| chosen(&b.path, source.as_ref(), &hide));
+    /// The bodies `filter` keeps, in the same order.
+    pub fn keep(mut self, filter: &Filter) -> ShownSet {
+        self.bodies.retain(|b| filter.keeps(&b.path, &b.body));
         self
     }
 
-    /// What saved view `view` shows of the set: [`ShownSet::keep`] by what it resolves to, which a
-    /// view that chooses nothing skips. Paths no occurrence makes any more match no body.
-    pub fn of_view(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
-        let (source, hide) = (view.occurrences.value.as_deref(), view.hide.value.as_deref().unwrap_or_default());
-        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(source, hide)) }
+    /// What saved view `view` shows of the set: [`ShownSet::keep`] by its [`Filter`], which a view
+    /// that leaves nothing out skips. Paths no occurrence makes any more, and bodies no part has any
+    /// more, match no body. A view that shows only what the design shows leaves out what the
+    /// browser hides too ([`DrawnView`]).
+    pub fn of_view(&self, view: &DrawnView) -> Cow<'_, ShownSet> {
+        self.kept_by(&Filter::of_view(view))
+    }
+
+    /// What saved view `view`'s own choices keep of the set (its source, hide and hide_bodies),
+    /// whatever the design hides.
+    pub fn keep_own(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
+        self.kept_by(&Filter::own(view))
+    }
+
+    /// [`ShownSet::keep`] by `filter`, skipped when it keeps every body.
+    fn kept_by(&self, filter: &Filter) -> Cow<'_, ShownSet> {
+        if filter.keeps_all() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(filter)) }
     }
 }
 
-/// Whether a body placed by `path` is drawn: under a `source` path (`[]` only for the design's own
-/// bodies) and under no `hide` path. Each of the path's heads is one look-up, so a body costs at
-/// most 64 of them however many paths there are.
-fn chosen(path: &[u64], source: Option<&HashSet<&[u64]>>, hide: &HashSet<&[u64]>) -> bool {
-    let heads = || (1..=path.len()).filter_map(|n| path.get(..n));
-    let wanted = source.is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads().any(|h| set.contains(h)) });
-    wanted && !heads().any(|h| hide.contains(h))
+/// Which bodies a view draws, built once per view and asked once per body (#22107): under a
+/// `source` path (every body when there is none; `[]` only for the design's own bodies), under no
+/// `hide` path, and not one of `hide_bodies`, each a body by the occurrences that place it and its
+/// definition's body name, the pair [`Shown`] carries. Each of a path's heads is one look-up, so a
+/// body costs at most 64 of them however many paths there are, and one more for its name.
+#[derive(Debug, Default)]
+pub struct Filter<'a> {
+    source: Option<HashSet<&'a [u64]>>,
+    hide: HashSet<&'a [u64]>,
+    hide_bodies: HashSet<(&'a [u64], &'a str)>,
+    /// What the design hides, for a view that shows only what the design shows ([`DrawnView`]).
+    design: Option<&'a DesignHidden>,
 }
 
-/// Why a saved view doesn't draw what an occurrence path places ([`left_out`]).
+impl<'a> Filter<'a> {
+    /// The filter of `source`, `hide` and `hide_bodies`, as a view or a snapshot gives them.
+    pub fn new(source: Option<&'a [Vec<u64>]>, hide: &'a [Vec<u64>], hide_bodies: &'a [HiddenBody]) -> Filter<'a> {
+        Filter {
+            source: source.map(|paths| paths.iter().map(Vec::as_slice).collect()),
+            hide: hide.iter().map(Vec::as_slice).collect(),
+            hide_bodies: hide_bodies.iter().map(|b| (b.path.as_slice(), b.body.as_str())).collect(),
+            design: None,
+        }
+    }
+
+    /// It, leaving out what `design` hides too: none for a view that draws every body.
+    pub fn with_design(self, design: Option<&'a DesignHidden>) -> Filter<'a> {
+        Filter { design: design.filter(|d| !d.is_empty()), ..self }
+    }
+
+    /// Saved view `view`'s filter, by what its settings resolve to and, when it shows only what the
+    /// design shows, what the design hides.
+    pub fn of_view(view: &'a DrawnView) -> Filter<'a> {
+        Filter::own(&view.view).with_design(view.design.as_deref())
+    }
+
+    /// Saved view `view`'s own filter: its source, hide and hide_bodies, whatever the design hides.
+    pub fn own(view: &'a ResolvedView) -> Filter<'a> {
+        Filter::new(
+            view.occurrences.value.as_deref(),
+            view.hide.value.as_deref().unwrap_or_default(),
+            view.hide_bodies.value.as_deref().unwrap_or_default(),
+        )
+    }
+
+    /// Whether it keeps every body: nothing chosen and nothing left out.
+    pub fn keeps_all(&self) -> bool {
+        self.source.is_none() && self.hide.is_empty() && self.hide_bodies.is_empty() && self.design.is_none()
+    }
+
+    /// Whether it keeps body `body` placed by `path` ([`Filter::left_out`] finds nothing).
+    pub fn keeps(&self, path: &[u64], body: &str) -> bool {
+        self.why(path, body).is_none()
+    }
+
+    /// Why it leaves body `body` placed by `path` out, if it does: a `hide` path covering it first,
+    /// then no `source` path taking it, then the body itself in `hide_bodies`, then the design hiding
+    /// it: the view's own choices are named first.
+    fn why<'p>(&self, path: &'p [u64], body: &str) -> Option<Why<'p>> {
+        let mut heads = (1..=path.len()).filter_map(|n| path.get(..n));
+        if let Some(by) = heads.clone().find(|h| self.hide.contains(h)) {
+            return Some(Why::Hidden(by));
+        }
+        let wanted = self.source.as_ref().is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads.any(|h| set.contains(h)) });
+        if !wanted {
+            return Some(Why::NotChosen);
+        }
+        if self.hide_bodies.contains(&(path, body)) {
+            return Some(Why::BodyHidden);
+        }
+        self.design.is_some_and(|design| design.hides(path, body)).then_some(Why::InDesign)
+    }
+}
+
+/// The entries of `hide_bodies` that name no body `all` places at their path, in their order: every
+/// entry when there are no bodies to read. A body renamed or deleted since it was hidden is one.
+pub fn unmatched<'b>(all: &std::result::Result<ShownSet, Unmeasured>, hide_bodies: &'b [HiddenBody]) -> Vec<&'b HiddenBody> {
+    if hide_bodies.is_empty() {
+        return Vec::new();
+    }
+    let placed: HashSet<(&[u64], &str)> = match all {
+        Ok(set) => set.bodies.iter().map(|b| (b.path.as_slice(), b.body.as_str())).collect(),
+        Err(_) => HashSet::new(),
+    };
+    hide_bodies.iter().filter(|b| !placed.contains(&(b.path.as_slice(), b.body.as_str()))).collect()
+}
+
+/// What [`Filter::why`] found, before the view says who set it.
+enum Why<'p> {
+    Hidden(&'p [u64]),
+    NotChosen,
+    BodyHidden,
+    InDesign,
+}
+
+/// A saved view as it draws (#22107): its settings, and what the design hides when it shows only
+/// what the design shows (none when it draws every body). Every reader that draws or measures a view,
+/// or refuses what points at a part it leaves out, takes one, so none can miss the design's eyes. The
+/// set is the session's ([`Session::design_hidden`]), shared by every view drawn from it, and compared
+/// by address first: a view drawn from it is up to date while the design hides the same bodies.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawnView {
+    pub view: ResolvedView,
+    pub design: Option<Arc<DesignHidden>>,
+}
+
+impl std::ops::Deref for DrawnView {
+    type Target = ResolvedView;
+    fn deref(&self) -> &ResolvedView {
+        &self.view
+    }
+}
+
+impl DrawnView {
+    /// `view` as it draws from `s`, the design as it places its parts on the window's thread: a view
+    /// that shows only what the design shows takes what `s`'s browser hides.
+    pub fn new(s: &Session, view: ResolvedView) -> DrawnView {
+        let design = (view.shows.value == Shows::Design).then(|| s.design_hidden());
+        DrawnView { view, design }
+    }
+
+    /// `view` with its own choices alone, whatever the design hides: what a view is refused for
+    /// leaving nothing to draw by (hiding everything in the browser gives its placeholder instead).
+    pub fn own(view: ResolvedView) -> DrawnView {
+        DrawnView { view, design: None }
+    }
+}
+
+/// View `id` of `d` as it draws from `s` ([`DrawnView::new`]).
+pub fn drawn_view(s: &Session, d: &Drawing, id: u64) -> solidcraft_doc::Result<DrawnView> {
+    d.resolve_view(id).map(|view| DrawnView::new(s, view))
+}
+
+/// Why a saved view doesn't draw a body ([`left_out`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LeftOut {
     /// A `hide` path covers it: that path, and the view that set it.
     Hidden { by: Vec<u64>, set_by: SetBy },
     /// No `source` path takes it: the view that set the source.
     NotChosen { set_by: SetBy },
+    /// `hide_bodies` names it (#22107): the body, the occurrences that place it, and the view that
+    /// set it.
+    BodyHidden { body: String, path: Vec<u64>, set_by: SetBy },
+    /// The design hides it, and the view shows only what the design shows (#22107): the view that
+    /// set that.
+    InDesign { set_by: SetBy },
 }
 
-/// Why saved view `view` doesn't draw the body that occurrence path `path` places, if it doesn't:
-/// [`chosen`] asked about one path, with the `hide` path that covers it. No model is read.
-pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
-    let source: Option<HashSet<&[u64]>> = view.occurrences.value.as_deref().map(|paths| paths.iter().map(Vec::as_slice).collect());
-    let hide: HashSet<&[u64]> = view.hide.value.as_deref().unwrap_or_default().iter().map(Vec::as_slice).collect();
-    if chosen(path, source.as_ref(), &hide) {
-        return None;
-    }
-    let by = (1..=path.len()).filter_map(|n| path.get(..n)).find(|head| hide.contains(head));
-    Some(match by {
-        Some(by) => LeftOut::Hidden { by: by.to_vec(), set_by: view.hide.set_by },
-        None => LeftOut::NotChosen { set_by: view.occurrences.set_by },
+/// Why saved view `view` doesn't draw body `body` (its definition's body name) placed by occurrence
+/// path `path`, if it doesn't: its [`Filter`] asked about one body. No model is read.
+pub fn left_out(view: &DrawnView, path: &[u64], body: &str) -> Option<LeftOut> {
+    Some(match Filter::of_view(view).why(path, body)? {
+        Why::Hidden(by) => LeftOut::Hidden { by: by.to_vec(), set_by: view.hide.set_by },
+        Why::NotChosen => LeftOut::NotChosen { set_by: view.occurrences.set_by },
+        Why::BodyHidden => LeftOut::BodyHidden { body: body.to_string(), path: path.to_vec(), set_by: view.hide_bodies.set_by },
+        Why::InDesign => LeftOut::InDesign { set_by: view.shows.set_by },
     })
 }
 
@@ -564,19 +703,26 @@ pub fn check_centre_view(d: &Drawing, view: u64, what: &str, cmd: &str) -> Resul
     }
 }
 
-/// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
-/// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
-/// editable. Pictures leave out every section view for now.
-pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
-    match view.cut.as_ref()?.line.kind() {
-        SectionKind::Full if view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded() => {
-            Some("not supported yet: a shaded section view")
-        }
+/// Why a cutting line of `kind` can't be cut yet, if it can't (#13046): only a full section is
+/// cut so far.
+pub fn not_cut_yet_kind(kind: SectionKind) -> Option<&'static str> {
+    match kind {
         SectionKind::Full => None,
         SectionKind::Half => Some("not supported yet: a half section"),
         SectionKind::Offset => Some("not supported yet: an offset section"),
         SectionKind::Aligned => Some("not supported yet: an aligned section"),
     }
+}
+
+/// Why section view `view` can't be drawn yet, if it can't (#13046): only a full section's lines
+/// are cut so far, and a shaded part's picture isn't. The sheet scene refuses it; its settings stay
+/// editable. Pictures leave out every section view for now.
+pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
+    let kind = view.cut.as_ref()?.line.kind();
+    if let Some(why) = not_cut_yet_kind(kind) {
+        return Some(why);
+    }
+    (view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded()).then_some("not supported yet: a shaded section view")
 }
 
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
@@ -598,7 +744,8 @@ pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
 }
 
 /// Why flat pattern view `view` can't be drawn, if it can't: it draws one body's flat, so it is never
-/// exploded or posed, and a configuration of its own needs that configuration's flat, not read yet.
+/// exploded or posed and doesn't follow the browser's eyes, and a configuration of its own needs that
+/// configuration's flat, not read yet.
 /// Nothing for a view of the model.
 pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
     if view.flat.is_none() {
@@ -609,6 +756,8 @@ pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
         Some("a flat pattern view has no position: it draws one body's flat")
     } else if view.configuration.value != ViewConfiguration::Active {
         Some("not supported yet: a flat pattern view of a configuration of its own")
+    } else if view.shows.value == Shows::Design {
+        Some("a flat pattern view draws its body's flat whatever the browser shows: it can't show only what the design shows")
     } else {
         None
     }
@@ -626,7 +775,7 @@ pub fn no_model_edges(view: &View) -> Option<&'static str> {
 /// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
 pub fn measured<'a>(
     shown: &'a std::result::Result<ShownSet, Unmeasured>,
-    view: &ResolvedView,
+    view: &DrawnView,
 ) -> std::result::Result<(Cow<'a, ShownSet>, Extents), Unmeasured> {
     let set = shown.as_ref().map_err(|why| *why)?.of_view(view);
     if set.bodies.is_empty() {
@@ -641,6 +790,36 @@ pub fn measured<'a>(
     Ok((set, extents))
 }
 
+/// Outcome of cutting one model body along a section plane.
+enum SectionCut {
+    /// Kept (whole or cut) on the kept side, with how its cut faces are told.
+    Kept(Box<ModelBody>, Option<CutFaces>),
+    /// Nothing of the body lies on the kept side.
+    Away,
+    /// The cut failed or was cancelled: drawn uncut, with the reason.
+    Failed(String),
+}
+
+/// Pre-warms the display meshes of unmeshed bodies in parallel so measuring extents across
+/// many-body assemblies does not tessellate serially on one thread. Rigid placements of one
+/// definition share one lazy source mesh, so each definition is warmed once.
+fn warm_mesh_in_place(bodies: &[&ModelBody]) {
+    let mut seen = HashSet::new();
+    let cold: Vec<&ModelBody> = bodies
+        .iter()
+        .copied()
+        .filter(|b| {
+            b.cached_mesh().is_none()
+                && seen.insert(b.placed_definition().unwrap_or_else(|| Arc::as_ptr(&b.display_identity()) as *const () as usize))
+        })
+        .collect();
+    if cold.len() > 1 {
+        solidcraft_kernel::map_on_threads(&cold, 16, |&b| {
+            let _ = b.mesh_in_place();
+        });
+    }
+}
+
 /// What a full section view along `cut` shows of `set`: each model body cut by the line's plane, the
 /// side its arrows point to kept ([`ModelBody::section`], which remembers it), and a body with nothing
 /// on that side left out. Reference parts show whole around the cut, as context. Mesh bodies have no
@@ -651,6 +830,35 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
     let mut state = ModelState::clone(&set.state);
     let (mut bodies, mut meshes, mut failed, mut why_failed) = (Vec::new(), 0usize, 0usize, None);
     let mut cut_bodies = BTreeMap::new();
+    let to_cut: Vec<&ModelBody> = match &plane {
+        Ok(_) => set.bodies.iter().filter(|s| !s.reference).filter_map(|s| set.body(s)).filter(|b| !b.body.is_mesh()).collect(),
+        Err(_) => Vec::new(),
+    };
+    let cut_one = |body: &ModelBody, plane: &Plane| -> SectionCut {
+        if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
+            return SectionCut::Failed("cancelled".into());
+        }
+        match body.section(plane) {
+            Ok(Some(section)) => {
+                // A body that only touches the plane is shown whole, and nothing of it is hatched.
+                let telling = hatch::cut_faces(&body.body, &section.body, plane);
+                SectionCut::Kept(Box::new(section), telling)
+            }
+            Ok(None) => SectionCut::Away,
+            Err(e) => SectionCut::Failed(e.to_string()),
+        }
+    };
+    let mut results = match &plane {
+        Ok(plane) if to_cut.len() > 1 => {
+            solidcraft_kernel::map_with_local_pools(&to_cut, crate::mesh_lines::WORKERS, |&body| Ok(cut_one(body, plane)))
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|e| SectionCut::Failed(e.to_string())))
+                .collect::<Vec<_>>()
+                .into_iter()
+        }
+        Ok(plane) => to_cut.iter().map(|&body| cut_one(body, plane)).collect::<Vec<_>>().into_iter(),
+        Err(_) => Vec::new().into_iter(),
+    };
     for shown in &set.bodies {
         let Some(body) = set.body(shown) else { continue };
         if shown.reference {
@@ -662,20 +870,22 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
             bodies.push(shown.clone());
             continue;
         }
-        match plane.clone().and_then(|plane| body.section(&plane).map_err(|e| e.to_string())) {
-            Ok(Some(section)) => {
+        let outcome = match &plane {
+            Ok(_) => results.next().unwrap_or_else(|| SectionCut::Failed("missing section result".into())),
+            Err(why) => SectionCut::Failed(why.clone()),
+        };
+        match outcome {
+            SectionCut::Kept(section, telling) => {
                 if let Some(slot) = state.bodies.get_mut(shown.index) {
-                    // A body that only touches the plane is shown whole, and nothing of it is hatched.
-                    let telling = plane.as_ref().ok().and_then(|plane| hatch::cut_faces(&body.body, &section.body, plane));
                     if let Some(telling) = telling {
                         cut_bodies.insert(shown.index, telling);
                     }
-                    *slot = section;
+                    *slot = *section;
                 }
                 bodies.push(shown.clone());
             }
-            Ok(None) => {}
-            Err(why) => {
+            SectionCut::Away => {}
+            SectionCut::Failed(why) => {
                 failed += 1;
                 why_failed.get_or_insert(why);
                 bodies.push(shown.clone());
@@ -700,8 +910,9 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
 /// reference parts.
 pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, Unmeasured> {
     let has_model = shown.bodies.iter().any(|b| !b.reference);
-    let bodies = shown.bodies.iter().filter(|b| !(has_model && b.reference)).filter_map(|b| shown.body(b));
-    let extents = bodies.fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
+    let bodies: Vec<&ModelBody> = shown.bodies.iter().filter(|b| !(has_model && b.reference)).filter_map(|b| shown.body(b)).collect();
+    warm_mesh_in_place(&bodies);
+    let extents = bodies.into_iter().fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
         model: e.model.union(&body.mesh_bounds_in(basis)),
         error_mm: e.error_mm.max(body.display_tol()),
         bodies: e.bodies + 1,
@@ -716,8 +927,9 @@ pub fn shows(shown: &ShownSet, basis: &Plane, extents: &Extents, percent: f64) -
     if percent <= 0.0 {
         return extents.model;
     }
-    let references = shown.bodies.iter().filter(|b| b.reference).filter_map(|b| shown.body(b));
-    let all = references.fold(extents.model, |all, body| all.union(&body.mesh_bounds_in(basis)));
+    let references: Vec<&ModelBody> = shown.bodies.iter().filter(|b| b.reference).filter_map(|b| shown.body(b)).collect();
+    warm_mesh_in_place(&references);
+    let all = references.into_iter().fold(extents.model, |all, body| all.union(&body.mesh_bounds_in(basis)));
     let part = percent / 100.0;
     let side = |from: f64, to: f64| if from == to { from } else { from * (1.0 - part) + to * part };
     let model = extents.model;
@@ -787,8 +999,8 @@ pub(crate) struct ViewOnSheet {
 
 /// Where the view of `dimension` puts what it draws on its sheet, as the sheet draws it: its frame,
 /// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
-/// an occurrence move not captured yet is left out). A full section can place distances between
-/// named model faces. Edges made by the cut have no model references yet (#13046).
+/// an occurrence move not captured yet is left out). A full section places what points at the model
+/// as any view does; the edges its cut makes have no model references (#13046).
 /// A missing or unsupported view, or one with nothing to measure, returns
 /// [`crate::drawing_scene::NOT_DRAWN`]. A view that draws no model edges, a flat
 /// pattern view ([`no_model_edges`]), has no place for what points at the model
@@ -802,10 +1014,7 @@ pub(crate) fn dimension_view_on_sheet(s: &Session, d: &Drawing, dimension: &Dime
     if d.view(id).and_then(no_model_edges).is_some() {
         return Err(NO_PLACE);
     }
-    if not_drawable_apart(&view).is_some()
-        || not_cut_yet(&view).is_some()
-        || (view.cut.is_some() && !matches!(dimension.kind, DimensionKind::Faces { .. }))
-    {
+    if not_drawable_apart(&view).is_some() || not_cut_yet(&view).is_some() {
         return Err(NOT_DRAWN);
     }
     let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
@@ -820,7 +1029,7 @@ pub(crate) fn dimension_view_on_sheet(s: &Session, d: &Drawing, dimension: &Dime
 
 /// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.
 pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
-    let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    let view = drawn_view(sessions.placed, drawing, id).map_err(|e| bad(cmd, e.to_string()))?;
     if let Some(of) = &view.flat {
         return flat_on_sheet(drawing, id, &flat(sessions.placed, of, cmd), cmd);
     }
@@ -924,21 +1133,38 @@ mod tests {
     /// path wins over a `source` path above it.
     #[test]
     fn a_body_is_drawn_under_a_source_path_and_no_hide_path() {
-        let set = |paths: &[&'static [u64]]| paths.iter().copied().collect::<HashSet<&[u64]>>();
+        let list = |paths: &[&[u64]]| paths.iter().map(|p| p.to_vec()).collect::<Vec<Vec<u64>>>();
         let paths: [&[u64]; 5] = [&[], &[1], &[1, 2], &[1, 2, 3], &[4]];
-        let cases: [(Option<HashSet<&[u64]>>, HashSet<&[u64]>, [bool; 5]); 4] = [
-            (None, set(&[&[1, 2]]), [true, true, false, false, true]),
-            (Some(set(&[&[1, 2]])), set(&[]), [false, false, true, true, false]),
-            (Some(set(&[&[]])), set(&[]), [true, false, false, false, false]),
-            (Some(set(&[&[1], &[4]])), set(&[&[1, 2]]), [false, true, false, false, true]),
+        let cases: [(Option<Vec<Vec<u64>>>, Vec<Vec<u64>>, [bool; 5]); 4] = [
+            (None, list(&[&[1, 2]]), [true, true, false, false, true]),
+            (Some(list(&[&[1, 2]])), list(&[]), [false, false, true, true, false]),
+            (Some(list(&[&[]])), list(&[]), [true, false, false, false, false]),
+            (Some(list(&[&[1], &[4]])), list(&[&[1, 2]]), [false, true, false, false, true]),
         ];
         for (source, hide, want) in cases {
-            let got = paths.map(|p| chosen(p, source.as_ref(), &hide));
+            let filter = Filter::new(source.as_deref(), &hide, &[]);
+            let got = paths.map(|p| filter.keeps(p, "Body"));
             assert_eq!(got, want, "{source:?} {hide:?}");
         }
     }
 
-    /// Seeded paths and choices: `chosen` always agrees with the rule worked out the long way.
+    /// `hide_bodies` leaves out one body by its path and its name, and no other: not its namesake at
+    /// another path, nor another body at its path. A hide path or an unchosen source says why first.
+    #[test]
+    fn a_hidden_body_is_left_out_by_its_path_and_name() {
+        let hidden = [HiddenBody { path: vec![], body: "Door".into() }, HiddenBody { path: vec![1, 2], body: "Door".into() }];
+        let filter = Filter::new(None, &[], &hidden);
+        assert!(!filter.keeps_all());
+        let kept = [(&[][..], "Door"), (&[][..], "Carcass"), (&[1][..], "Door"), (&[1, 2][..], "Door"), (&[1, 2][..], "Shelf")]
+            .map(|(path, body)| filter.keeps(path, body));
+        assert_eq!(kept, [false, true, true, false, true]);
+        let (hide, source) = (vec![vec![1]], vec![vec![4]]);
+        assert!(matches!(Filter::new(None, &hide, &hidden).why(&[1, 2], "Door"), Some(Why::Hidden(&[1]))));
+        assert!(matches!(Filter::new(Some(&source), &[], &hidden).why(&[], "Door"), Some(Why::NotChosen)));
+        assert!(Filter::new(None, &[], &[]).keeps_all());
+    }
+
+    /// Seeded paths and choices: the filter always agrees with the rule worked out the long way.
     #[test]
     fn seeded_choices_agree_with_the_rule() {
         let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
@@ -946,12 +1172,117 @@ mod tests {
         for seed in 1..=500u64 {
             let sources: Vec<Vec<u64>> = (0..pick(seed, 1, 3)).map(|i| path(seed, 100 + i * 20)).collect();
             let hides: Vec<Vec<u64>> = (0..pick(seed, 2, 3)).map(|i| path(seed, 200 + i * 20)).filter(|p| !p.is_empty()).collect();
-            let body = path(seed, 3);
-            let source = (pick(seed, 4, 2) == 0).then(|| sources.iter().map(Vec::as_slice).collect::<HashSet<&[u64]>>());
-            let hide: HashSet<&[u64]> = hides.iter().map(Vec::as_slice).collect();
+            let hidden: Vec<HiddenBody> =
+                (0..pick(seed, 5, 3)).map(|i| HiddenBody { path: path(seed, 300 + i * 20), body: format!("B{}", pick(seed, 400 + i, 2)) }).collect();
+            let (body, name) = (path(seed, 3), format!("B{}", pick(seed, 6, 2)));
+            let source = (pick(seed, 4, 2) == 0).then_some(sources.as_slice());
             let under = |p: &Vec<u64>| if p.is_empty() { body.is_empty() } else { body.starts_with(p) };
-            let long_way = (source.is_none() || sources.iter().any(under)) && !hides.iter().any(under);
-            assert_eq!(chosen(&body, source.as_ref(), &hide), long_way, "seed {seed}: {body:?} {sources:?} {hides:?}");
+            let long_way = (source.is_none() || sources.iter().any(under))
+                && !hides.iter().any(under)
+                && !hidden.iter().any(|h| h.path == body && h.body == name);
+            let filter = Filter::new(source, &hides, &hidden);
+            assert_eq!(filter.keeps(&body, &name), long_way, "seed {seed}: {body:?} {name} {sources:?} {hides:?} {hidden:?}");
         }
+    }
+
+    /// Parallel section cuts, extents measurement and reference growth match sequential per-body
+    /// sectioning in exact body order, cut-face map, extents and repeated determinism.
+    #[test]
+    fn parallel_section_cut_preserves_order_and_matches_serial() {
+        use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine};
+        use solidcraft_geom::drawing_view::NamedView;
+
+        let mut s = Session::default();
+        // 10 boxes: 2 wholly below z = 10, 6 spanning z = 10, 2 wholly above z = 10.
+        for i in 0..10 {
+            let (z0, h) = match i {
+                0 | 1 => (0.0, 5.0),
+                8 | 9 => (15.0, 10.0),
+                _ => (0.0, 20.0),
+            };
+            s.execute(
+                "solid.box",
+                &serde_json::json!({
+                    "length": 15,
+                    "width": 15,
+                    "height": h,
+                    "corner": [25 * i, 0, z0],
+                    "body_name": format!("Part {i}"),
+                    "operation": "new",
+                }),
+            )
+            .unwrap();
+        }
+        let set = shown(&s).unwrap();
+        let parent = NamedView::Front.basis();
+        let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-10.0, 10.0), Vec2::new(300.0, 10.0)], ArrowSide::Left).unwrap();
+        let cut = Cut { parent, line };
+        let plane = cut.line.planes(&cut.parent).unwrap().into_iter().next().unwrap();
+
+        let par_a = sectioned(&set, &cut).unwrap();
+        let par_b = sectioned(&set, &cut).unwrap();
+        assert_eq!(par_a.bodies, par_b.bodies);
+        assert_eq!(par_a.cut, par_b.cut);
+        assert_eq!(par_a.uncut, par_b.uncut);
+
+        let mut serial_bodies = Vec::new();
+        let mut serial_cut = BTreeMap::new();
+        for item in &set.bodies {
+            let body = set.body(item).unwrap();
+            if let Some(section) = body.section(&plane).unwrap() {
+                if let Some(telling) = hatch::cut_faces(&body.body, &section.body, &plane) {
+                    serial_cut.insert(item.index, telling);
+                }
+                serial_bodies.push(item.clone());
+            }
+        }
+        assert_eq!(par_a.bodies, serial_bodies);
+        assert_eq!(par_a.cut, serial_cut);
+        assert_eq!(par_a.uncut, None);
+        assert_eq!(par_a.cut.len(), 6);
+
+        let extents = measure(&par_a, &plane).unwrap();
+        let serial_model = par_a.bodies.iter().filter_map(|b| par_a.body(b)).fold(Aabb2::EMPTY, |acc, b| acc.union(&b.mesh_bounds_in(&plane)));
+        assert_eq!(extents.model, serial_model);
+        assert_eq!(extents.bodies, par_a.bodies.len());
+        assert_eq!(shows(&par_a, &plane, &extents, 50.0), extents.model);
+    }
+
+    /// A cancelled kernel watch stops parallel section cuts without cutting remaining bodies.
+    #[test]
+    fn section_cut_respects_watch_cancellation() {
+        use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine};
+        use solidcraft_geom::drawing_view::NamedView;
+
+        struct Cancelled;
+        impl solidcraft_kernel::watch::Watch for Cancelled {
+            fn cancelled(&self) -> bool {
+                true
+            }
+            fn progress(&self, _stage: &'static str, _done: usize, _total: usize) {}
+        }
+
+        let mut s = Session::default();
+        for i in 0..4 {
+            s.execute(
+                "solid.box",
+                &serde_json::json!({
+                    "length": 10,
+                    "width": 10,
+                    "height": 20,
+                    "corner": [20 * i, 0, 0],
+                    "body_name": format!("Block {i}"),
+                    "operation": "new",
+                }),
+            )
+            .unwrap();
+        }
+        let set = shown(&s).unwrap();
+        let parent = NamedView::Front.basis();
+        let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-10.0, 10.0), Vec2::new(100.0, 10.0)], ArrowSide::Left).unwrap();
+        let cut = Cut { parent, line };
+        let result = solidcraft_kernel::watch::watching(Arc::new(Cancelled), || sectioned(&set, &cut)).unwrap();
+        assert!(result.cut.is_empty());
+        assert!(result.uncut.as_deref().is_some_and(|why| why.contains("cancelled")), "{:?}", result.uncut);
     }
 }

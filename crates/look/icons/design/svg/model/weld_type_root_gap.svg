@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: root-gap</title>
+  <path d="M6 46L58 46L58 56L6 56Z" fill="#b8c3cf"/>
+  <path d="M6 46L58 46L58 56L6 56Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 14L38 14L38 41L26 41Z" fill="#b8c3cf"/>
+  <path d="M26 14L38 14L38 41L26 41Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 41L38 41L38 46L26 46Z" fill="#328bd3"/>
+  <path d="M26 41L38 41L38 46L26 46Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26 46L26 34L14 46Z" fill="#328bd3"/>
+  <path d="M26 46L26 34L14 46Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38 46L38 34L50 46Z" fill="#328bd3"/>
+  <path d="M38 46L38 34L50 46Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

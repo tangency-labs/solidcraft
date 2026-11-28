@@ -1058,10 +1058,25 @@ fn c1_collect_points(
     // the surface's natural domain, where its definition evaluates as an extension, not as
     // the closed surface (0.007 off on a cylinder of radius 30 at 0.008 past its seam), and
     // the round's exact surface through such feet is off its class.
-    for (srf, count) in [SrfIndex::First, SrfIndex::Second]
+    // Not upstream (tangency-labs/solidcraft#21940): nor on a base whose seam the blend's rails
+    // never cross (`RailEndNames::InDomain`: a closed edge's Join whose side seam on that base
+    // ends inside the band). Its two rail ends lie at one vertex whose trim curve names it a
+    // period apart, so one end's foot lies across from its trim curve and the other does not,
+    // yet the contact never crosses the seam: the name a period away lay outside the domain,
+    // and the trace ran on the surface's extension (0.29972 instead of 0.3 from the ball's
+    // centre).
+    let clear_of_seam = match ops.solver().rail_end_names {
+        crate::blend::fillet_solver::p1::RailEndNames::InDomain { rail } => Some(rail),
+        crate::blend::fillet_solver::p1::RailEndNames::TrimCurveSide => None,
+    };
+    for (rail, (srf, count)) in [SrfIndex::First, SrfIndex::Second]
         .into_iter()
         .zip(named_ends)
+        .enumerate()
     {
+        if clear_of_seam == Some(rail) {
+            continue;
+        }
         let on_srf = || renamed.iter().filter(move |(_, s, _)| *s == srf);
         if on_srf().count() == count {
             continue;
@@ -2357,13 +2372,13 @@ fn c3_make_intersector<'s>(
     let [domain1, domain2] = &st.trace.domains;
     // the solver (`*this`) is passed to each intersector call instead
     let mut fi = TraceIntersector::new(k, surface1, domain1, surface2, domain2, None)?;
-    // Not upstream (#2500): with `offset_extension_as_itself` an offset extends a surface
+    // Not upstream (#2500): an offset continuing as itself extends a surface
     // of revolution round its axis past the closure of its turn, so the offsets'
     // intersection can be closed (a round run onto a torus's tube meets its offset in a
     // closed oval) without repeating its UV: an extension stops where it comes back onto
     // the curve traced, compared in 3D, or it runs round past the trace's own span and the
     // fillet surface covers that span twice.
-    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
+    fi.base.base.extension_stops_on_closure = true;
 
     // If we need to trace beyond the end and we are tracing along an arc, put a stop
     // tracing criterion to avoid possible infinite looping (`IsArc` only runs when an
@@ -5079,13 +5094,13 @@ pub(crate) fn point_intersection_on_surfaces(
     let [surface1, surface2] = surfaces;
     let [domain1, domain2] = &domains;
     let mut fi = TraceIntersector::new(k, surface1, domain1, surface2, domain2, None)?;
-    // Not upstream (#2500): with `offset_extension_as_itself` an offset extends a surface
+    // Not upstream (#2500): an offset continuing as itself extends a surface
     // of revolution round its axis past the closure of its turn, so the offsets'
     // intersection can be closed (a round run onto a torus's tube meets its offset in a
     // closed oval) without repeating its UV: an extension stops where it comes back onto
     // the curve traced, compared in 3D, or it runs round past the trace's own span and the
     // fillet surface covers that span twice.
-    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
+    fi.base.base.extension_stops_on_closure = true;
     let mut cx = Cx {
         k,
         target,

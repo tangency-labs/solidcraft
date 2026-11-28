@@ -39,6 +39,32 @@ fn taken(map: solidcore::Result<Transform>) -> Result<Matrix> {
     map.map(|t| t.m).map_err(|_| Error::Argument)
 }
 
+/// Signed volume scale, ignoring translation.
+pub fn linear_determinant(matrix: &Matrix) -> f64 {
+    Transform { m: *matrix }.linear_determinant()
+}
+
+/// Unit direction with the input's sense, even for very large or very small axes.
+pub fn directed_unit(axis: [f64; 3]) -> Option<[f64; 3]> {
+    vec3(axis).length_and_unit().map(|(_, v)| v.to_array())
+}
+
+/// Point carried by a displacement in the same frame.
+pub fn translated_point(point: [f64; 3], by: [f64; 3]) -> [f64; 3] {
+    (vec3(point) + vec3(by)).to_array()
+}
+
+/// Compose the two axis-angle turns in application order.
+pub fn compose_turn(
+    first: [f64; 3],
+    radians: f64,
+    world: [f64; 3],
+    turn: f64,
+) -> Option<([f64; 3], f64)> {
+    solidcore::math::compose_turn(vec3(first), radians, vec3(world), turn)
+        .map(|(axis, angle)| (axis.to_array(), angle))
+}
+
 /// The move by `by`.
 ///
 /// # Errors
@@ -96,6 +122,21 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
     Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
 }
 
+/// The axes `x` and `y` of a frame whose normal runs along `d`, through the kernel's
+/// [`Transform::frame_axes`]: `x` is the unit cross product of `v`'s part square to `d` with `d`
+/// and `y = d × x`, so both are unit and square to `d` within a few ulps, `x × y` runs along `d`,
+/// and `y` along `v`'s part square to `d`. Any finite lengths are taken.
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite, a `d` or `v` of no length, or a `v` whose part
+/// square to `d` is no longer than its own rounding ([`solidcore::math::FRAME_LEAN`], 16 ulps):
+/// `y` would follow the rounding and not `v`. Past that, `y`'s direction is off `v`'s part square
+/// to `d` by about `4ε / sin`; a caller that needs it closer compares that sine itself.
+pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2]> {
+    let [x, y] = Transform::frame_axes(vec3(d), vec3(v)).ok_or(Error::Argument)?;
+    Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
 /// A plane's axes `x` and `y` with the coordinates smaller than `noise` dropped, each unit
 /// again, through [`Transform::axis_squared_frame`]: a flat face's plane, tilted only by
 /// rounding, made exactly square to the world axes it lies along. `None` when the kernel finds
@@ -146,6 +187,24 @@ pub fn rigid_plane_through(
         .rigid_plane_through(vec3(origin), vec3(u), vec3(v))
         .map_err(|_| Error::Argument)?;
     Ok(([o.x, o.y, o.z], [[u.x, u.y, u.z], [v.x, v.y, v.z]]))
+}
+
+/// The plane through `origin` with the unit, square axes `x` and `y` brought onto the line
+/// through `at` along the unit direction `dir`, through [`solidcore::math::plane_onto_line`]:
+/// tilted by the least turn that makes it parallel to the line, then moved along its normal until
+/// it holds the line; a plane that already holds it comes back unchanged. The new origin and axes;
+/// `None` for a number not finite or a line square to the plane (within
+/// [`solidcore::math::PLANE_ONTO_LINE_SQUARE_SIN`] of its normal).
+pub fn plane_onto_line(
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+    at: [f64; 3],
+    dir: [f64; 3],
+) -> Option<([f64; 3], [[f64; 3]; 2])> {
+    let (o, x, y) =
+        solidcore::math::plane_onto_line(vec3(origin), vec3(x), vec3(y), vec3(at), vec3(dir))?;
+    Some(([o.x, o.y, o.z], [[x.x, x.y, x.z], [y.x, y.y, y.z]]))
 }
 
 /// The scale by `factor` in every direction about `centre`, which it keeps.
@@ -523,6 +582,56 @@ pub fn chord_coordinates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A frame's axes along a direction: `y` keeps the part of `v` square to `d`, `x = y × d`;
+    /// a `v` along `d` or a `d` of no length is refused.
+    #[test]
+    fn frame_axes_take_v_square_to_d_and_cross_them() {
+        assert_eq!(
+            frame_axes([0.0, 0.0, 2.0], [0.0, 3.0, 5.0]).unwrap(),
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert_eq!(
+            frame_axes([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]).unwrap(),
+            [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert!(frame_axes([0.0, 0.0, 1.0], [0.0, 0.0, 3.0]).is_err());
+        assert!(frame_axes([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]).is_err());
+    }
+
+    /// brett19's probes on #22066: `v` the unit `d` leaned by `k` ulps along `p` square to it.
+    /// Along `d` (and within its rounding) it is refused; from 65 ulps on, at a sine of 5e-7, and
+    /// at 1e±300, `x` and `y` are unit and square to `d` and to each other within a few ulps.
+    #[test]
+    fn frame_axes_are_a_frame_for_any_v_taken_and_refuse_one_along_d() {
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        // d along the unit u, its frame checked against u
+        let check = |d: [f64; 3], u: [f64; 3], v: [f64; 3]| {
+            let [x, y] = frame_axes(d, v).unwrap();
+            for (a, b, want) in [
+                (x, x, 1.0),
+                (y, y, 1.0),
+                (x, y, 0.0),
+                (x, u, 0.0),
+                (y, u, 0.0),
+            ] {
+                assert!((dot(a, b) - want).abs() < 8.0 * f64::EPSILON, "{x:?} {y:?}");
+            }
+            // y along v's part square to d
+            assert!(dot(y, v) > 0.0);
+        };
+        // (2, 3, 6) / 7 and (6, 2, -3) / 7: unit and square to each other
+        let d = [2.0 / 7.0, 3.0 / 7.0, 6.0 / 7.0];
+        let p = [6.0 / 7.0, 2.0 / 7.0, -3.0 / 7.0];
+        let leaned = |k: f64| [0, 1, 2].map(|i| d[i] + k * f64::EPSILON * p[i]);
+        assert!(frame_axes(d, d).is_err());
+        assert!(frame_axes(d, d.map(|c| -2.0 * c)).is_err());
+        for k in [65.0, 100.0, 1e3, 1e4, 5e-7 / f64::EPSILON, 1e11, 1e15] {
+            check(d, d, leaned(k));
+        }
+        check([2e300, 3e300, 6e300], d, [1e300, 0.0, 0.0]);
+        check([2e-300, 3e-300, 6e-300], d, [0.0, 0.0, 1e-300]);
+    }
 
     /// A face's plane tilted by rounding comes back square to the axes; one tilted for real
     /// keeps its axes; parallel axes give `None`.

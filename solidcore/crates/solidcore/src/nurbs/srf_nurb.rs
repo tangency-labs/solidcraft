@@ -86,6 +86,7 @@
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::a_object::reverse_knots;
 use crate::kernel::UpstreamFixes;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::{curves_are_coincident, ConicType, Curve};
 use crate::nurbs::crv_nurb::{line_from_pt_and_vector, CurveType};
@@ -2491,8 +2492,8 @@ pub fn cone_elliptic_ends(c: &EllipticCone) -> Result<Surface> {
     let cpt = |sur: &Surface, i: usize, j: isize| -> Result<CPoint> { sur.cpt(i, ux(j, OP)?) };
 
     // Front plane: X*tan(theta_X_front) + Y*tan(theta_Y_front) - Z = 0.
-    let tan_y_front = theta_y_front.tan();
-    let tan_x_front = theta_x_front.tan();
+    let tan_y_front = det::tan(theta_y_front);
+    let tan_x_front = det::tan(theta_x_front);
     if c.tilt_y_front.abs() < zero_angle && c.tilt_x_front.abs() < zero_angle {
         // There is no tilt at the front.
         for ii in 0..=nv {
@@ -2523,8 +2524,8 @@ pub fn cone_elliptic_ends(c: &EllipticCone) -> Result<Surface> {
     }
 
     // Rear plane: X*tan(theta_X_rear) + Y*tan(theta_Y_rear) - Z + L = 0.
-    let tan_y_rear = theta_y_rear.tan();
-    let tan_x_rear = theta_x_rear.tan();
+    let tan_y_rear = det::tan(theta_y_rear);
+    let tan_x_rear = det::tan(theta_x_rear);
     if c.tilt_y_rear.abs() < zero_angle && c.tilt_x_rear.abs() < zero_angle {
         // There is no tilt at the rear.
         for ii in 0..=nv {
@@ -2646,7 +2647,7 @@ mod tests {
                 (0..=m)
                     .map(|j| {
                         let (x, y) = (i as f64, j as f64);
-                        let z = (x * 0.7 + y * 1.3).sin();
+                        let z = det::sin(x * 0.7 + y * 1.3);
                         let w = if rational {
                             1.0 + 0.1 * ((i + 2 * j) % 3) as f64
                         } else {

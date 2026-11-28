@@ -1,8 +1,9 @@
 //! Portable, disposable PNG pictures. Reading never resolves source blobs.
 use super::*;
-pub const THUMBNAIL_SIZE: [usize; 2] = [240, 150];
-const MAX_BYTES: usize = 256 << 10;
-const FORMAT: &str = "solidcraft-thumbnail/1";
+/// 4:3, drawn at twice the largest card's size in points.
+pub const THUMBNAIL_SIZE: [usize; 2] = [512, 384];
+const MAX_BYTES: usize = 512 << 10;
+const FORMAT: &str = "solidcraft-thumbnail/2";
 
 /// The design's picture, as the shared container keeps it.
 const PICTURE: solidcraft_format::container::Thumbnail =

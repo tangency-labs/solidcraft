@@ -15,38 +15,21 @@ use crate::{KernelError, Result};
 /// Most points one trim picks with.
 const MAX_PICKS: usize = 10_000;
 
-/// What a trim keeps.
-#[derive(Clone, Copy, Debug)]
-pub enum TrimKeep<'a> {
-    /// Every piece on the side of the tool this point is on. A tool of several sketch curves
-    /// has no one side: the region the point picks is kept.
-    Side(Vec3),
-    /// The regions the points pick (a region: the pieces that hang together once the tool has
-    /// cut the body, each picked by the piece nearest a point).
-    Regions(&'a [Vec3]),
-}
+pub use solidcraft_kernel_api::TrimKeep;
 
-impl TrimKeep<'_> {
-    fn points(&self) -> &[Vec3] {
-        match self {
-            TrimKeep::Side(p) => std::slice::from_ref(p),
-            TrimKeep::Regions(at) => at,
-        }
+/// `keep` picks something, with finite points, and not too many.
+fn check_keep(keep: &TrimKeep<'_>) -> Result<()> {
+    let at = keep.points();
+    if at.is_empty() {
+        return Err(KernelError::Invalid("pick what to keep".into()));
     }
-
-    fn check(&self) -> Result<()> {
-        let at = self.points();
-        if at.is_empty() {
-            return Err(KernelError::Invalid("pick what to keep".into()));
-        }
-        if at.len() > MAX_PICKS {
-            return Err(KernelError::Invalid("too many points to keep".into()));
-        }
-        if at.iter().any(|p| !p.is_finite()) {
-            return Err(KernelError::Invalid("a point to keep is not finite".into()));
-        }
-        Ok(())
+    if at.len() > MAX_PICKS {
+        return Err(KernelError::Invalid("too many points to keep".into()));
     }
+    if at.iter().any(|p| !p.is_finite()) {
+        return Err(KernelError::Invalid("a point to keep is not finite".into()));
+    }
+    Ok(())
 }
 
 /// A surface body trimmed by a tool: its faces are cut where the tool meets them and the
@@ -61,7 +44,7 @@ pub fn trim(body: &Body, tool: &SplitTool, keep: Vec3) -> Result<Body> {
 pub fn trim_sheet_keep(body: &Body, sheet: &Body, keep: TrimKeep) -> Result<Body> {
     body.require_brep("trim")?;
     sheet.require_brep("a trim tool")?;
-    keep.check()?;
+    check_keep(&keep)?;
     if std::ptr::eq(body, sheet) {
         return Err(KernelError::Invalid("a surface cannot trim itself".into()));
     }
@@ -79,6 +62,46 @@ pub fn trim_sheet_keep(body: &Body, sheet: &Body, keep: TrimKeep) -> Result<Body
     })
 }
 
+/// A surface body split by the complete bounded surface body `sheet` into its connected regions,
+/// each region its own body: the faces are cut where the sheet's faces meet them, as they are
+/// and never extended, as [`trim_sheet_keep`] cuts them. Every region is kept, so together the
+/// parts are the whole of `body`. `None` when the sheet separates no region of `body` (it
+/// misses it, only touches it, or ends inside a face): one of several tools may cross only some
+/// of the pieces the others leave. Each part's history is over `[body]`, each face the face of
+/// `body` it is a piece of. `body` may be closed: a closed sheet (a full turn of a surface, which
+/// [`Body::is_surface`] cannot tell from a solid) splits into open regions the same way, so the
+/// caller decides that `body` is a surface.
+pub fn split_sheet_where_it_cuts(body: &Body, sheet: &Body) -> Result<Option<Vec<Body>>> {
+    let _span = solidcraft_profile::span("kernel", "split_sheet_where_it_cuts");
+    body.require_brep("split")?;
+    sheet.require_brep("a split tool")?;
+    if std::ptr::eq(body, sheet) {
+        return Err(KernelError::Invalid("a surface cannot split itself".into()));
+    }
+    if !sheet.is_surface() {
+        return Err(KernelError::Invalid("a surface body splits only along other surface bodies".into()));
+    }
+    crate::guard("split sheet", || {
+        let (target, order) = crate::splitface::tagged("split sheet", body)?;
+        let tool = crate::native::smlib_body(sheet)?;
+        let parts = match target.split_sheet(&tool) {
+            Ok(parts) => parts,
+            Err(solidcraft_smlib::Error::Refused(solidcore_ops::Error::CurveDoesNotCut)) => return Ok(None),
+            Err(e) => return Err(KernelError::smlib("split sheet", e)),
+        };
+        let counts = crate::record::counts(&[body]);
+        parts
+            .iter()
+            .map(|part| {
+                let (mut out, history) = crate::splitface::brought_back("split sheet", body, &order, part)?;
+                out.regularization_protected = true;
+                Ok(out.with_checked_history(Some(history), &counts))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Some)
+    })
+}
+
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
 /// a piece of (its history is over `[body]`).
 ///
@@ -87,7 +110,7 @@ pub fn trim_sheet_keep(body: &Body, sheet: &Body, keep: TrimKeep) -> Result<Body
 /// faces are the body's own, cut.
 pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
     body.require_brep("trim")?;
-    keep.check()?;
+    check_keep(&keep)?;
     let all: Vec<usize> = (0..body.face_count()).collect();
     let (split, _) = crate::splitface::split_any(body, &all, tool)?;
     let kept: Vec<bool> = match keep {
@@ -139,7 +162,7 @@ pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Ve
     const NAME: &str = "the imprint of the bodies in the walls' way";
     let _span = solidcraft_profile::span("kernel", "stop_at_bodies");
     walls.require_brep("trim")?;
-    TrimKeep::Regions(starts).check()?;
+    check_keep(&TrimKeep::Regions(starts))?;
     let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
     let form = walls.ops_body().ok_or_else(no_form)?;
     let (ops, order) = (&form.0, &form.1);
@@ -220,7 +243,7 @@ fn pieces(stopped: solidcore_ops::stop::Stopped, walls: &Body) -> Result<Body> {
 pub fn trim_dropped_keep(body: &Body, plane: &Plane, curves: &[Vec<Seg2>], keep: TrimKeep) -> Result<Body> {
     const NAME: &str = "trim";
     body.require_brep(NAME)?;
-    keep.check()?;
+    check_keep(&keep)?;
     let segments: usize = curves.iter().map(Vec::len).sum();
     if segments == 0 || curves.iter().any(Vec::is_empty) {
         return Err(KernelError::Invalid("no curves to trim with".into()));
@@ -306,8 +329,8 @@ pub fn mutual_trim(a: &Body, b: &Body, keep_a: TrimKeep, keep_b: TrimKeep, exten
             )));
         }
     }
-    keep_a.check()?;
-    keep_b.check()?;
+    check_keep(&keep_a)?;
+    check_keep(&keep_b)?;
     let ta = cut_by(a, &SplitTool::Face { body: b, face: 0 }, keep_a, extend, "first")?;
     let tb = cut_by(b, &SplitTool::Face { body: a, face: 0 }, keep_b, extend, "second")?;
     Ok((ta, tb))
@@ -340,7 +363,7 @@ fn cut_by(x: &Body, tool: &SplitTool, keep: TrimKeep, extend: bool, name: &str) 
         return Err(KernelError::Invalid(format!("the {name} surface does not reach the other one: extend it to meet")));
     }
     let edge = nearest_boundary_edge(x, &side)?;
-    let opts = ExtendOptions { mode: ExtendMode::Natural, limit: ExtendLimit::UpTo(tool), neighbours: true };
+    let opts = ExtendOptions { mode: ExtendMode::Natural, limit: ExtendLimit::UpTo(tool), neighbours: true, angle: 0.0 };
     crate::extend_surface(x, &[edge], &opts)
 }
 

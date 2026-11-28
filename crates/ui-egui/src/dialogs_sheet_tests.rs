@@ -259,9 +259,9 @@ fn flat_exports_use_the_save_picker() {
             captured.lock().unwrap().push((name.to_string(), extensions.iter().map(|x| x.to_string()).collect::<Vec<_>>()));
             Box::pin(std::future::ready(None))
         }));
-        assert_eq!(export_flat(&mut app, "Base", "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
-        assert_eq!(export_flat(&mut app, "Base", "dxf"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", Some(DxfExportOptions::default())), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         let picks = picks.lock().unwrap();
         assert!(picks[0].0.ends_with("-Base.csv"));
@@ -337,6 +337,147 @@ fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
         }
         assert!(!texts.iter().any(|t| t.galley.text().contains('×')), "{layout}: the sides are no longer run together");
     }
+}
+
+/// A plate with one flange up, its Flat Pattern panel open, and `profile` written beside the
+/// exports as the file the next Open picker returns.
+fn flat_panel_with_profile_file(profile: &str) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+    for (id, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+        ("sketch.finish", json!({})),
+        ("sheet.flange", json!({"sketch": "Base"})),
+        ("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": "20 mm", "position": "outside"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    std::fs::write(h.dir.join("example-laser.json"), profile).unwrap();
+    h.app.start("sheet.flat_pattern");
+    h.frames(4);
+    h.step(&json!({"choose_file": "example-laser.json"})).unwrap();
+    h
+}
+
+/// Everything the Flat Pattern panel paints in one more frame.
+fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
+    let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+        h.app.logic(ui.ctx());
+        h.app.ui(ui);
+    });
+    crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_string()).collect()
+}
+
+/// The one DXF the panel's Export DXF… wrote into the scenario's folder.
+fn exported_dxf(h: &crate::scenario::Harness) -> Option<String> {
+    let mut files = std::fs::read_dir(&h.dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "dxf"));
+    let file = files.next()?;
+    assert!(files.next().is_none(), "one DXF");
+    Some(std::fs::read_to_string(file).unwrap())
+}
+
+/// The Flat Pattern panel takes a DXF profile (#6803): Choose profile… reads a shop's file, the
+/// panel lists the roles it writes otherwise than the standard layers, and Export DXF… writes
+/// the file with it. Without a profile the export is the command's plain one.
+#[test]
+fn flat_pattern_exports_the_dxf_with_the_chosen_profile() {
+    let profile = json!({
+        "format": "solidcraft-dxf-profile",
+        "name": "Example laser",
+        "roles": {
+            "outline": {"layer": "LASER_CUT", "color": 7},
+            "bend_up": {"layer": "FOLD", "color": 30, "linetype": "hidden"},
+            "bend_down": {"layer": "FOLD", "color": 30, "linetype": "hidden"},
+            "bend_notes": {"on": false},
+        }
+    });
+    let mut h = flat_panel_with_profile_file(&profile.to_string());
+    let texts = painted_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "DXF profile") && texts.iter().any(|t| t == "Standard layers"), "{texts:?}");
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    let plain = exported_dxf(&h).unwrap();
+    assert_eq!(plain, h.app.session.execute("sheet.export_dxf", &json!({})).unwrap()["dxf"].as_str().unwrap());
+    assert!(plain.contains("BEND_UP") && !plain.contains("FOLD") && !plain.contains("LASER_CUT"));
+
+    h.step(&json!({"widget": "Choose profile…"})).unwrap();
+    h.frames(3);
+    let texts = painted_texts(&mut h);
+    for shown in ["Example laser", "LASER_CUT, color 7, continuous", "FOLD, color 30, hidden", "Not exported", "Bends up", "Bend notes"] {
+        assert!(texts.iter().any(|t| t.trim() == shown), "{shown} is not shown: {texts:?}");
+    }
+    // Roles the profile leaves as they are have no row.
+    assert!(!texts.iter().any(|t| t.trim() == "Roll lines" || t.trim() == "Etched text"), "{texts:?}");
+    assert_eq!(texts.iter().filter(|t| t.as_str() == "FOLD, color 30, hidden").count(), 2, "both bend directions");
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    let written = exported_dxf(&h).unwrap();
+    let path = h.dir.join("example-laser.json").to_string_lossy().into_owned();
+    assert_eq!(written, h.app.session.execute("sheet.export_dxf", &json!({"profile": path})).unwrap()["dxf"].as_str().unwrap());
+    assert!(written.contains("LASER_CUT") && written.contains("FOLD"));
+    assert!(!written.contains("BEND_UP"));
+
+    // Back to the standard layers: the plain file again.
+    h.step(&json!({"widget": "Use standard layers"})).unwrap();
+    h.frames(2);
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert_eq!(exported_dxf(&h).unwrap(), plain);
+}
+
+/// A profile file that cannot be used says why in the panel, and Export DXF… writes nothing
+/// with it: a cutter that expects its own layers must not get the standard ones by mistake.
+#[test]
+fn flat_pattern_refuses_to_export_with_a_dxf_profile_it_cannot_use() {
+    let mut h = flat_panel_with_profile_file(r#"{"format": "solidcraft-dxf-profile", "roles": {"engrave": {"layer": "MARK"}}}"#);
+    h.step(&json!({"widget": "Choose profile…"})).unwrap();
+    h.frames(3);
+    let texts = painted_texts(&mut h);
+    let error = texts.iter().find(|t| t.starts_with("This DXF profile cannot be used.")).unwrap_or_else(|| panic!("no error shown: {texts:?}"));
+    assert!(error.contains("role `engrave` is not known"), "{error}");
+    // The file's name stands for the profile that has none.
+    assert!(texts.iter().any(|t| t == "example-laser.json"), "{texts:?}");
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert!(exported_dxf(&h).is_none() && !h.app.file_picker_busy(), "nothing is exported and no picker opens");
+    let Some(Kind::Sheet(Sm::FlatPattern { status, profile, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("flat dialog") };
+    assert!(status.as_deref().is_some_and(|s| s.starts_with("Nothing was exported")), "{status:?}");
+    assert!(profile.as_ref().is_some_and(|p| p.read.is_err()));
+
+    // The file is read again at each export: once it is mended, the same choice exports.
+    std::fs::write(
+        h.dir.join("example-laser.json"),
+        r#"{"format": "solidcraft-dxf-profile", "roles": {"etch": {"layer": "MARK"}, "outline": {"layer": "LASER_CUT"}}}"#,
+    )
+    .unwrap();
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert!(exported_dxf(&h).is_some_and(|dxf| dxf.contains("LASER_CUT")));
+    // Dropping the profile takes the last export's message with it.
+    h.step(&json!({"widget": "Use standard layers"})).unwrap();
+    h.frames(2);
+    let Some(Kind::Sheet(Sm::FlatPattern { status, profile, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("flat dialog") };
+    assert!(status.is_none() && profile.is_none(), "{status:?}");
+    // A file that is not there is refused the same way.
+    std::fs::remove_file(h.dir.join("example-laser.json")).unwrap();
+    let choice = DxfProfileChoice::open(h.dir.join("example-laser.json").to_string_lossy().into_owned());
+    assert!(choice.read.is_err());
+    // A profile that changes nothing lists no role.
+    assert!(dxf_profile_changes(&solidcraft_engine::io::DxfExportProfile::neutral()).is_empty());
 }
 
 #[test]
@@ -470,7 +611,9 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
         h.app.start("sheet.flat_pattern");
         h.settle();
         let undo = h.app.session.undo.len();
-        h.step(&json!({"widget":"Export DXF…"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:options"}})).unwrap();
+        assert!(!path.exists(), "opening the options does not export");
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:save"}})).unwrap();
         let exported = std::fs::read_to_string(&path).expect("actual Export DXF button writes the picker destination");
         assert!(exported.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
         assert!(exported.contains("OUTLINE"));
@@ -495,7 +638,7 @@ fn bend_table_picker_writes_the_current_body() {
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
         let undo = app.session.undo.len();
-        assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, &body, None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
         let contents = std::fs::read_to_string(&path).unwrap();
@@ -611,6 +754,184 @@ fn rules_dialog_sets_how_bend_angles_read() {
         let rule = h.app.session.doc.sheet_rule(None);
         assert_eq!((rule.angle_display.as_str(), rule.thickness.as_str()), ("bend", "2 mm"));
         assert_eq!(note(&mut h.app).as_deref(), Some("B1 UP 58%%d R1"));
+    }
+}
+
+/// The rule manager's unfold choice: Bend Deduction with a chart's 90° value reaches the rule and
+/// the flat pattern, the dialog shows both the next time, and K Factor takes the rule back.
+#[test]
+fn rules_dialog_unfolds_from_a_press_brake_charts_90_degree_value() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "90 deg"})).unwrap();
+        let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::Sheet(Sm::Rules { unfold, values, .. })) => Some((*unfold, values.last().cloned().unwrap_or_default())),
+            _ => None,
+        };
+        let allowance = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"][0]["allowance"].as_f64();
+        // K 0.5, R 1, T 2 at 90°: π/2 · (1 + 1) = π.
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9);
+        h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+        h.frames(3);
+        assert_eq!(shown(&h.app), Some((0, String::new())), "a rule starts unfolding from its K-factor");
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+        // The 90° field starts at the deduction K 0.5 gives, BD90 = 2·(1 + 2) − π, so switching alone
+        // changes nothing and shows no error: OK stays on.
+        // In full: the field is saved as it stands when the user types nothing over it.
+        let prefilled = shown(&h.app).map(|(unfold, value)| (unfold, crate::length_input::eval(&h.app.session.doc, &value, ValueKind::Length)));
+        assert!(
+            matches!(&prefilled, Some((1, Ok(value))) if (value - (6.0 - std::f64::consts::PI)).abs() < 1e-11),
+            "prefilled from the rule's K-factor: {prefilled:?}"
+        );
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0), "no error before the user types");
+        // The chart's BD90 3.2 mm: BA90 = 2·(1 + 2) − 3.2 = 2.8 mm.
+        if let Some(Kind::Sheet(Sm::Rules { values, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some(last) = values.last_mut()
+        {
+            *last = "3.2 mm".into();
+        }
+        h.frames(2);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let rule = h.app.session.doc.sheet_rule(None);
+        assert_eq!((rule.unfold_method.as_str(), rule.unfold_value.as_str(), rule.k_factor.as_str()), ("deduction", "3.2 mm", "0.5"));
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - 2.8).abs() < 1e-9);
+        h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+        h.frames(3);
+        assert_eq!(shown(&h.app), Some((1, "3.2 mm".into())), "the dialog shows the rule's unfold choice and value");
+        // Deduction to allowance converts the value: BA90 = 6 − 3.2 = 2.8 mm, the same part.
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Allowance"}})).unwrap();
+        assert_eq!(shown(&h.app), Some((2, "2.8 mm".into())), "converted to the equivalent allowance");
+        // Back to the K-factor: the K Factor field takes the K the chart's value works out to,
+        // (2.8/(π/2) − 1)/2, not the 0.5 the rule had stored, so the part stays as it is.
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:K Factor"}})).unwrap();
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let back = h.app.session.doc.sheet_rule(None);
+        assert_eq!((back.unfold_method.as_str(), back.unfold_value.as_str()), ("k_factor", ""), "a K Factor rule keeps no 90° value");
+        let k = back.k_factor.parse::<f64>().unwrap_or(f64::NAN);
+        assert!((k - (2.8 / std::f64::consts::FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", back.k_factor);
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - 2.8).abs() < 1e-9);
+    }
+}
+
+/// OK on the prefilled 90° value, with nothing typed over it, saves the part as it was: the field
+/// holds the value in full, not rounded for show (K 0.5, R 1, T 2: the allowance stays π).
+#[test]
+fn rules_dialog_saves_an_unedited_prefilled_90_degree_value_in_full() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "90 deg"})).unwrap();
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    assert_eq!(h.app.session.doc.sheet_rule(None).unfold_method, "deduction");
+    let allowance = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"][0]["allowance"].as_f64();
+    assert!((allowance.unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9, "{allowance:?}");
+}
+
+/// Switching the Unfold choice keeps the part whichever way it goes (#6794): a value left by an
+/// earlier choice is not read as the new one's, a chart's value becomes the K Factor field, and
+/// `Thickness` in the bend radius is the rule's thickness.
+#[test]
+fn switching_the_unfold_choice_keeps_the_part_whichever_way_it_goes() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let doc = solidcraft_engine::doc::Document::default();
+    let (k_factor, deduction, allowance) = (unfold_index("k_factor"), unfold_index("deduction"), unfold_index("allowance"));
+    let mm = |text: &str| crate::length_input::eval(&doc, text, ValueKind::Length).unwrap_or(f64::NAN);
+    let rule = |k: &str, radius: &str| vec!["2 mm".to_string(), k.to_string(), radius.to_string()];
+
+    // K 0.5, R 1, T 2: BD90 = 6 − π, BA90 = π. Deduction, back to K Factor, then Allowance: the
+    // deduction left in the hidden field is not handed on as an allowance.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - PI)).abs() < 1e-11, "{}", extra[0]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!(main[1], "0.5", "the K Factor field already says this K: left as typed");
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, allowance);
+    assert!((mm(&extra[0]) - PI).abs() < 1e-11, "{}", extra[0]);
+
+    // A chart's BD90 3.2 mm is K (2.8/(π/2) − 1)/2, about 0.3913, not the 0.5 in the K Factor
+    // field: K Factor takes it, and Bend Deduction again shows the 3.2 mm as it was typed.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["3.2 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    let k = main[1].parse::<f64>().unwrap_or(f64::NAN);
+    assert!((k - (2.8 / FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", main[1]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert_eq!(extra[0], "3.2 mm");
+    // A K typed over it since then counts: the 3.2 mm no longer says the rule's K-factor.
+    main[1] = "0.5".into();
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    main[1] = "0.4".into();
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - FRAC_PI_2 * (1.0 + 0.4 * 2.0))).abs() < 1e-11, "{}", extra[0]);
+
+    // The default rule's bend radius, `Thickness`, is the rule's 2 mm: BD90 = 2·(2 + 2) − π/2·(2 + 1).
+    let (mut main, mut extra) = (rule("0.5", "Thickness"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (8.0 - 1.5 * PI)).abs() < 1e-11, "{}", extra[0]);
+
+    // A value no K-factor from 0 to 1 gives is the rule's error to report: nothing is rewritten.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["9 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!((main[1].as_str(), extra[0].as_str()), ("0.5", "9 mm"));
+}
+
+/// The rule manager's card widens to fit its longest label, as feature cards do (#10620): at
+/// 1280×720 "Bend Deduction at 90°" and "Bend Allowance at 90°" drew as "Bend Deduction a…", and
+/// the card widens no further than its labels need. It widens only while a 90° row shows: a rule
+/// that unfolds from its K-factor, as every rule did before, keeps the card's fixed width.
+#[test]
+fn the_rule_managers_card_fits_its_90_degree_labels() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1280, "height": 720}));
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    let card = |h: &crate::scenario::Harness| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "SHEET METAL RULES")))).map(|r| r.width());
+    let plain = card(&h).expect("the rules card");
+    for (choice, label) in [(1, "Bend Deduction at 90°"), (2, "Bend Allowance at 90°")] {
+        if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *unfold = choice;
+        }
+        h.frames(4);
+        let drawn: Vec<String> = h
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with(&label[..12]) => {
+                    Some(text.galley.rows.iter().map(|row| row.text()).collect::<String>())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(drawn.iter().any(|t| t == label), "{label} drawn whole: {drawn:?}");
+        let wide = card(&h).unwrap_or(plain);
+        assert!(wide > plain && wide <= plain * 1.5, "{label}: card {wide} from {plain}");
+        // Wider, it is still a manager card: its header keeps the collapse arrow.
+        assert!(crate::scenario::handle_at("dialog:collapse").is_some(), "{label}: the header's collapse arrow");
+        // Back on K Factor the card is the width it was.
+        if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *unfold = 0;
+        }
+        h.frames(4);
+        assert_eq!(card(&h), Some(plain), "the K Factor card keeps its fixed width after {label}");
     }
 }
 
@@ -1036,6 +1357,73 @@ fn flange_dialog_measures_the_height_from_the_chosen_datum() {
         run_all(&mut h.app, commands);
         assert_eq!(saved(&h.app).as_deref(), Some("tangent"));
     }
+}
+
+/// The Flange dialog's Bend Offset: empty (the default) asks for nothing, a length reaches the
+/// feature, Edit Feature shows it again, and emptying it takes the offset away.
+#[test]
+fn flange_dialog_moves_the_bend_out_by_the_bend_offset() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edges: Vec<Sel> = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+    assert_eq!(edges.len(), 1);
+    h.app.session.selection = edges;
+    h.app.start("sheet.flange");
+    h.frames(3);
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert!(c[0].1.get("offset").is_none(), "{}", c[0].1);
+    if let Some(Kind::Sheet(Sm::Flange { offset, position, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *offset = "3 mm".into();
+        *position = POSITIONS.iter().position(|p| *p == "outside").unwrap();
+    }
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].1["offset"], json!("3 mm"), "{}", c[0].1);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let saved = |app: &SolveApp| match app.session.doc.features.last().map(|f| &f.kind) {
+        Some(FeatureKind::SheetFlange { offset, .. }) => offset.clone(),
+        _ => None,
+    };
+    assert_eq!(saved(&h.app).as_deref(), Some("3 mm"));
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let mut e = edit_dialog(&h.app, id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { offset, .. }) if offset == "3 mm"));
+    if let Kind::Sheet(Sm::Flange { offset, .. }) = &mut e.kind {
+        offset.clear();
+    }
+    let commands = apply_commands(&h.app, &e).unwrap();
+    run_all(&mut h.app, commands);
+    assert_eq!(saved(&h.app), None);
+}
+
+#[test]
+fn inch_flange_bend_offset_is_a_length_in_the_design_units() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("document.units", json!({"units": "in"})).unwrap();
+    h.app.session.selection = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+    h.app.start("sheet.flange");
+    h.frames(3);
+    if let Some(Kind::Sheet(Sm::Flange { offset, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *offset = "0.125".into();
+    }
+    let d = h.app.dialog.clone().unwrap();
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].1["offset"], json!("0.125 in"), "{}", c[0].1);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let e = edit_dialog(&h.app, id, None).unwrap();
+    let c = apply_commands(&h.app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["offset"], json!("0.125 in"), "{}", c[0].1);
 }
 
 /// The Flange dialog's Bend Position offers material outside and tangent, and Edit Feature shows them again.
@@ -1697,7 +2085,7 @@ fn perforate_toolbar_opens_without_running_empty_parameters() {
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             if let Kind::Sheet(k) = &mut dialog.kind {
-                rows(&mut app, ui, k, &mut dialog.inputs);
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
             }
         });
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
@@ -2517,7 +2905,7 @@ fn press_in_hardware_form_offers_the_sizes_the_table_has_for_the_kind() {
         }
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             if let Kind::Sheet(k) = &mut dialog.kind {
-                rows(&mut app, ui, k, &mut dialog.inputs);
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
             }
         });
         let texts: Vec<String> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();

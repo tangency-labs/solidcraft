@@ -38,13 +38,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_dxf")
         .contract(&INSERT_DXF_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: DXF, ASCII or (by `path`) binary (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); dpi?: the dots per inch the file's pixels are read at, 1 to 10000 (default 96; a file drawn at 72 dpi comes in at its drawn size with 72; lengths with a unit such as mm keep it); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); simplify?: mm on the drawing as it is drawn, at any scale, 0 to 100 (default 0: every edge as drawn) — runs of lines that meet end to end are replaced by fewer lines that follow them within this distance, so a dense drawing comes in with fewer curves (arcs, circles, splines and text stay as drawn); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_airfoil", "Insert Airfoil", crate::checked!("sketch.insert_airfoil", insert_airfoil))
         .at("SKETCH", "INSERT")
         .icon("airfoil")
@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&DRAWING_BOUNDS_CONTRACT)
         .output(output_schema_for::<DrawingBoundsResult>)
-        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); dpi?: SVG only, the dots per inch its pixels are read at, 1 to 10000 (default 96); fit?: bool (also work out the smallest Simplify distance, mm on the drawing to 0.01, at which `sketch.insert_svg`/`_dxf` would add it to a sketch without running out of points or curves — `auto_simplify`: 0 when it fits as drawn, left out when no distance up to the cap does; the window's Auto figures); returns min, max, width and height of the drawn geometry in the file's own size, how many drawn elements it has (`edges`, about what the insert adds curves for), and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
         .noundo()
@@ -95,7 +95,7 @@ fn source_text(p: &Value, cmd: &str, svg: bool) -> Result<String> {
     if svg {
         return solidcraft_io::decode_svg(&bytes).map_err(|e| drawing_error(p, svg, e.to_string()));
     }
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    solidcraft_io::dxf_text_from_bytes(&bytes).map_err(|e| drawing_error(p, svg, e.to_string()))
 }
 
 /// A problem with the drawing file's contents (not with the command's parameters), named after
@@ -287,10 +287,20 @@ type Drawing = (Vec<Geom2>, (Vec2, Vec2), String, Vec<String>);
 
 /// The drawing's geometry and the box around it; a drawing with none is an error that says why
 /// (#9641).
+/// The dots per inch an SVG's pixels are read at: `dpi`, else CSS's 96 (#20240).
+fn dpi_of(p: &Value, cmd: &str, svg: bool) -> Result<f64> {
+    let Some(v) = p.get("dpi").filter(|v| !v.is_null()) else { return Ok(solidcraft_io::SVG_DEFAULT_DPI) };
+    if !svg {
+        return Err(bad(cmd, "`dpi` is for SVG drawings; a DXF has no pixels"));
+    }
+    v.as_f64().filter(|d| (1.0..=10000.0).contains(d)).ok_or_else(|| bad(cmd, "`dpi` must be a number from 1 to 10000 (dots per inch)"))
+}
+
 fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Drawing> {
     let text = source_text(p, cmd, svg)?;
+    let dpi = dpi_of(p, cmd, svg)?;
     let (geom, warnings) = if svg {
-        solidcraft_io::read_svg_drawing(&text).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
+        solidcraft_io::read_svg_drawing_at(&text, dpi).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
     } else {
         solidcraft_io::read_dxf(&text).map(|g| (g, Vec::new()))
     }
@@ -317,12 +327,70 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
     };
     let (geom, bounds, text, _) = read_drawing(p, cmd, svg)?;
     // Only an SVG names a sheet, and only when it says how big its sheet is.
-    let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
-    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, edges: geom.len(), param_warnings: Vec::new() })
+    let dpi = dpi_of(p, cmd, svg)?;
+    let sheet = svg.then(|| solidcraft_io::svg_sheet_at(&text, dpi)).flatten().map(drawing_box);
+    // The window's Auto figure: what it takes to fit a sketch, worked out here on the same read.
+    let auto_simplify = if bool_(p, "fit").unwrap_or(false) {
+        let span = (bounds.1.x - bounds.0.x).max(bounds.1.y - bounds.0.y);
+        fit_simplify(&geom, span)
+    } else {
+        None
+    };
+    reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, edges: geom.len(), auto_simplify, param_warnings: Vec::new() })
 }
 
 /// The most a drawing may be simplified by, in mm: `simplify` is brought inside this.
 const MAX_SIMPLIFY_MM: f64 = 100.0;
+
+/// The join tolerance the insert commands use when the caller gives none, in mm of the drawing's
+/// place.
+const DEFAULT_TOLERANCE_MM: f64 = 1e-4;
+
+/// The smallest Simplify distance (mm on the drawing, to 0.01) at which the insert would add
+/// `geom` to a sketch on a scratch model: `Some(0.0)` when it fits as drawn, `None` when no
+/// distance up to the cap (a hundredth of its span, and [`MAX_SIMPLIFY_MM`]) does. Counted as
+/// `sketch.insert_svg` adds it, so a drawing whose curves the sketch cannot take as drawn (a
+/// field of splines the simplify distance leaves as drawn) says none fits rather than guessing.
+fn fit_simplify(geom: &[Geom2], span: f64) -> Option<f64> {
+    let cap = MAX_SIMPLIFY_MM.min(span * 0.01);
+    if !(cap > 0.0 && cap.is_finite()) {
+        return None;
+    }
+    let fits = |d: f64| {
+        // As drawn is a borrow: a drawing too large for the sketch is refused before it is
+        // copied, which is the common case for a window that asks.
+        let cut: std::borrow::Cow<[Geom2]> =
+            if d > 0.0 { std::borrow::Cow::Owned(simplify_lines(geom, d, DEFAULT_TOLERANCE_MM).0) } else { std::borrow::Cow::Borrowed(geom) };
+        if cut.len() > solidcraft_sketch::limits::max_points() {
+            return false;
+        }
+        let mut sk = Sketch::new();
+        add_geometry(&mut sk, cut.as_ref(), &|q: Vec2| q, 1.0, DEFAULT_TOLERANCE_MM).is_ok()
+    };
+    if fits(0.0) {
+        return Some(0.0);
+    }
+    if !fits(cap) {
+        return None;
+    }
+    // Bisect for the smallest distance that fits, on the 0.01 mm the window's box steps in.
+    let (mut no, mut yes) = (0.0_f64, cap);
+    for _ in 0..40 {
+        if yes - no <= 0.005 {
+            break;
+        }
+        let mid = ((no + yes) / 2.0 * 100.0).ceil() / 100.0;
+        if mid <= no || mid >= yes {
+            break;
+        }
+        if fits(mid) {
+            yes = mid;
+        } else {
+            no = mid;
+        }
+    }
+    Some(if cap >= 0.01 { (yes * 100.0).ceil() / 100.0 } else { yes })
+}
 
 /// Why a drawing was not simplified as far as asked (a run too complex for the work budget):
 /// it is inserted as drawn, never coarser than the tolerance allows.
@@ -440,7 +508,8 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     let (lo, hi) = match str_(p, "size_from") {
         None | Some("geometry") => (lo, hi),
         Some("viewbox") if !svg => return Err(bad(cmd, "`size_from: viewbox` is for SVG drawings; a DXF has no sheet")),
-        Some("viewbox") => solidcraft_io::svg_sheet(&text).ok_or_else(|| bad(cmd, "the SVG has no viewBox or width and height to size by"))?,
+        Some("viewbox") => solidcraft_io::svg_sheet_at(&text, dpi_of(p, cmd, svg)?)
+            .ok_or_else(|| bad(cmd, "the SVG has no viewBox or width and height to size by"))?,
         Some(_) => return Err(bad(cmd, "`size_from` must be \"geometry\" or \"viewbox\"")),
     };
     // A size in millimetres wins over a factor; the aspect ratio is always kept.
@@ -1360,6 +1429,45 @@ EOF
         assert!(at_clamp > 1, "most of the outline still comes in: {at_clamp}");
     }
 
+    /// A drawing the sketch takes as drawn needs no Simplify distance; a dense one gets the
+    /// smallest distance at which the insert fits, and nothing below it does; more circles than a
+    /// sketch takes, which Simplify leaves as drawn, get none.
+    #[test]
+    fn bounds_fit_finds_the_smallest_distance_that_fits() {
+        let mut s = Session::default();
+        // As drawn: a rectangle.
+        let square = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"#;
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": square, "fit": true})).unwrap();
+        assert_eq!(b["auto_simplify"], json!(0.0), "{b}");
+        // A dense half circle: at the auto distance the insert fits, below it the sketch refuses.
+        let n = 40_000;
+        let mut path = String::from("M 10 0");
+        for k in 1..=n {
+            let a = std::f64::consts::PI * k as f64 / n as f64;
+            path.push_str(&format!(" L {:.6} {:.6}", 10.0 * a.cos(), 10.0 * a.sin()));
+        }
+        let dense =
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20mm\" height=\"10mm\" viewBox=\"-10 0 20 10\"><path d=\"{path}\"/></svg>");
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": dense, "fit": true})).unwrap();
+        let auto = b["auto_simplify"].as_f64().unwrap_or_else(|| panic!("a distance fits: {b}"));
+        assert!(auto > 0.0 && auto <= super::MAX_SIMPLIFY_MM && (auto * 100.0).fract().abs() < 1e-9, "on the 0.01 grid: {auto}");
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let fit = s.execute("sketch.insert_svg", &json!({"text": dense, "simplify": auto}));
+        assert!(fit.unwrap()["curves"].as_u64().unwrap() > 0, "the auto distance fits");
+        let mut below = Session::default();
+        below.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let too_dense = below.execute("sketch.insert_svg", &json!({"text": dense, "simplify": (auto - 0.02).max(0.0)}));
+        assert!(too_dense.is_err(), "nothing below it fits: {too_dense:?}");
+        // Circles stay as drawn, so no distance fits more of them than a sketch takes.
+        let mut circles = String::new();
+        for k in 0..25_000 {
+            circles.push_str(&format!("<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"0.1\"/>", (k % 100) as f64 * 0.2, (k / 100) as f64 * 0.2));
+        }
+        let many = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20mm\" height=\"10mm\" viewBox=\"0 0 20 10\">{circles}</svg>");
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": many, "fit": true})).unwrap();
+        assert!(b.get("auto_simplify").is_none(), "no distance fits circles that stay as drawn: {b}");
+    }
+
     /// `simplify` is measured on the drawing as drawn, so the window's preview (imported at
     /// scale 1) and the confirmed command (at the window's scale) keep the same edges: the
     /// confirmed geometry is exactly the preview scaled by that factor.
@@ -1502,6 +1610,37 @@ EOF
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A binary DXF file inserts like its ASCII twin: here one 10 mm line, written with the
+    /// two-byte group codes of release 13 and later (DXF reference, "Binary DXF Files").
+    #[test]
+    fn a_binary_dxf_file_inserts_its_drawing() {
+        let mut bytes = b"AutoCAD Binary DXF\r\n\x1a\0".to_vec();
+        let text = |b: &mut Vec<u8>, code: i16, v: &str| {
+            b.extend(code.to_le_bytes());
+            b.extend(v.as_bytes());
+            b.push(0);
+        };
+        let double = |b: &mut Vec<u8>, code: i16, v: f64| {
+            b.extend(code.to_le_bytes());
+            b.extend(v.to_le_bytes());
+        };
+        for (code, v) in [(0, "SECTION"), (2, "ENTITIES"), (0, "LINE"), (8, "0")] {
+            text(&mut bytes, code, v);
+        }
+        for (code, v) in [(10, 0.0), (20, 0.0), (11, 10.0), (21, 0.0)] {
+            double(&mut bytes, code, v);
+        }
+        for (code, v) in [(0, "ENDSEC"), (0, "EOF")] {
+            text(&mut bytes, code, v);
+        }
+        let file = std::env::temp_dir().join(format!("solidcraft-binary-dxf-{}.dxf", std::process::id()));
+        std::fs::write(&file, &bytes).unwrap();
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_dxf", &json!({"path": file.to_string_lossy()}));
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(r.unwrap()["curves"], 1);
+    }
+
     /// #8155: an elliptical arc of a DXF (as Fusion writes one) comes into the sketch as exact
     /// conics, and the drawing's size is the arc's own, not the box round the conics' apexes.
     #[test]
@@ -1549,6 +1688,47 @@ EOF
         p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
         s.execute("sketch.insert_svg", &p).unwrap();
         span(&s)
+    }
+
+    /// An SVG's pixels are read at 96 dpi unless `dpi` says otherwise (#20240): a file drawn at 72
+    /// dpi comes in at the size it was drawn at. A length with its own unit keeps it, and a DXF has
+    /// no pixels to read.
+    #[test]
+    fn an_svg_is_read_at_the_dpi_it_was_drawn_at() {
+        let size = |svg: &str, params: serde_json::Value| {
+            let mut s = Session::default();
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let mut p = json!({"text": svg});
+            p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
+            s.execute("sketch.insert_svg", &p).unwrap();
+            let b = span(&s);
+            (b.2 - b.0, b.3 - b.1)
+        };
+        let near = |a: (f64, f64), e: (f64, f64)| assert!((a.0 - e.0).abs() < 1e-6 && (a.1 - e.1).abs() < 1e-6, "{a:?} vs {e:?}");
+        let px = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 72"><rect x="0" y="0" width="72" height="36"/></svg>"#;
+        near(size(px, json!({})), (72.0 * 25.4 / 96.0, 36.0 * 25.4 / 96.0));
+        near(size(px, json!({"dpi": 96})), (72.0 * 25.4 / 96.0, 36.0 * 25.4 / 96.0));
+        near(size(px, json!({"dpi": 72})), (25.4, 12.7));
+        near(size(px, json!({"dpi": 72, "scale": 2})), (50.8, 25.4));
+        near(size(px, json!({"dpi": 72, "width": 10})), (10.0, 5.0));
+        // The sheet is read at the same dpi.
+        near(size(px, json!({"dpi": 72, "size_from": "viewbox"})), (25.4, 12.7));
+        // Measuring takes the same `dpi`, for the drawing and for its sheet.
+        let b = Session::default().execute("sketch.drawing_bounds", &json!({"text": px, "dpi": 72})).unwrap();
+        near((b["width"].as_f64().unwrap(), b["height"].as_f64().unwrap()), (25.4, 12.7));
+        near((b["sheet"]["width"].as_f64().unwrap(), b["sheet"]["height"].as_f64().unwrap()), (50.8, 25.4));
+        // A file with its own size in millimetres is not a matter of pixels.
+        let mm =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 200 100"><rect width="200" height="100"/></svg>"#;
+        near(size(mm, json!({"dpi": 72})), (100.0, 50.0));
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        for bad in [json!(0), json!(0.5), json!(20000), json!("72")] {
+            let e = s.execute("sketch.insert_svg", &json!({"text": px, "dpi": bad})).unwrap_err().to_string();
+            assert!(e.contains("dpi"), "{bad}: {e}");
+        }
+        let dxf = json!({"text": "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n11\n10\n21\n0\n0\nENDSEC\n0\nEOF\n", "dpi": 72});
+        assert!(s.execute("sketch.insert_dxf", &dxf).unwrap_err().to_string().contains("DXF"));
     }
 
     /// A drawing can be given a size in millimetres (its aspect kept), turned about its origin and

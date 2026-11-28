@@ -15,13 +15,16 @@ use serde_json::Value;
 use solidcraft_doc::bom::Unlisted;
 use solidcraft_doc::drawing::OnSheet;
 use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
+use solidcraft_doc::drawing::dimension::{EdgePick, ModelEdge, Reference};
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
 use super::drawing_dimension::{Slot, repair_reference, status_words};
 use super::drawing_view::{check_drawn, drawn_warning};
 use crate::params::bad;
-use crate::schema::drawing_balloon::{AddParams, BalloonResult, DeleteParams, DeleteResult, EditParams, EditResult, InspectParams, RepairParams};
+use crate::schema::drawing_balloon::{
+    AddParams, AtEdge, BalloonResult, DeleteParams, DeleteResult, EditParams, EditResult, InspectParams, RepairParams,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -48,7 +51,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              {body, index}, and `path` INSIDE it (not a top-level field), the occurrences its body is placed through, from the top (the part the \
              balloon numbers; at least one; a design of one part has none, so place it as a component first), e.g. \
              edge: {point: [40, 0, 0], path: [3]}; at: [x, y], the balloon's centre on paper in mm from the view's centre; parts_list?: the table it reads \
-             (default its sheet's only parts list, else the drawing's) → what drawing.balloon.inspect \
+             (default its sheet's only parts list, else the drawing's); at_edge?: middle (default: the arrow ends on the edge's middle) or \
+             picked (it ends at the edge's `point`, kept as a part of the edge's length) → what drawing.balloon.inspect \
              answers for it. Saved by the edge's name, never the point picked; one on a part its view doesn't draw (its hide or \n             source leaves it out) is refused. One undo step; no model is evaluated.",
         ),
     CommandSpec::new(DELETE, "Delete Balloon", crate::checked!("drawing.balloon.delete", delete)).begins_edit()
@@ -89,7 +93,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<BalloonResult>)
         .params(
             "balloon: its id → {balloon, view, record: as saved, occurrence: the part it numbers, status: ok, ambiguous, suppressed, \
-             failed or lost, why?, point?: where its arrow ends (its edge's middle, in the design's frame), exact, candidates?: [{edge: \
+             failed or lost, why?, point?: where its arrow ends (its edge's middle, or where `at_edge: picked` picked it, in the design's frame), exact, candidates?: [{edge: \
              {body, index}}] what an ambiguous edge's name finds, or a lost one's leads ({face: {body, index}} too), parts_list?: the \
              list it reads, choices?: with none to go by, those it could name, item?: its row's item (\"1.2\"), \
              row_status: ok, no_list, reference, no_row, not_found or unread (its list's design can't be read), warnings?: such as its view edited since to leave its part out}. A lost row never removes it. Read-only; no model is \
@@ -103,14 +107,29 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|why| bad(ADD, why.to_string()))?;
-    check_drawn(&record, view, [edge.path.as_slice()], ADD)?;
+    check_drawn(s, &record, view, [Reference::Edge(&edge)], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
-    let balloon = Balloon { id, view, edge, at: request.at, parts_list: request.parts_list.map(|list| list.0) };
+    let along = leader_along(s, &edge, &request.edge.pick, request.at_edge, ADD)?;
+    let balloon = Balloon { id, view, edge, at: request.at, parts_list: request.parts_list.map(|list| list.0), along };
     s.edit_drawing(ADD, |d| {
         d.balloons.add([Arc::new(balloon)]);
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+/// Where on `edge` a leader picked by `pick` ends, as `at_edge` asks (#22195): none for its middle,
+/// else how far along the edge the picked point is.
+pub(crate) fn leader_along(s: &Session, edge: &ModelEdge, pick: &EdgePick, at_edge: AtEdge, cmd: &str) -> Result<Option<f64>> {
+    match (at_edge, pick) {
+        (AtEdge::Middle, _) => Ok(None),
+        (AtEdge::Picked, EdgePick::Point(at)) => s
+            .doc
+            .along_edge(&s.model, edge, *at)
+            .map(Some)
+            .ok_or_else(|| bad(cmd, format!("`at_edge: picked` finds no one place on edge `{}` to end at", edge.name))),
+        (AtEdge::Picked, EdgePick::Index { .. }) => Err(bad(cmd, "`at_edge: picked` ends where the edge's `point` is: pick the edge by a point")),
+    }
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -180,7 +199,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     // Why it has no number, in the sheet's words, when no edit to the balloon gives it one.
     let lasting = matches!(row, RowRead::Unlisted { why: Unlisted::Reference, .. } | RowRead::Unread { .. });
     let mut warnings: Vec<String> = if lasting { crate::drawing_scene::row_why(&row).into_iter().collect() } else { Vec::new() };
-    warnings.extend(drawn_warning(d, balloon.view, [balloon.edge.path.as_slice()]));
+    warnings.extend(drawn_warning(s, d, balloon.view, [Reference::Edge(&balloon.edge)]));
     let reply = BalloonResult {
         balloon: ids::encode(id),
         view: ids::encode(balloon.view),

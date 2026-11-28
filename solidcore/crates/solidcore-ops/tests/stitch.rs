@@ -1,8 +1,9 @@
 //! The stitch and merge family on boxes.
 #![allow(clippy::unwrap_used)]
 
+use solidcore_ops::boolean::union_all;
 use solidcore_ops::stitch::{gather, open_edges, sew, stitch};
-use solidcore_ops::sweep::{planar_faces, Curve};
+use solidcore_ops::sweep::{extrude, planar_faces, Curve, DraftCorner};
 use solidcore_ops::{make_box, session, Body, Error};
 
 fn all_fixes() {
@@ -99,6 +100,7 @@ fn a_boxs_six_faces_as_six_sheets_sew_closed() {
     assert!(sewn.closed);
     assert!(sewn.open_edges.is_empty());
     assert_eq!(sewn.body.counts().unwrap(), [6, 12, 8]);
+    assert!((sewn.body.volume(1e-6).unwrap() - 1.0).abs() < 1e-9);
 }
 
 /// Squares of side 10 with a gap of 0.5 between them: a tolerance a fifth of the gap sews
@@ -124,4 +126,42 @@ fn sheets_half_apart_sew_only_at_a_tolerance_past_the_gap() {
     for t in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert_eq!(sew(&[&a, &b], t).unwrap_err(), Error::Argument, "{t}");
     }
+}
+
+/// A square tube capped at both ends by a union of the three sheets arrives closed but with
+/// no material; stitched, the space it encloses is the solid, as for the box from `make_box`.
+#[test]
+fn a_tube_closed_by_a_union_of_caps_stitches_to_a_solid() {
+    all_fixes();
+    let at = |z: f64| -> Vec<Curve> {
+        let p = [[0.0, 0.0, z], [1.0, 0.0, z], [1.0, 1.0, z], [0.0, 1.0, z]];
+        (0..4)
+            .map(|i| Curve::Line {
+                start: p[i],
+                end: p[(i + 1) % 4],
+            })
+            .collect()
+    };
+    let tube = extrude(
+        &at(0.0),
+        [0.0, 0.0, 1.0],
+        1.0,
+        0.0,
+        DraftCorner::Curvature,
+        false,
+    )
+    .unwrap();
+    let caps = [
+        planar_faces(&at(0.0)).unwrap(),
+        planar_faces(&at(1.0)).unwrap(),
+    ];
+    let [bottom, top] = caps;
+    let merged = union_all(vec![tube, bottom, top]).unwrap();
+    let (s, closed) = stitch(merged, 1e-6).unwrap();
+    assert!(closed);
+    assert_eq!(s.counts().unwrap(), [6, 12, 8]);
+    let v = s.volume(1e-6).unwrap();
+    assert!(v > 0.0 && (v - 1.0).abs() < 1e-9, "{v}");
+    let made = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+    assert!((made.volume(1e-6).unwrap() - v).abs() < 1e-9);
 }

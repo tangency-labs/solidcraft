@@ -203,13 +203,28 @@ impl Writer {
 
     /// The bytes `entries` more optional parts may hold together ([`Writer::room`]).
     pub fn space(&self, entries: usize, budget: usize) -> usize {
+        self.file_space(entries, budget).min(self.expanded_space(entries))
+    }
+
+    /// The compressed bytes `entries` more optional parts may add and still keep the container
+    /// file within `budget` (#18815).
+    pub fn file_space(&self, entries: usize, budget: usize) -> usize {
         if self.names.len().saturating_add(entries) > self.limits.max_entries {
             return 0;
         }
         // The bytes written so far, plus what the open compressed part may still hold back.
         let written = self.zip.get_ref().map_or(usize::MAX, |c| c.get_ref().len()).saturating_add(1 << 20);
         let directory = self.names.len().saturating_add(entries).saturating_mul(256).saturating_add(65_536);
-        budget.saturating_sub(written.saturating_add(directory)).min((self.open_expanded_limit)().saturating_sub(self.expanded))
+        budget.saturating_sub(written.saturating_add(directory))
+    }
+
+    /// The uncompressed bytes `entries` more optional parts may add and still keep the container's
+    /// expanded contents within the reader's opening budget (#18815).
+    pub fn expanded_space(&self, entries: usize) -> usize {
+        if self.names.len().saturating_add(entries) > self.limits.max_entries {
+            return 0;
+        }
+        (self.open_expanded_limit)().saturating_sub(self.expanded)
     }
 
     /// Add a payload as a blob, `blobs/<sha256>.<extension>`, and say its name, for the JSON that
@@ -478,7 +493,7 @@ impl<R: Read + Seek> Reader<R> {
 pub struct Thumbnail {
     /// The key's format tag.
     pub format: &'static str,
-    /// The build that wrote it: only the same build reads it back.
+    /// The build that wrote it, recorded in the key. A picture is a picture: any build reads it.
     pub app: &'static str,
     /// Its width and height in pixels.
     pub size: [usize; 2],
@@ -513,13 +528,12 @@ impl Thumbnail {
         writer.part("cache/thumbnail.png", png, false)
     }
 
-    /// The picture, when this build wrote it for exactly the file's own part (`document.json`,
+    /// The picture, when it was written (by any build, in this format) for exactly the file's own part (`document.json`,
     /// read within `document_limit`).
     pub fn read<R: Read + Seek>(&self, reader: &mut Reader<R>, document_limit: usize) -> Result<Vec<u8>, FormatError> {
         let key: Value = serde_json::from_slice(&reader.limited_part("cache/thumbnail.json", 4096)?).map_err(invalid)?;
         let document = reader.document(document_limit)?;
         if key.get("format").and_then(Value::as_str) != Some(self.format)
-            || key.get("app").and_then(Value::as_str) != Some(self.app)
             || key.get("document").and_then(Value::as_str) != Some(digest(&document).as_str())
         {
             return Err(invalid("thumbnail key"));

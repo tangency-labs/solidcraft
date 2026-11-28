@@ -90,6 +90,8 @@ pub struct Plugin {
     /// The images its entries and ribbon groups name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
+    /// Its static panel and workspace declarations; inert data, read with the manifest.
+    pub declarations: solidcraft_engine::plugin::ui::Declarations,
     pub(crate) swatches: crate::plugin_images::Swatches,
     /// Its view backgrounds (`shaders@0.1`): the preference's key, `id/shader`, and the name.
     pub shaders: Vec<(String, String)>,
@@ -172,6 +174,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         entries: Vec::new(),
         ribbon_groups: Vec::new(),
         images: Default::default(),
+        declarations: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
         tints: Vec::new(),
@@ -255,6 +258,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
         })
         .collect();
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
+    plugin.declarations = parsed.runtime.as_ref().and_then(|runtime| runtime.ui.clone()).unwrap_or_default();
     plugin.path = dir.to_string_lossy().into_owned();
     plugin.approval = approval;
     plugin.shaders = shaders;
@@ -2437,6 +2441,7 @@ mod tests {
             entries: Vec::new(),
             ribbon_groups: Vec::new(),
             images: Default::default(),
+            declarations: Default::default(),
             swatches: Default::default(),
             shaders: Vec::new(),
             tints: Vec::new(),

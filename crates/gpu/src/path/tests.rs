@@ -3206,6 +3206,186 @@ fn gpu_clear_coat_samples_the_pdf_mixture_components() {
     }
 }
 
+/// Where `Params.flakes` starts, read from the shader itself.
+fn flake_table_offset() -> usize {
+    let module = naga::front::wgsl::parse_str(SHADER).unwrap();
+    let params = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("Params")).unwrap().1;
+    let naga::TypeInner::Struct { members, .. } = &params.inner else { panic!("Params") };
+    members.iter().find(|m| m.name.as_deref() == Some("flakes")).unwrap().offset as usize
+}
+/// Runs a one-thread reference entry with the given leading parameters and the task's
+/// paint flake table, and reads pixel 0.
+fn flake_reference(context: &Arc<Context>, task: &mut Task, entry: &str, params: &[u8]) -> [f32; 4] {
+    let shader = context
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("paint flake reference"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some(entry),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    context.queue.write_buffer(&task.uniform, 0, params);
+    context.queue.write_buffer(&task.uniform, flake_table_offset() as u64, &task.flakes);
+    let mut encoder = context.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &task.bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    context.queue.submit([encoder.finish()]);
+    task.sample = 1;
+    task.read_linear().unwrap()[0]
+}
+
+#[test]
+fn gpu_paint_flake_lookup_matches_the_f64_flake_oracle_away_from_the_camera_target() {
+    use solidcraft_viewport::flakes::FlakeLayer;
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let flakes = FlakeLayer::new(0.6, 0.05, 0.9, 0.7, Vec3::new(0.9, 0.7, 0.4), 1.0, 0.2).unwrap();
+    let surface = OpaqueSurface::new(Vec3::new(0.1, 0.2, 0.5), 0.0, 0.5, 1.5).unwrap().with_flakes(flakes);
+    let mut input = request(1);
+    // Far from the origin, in many whole cells and a fraction: the shader sees
+    // camera-relative points and must still find the CPU's world cells.
+    input.camera.target = Vec3::new(1234.5678, -8901.234, 456.789);
+    let target = input.camera.target;
+    let mut task = Task::new(context.clone(), sphere(surface), input, JobOptions::default(), CancelToken::default()).unwrap();
+    let normal = Vec3::new(-0.3, 0.2, 1.0).normalized().unwrap();
+    let (mut on, mut between, mut differing) = (0, 0, 0);
+    for i in 0..48_u32 {
+        let local = Vec3::new(f64::from(i) * 0.0173 - 0.4, f64::from(i % 7) * 0.031 - 0.1, f64::from(i % 5) * 0.011);
+        let mut params = vec![0; 48];
+        scene::vector(&mut params, local, 0.0);
+        scene::vector(&mut params, normal, 0.0);
+        let lookup = flake_reference(context, &mut task, "flake_lookup_reference", &params);
+        let finish = flake_reference(context, &mut task, "flake_finish_reference", &params);
+        // The f32 point can round across a cell boundary the f64 point does not reach.
+        let expected = surface.at(local + target, normal).unwrap();
+        let gpu_on = lookup[..3] != [0.0; 3];
+        let cpu_on = expected.flakes().is_none();
+        if gpu_on != cpu_on {
+            differing += 1;
+            continue;
+        }
+        if !cpu_on {
+            between += 1;
+            assert_eq!(f64::from(lookup[3]), surface.metallic());
+            continue;
+        }
+        on += 1;
+        let m = expected.base_normal(normal);
+        for (a, b) in lookup[..3].iter().zip([m.x + 2.0, m.y + 2.0, m.z + 2.0]) {
+            assert!((f64::from(*a) - b).abs() < 2e-5, "point {i}: {lookup:?} vs {m:?}");
+        }
+        let color = expected.base_color();
+        for (a, b) in finish.iter().zip([color.x, color.y, color.z, expected.roughness()]) {
+            assert!((f64::from(*a) - b).abs() < 2e-5, "point {i}: {finish:?}");
+        }
+        assert!((f64::from(lookup[3]) - expected.metallic()).abs() < 2e-5);
+    }
+    assert!(on >= 10 && between >= 10, "both flakes and gaps are covered: {on} on, {between} between");
+    assert!(differing <= 1, "{differing} points differ between the GPU and the f64 oracle");
+}
+
+#[test]
+fn gpu_paint_flake_brdf_pdf_and_sampling_match_the_f64_surface_oracle() {
+    use solidcraft_viewport::flakes::{Flake, FlakeLayer};
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let tilted = Vec3::new(0.45, 0.2, 1.0).normalized().unwrap();
+    for metallic in [0.0, 1.0] {
+        for coat in [0.0, 1.0] {
+            // Depth 1 keeps the stored base finish, so the GPU triangle and the oracle agree;
+            // only the flake's normal differs from the surface normal.
+            let flakes = FlakeLayer::new(1.0, 0.05, 1.0, 1.0, Vec3::new(0.9, 0.9, 0.9), 1.0, 0.2).unwrap();
+            let base = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
+                .unwrap()
+                .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(coat, 0.12, 1.5).unwrap())
+                .with_flakes(flakes);
+            let surface = base.on_flake(Flake { normal: tilted, depth: 1.0 }).unwrap();
+            let m = surface.base_normal(Vec3::Z);
+            let mut task = Task::new(context.clone(), sphere(base), request(1), JobOptions::default(), CancelToken::default()).unwrap();
+            for (view, light) in [
+                (Vec3::Z, Vec3::Z),
+                (Vec3::new(0.5, 0.2, 1.0), Vec3::new(-0.4, 0.3, 0.8)),
+                (Vec3::new(-0.9, -0.2, 0.3), Vec3::new(0.6, 0.1, 0.8)),
+                (Vec3::new(1.0, 0.0, 0.05), Vec3::new(-1.0, 0.1, 0.05)),
+            ] {
+                let view = view.normalized().unwrap();
+                let light = light.normalized().unwrap();
+                let mut params = vec![0; 48];
+                scene::vector(&mut params, light, 0.0);
+                scene::vector(&mut params, Vec3::Z, 0.0);
+                scene::vector(&mut params, view, 0.0);
+                scene::vector(&mut params, Vec3::ZERO, 0.0);
+                scene::vector(&mut params, m, 0.0);
+                let brdf = flake_reference(context, &mut task, "flake_brdf_reference", &params);
+                let expected = surface.brdf(Vec3::Z, view, light).unwrap();
+                for (a, b) in brdf.iter().zip([expected.x, expected.y, expected.z]) {
+                    assert!((f64::from(*a) - b).abs() <= 3e-3 * b.abs() + 2e-5, "m={metallic}, coat={coat}: brdf {a} vs {b}");
+                }
+                let pdf = flake_reference(context, &mut task, "flake_pdf_reference", &params)[0];
+                let expected = solidcraft_viewport::clear_coat::surface_pdf(surface, Vec3::Z, view, light).unwrap();
+                assert!((f64::from(pdf) - expected).abs() <= 3e-3 * expected.abs() + 2e-5, "m={metallic}, coat={coat}: pdf {pdf} vs {expected}");
+            }
+            // A drawn base direction turns about the flake; seen from behind, it has no mass.
+            let [diffuse, specular, coat_probability] = solidcraft_viewport::clear_coat::lobe_probabilities(surface);
+            for (view, component) in
+                [(Vec3::Z, diffuse * 0.5), (Vec3::Z, diffuse + specular * 0.5), (Vec3::new(-0.95, -0.1, 0.25), diffuse + specular * 0.5)]
+            {
+                if component >= 1.0 - coat_probability || component < 0.0 {
+                    continue;
+                }
+                let view = view.normalized().unwrap();
+                let mut params = vec![0; 48];
+                scene::vector(&mut params, Vec3::ZERO, 0.0);
+                scene::vector(&mut params, Vec3::Z, 0.0);
+                scene::vector(&mut params, view, 0.0);
+                scene::vector(&mut params, Vec3::new(component, 0.3, 0.6), 0.0);
+                scene::vector(&mut params, m, 0.0);
+                let drawn = flake_reference(context, &mut task, "flake_sample_reference", &params);
+                let direction = Vec3::new(f64::from(drawn[0]) - 2.0, f64::from(drawn[1]) - 2.0, f64::from(drawn[2]) - 2.0);
+                if view.dot(m) <= 0.0 {
+                    assert!(direction.len() < 1e-6, "a flake seen from behind draws nothing: {direction:?}");
+                } else if component < diffuse {
+                    assert!(direction.dot(m) > 0.0 && (direction.len() - 1.0).abs() < 1e-5, "diffuse about the flake: {direction:?}");
+                } else {
+                    let half = (direction + view).normalized().unwrap();
+                    assert!(half.dot(m) > 0.0, "the specular half vector lies above the flake: {direction:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_paint_flake_scenes_tag_triangles_bound_layers_and_refuse_transmission() {
+    use solidcraft_viewport::flakes::FlakeLayer;
+    let flakes = |coverage| FlakeLayer::new(coverage, 0.05, 0.5, 0.5, Vec3::new(0.9, 0.9, 0.9), 1.0, 0.2).unwrap();
+    let painted = OpaqueSurface::new(Vec3::new(0.1, 0.2, 0.5), 0.0, 0.5, 1.5).unwrap().with_flakes(flakes(0.5));
+    let upload = scene::flatten(&sphere(painted), Vec3::ZERO, &CancelToken::default()).unwrap();
+    assert_eq!(upload.flakes, vec![flakes(0.5)], "one layer for every triangle of the body");
+    let plain =
+        scene::flatten(&sphere(OpaqueSurface::new(Vec3::new(0.1, 0.2, 0.5), 0.0, 0.5, 1.5).unwrap()), Vec3::ZERO, &CancelToken::default()).unwrap();
+    assert!(plain.flakes.is_empty());
+    assert_eq!(plain.geometry.len(), upload.geometry.len(), "flakes add no per-triangle bytes");
+    let table = scene::flake_parameters(&upload.flakes, Vec3::new(1.0e7, 0.0, 0.0)).unwrap();
+    assert_eq!(table.len(), scene::FLAKE_PARAMETER_BYTES);
+    let mut glass = sphere(painted);
+    glass.meshes[0].transmission = Some(solidcraft_render::transmission::Transmission::new(Vec3::ZERO, Some(1.0)).unwrap());
+    let error = scene::flatten(&glass, Vec3::ZERO, &CancelToken::default()).err().unwrap();
+    assert!(error.to_string().contains("paint flakes and transmission"), "{error}");
+}
+
 #[test]
 fn gpu_indirect_clamp_keeps_hue_caps_the_brightest_channel_and_spares_the_first_hit() {
     let Some(executor) = executor() else { return };
@@ -6636,6 +6816,8 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
         distance: 61.06594959585294,
         fov: 0.0,
         up: solidcraft_viewport::UpAxis::Z,
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        frame: None,
     };
     let options: JobOptions = serde_json::from_value(json!({
         "samples":4,"max_depth":3,"seed":7,"exposure_ev":0.5,"tone_map":"aces_fitted",
@@ -8173,4 +8355,61 @@ fn gpu_paged_optical_scratch_and_refreshed_photons_keep_global_sample_identity()
         }
     }
     println!("paged rough optical/photon parity: indexed records and masks exact; maximum independent-gather difference={maximum_difference}");
+}
+
+#[test]
+fn gpu_scene_preparation_cache_reuses_buffers_and_preserves_bit_identical_output() {
+    let Some(executor) = executor() else { return };
+    let scene = sphere_grid(white(), 16, 32);
+    let image = request(8);
+    let options = JobOptions { samples: 2, max_depth: 3, seed: 19, ..Default::default() };
+
+    // Preflight on a cold cache validates without populating GPU cache state.
+    executor.validate_prepared(&scene, &image, options, &CancelToken::default()).unwrap();
+    assert!(executor.context.scene_cache.lock().unwrap().is_empty(), "preflight must not retain GPU buffers on a miss");
+
+    // First job misses and populates the single-entry cache.
+    let mut cold = Task::new(executor.context.clone(), scene.clone(), image.clone(), options, CancelToken::default()).unwrap();
+    assert!(!cold.scene_cache_hit);
+    assert!(cold.metrics.1 > 0);
+    for _ in 0..options.samples {
+        cold.complete_sample().unwrap();
+    }
+    let cold_linear = cold.read_linear().unwrap();
+
+    // Second job with identical scene, camera target, and nested_media hits the cache and renders bit-identically.
+    let mut warm = Task::new(executor.context.clone(), scene.clone(), image.clone(), options, CancelToken::default()).unwrap();
+    assert!(warm.scene_cache_hit);
+    assert!(warm.metrics.1 < cold.metrics.1, "cached job must skip geometry and BVH VRAM upload");
+    for _ in 0..options.samples {
+        warm.complete_sample().unwrap();
+    }
+    let warm_linear = warm.read_linear().unwrap();
+    assert_eq!(warm_linear.len(), cold_linear.len());
+    for (a, b) in cold_linear.iter().zip(&warm_linear) {
+        assert_eq!(a.map(f32::to_bits), b.map(f32::to_bits), "cached preparation must produce bit-identical pixels");
+    }
+
+    // Orbiting around the same camera.target hits the cache too.
+    let mut orbited = image.clone();
+    orbited.camera.yaw += 0.5;
+    orbited.camera.distance *= 1.25;
+    let orbited_task = Task::new(executor.context.clone(), scene.clone(), orbited, options, CancelToken::default()).unwrap();
+    assert!(orbited_task.scene_cache_hit);
+
+    // Moving camera.target changes the rebase origin -> miss and evict.
+    let mut panned = image.clone();
+    panned.camera.target += Vec3::new(0.25, 0.0, 0.0);
+    let panned_task = Task::new(executor.context.clone(), scene.clone(), panned.clone(), options, CancelToken::default()).unwrap();
+    assert!(!panned_task.scene_cache_hit);
+
+    // Changing surface appearance invalidates the cache too.
+    let mut repainted = scene;
+    repainted.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(0.2, 0.5, 0.8), 0.1, 0.4, 1.5).unwrap());
+    let repainted_task = Task::new(executor.context.clone(), repainted, panned, options, CancelToken::default()).unwrap();
+    assert!(!repainted_task.scene_cache_hit);
+
+    // Explicit eviction clears the single-entry cache cleanly.
+    executor.context.clear_scene_cache();
+    assert!(executor.context.scene_cache.lock().unwrap().is_empty());
 }

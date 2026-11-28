@@ -1,0 +1,15 @@
+{
+  "label": "NX",
+  "provenance": "Written for SolidCraft. The keys are NX defaults described in Siemens' public NX blog posts and support notes, and in issue #15101.",
+  "keys": {
+    "file.save_as": "Ctrl+Shift+A",
+    "sketch.arc.three_point": "A",
+    "sketch.finish": "Ctrl+Q",
+    "sketch.line": "Z",
+    "solid.revolve": "R",
+    "ui.toggle_visibility": "Ctrl+W",
+    "view.fit": "Ctrl+F",
+    "view.isometric": "End",
+    "view.normal_to": "F8"
+  }
+}

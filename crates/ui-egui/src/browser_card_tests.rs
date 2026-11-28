@@ -1977,6 +1977,7 @@ fn reveal_browser_at_height(h: &mut Harness, height: f32) {
 fn assert_no_pending_reveals(h: &Harness) {
     assert!(h.app.tree.reveal.is_none());
     assert!(h.app.tree.reveal_source.is_none());
+    assert!(h.app.tree.reveal_occurrence.is_none());
     assert!(h.app.tree.reveal_feature.is_none());
     assert!(h.app.tree.timeline_reveal.is_none());
     assert!(h.app.tree.view_pick.is_none());
@@ -2318,6 +2319,34 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
 }
 
+/// A KiCad board's link, which names no importer plugin, gets the same badges as any other: the
+/// badge is only looked at again when the window returns to the front, like every link's.
+#[test]
+fn a_changed_kicad_boards_link_gets_the_changed_badge() {
+    let mut h = Harness::new();
+    h.frames(2);
+    let board = h.dir.join("board.kicad_pcb");
+    let write = |width: &str| {
+        std::fs::write(&board, format!("(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end {width} 10) (layer \"Edge.Cuts\")))"))
+            .unwrap();
+    };
+    write("20");
+    let component = h.app.run("doc.open", json!({"path": board})).unwrap()["component"].as_u64().unwrap();
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
+    link_answer(&mut h);
+    let badge = h.app.tree.links.get(component).expect("the board's badge");
+    assert_eq!((badge.state, badge.note), (LinkState::Linked, None));
+
+    write("30.5");
+    h.frames(2);
+    assert_eq!(h.app.tree.links.get(component).unwrap().note, None, "not looked at until the window returns");
+    h.app.synthetic.push(egui::Event::WindowFocused(true));
+    link_answer(&mut h);
+    let changed = h.app.tree.links.get(component).unwrap();
+    assert_eq!((changed.state, changed.note), (LinkState::Changed, Some("ui.link_changed")));
+}
+
 /// A design opened from its file reads its link next to that file, and asks once.
 #[test]
 fn a_saved_designs_linked_component_shows_its_badge() {
@@ -2337,4 +2366,155 @@ fn a_saved_designs_linked_component_shows_its_badge() {
     assert_eq!((link.state, link.note), (LinkState::Linked, None));
     h.frames(5);
     assert!(!h.app.tree.links.busy(), "one answer, no asking again every frame");
+}
+
+/// The option is a ticked or unticked row in the View section of the Browser panel's ⋯ menu,
+/// and a click on the row turns the saved setting over.
+#[test]
+fn the_hide_folder_options_are_rows_of_the_browser_menu() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.browser_hide_sketches_folder, "off by default");
+    assert!(
+        crate::browser::menu_toggles(&h.app).contains(&("hide-sketches-folder", "prefs.browser_hide_sketches_folder", false)),
+        "a row of the menu, unticked"
+    );
+    crate::browser::menu_action(&mut h.app, "hide-sketches-folder").unwrap();
+    assert!(h.app.preferences.browser_hide_sketches_folder, "a click turns it on");
+    assert!(crate::browser::menu_toggles(&h.app).contains(&("hide-sketches-folder", "prefs.browser_hide_sketches_folder", true)), "ticked");
+    crate::browser::menu_action(&mut h.app, "hide-sketches-folder").unwrap();
+    assert!(!h.app.preferences.browser_hide_sketches_folder, "a second click turns it off");
+    assert!(!h.app.preferences.browser_hide_construction_folder, "off by default");
+    assert!(
+        crate::browser::menu_toggles(&h.app).contains(&("hide-construction-folder", "prefs.browser_hide_construction_folder", false)),
+        "a row of the menu, unticked"
+    );
+    crate::browser::menu_action(&mut h.app, "hide-construction-folder").unwrap();
+    assert!(h.app.preferences.browser_hide_construction_folder, "a click turns it on");
+    assert!(crate::browser::menu_toggles(&h.app).contains(&("hide-construction-folder", "prefs.browser_hide_construction_folder", true)), "ticked");
+    crate::browser::menu_action(&mut h.app, "hide-construction-folder").unwrap();
+    assert!(!h.app.preferences.browser_hide_construction_folder, "a second click turns it off");
+}
+
+/// "Hide the Sketches folder": the History lists the sketches, so the Browser leaves its Sketches
+/// folder out, except while searching.
+#[test]
+fn the_sketches_folder_hides_when_the_preference_is_on() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY", "name":"Outline"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":5})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Sketches").is_some(), "off by default: the folder is there");
+    h.app.preferences.browser_hide_sketches_folder = true;
+    h.settle();
+    assert!(handle_at("row:Sketches").is_none(), "on: no Sketches folder");
+    assert!(handle_at("row:Bodies").is_some() || handle_at("row:Origin").is_some(), "the rest of the tree still draws");
+    h.app.tree.search.show();
+    h.app.tree.search.text = "Outline".to_string();
+    h.frames(2);
+    assert!(handle_at("row:Sketches").is_some(), "a search still finds sketches in their folder");
+}
+
+/// "Hide the Construction folder": the History lists the construction planes, axes and points, so
+/// the Browser leaves its Construction folder out, except while searching.
+#[test]
+fn the_construction_folder_hides_when_the_preference_is_on() {
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20,"name":"Lid plane"})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Construction").is_some(), "off by default: the folder is there");
+    h.app.preferences.browser_hide_construction_folder = true;
+    h.settle();
+    assert!(handle_at("row:Construction").is_none(), "on: no Construction folder");
+    h.app.tree.search.show();
+    h.app.tree.search.text = "Lid plane".to_string();
+    h.frames(2);
+    assert!(handle_at("row:Construction").is_some(), "a search still finds the plane in its folder");
+}
+
+/// With the Construction folder hidden, Find in Browser on a plane goes to its History row instead
+/// of waiting for a folder that is not drawn, with the History in the Browser or in its own panel;
+/// and a Construction folder hidden by its own eye stays listed, so that eye can show its planes again.
+#[test]
+fn a_hidden_construction_folder_leaves_find_and_its_eye_working() {
+    let mut h = Harness::new();
+    let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":20,"name":"Lid plane"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.preferences.browser_hide_construction_folder = true;
+    for dock in ["left", "browser"] {
+        h.app.run("view.history_layout", json!({ "dock": dock })).unwrap();
+        h.settle();
+        reveal_construction(&mut h.app, plane);
+        assert!(h.app.tree.reveal_construction.is_none(), "{dock}: no request left waiting for the hidden folder");
+        h.frames(8);
+        assert!(h.app.tree.reveal_feature.is_none(), "{dock}: the plane's History row in the Browser was reached");
+        assert!(h.app.tree.timeline_reveal.is_none(), "{dock}: the plane's History row was reached");
+    }
+
+    h.app.run("browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": false})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Construction").is_some(), "hidden by its eye, the folder stays listed");
+    h.app.run("browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": true})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Construction").is_none(), "shown again, the option hides it");
+}
+
+/// The option is a ticked or unticked row in the View section of the Browser panel's ⋯ menu,
+/// and a click on the row turns the saved setting over.
+#[test]
+fn the_fold_option_is_a_row_of_the_browser_menu() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.browser_fold_other_components, "off by default");
+    assert!(
+        crate::browser::menu_toggles(&h.app).contains(&("fold-other-components", "prefs.browser_fold_other_components", false)),
+        "a row of the menu, unticked"
+    );
+    crate::browser::menu_action(&mut h.app, "fold-other-components").unwrap();
+    assert!(h.app.preferences.browser_fold_other_components, "a click turns it on");
+    assert!(crate::browser::menu_toggles(&h.app).contains(&("fold-other-components", "prefs.browser_fold_other_components", true)), "ticked");
+    crate::browser::menu_action(&mut h.app, "fold-other-components").unwrap();
+    assert!(!h.app.preferences.browser_fold_other_components, "a second click turns it off");
+}
+
+/// "Fold other components on activate": activating one component folds every other placement's
+/// row and opens the active one's; off, activating leaves the rows as they are.
+#[test]
+fn activating_a_component_folds_the_others_when_the_preference_is_on() {
+    let mut h = Harness::new();
+    let made = |h: &mut Harness, name: &str, x: f64| {
+        let reply = h.app.run("component.create", json!({"name": name})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"body_name":name})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        (reply["component"].as_u64().unwrap(), reply["occurrence"].as_u64().unwrap())
+    };
+    let (a, a_at) = made(&mut h, "A", 0.0);
+    let (b, b_at) = made(&mut h, "B", 20.0);
+    let (a_key, b_key) = (occurrence_key(&[a_at]), occurrence_key(&[b_at]));
+    let open_both = |h: &mut Harness| {
+        h.app.tree.open_row(&a_key);
+        h.app.tree.open_row(&b_key);
+        h.settle();
+        assert!(fold_open(&h.app, &a_key, true) && fold_open(&h.app, &b_key, true));
+    };
+    open_both(&mut h);
+    h.app.run("component.activate", json!({"component":a})).unwrap();
+    h.settle();
+    assert!(fold_open(&h.app, &a_key, true) && fold_open(&h.app, &b_key, true), "off by default: the rows stay as they were");
+
+    h.app.preferences.browser_fold_other_components = true;
+    h.app.run("component.activate", json!({"component":b})).unwrap();
+    h.settle();
+    assert!(!fold_open(&h.app, &a_key, true), "the component left folds");
+    assert!(fold_open(&h.app, &b_key, true), "the active one stays open");
+    h.app.run("component.activate", json!({"component":a})).unwrap();
+    h.settle();
+    assert!(fold_open(&h.app, &a_key, true) && !fold_open(&h.app, &b_key, true), "activating opens the one made active");
+    // The design itself active: every placement folds.
+    open_both(&mut h);
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.settle();
+    assert!(!fold_open(&h.app, &a_key, true) && !fold_open(&h.app, &b_key, true));
+    // A row opened by hand afterwards stays open until the next activation.
+    open_both(&mut h);
+    h.frames(3);
+    assert!(fold_open(&h.app, &a_key, true) && fold_open(&h.app, &b_key, true));
 }

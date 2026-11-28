@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Dogbone</title>
+  <path d="M24.65 17A7.35 4.24 0 0 1 39.35 17L39.35 28A7.35 4.24 0 0 0 24.65 28Z" fill="#328bd3"/>
+  <path d="M24.65 17A7.35 4.24 0 0 1 39.35 17L39.35 28A7.35 4.24 0 0 0 24.65 28Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16.41 34L24.9 29.1A7.35 4.24 0 1 1 39.1 29.1L47.59 34L32 43Z" fill="#e2e8ef"/>
+  <path d="M24.9 29.1A7.35 4.24 0 1 1 39.1 29.1L32 25Z" fill="#328bd3"/>
+  <path d="M16.41 34L24.9 29.1A7.35 4.24 0 1 1 39.1 29.1L47.59 34L32 43Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24.9 18.1L16.41 23L16.41 34L24.9 29.1Z" fill="#8e9faf"/>
+  <path d="M24.9 18.1L16.41 23L16.41 34L24.9 29.1Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39.1 18.1L47.59 23L47.59 34L39.1 29.1Z" fill="#b8c3cf"/>
+  <path d="M39.1 18.1L47.59 23L47.59 34L39.1 29.1Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 5L55.38 18.5L47.59 23L39.1 18.1A7.35 4.24 0 1 0 24.9 18.1L16.41 23L8.62 18.5Z" fill="#e2e8ef"/>
+  <path d="M32 5L55.38 18.5L47.59 23L39.1 18.1A7.35 4.24 0 1 0 24.9 18.1L16.41 23L8.62 18.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 18.5L16.41 23L16.41 34L32 43L32 59L8.62 45.5Z" fill="#b8c3cf"/>
+  <path d="M8.62 18.5L16.41 23L16.41 34L32 43L32 59L8.62 45.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M55.38 18.5L47.59 23L47.59 34L32 43L32 59L55.38 45.5Z" fill="#8e9faf"/>
+  <path d="M55.38 18.5L47.59 23L47.59 34L32 43L32 59L55.38 45.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

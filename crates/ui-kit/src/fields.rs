@@ -86,6 +86,43 @@ pub fn viewport_half_height(ctx: &egui::Context) -> Option<f64> {
     ctx.data(|d| d.get_temp::<f64>(view_scale_id()))
 }
 
+/// Where a context keeps whether a label scrub wraps the cursor at the window's edges.
+fn scrub_wrap_id() -> egui::Id {
+    egui::Id::unique("sc_kit_scrub_wrap")
+}
+
+/// Whether a label scrub that reaches the left or right edge of the window moves the cursor to
+/// the opposite edge and keeps going (#22495). Off, or never set, the drag stops at the edge.
+/// The app sets it each frame from its preference, and off for a synthetic drag, which has no
+/// real cursor to move.
+pub fn set_scrub_cursor_wrap(ctx: &egui::Context, wrap: bool) {
+    ctx.data_mut(|d| d.insert_temp(scrub_wrap_id(), wrap));
+}
+
+fn scrub_cursor_wrap(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(scrub_wrap_id())).unwrap_or(false)
+}
+
+/// How close to the window's edge (points) a label scrub moves the cursor to the other side.
+const SCRUB_WRAP_MARGIN: f32 = 4.0;
+
+/// Where a scrub at `x`, at or past the left or right edge of `rect`, continues on the opposite
+/// side; `None` while it is well inside, or the window is too narrow to wrap in.
+pub fn scrub_wrapped(rect: egui::Rect, x: f32) -> Option<f32> {
+    let (lo, hi) = (rect.min.x + SCRUB_WRAP_MARGIN, rect.max.x - SCRUB_WRAP_MARGIN);
+    if !x.is_finite() || !lo.is_finite() || !hi.is_finite() || hi - lo < 4.0 * SCRUB_WRAP_MARGIN {
+        return None;
+    }
+    let to = if x <= lo {
+        x + (hi - lo) - 2.0 * SCRUB_WRAP_MARGIN
+    } else if x >= hi {
+        x - (hi - lo) + 2.0 * SCRUB_WRAP_MARGIN
+    } else {
+        return None;
+    };
+    Some(to.clamp(lo + SCRUB_WRAP_MARGIN, hi - SCRUB_WRAP_MARGIN))
+}
+
 /// Where a context keeps the ID of the row currently being scrubbed, if any.
 fn scrub_active_id() -> egui::Id {
     egui::Id::unique("sc_kit_scrub_active")
@@ -353,12 +390,23 @@ pub fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
 }
 
 /// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
+/// `last` is the pointer x the previous frame saw, `jump` a cursor wrap asked for and not yet
+/// reported by the pointer, `waited` the frames since it was asked for, and `stuck` that a jump
+/// never came, so this drag asks for no more.
 #[derive(Clone)]
 struct Scrub {
     anchor: f64,
     origin: f32,
     step: f64,
+    last: f32,
+    jump: Option<f32>,
+    waited: u8,
+    stuck: bool,
 }
+
+/// Frames a label scrub waits for the pointer to report a cursor wrap. A host that moves the
+/// cursor reports it within a frame or two; one that doesn't (Wayland, the browser) never does.
+const SCRUB_WRAP_WAIT: u8 = 10;
 
 /// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
 /// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
@@ -401,12 +449,41 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String, clamp_positiv
     let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
     let base_step = expr.scrub_step(&now.unit, viewport_half_height(ui.ctx()), now.number);
     let target_step = base_step * factor;
-    // A new drag starts from where it was pressed; a changed modifier starts over from here.
-    let state = match base {
-        Some(state) if (state.step - target_step).abs() <= state.step * 1e-9 => state,
-        Some(_) => Scrub { anchor: now.number, origin: x, step: target_step },
-        None => Scrub { anchor: now.number, origin: pressed, step: target_step },
-    };
+    // A new drag starts from where it was pressed.
+    let mut state = base.unwrap_or(Scrub { anchor: now.number, origin: pressed, step: target_step, last: x, jump: None, waited: 0, stuck: false });
+    // The frame that reports a cursor wrap moves the origin with it, so the value changes only by
+    // what the hand did. Where the cursor can't be moved (Wayland, the browser) the jump never
+    // arrives: after a few frames this drag stops asking, so no later fast move is taken for the
+    // jump, and it stops at the edge as without wrapping.
+    if let Some(jump) = state.jump {
+        if ((x - state.last) - jump).abs() < jump.abs() * 0.5 {
+            state.origin += jump;
+            state.jump = None;
+        } else {
+            state.waited = state.waited.saturating_add(1);
+            if state.waited > SCRUB_WRAP_WAIT {
+                state.jump = None;
+                state.stuck = true;
+            }
+        }
+    }
+    state.last = x;
+    // A changed modifier starts over from here, after any jump this frame reported is taken in.
+    let same_step = (state.step - target_step).abs() <= state.step * 1e-9;
+    if !same_step {
+        state.anchor = now.number;
+        state.origin = x;
+        state.step = target_step;
+    }
+    if state.jump.is_none()
+        && !state.stuck
+        && scrub_cursor_wrap(ui.ctx())
+        && let (Some(to), Some(y)) = (scrub_wrapped(ui.ctx().content_rect(), x), ui.input(|i| i.pointer.latest_pos().map(|p| p.y)))
+    {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::CursorPosition(egui::pos2(to, y)));
+        state.jump = Some(to - x);
+        state.waited = 0;
+    }
     let points = x - state.origin;
     let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step, clamp_positive), state.step, &now);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
@@ -1044,7 +1121,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
     super::disclosure(painter, egui::pos2(rect.left() + t.form_inset + t.space_8 * 0.5, y), open, t.text_dim);
     let small = egui::FontId::proportional(t.font_small);
     let title = painter.layout_no_wrap(compact(&name.to_uppercase(), SEARCH_LABEL_CAP), small.clone(), t.text);
-    let title_pos = egui::pos2(rect.left() + t.form_inset + t.space_16, y - title.size().y / 2.0);
+    let title_pos = egui::pos2(rect.left() + t.form_inset + t.space_16, y - title.size().y / 2.0 - egui::galley_cap_ink_rise(painter, &title));
     let title_width = title.size().x;
     painter.galley(title_pos, title, t.text);
     let number = painter.layout_no_wrap(count.to_string(), small, t.text_dim);
@@ -1055,7 +1132,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
         vec2(number.size().x + pad * 2.0, badge_height),
     );
     painter.rect_filled(badge, t.radius_sm, t.chip);
-    painter.galley(egui::pos2(badge.left() + pad, y - number.size().y / 2.0), number, t.text_dim);
+    painter.galley(egui::pos2(badge.left() + pad, y - number.size().y / 2.0 - egui::galley_cap_ink_rise(painter, &number)), number, t.text_dim);
     let (rule_from, rule_to) = (badge.right() + t.space_8, rect.right() - t.form_inset);
     if rule_from < rule_to {
         painter.hline(rule_from..=rule_to, y, egui::Stroke::new(1.0, t.border));
@@ -1267,6 +1344,11 @@ pub fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: i
     dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// Whether the dropdown with this salt currently has its value popup open.
+pub fn dropdown_is_open(ui: &Ui, id: impl egui::AsIdSalt) -> bool {
+    egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new(&id)))
+}
+
 /// A width-bounded toolbar picker. Long selected values and popup rows truncate;
 /// callers can retain their complete labels in hover text.
 pub fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, width: f32, add: impl FnOnce(&mut Ui)) -> Response {
@@ -1295,6 +1377,9 @@ pub fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str
             let response = popup.response;
             if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 response.request_focus();
+            }
+            if response.has_focus() && ui.visuals().widgets.active.bg_stroke == ui.visuals().widgets.inactive.bg_stroke {
+                ui.painter().rect_stroke(response.rect, Tokens::get().control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
             }
             response
         })
@@ -1370,6 +1455,9 @@ fn dropdown_menu_width(
     }
     if let Some(icon) = leading_icon {
         paint_dropdown_icon(ui, response.rect, icon);
+    }
+    if response.has_focus() && ui.visuals().widgets.active.bg_stroke == ui.visuals().widgets.inactive.bg_stroke {
+        ui.painter().rect_stroke(response.rect, t.control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
     }
     publish(ui, &response, egui::Role::ComboBox);
     // Kit chrome publishes the row label after egui's selected-text metadata.
@@ -1786,7 +1874,13 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     // Focus leaves a field on pointer press, before the button reports a released click.
     let opening = (button.clicked() || button.is_pointer_button_down_on()) && !open;
     open |= opening;
-    if open && ui.is_rect_visible(response.rect) {
+    // Keep this frame's inline TextEdit in its layer. Opening the popup on the next frame
+    // avoids registering that same editor id in both Middle and Foreground in one frame.
+    if opening {
+        response.request_focus();
+        ui.ctx().request_repaint();
+    }
+    if open && !opening && ui.is_rect_visible(response.rect) {
         let font = egui::FontId::monospace(t.font_label);
         let text_width = ui.fonts_mut(|f| f.layout_no_wrap("M".repeat(30), font.clone(), t.form_ink)).size().x;
         let width = (text_width + 2.0 * t.form_inset).max(width);
@@ -1822,11 +1916,12 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
                                 if opening || button.clicked() || ui.is_sizing_pass() {
                                     response.request_focus();
                                 }
+                                let menu_was_open = crate::Menu::response_is_open(&response);
                                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
                                 let enter = ui.input(|i| i.raw.events.iter().any(|event| matches!(event,
                                     egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE
                                 )));
-                                if response.has_focus() && enter {
+                                if response.has_focus() && enter && !menu_was_open {
                                     response.surrender_focus();
                                 }
                                 publish(ui, &response, egui::Role::TextInput);
@@ -1838,6 +1933,7 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             });
         response = shown.inner.with_new_rect(shown.response.rect);
         if egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response))
+            || crate::Menu::response_is_open(&response)
             || (response.lost_focus() && shown.response.contains_pointer() && ui.input(|i| i.pointer.any_down()))
         {
             response.request_focus();
@@ -1845,7 +1941,7 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
         solidcraft_ui_registry::publish_target(&format!("{handle}:popup"), response.rect.intersect(shown.response.rect));
         open = opening || ctx.memory(|m| m.has_focus(id));
     } else {
-        open = false;
+        open = opening;
     }
     ui.data_mut(|d| d.insert_temp(open_id, open));
     response.widget_info(|| {
@@ -2041,7 +2137,9 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
         // rectangle would flatten translucent/blurred parents. Unexpected painting
         // (including an invisible or clipped widget) keeps the native shapes intact.
         ui.ctx().graphics_mut(|graphics| {
-            let Some(list) = graphics.get_mut(layer) else { return };
+            let Some(list) = graphics.get_mut(layer) else {
+                return;
+            };
             let paint_end = list.next_idx();
             if paint_end.0.saturating_sub(paint_start.0) < 2 {
                 return;
@@ -2483,8 +2581,17 @@ pub fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, keep_ta
     let mut response = ui.add(edit);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     t.input_bevel(ui, &response);
-    let field = (ui.ctx().cumulative_pass_nr(), response.id, value.chars().count());
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_canvas_value_focus"), field));
+    let pass = ui.ctx().cumulative_pass_nr();
+    let field = (response.id, value.chars().count());
+    ui.ctx().data_mut(|data| {
+        let key = egui::Id::unique("sc_canvas_value_focus");
+        let entry = data.get_temp_mut_or_default::<(u64, Vec<(egui::Id, usize)>)>(key);
+        if entry.0 != pass {
+            entry.0 = pass;
+            entry.1.clear();
+        }
+        entry.1.push(field);
+    });
     response
 }
 

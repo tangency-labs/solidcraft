@@ -696,6 +696,29 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     assert!(tight["notes"].to_string().contains("under Aluminium 6061-T6's published minimum of 2.581 mm"), "{tight}");
     assert_eq!(made["rule"]["thickness"], "0.0625 in", "{made}");
     assert_eq!(made["rule"]["material"], "Stainless steel 304", "{made}");
+    // A rule that unfolds from a chart's 90° bend deduction goes back to its K-factor when a gauge
+    // is picked for it: the chart value was for the thickness it had (#6794). Said in the notes,
+    // with the estimate that is now the rule's K-factor (hard column at R = T, air: 0.45).
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Chart", "thickness": "2 mm", "bend_radius": "Thickness", "unfold_method": "deduction", "unfold_value": "3.5 mm"}),
+    );
+    let picked = run(&mut s, "sheet.manage_rules", json!({"name": "Chart", "material": "Stainless steel 304", "gauge": "16"}));
+    assert_eq!((picked["rule"]["unfold_method"].as_str(), picked["rule"]["unfold_value"].as_str()), (Some("k_factor"), Some("")), "{picked}");
+    assert_eq!(picked["rule"]["k_factor"], "0.45", "{picked}");
+    let notes = picked["notes"].to_string();
+    assert!(notes.contains("now unfolds from its K-factor") && notes.contains("estimate from the generic air chart"), "{picked}");
+    // A pick that says how the rule unfolds keeps the chart method, with no K-factor estimate:
+    // T 0.0625 in = 1.5875 mm, R = T, BD90 2.7 mm gives BA90 = 4·T − 2.7 = 3.65, K = 3.65/(π/2·T) − 1.
+    let kept = run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Chart", "material": "Stainless steel 304", "gauge": "16", "unfold_method": "deduction", "unfold_value": "2.7 mm"}),
+    );
+    assert_eq!((kept["rule"]["unfold_method"].as_str(), kept["rule"]["unfold_value"].as_str()), (Some("deduction"), Some("2.7 mm")), "{kept}");
+    assert!((kept["values"]["k_factor"].as_f64().unwrap_or(0.0) - (3.65 / (FRAC_PI_2 * 1.5875) - 1.0)).abs() < 1e-12, "{kept}");
+    assert!(!kept.to_string().contains("estimate"), "{kept}");
     // A material of one's own is a label.
     let own = run(&mut s, "sheet.manage_rules", json!({"name": "Galv", "material": "Galvanneal", "thickness": "1.6 mm"}));
     assert_eq!(own["rule"]["material"], "Galvanneal", "{own}");
@@ -3228,6 +3251,104 @@ fn the_angle_display_is_a_rule_setting_checked_saved_and_undone() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(display(&mut s).0, "bend");
     assert_eq!(bend_notes(&mut s), ["B1 UP 58%%d R1"]);
+}
+
+/// The bend table's allowance and the flat size of the last sheet body.
+fn allowance_and_flat_size(s: &mut Session) -> (f64, Value) {
+    let f = flat(s);
+    (f["bends"][0]["allowance"].as_f64().unwrap_or(f64::NAN), f["flat_size_mm"].clone())
+}
+
+#[test]
+fn a_rule_unfolds_from_a_press_brake_charts_90_degree_deduction_or_allowance() {
+    // The 2 mm rule `Shop` (R 1) with a chart's BD90 3.2 mm: BA90 = 2·(R + T) − BD90 = 6 − 3.2 =
+    // 2.8 mm, so K = (2.8/(π/2) − 1)/2 = 0.39126768131461387. A bend allowance is proportional to
+    // the bend angle, so a 58° bend allows 2.8 · 58/90 = 1.8044444444444445 mm.
+    const K: f64 = 0.39126768131461387;
+    for (deg, ba) in [(90.0, 2.8), (58.0, 1.8044444444444445)] {
+        let mut by_k = shop_bend(deg, None);
+        run(&mut by_k, "sheet.manage_rules", json!({"name": "Shop", "k_factor": K}));
+        let mut by_chart = shop_bend(deg, None);
+        let r = run(&mut by_chart, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": "deduction", "unfold_value": "3.2 mm"}));
+        assert_eq!((&r["rule"]["unfold_method"], &r["rule"]["unfold_value"]), (&json!("deduction"), &json!("3.2 mm")));
+        assert!((r["values"]["k_factor"].as_f64().unwrap_or(f64::NAN) - K).abs() < 1e-12, "{r}");
+        let (chart_ba, chart_size) = allowance_and_flat_size(&mut by_chart);
+        let (k_ba, k_size) = allowance_and_flat_size(&mut by_k);
+        assert!((chart_ba - ba).abs() < 1e-9 && (k_ba - ba).abs() < 1e-9, "{deg}°: {chart_ba} and {k_ba}, want {ba}");
+        // The same part as the K-factor rule it works out to: the flat sizes agree to the rounding.
+        let sizes = |v: &Value| v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect::<Vec<_>>()).unwrap_or_default();
+        let (a, b) = (sizes(&chart_size), sizes(&k_size));
+        assert!(a.len() == b.len() && !a.is_empty() && a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-9), "{chart_size} vs {k_size}");
+        // The same 90° value as an allowance: BA90 2.8 mm gives the same K.
+        let r = run(&mut by_chart, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": "Allowance", "unfold_value": "2.8 mm"}));
+        assert!((r["values"]["k_factor"].as_f64().unwrap_or(f64::NAN) - K).abs() < 1e-12, "{r}");
+        assert!((allowance_and_flat_size(&mut by_chart).0 - ba).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn the_unfold_method_is_a_rule_setting_checked_saved_and_undone() {
+    let mut s = shop_bend(90.0, None);
+    let listed = |s: &mut Session| {
+        let r = run(s, "sheet.rules", json!({}));
+        let rule = &r["rules"][0];
+        (rule["rule"]["unfold_method"].clone(), rule["rule"]["unfold_value"].clone(), rule["values"]["k_factor"].as_f64().unwrap_or(f64::NAN))
+    };
+    assert_eq!(listed(&mut s), (json!("k_factor"), json!(""), 0.5));
+    // A design whose rules unfold from their K-factor saves as it did before the setting.
+    let before = s.doc.to_json();
+    assert!(!before.contains("unfold_method") && !before.contains("unfold_value"), "{before}");
+    // A refused method or value changes nothing and makes no rule.
+    let refused = [
+        (json!({"unfold_method": "neutral"}), "`unfold_method` must be k_factor, deduction or allowance"),
+        (json!({"unfold_method": 3}), "`unfold_method` must be k_factor, deduction or allowance"),
+        (json!({"unfold_method": "deduction"}), "needs its 90° bend deduction (`unfold_value`)"),
+        (json!({"unfold_method": "allowance", "unfold_value": "9 mm"}), "outside 0 to 1"),
+        (json!({"unfold_method": "deduction", "unfold_value": "3 deg"}), ""),
+    ];
+    for (params, says) in refused {
+        for name in ["Shop", "Other"] {
+            let mut p = params.clone();
+            p["name"] = json!(name);
+            let e = s.execute("sheet.manage_rules", &p).map(|_| ()).unwrap_err().to_string();
+            assert!(e.contains(says), "{p}: {e}");
+            assert_eq!(s.doc.to_json(), before, "{p}");
+        }
+    }
+    // A flange takes the rule's unfolding and never its own.
+    let e = s.execute("sheet.flange", &json!({"edges": [[50, 60, 2]], "height": 20, "unfold_method": "deduction"})).unwrap_err().to_string();
+    assert!(e.contains("`unfold_method` is not a sheet.flange parameter"), "{e}");
+    let undo = s.undo.len();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": " bend_deduction ", "unfold_value": "3.2 mm"}));
+    let (_, _, k) = listed(&mut s);
+    assert!((k - 0.39126768131461387).abs() < 1e-12, "{k}");
+    assert!((allowance_and_flat_size(&mut s).0 - 2.8).abs() < 1e-9);
+    // Other settings leave it alone, and so does null.
+    run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "hem_gap": "0.02 mm", "unfold_method": null}));
+    assert_eq!(listed(&mut s).0, "deduction");
+    // Saved with the design and read back; a design saved without it unfolds from its K-factor.
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!((&saved["sheet"]["rules"][0]["unfold_method"], &saved["sheet"]["rules"][0]["unfold_value"]), (&json!("deduction"), &json!("3.2 mm")));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!((allowance_and_flat_size(&mut reopened).0 - 2.8).abs() < 1e-9);
+    if let Some(rule) = saved["sheet"]["rules"][0].as_object_mut() {
+        rule.remove("unfold_method");
+        rule.remove("unfold_value");
+    }
+    let mut older = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert_eq!(listed(&mut older), (json!("k_factor"), json!(""), 0.5));
+    // Back to the K-factor: the rule keeps no 90° value, and saves as it did before the setting.
+    run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "unfold_method": "k_factor"}));
+    assert_eq!(listed(&mut s), (json!("k_factor"), json!(""), 0.5));
+    let back = s.doc.to_json();
+    assert!(!back.contains("unfold_method") && !back.contains("unfold_value"), "{back}");
+    // Undone like the rule's other changes.
+    assert_eq!(s.undo.len(), undo + 3);
+    for _ in 0..3 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(listed(&mut s), (json!("k_factor"), json!(""), 0.5));
+    assert_eq!(s.doc.to_json(), before);
 }
 
 #[test]
@@ -7611,6 +7732,74 @@ fn a_return_alone_on_a_leaning_wall_keeps_out_of_the_walls_beside_it() {
     assert!(rel(vol, polygon_area(&outline) * 2.0) < 1e-3, "{vol} vs {}", polygon_area(&outline) * 2.0);
 }
 
+/// An equilateral triangle tray, 120 on a side, made as [`tray_with_returns`] makes its tray (2 mm
+/// aluminium, R 1, K 0.5, gap 0.5, walls 20 high at 90° on its three edges in one feature) and,
+/// when `with_return`, a level return 12 high on the wall on y = 0 alone, picked on that wall's
+/// inner face.
+fn triangle_tray(with_return: bool) -> Session {
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true}),
+    );
+    // The triangle's height, 60·√3.
+    let h = 103.923_048_454_132_63;
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": [[0.0, 0.0], [120.0, 0.0], [60.0, h]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[60.0, 0.0, 2.0], [90.0, h / 2.0, 2.0], [30.0, h / 2.0, 2.0]], "height": 20, "angle": "90 deg"}));
+    if with_return {
+        run(&mut s, "sheet.flange", json!({"edges": [[60.0, 2.0, 20.0]], "height": 12, "angle": "90 deg"}));
+    }
+    s
+}
+
+/// A return alone on a wall whose corners are acute (#19832): on an equilateral triangle tray
+/// (60°) and on the trapezoid of [`tray_with_returns`] (77.5°), walls 20 high at 90° and a level
+/// return on the wall on y = 0. The walls beside it run in across the return, so its sides are
+/// cut back on a slant, parallel to them, and its bend stops square where the slant starts. The
+/// return's side used to run on along that slant down to the return's anchor, past the bend's
+/// end, and left a sliver of the return lying in the bend's corner against the bend's end face;
+/// the sew refused the two ("sew: ambiguous edge contact"). Within the bend's strip the side now
+/// follows the bend's end.
+#[test]
+fn a_return_alone_on_a_wall_between_acute_corners_keeps_clear_of_the_walls_beside_it() {
+    // By hand: at a corner of angle α the wall beside has its inner face T = 2 in from the base's
+    // edge, and the return keeps g·cos(α/2) clear of it (half the gap g = 0.5 off the mitre
+    // between the two). The return's start, R + T = 3 in from its wall's outer face, comes
+    // nearest that face, so its bend stops (T + g·cos(α/2) + (R + T)·cos α) / sin α along the edge
+    // from each corner, and the bend is 120 less twice that long: 110.917 096 at α = 60° (the
+    // triangle) and 113.770 021 at α = atan(90 / 20) (the trapezoid, 77.47°).
+    let cases = [
+        ("triangle", triangle_tray(true), triangle_tray(false), 110.917_096_231_345_24),
+        ("trapezoid", tray_with_returns(80.0, 90.0, "0.5 mm", &[0]), tray_with_returns(80.0, 90.0, "0.5 mm", &[]), 113.770_021_333_771_17),
+    ];
+    for (name, mut s, mut without, want) in cases {
+        assert!(no_errors_or_warnings(&s), "{name}: {:?}", s.model.results);
+        let lengths = bend_lengths(&mut s);
+        assert!(lengths.last().is_some_and(|got| (got - want).abs() < 1e-6), "{name}: {lengths:?} vs {want}");
+        // The return lies inside the walls: the part's box is the walls' own.
+        let (with, without) = (bbox(&mut s), bbox(&mut without));
+        for end in ["min", "max"] {
+            for k in 0..3 {
+                let (a, b) = (with[end][k].as_f64().unwrap_or(f64::NAN), without[end][k].as_f64().unwrap_or(f64::NAN));
+                assert!((a - b).abs() < 1e-6, "{name}: {with} vs {without}");
+            }
+        }
+        // One outline in the flat, and the folded part holds its material (K 0.5).
+        let f = flat(&mut s);
+        assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{name}: {f}");
+        let (outline, vol) = (outline_points(&f), volume(&mut s));
+        assert!(rel(vol, polygon_area(&outline) * 2.0) < 1e-6, "{name}: {vol} vs {}", polygon_area(&outline) * 2.0);
+        run(&mut s, "sheet.unfold", json!({}));
+        assert!(same_points(&outline_points(&flat(&mut s)), &outline), "{name}");
+        run(&mut s, "sheet.refold", json!({}));
+        assert!(rel(volume(&mut s), vol) < 1e-9, "{name}");
+    }
+}
+
 #[test]
 fn returns_follow_the_rules_gap_and_a_gap_of_zero_is_refused() {
     use std::f64::consts::SQRT_2;
@@ -8145,6 +8334,102 @@ fn edge_flange_material_outside_and_tangent_positions_start_the_bend_where_they_
     assert!((bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN)).abs() < 1e-6);
 }
 
+#[test]
+fn edge_flange_offset_moves_the_bend_out_past_its_position() {
+    // T = 2, R = 2, K = 0.4, height 20 from the outer sharp on the edge y = 0, as above. An
+    // offset d moves the bend d further out than the position starts it, and the base grows by
+    // that strip: the least y and the flat both move by d, and the volume by 100·d·T.
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    for deg in [90.0f64, 120.0] {
+        let th = deg.to_radians();
+        let half = (th / 2.0).tan();
+        for (position, setback) in [("inside", (r + t) * half), ("outside", 0.0), ("material_outside", r * half), ("tangent", r + t)] {
+            let mut s = Session::default();
+            r2_base(&mut s);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "position": position}));
+            let plain = volume(&mut s);
+            for d in [3.0, -0.5] {
+                let what = format!("{deg}° {position} offset {d}");
+                let mut s = Session::default();
+                r2_base(&mut s);
+                run(
+                    &mut s,
+                    "sheet.flange",
+                    json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "position": position, "offset": format!("{d} mm")}),
+                );
+                let least_y = bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN);
+                let reach = setback - d - (r + t);
+                assert!((least_y - reach).abs() < 1e-6, "{what}: least y {least_y}, want {reach}");
+                let length = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+                let want = 60.0 - setback + d + th * (r + k * t) + 20.0 - (r + t) * half;
+                assert!((length - want).abs() < 1e-6, "{what}: flat {length}, want {want}");
+                assert!(rel(volume(&mut s), plain + 100.0 * d * t) < 1e-6, "{what}: volume {}, want {}", volume(&mut s), plain + 100.0 * d * t);
+                let saved = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+                assert_eq!(saved["offset"], format!("{d} mm"), "{what}");
+            }
+        }
+    }
+}
+
+#[test]
+fn edge_flange_offset_past_the_bend_band_keeps_the_rim_names() {
+    let names = |offset: Option<&str>| {
+        let mut s = Session::default();
+        r2_base(&mut s);
+        let mut p = json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside"});
+        if let Some(d) = offset {
+            p["offset"] = json!(d);
+        }
+        run(&mut s, "sheet.flange", p);
+        let state = s.model.state();
+        let mut names = solidcraft_doc::naming::face_names(&state.bodies[0]).as_ref().clone();
+        names.sort_unstable();
+        names
+    };
+    let plain = names(None);
+    assert!(plain.iter().all(|n| !n.contains("/?")), "{plain:?}");
+    for d in ["3 mm", "20 mm", "-6.5 mm"] {
+        assert_eq!(names(Some(d)), plain, "offset {d}");
+    }
+}
+
+#[test]
+fn edge_flange_offset_is_a_parameter_carries_down_a_chain_and_is_saved_only_when_given() {
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    let ba = FRAC_PI_2 * (r + k * t);
+    // No offset: nothing saved, and the flat is the outside position's.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside"}));
+    let saved = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+    assert!(saved.get("offset").is_none(), "{saved}");
+    let plain = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+    assert!((plain - (60.0 + ba + 16.0)).abs() < 1e-6, "{plain}");
+    // The offset is the feature's last input: changing it rebuilds the flange.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside", "offset": "3 mm"}));
+    let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
+    let last = names.last().cloned().unwrap_or_default();
+    run(&mut s, "parameters.change", json!({"name": last, "expression": "5 mm"}));
+    let moved = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+    assert!((moved - (plain + 5.0)).abs() < 1e-6, "{moved}");
+    // A chain: each further bend takes the first one's offset, on the far edge of the one before.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside", "offset": "1 mm", "then": [{"height": 15}]}));
+    let kinds: Vec<Value> = s.doc.features.iter().rev().take(2).map(|f| serde_json::to_value(&f.kind).unwrap_or_default()).collect();
+    assert!(kinds.iter().all(|v| v["offset"] == "1 mm"), "{kinds:?}");
+    // Refusals leave the design as it was: a base flange takes no offset, and an offset is a length.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    let features = s.doc.features.len();
+    let e = s.execute("sheet.flange", &json!({"sketch": "Base", "offset": "3 mm"})).unwrap_err().to_string();
+    assert!(e.contains("`offset` is only for edge flanges"), "{e}");
+    assert!(s.execute("sheet.flange", &json!({"edges": [[50, 0, 2]], "height": 20, "offset": "30 deg"})).is_err());
+    assert_eq!(s.doc.features.len(), features);
+}
+
 /// A new fold refuses a `fixed` point in a cut-out or past the outline, leaving the design
 /// untouched (#263). A point on the sheet decides the side that stays as the fold is made: the
 /// fold keeps that side and not the point, so a recompute that takes the material from under
@@ -8322,6 +8607,84 @@ fn every_flat_face_of_a_sheet_takes_an_attached_sketch() {
     assert!((v0 - volume(&mut t) - PI * 9.0 * 2.5).abs() < 0.1, "{}", v0 - volume(&mut t));
     let f = flat(&mut t);
     assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(1), "{f}");
+}
+
+/// #21300: a base flange from a circle of radius 40, folded 90° along a construction line 20 mm off
+/// its centre. Each flat face of both pieces takes an attached sketch, as every flat face of a
+/// sheet does: the round rim's pieces are named after the circle that made them (`side:c1`), as a
+/// straight rim is after its line, so they tell the panel's pieces apart.
+#[test]
+fn every_flat_face_of_a_folded_round_sheet_takes_an_attached_sketch() {
+    let mut s = Session::default();
+    let features = [
+        json!({"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+            "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+            "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+            "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                       {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}}),
+        json!({"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"}),
+        json!({"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+               "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"}),
+    ];
+    for feature in features {
+        run(&mut s, "timeline.add", json!({ "feature": feature }));
+    }
+    let faces = flat_face_points(&s);
+    // Each piece's two caps; the bend's two ends.
+    assert!(faces.len() >= 4, "{faces:?}");
+    for (index, point, normal) in faces {
+        let made = run(&mut s, "sketch.create", json!({"plane": {"face": point, "body": "Body1", "index": index}}));
+        run(&mut s, "sketch.finish", json!({}));
+        assert_eq!(made["attachment"], "exact_face", "face {index} at {point:?}");
+        let id = made["sketch"].as_u64().unwrap();
+        let solidcraft_doc::FaceAttachmentStatus::Healthy { plane, .. } = s.placed_document().sketch_face_attachment(id, &s.model) else {
+            panic!("face {index} at {point:?}")
+        };
+        assert!(plane.normal().dot(normal) > 1.0 - 1e-9 && (point - plane.origin).dot(normal).abs() < 1e-6, "face {index}: {plane:?}");
+    }
+}
+
+/// #21300: a design saved before the pieces of a folded panel's cap were named by the fold's role
+/// of each held them by their numbers by place (`F2:top#1`, the piece Fold1 folded; `F2:top#2`, the
+/// piece it left). Reopened, a reference saved under such a number finds that very piece, as each
+/// piece keeps its number as its former name: by the name, even where the saved point now lies on
+/// the other piece of the cap.
+#[test]
+fn a_reference_saved_under_a_numbered_piece_of_a_folded_round_cap_finds_that_piece() {
+    let mut s = Session::default();
+    let features = [
+        json!({"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+            "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+            "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+            "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                       {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}}),
+        json!({"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"}),
+        json!({"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+               "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"}),
+    ];
+    for feature in features {
+        run(&mut s, "timeline.add", json!({ "feature": feature }));
+    }
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let state = reopened.model.state();
+    let names = solidcraft_doc::naming::face_names(&state.bodies[0]);
+    // Each cap piece: the number earlier builds gave it, and a point on it.
+    let mut pieces = Vec::new();
+    for (index, point, _) in flat_face_points(&reopened) {
+        let Some((side, role)) = names[index].strip_suffix(']').and_then(|n| n.split_once("#[F30:fold:")) else { continue };
+        pieces.push((index, format!("{side}#{}", if role == "stay" { 2 } else { 1 }), point));
+    }
+    let mut formers: Vec<&str> = pieces.iter().map(|(_, former, _)| former.as_str()).collect();
+    formers.sort_unstable();
+    assert_eq!(formers, ["F2:bottom#1", "F2:bottom#2", "F2:top#1", "F2:top#2"], "{names:?}");
+    for (index, former, point) in &pieces {
+        let side = former.split('#').next().unwrap_or_default();
+        let other = pieces.iter().find(|(i, f, _)| i != index && f.starts_with(side)).map(|(_, _, p)| *p).unwrap();
+        for at in [*point, other] {
+            let hit = solidcraft_doc::naming::locate_face(&state, former, at).unwrap_or_else(|| panic!("{former} at {at:?}"));
+            assert_eq!(hit.face, *index, "{former} ({}) at {at:?}", names[*index]);
+        }
+    }
 }
 
 /// A 60 x 40 base with a 30 mm flange up its far long edge (y = 40); its thickness.
@@ -11390,5 +11753,40 @@ fn a_fold_carries_a_slot_lip_without_filling_its_root() {
             assert_eq!(flat_points(&after[key], 1.0), flat_points(&before[key], 1.0), "{key}: {after}");
         }
         assert!((flat_area(&after) - want).abs() < 1e-6);
+    }
+}
+
+/// #23209: a fold builds when the outline has a vertex, in line with its neighbours, a hair
+/// beside the bend zone's edge, as it does with the vertex on that edge or left out, and folds
+/// the same part. Blank 200 x 100, t 2, r 3, K 0.44, folded 90° at y 30 (centerline): the zone's
+/// lower edge is at y 26.952655126018.
+#[test]
+fn a_fold_builds_with_an_outline_vertex_a_hair_beside_the_zone_edge() {
+    let edge = 26.952655126018;
+    let folded = |vertex: Option<f64>| {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "active": true, "thickness": "2 mm", "bend_radius": "3 mm", "k_factor": 0.44}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let mut points = vec![json!([0, 0]), json!([200, 0]), json!([200, 100]), json!([0, 100])];
+        if let Some(d) = vertex {
+            points.insert(2, json!([200, edge + d]));
+        }
+        let lines: Vec<String> = (1..=points.len()).map(|i| format!("l{i}")).collect();
+        run(&mut s, "sketch.line", json!({"closed": true, "points": points}));
+        run(&mut s, "sketch.constraint.fix", json!({"entities": lines}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "S", "rule": "Rule", "name": "Base"}));
+        run(
+            &mut s,
+            "sheet.fold",
+            json!({"points": [[0, 30, 0], [200, 30, 0]], "angle": "90 deg", "position": "centerline", "fixed": [100, 10, 0], "name": "Fold"}),
+        );
+        volume(&mut s)
+    };
+    let plain = folded(None);
+    assert!(plain > 40_000.0 + 1.0, "{plain}");
+    for d in [0.0, 2e-7, -2e-7, -1e-6, 1e-4] {
+        let v = folded(Some(d));
+        assert!(rel(v, plain) < 1e-9, "vertex {d:e} beside the zone's edge: volume {v}, {plain} without it");
     }
 }

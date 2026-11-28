@@ -1,0 +1,35 @@
+{
+  "en": {
+    "parameters.redesign.other_uses": "Other uses"
+  },
+  "de": {
+    "parameters.redesign.other_uses": "Weitere Verwendungen"
+  },
+  "es": {
+    "parameters.redesign.other_uses": "Otros usos"
+  },
+  "fr": {
+    "parameters.redesign.other_uses": "Autres utilisations"
+  },
+  "it": {
+    "parameters.redesign.other_uses": "Altri usi"
+  },
+  "ja": {
+    "parameters.redesign.other_uses": "その他の使用箇所"
+  },
+  "ko": {
+    "parameters.redesign.other_uses": "기타 사용처"
+  },
+  "zh": {
+    "parameters.redesign.other_uses": "其他用途"
+  },
+  "ar": {
+    "parameters.redesign.other_uses": "استخدامات أخرى"
+  },
+  "he": {
+    "parameters.redesign.other_uses": "שימושים אחרים"
+  },
+  "vi": {
+    "parameters.redesign.other_uses": "Nơi dùng khác"
+  }
+}

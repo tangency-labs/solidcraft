@@ -6,9 +6,10 @@
 //! one loop of each face counter-clockwise about the natural normal (the outer) and the rest
 //! clockwise; each vertex loop's vertex lies on its surface.
 //!
-//! A spot check, not a certificate: a fixed number of evaluations per record (three points of
-//! each edge, [`AREA_SAMPLES`] of each use, one projection per vertex loop), so the work is
-//! linear in the record. Every distance is held to the record's own tolerance:
+//! The winding check reports only errors established by certified signed-area bounds.
+//! The other checks sample three points
+//! of each edge, [`AREA_SAMPLES`] of each use and one projection per vertex loop.
+//! Every distance is held to the record's own tolerance:
 //! an edge's for its pcurves, an edge's and its vertex's together where they meet, a vertex's on
 //! its surface. A point that cannot be evaluated is an error, never a panic.
 //!
@@ -16,6 +17,7 @@
 //! its history (RFC 0003). It reads the record through a plain view of it ([`Edge`], [`Vertex`],
 //! [`Face`]) in the kernel's evaluation types, which `solidcore-ops`' `record_check::agreement`
 //! builds from a record.
+use super::pcurve::loop_is_clockwise;
 use super::vec::{v3, VecExt};
 use super::{Curve, Curve2, CurveEval, Surface, SurfaceEval};
 
@@ -168,7 +170,7 @@ pub enum Problem {
     Turn {
         /// Whether it is the outer loop.
         outer: bool,
-        /// The signed area.
+        /// The estimated area with its certified sign.
         area: f64,
     },
     /// A point of the record cannot be evaluated (an unsupported kind, a non-finite value).
@@ -266,13 +268,15 @@ pub fn check(brep: &View<'_>) -> Result<()> {
         }
         points.push(p);
     }
+    let kernel = crate::Kernel::default();
     for (fi, f) in brep.faces.iter().enumerate() {
         let face = index(fi);
         let surface =
             SurfaceEval::new(f.surface).map_err(|err| unevaluable(Record::Face(face), err))?;
         let period = surface.domain().period;
-        // Each edge loop's signed (u, v) area.
-        let mut areas: Vec<(u32, f64)> = Vec::new();
+        // Each certified winding with an estimate of its signed (u, v) area.
+        let mut areas: Vec<(u32, bool, f64)> = Vec::new();
+        let mut winding_undecided = false;
         for (li, l) in f.loops.iter().enumerate() {
             let r#loop = index(li);
             match l {
@@ -377,8 +381,8 @@ pub fn check(brep: &View<'_>) -> Result<()> {
                             }
                         }
                     }
-                    // The signed area the loop encloses (positive for the outer loop). Where
-                    // uses meet at a pole the ring runs straight along the pole's line.
+                    // The sampled area detects collapsed loops and estimates their sizes.
+                    // Where uses meet at a pole the ring runs along the pole's line.
                     let at = Record::Loop { face, r#loop };
                     let mut ring: Vec<[f64; 2]> = Vec::new();
                     for u in edges {
@@ -412,32 +416,45 @@ pub fn check(brep: &View<'_>) -> Result<()> {
                             hi - lo
                         })
                         .fold(0.0, f64::max);
-                    #[allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN area is empty
-                    if !(area.abs() > EMPTY_AREA * extent * extent) {
-                        return Err(Mismatch {
-                            record: at,
-                            problem: Problem::Empty { area },
-                        });
+                    // A NaN area is empty.
+                    let encloses = area.abs() > EMPTY_AREA * extent * extent;
+                    let curves: Vec<_> = edges.iter().map(|u| (u.pcurve, u.forward)).collect();
+                    if let Some(clockwise) =
+                        loop_is_clockwise(&kernel, &curves).map_err(|e| unevaluable(at, e))?
+                    {
+                        let signed = if clockwise { -area.abs() } else { area.abs() };
+                        areas.push((r#loop, clockwise, signed));
+                    } else {
+                        if !encloses {
+                            return Err(Mismatch {
+                                record: at,
+                                problem: Problem::Empty { area },
+                            });
+                        }
+                        winding_undecided = true;
                     }
-                    areas.push((r#loop, area));
                 }
             }
         }
         // One loop runs counter-clockwise, the outer; every other one clockwise. Which is
         // which comes from the areas, not the loops' order: the truck adapter writes a face's
         // wires in truck's order, which need not put the outer one first.
-        let by_size = |a: &(u32, f64), b: &(u32, f64)| a.1.abs().total_cmp(&b.1.abs());
-        let ccw: Vec<(u32, f64)> = areas.iter().copied().filter(|a| a.1 > 0.0).collect();
+        let by_size = |a: &(u32, bool, f64), b: &(u32, bool, f64)| a.2.abs().total_cmp(&b.2.abs());
+        let ccw: Vec<_> = areas
+            .iter()
+            .copied()
+            .filter(|(_, clockwise, _)| !clockwise)
+            .collect();
         let wrong = match ccw.len() {
-            0 => areas
+            0 if !winding_undecided => areas
                 .into_iter()
                 .max_by(by_size)
-                .map(|(l, area)| (l, true, area)),
-            1 => None,
+                .map(|(l, _, area)| (l, true, area)),
+            0 | 1 => None,
             _ => ccw
                 .into_iter()
                 .min_by(by_size)
-                .map(|(l, area)| (l, false, area)),
+                .map(|(l, _, area)| (l, false, area)),
         };
         if let Some((r#loop, outer, area)) = wrong {
             return Err(Mismatch {

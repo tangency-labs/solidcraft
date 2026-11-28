@@ -223,6 +223,7 @@ pub(crate) trait RailOps {
                 skip_two_pnts_intersection: skip_two_points_intersection,
                 ref_point: reference_point,
                 closed_by_start_direction: false,
+                heading_side_only: false,
             },
         )
         .map(|curves| curves.curve_3d)

@@ -23,8 +23,7 @@ pub fn watching<R>(watch: Arc<dyn Watch>, f: impl FnOnce() -> R) -> R {
     scoped(Some(watch), f)
 }
 
-/// Run `f` with `watch` (or without one when `None`) over this thread's work, restoring the
-/// previous watch afterward.
+/// Run `f` with `watch` installed (or cleared when `None`), restoring the previous watch on exit.
 pub(crate) fn scoped<R>(watch: Option<Arc<dyn Watch>>, f: impl FnOnce() -> R) -> R {
     let previous = CURRENT.with(|c| c.replace(watch));
     struct Restore(Option<Option<Arc<dyn Watch>>>);
@@ -45,7 +44,7 @@ pub fn current() -> Option<Arc<dyn Watch>> {
 }
 
 /// Whether the watch over this thread's work asked it to stop.
-pub(crate) fn cancelled() -> bool {
+pub fn cancelled() -> bool {
     CURRENT.with(|c| c.borrow().as_ref().is_some_and(|w| w.cancelled()))
 }
 

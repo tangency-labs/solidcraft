@@ -10,8 +10,8 @@ use solidcraft_geom::inertia::{self, Tensor3};
 
 use crate::params::bad;
 use crate::schema::component::{
-    BodyProperties, BoundingBox, InertiaAbout, OccurrencePropertiesResult, PhysicalOverrideSaved, PhysicalProperties, PropertiesResult,
-    TotalProperties,
+    BodyProperties, BoundingBox, InertiaAbout, OccurrencePlacement, OccurrencePropertiesResult, PhysicalOverrideSaved, PhysicalProperties,
+    PlacementPose, PropertiesResult, TotalProperties,
 };
 use crate::{Result, Session};
 
@@ -97,7 +97,38 @@ pub(super) fn occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let properties = measure(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
     let name = doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone());
-    super::reply(OccurrencePropertiesResult { occurrence: id, name, properties, param_warnings: Vec::new() })
+    let placement = placement_frames(&doc, &path).map(|(local, world)| OccurrencePlacement { in_parent: pose(&local), world: pose(&world) });
+    super::reply(OccurrencePropertiesResult { occurrence: id, name, properties, placement, param_warnings: Vec::new() })
+}
+
+/// The occurrence's own transform and its world transform, walking `path` on `doc` (pending
+/// moves already applied). `None` when the path does not match the tree.
+fn placement_frames(doc: &Document, path: &[u64]) -> Option<(Mat, Mat)> {
+    if path.is_empty() || path.len() > 64 {
+        return None;
+    }
+    let mut parent = 0u64;
+    let mut world = solidcraft_doc::IDENTITY;
+    let mut local = solidcraft_doc::IDENTITY;
+    for id in path {
+        let occurrence = doc.occurrences.iter().find(|o| o.id == *id && o.parent == parent)?;
+        local = occurrence.transform;
+        world = solidcraft_doc::mat_mul(&world, &local);
+        parent = occurrence.component;
+    }
+    Some((local, world))
+}
+
+/// One pose, in the form `occurrence.move` takes: position in mm, the rotation's axis and
+/// angle, and the row-major 3×4 matrix (translation in the last column).
+fn pose(m: &Mat) -> PlacementPose {
+    let (axis, angle) = super::matrix::axis_angle(m);
+    PlacementPose {
+        position: [m[3][0], m[3][1], m[3][2]],
+        axis: [axis.x, axis.y, axis.z],
+        angle_deg: angle.to_degrees(),
+        matrix: [[m[0][0], m[1][0], m[2][0], m[3][0]], [m[0][1], m[1][1], m[2][1], m[3][1]], [m[0][2], m[1][2], m[2][2], m[3][2]]],
+    }
 }
 
 /// The linear part of `m` is a rotation (no scale, shear or mirror), to rounding.
@@ -229,6 +260,47 @@ pub(super) fn body_collision(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"bodies": bodies, "shape": text}))
+}
+
+pub(super) const BODY_EDGE_LINES_CONTRACT: crate::schema::TypedContract<crate::schema::component::BodyEdgeLinesParams> =
+    crate::schema::TypedContract::new();
+
+/// Draw bodies with or without their edge lines, whatever the visual style.
+pub(super) fn body_edge_lines(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "body.edge_lines";
+    let bodies: Vec<String> = match (crate::params::str_(p, "body"), p.get("bodies").filter(|v| !v.is_null())) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `body` or `bodies`, not both")),
+        (None, None) => return Err(bad(cmd, "give `body` or `bodies`")),
+        (Some(name), None) => vec![name.to_string()],
+        (None, Some(list)) => {
+            let list = list.as_array().ok_or_else(|| bad(cmd, "`bodies` must be a list of body names"))?;
+            list.iter()
+                .map(|v| v.as_str().map(str::to_string).ok_or_else(|| bad(cmd, "`bodies` must be a list of body names")))
+                .collect::<Result<_>>()?
+        }
+    };
+    if bodies.is_empty() {
+        return Err(bad(cmd, "`bodies` is empty"));
+    }
+    // One set of the model's names: a Select All can send tens of thousands of bodies.
+    let state = s.model.state();
+    let known: std::collections::HashSet<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    if let Some(name) = bodies.iter().find(|name| !known.contains(name.as_str())) {
+        return Err(bad(cmd, format!("no body `{name}`")));
+    }
+    let show = match p.get("show").filter(|v| !v.is_null()) {
+        None => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`show` must be true or false"))?,
+    };
+    let doc = s.doc_mut();
+    for b in &bodies {
+        if show {
+            doc.edgeless_bodies.remove(b);
+        } else {
+            doc.edgeless_bodies.insert(b.clone());
+        }
+    }
+    Ok(json!({"bodies": bodies, "show": show}))
 }
 
 pub(super) const PHYSICAL_OVERRIDE_CONTRACT: crate::schema::TypedContract<crate::schema::component::PhysicalOverrideParams> =

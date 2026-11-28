@@ -879,6 +879,14 @@ impl OffsetExecutive {
         f: FaceId,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
+        // (not upstream, #22806) in a local operation, when `extend_result_faces_prefix`
+        // restored a kept offset face to its original surface after `TrimPastExtension`,
+        // its UV trims were removed and its loops are unchanged from the input, so skip
+        // crossing-loop resolution until `restore_kept_edges` restores the original edges
+        // and trims.
+        if self.is_kept_extension_restored(f) {
+            return Ok(());
+        }
         // (the face's tolerance model: SmTol::GetZoneTol3d reads the surface's face)
         let (zone_tol, uv_tol) = {
             let surface = present(b.face(f)?.surface.as_ref(), FACE_NO_SURFACE)?;
@@ -2424,5 +2432,74 @@ mod tests {
         assert!(!failed.is_defect());
         assert_eq!(strip_result::<u8>(Err(failed)).ok(), Some(None));
         assert_eq!(strip_result(Ok(7_u8)).ok(), Some(Some(7)));
+    }
+
+    /// #22806: in a local operation, `resolve_crossing_loops_of_face` skips a kept offset
+    /// face only when `extend_result_faces_prefix` restored its original surface after
+    /// `TrimPastExtension` (leaving it without UV trims until `restore_kept_edges` restores
+    /// the original edges and trims). Kept faces whose extension succeeded run normally.
+    #[test]
+    fn crossing_loops_skip_only_kept_faces_restored_after_trim_past_extension() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::geom::object::ObjectRef;
+        use crate::topology::{FaceuseId, RegionId};
+
+        let mut kernel = Kernel::default();
+        let mut original = Brep::new();
+        let mut offset = Brep::new();
+        let mut records = topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let dummy = ObjectRef {
+            key: ObjectKey(1),
+            type_code: 0,
+        };
+        let key_of = |_: EntityRef| dummy;
+        let curve_ref = |_: EdgeId, _: i64| dummy;
+        let source_lists = |_: bool, _: RegionId| [dummy, dummy];
+        let mut notifications = OffsetNotifications {
+            records: &mut records,
+            attributes: &mut attributes,
+            original_key_of: &key_of,
+            result_key_of: &key_of,
+            original_curve_ref: &curve_ref,
+            result_curve_ref: &curve_ref,
+            boolean_source_lists: &source_lists,
+            result_brep: dummy,
+            merge_identities: None,
+        };
+
+        let face_id = FaceId::from_index(0);
+        let source_fu = FaceuseId::from_index(0);
+        let mut exec = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.0, 1.0e-6);
+        exec.relate_faceuse(source_fu, face_id);
+        exec.kept_faceuses.insert(source_fu);
+
+        // A kept face whose extension succeeded is not skipped.
+        assert!(matches!(
+            exec.resolve_crossing_loops_of_face(
+                &mut kernel,
+                &mut original,
+                &mut offset,
+                face_id,
+                &mut notifications,
+            ),
+            Err(SolidError::NotFound {
+                entity: EntityRef::Face(id),
+                ..
+            }) if id == face_id
+        ));
+
+        // Once recorded in `kept_extension_restored`, crossing-loop resolution skips it.
+        exec.kept_extension_restored.insert(face_id);
+        assert_eq!(
+            exec.resolve_crossing_loops_of_face(
+                &mut kernel,
+                &mut original,
+                &mut offset,
+                face_id,
+                &mut notifications,
+            ),
+            Ok(())
+        );
     }
 }

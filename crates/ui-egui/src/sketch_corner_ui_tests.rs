@@ -947,9 +947,8 @@ fn centre_circle_clicked_through_a_line_end_stays_on_it() {
     );
 }
 
-/// #7299: the centre arc tool, its centre snapped to a rectangle's corner, ties the arc to the
-/// corner with a Coincident (which the sketch shows as a glyph), not by quietly sharing the corner
-/// as its centre.
+/// The centre arc tool, its centre snapped to a free rectangle corner, merges its centre into
+/// that corner rather than creating a duplicate point tied by a Coincident constraint.
 #[test]
 fn centre_arc_on_an_existing_point_is_tied_by_a_coincident() {
     use solidcraft_engine::sketch::ConstraintKind;
@@ -973,13 +972,13 @@ fn centre_arc_on_an_existing_point_is_tied_by_a_coincident() {
         _ => None,
     });
     let centre = centre.unwrap_or_else(|| panic!("an arc is drawn: {:?}", h.app.status));
-    assert_ne!(centre, corner, "the arc has a centre of its own");
+    assert_eq!(centre, corner, "the arc centre merges into the existing corner");
     assert!(at_corner(sk.point(centre)), "the centre is on the corner");
     let tied = sk
         .constraints
         .iter()
         .any(|k| matches!(k.kind, ConstraintKind::Coincident { p, q } if (p, q) == (corner, centre) || (p, q) == (centre, corner)));
-    assert!(tied, "a Coincident ties the centre to the corner: {:?}", sk.constraints);
+    assert!(!tied, "merged centre needs no Coincident constraint: {:?}", sk.constraints);
 }
 
 /// #4691: the Point tool clicked on a line's midpoint makes a point held there (a MidPoint
@@ -1022,9 +1021,8 @@ fn a_point_clicked_on_a_line_crossing_is_held_on_both() {
     }
 }
 
-/// #7299: the centre circle tool, its centre snapped to a rectangle's corner, ties the circle
-/// to the corner with a Coincident (which the sketch shows as a glyph that can be picked and
-/// deleted), not by quietly sharing the corner as its centre.
+/// The centre circle tool, its centre snapped to a free rectangle corner, merges its centre into
+/// that corner rather than creating a duplicate point tied by a Coincident constraint.
 #[test]
 fn centre_circle_on_an_existing_point_is_tied_by_a_coincident() {
     use solidcraft_engine::sketch::ConstraintKind;
@@ -1048,13 +1046,13 @@ fn centre_circle_on_an_existing_point_is_tied_by_a_coincident() {
         _ => None,
     });
     let centre = centre.unwrap_or_else(|| panic!("a circle is drawn: {:?}", h.app.status));
-    assert_ne!(centre, corner, "the circle has a centre of its own");
+    assert_eq!(centre, corner, "the circle centre merges into the existing corner");
     assert!(at_corner(sk.point(centre)), "the centre is on the corner");
     let tied = sk
         .constraints
         .iter()
         .any(|k| matches!(k.kind, ConstraintKind::Coincident { p, q } if (p, q) == (corner, centre) || (p, q) == (centre, corner)));
-    assert!(tied, "a Coincident ties the centre to the corner: {:?}", sk.constraints);
+    assert!(!tied, "merged centre needs no Coincident constraint: {:?}", sk.constraints);
 }
 
 #[test]
@@ -1569,6 +1567,154 @@ fn a_shape_whose_stored_click_lost_its_curve_to_undo_is_still_drawn() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A sketch on XY with the lines `bottom` (y = 0), `left` (x = 0), `right` (x = 60) and `gone`
+/// (y = 60, drawn last), the tool `tool` clicked at each of `before`, then the Undo button (it
+/// runs `edit.undo` and leaves the tool on), which takes `gone` away.
+fn picked_then_undone(tool: &str, before: &[[i32; 3]]) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-10,0],[70,0]],"ids":["bottom"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,-10],[0,70]],"ids":["left"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[60,-10],[60,70]],"ids":["right"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-10,60],[70,60]],"ids":["gone"]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":tool})).unwrap();
+    for at in before {
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.iter().any(|id| id == "gone")), "{tool}: {:?}", h.app.tool.as_ref().map(|t| &t.picks));
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("gone").is_none(), "{tool}: Undo took the line");
+    h
+}
+
+/// The Undo button while a tangent-circle tool runs can take away a curve it picked (#23086). The
+/// lost pick is dropped, so the curves picked next make the circle: 2-Tangent Circle no longer
+/// fails on every Enter, 3-Tangent Circle no longer loses a set of picks.
+#[test]
+fn a_tangent_circle_whose_pick_lost_its_curve_to_undo_takes_the_next_picks() {
+    let cases: [(&str, &[[i32; 3]], bool); 2] = [
+        ("sketch.circle.two_tangent", &[[30, 0, 0], [0, 30, 0]], true),
+        ("sketch.circle.three_tangent", &[[30, 0, 0], [0, 30, 0], [60, 30, 0]], false),
+    ];
+    let mut failed = Vec::new();
+    for (tool, after, enter) in cases {
+        let mut h = picked_then_undone(tool, &[[30, 60, 0]]);
+        let sid = h.app.session.active_sketch.unwrap();
+        for at in after {
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        if enter {
+            h.step(&json!({"key":"Enter"})).unwrap();
+        }
+        let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        let circles = sk.curves.iter().filter(|c| matches!(c.kind, CurveKind::Circle { .. })).count();
+        let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+        let ready = h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty());
+        if error.is_some() || circles != 1 || !ready {
+            failed.push(format!("{tool}: {circles} circle(s), ready {ready}, {error:?}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Both curves of 2-Tangent Circle picked and its Radius box shown, then the Undo button takes one
+/// away: the box goes with the pair and the tool's hint asks for a curve again, so Enter makes
+/// nothing and says nothing wrong. A second curve picked and Enter make the circle (#23086).
+#[test]
+fn a_two_tangent_circle_whose_pair_lost_a_curve_to_undo_asks_for_it_again() {
+    let mut h = picked_then_undone("sketch.circle.two_tangent", &[[30, 60, 0], [30, 0, 0]]);
+    let sid = h.app.session.active_sketch.unwrap();
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(tool.picks, ["bottom"]);
+    assert!(tool.dims.is_empty(), "the Radius box went with the pair: {:?}", tool.dims.iter().map(|d| d.label).collect::<Vec<_>>());
+    let hint = crate::tools::hint("sketch.circle.two_tangent");
+    assert_eq!(h.app.status.as_ref().map(|s| (s.0.clone(), s.2)), Some((hint.clone(), false)), "the hint asks for a curve");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let circles = |h: &crate::scenario::Harness| {
+        h.app.session.model.state().sketch(sid).unwrap().sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Circle { .. })).count()
+    };
+    assert_eq!(circles(&h), 0);
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    h.step(&json!({"click":{"world":[0, 30, 0]}})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert_eq!(circles(&h), 1);
+}
+
+/// The Sketch Constrainer applies on a right-click. Its only pick taken away by the Undo button, the
+/// right-click keeps the tool on; the next pick and right-click apply to the line that stands.
+#[test]
+fn a_constrainer_whose_pick_lost_its_curve_to_undo_stays_on_for_the_right_click() {
+    let mut h = picked_then_undone("sketch.constrainer", &[[30, 60, 0]]);
+    let sid = h.app.session.active_sketch.unwrap();
+    let constraints = |h: &crate::scenario::Harness| h.app.session.model.state().sketch(sid).unwrap().sketch.constraints.len();
+    let before = constraints(&h);
+    h.step(&json!({"click":{"world":[30, 30, 0]},"button":"right"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.constrainer"), "the tool stays on");
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    h.step(&json!({"click":{"world":[30, 0, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[30, 30, 0]},"button":"right"})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert_eq!(constraints(&h), before + 1, "a constraint on the bottom line");
+}
+
+/// One of the Constrainer's three picks taken away by the Undo button: the right-click applies to
+/// the two lines that stand and keeps the tool on, and the next right-click ends it, as on main.
+/// Esc after every pick was taken away ends the tool at once, as on main.
+#[test]
+fn a_constrainer_with_a_pick_left_after_undo_applies_then_ends_and_esc_ends_it() {
+    let mut h = picked_then_undone("sketch.constrainer", &[[30, 0, 0], [0, 30, 0], [30, 60, 0]]);
+    let sid = h.app.session.active_sketch.unwrap();
+    let constraints = |h: &crate::scenario::Harness| h.app.session.model.state().sketch(sid).unwrap().sketch.constraints.len();
+    assert_eq!(h.app.tool.as_ref().map(|t| (t.picks.clone(), t.picks_dropped)), Some((vec!["bottom".to_string(), "left".to_string()], false)));
+    let before = constraints(&h);
+    h.step(&json!({"click":{"world":[30, 30, 0]},"button":"right"})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert!(constraints(&h) > before, "the two lines that stand are constrained");
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.constrainer"), "the right-click that applied keeps the tool on");
+    h.step(&json!({"click":{"world":[30, 30, 0]},"button":"right"})).unwrap();
+    assert!(h.app.tool.is_none(), "the next right-click ends the tool");
+
+    let mut h = picked_then_undone("sketch.constrainer", &[[30, 60, 0]]);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Esc ends the tool");
+}
+
+/// Seen along its plane, a sketch's curves can still be clicked though the click misses the
+/// plane: the pick still gets its place, so the places stay matched to the picks.
+#[test]
+fn a_curve_picked_in_a_view_along_the_sketch_plane_keeps_its_place() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-10,0],[70,0]],"ids":["bottom"]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"front"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.circle.three_tangent"})).unwrap();
+    h.step(&json!({"click":{"world":[30, 0, 0]}})).unwrap();
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(tool.picks, ["bottom"], "the line is picked in the view along the plane");
+    assert_eq!(tool.pts.len(), 1, "with its place: {:?}", tool.pts);
+}
+
+/// A preselected pick has no click place and comes before the clicked ones, so a dropped clicked
+/// pick takes its own place with it, not the place of another.
+#[test]
+fn a_dropped_pick_takes_its_own_click_place_after_a_preselected_pick() {
+    let h = picked_then_undone("sketch.circle.three_tangent", &[[30, 60, 0]]);
+    let mut tool = crate::sketch_tools::tool_for("sketch.constraint.curvature").unwrap();
+    tool.picks = vec!["bottom".into(), "left".into(), "gone".into()];
+    tool.pts = vec![(Vec2::new(0.0, 30.0), None), (Vec2::new(30.0, 60.0), None)];
+    assert!(crate::sketch_tools::drop_gone_picks(&h.app, &mut tool));
+    assert_eq!(tool.picks, ["bottom", "left"]);
+    assert_eq!(tool.pts.iter().map(|p| p.0).collect::<Vec<_>>(), [Vec2::new(0.0, 30.0)]);
+    assert!(!tool.picks_dropped, "picks stand, so a right-click applies or ends as on main");
+}
+
 /// Redo after that Undo brings the line back, and the circle's centre clicked on it is held on it
 /// again: the stored snap is only set aside while its curve is gone.
 #[test]
@@ -1584,6 +1730,98 @@ fn a_circle_centre_snapped_to_a_line_undone_and_redone_stays_on_it() {
     assert_eq!(sk.curves.len(), 3, "{:?}", sk.curves);
     let held = held_on(&sk, "base");
     assert!(held.iter().any(|p| p.dist(Vec2::new(20.0, 0.0)) < 0.5), "the centre is held on the line: {held:?}");
+}
+
+/// The tools that take their points one by one send a stored snap again too (#22766): after the
+/// Undo button took its curve away, a Midpoint Line, a Conic and the splines are drawn through
+/// the places clicked, and the tool goes on. A spline is sent on the right click that ends it.
+#[test]
+fn a_point_tool_whose_stored_click_lost_its_curve_to_undo_is_still_drawn() {
+    let spline: &[[i32; 3]] = &[[30, 15, 0], [45, 10, 0], [50, 20, 0], [40, 25, 0], [25, 22, 0]];
+    let cases: [(&str, &[[i32; 3]], &[[i32; 3]]); 6] = [
+        ("sketch.line.midpoint", &[[20, 0, 0]], &[[40, 20, 0]]),
+        ("sketch.conic", &[[20, 0, 0]], &[[45, 20, 0], [30, 15, 0]]),
+        ("sketch.conic", &[[20, 15, 0], [20, 0, 0]], &[[35, 20, 0]]),
+        ("sketch.spline.fit_point", &[[20, 0, 0]], spline),
+        ("sketch.spline.control_point", &[[20, 0, 0]], spline),
+        ("sketch.spline.control_point_5", &[[20, 0, 0]], spline),
+    ];
+    let mut failed = Vec::new();
+    for (tool, before, after) in cases {
+        let mut h = clicked_then_undone(tool, before);
+        for at in after {
+            h.step(&json!({"move":{"world":at}})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        if tool.starts_with("sketch.spline.") {
+            h.step(&json!({"click":{"world":after[after.len() - 1]},"button":"right"})).unwrap();
+        }
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        // A control point spline brings its control polygon, so the new curve is counted by kind.
+        let drawn = sk.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count() > 1
+            || sk.curves.iter().any(|c| !matches!(c.kind, CurveKind::Line { .. }));
+        let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+        let ready = h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty());
+        if error.is_some() || !drawn || !ready {
+            failed.push(format!("{tool} after {} click(s): drawn {drawn}, ready {ready}, {error:?}", before.len()));
+        }
+    }
+    // A fit point spline closed by a click on its start, which snapped to the removed line: the
+    // start is found by its place, and the closed spline is drawn.
+    let mut h = clicked_then_undone("sketch.spline.fit_point", &[[20, 0, 0]]);
+    for at in [[40, 15, 0], [30, 25, 0], [20, 0, 0]] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let closed = sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Spline { periodic: true, .. }));
+    let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+    let ready = h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty());
+    if error.is_some() || !closed || !ready {
+        failed.push(format!("closed fit point spline: closed {closed}, ready {ready}, {error:?}"));
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Tangent Arc and Blend Curve need the sketch point they were clicked on, so the place clicked
+/// cannot stand in for it. When the Undo button took that point away, the next click drops the
+/// stored one and shows where to click, and the clicks after it draw the curve (#22766).
+#[test]
+fn a_tangent_arc_or_blend_curve_whose_stored_end_was_undone_starts_over() {
+    let cases: [(&str, [i32; 3], &[[i32; 3]]); 2] =
+        [("sketch.arc.tangent", [75, 15, 0], &[[60, 30, 0], [75, 40, 0]]), ("sketch.blend_curve", [60, 30, 0], &[[60, 30, 0], [60, 50, 0]])];
+    for (tool, refused, again) in cases {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,50],[60,50]],"ids":["other"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,30],[60,30]],"ids":["keep"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+        h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+        h.settle();
+        h.step(&json!({"start":tool})).unwrap();
+        h.step(&json!({"move":{"world":[60, 0, 0]}})).unwrap();
+        h.step(&json!({"click":{"world":[60, 0, 0]}})).unwrap();
+        let first = h.app.tool.as_ref().unwrap().pts.clone();
+        assert!(first.len() == 1 && first[0].1.as_deref() == Some("base.end"), "{tool}: {first:?}");
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        let sid = h.app.session.active_sketch.unwrap();
+        assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("base").is_none(), "{tool}: Undo took the line");
+        h.step(&json!({"move":{"world":refused}})).unwrap();
+        h.step(&json!({"click":{"world":refused}})).unwrap();
+        assert_eq!(h.app.status.as_ref().map(|s| (s.0.clone(), s.2)), crate::sketch_tools::hint(tool).map(|hint| (hint, true)), "{tool}");
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == tool && t.pts.is_empty()), "{tool}: the stored click is gone, the tool is on");
+        assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len(), 2, "{tool}: nothing drawn yet");
+        for at in again {
+            h.step(&json!({"move":{"world":at}})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        let curves = h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len();
+        assert_eq!(curves, 3, "{tool}: drawn from the clicks after the hint: {:?}", h.app.status);
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty()), "{tool}: ready for the next one");
+    }
 }
 
 /// The Edge-Center Rectangle's second click snapped onto a line, a little off a sketch axis, and

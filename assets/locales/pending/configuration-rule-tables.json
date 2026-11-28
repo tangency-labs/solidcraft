@@ -1,0 +1,98 @@
+{
+  "ar": {
+    "config.rules.allowed": "يقيّد {parameter}: {values}",
+    "config.rules.dormant": "غير نشط",
+    "config.rules.drive": "يضبط {parameter} = {expression}",
+    "config.rules.matched": "مطابق",
+    "config.rules.preview": "معاينة: {row}",
+    "config.rules.range": "يقيّد {parameter}: من {minimum} إلى {maximum}",
+    "config.rules.resolved": "تم الحل",
+    "config.rules.shared_definition": "تعريف مشترك",
+    "config.rules.skipped": "تم التخطي",
+    "config.rules.suppression": "يضبط تعطيل {feature} = {value}"
+  },
+  "de": {
+    "config.rules.allowed": "Beschränkt {parameter}: {values}",
+    "config.rules.dormant": "Inaktiv",
+    "config.rules.drive": "Steuert {parameter} = {expression}",
+    "config.rules.matched": "Zutreffend",
+    "config.rules.preview": "Vorschau: {row}",
+    "config.rules.range": "Beschränkt {parameter}: {minimum} bis {maximum}",
+    "config.rules.resolved": "Aufgelöst",
+    "config.rules.shared_definition": "Gemeinsame Definition",
+    "config.rules.skipped": "Übersprungen",
+    "config.rules.suppression": "Steuert Unterdrückung von {feature} = {value}"
+  },
+  "en": {
+    "config.rules.allowed": "Restricts {parameter}: {values}",
+    "config.rules.dormant": "Dormant",
+    "config.rules.drive": "Drives {parameter} = {expression}",
+    "config.rules.matched": "Matched",
+    "config.rules.preview": "Preview: {row}",
+    "config.rules.range": "Restricts {parameter}: {minimum} through {maximum}",
+    "config.rules.resolved": "Resolved",
+    "config.rules.shared_definition": "Shared definition",
+    "config.rules.skipped": "Skipped",
+    "config.rules.suppression": "Drives suppression {feature} = {value}"
+  },
+  "he": {
+    "config.rules.allowed": "מגביל את {parameter}: {values}",
+    "config.rules.dormant": "רדום",
+    "config.rules.drive": "מגדיר {parameter} = {expression}",
+    "config.rules.matched": "תואם",
+    "config.rules.preview": "תצוגה מקדימה: {row}",
+    "config.rules.range": "מגביל את {parameter}: מ־{minimum} עד {maximum}",
+    "config.rules.resolved": "נפתר",
+    "config.rules.shared_definition": "הגדרה משותפת",
+    "config.rules.skipped": "דולג",
+    "config.rules.suppression": "מגדיר השבתה של {feature} = {value}"
+  },
+  "ja": {
+    "config.rules.allowed": "{parameter} を制限: {values}",
+    "config.rules.dormant": "休止中",
+    "config.rules.drive": "{parameter} = {expression} に設定",
+    "config.rules.matched": "一致",
+    "config.rules.preview": "プレビュー: {row}",
+    "config.rules.range": "{parameter} を制限: {minimum} から {maximum}",
+    "config.rules.resolved": "解決済み",
+    "config.rules.shared_definition": "共有定義",
+    "config.rules.skipped": "スキップ",
+    "config.rules.suppression": "{feature} の抑制を {value} に設定"
+  },
+  "ko": {
+    "config.rules.allowed": "{parameter} 제한: {values}",
+    "config.rules.dormant": "비활성",
+    "config.rules.drive": "{parameter} = {expression} 설정",
+    "config.rules.matched": "일치",
+    "config.rules.preview": "미리보기: {row}",
+    "config.rules.range": "{parameter} 제한: {minimum}~{maximum}",
+    "config.rules.resolved": "해결됨",
+    "config.rules.shared_definition": "공유 정의",
+    "config.rules.skipped": "건너뜀",
+    "config.rules.suppression": "{feature} 억제를 {value}(으)로 설정"
+  },
+  "vi": {
+    "config.rules.allowed": "Giới hạn {parameter}: {values}",
+    "config.rules.dormant": "Không hoạt động",
+    "config.rules.drive": "Điều khiển {parameter} = {expression}",
+    "config.rules.matched": "Khớp",
+    "config.rules.preview": "Xem trước: {row}",
+    "config.rules.range": "Giới hạn {parameter}: từ {minimum} đến {maximum}",
+    "config.rules.resolved": "Đã phân giải",
+    "config.rules.shared_definition": "Định nghĩa dùng chung",
+    "config.rules.skipped": "Đã bỏ qua",
+    "config.rules.suppression": "Điều khiển trạng thái vô hiệu hóa {feature} = {value}"
+  },
+  "zh": {
+    "config.rules.allowed": "限制 {parameter}：{values}",
+    "config.rules.dormant": "未激活",
+    "config.rules.drive": "驱动 {parameter} = {expression}",
+    "config.rules.matched": "已匹配",
+    "config.rules.preview": "预览：{row}",
+    "config.rules.range": "限制 {parameter}：{minimum} 至 {maximum}",
+    "config.rules.resolved": "已解析",
+    "config.rules.shared_definition": "共享定义",
+    "config.rules.skipped": "已跳过",
+    "config.rules.suppression": "驱动抑制状态 {feature} = {value}"
+  }
+}

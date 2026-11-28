@@ -1,7 +1,7 @@
 //! Parts library cards: a part's picture on the tile ground with its name under it, a folder with
 //! how many parts it holds, a names-only row, a placeholder while a folder is read, and the folder
 //! button that starts the library's breadcrumb. Tokens only; the host's accent marks a selection.
-use egui::{Response, Sense, TextureId, Ui, vec2};
+use egui::{Response, Sense, Ui, vec2};
 
 use solidcraft_theme::{TabAccent, Tokens};
 
@@ -61,7 +61,7 @@ impl PartCardSize {
 pub enum PartFace<'a> {
     /// A part: its picture once drawn (`None` while it is drawn), and its kind where it is not a
     /// SolidCraft design (a STEP or mesh file).
-    Part { picture: Option<TextureId>, badge: Option<&'a str> },
+    Part { picture: Option<crate::PreviewArt>, badge: Option<&'a str> },
     /// A folder, with "N parts".
     Folder { count: &'a str },
     /// A card at its final size while the folder is read, so nothing jumps.
@@ -91,10 +91,6 @@ pub fn part_card(ui: &mut Ui, card: PartCard<'_>) -> Response {
     let picture = egui::Rect::from_min_size(rect.min, vec2(width, size.picture()));
     let accent = card.accent;
     let painter = ui.painter_at(rect.expand(1.0));
-    painter.rect_filled(picture, t.radius_md, t.dialog_footer);
-    if card.selected {
-        painter.rect_filled(picture, t.radius_md, accent.soft);
-    }
     let edge = if card.selected {
         t.primary_border(accent.color)
     } else if response.hovered() && !matches!(card.face, PartFace::Placeholder) {
@@ -102,19 +98,21 @@ pub fn part_card(ui: &mut Ui, card: PartCard<'_>) -> Response {
     } else {
         t.control_border_stroke(t.control_border)
     };
-    painter.rect_stroke(picture, t.radius_md, edge, egui::StrokeKind::Inside);
     let inner = picture.shrink(t.space_4);
-    match card.face {
-        PartFace::Part { picture: Some(texture), .. } => {
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-            if card.dragging {
-                child.set_opacity(0.45);
-            }
-            // `paint_at` fills the rect it is given: fit the picture inside it at its own aspect.
-            let shape = child.ctx().tex_manager().read().meta(texture).map(|m| egui::vec2(m.size[0] as f32, m.size[1] as f32));
-            egui::Image::new((texture, inner.size())).paint_at(&child, fitted(inner, shape));
+    // A part is a file preview, which brings its own ground; a folder or placeholder sits on the tile's.
+    if let PartFace::Part { picture: art, .. } = card.face {
+        let lit = response.hovered() && !card.dragging;
+        crate::file_preview(ui, response.id.with("preview"), picture, art, lit, if card.dragging { 0.45 } else { 1.0 });
+    } else {
+        painter.rect_filled(picture, t.radius_md, t.dialog_footer);
+        if card.selected {
+            painter.rect_filled(picture, t.radius_md, accent.soft);
         }
-        PartFace::Part { picture: None, .. } | PartFace::Placeholder => {
+    }
+    painter.rect_stroke(picture, t.radius_md, edge, egui::StrokeKind::Inside);
+    match card.face {
+        PartFace::Part { .. } => {}
+        PartFace::Placeholder => {
             painter.hline(inner.shrink(t.space_8).x_range(), inner.center().y, t.control_border_stroke(t.control_border));
         }
         PartFace::Folder { count } => {
@@ -192,17 +190,6 @@ pub fn folder_button(ui: &mut Ui, name: &str, max_width: f32, accent: TabAccent)
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
     response
-}
-
-/// The largest rect of `shape`'s aspect centred in `room` (all of `room` when the shape is unknown).
-pub fn fitted(room: egui::Rect, shape: Option<egui::Vec2>) -> egui::Rect {
-    match shape {
-        Some(s) if s.x > 0.0 && s.y > 0.0 => {
-            let scale = (room.width() / s.x).min(room.height() / s.y);
-            egui::Rect::from_center_size(room.center(), s * scale)
-        }
-        _ => room,
-    }
 }
 
 /// A small outlined pill whose top left is at `at`.

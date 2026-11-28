@@ -17,6 +17,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::Vec3;
+use solidcraft_smlib::history::Order;
 use solidcraft_smlib::{Brep, CheckLevel, Error as SmError};
 
 use crate::body::Body;
@@ -68,6 +69,12 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         // A face the operation cannot handle, named for what it is (a draft's face that is neither
         // a plane nor a cone or cylinder, #18541).
         SmError::Refused(solidcore_ops::Error::Unsupported(why)) => KernelError::Failed(format!("not supported yet: {op}: {why}")),
+        // A drafted cone or cylinder whose angle closes it within the face, or whose neutral plane
+        // lies at or past its apex (#22807): a geometric refusal, not an unsupported feature.
+        SmError::Refused(solidcore_ops::Error::OffsetRefused {
+            why: why @ (solidcore_ops::OffsetRefusal::DraftConeCloses | solidcore_ops::OffsetRefusal::DraftNeutralPlanePastApex),
+            ..
+        }) => KernelError::Invalid(format!("{op}: {why}")),
         // A tangent blend that cannot follow the moved faces, in solidcore's words (#18575).
         SmError::BlendsNotFollowed { exact: false, why } => KernelError::Failed(format!("not supported yet: SMLib {op}: {why}")),
         SmError::BlendsNotFollowed { exact: true, why } => {
@@ -81,6 +88,12 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
 /// How far a selection point may be from the face it picks: the kernel's own picking reach.
 fn pick_tolerance(b: &Body) -> f64 {
     b.size() * 1e-3 + 1e-6
+}
+
+/// The pick reach widened by the display chord deviation: a near-rim click picks the
+/// nearest exact trimmed face, including on a curved wall.
+pub(crate) fn exact_pick_reach(b: &Body) -> f64 {
+    2.0 * pick_tolerance(b)
 }
 
 fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
@@ -101,29 +114,33 @@ pub(crate) fn run(
     run_ordered(name, b, wall, |tagged, _| op(tagged))
 }
 
-/// Like [`run`], also passing the operand's SMLib-to-record [`solidcraft_smlib::history::Order`]
+/// Like [`run`], also passing the operand's SMLib-to-record [`Order`]
 /// so the operation can name edges directly by SMLib index.
 pub(crate) fn run_ordered(
     name: &str,
     b: &Body,
     wall: Option<f64>,
-    op: impl FnOnce(&Brep, Option<&solidcraft_smlib::history::Order>) -> std::result::Result<Brep, SmError>,
+    op: impl FnOnce(&Brep, Option<&Order>) -> std::result::Result<Brep, SmError>,
 ) -> Result<(Body, Option<History>)> {
-    use crate::validation::{Checked, Step};
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
     let r = op(&tagged, ob.as_ref()).map_err(|e| refused(name, wall, e))?;
+    finish_run(name, b, &sb, ob, r)
+}
+
+/// Bring a tagged operation's result back, with its checked geometry and native origins.
+fn finish_run(name: &str, b: &Body, sb: &Brep, ob: Option<Order>, r: Brep) -> Result<(Body, Option<History>)> {
+    use crate::validation::Step;
     let step = crate::validation::step();
-    if step == Step::Check {
-        let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
-        if !check.is_valid() {
-            let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-            let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
-            return Err(failed(name, what, check));
-        }
-    }
     let (body, or) = body_from_smlib_ordered(&r)?;
+    if step == Step::Check
+        && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {name}"), body.record())?
+    {
+        let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+        let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
+        return Err(failed(name, what, detail));
+    }
     let history = match (ob, or) {
         (Some(ob), Some(or)) => r.history().map_err(|e| failed(name, "history", e))?.history(&[ob], &or).map(Some).unwrap_or_else(|e| {
             log::debug!(target: "smlib", "{name} history: {e}");
@@ -131,7 +148,7 @@ pub(crate) fn run_ordered(
         }),
         _ => None,
     };
-    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r, &[b]) } else { body };
+    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), &[b]) } else { body };
     Ok((body, history))
 }
 
@@ -189,7 +206,10 @@ pub(crate) fn thinner_walls(thickness: f64, largest: Option<f64>) -> Vec<f64> {
 
 /// The refusal of a shell of `thickness` with a hint that has been tried: the first of the
 /// thinner walls that `builds` is the one named, so the wall the message offers does work. Where
-/// none builds, the message says the wall is not the obstacle. `first` is the refusal itself.
+/// none builds and the kernel refused the wall for folding, a face curving tighter than the wall
+/// is thick, the message says the wall is not the obstacle. Any other cause is the kernel's own
+/// refusal, `first`, kept as it is: a result that is not a solid at every wall is not a property
+/// of the wall or of how the faces curve, and saying it is would blame valid input.
 pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: KernelError, mut builds: impl FnMut(f64) -> bool) -> KernelError {
     let largest = match failure {
         SmError::WallFolds { largest } => *largest,
@@ -207,7 +227,7 @@ pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: Kerne
         return KernelError::Invalid(format!("shell: a wall of {t} mm does not fit: {why}; a wall of {w} mm builds"));
     }
     match first {
-        KernelError::Invalid(_) | KernelError::Failed(_) => KernelError::Invalid(format!(
+        KernelError::Invalid(_) | KernelError::Failed(_) if matches!(failure, SmError::WallFolds { .. }) => KernelError::Invalid(format!(
             "shell: a wall of {t} mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
              a face of the body curves too tightly to offset inwards, or the body has faces too small or too many to offset into a solid \
              (a curve cut as many tiny flat pieces, for example); round the tight bend or rebuild the body with smoother faces"
@@ -224,7 +244,11 @@ pub(crate) fn offset_faces(b: &Body, chosen: &[usize], distance: f64) -> Result<
     let tol = pick_tolerance(b);
     let pts = points(&at);
     let (r, h) = run("offset faces", b, None, |s| s.offset_faces(&pts, tol, distance))?;
-    let h = h.map(|mut h| {
+    Ok(moved_faces(r, h, b, chosen))
+}
+
+fn moved_faces(r: Body, history: Option<History>, input: &Body, chosen: &[usize]) -> Body {
+    let h = history.map(|mut h| {
         for f in &mut h.faces {
             if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {
                 f.change = Change::Modified;
@@ -232,7 +256,33 @@ pub(crate) fn offset_faces(b: &Body, chosen: &[usize], distance: f64) -> Result<
         }
         h
     });
-    Ok(r.with_checked_history(h, &record::counts(&[b])))
+    r.with_checked_history(h, &[(input.face_count(), input.edge_count())])
+}
+
+/// Retrim a single support. Resolve the pick on the original body, without healing away
+/// split faces, and carry that exact face into the tagged copy in its native order.
+pub(crate) fn transform_face(b: &Body, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+    const NAME: &str = "transform face";
+    let _span = solidcraft_profile::span("kernel", "transform_face");
+    b.require_brep(NAME)?;
+    let tolerance = exact_pick_reach(b);
+    let chosen = b.face_within(at, tolerance)?.ok_or_else(|| KernelError::Invalid(format!("no face at {at}")))?;
+    let (sb, ob) = smlib_body_ordered(b)?;
+    let order = ob.ok_or_else(|| KernelError::Failed("transform face: cannot match the body's face order".into()))?;
+    let index = if order.faces.is_empty() {
+        chosen
+    } else {
+        order.faces.iter().position(|&face| face == chosen).ok_or_else(|| KernelError::Failed("transform face: missing selected face".into()))?
+    };
+    let pick = solidcraft_smlib::PickedFace { index, at: at.into(), tolerance };
+    let tagged = sb.tagged(0).map_err(|e| failed(NAME, "tag", e))?;
+    let (r, changed) = tagged.transform_face(pick, translate.into(), origin.into(), axis.into(), angle).map_err(|e| refused(NAME, None, e))?;
+    if !changed {
+        solidcraft_smlib::trace::exported(&r, b.record());
+        return Ok(b.unchanged_step());
+    }
+    let (r, h) = finish_run(NAME, b, &sb, Some(order), r)?;
+    Ok(moved_faces(r, h, b, &[chosen]).with_split_lines(b.splits.clone()).inherit_regularization_protection(b))
 }
 
 /// [`crate::thicken`] through SMLib: the sheet `b` grown by `thickness` along its faces'
@@ -287,15 +337,7 @@ pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcore_record::Plane, pu
     let pts = points(&face_points(b, &chosen)?);
     let o = neutral.origin;
     let (r, h) = run("draft", b, None, |s| s.draft(&pts, tol, [o.x, o.y, o.z], [normal.x, normal.y, normal.z], [pull.x, pull.y, pull.z], angle))?;
-    let h = h.map(|mut h| {
-        for f in &mut h.faces {
-            if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {
-                f.change = Change::Modified;
-            }
-        }
-        h
-    });
-    Ok(r.with_checked_history(h, &record::counts(&[b])))
+    Ok(moved_faces(r, h, b, &chosen))
 }
 
 /// The face of `b` under each point: the face of the nearest triangle, within the picking reach.

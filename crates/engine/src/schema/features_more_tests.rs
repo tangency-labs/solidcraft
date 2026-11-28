@@ -124,6 +124,7 @@ fn schemas_and_the_key_check_agree() {
             "diameter",
             "end_cut",
             "height",
+            "height_measure",
             "name",
             "operation",
             "participants",

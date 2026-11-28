@@ -28,4 +28,4 @@ These bugs show up on one kind of machine and not on yours. A fix written from a
 ## The PR body
 - The configuration it fixes, with the evidence from the released build.
 - The condition the fix checks, and why other configurations don't reach the new code.
-- `Changes a default: no` when the fix only makes the affected configuration work as intended. If it also changes a shortcut or behaviour users there already rely on, that is `yes`.
+- `Changes a default: no` when the fix only makes the affected configuration work as intended. If it also changes a shortcut or behaviour users there already rely on, that is `yes`, but only for a deliberate change to behaviour they rely on, not for fixing something janky.

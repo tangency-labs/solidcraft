@@ -2,7 +2,7 @@
 //! or a circle's or an arc's radius or diameter; pick a second for the distance between the two, or
 //! the angle between two lines that aren't parallel. A cylinder seen side on shows no circle: one of
 //! its two outline lines, or both, gives its diameter. Once the picks say what it measures, the
-//! dimension follows the pointer until a click on the sheet places it, horizontal, vertical or
+//! dimension follows the pointer until a click on the sheet, or Enter, places it, horizontal, vertical or
 //! aligned by where the pointer is ([`linear_axis`], the sketch tool's rule) and
 //! an angle in the sector the pointer is in ([`in_sector`]). A click on another
 //! edge of the same view while one is picked takes it as the second pick.
@@ -10,7 +10,8 @@
 //! A drawing's dimensions are reference dimensions: each measures the view as it shows the model
 //! and never drives it. The preview is `drawing.dimension.add` itself, dry run with the pointer as
 //! its place (`line_through_mm`, or a radius's `text_to_mm`), so it is laid out as the placed one will be; the click adds the
-//! same thing. Esc drops the picks, then leaves the tool, through the workspace's own Esc.
+//! same thing, and Enter adds it where the preview is ([`place_preview`]). Esc drops the picks, then leaves the tool,
+//! through the workspace's own Esc.
 use serde_json::{Value, json};
 use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_engine::sketch::{LinearAxis, in_sector, linear_axis};
@@ -401,6 +402,34 @@ fn preview(app: &mut SolveApp, draft: &Draft, at: Vec2) -> Option<Preview> {
     })
 }
 
+/// Adds the dimension the picks make with its text at `at`, as a click there does; on a refusal the
+/// status bar says why and the picks stay. Whether it was added.
+fn place(app: &mut SolveApp, draft: &Draft, at: Vec2) -> bool {
+    let Some(params) = params_for(app, draft, at) else {
+        app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true);
+        return false;
+    };
+    // `run` puts a refusal's reason in the status bar itself.
+    app.run(COMMAND, params).is_ok()
+}
+
+/// Enter (#22661): places the dimension where its preview is, the place the tool last laid it out,
+/// as a click there would. Whether the tool took the key: only while a preview of the picks shows
+/// on the drawing's open sheet, as of this revision; otherwise Enter is left to the rest of the app.
+pub(crate) fn place_preview(app: &mut SolveApp) -> bool {
+    let revision = app.session.revision;
+    let sheet = crate::drawing_sheet_page::active_sheet(app);
+    let Some(draft) = app.drawing_workspace.dimension.take() else { return false };
+    let Some(at) = draft.preview.as_ref().map(|p| p.at).filter(|_| Some(draft.sheet) == sheet && draft.revision == revision) else {
+        app.drawing_workspace.dimension = Some(draft);
+        return false;
+    };
+    if !place(app, &draft, at) {
+        app.drawing_workspace.dimension = Some(draft);
+    }
+    true
+}
+
 /// Paints a picked edge's stroke, so the picks show.
 fn paint_pick(painter: &egui::Painter, at: OnScreen, shape: Shape, path: &[Seg2]) {
     let stroke = egui::Stroke::new(2.5, Tokens::get().accent);
@@ -486,13 +515,11 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
                 }
             }
             // Anywhere else: the dimension the picks make goes where the pointer is.
-            (Some(d), _) => match params_for(app, d, point) {
-                Some(params) => match app.run(COMMAND, params) {
-                    Ok(_) => draft = None,
-                    Err(error) => app.set_status(error, true),
-                },
-                None => app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true),
-            },
+            (Some(d), _) => {
+                if place(app, d, point) {
+                    draft = None;
+                }
+            }
             (None, None) => {}
         }
     }

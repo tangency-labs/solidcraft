@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="430" viewBox="0 0 760 430">
+  <title>21748-closed-rail-touches-hole</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="430" fill="#ffffff"/>
+    <rect id="face_before" data-name="face before" x="40" y="110" width="300" height="220" fill="#f0f0f0"/>
+    <circle id="hole_before" data-name="hole before" cx="190" cy="170" r="60" fill="#ffffff" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="rail_before" data-name="rail before" x1="40" y1="110" x2="340" y2="110" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect id="face_after" data-name="face after" x="420" y="110" width="300" height="220" fill="#f0f0f0"/>
+    <circle id="hole_after" data-name="hole after" cx="570" cy="170" r="60" fill="#ffffff" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="rail_after" data-name="rail after" x1="420" y1="110" x2="720" y2="110" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle id="vertex_P" data-name="vertex P" cx="570" cy="110" r="5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">A closed contact line touches a hole&apos;s edge at one point</tspan></text>
+    <text transform="matrix(1 0 0 1 40 72)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Before: two loops touch at P</tspan></text>
+    <text transform="matrix(1 0 0 1 420 72)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">After: P imprinted, one loop</tspan></text>
+    <text transform="matrix(1 0 0 1 215 101)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">contact line (rail)</tspan></text>
+    <text transform="matrix(1 0 0 1 256 200)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">hole&apos;s edge</tspan></text>
+    <text transform="matrix(1 0 0 1 185 101)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">P</tspan></text>
+    <text transform="matrix(1 0 0 1 582 101)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">vertex P</tspan></text>
+    <text transform="matrix(1 0 0 1 40 346)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">The cylinder face, unrolled, below the round. The rail and</tspan><tspan x="0" y="26.4">the hole&apos;s loop meet only at P; kept as two loops they fail</tspan><tspan x="0" y="40.8">Face 38, so the round was refused.</tspan></text>
+    <text transform="matrix(1 0 0 1 420 346)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">The rail and the hole&apos;s edge are split at P. The face&apos;s</tspan><tspan x="0" y="26.4">boundary is one loop: along the rail to P, round the hole</tspan><tspan x="0" y="40.8">back to P, on along the rail.</tspan></text>
+  </g>
+</svg>

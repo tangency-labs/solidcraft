@@ -128,6 +128,7 @@ use crate::geom::transform::Transform;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     is_infinite_param, max2, max4, min2, min4, rad_to_deg, EFF_ZERO, EFF_ZERO_DEG,
     INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
@@ -384,8 +385,8 @@ impl BendVolume {
         let du = param_point.x;
         let dv = param_point.y;
         let dw = param_point.z;
-        let cos = (dv / self.bend_neutral_dist).cos();
-        let sin = (dv / self.bend_neutral_dist).sin();
+        let cos = det::cos(dv / self.bend_neutral_dist);
+        let sin = det::sin(dv / self.bend_neutral_dist);
         let mid = volume.bend_mid_dir();
         let bin = volume.bend_binormal();
         let axis = volume.bend_axis();
@@ -474,8 +475,8 @@ impl BendVolume {
         let du = param_point.x;
         let dv = param_point.y;
         let dw = param_point.z;
-        let cos = (dv / self.bend_neutral_dist).cos();
-        let sin = (dv / self.bend_neutral_dist).sin();
+        let cos = det::cos(dv / self.bend_neutral_dist);
+        let sin = det::sin(dv / self.bend_neutral_dist);
 
         // init output array
         let mut d = vec![Vec3::ZERO; eval_size(n)];
@@ -548,10 +549,10 @@ impl BendVolume {
         let v_max = param_box.v_max();
         let theta_min = v_min / self.bend_neutral_dist;
         let theta_max = v_max / self.bend_neutral_dist;
-        let cos_theta_min = theta_min.cos();
-        let sin_theta_min = theta_min.sin();
-        let cos_theta_max = theta_max.cos();
-        let sin_theta_max = theta_max.sin();
+        let cos_theta_min = det::cos(theta_min);
+        let sin_theta_min = det::sin(theta_min);
+        let cos_theta_max = det::cos(theta_max);
+        let sin_theta_max = det::sin(theta_max);
         let u_min = param_box.u_min();
         let u_max = param_box.u_max();
         let half_pi = PI / 2.0;
@@ -674,8 +675,8 @@ impl BendVolume {
                 } else {
                     0.0
                 };
-                let cos_theta_mid = theta_mid.cos();
-                let sin_theta_mid = theta_mid.sin();
+                let cos_theta_mid = det::cos(theta_mid);
+                let sin_theta_mid = det::sin(theta_mid);
 
                 let (cos_min, sin_max) = if v_unbounded {
                     (-1.0, 1.0)
@@ -683,12 +684,12 @@ impl BendVolume {
                     let half_angle =
                         max2((theta_min - theta_mid).abs(), (theta_max - theta_mid).abs());
                     let c_min = if half_angle < PI {
-                        half_angle.cos()
+                        det::cos(half_angle)
                     } else {
                         -1.0
                     };
                     let s_max = if half_angle < half_pi {
-                        half_angle.sin()
+                        det::sin(half_angle)
                     } else {
                         1.0
                     };
@@ -871,7 +872,7 @@ impl BendVolume {
         let theta = if r < self.legal_min_u() {
             0.0
         } else {
-            proj_point.y.atan2(proj_point.x)
+            det::atan2(proj_point.y, proj_point.x)
         };
         let d = self.bend_neutral_dist;
 
@@ -1231,7 +1232,7 @@ impl BendVolume {
         if const_binormal_plane {
             let ang_rad = (binormal_plane_sum / samples / samples) / bend_neutral_dist;
             let mut x_vector = bend_axis;
-            let mut y_vector = ang_rad.cos() * bend_mid_dir + ang_rad.sin() * bend_binormal;
+            let mut y_vector = det::cos(ang_rad) * bend_mid_dir + det::sin(ang_rad) * bend_binormal;
 
             let uv_scale = Vec2::new(1.0, 1.0);
             let mut uv_domain = Extent2d::from_bounds(
@@ -1801,7 +1802,7 @@ mod tests {
         b.evaluate_bounding_box_simple(&pb, Some(&mut bx_fix), Some(&mut pseudo_fix));
         assert!(bx_fix.contains_point(corner, EFF_ZERO));
         assert!(bx_fix.contains_point(pole, EFF_ZERO));
-        assert!((pseudo_fix.intervals()[0].min() - 1.5 * 2.0_f64.cos()).abs() < 1e-12);
+        assert!((pseudo_fix.intervals()[0].min() - 1.5 * det::cos(2.0_f64)).abs() < 1e-12);
         assert_eq!(pseudo_fix.intervals()[0].max(), 1.5);
         assert_eq!(pseudo_fix.intervals()[1].min(), -1.5);
         assert_eq!(pseudo_fix.intervals()[1].max(), 1.5);
@@ -1816,9 +1817,9 @@ mod tests {
         let pb_narrow = Extent3d::from_bounds(0.8, 0.5, -0.5, 2.2, 2.5, 0.5);
         let mut pseudo_narrow = PseudoBox::new();
         b_narrow.evaluate_bounding_box_simple(&pb_narrow, None, Some(&mut pseudo_narrow));
-        assert!((pseudo_narrow.intervals()[0].min() - 0.8 * 0.4_f64.cos()).abs() < 1e-12);
+        assert!((pseudo_narrow.intervals()[0].min() - 0.8 * det::cos(0.4_f64)).abs() < 1e-12);
         assert!((pseudo_narrow.intervals()[0].max() - 2.2).abs() < 1e-12);
-        assert!((pseudo_narrow.intervals()[1].max() - 2.2 * 0.4_f64.sin()).abs() < 1e-12);
+        assert!((pseudo_narrow.intervals()[1].max() - 2.2 * det::sin(0.4_f64)).abs() < 1e-12);
         assert_grid_contained(&b_narrow, &pb_narrow, &pseudo_narrow);
 
         // Off-center wide angle (half_angle = 1.8 in (pi / 2, pi)).
@@ -1865,10 +1866,10 @@ mod tests {
         let mut bx_fix = Extent3d::new();
         let mut pseudo_fix = PseudoBox::new();
         b.evaluate_bounding_box_simple(&inf_down, Some(&mut bx_fix), Some(&mut pseudo_fix));
-        assert!((bx_fix.v_max() - (-0.2_f64).sin()).abs() < 1e-12);
+        assert!((bx_fix.v_max() - det::sin(-0.2_f64)).abs() < 1e-12);
         assert!(bx_fix.v_max() < 0.0);
         assert_eq!(bx_fix.v_min(), -INFINITE_PARAMETER);
-        assert!((pseudo_fix.intervals()[0].min() - 0.4_f64.cos()).abs() < 1e-12);
+        assert!((pseudo_fix.intervals()[0].min() - det::cos(0.4_f64)).abs() < 1e-12);
         assert_eq!(pseudo_fix.intervals()[0].max(), INFINITE_PARAMETER);
         assert_eq!(pseudo_fix.intervals()[1].min(), -INFINITE_PARAMETER);
         assert_eq!(pseudo_fix.intervals()[1].max(), INFINITE_PARAMETER);
@@ -1886,7 +1887,7 @@ mod tests {
         let inf_q3 = Extent3d::from_bounds(2.0, -3.0, 0.0, INFINITE_PARAMETER, -2.0, 1.0);
         let mut bx_q3_fix = Extent3d::new();
         b.evaluate_bounding_box_simple(&inf_q3, Some(&mut bx_q3_fix), None);
-        assert!((bx_q3_fix.v_max() - 2.0 * (-3.0_f64).sin()).abs() < 1e-12);
+        assert!((bx_q3_fix.v_max() - 2.0 * det::sin(-3.0_f64)).abs() < 1e-12);
 
         // Wide-angle unbounded u propagates +-INFINITE_PARAMETER on both pseudo-box axes.
         let inf_wide = Extent3d::from_bounds(0.5, -2.0, 0.0, INFINITE_PARAMETER, 2.0, 1.0);

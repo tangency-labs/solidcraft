@@ -32,6 +32,7 @@ fn select_other_feedback_is_local_when_the_browser_hover_expires() {
         dialog: false,
         include_hidden: h.app.preferences.select_other_hidden,
         held: Default::default(),
+        shown: false,
     });
     let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
     h.ctx
@@ -377,7 +378,7 @@ fn long_names_stay_inside_the_popup_and_remain_available_on_hover() {
             _ => None,
         })
         .expect("the body label is painted");
-    let popup = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_select_other"))).unwrap();
+    let popup = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_select_other"), 0).unwrap();
     let text_rect = egui::Rect::from_min_size(text.pos, text.galley.size());
     assert!(popup.contains_rect(text_rect), "{text_rect:?} spills outside {popup:?}");
     assert!(h.ctx.content_rect().contains_rect(popup));
@@ -876,7 +877,8 @@ fn approximate_long_click_reaches_profiles_and_shows_all_eight_rows() {
         h.frames(4);
     }
     let rect = crate::scenario::rect_of("select_other").unwrap();
-    assert!(rect.height() > 8.0 * super::ROW_HEIGHT, "all eight rows plus header: {rect:?}");
+    let tokens = solidcraft_theme::Tokens::get();
+    assert!(rect.height() > 8.0 * (tokens.control_height + tokens.space_2), "all eight shared rows plus header: {rect:?}");
     for i in 0..8 {
         assert!(rect.contains(crate::scenario::handle_at(&format!("select_other:{i}")).unwrap()), "row {i}: {rect:?}");
     }
@@ -919,7 +921,7 @@ fn popup_uses_window_height_and_flips_above_the_pointer() {
             if y > 500.0 {
                 assert!(rect.bottom() <= y, "opens above the pointer: {rect:?}");
             } else if y < 500.0 {
-                assert!(rect.top() > y, "opens below the pointer: {rect:?}");
+                assert!(rect.top() >= y, "opens at or below the pointer: {rect:?}");
             }
         } else {
             assert!(!rect.contains(crate::scenario::handle_at(&format!("select_other:{}", count - 1)).unwrap()), "overflow needs scrolling");

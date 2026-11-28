@@ -253,29 +253,37 @@ fn save(app: &mut SolveApp) {
         let written = if as_json { json } else { Ok(text) }
             .and_then(|body| solidcraft_engine::io::vfs::write(&path, body.as_bytes()).map_err(|e| e.to_string()));
         match written {
-            Ok(()) => app.set_status(format("import_report.saved", &[("path", &path)]), false),
+            Ok(()) => app.set_status(format("import_report.saved", &[("path", crate::display_user_path(&path))]), false),
             Err(error) => app.set_status(format("import_report.save_failed", &[("error", &error)]), true),
         }
     });
 }
 
 fn draw_outline(ui: &mut egui::Ui, nodes: &[Node]) {
-    for (i, node) in nodes.iter().enumerate() {
-        ui.push_id(i, |ui| {
+    fn rows(ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>, nodes: &[Node], parent: &str) {
+        for (i, node) in nodes.iter().enumerate() {
+            let key = std::format!("{parent}:{i}");
             if node.children.is_empty() {
-                let line = if node.label.is_empty() || node.value.is_empty() {
-                    std::format!("{}{}", node.label, node.value)
-                } else {
-                    std::format!("{}: {}", node.label, node.value)
-                };
-                ui_kit::text(ui, &line, ui_kit::Text::Report("import_report_field", false));
-            } else {
-                ui_kit::section(ui, "import_report_group", &node.label, node.open, |ui| {
-                    ui.indent("import_report_group_lines", |ui| draw_outline(ui, &node.children));
+                table.row(ui, &key, false, |row| {
+                    row.cell(|ui| ui_kit::text(ui, &node.label, ui_kit::Text::Cell));
+                    row.cell(|ui| {
+                        let value = ui_kit::text(ui, &node.value, ui_kit::Text::Cell);
+                        crate::scenario::publish_rect("dialog:report:import_report_field", value.rect);
+                    });
                 });
+            } else {
+                let id = ui.make_persistent_id(("import_report_outline", &key));
+                let mut open = ui.data(|data| data.get_temp(id)).unwrap_or(node.open);
+                table.group(ui, &key, &node.label, node.children.len(), &mut open);
+                ui.data_mut(|data| data.insert_temp(id, open));
+                if open {
+                    rows(ui, table, &node.children, &key);
+                }
             }
-        });
+        }
     }
+    let columns = [ui_kit::Column::new(tr("Name"), 1.0).flex(), ui_kit::Column::new(tr("Value"), 2.0).flex()];
+    ui_kit::report_list(ui, "import_report_outline", ui_kit::table_row_height() * 8.0, &columns, "", |ui, table| rows(ui, table, nodes, "root"));
 }
 
 fn severity_label(severity: LossSeverity) -> &'static str {
@@ -361,9 +369,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             if !shown.report.items.is_empty() || !shown.outline.is_empty() {
                 egui::ScrollArea::vertical().id_salt("import_report_items").max_height(320.0).show(ui, |ui| {
-                    for (i, (severity, line)) in lines(&shown.report).iter().enumerate() {
-                        let strong = *severity == LossSeverity::Dropped;
-                        ui.push_id(i, |ui| ui_kit::text(ui, line, ui_kit::Text::Report("import_report_item", strong)));
+                    if !shown.report.items.is_empty() {
+                        let columns = [ui_kit::Column::new(tr("report.type"), 1.0).flex(), ui_kit::Column::new(tr("report.description"), 3.0).flex()];
+                        ui_kit::report_list(ui, "import_report_items", ui_kit::table_row_height() * 8.0, &columns, "", |ui, table| {
+                            for (i, (severity, line)) in lines(&shown.report).iter().enumerate() {
+                                table.row(ui, &i.to_string(), false, |row| {
+                                    row.cell(|ui| ui_kit::text(ui, tr(severity_label(*severity)), ui_kit::Text::Cell));
+                                    let text = line.split_once(": ").map_or(line.as_str(), |(_, text)| text);
+                                    row.cell(|ui| {
+                                        let response =
+                                            ui_kit::text(ui, text, ui_kit::Text::Value("import_report_item", *severity == LossSeverity::Dropped));
+                                        crate::scenario::publish_rect("dialog:report:import_report_item", response.rect);
+                                    });
+                                });
+                            }
+                        });
                     }
                     // The importer's own data: how it checked what it made, feature by feature.
                     if !shown.outline.is_empty() {
@@ -374,9 +394,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     // The plugin's own wording and codes, for a bug report, folded away.
                     if !shown.report.items.is_empty() {
                         ui_kit::section(ui, "import_report_details", tr("import_report.show_details"), false, |ui| {
-                            for (i, line) in detail_lines(&shown.report).iter().enumerate() {
-                                ui.push_id(("detail", i), |ui| ui_kit::text(ui, line, ui_kit::Text::Note("import_report_detail")));
-                            }
+                            let columns = [ui_kit::Column::new(tr("report.description"), 1.0).flex()];
+                            ui_kit::report_list(ui, "import_report_details", ui_kit::table_row_height() * 8.0, &columns, "", |ui, table| {
+                                for (i, line) in detail_lines(&shown.report).iter().enumerate() {
+                                    table.row(ui, &i.to_string(), false, |row| {
+                                        row.cell(|ui| {
+                                            let detail = ui_kit::text(ui, line, ui_kit::Text::Cell);
+                                            crate::scenario::publish_rect("dialog:note:import_report_detail", detail.rect);
+                                        });
+                                    });
+                                }
+                            });
                         });
                     }
                 });
@@ -517,6 +545,20 @@ mod tests {
             let nodes = outline(&odd, SHOWN);
             assert!(nodes.iter().all(|n| n.label.chars().count() <= MAX_TEXT + 1 && n.value.chars().count() <= MAX_TEXT + 1));
         }
+    }
+
+    #[test]
+    fn import_report_uses_tables_for_losses_and_importer_outline() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        let reply = serde_json::json!({"name":"Bracket","plugin":"Sample","loss_report":{"summary":"One feature left out","items":[item("dropped","Features without editable history","feature","not mapped","")],"details":details()}});
+        offer(&mut h.app, &reply);
+        h.frames(5);
+        assert!(crate::scenario::rect_of("dialog:column:import_report_items:Type").is_some());
+        assert!(crate::scenario::rect_of("dialog:column:import_report_outline:Name").is_some());
+        assert!(crate::scenario::rect_of("dialog:table:import_report_outline:group:root:0").is_some());
+        assert!(report_text(h.app.import_report.as_ref().unwrap()).contains("Features without editable history"));
     }
 
     #[test]

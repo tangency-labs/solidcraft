@@ -3,6 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::drawing_check::Finding;
 use super::drawing_scene::{
     SheetAnnotationFailure, SheetSceneBalloon, SheetSceneDimension, SheetSceneFill, SheetSceneNote, SheetSceneSketch, SheetSceneTable, SheetSceneView,
 };
@@ -220,6 +221,10 @@ pub struct ExportResult {
     /// Centre annotations omitted and why, as `drawing.scene` reports them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotation_failures: Vec<SheetAnnotationFailure>,
+    /// What lies outside the sheets written, as `drawing.check` lists it (`outside_sheet`): the
+    /// file is written all the same. In page order, then by the record each names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside_sheet: Vec<Finding>,
     /// Each balloon of a view on the sheet, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub balloons: Vec<SheetSceneBalloon>,

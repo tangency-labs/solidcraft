@@ -176,6 +176,14 @@ const KICAD_IMPORT: &[OptionSpec] = &[
         kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modeled")], default: 1 },
     },
     OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
+    OptionSpec {
+        param: "holes",
+        label: "Holes",
+        kind: OptionKind::Choice {
+            choices: &[("none", "None"), ("mounting", "Mounting holes"), ("pads", "Mounting and pad holes"), ("all", "All, with vias")],
+            default: 1,
+        },
+    },
     OptionSpec { param: "color", label: "Board color", kind: OptionKind::Color { default: [13, 84, 46] } },
     OptionSpec {
         param: "thickness",

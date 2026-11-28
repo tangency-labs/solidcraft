@@ -1117,6 +1117,7 @@ impl FilletCorner {
                         skip_two_pnts_intersection: false,
                         ref_point: None,
                         closed_by_start_direction: false,
+                        heading_side_only: false,
                     },
                 )?;
 

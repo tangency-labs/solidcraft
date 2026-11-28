@@ -986,6 +986,12 @@ fn an_animation_has_the_frames_and_the_size_asked_for() {
     let bytes = std::fs::read(&gif).unwrap();
     assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64));
     assert_eq!(gif_frames(&bytes), (64, 40, 6));
+    // 24 and 30 aren't a whole number of hundredths a frame: they play at 24 and 30, not 25 and 33.
+    for fps in [24.0, 30.0] {
+        let p = json!({"study": "Push", "path": gif.to_string_lossy(), "samples": 6, "width": 16, "height": 16, "fps": fps});
+        let r = super::animation::export_with(&s, &p, Some(&cpu)).unwrap();
+        assert_eq!(r["fps"], fps, "{r}");
+    }
     // Without samples: the study's steps + 1.
     let r =
         super::animation::export_with(&s, &json!({"study": "Push", "path": gif.to_string_lossy(), "width": 32, "height": 32}), Some(&cpu)).unwrap();

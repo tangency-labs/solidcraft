@@ -2,7 +2,7 @@
 //! orthographic projection, screen ↔ world mapping and picking rays. The description of a picture
 //! ([`Scene`]) and a small CPU rasterizer (z-buffer, shaded triangles, depth-tested lines) for
 //! pictures without a GPU. Picking drawn lines: the drawn point nearest the pointer
-//! ([`nearest_drawn_point`]). The opaque and clear-coat shading models and the section hatch. The
+//! ([`nearest_drawn_point`]). The opaque, clear-coat and metallic-flake shading models and the section hatch. The
 //! grid's spacing and reach for a view ([`grid`]). It
 //! draws solidcore-tess's display meshes and knows no app's geometry crate, GPU API or UI
 //! toolkit: the GPU pipelines are `solidcraft-viewport-gpu`, the egui glue
@@ -13,6 +13,8 @@
 mod analysis;
 mod camera;
 pub mod clear_coat;
+pub mod flakes;
+mod footprint;
 pub mod grid;
 pub mod hatch;
 mod pick;
@@ -26,12 +28,19 @@ pub use analysis::AnalysisMode;
 pub use analysis::SceneAnalysis;
 pub use camera::Camera;
 pub use camera::CameraAnim;
+pub use camera::FrameFace;
 pub use camera::Mat4;
 pub use camera::Quat;
 pub use camera::StandardView;
 pub use camera::UpAxis;
 pub use camera::ViewAngles;
+pub use camera::ViewFrame;
+pub use camera::dial_turn;
 pub use camera::ease_in_out;
+pub use camera::frame_or_none;
+pub use camera::nearest_axis;
+pub use footprint::Footprint;
+pub use footprint::footprint;
 pub use pick::DrawnPoint;
 pub use pick::nearest_drawn_point;
 pub use raster::Canvas;

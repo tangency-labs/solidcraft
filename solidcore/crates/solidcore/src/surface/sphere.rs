@@ -108,7 +108,8 @@
 //!   (`topology::face::p3`). No input-driven recursion.
 //! - **Found spheres keep the tested NURB** (WR-493, the SolidCraft fork's
 //!   tangency-labs/smlib@7ea6a96): the sphere `IsNurbSurfaceSphere` finds keeps the
-//!   tested NURB (`SetFromGwNurb`), its sweep interval the polar curve's.
+//!   tested NURB (`SetFromGwNurb`), its sweep and generator intervals the polar and
+//!   generator curves'.
 //!   Upstream keeps the NURB made from the fitted circles. The fork also widens the
 //!   half-meridian test to `180 + 360 * SM_EFF_ZERO` degrees; that is not taken, since
 //!   the angles' rounding (far spheres, below) already covers it and no more.
@@ -144,8 +145,9 @@ use crate::geom::tol::{are_same, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{asin, sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
-    max2, min2, rad_to_deg, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
+    max2, min2, rad_to_deg, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
@@ -820,10 +822,10 @@ impl Sphere {
         }
 
         // evaluate expensive trigonometric functions
-        let cos_u = (uv.x * PI / 180.0).cos();
-        let sin_u = (uv.x * PI / 180.0).sin();
-        let cos_v = (uv.y * PI / 180.0).cos();
-        let sin_v = (uv.y * PI / 180.0).sin();
+        let cos_u = det::cos(uv.x * PI / 180.0);
+        let sin_u = det::sin(uv.x * PI / 180.0);
+        let cos_v = det::cos(uv.y * PI / 180.0);
+        let sin_v = det::sin(uv.y * PI / 180.0);
 
         let n = (hu + 1) * (hv + 1);
         let d = d
@@ -1620,7 +1622,7 @@ impl Sphere {
             let (center, x, y) = if ii == 0 || ii == 1 {
                 // min/max V boundaries - Varying U isoParam Circles
                 (
-                    sphere_origin + self.radius * sphere_z_axis * ang_rad.sin(),
+                    sphere_origin + self.radius * sphere_z_axis * det::sin(ang_rad),
                     sphere_x_axis,
                     sphere_y_axis,
                 )
@@ -1628,7 +1630,7 @@ impl Sphere {
                 // min/max U boundries - Varying V isoParam Circles
                 (
                     sphere_origin,
-                    ang_rad.cos() * sphere_x_axis + ang_rad.sin() * sphere_y_axis,
+                    det::cos(ang_rad) * sphere_x_axis + det::sin(ang_rad) * sphere_y_axis,
                     sphere_z_axis,
                 )
             };
@@ -1661,7 +1663,7 @@ impl Sphere {
                 let cir_vec = p - circle_center;
                 let d_x = cir_vec.dot(circle_x_axis);
                 let d_y = cir_vec.dot(circle_y_axis);
-                let angle_deg = d_y.atan2(d_x) * 180.0 / PI;
+                let angle_deg = det::atan2(d_y, d_x) * 180.0 / PI;
 
                 // accumulate angles
                 ang_degs.push(angle_deg);
@@ -1737,7 +1739,8 @@ impl Sphere {
                     let mut ang = at(&ang_degs, 0) + 42.0; // random...
                     ang = deg2rad(ang);
                     test_point = circle_center
-                        + circle_radius * (ang.cos() * circle_x_axis + ang.sin() * circle_y_axis);
+                        + circle_radius
+                            * (det::cos(ang) * circle_x_axis + det::sin(ang) * circle_y_axis);
                 }
 
                 // Test the point. Tol loosened [B661]
@@ -1795,7 +1798,8 @@ impl Sphere {
             let mid_angle_rad = (start_angle + arc_angle_deg / 2.0) * PI / 180.0;
             let mid_arc_point = circle_center
                 + circle_radius
-                    * (mid_angle_rad.cos() * circle_x_axis + mid_angle_rad.sin() * circle_y_axis);
+                    * (det::cos(mid_angle_rad) * circle_x_axis
+                        + det::sin(mid_angle_rad) * circle_y_axis);
 
             // when circle arcLength is shorter than tolerance
             if deg2rad(arc_angle_deg) * circle_radius < tol_3d {
@@ -1858,7 +1862,8 @@ impl Sphere {
             let arc_ang_rad = at(&ang_degs, ii) * PI / 180.0;
             let arc_point = circle_center
                 + circle_radius
-                    * (arc_ang_rad.cos() * circle_x_axis + arc_ang_rad.sin() * circle_y_axis);
+                    * (det::cos(arc_ang_rad) * circle_x_axis
+                        + det::sin(arc_ang_rad) * circle_y_axis);
 
             // Actually, check all circle-circle intersections.  There will be some
             // outside of the surface patch.
@@ -2414,13 +2419,11 @@ impl Sphere {
         sphere.base.base.nurb_is_borrowed = false;
         ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
         // (not in the fork) the rebuild takes the sweep interval from one iso circle and
-        // the polar curve from another; they differ beyond the check's 1e-12 on a small
-        // sphere. The interval is the polar curve's.
-        if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
-            let d = sphere.base.anal_uv_domain;
-            sphere.base.anal_uv_domain =
-                Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
-        }
+        // the polar curve from another, and the V interval from 3D pole angles while the
+        // generator circle's polar setup reads its endpoints in the meridian plane; they
+        // can differ beyond the check's 1e-12 on a small or far sphere. Keep the STEP
+        // domain aligned with the finalized polar and generator curves.
+        sphere.sync_domain_with_converters();
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
         Ok(Some(sphere))
@@ -2632,7 +2635,37 @@ impl Sphere {
 
         // Set PolarConverter from Nurb midPoint rotation isoParamCurve (status ignored)
         ignore_status(self.rebuild_polar_converter(k))?;
+        self.sync_domain_with_converters();
         Ok(())
+    }
+
+    /// Aligns the sphere's STEP UV domain with the intervals finalized by its polar
+    /// converter (U) and generator circle (V) against the retained NURB, so
+    /// `SmSurfOfRevolution::Test #2/#7` and `SmSphere::Test #1` agree with them.
+    fn sync_domain_with_converters(&mut self) {
+        let d = self.base.anal_uv_domain;
+        let mut u_ivl = d.u_interval();
+        let mut v_ivl = d.v_interval();
+
+        if let Some(ivl) = self.base.polar_curve().map(Ellipse::step_interval) {
+            if ivl.length() > EFF_ZERO && ivl.length() <= 360.0 + EFF_ZERO_DEG {
+                u_ivl = ivl;
+            }
+        }
+        if let Some(CurveKind::Ellipse(circle)) = self.base.gen_curve.as_ref().map(Curve::kind) {
+            let ivl = circle.step_interval();
+            if circle.polar_converter().is_polar_conversion_possible()
+                && ivl.length() > EFF_ZERO
+                && ivl.length() <= 180.0 + EFF_ZERO_DEG
+                && ivl.min() >= -90.0 - EFF_ZERO_DEG
+                && ivl.max() <= 90.0 + EFF_ZERO_DEG
+            {
+                v_ivl = ivl;
+            }
+        }
+
+        self.base.anal_uv_domain =
+            Extent2d::from_bounds(u_ivl.min(), v_ivl.min(), u_ivl.max(), v_ivl.max());
     }
 
     // ---- closed directions ----------------------------------------------------------
@@ -2796,7 +2829,7 @@ impl Sphere {
         let d_z = vec.dot(z_axis);
 
         // Get Spherical Coordinates (degrees)
-        let d_u = d_y.atan2(d_x) * 180.0 / PI; //  dU range:[-180 to 180]
+        let d_u = det::atan2(d_y, d_x) * 180.0 / PI; //  dU range:[-180 to 180]
         let d_v = asin(d_z / self.radius) * 180.0 / PI; //  dV range:[-90 to 90]
 
         // set output
@@ -3290,7 +3323,7 @@ mod tests {
         fn quarter(u: f64) -> f64 {
             let w = 0.5_f64.sqrt();
             let b = [(1.0 - u) * (1.0 - u), 2.0 * u * (1.0 - u) * w, u * u];
-            (b[1] + b[2]).atan2(b[0] + b[1])
+            det::atan2(b[1] + b[2], b[0] + b[1])
         }
         fn rational(t: f64) -> f64 {
             if t <= 0.5 {
@@ -3327,7 +3360,7 @@ mod tests {
             ("uniform", uniform as fn(f64) -> f64, 6.02),
             ("rational", rational, 5.98),
         ] {
-            let at = |a: f64| c + Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+            let at = |a: f64| c + Vec3::new(r * det::cos(a), r * det::sin(a), 0.0);
             let pts = params.map(|t| at(angle(t)));
             let (frame, base) = end(&pts);
             // the gradient of the end angle in each point, by central differences
@@ -3655,6 +3688,55 @@ mod tests {
                 .expect("a sphere");
             assert!(same_nurb(found.base().base(), &nurbs));
             assert!((found.radius() - radius.abs()).abs() < 1e-9 * radius.abs());
+        }
+    }
+
+    /// A small or far sphere recognized from its retained NURB keeps its STEP U and V
+    /// intervals aligned with its polar converter and generator circle, passing
+    /// `Surface::assert_valid` (including `SmSurfOfRevolution::Test #2/#7` and
+    /// `SmSphere::Test #1`).
+    #[test]
+    fn far_small_sphere_keeps_matching_generator_and_polar_domains() {
+        use crate::geom::assert_array::{AssertArray, ObjectKey};
+
+        let k = Kernel::default();
+        for (center, radius) in [
+            (Point3::new(0.0, 0.0, 6000.0), 0.1),
+            (Point3::new(0.0, 0.0, 6000.0), 10.0),
+            (Point3::new(0.0, 0.0, 6000.0), 2500.0),
+            (Point3::new(1.0e5, 1.0e5, 1.0e5 + 10.0), 2.5),
+        ] {
+            let placement =
+                Axis2Placement::new(center, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+            let s = Sphere::create_canonical(&k, &placement, radius).expect("sphere");
+            let nurbs = BSplineSurface::from_gw_nurb(s.base().base().gw_nurb().unwrap());
+            let found = Sphere::is_nurb_surface_sphere(&k, &nurbs, 1.0)
+                .unwrap()
+                .expect("a sphere");
+            let step = found.step_uv_domain();
+            let polar_ivl = found
+                .base()
+                .polar_curve()
+                .expect("polar curve")
+                .step_interval();
+            let Some(CurveKind::Ellipse(gen_circle)) = found.base().gen_curve().map(Curve::kind)
+            else {
+                panic!("generator circle");
+            };
+            let gen_ivl = gen_circle.step_interval();
+            assert_eq!(step.u_interval(), polar_ivl, "{center:?} r={radius}");
+            assert_eq!(step.v_interval(), gen_ivl, "{center:?} r={radius}");
+
+            let surface = Surface::from(found);
+            let mut reports = AssertArray::new();
+            let valid = surface
+                .assert_valid(&k, Some(&mut reports), 2, ObjectKey(1))
+                .unwrap();
+            let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+            assert!(
+                valid && failed.is_empty(),
+                "{center:?} r={radius}: {failed:?}"
+            );
         }
     }
 }

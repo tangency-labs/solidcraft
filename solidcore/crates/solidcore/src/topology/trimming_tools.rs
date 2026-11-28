@@ -105,6 +105,7 @@
 
 pub mod curve_loops;
 
+use crate::math::det;
 use std::borrow::Cow;
 
 use crate::curve::curve::p2::CurveKind;
@@ -1636,7 +1637,7 @@ fn next_round_the_vertex(
     let mut best_bend = 0.0;
     for (ii, (ray, acc)) in rays.iter().zip(&accs).enumerate() {
         let r = *ray / ray.length();
-        let mut angle = normal.dot(back.cross(r)).atan2(back.dot(r));
+        let mut angle = det::atan2(normal.dot(back.cross(r)), back.dot(r));
         if angle <= 0.0 {
             angle += two_pi;
         }
@@ -2883,8 +2884,24 @@ pub fn is_iso_curve(k: &Kernel, curve: &Curve) -> Result<Option<(SurfParamType, 
 ///
 /// Those of [`is_iso_curve`] and the closure test.
 pub fn is_iso_curve_on_seam(k: &Kernel, surface: &Surface, curve: &Curve) -> Result<bool> {
+    Ok(iso_curve_seam(k, surface, curve)?.is_some())
+}
+
+/// Not upstream (#21421): the seam [`is_iso_curve_on_seam`] finds the UV curve on, as the
+/// constant direction and the exact bound of the surface's natural domain in it (the range's
+/// start when the curve's parameter is within a thousandth of the range of it, else its end);
+/// `None` when the curve is not an iso curve on a seam.
+///
+/// # Errors
+///
+/// Those of [`is_iso_curve`] and the closure test.
+pub fn iso_curve_seam(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+) -> Result<Option<(SurfParamType, f64)>> {
     let Some((side, param)) = is_iso_curve(k, curve)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let bounds = surface.natural_uv_domain_with_nurb(k)?;
     let closed = surface.is_closed(k, &bounds, side, None, false)?.0;
@@ -2895,8 +2912,16 @@ pub fn is_iso_curve_on_seam(k: &Kernel, surface: &Surface, curve: &Curve) -> Res
     };
     let range = Extent1d::from_raw(lo, hi);
     let tolerance = range.length() / 1000.0;
-    Ok(closed
-        && ((param - range.min()).abs() < tolerance || (param - range.max()).abs() < tolerance))
+    if !closed {
+        return Ok(None);
+    }
+    Ok(if (param - range.min()).abs() < tolerance {
+        Some((side, range.min()))
+    } else if (param - range.max()).abs() < tolerance {
+        Some((side, range.max()))
+    } else {
+        None
+    })
 }
 
 #[cfg(test)]

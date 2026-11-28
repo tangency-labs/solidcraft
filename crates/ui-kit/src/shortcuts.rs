@@ -45,7 +45,8 @@ pub fn shortcut_binding(ui: &mut Ui, chord: &str, unassigned: &str, editable: bo
     let mut x = rect.left();
     if chord.is_empty() {
         let galley = ui.painter().layout_no_wrap(unassigned.to_owned(), FontId::proportional(t.font_label), t.form_dim);
-        ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0), galley, t.form_dim);
+        let rise = egui::galley_cap_ink_rise(ui.painter(), &galley);
+        ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0 - rise), galley, t.form_dim);
     } else {
         for part in chord_parts(chord) {
             let width = ui.painter().layout_no_wrap(part.to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x + t.space_10;
@@ -66,6 +67,12 @@ pub fn shortcut_binding(ui: &mut Ui, chord: &str, unassigned: &str, editable: bo
     response
 }
 
+/// The shortcut pill at the end of a search field names the key that focuses it, as this platform
+/// names it: "Cmd F" on macOS, where the shortcut is Cmd+F, and "Ctrl F" elsewhere (#22641).
+fn pill_chord(mac: bool) -> String {
+    chord_label_for_platform("Ctrl+F", mac).replace('+', " ")
+}
+
 /// Native text editing with the same token frame and leading magnifier as command search. Its frame
 /// and clear button are published as `{prefix}:search:frame` and `{prefix}:search:clear`.
 pub fn preferences_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, prefix: &str) -> Response {
@@ -74,7 +81,11 @@ pub fn preferences_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, h
     let (r, _) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), height), Sense::hover());
     let search = SearchBox::frame(ui, r, id, t.control_radius, None, prefix);
     let show_clear = !value.is_empty();
-    let clear_side = if show_clear { height } else { super::CommandSearch::key(ui, r.right_center() - vec2(t.space_6, 0.0), "Ctrl F") + t.space_12 };
+    let clear_side = if show_clear {
+        height
+    } else {
+        super::CommandSearch::key(ui, r.right_center() - vec2(t.space_6, 0.0), &pill_chord(cfg!(target_os = "macos"))) + t.space_12
+    };
     let response = search.editor(ui, value, hint, usize::MAX, clear_side);
     if show_clear {
         let clear_rect = Rect::from_center_size(pos2(r.right() - height * 0.5, r.center().y), vec2(height, height));
@@ -183,4 +194,31 @@ pub fn chord_label_for_platform(key: &str, mac: bool) -> String {
         })
         .collect::<Vec<_>>()
         .join("+")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_field_pill_names_the_shortcut_as_the_platform_names_it() {
+        // #22641: the pill was a literal "Ctrl F" even on macOS, where the shortcut is Cmd+F.
+        assert_eq!(pill_chord(true), "Cmd F");
+        assert_eq!(pill_chord(false), "Ctrl F");
+    }
+
+    #[test]
+    fn an_empty_search_field_draws_the_pill_with_that_label() {
+        let ctx = crate::test_support::context();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 100.0))), ..Default::default() };
+        let mut value = String::new();
+        let output = crate::test_support::raw_frame(&ctx, input, |ui| {
+            preferences_search_field(ui, egui::Id::unique("prefs_search"), &mut value, "Search settings", "prefs");
+        });
+        let expected = pill_chord(cfg!(target_os = "macos"));
+        assert!(
+            output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == expected)),
+            "the field ends with a pill naming the shortcut: {expected}"
+        );
+    }
 }

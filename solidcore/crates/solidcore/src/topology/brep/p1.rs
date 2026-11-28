@@ -621,16 +621,26 @@ pub fn wire_edges(b: &Brep, attribute: Option<&AttributeFilter<'_>>) -> Result<V
 }
 
 /// `GetTopologicalEdges`: the edges `SmEdge::IsTopological` (default gain) accepts:
-/// those removable by merging their two faces. As upstream the coverage test may
-/// expand a face's surface in place.
+/// those removable by merging their two faces.
+///
+/// Not upstream (WR-792, #23077): the edges are tested on a trial copy of `b`
+/// ([`Brep::clone_for_trial_keeping_definitions`], the same ids), never on `b` itself.
+/// The test prepares a merge: it expands the covering face's surface in place and drops
+/// that face's UV trims, and only the merge sets the face's domain anew. Upstream tests on
+/// the B-rep, and a caller that keeps the edges it lists (a keep list) leaves each face it
+/// covered on the expanded surface under its old domain (a revolution's NURB
+/// re-parameterised, its trims off it). The copy takes the expansions instead, in the same
+/// edge order, so the list is upstream's.
 ///
 /// # Errors
 ///
-/// Those of [`edge::is_topological`].
-pub fn topological_edges(k: &Kernel, b: &mut Brep) -> Result<Vec<EdgeId>> {
+/// Those of [`edge::is_topological`] and of the trial copy (a trimmed surface cache in
+/// use: no caller asks from inside a solve).
+pub fn topological_edges(k: &Kernel, b: &Brep) -> Result<Vec<EdgeId>> {
+    let mut trial = b.clone_for_trial_keeping_definitions()?;
     let mut out = Vec::new();
-    for e in edges(b, None)? {
-        if edge::is_topological(k, b, e, 1.0)?.is_topological {
+    for e in edges(&trial, None)? {
+        if edge::is_topological(k, &mut trial, e, 1.0)?.is_topological {
             out.push(e);
         }
     }
@@ -2961,6 +2971,16 @@ pub(crate) fn uv_into_period(k: &Kernel, surface: &Surface, uv: &mut Curve) -> R
 /// # Errors
 /// Those of the copy.
 fn uv_hull(uv: &Curve) -> Result<Option<Vec<(Point3, f64)>>> {
+    uv_hull_over(uv, &uv.natural_interval())
+}
+
+/// [`uv_hull`] over `interval` alone: the points whose convex hull holds the UV curve `uv`
+/// over `interval`, each with the error bound of its coordinates (the control points of the
+/// piece over `interval`, [`Curve::piece_hull_points`]).
+///
+/// # Errors
+/// Those of the copy.
+pub(crate) fn uv_hull_over(uv: &Curve, interval: &Extent1d) -> Result<Option<Vec<(Point3, f64)>>> {
     let mut copy = uv.clone_for_evaluation()?;
     let made_3d = match copy.kind_mut() {
         CurveKind::BSpline(b) => b.convert_to_3d().is_ok(),
@@ -2971,9 +2991,7 @@ fn uv_hull(uv: &Curve) -> Result<Option<Vec<(Point3, f64)>>> {
         }
         _ => false,
     };
-    Ok(made_3d
-        .then(|| copy.piece_hull_points(&uv.natural_interval()))
-        .flatten())
+    Ok(made_3d.then(|| copy.piece_hull_points(interval)).flatten())
 }
 
 // ---- B-rep intersection (SmBrep::BrepIntersect) -----------------------------------------
@@ -3955,6 +3973,7 @@ mod tests {
     use super::*;
     use crate::error::SM_ERR_INVALID_INPUT;
     use crate::geom::a_object;
+    use crate::math::det;
     use crate::topology::Region;
 
     fn cross_body_face(k: &mut Kernel, surface: Surface) -> Brep {
@@ -4111,7 +4130,9 @@ mod tests {
                     assert!((p.z - 0.125).abs() <= 1e-9 * p.z.abs());
                     // The curve approximates the circle on the paraboloid to the
                     // requested 3D approximation tolerance, regardless of orientation.
-                    assert!(((p.x - 0.5).powi(2) + (p.y - 0.5).powi(2) - 0.125).abs() <= 1e-6);
+                    assert!(
+                        (det::powi(p.x - 0.5, 2) + det::powi(p.y - 0.5, 2) - 0.125).abs() <= 1e-6
+                    );
                     if !reverse {
                         for (actual, expected) in
                             [(p.x, expected.x), (p.y, expected.y), (p.z, expected.z)]

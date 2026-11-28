@@ -52,6 +52,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::xsect_tol3d;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, UNDEF_DOUBLE};
 
 /// Number of gap-size histogram buckets (`SM_HISTOGRAM_GAPSIZE_BUCKETCNT`).
@@ -67,7 +68,7 @@ pub fn gap_histogram_index(gap: f64) -> usize {
     if gap > 10.0 {
         10
     } else if gap > 1e-6 {
-        (gap.log10().floor() + 9.0) as usize
+        (det::log10(gap).floor() + 9.0) as usize
     } else if gap > 1e-8 {
         2
     } else {

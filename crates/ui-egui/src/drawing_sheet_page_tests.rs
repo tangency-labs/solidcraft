@@ -1235,6 +1235,106 @@ fn dimension_tool_escape_drops_picks_then_the_tool() {
     assert!(!crate::drawing_workspace::placing_dimension(&h.app));
 }
 
+/// A dimension's record without its id: two placed alike have the same one.
+fn record_of(read: &Value) -> Value {
+    let mut record = read["record"].clone();
+    record.as_object_mut().unwrap().remove("id");
+    record
+}
+
+/// Enter places the dimension the picks make where its preview is, as a click there does (#22661):
+/// the plate's bottom edge, then Enter with the pointer above the view, off every edge. It is the
+/// same dimension a click at that place adds, the picks are gone and the tool is still in hand.
+#[test]
+fn dimension_tool_enter_places_the_dimension_where_its_preview_is() {
+    use crate::drawing_workspace::dimension::picked_shapes;
+    let (mut h, _) = holed_plate_dimensioning();
+    let mut before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 125.0, 175.0);
+    h.step(&json!({"move": on_screen(140.0, 160.0)})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    let by_enter = added_dimension(&mut h, &before);
+    assert!(picked_shapes(&h.app).is_empty(), "the tool starts again");
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool is still in hand");
+    before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 125.0, 175.0);
+    click_paper(&mut h, 140.0, 160.0);
+    let by_click = added_dimension(&mut h, &before);
+    assert_eq!(record_of(&by_enter), record_of(&by_click), "Enter places what a click there places");
+}
+
+/// Where the engine won't place the dimension, Enter does what a click does: it adds nothing, keeps
+/// the pick and says why in the engine's words (#20181). The rod's outline, with the pointer inside
+/// the rod's length.
+#[test]
+fn dimension_tool_enter_where_it_cannot_place_adds_nothing_and_says_why() {
+    use crate::drawing_workspace::dimension::{picked_shapes, refusal};
+    let mut h = rod_dimensioning();
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 140.0, 183.0);
+    h.step(&json!({"move": on_screen(140.0, 190.0)})).unwrap();
+    h.frames(2);
+    assert!(refusal(&h.app).is_some(), "the panel already says why");
+    // The status bar is cleared first, so the reason below is the one Enter gives.
+    h.app.status = None;
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing is placed");
+    assert_eq!(picked_shapes(&h.app).len(), 1, "the pick stays");
+    let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+    assert!(status.contains("past one of them"), "{status}");
+    // The message log holds the reason once: `run` reports it, and nothing writes it again.
+    let logged: u32 = h.app.messages.iter().filter(|m| m.text.contains("past one of them")).map(|m| m.count).sum();
+    assert_eq!(logged, 1, "the reason is logged once");
+}
+
+/// Enter places nothing without a pick, and leaves a focused button its own Enter: the tool takes
+/// it only while a placeable preview shows and the keyboard is free.
+#[test]
+fn dimension_tool_enter_without_a_dimension_changes_nothing() {
+    let (mut h, _) = holed_plate_dimensioning();
+    let count = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    let before = count(&h);
+    h.step(&json!({"move": on_screen(140.0, 160.0)})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(count(&h), before, "no pick, nothing placed");
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool is still in hand");
+
+    click_paper(&mut h, 125.0, 175.0);
+    h.step(&json!({"move": on_screen(140.0, 160.0)})).unwrap();
+    h.frames(2);
+    // Give the tool's Cancel button the keyboard through egui's accessibility Focus request, the way
+    // a screen reader or Tab hands it over. Tab alone reached no button in this harness.
+    h.ctx.enable_accesskit();
+    h.frames(2);
+    let cancel = h.app.tr("ui.cancel").to_owned();
+    let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+    let node = tree
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == egui::accesskit::Role::Button && !n.is_disabled() && n.label() == Some(cancel.as_str()))
+        .map(|(id, _)| *id)
+        .expect("the tool shows its Cancel button");
+    h.app.synthetic.push(egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+        action: egui::accesskit::Action::Focus,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node: node,
+        data: None,
+    }));
+    h.frames(2);
+    let focused = h.ctx.memory(|m| m.focused());
+    // egui counts any focused widget as wanting the keyboard, so the check is that a button, not a text field, has it.
+    assert!(focused.is_some() && !h.ctx.text_edit_focused(), "Cancel has the keyboard, focused {focused:?}");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(count(&h), before, "the focused button takes Enter, not the tool");
+    assert!(!crate::drawing_workspace::placing_dimension(&h.app), "Enter on the focused Cancel closes the tool, as a click on it does");
+}
+
 /// Paper millimetres (`x`, `y`) of the A3 sheet on screen.
 fn on_screen(x: f64, y: f64) -> [f32; 2] {
     let paper = crate::scenario::rect_of("sheet:paper").unwrap();
@@ -2259,9 +2359,12 @@ fn marks_draw_each_item_of_the_scene() {
     assert!(marks.error.is_none(), "{:?}", marks.error);
     let lines: Vec<&Vec<Vec2>> = marks.marks.iter().filter_map(|m| if let Mark::Line { points, .. } = m { Some(points) } else { None }).collect();
     assert_eq!(lines.len(), 1 + 3 + 1, "the line, three dashes, the arc");
-    for dash in &lines[1..4] {
+    // Each 5 mm dash is drawn 0.35 mm shorter about its middle, so its round caps end it at 5 mm:
+    // from 0.175 + 10k to 4.825 + 10k.
+    for (k, dash) in lines[1..4].iter().enumerate() {
         let length: f64 = dash.windows(2).map(|w| w[0].dist(w[1])).sum();
-        assert!((length - 5.0).abs() < 1e-9, "{dash:?}");
+        let start = dash.first().map_or(f64::NAN, |p| p.x);
+        assert!((length - 4.65).abs() < 1e-9 && (start - (0.175 + 10.0 * k as f64)).abs() < 1e-9, "{dash:?}");
     }
     assert!(lines[4].iter().all(|p| (p.dist(Vec2::new(50.0, 50.0)) - 20.0).abs() <= 0.01 + 1e-9) && lines[4].len() > 20);
     let Some(Mark::Fill { triangles, .. }) = marks.marks.last() else { panic!("{:?}", marks.marks) };
@@ -2272,6 +2375,94 @@ fn marks_draw_each_item_of_the_scene() {
     bad.size_mm = Vec2::new(f64::NAN, 1.0);
     let marks = Marks::of(&bad, 8, 0.01);
     assert!(marks.marks.is_empty() && marks.error.is_some());
+}
+
+/// A closed line that turns back on itself is drawn within its miter limit, as the paper draws it
+/// (#21787). The bottom edge of an 80 mm disc seen 0.0001 rad off edge-on is a loop 80 mm long and
+/// 0.004 mm tall, drawn 0.5 mm wide and filled: egui's closed line joined its two ends by miter with
+/// no limit, spikes some 120 half widths long out past each end. Every vertex painted lies within
+/// a round join's reach of the loop.
+#[test]
+fn a_closed_line_that_turns_back_stays_within_its_miter_limit() {
+    let sliver: Vec<Vec2> =
+        (0..16).map(|i| f64::from(i) * std::f64::consts::TAU / 16.0).map(|t| Vec2::new(40.0 * t.cos(), 0.002 * t.sin())).collect();
+    let ring = Loop2::polygon(&sliver);
+    let stroke = Item::Stroke { path: ring.segs.clone(), closed: true, width_mm: 0.5, pattern: None };
+    let fill = Item::Fill { region: Region2 { outer: ring, holes: vec![] } };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![stroke, fill] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let shapes = painted(&egui::Context::default(), &marks, &PictureTextures::default());
+    let mut tess = egui::epaint::Tessellator::new(1.0, egui::epaint::TessellationOptions::default(), [1, 1], vec![]);
+    let mut mesh = egui::Mesh::default();
+    shapes.into_iter().for_each(|clipped| tess.tessellate_shape(clipped.shape, &mut mesh));
+    assert!(!mesh.vertices.is_empty());
+    // 10 points a millimetre: the loop spans x ±400 and y ±0.02; the line is 5 wide, drawn in runs
+    // cut at every turn past 30° with round ends, so it reaches at most a half width past a point
+    // (1 / cos 15° of it at a join), a feather's pixel more.
+    let reach = 2.5 / 15f32.to_radians().cos() + 1.0;
+    for v in &mesh.vertices {
+        assert!(v.pos.x.abs() <= 400.0 + reach && v.pos.y.abs() <= 0.02 + reach, "{:?} lies off the loop", v.pos);
+    }
+}
+
+/// A chain line whose dot is one line width long keeps its dots: under round caps the dot is a
+/// dash 0 long, drawn as a disc. 0.5 mm wide, 12, 1.5, 0.5, 1.5 is stroked 11.5, 2, 0, 2 from
+/// 15.25: along 31 mm, dashes from 0.25 and 15.75 and dots at 13.75 and 29.25.
+#[test]
+fn a_chain_line_keeps_its_dots_under_round_caps() {
+    let chain = Item::Stroke {
+        path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(31.0, 0.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: Some(Dashes { lengths_mm: vec![12.0, 1.5, 0.5, 1.5], phase_mm: 0.0 }),
+    };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![chain] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ends: Vec<(f64, f64)> = marks
+        .marks
+        .iter()
+        .filter_map(|m| if let Mark::Line { points, .. } = m { Some((points.first()?.x, points.last()?.x)) } else { None })
+        .collect();
+    let expected = [(0.25, 11.75), (13.75, 13.75), (15.75, 27.25), (29.25, 29.25)];
+    assert!(ends.len() == expected.len() && ends.iter().zip(expected).all(|(a, b)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9), "{ends:?}");
+}
+
+/// A line that starts exactly on a dot draws it, and none exactly at its end, as the writers do:
+/// 0.5 mm wide, 0.5, 1.5 from 0.25 is stroked 0, 2 from 0, so along 4 mm the dots are at 0 and 2.
+#[test]
+fn a_dotted_line_starts_on_its_dot() {
+    let dotted = Item::Stroke {
+        path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(4.0, 0.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: Some(Dashes { lengths_mm: vec![0.5, 1.5], phase_mm: 0.25 }),
+    };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![dotted] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ends: Vec<(f64, f64)> = marks
+        .marks
+        .iter()
+        .filter_map(|m| if let Mark::Line { points, .. } = m { Some((points.first()?.x, points.last()?.x)) } else { None })
+        .collect();
+    assert_eq!(ends, [(0.0, 0.0), (2.0, 2.0)]);
 }
 
 /// The plate's sheet draws its border, views, dimension and title block text: every text run's
@@ -2762,4 +2953,170 @@ fn dragging_a_detail_view_leaves_its_callout_in_place() {
     let moved = after - from;
     assert!((moved.x - by.x).abs() < 1.0 && (moved.y - by.y).abs() < 1.0, "the detail moved by {moved:?}, not {by:?}");
     assert_eq!(callout(&mut h), before, "the callout stays where it was");
+}
+
+/// One part with two bodies (#22107), as woodwork makes a cabinet's boards: Carcass, 100 x 50 x 20 mm
+/// from the origin, and Door, a 20 mm cube from (200, 0, 0). The front view at 1:1 is centred at
+/// (200, 150) on the A3 sheet: on paper the carcass spans x 90 to 190 and the door x 290 to 310, both
+/// y 140 to 160. Returns the view.
+fn carcass_and_door_sheet() -> (Harness, u64) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Carcass"})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [200, 0, 0], "body_name": "Door", "operation": "new"})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    let made = h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [200, 150]})).unwrap();
+    let view = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    (h, view)
+}
+
+/// The bodies view `view` leaves out one by one, as it draws.
+fn hidden_bodies(h: &Harness, view: u64) -> Option<Vec<solidcraft_engine::doc::drawing_view::HiddenBody>> {
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    drawing.resolve_view(view).unwrap().hide_bodies.value.map(|bodies| bodies.to_vec())
+}
+
+fn menu_labels(h: &Harness) -> Vec<String> {
+    crate::context_menu::describe(&h.app)["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item["label"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// A right-click on a model line of a view offers Hide in This View (#22107): it leaves the line's
+/// body out of that view in one undo step, and Undo draws it again. Inside a face, or off the view,
+/// there is no line, and no such row.
+#[test]
+fn right_click_on_a_line_hides_its_body_in_that_view() {
+    let (mut h, view) = carcass_and_door_sheet();
+    let door = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Door".into() };
+
+    // Inside the carcass's face: the view's menu, without the row.
+    h.step(&json!({"click": on_screen(140.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = menu_labels(&h);
+    assert_eq!(&rows[..3], ["Edit View", "Projected View", "Delete"], "{rows:?}");
+    h.call("ui.menu", json!({"close": true}));
+
+    // On the door's left edge.
+    h.step(&json!({"click": on_screen(290.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = menu_labels(&h);
+    assert_eq!(&rows[..4], ["Edit View", "Projected View", "Hide in This View", "Delete"], "{rows:?}");
+    let undo = h.app.session.undo.len();
+    crate::context_menu::pick(&mut h.app, "Hide in This View").unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, view), Some(vec![door.clone()]));
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+
+    // The door has gone and the view centres on what is left: the carcass now spans x 150 to 250, so
+    // the door's old place is off the view, and the carcass's left edge is a line of the redrawn view.
+    h.step(&json!({"click": on_screen(290.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(!menu_labels(&h).iter().any(|label| label == "Hide in This View"));
+    h.call("ui.menu", json!({"close": true}));
+    h.step(&json!({"click": on_screen(150.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(menu_labels(&h).iter().any(|label| label == "Hide in This View"), "the carcass's edge, where the sheet draws it now");
+    crate::context_menu::pick(&mut h.app, "Undo").unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, view), None, "Undo draws the door again");
+    h.step(&json!({"click": on_screen(290.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(menu_labels(&h).iter().any(|label| label == "Hide in This View"), "the door's line is back");
+    h.call("ui.menu", json!({"close": true}));
+
+    // `ui.menu` at a point opens the same menu on what is there.
+    let [x, y] = on_screen(290.0, 150.0);
+    h.call("ui.menu", json!({"x": x, "y": y}));
+    h.frames(4);
+    assert!(menu_labels(&h).iter().any(|label| label == "Hide in This View"), "{:?}", menu_labels(&h));
+    h.call("ui.menu", json!({"close": true}));
+}
+
+/// Edit View lists the bodies of a view's source with a tick each (#22107). A projected view shows
+/// its parent's choice as the parent's; ticking a body there and Apply draws it again in that view
+/// only, in one undo step, and the view's own list hides none. Unticking a body leaves it out on
+/// its own; with every body unticked Apply is off and the panel says why.
+#[test]
+fn edit_view_lists_the_bodies_and_a_tick_chooses_what_it_draws() {
+    let (mut h, view) = carcass_and_door_sheet();
+    let encode = solidcraft_engine::doc::ids::encode;
+    let door = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Door".into() };
+    h.app.run("drawing.view.edit", json!({"view": encode(view), "set": {"hide_bodies": [{"body": "Door"}]}})).unwrap();
+    let made = h.app.run("drawing.view.projected", json!({"parent": encode(view), "side": "above"})).unwrap();
+    let top = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, top), Some(vec![door.clone()]), "the projected view takes its parent's list");
+
+    crate::drawing_workspace::edit_object(&mut h.app, "view", top);
+    h.frames(4);
+    assert!(h.widget("Untick a body or a component to leave it out of this view.").is_some(), "the list shows");
+    assert!(h.widget("Carcass").is_some(), "with every body of the source, the drawn ones too");
+    assert!(h.widget("ⓘ From the parent view").is_some(), "and says the list is the parent's");
+    let tick = h.widget("Door").expect("the door has a row");
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    let undo = h.app.session.undo.len();
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, top), Some(Vec::new()), "the projected view's own list hides none");
+    assert_eq!(hidden_bodies(&h, view), Some(vec![door]), "its parent still leaves the door out");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+    assert!(h.widget("ⓘ From the parent view").is_none(), "the list is the view's own now");
+
+    // Unticking the carcass in the base view leaves it out on its own, the door already being out.
+    crate::drawing_workspace::edit_object(&mut h.app, "view", view);
+    h.frames(4);
+    let tick = h.widget("Carcass").expect("the carcass has a row");
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Tick at least one body.").is_some(), "with nothing ticked the panel says why");
+    let undo = h.app.session.undo.len();
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.undo.len(), undo, "and Apply is off");
+    let tick = h.widget("Door").unwrap();
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    settle(&mut h);
+    let carcass = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Carcass".into() };
+    assert_eq!(hidden_bodies(&h, view), Some(vec![carcass]), "the carcass is left out, the door drawn again");
+
+    // Shows: As shown in the design follows the Browser, its list still on top; All bodies leaves
+    // nothing out.
+    let shows = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().resolve_view(view).unwrap().shows.value;
+    let choose = |h: &mut Harness, option: &str| {
+        let row = crate::scenario::rect_of("dialog:widget:Shows").expect("Shows is drawn").center();
+        h.step(&json!({"click": [row.x, row.y]})).unwrap();
+        h.frames(3);
+        let at = solidcraft_ui_registry::handle_at(&format!("dialog:Shows:{option}")).expect(option);
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(3);
+    };
+    let apply = |h: &mut Harness| {
+        let at = h.widget("Apply").unwrap();
+        h.step(&json!({"click": at})).unwrap();
+        settle(h);
+    };
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::All);
+    choose(&mut h, "As shown in the design");
+    assert!(h.widget("Carcass").is_some(), "the list stays, on top of the Browser");
+    apply(&mut h);
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::Design);
+    assert_eq!(hidden_bodies(&h, view).map(|bodies| bodies.len()), Some(1), "its own list is kept");
+    choose(&mut h, "All bodies");
+    assert!(h.widget("Carcass").is_none(), "All bodies has no list");
+    apply(&mut h);
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::All);
+    assert_eq!(hidden_bodies(&h, view), Some(Vec::new()), "and leaves nothing out");
 }

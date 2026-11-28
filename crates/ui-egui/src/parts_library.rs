@@ -145,15 +145,15 @@ pub struct LibraryState {
     listed: Option<(PathBuf, f64)>,
     #[cfg(not(target_arch = "wasm32"))]
     listing: Option<std::sync::mpsc::Receiver<Listing>>,
-    thumbs: HashMap<String, Option<egui::TextureHandle>>,
+    thumbs: HashMap<String, Option<crate::ui_kit::PreviewTextures>>,
     queued: Vec<String>,
     /// The card grid drawn last frame, and the slide from the grid before it.
     grid: Option<Grid>,
     slide: Option<(Grid, f64)>,
     #[cfg(not(target_arch = "wasm32"))]
-    pictures: Option<std::sync::mpsc::Receiver<(String, Option<egui::ColorImage>)>>,
+    pictures: Option<std::sync::mpsc::Receiver<(String, Option<crate::ui_kit::PreviewImage>)>>,
     #[cfg(not(target_arch = "wasm32"))]
-    slow_pictures: Vec<std::sync::mpsc::Receiver<(String, Option<egui::ColorImage>)>>,
+    slow_pictures: Vec<std::sync::mpsc::Receiver<(String, Option<crate::ui_kit::PreviewImage>)>>,
 }
 
 /// Read a folder: its subfolders, then its designs and parts, by name (hidden files left out).
@@ -387,7 +387,7 @@ fn start_pictures(l: &mut LibraryState) {
 const SLOW_PICTURE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_pictures(keys: Vec<String>) -> Option<std::sync::mpsc::Receiver<(String, Option<egui::ColorImage>)>> {
+fn spawn_pictures(keys: Vec<String>) -> Option<std::sync::mpsc::Receiver<(String, Option<crate::ui_kit::PreviewImage>)>> {
     let (tx, rx) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new().name("library pictures".into()).spawn(move || {
         for key in keys {
@@ -400,9 +400,9 @@ fn spawn_pictures(keys: Vec<String>) -> Option<std::sync::mpsc::Receiver<(String
     spawned.is_ok().then_some(rx)
 }
 
-fn thumb(l: &mut LibraryState, key: &str) -> Option<egui::TextureHandle> {
+fn thumb(l: &mut LibraryState, key: &str) -> Option<crate::ui_kit::PreviewArt> {
     match l.thumbs.get(key) {
-        Some(t) => t.clone(),
+        Some(t) => t.as_ref().map(crate::ui_kit::PreviewTextures::art),
         None => {
             if !l.queued.iter().any(|k| k == key) {
                 l.queued.push(key.to_string());
@@ -929,7 +929,7 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
                             PartFace::Folder { count: &parts }
                         } else {
                             let key = e.path.to_string_lossy().to_string();
-                            PartFace::Part { picture: thumb(&mut app.parts_library, &key).map(|tex| tex.id()), badge }
+                            PartFace::Part { picture: thumb(&mut app.parts_library, &key), badge }
                         };
                         let dragging = dragging.as_ref() == Some(&e.path);
                         let mut card = ui.new_child(egui::UiBuilder::new().max_rect(place).id_salt(&e.path));
@@ -970,21 +970,18 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
                 if r.double_clicked() {
                     acts.open = Some(e.path.clone());
                 }
-                crate::ui_kit::Menu::context(&r, |ui| {
-                    let insert = if e.kind == Kind::Design { tr("parts_library.insert") } else { tr("parts_library.import") };
-                    let i = crate::ui_kit::MenuItem::new("library:menu_insert", insert, "").show(ui);
-                    crate::scenario::publish_handle("library:menu_insert", i.rect.center());
-                    if i.clicked() {
-                        acts.insert = Some(e.path.clone());
-                        ui.close();
+                let insert = if e.kind == Kind::Design { tr("parts_library.insert") } else { tr("parts_library.import") };
+                let mut insert_item = crate::ui_kit::Item::action("library:menu_insert", insert, "");
+                insert_item.aliases.push("library:menu_insert".into());
+                let mut open_item = crate::ui_kit::Item::action("library:menu_open", tr("parts_library.open"), "");
+                open_item.aliases.push("library:menu_open".into());
+                if let Some(picked) = crate::ui_kit::Menu::context_items(&r, &[insert_item, open_item]) {
+                    match picked.id.as_str() {
+                        "library:menu_insert" => acts.insert = Some(e.path.clone()),
+                        "library:menu_open" => acts.open = Some(e.path.clone()),
+                        _ => {}
                     }
-                    let o = crate::ui_kit::MenuItem::new("library:menu_open", tr("parts_library.open"), "").show(ui);
-                    crate::scenario::publish_handle("library:menu_open", o.rect.center());
-                    if o.clicked() {
-                        acts.open = Some(e.path.clone());
-                        ui.close();
-                    }
-                });
+                }
             }
         }
     }

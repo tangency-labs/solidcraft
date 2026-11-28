@@ -13,7 +13,7 @@
 //! | [`PrimitiveFailure::Defect`]           | `SM_ERR` (or the site's, through `with_status`) |
 //! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`], [`PrimitiveFailure::FaceWithoutSurface`], [`PrimitiveFailure::EdgeWithoutFace`], [`PrimitiveFailure::SphereEdgeNotDropped`], [`PrimitiveFailure::ClosestPointNotFound`] | `SM_ERR_NULL_POINTER` |
 //! | [`PrimitiveFailure::Failed`]           | `SM_ERR`                      |
-//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`], [`PrimitiveFailure::SheetHasNoFace`], [`PrimitiveFailure::CircleNotMade`], [`PrimitiveFailure::CylinderDomainNotSet`], [`PrimitiveFailure::ConeSurfaceNotMade`], [`PrimitiveFailure::AnalyticSweepRefused`], [`PrimitiveFailure::SweptSurfaceNotMade`], [`PrimitiveFailure::SweptFaceNotMade`], [`PrimitiveFailure::NoProfiles`], [`PrimitiveFailure::SectionNotFinite`], [`PrimitiveFailure::SectionLoopNoInterval`], [`PrimitiveFailure::SectionLayersDiffer`], [`PrimitiveFailure::OffsetMapMissing`], [`PrimitiveFailure::OffsetMapIndexOutOfRange`], [`PrimitiveFailure::OffsetFacesMissing`], [`PrimitiveFailure::RuledSidesTooShort`], [`PrimitiveFailure::ProfileSlotEmpty`], [`PrimitiveFailure::ProfileMakesNoWire`], [`PrimitiveFailure::CappedSweepNoRepetition`], [`PrimitiveFailure::CappedRevolutionRepeats`] | `SM_ERR` |
+//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`], [`PrimitiveFailure::SheetHasNoFace`], [`PrimitiveFailure::CircleNotMade`], [`PrimitiveFailure::CylinderDomainNotSet`], [`PrimitiveFailure::ConeSurfaceNotMade`], [`PrimitiveFailure::AnalyticSweepRefused`], [`PrimitiveFailure::SweptSurfaceNotMade`], [`PrimitiveFailure::SweptFaceNotMade`], [`PrimitiveFailure::NoProfiles`], [`PrimitiveFailure::SectionNotFinite`], [`PrimitiveFailure::SectionLoopNoInterval`], [`PrimitiveFailure::SectionLayersDiffer`], [`PrimitiveFailure::OffsetMapMissing`], [`PrimitiveFailure::OffsetMapIndexOutOfRange`], [`PrimitiveFailure::OffsetFacesMissing`], [`PrimitiveFailure::RuledSidesTooShort`], [`PrimitiveFailure::ProfileSlotEmpty`], [`PrimitiveFailure::ProfileMakesNoWire`], [`PrimitiveFailure::CappedSweepNoRepetition`], [`PrimitiveFailure::CappedRevolutionRepeats`], [`PrimitiveFailure::AxisNormalToProfile`] | `SM_ERR` |
 //! | [`PrimitiveFailure::HelixDeviates`]    | `SM_ERR_NOT_WITHIN_TOLERANCE` |
 //! | [`PrimitiveFailure::Missing`]          | `SM_ERR_NULL_POINTER`         |
 //! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
@@ -42,9 +42,15 @@ pub enum PrimitiveFailure {
     /// The caller's curve cannot be revolved about the axis into one analytic face.
     /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
     AnalyticSweepRefused(AnalyticSweepRefusal),
-    /// A revolution's axis runs inside the face it would turn, so the revolved solid
-    /// would cross itself.
+    /// A revolution's axis runs inside the face it would turn, or, for a capped partial
+    /// revolution, crosses the face's plane inside the face (not upstream, #21671), so
+    /// the revolved solid would cross itself.
     AxisInsideFace,
+    /// A capped partial revolution's axis is square to the plane of the face it would
+    /// turn, so the turn keeps the face within its tolerance of that plane: both caps lie
+    /// in the plane and the body between them encloses no volume (not upstream, #22036).
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    AxisNormalToProfile,
     /// The caller asked for a capped partial revolution repeated other than once.
     /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
     CappedRevolutionRepeats {
@@ -364,6 +370,7 @@ impl PrimitiveFailure {
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::AnalyticSweepRefused(_)
+            | Self::AxisNormalToProfile
             | Self::CappedRevolutionRepeats { .. }
             | Self::CappedSweepNoRepetition
             | Self::CircleNotMade
@@ -434,6 +441,7 @@ impl PrimitiveFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::AnalyticSweepRefused(_)
+            | Self::AxisNormalToProfile
             | Self::CappedRevolutionRepeats { .. }
             | Self::CappedSweepNoRepetition
             | Self::ConeHasNoRadius { .. }
@@ -487,6 +495,10 @@ impl core::fmt::Display for PrimitiveFailure {
             Self::AxisInsideFace => {
                 f.write_str("the revolution axis runs inside the face it would turn")
             }
+            Self::AxisNormalToProfile => f.write_str(
+                "the revolution axis is square to the profile's plane, so the turn keeps \
+                 the profile in that plane and encloses no volume",
+            ),
             Self::CappedRevolutionRepeats { repetitions } => write!(
                 f,
                 "a capped revolution repeats once, not {repetitions} times"
@@ -1165,6 +1177,13 @@ mod tests {
                 SM_ERR,
                 K::InvalidInput,
                 "a capped revolution repeats once, not 2 times",
+            ),
+            (
+                PrimitiveFailure::AxisNormalToProfile,
+                SM_ERR,
+                K::InvalidInput,
+                "the revolution axis is square to the profile's plane, so the turn keeps the \
+                 profile in that plane and encloses no volume",
             ),
             (
                 PrimitiveFailure::SweptFaceNotMade,

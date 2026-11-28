@@ -1025,6 +1025,19 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
                 arg.insert("x".into(), xref(x));
             }
         }
+        Snap::BetweenFaces { a, b, snap } => {
+            arg.insert("faces".into(), json!([world(a.pick), world(b.pick)]));
+            if let Some(inner) = snap {
+                let inner_origin = solidcraft_doc::joints::JointOrigin::new(origin.occurrence, inner.as_ref().clone());
+                let Some(mut inner_arg) = joint_origin_arg(&inner_origin, doc)? else {
+                    return Ok(None);
+                };
+                if let Some(m) = inner_arg.as_object_mut() {
+                    m.remove("occurrence");
+                }
+                arg.insert("snap".into(), inner_arg);
+            }
+        }
         _ => return Ok(None),
     }
     Ok(Some(Value::Object(arg)))

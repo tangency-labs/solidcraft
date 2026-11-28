@@ -138,6 +138,15 @@ fn report_progress(app: &mut SolveApp) {
             status(&id, "opened", "The report is open in the person's browser: they sign in there and click File ticket.", json!({ "url": url }));
             app.tickets.agent = None;
         }
+        Some(Outcome::AlreadySent(url)) => {
+            status(
+                &id,
+                "opened",
+                "The same report was sent in the last 30 minutes, so nothing new was sent: its page is offered to the person again.",
+                json!({ "url": url, "already_sent": true }),
+            );
+            app.tickets.agent = None;
+        }
         Some(Outcome::Queued(why)) => {
             status(
                 &id,

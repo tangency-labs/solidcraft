@@ -7,9 +7,8 @@
 //! ([`crate::heal::heal_data`]), but it finds degenerate edges by a sampled length against the
 //! context's approximation tolerance (so an edge shorter than its own, larger tolerance is not
 //! one), always keeps the start vertex, and leaves the neighbour edges' curves ending at the
-//! vertex it deletes. [`collapse_short_edge`] is the certified detector and edit meant to
-//! replace that step's detector; the healer is left as it is here (its goldens hold it at
-//! parity with upstream).
+//! vertex it deletes. The healer's step now decides with [`short_edge_bound`] and squeezes with
+//! [`collapse_short_edge`] (`HealData::fix_degen_edges`), each edge into its own midpoint.
 //!
 //! | Rust | Upstream |
 //! |------|----------|
@@ -590,7 +589,7 @@ fn planar_trim(c: &Curve, map: &(Point3, Vec3, Vec3, Point2)) -> Result<Option<C
 
 /// Makes the trims of edge `e`'s uses again from its curve, after its old ones are deleted:
 /// on a plane exactly ([`planar_trim`]), attached with its certified gap to the plane; on any
-/// other surface by SMLib's trim maker.
+/// other surface by SMLib's trim maker. A use on no face (a wire's) has no trim.
 fn remake_trims(k: &Kernel, b: &mut Brep, e: EdgeId, gaps: &[(FaceId, f64)]) -> Result<()> {
     for eu in edge::edgeuses(b, e, None, None)? {
         eu1::delete_uv_trim_curve(b, eu)?;
@@ -599,18 +598,15 @@ fn remake_trims(k: &Kernel, b: &mut Brep, e: EdgeId, gaps: &[(FaceId, f64)]) -> 
         if eu1::uv_trim_curve(b, eu)?.0.is_some() {
             continue;
         }
-        let face = eu1::face(b, eu)?;
-        let exact = match face {
-            Some(f) => {
-                let rec = b.face(f)?;
-                match rec.surface.as_ref() {
-                    Some(surface) => match plane_map(k, surface, &rec.uv_domain)? {
-                        Some(map) => planar_trim(curve_of(b, e)?, &map)?.map(|t| (f, t)),
-                        None => None,
-                    },
-                    None => None,
-                }
-            }
+        let Some(f) = eu1::face(b, eu)? else {
+            continue;
+        };
+        let rec = b.face(f)?;
+        let exact = match rec.surface.as_ref() {
+            Some(surface) => match plane_map(k, surface, &rec.uv_domain)? {
+                Some(map) => planar_trim(curve_of(b, e)?, &map)?.map(|t| (f, t)),
+                None => None,
+            },
             None => None,
         };
         match exact {

@@ -2169,14 +2169,28 @@ impl Brep {
     /// Deletes a face record (upstream `m_pFaceListHead->Remove` and `delete`): the
     /// face leaves the B-rep's face list; no other unlinking.
     pub fn remove_face_record(&mut self, id: FaceId) -> Result<Face> {
+        let face = self.remove_face_record_unlisted(id)?;
+        self.face_list.retain(|&x| x != id);
+        Ok(face)
+    }
+
+    /// Removes a face record and its geometry-owner entry without scanning `face_list`.
+    /// Callers must compact `face_list` afterwards via [`Self::retain_face_list`].
+    pub(crate) fn remove_face_record_unlisted(&mut self, id: FaceId) -> Result<Face> {
         let face = self
             .faces
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_face_record", id))
             .inspect(|_| self.removals.push(EntityRef::Face(id)))?;
-        self.face_list.retain(|&x| x != id);
         self.geometry_owner_keys.remove(&EntityRef::Face(id));
         Ok(face)
+    }
+
+    /// Drops every id in `removed` from the B-rep's face list in one linear pass.
+    pub(crate) fn retain_face_list(&mut self, removed: &std::collections::BTreeSet<FaceId>) {
+        if !removed.is_empty() {
+            self.face_list.retain(|x| !removed.contains(x));
+        }
     }
 
     /// Deletes a loop record (upstream `delete`; no unlinking).
@@ -2190,26 +2204,52 @@ impl Brep {
     /// Deletes an edge record (upstream `m_pEdgeListHead->Remove` and `delete`): the
     /// edge leaves the B-rep's edge list; no other unlinking.
     pub fn remove_edge_record(&mut self, id: EdgeId) -> Result<Edge> {
+        let edge = self.remove_edge_record_unlisted(id)?;
+        self.edge_list.retain(|&x| x != id);
+        Ok(edge)
+    }
+
+    /// Removes an edge record and its geometry-owner entry without scanning `edge_list`.
+    /// Callers must compact `edge_list` afterwards via [`Self::retain_edge_list`].
+    pub(crate) fn remove_edge_record_unlisted(&mut self, id: EdgeId) -> Result<Edge> {
         let edge = self
             .edges
             .remove(id)
             .ok_or_else(|| not_found("topology::Brep::remove_edge_record", id))
             .inspect(|_| self.removals.push(EntityRef::Edge(id)))?;
-        self.edge_list.retain(|&x| x != id);
         self.geometry_owner_keys.remove(&EntityRef::Edge(id));
         Ok(edge)
+    }
+
+    /// Drops every id in `removed` from the B-rep's edge list in one linear pass.
+    pub(crate) fn retain_edge_list(&mut self, removed: &std::collections::BTreeSet<EdgeId>) {
+        if !removed.is_empty() {
+            self.edge_list.retain(|x| !removed.contains(x));
+        }
     }
 
     /// Deletes a vertex record (upstream `m_pVertexListHead->Remove` and `delete`):
     /// the vertex leaves the B-rep's vertex list; no other unlinking.
     pub fn remove_vertex_record(&mut self, id: VertexId) -> Result<Vertex> {
-        let vertex = self
-            .vertices
-            .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_vertex_record", id))
-            .inspect(|_| self.removals.push(EntityRef::Vertex(id)))?;
+        let vertex = self.remove_vertex_record_unlisted(id)?;
         self.vertex_list.retain(|&x| x != id);
         Ok(vertex)
+    }
+
+    /// Removes a vertex record without scanning `vertex_list`.
+    /// Callers must compact `vertex_list` afterwards via [`Self::retain_vertex_list`].
+    pub(crate) fn remove_vertex_record_unlisted(&mut self, id: VertexId) -> Result<Vertex> {
+        self.vertices
+            .remove(id)
+            .ok_or_else(|| not_found("topology::Brep::remove_vertex_record", id))
+            .inspect(|_| self.removals.push(EntityRef::Vertex(id)))
+    }
+
+    /// Drops every id in `removed` from the B-rep's vertex list in one linear pass.
+    pub(crate) fn retain_vertex_list(&mut self, removed: &std::collections::BTreeSet<VertexId>) {
+        if !removed.is_empty() {
+            self.vertex_list.retain(|x| !removed.contains(x));
+        }
     }
 
     /// Deletes a face use record (upstream `delete`; no unlinking).

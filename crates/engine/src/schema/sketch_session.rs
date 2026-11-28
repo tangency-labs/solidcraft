@@ -615,6 +615,108 @@ pub struct BrokenLink {
     pub why: String,
 }
 
+fn detach_point_required(schema: &mut Schema) {
+    require(schema, "curve");
+    require(schema, "point");
+}
+
+fn opt_offset_point<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Point2>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if v.is_null() {
+        return Ok(None);
+    }
+    params::vec2(&v).map(|p| Some(Point2(p))).ok_or_else(|| refuse("`offset` must be [dx, dy]"))
+}
+
+/// Detach a sketch curve from a shared or coincident point, placing its detached endpoint at an
+/// optional 2D offset so the curve can be dragged independently.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = detach_point_required)]
+pub struct DetachPointParams {
+    /// The curve to detach.
+    #[serde(default, deserialize_with = "curve_id", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub curve: Option<String>,
+    /// The shared or coincident point id (`p3`, `l1.end`, `origin`).
+    #[serde(default, deserialize_with = "point_id", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub point: Option<String>,
+    /// Optional 2D nudge [dx, dy] in sketch coordinates (mm) for the detached endpoint.
+    #[serde(default, deserialize_with = "opt_offset_point", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub offset: Option<Point2>,
+    /// Optional scalar distance (mm) to nudge the detached endpoint inward along the real curve
+    /// (capped at half the curve's exact arc length). Used when `offset` is omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance: Option<f64>,
+    /// Optional specific `Coincident` constraint id to delete when detaching a fallback point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+    /// The sketch. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// What `sketch.detach_point` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DetachPointResult {
+    /// The point id now on that end/centre of `curve`.
+    pub point: String,
+    /// Any fallback `Coincident` constraint ids removed while detaching.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detached_coincident: Vec<String>,
+    /// The sketch's solve; null when it was not solved again.
+    pub sketch: Option<SketchSolve>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Which connected curve-relation group `sketch.unlink_curve_group` removes a curve from.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveGroupKind {
+    Equal,
+    Parallel,
+}
+
+fn unlink_curve_group_required(schema: &mut Schema) {
+    require(schema, "curve");
+    require(schema, "kind");
+}
+
+/// Remove a curve from its connected `Equal` or `Parallel` constraint group while preserving
+/// constraints among any remaining curves in that group.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = unlink_curve_group_required)]
+pub struct UnlinkCurveGroupParams {
+    /// The curve to unlink from the group.
+    #[serde(default, deserialize_with = "curve_id", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub curve: Option<String>,
+    /// Which constraint group kind to unlink (`equal` or `parallel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CurveGroupKind>,
+    /// The sketch. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// What `sketch.unlink_curve_group` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct UnlinkCurveGroupResult {
+    /// Constraint ids removed from `curve`.
+    pub removed: Vec<String>,
+    /// Any bridging constraint ids added to keep the remaining curves connected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<String>,
+    /// The sketch's solve; null when it was not solved again.
+    pub sketch: Option<SketchSolve>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------------------------
 // sketch.move_point, sketch.move_points, sketch.drag, sketch.drag_end
 

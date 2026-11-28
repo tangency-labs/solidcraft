@@ -49,6 +49,15 @@ impl PluginState {
         }
         Ok(())
     }
+    /// Make one declared panel a registered kind, as a workspace layout needs it. Idempotent.
+    pub(crate) fn ensure_registered(&self, runtime: &mut PanelRuntime, plugin: &str, panel: &model::PanelSpec) -> PanelResult<InstanceId> {
+        let id = instance_for(plugin, panel)?;
+        let spec = registration_for(plugin, panel)?;
+        if runtime.layout().registry().get(&spec.kind).is_err() {
+            runtime.register_panel(spec, self.binding(&id.0))?;
+        }
+        Ok(id)
+    }
     fn binding(&self, id: &str) -> ControllerBinding {
         let state = self.clone();
         let id = id.to_owned();
@@ -57,19 +66,28 @@ impl PluginState {
             create: Box::new(move |_, _| Ok(Box::new(PluginController { id: id.clone(), state: state.clone() }))),
         }
     }
+    #[cfg(test)]
+    pub(super) fn queued_entries_for_test(&self) -> Vec<(String, model::EventKind, Option<String>)> {
+        self.0.borrow().actions.iter().map(|a| (a.entry.clone(), a.event.event, a.event.row.clone())).collect()
+    }
 }
 
 fn instance(panel: &PanelSnapshot) -> PanelResult<InstanceId> {
+    instance_for(&panel.plugin, &panel.panel)
+}
+
+/// The panel identity a plugin's declared panel has in every workspace layout.
+pub(crate) fn instance_for(plugin: &str, panel: &model::PanelSpec) -> PanelResult<InstanceId> {
     // Full SHA-256 in base32 keeps two 64-byte manifest ids inside the host's
     // 64-byte id bound. Delimit the two names, so their concatenations cannot alias.
     let mut hash = Sha256::new();
-    hash.update(panel.plugin.as_bytes());
+    hash.update(plugin.as_bytes());
     hash.update([0]);
-    hash.update(panel.panel.id.as_bytes());
+    hash.update(panel.id.as_bytes());
     hash.update([0]);
     // A changed zone contract gets a new legal placement; ordinary updates keep
     // the same identity and the user's workspace placement memory.
-    for zone in &panel.panel.zones {
+    for zone in &panel.zones {
         hash.update([match zone {
             model::DockZone::Left => 0,
             model::DockZone::Right => 1,
@@ -95,8 +113,11 @@ fn instance(panel: &PanelSnapshot) -> PanelResult<InstanceId> {
 }
 
 pub(super) fn registration(panel: &PanelSnapshot) -> PanelResult<PanelSpec> {
+    registration_for(&panel.plugin, &panel.panel)
+}
+
+pub(crate) fn registration_for(plugin: &str, panel: &model::PanelSpec) -> PanelResult<PanelSpec> {
     let allowed_zones: BTreeSet<_> = panel
-        .panel
         .zones
         .iter()
         .map(|zone| match zone {
@@ -107,7 +128,6 @@ pub(super) fn registration(panel: &PanelSnapshot) -> PanelResult<PanelSpec> {
         .chain([Zone::Floating])
         .collect();
     let default_zone = panel
-        .panel
         .zones
         .first()
         .map(|zone| match zone {
@@ -117,7 +137,7 @@ pub(super) fn registration(panel: &PanelSnapshot) -> PanelResult<PanelSpec> {
         })
         .ok_or_else(|| error(Rule::Placement, "plugin panel requires a dock zone"))?;
     Ok(PanelSpec {
-        kind: PanelKind::new(instance(panel)?.0)?,
+        kind: PanelKind::new(instance_for(plugin, panel)?.0)?,
         title_key: "ui.plugin_panel_badge".into(),
         icon: crate::plugin_images::GENERIC.into(),
         allowed_zones,
@@ -130,6 +150,7 @@ pub(super) fn registration(panel: &PanelSnapshot) -> PanelResult<PanelSpec> {
         features: PanelFeatures { popout: false, ..Default::default() },
         side_height_policy: SideHeightPolicy::Content,
         fixed_bottom_height: None,
+        bottom_always_open: false,
         header_actions: Vec::new(),
         text_heavy: true,
     })
@@ -173,6 +194,10 @@ pub(super) fn sync(app: &mut crate::SolveApp) -> PanelResult<()> {
     let panels = state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "plugin panel data borrowed"))?.panels.clone();
     let mut failure = None;
     for (id, panel) in panels {
+        // A plugin workspace shows exactly the panels it places; the others wait for a built-in workspace.
+        if !crate::plugin_workspaces::panel_allowed(app, &panel.plugin, &panel.panel.id) {
+            continue;
+        }
         let result = sync_visibility(app, &state, id, panel);
         if failure.is_none() {
             failure = result.err();
@@ -311,6 +336,7 @@ impl PanelController for PluginController {
             status: Some(solidcraft_ui_text::tr("ui.plugin_panel_badge").into()),
             attention: false,
             actions: Vec::new(),
+            menu_heading: None,
         }
     }
     fn prepare_lifecycle(&self, _event: &LifecycleEvent) -> PanelResult<()> {
@@ -470,7 +496,11 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
             });
             let row = selected.clone();
             ui.ctx().data_mut(|data| {
-                data.insert_temp(selected_id, selected.unwrap_or_default());
+                // Nothing selected stores nothing: an empty row id would have every press of the
+                // panel's buttons refused (#23395).
+                if let Some(selected) = selected {
+                    data.insert_temp(selected_id, selected);
+                }
                 data.insert_temp(panel_selection_id(panel), row);
             });
         }
@@ -527,7 +557,9 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
                                     if column_index == 0 && indent > 0 {
                                         ui.add_space(indent as f32 * TABLE_ROW_INDENT);
                                     }
-                                    ui.label(value_text(fields.get(&column.key), column.unit.as_deref(), units));
+                                    // Keep cell text non-selectable so clicks and double-clicks over
+                                    // cell labels reach `table.row`'s row interaction (#23396).
+                                    ui.add(egui::Label::new(value_text(fields.get(&column.key), column.unit.as_deref(), units)).selectable(false));
                                 });
                             }
                         });

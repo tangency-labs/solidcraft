@@ -1,10 +1,6 @@
 # A swappable kernel layer in SolidCraft
 
-Status: approved by the owner on 2026-11-24 for **phase 1 only**: the seam (§12). Phase 1 is the
-kernel interface in SolidCraft, the solidcore adapter behind it, and SolidCraft calling the kernel
-only through that interface. No second kernel is planned or being built. The later sections
-describe what the seam must allow, so that the interface is right the first time; they are not
-a plan to add another kernel.
+Status: approved by the owner in full. He approved phase 1, the seam (§12), on 2026-11-24, and on 2026-11-26 every later phase of §12 as well: "I asked for it". Phase 1 is the kernel interface in SolidCraft, the solidcore adapter behind it, and SolidCraft calling the kernel only through that interface. No second kernel is planned or being built. The later sections describe what the seam must allow, so that the interface is right the first time; they are not a plan to add another kernel.
 
 The owner's brief (2026-11-24):
 
@@ -60,6 +56,7 @@ Decisions the owner has made. The rest of this document follows them; the open q
 | 2026-11-24 | **We write and maintain the solidcore adapter, and only it.** It adapts `solidcore-ops`, solidcore's own API, and lives in SolidCraft. Anyone else writes and maintains their own kernel's adapter to our interface; it must pass our naming gate and an accuracy gate (tolerance equal to or tighter than solidcore's) and appear in the support matrix (§8). |
 | 2026-11-24 | **Run-time selection comes later.** In phase 1, build features alone decide which kernels are compiled in, and solidcore is the only one. The launch-time switch, per-operation routes and hot swap described below are later work. This supersedes the launch-time switch in the compile-time decision above. |
 | 2026-11-24 | **STEP stays in solidcore** (§2, §10). |
+| 2026-11-26 | **Build all of it.** Every later phase of §12 is approved too (steps 6 to 16: smlib onto `solidcore-ops`, the adapter split, sweep and loft in the trait, exchange, measurement, run-time selection and designs recording their kernel). Each step still follows §12's rules. Still no second kernel. |
 
 Contents:
 0. [Decisions](#decisions)
@@ -331,6 +328,8 @@ Why the record and not a new format:
   - corner balls (`BallPatch`);
   - blends by their definition plus a certified net (`Blend { definition }`; see
     `solidcore/docs/definitions-and-certificates.md`);
+  - from the stages of [screw-surface-record.md](screw-surface-record.md) on, screw-swept walls
+    (threads, coils) by their definition (`Sweep { definition }`);
   - pcurves, and tolerances per body, edge and vertex.
 - **Its validator gives one canonical order.** Persistent names follow history in that order.
   Once a backend's history is renumbered into it, which kernel made the body doesn't matter (§4).
@@ -358,6 +357,33 @@ becomes a change for every adapter, and that pull request updates them. An adapt
   record anyway, for names and display.
 - **Backends don't convert directly into each other.** They always go through the record, so N
   backends need N adapters, not N².
+
+### Exact bodies: crossing in memory
+
+A kernel that can't write the record's canonical order itself (its radial edge order, each
+round face's NURBS form, its measured tolerances, seams on closed surfaces) crosses as an
+**exact body** instead (`solidcraft_kernel_api::ExactBody`): vertices, edges on record curves,
+faces on record surfaces with their bounds, and shells, in the kernel's own order, each face
+and edge with the kernel's own id. Pcurves are optional per use. It is the input the record is
+assembled from, not a second body format: solidcore assembles it with the one stage that
+assembles every body read from a file (`solidcore/docs/import-assembly.md`), with no STEP on
+the way, and keeps the pcurves the kernel holds instead of fitting them again.
+
+- **Out of solidcore:** `Backend::import_exact` gets each operand as an exact body
+  (`solidcraft_kernel::exact::exact_body`) when the adapter says `takes_exact`: round faces as
+  the analytic surfaces they are, edges on conics bounded by their vertices, pcurves where they
+  are in the given surface's own (u, v).
+- **Into solidcore:** `Backend::export_exact` gives the result as an exact body with the
+  operation's history in its own indices (`ExactHistory`). The router assembles it
+  (`solidcraft_kernel::exact::body_from_exact`) and renumbers the history through the face and
+  edge each record item came from. Where an edge can't be followed (the record's edges were
+  rebuilt), the body comes back without history rather than with a guessed one.
+- **Measured** (`cargo run --release -p solidcraft-kernel --example exact_exchange`), a thread
+  as the thread feature makes it, out of solidcore and back: M20 × 2.5 (103 faces) 0.29 s by
+  STEP against 0.13 s exact; M30 × 1.5 over 64 turns (453 faces) 1.34 s against 0.59 s. What is
+  left is fitting the pcurves of helices on the core's cylinder, which has no closed form on the
+  cylinder's NURBS form, on either path.
+- The OCCT adapter still crosses by STEP; moving it onto exact bodies is its own change.
 
 ### What each backend loses
 
@@ -1101,7 +1127,7 @@ Rules for every step:
 
 The steps that move existing call sites don't change any function that runs.
 
-### Phase 1: the seam (approved, being built)
+### Phase 1: the seam (approved, built)
 
 1. **This document**, docs only.
 2. **`crates/kernel-api`.** The `Backend` trait, `OpKind`, `Support`, `BackendError` and the
@@ -1129,10 +1155,10 @@ The steps that move existing call sites don't change any function that runs.
 Phase 1 ends when every crate but the adapter, geom (step 6) and the shared display crates
 (§13, question 2) reaches solidcore only through `crates/kernel`.
 
-### Later phases (not approved yet)
+### Later phases (approved 2026-11-26)
 
 These finish "solidcore only through ops" and make the seam usable by another kernel's adapter.
-They need the owner's yes before they start.
+The owner approved them on 2026-11-26. Each step follows the rules at the top of this section.
 
 6. **geom's ops and seam uses move up.**
    - Before any move, the missing `solidcore-ops` curve-evaluation entry points go in as their

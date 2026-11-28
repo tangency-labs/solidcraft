@@ -184,7 +184,9 @@ pub fn dimension_unit_mark(kind: expr::Kind, unit: &str, drawing_unit: &str, alt
         }
         expr::Kind::Angle if unit_scale == std::f64::consts::PI / 180.0 && !alternate => Ok(Some("°")),
         expr::Kind::Angle => Err(DocError::Invalid("drawing angles must use degrees and cannot have an alternate length unit".into())),
-        expr::Kind::Unitless => Err(DocError::Invalid("drawing dimensions must have a length or angle unit".into())),
+        expr::Kind::Unitless | expr::Kind::Mass | expr::Kind::Volume | expr::Kind::Area => {
+            Err(DocError::Invalid("drawing dimensions must have a length or angle unit".into()))
+        }
     }
 }
 

@@ -81,8 +81,8 @@ fn cylinder_axis_expressions_follow_parameters() {
 
 /// Inside a component turned a quarter turn about Z, an axis of expressions is turned into the
 /// component's frame (#18822), as `[x, y, z]` or `{x, y, z}`, landing where the same direction
-/// given as numbers lands. X, Y or Z by name stays the component's own axis, as before, for the
-/// cylinder, the cone and the coil alike.
+/// given as numbers lands. An axis named X, Y or Z turns like the unit vector it names (#21098),
+/// for the cylinder, the cone and the coil alike.
 #[test]
 fn cylinder_axis_forms_turn_with_a_turned_component() {
     let world_box_of = |cmd: &str, params: Value| {
@@ -104,20 +104,24 @@ fn cylinder_axis_forms_turn_with_a_turned_component() {
     for axis in [json!(["0", "-sin(t)", "-cos(t)"]), json!({"x": "0", "y": "-sin(t)", "z": "-cos(t)"}), json!([0, "-sin(t) * sqrt(2)", -1])] {
         assert!(same(world_box(axis.clone()), slant), "{axis}: {:?} vs {slant:?}", world_box(axis.clone()));
     }
-    // The component's X is the world's Y after the quarter turn; its Y is the world's -X.
-    let own_x = world_box(json!([0, 1, 0]));
-    assert!(own_x.1[1] > 9.0 && own_x.1[0] < 1.5, "{own_x:?}");
+    // An axis named X, Y or Z turns like the unit vector it names (#21098).
+    let world_x = world_box(json!([1, 0, 0]));
+    assert!(world_x.1[0] > 9.0 && world_x.1[1] < 1.5, "{world_x:?}");
     for axis in [json!("X"), json!(" x ")] {
-        assert!(same(world_box(axis.clone()), own_x), "{axis}: {:?} vs {own_x:?}", world_box(axis.clone()));
+        assert!(same(world_box(axis.clone()), world_x), "{axis}: {:?} vs {world_x:?}", world_box(axis.clone()));
+    }
+    let world_y = world_box(json!([0, 1, 0]));
+    for axis in [json!("Y"), json!(" y ")] {
+        assert!(same(world_box(axis.clone()), world_y), "{axis}: {:?} vs {world_y:?}", world_box(axis.clone()));
     }
     let cone = |axis: Value| world_box_of("solid.cone", json!({"radius": 2, "top_radius": 1, "height": 10, "axis": axis, "body_name": "C"}));
-    assert!(same(cone(json!("X")), cone(json!([0, 1, 0]))), "{:?} vs {:?}", cone(json!("X")), cone(json!([0, 1, 0])));
-    assert!(same(cone(json!(" y ")), cone(json!([-1, 0, 0]))), "{:?}", cone(json!(" y ")));
+    assert!(same(cone(json!("X")), cone(json!([1, 0, 0]))), "{:?} vs {:?}", cone(json!("X")), cone(json!([1, 0, 0])));
+    assert!(same(cone(json!(" y ")), cone(json!([0, 1, 0]))), "{:?}", cone(json!(" y ")));
     let coil = |axis: Value| {
         world_box_of("solid.coil", json!({"diameter": 10, "revolutions": 2, "pitch": 5, "section_size": 1, "axis": axis, "body_name": "C"}))
     };
-    let (named, numbers) = (coil(json!("X")), coil(json!([0, 1, 0])));
-    assert!(named.1[1] > 9.0 && numbers.1[1] > 9.0, "{named:?} vs {numbers:?}");
+    let (named, numbers) = (coil(json!("X")), coil(json!([1, 0, 0])));
+    assert!(named.1[0] > 9.0 && numbers.1[0] > 9.0, "{named:?} vs {numbers:?}");
 }
 
 /// An axis that uses no parameter is saved normalized, as numbers, whatever form it was given

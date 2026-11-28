@@ -1,0 +1,23 @@
+{
+  "en": {
+    "ui.palette_shortcut_starts_listed_tool": "Shortcut starts the listed tool"
+  },
+  "ar": {
+    "ui.palette_shortcut_starts_listed_tool": "الاختصار يبدأ الأداة المدرجة"
+  },
+  "de": {
+    "ui.palette_shortcut_starts_listed_tool": "Taste startet das gelistete Werkzeug"
+  },
+  "he": {
+    "ui.palette_shortcut_starts_listed_tool": "קיצור מפעיל את הכלי המוצג"
+  },
+  "ja": {
+    "ui.palette_shortcut_starts_listed_tool": "ショートカットで表示中のツールを開始"
+  },
+  "vi": {
+    "ui.palette_shortcut_starts_listed_tool": "Phím tắt mở công cụ được ghi"
+  },
+  "zh": {
+    "ui.palette_shortcut_starts_listed_tool": "快捷键启动列出的工具"
+  }
+}

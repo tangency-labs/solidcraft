@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{HostError, Result, RuntimeManifest, invalid, plain, valid_id};
+use crate::{Effect, EntryKind, HostError, Result, RuntimeManifest, invalid, plain, valid_command_name, valid_id};
 
 pub const UI_VERSION: u32 = 1;
 pub const MAX_PANELS: usize = 8;
@@ -14,6 +14,11 @@ pub const MAX_PANEL_BYTES: usize = 1024 * 1024;
 pub const MAX_ROWS: usize = 100_000;
 pub const MAX_CHART_SERIES: usize = 8;
 pub const MAX_CHART_POINTS: usize = 20_000;
+/// The longest a workspace's enter or exit hook may run.
+pub const WORKSPACE_HOOK_DEADLINE_MS: u64 = 1_000;
+pub const MAX_WORKSPACES: usize = 2;
+pub const MAX_WORKSPACE_RIBBON_TABS: usize = 6;
+pub const MAX_WORKSPACE_RIBBON_ENTRIES: usize = 60;
 pub const MAX_TABLE_ROW_INDENT: usize = 8;
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -237,7 +242,7 @@ pub struct RibbonTab {
     pub name: String,
     pub groups: Vec<RibbonGroup>,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum DesignKind {
     Part,
@@ -252,10 +257,15 @@ pub struct WorkspaceSpec {
     pub name: String,
     pub icon: String,
     pub applies_to: Vec<DesignKind>,
+    #[serde(default)]
     pub ribbon: Vec<RibbonTab>,
+    #[serde(default)]
     pub panels: Vec<(DockZone, Vec<String>)>,
+    #[serde(default)]
     pub builtin_panels: Vec<String>,
+    #[serde(default)]
     pub on_enter: Option<String>,
+    #[serde(default)]
     pub on_exit: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -355,14 +365,67 @@ fn check_path(path: &str) -> Result<()> {
     }
     Ok(())
 }
+fn command_entry(runtime: &RuntimeManifest, name: &str) -> bool {
+    runtime.entries.iter().any(|entry| entry.kind == EntryKind::Command && entry.name == name)
+}
+
+fn validate_ribbon(workspace: &WorkspaceSpec, runtime: &RuntimeManifest) -> Result<()> {
+    let mut count = 0usize;
+    if workspace.ribbon.len() > MAX_WORKSPACE_RIBBON_TABS {
+        return Err(limit("ui.workspace.ribbon: at most 6 tabs and 60 entries"));
+    }
+    let mut tabs = BTreeSet::new();
+    for tab in &workspace.ribbon {
+        if !plain(&tab.name, 80) || !tabs.insert(&tab.name) || tab.groups.len() > MAX_WORKSPACE_RIBBON_ENTRIES {
+            return Err(invalid("runtime.ui.workspaces.ribbon", "distinct printable tab names and at most 60 groups per tab"));
+        }
+        let mut groups = BTreeSet::new();
+        for group in &tab.groups {
+            if !plain(&group.name, 80) || !groups.insert(&group.name) {
+                return Err(invalid("runtime.ui.workspaces.ribbon", "distinct printable group names are required"));
+            }
+            count = count.saturating_add(group.entries.len());
+            if count > MAX_WORKSPACE_RIBBON_ENTRIES {
+                return Err(limit("ui.workspace.ribbon: at most 6 tabs and 60 entries"));
+            }
+            if group.entries.iter().any(|entry| !command_entry(runtime, entry)) {
+                return Err(invalid("runtime.ui.workspaces.ribbon", "each ribbon entry must name a declared command entry"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_placements(workspace: &WorkspaceSpec, panels: &[PanelSpec]) -> Result<()> {
+    let mut zones = BTreeSet::new();
+    let mut placed = BTreeSet::new();
+    if workspace.panels.len() > 3 {
+        return Err(invalid("runtime.ui.workspaces.panels", "at most one placement per dock zone"));
+    }
+    for (zone, ids) in &workspace.panels {
+        if !zones.insert(zone) || ids.len() > MAX_PANELS {
+            return Err(invalid("runtime.ui.workspaces.panels", "distinct dock zones and at most 8 panels per zone"));
+        }
+        for id in ids {
+            if !placed.insert(id) || !panels.iter().any(|panel| panel.id == *id && panel.zones.contains(zone)) {
+                return Err(invalid("runtime.ui.workspaces.panels", "each panel appears once in one of its declared dock zones"));
+            }
+        }
+    }
+    let mut builtin = BTreeSet::new();
+    if workspace.builtin_panels.len() > 32 || workspace.builtin_panels.iter().any(|id| !valid_id(id) || !builtin.insert(id)) {
+        return Err(invalid("runtime.ui.workspaces.builtin_panels", "at most 32 distinct host panel ids"));
+    }
+    Ok(())
+}
+
 impl Declarations {
     pub fn validate(&self, runtime: &RuntimeManifest) -> Result<()> {
         check_bytes(self, "ui.declarations: at most 1 MiB")?;
         if self.panels.len() > MAX_PANELS {
             return Err(limit("ui.panels: at most 8 panels"));
         }
-        // Workspaces belong to phase 3 and remain inert in this host.
-        if self.workspaces.len() > 2 {
+        if self.workspaces.len() > MAX_WORKSPACES {
             return Err(limit("ui.workspaces: at most 2 workspaces"));
         }
         let mut ids = BTreeSet::new();
@@ -375,11 +438,22 @@ impl Declarations {
             }
             panel.layout.validate(runtime)?;
         }
+        ids.clear();
         for workspace in &self.workspaces {
-            if workspace.ribbon.len() > 6
-                || workspace.ribbon.iter().flat_map(|t| &t.groups).fold(0usize, |total, g| total.saturating_add(g.entries.len())) > 60
-            {
-                return Err(limit("ui.workspace.ribbon: at most 6 tabs and 60 entries"));
+            if !valid_id(&workspace.id) || !ids.insert(&workspace.id) || !plain(&workspace.name, 80) || !valid_command_name(&workspace.icon) {
+                return Err(invalid("runtime.ui.workspaces", "distinct lowercase ids, printable names and icon registry names are required"));
+            }
+            let kinds: BTreeSet<_> = workspace.applies_to.iter().collect();
+            if kinds.is_empty() || kinds.len() != workspace.applies_to.len() {
+                return Err(invalid("runtime.ui.workspaces.applies_to", "requires 1..4 distinct design kinds"));
+            }
+            validate_ribbon(workspace, runtime)?;
+            validate_placements(workspace, &self.panels)?;
+            for hook in [&workspace.on_enter, &workspace.on_exit].into_iter().flatten() {
+                let entry = runtime.entries.iter().find(|entry| entry.name == *hook);
+                if !entry.is_some_and(|entry| entry.kind == EntryKind::Command && entry.effect == Effect::Read) {
+                    return Err(invalid("runtime.ui.workspaces.hooks", "enter and exit hooks must name declared read-only command entries"));
+                }
             }
         }
         Ok(())

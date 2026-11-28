@@ -398,3 +398,44 @@ fn merge_faces_keeping_edges_keeps_named_edges_and_exceeds_max_points() {
     let merged = merge_faces_keeping_edges(&many_boxes, &all_indices).unwrap();
     assert_eq!(counts(&merged).unwrap(), [350 * 6, 350 * 12, 350 * 8]);
 }
+
+/// Parity: SolidCraft's merges are solidcore-ops' `merge_faces_with` under the capi's contract
+/// (closed, tolerances grown), bit for bit. Each case runs through this crate's entry point and
+/// straight through ops on a copy of the same body: the results' native bytes are the same, and
+/// so is a pick that misses or a refused index.
+#[test]
+fn routed_merges_are_solidcore_ops() {
+    use super::merge::merge_faces_keeping_edges;
+    use solidcore_ops::stitch::{KeptEdges, MergeOptions, merge_faces_with};
+    let capi = MergeOptions { contract: solidcore_ops::Contract::Closed, grow_tolerances: true };
+    let bytes = |b: &Body| b.to_smb(false).unwrap();
+    let direct = |body: &Body, keep: KeptEdges<'_>| merge_faces_with(body.copy().unwrap(), keep, capi);
+    let mut merged = 0;
+    let marginal = stitch(&loose_faces(ALL, 0.005), TOL).unwrap().0;
+    for body in [split_cube(), two_boxes(), make_box([0.0; 3], [10.0; 3]).unwrap(), loose_faces(OPEN, 0.0), marginal] {
+        let edges = counts(&body).unwrap()[1];
+        for i in 0..=edges {
+            let keep = [i];
+            match (merge_faces_keeping_edges(&body, &keep), direct(&body, KeptEdges::Native(&keep))) {
+                (Ok(ours), Ok(Ok(ops))) => {
+                    assert_eq!(bytes(&ours), bytes(&ops), "edge {i}");
+                    merged += 1;
+                }
+                (Err(Error::Argument), Err(solidcore_ops::Error::Argument)) => assert_eq!(i, edges),
+                (ours, ops) => panic!("edge {i}: {:?} against {:?}", ours.map(|b| counts(&b)), ops.map(|r| r.map(|b| counts(&b).unwrap()))),
+            }
+        }
+        for points in [&[][..], &[[5.0, 5.0, 10.0]], &[[5.0, 0.0, 0.0], [0.0, 5.0, 10.0]], &[[50.0, 50.0, 50.0]]] {
+            let ours = merge_faces(&body, points, TOL);
+            match direct(&body, KeptEdges::Nearest { points, tolerance: TOL }).unwrap() {
+                Ok(ops) => {
+                    assert_eq!(bytes(&ours.unwrap()), bytes(&ops), "{points:?}");
+                    merged += 1;
+                }
+                Err(solidcore_ops::pick::Miss::None(point)) => assert_eq!(ours.err(), Some(Error::NoMatch { point })),
+                Err(solidcore_ops::pick::Miss::Ambiguous(point)) => assert_eq!(ours.err(), Some(Error::Ambiguous { point })),
+            }
+        }
+    }
+    assert!(merged > 60, "{merged} merges compared");
+}

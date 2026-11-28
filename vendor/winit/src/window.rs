@@ -461,8 +461,9 @@ impl WindowAttributes {
 
     /// Associate a top-level window with a live owner.
     ///
-    /// Windows uses a Win32 owner, macOS a child window, X11 a transient hint, and Wayland
-    /// an XDG toplevel parent. macOS requires the `rwh_06` feature.
+    /// Windows uses a Win32 owner, X11 a transient hint, and Wayland an XDG toplevel parent.
+    /// On macOS the owner puts the window right above itself whenever the owner becomes the
+    /// key window; the window is not a child window, so it can be on any screen.
     #[inline]
     pub fn with_owned_by(mut self, owner: Arc<Window>) -> Self {
         self.owned_by = Some(owner);

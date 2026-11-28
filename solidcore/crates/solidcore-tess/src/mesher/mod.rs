@@ -214,6 +214,7 @@ fn kind(s: &brep::Surface) -> &'static str {
         brep::Surface::RationalSpline { .. } => "rational spline",
         brep::Surface::PlacedRevolution { .. } => "revolution",
         brep::Surface::Blend { .. } => "blend",
+        brep::Surface::Sweep { .. } => "sweep",
     }
 }
 
@@ -792,8 +793,11 @@ fn boundary(
             let mut ep: Vec<Vec3> = n.points.clone();
             let mut es: Vec<bool> = n.params.iter().map(|t| n.snapped.contains(t)).collect();
             let mut eq: Vec<[f64; 2]> = Vec::with_capacity(ep.len());
+            let pcurve = solidcore_convert::curve2(&oe.pcurve).evaluator();
             for (k, (t, p)) in n.params.iter().zip(&n.points).enumerate() {
-                let q = solidcore_convert::curve2(&oe.pcurve).eval(t.clamp(p0, p1))
+                let q = pcurve
+                    .as_ref()
+                    .and_then(|pc| pc.eval(t.clamp(p0, p1)))
                     .ok_or_else(|| fail(oe.edge, format!("its pcurve does not evaluate at t = {t}")))?;
                 let q = map.to_eval(q);
                 let on =
@@ -2521,7 +2525,7 @@ fn plan_face(
         // The mesh path's triangles are the surface's Delaunay ones, shaped in 3D: flips toward
         // the surface's normals, for shading, would undo their shape.
         if matches!(purpose, Purpose::Display) {
-            sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
+            sag::flip_with_pos(s, tol, &poles, &refinement.pos, &all, &mut triangles);
         }
         // Measure finished triangles with their held positions when a bound or a remaining
         // departure involving the shared boundary can leave them outside the tolerance.

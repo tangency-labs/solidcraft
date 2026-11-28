@@ -122,8 +122,8 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
 use crate::geom::solution_array::{
-    EndClass, OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject, SolutionType,
-    SortKey,
+    Contact, EndClass, OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject,
+    SolutionType, SortKey,
 };
 use crate::geom::tol::is_zero;
 use crate::geom::tree::{AuxDataType, NodeData, NodeId, Tree, TreeNode};
@@ -1654,10 +1654,13 @@ fn combine_min_max<O: SolutionObject>(
 ) -> Result<Option<Solution<O>>> {
     // (not upstream) the contact of a range the two make, or one takes the other into
     let both = min.contact.absorbed(max.contact);
+    // (and a limit root either holds leaves its mark on what the two make)
+    let limit_root = min.limit_root || max.limit_root;
     let ranged = |s: Solution<O>| Solution {
         contact: both,
         unique: None,
         shared_contact: None,
+        limit_root,
         ..s
     };
     // when 1st solution is rangeOfValues
@@ -1696,12 +1699,14 @@ fn combine_min_max<O: SolutionObject>(
                     max.contact = both;
                     max.unique = None;
                     max.shared_contact = None;
+                    max.limit_root = limit_root;
 
                     // change min solution into a range that stops at the point solution
                     min.end = max.start;
                     min.contact = both;
                     min.unique = None;
                     min.shared_contact = None;
+                    min.limit_root = limit_root;
                     return Ok(None);
                 }
                 // combine point into range
@@ -2097,7 +2102,13 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
                 // (not upstream) the solution kept carries both contacts
                 let mut kept = if keep { *solution } else { *test };
                 kept.contact = test.contact.merged(solution.contact);
+                kept.limit_root = test.limit_root || solution.limit_root;
                 kept.shared_contact = None;
+                // (a unique box is a crossing's, by the root it carries: a merged solution
+                // that is not a crossing carries none, whichever of the two was kept)
+                if kept.contact != Contact::Crossing {
+                    kept.unique = None;
+                }
                 self.solver_mut().solutions.set_at(ii, &kept)?;
                 return Ok(());
             }
@@ -2339,7 +2350,7 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for GlobalSolver<'t, O> {
 mod tests {
     use super::*;
     use crate::geom::extent1d::Extent1d;
-    use crate::geom::solution_array::{Contact, ObjectKind};
+    use crate::geom::solution_array::ObjectKind;
     use crate::geom::tree::TreeNode;
 
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2730,6 +2741,44 @@ mod tests {
         }
     }
 
+    /// A limit root (`Solution::limit_root`) the solver's combination takes in leaves its
+    /// mark on what it makes: a range absorbing a point, a range taking in a range, and both
+    /// ranges a tight point splits a range into; a point that is no limit root leaves none.
+    #[test]
+    fn a_combination_keeps_a_limit_root_mark() {
+        for marked in [true, false] {
+            let mark = |mut s: Solution<Obj>, on: bool| {
+                s.limit_root = on;
+                s
+            };
+            // a loose point inside a range, absorbed; a range inside a range
+            for inner in [single(1e-3, 1.0), range(0.0, 0.5, 0.0, 1.5)] {
+                let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+                solver.set_solver_operation(SolverOperation::Find);
+                solver.set_3d_tolerance(1e-6);
+                for s in [range(0.0, 0.0, 0.0, 2.0), mark(inner, marked)] {
+                    solver
+                        .add_sorted_solution(&s, SortKey::ByFirstParameter, true)
+                        .unwrap();
+                }
+                assert_eq!(solver.solutions.len(), 1);
+                assert_eq!(solver.solutions.get(0).unwrap().limit_root, marked);
+            }
+            // a tight point splitting a range: both ranges carry the mark
+            let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+            solver.set_3d_tolerance(1e-6);
+            for s in [range(1e-3, 0.0, 1e-3, 2.0), mark(single(1e-9, 1.0), marked)] {
+                solver
+                    .add_sorted_solution(&s, SortKey::ByFirstParameter, true)
+                    .unwrap();
+            }
+            assert_eq!(solver.solutions.len(), 2);
+            for s in solver.solutions.as_slice() {
+                assert_eq!(s.limit_root, marked);
+            }
+        }
+    }
+
     /// A duplicate `add_sorted_solution` drops leaves the solution it keeps with the
     /// merged contact of both, whichever of the two it keeps.
     #[test]
@@ -2763,6 +2812,33 @@ mod tests {
                 let kept = solver.solutions.get(0).unwrap();
                 assert_eq!(kept.start.solution_value, 1e-7, "{stored:?} {added:?}");
                 assert_eq!(kept.contact, want, "{stored:?} {added:?} {v_stored}");
+                // the same with a unique box on either one or both: the solution kept is no
+                // crossing, so it keeps no box
+                let boxed = Some([[0.5, 1.5], [0.0, 1.0]]);
+                for (box_first, box_second) in [(true, false), (false, true), (true, true)] {
+                    let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+                    solver.set_solver_operation(SolverOperation::Find);
+                    solver.set_3d_tolerance(1e-6);
+                    let (mut a, mut b) = (first, second);
+                    if box_first {
+                        a.unique = boxed;
+                    }
+                    if box_second {
+                        b.unique = boxed;
+                    }
+                    for s in [a, b] {
+                        solver
+                            .add_sorted_solution(&s, SortKey::ByFirstParameter, true)
+                            .unwrap();
+                    }
+                    assert_eq!(solver.solutions.len(), 1);
+                    let kept = solver.solutions.get(0).unwrap();
+                    assert_eq!(
+                        (kept.contact, kept.unique),
+                        (want, None),
+                        "{stored:?} {added:?}"
+                    );
+                }
             }
         }
     }

@@ -915,7 +915,7 @@ fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
 
 /// The names of the KiCad board options `doc.open` takes (for a `.kicad_pcb` or `.kicad_pro`
 /// file), in the order [`kicad_open_properties`] lists them.
-pub const KICAD_OPEN_OPTIONS: &[&str] = &["thickness", "components", "copper", "silkscreen", "color", "representation"];
+pub const KICAD_OPEN_OPTIONS: &[&str] = &["thickness", "components", "copper", "silkscreen", "holes", "color", "representation"];
 
 /// The KiCad board options of `doc.open` as JSON Schema properties. `OpenParams` publishes these
 /// and the MCP `open` tool lists the same ones, so the two cannot name or describe them apart.
@@ -928,6 +928,11 @@ pub fn kicad_open_properties() -> Map<String, Value> {
             "description": "KiCad board only: overlay (default: flat copper just above the board), none (leave the traces out) or mesh (modelled with thickness; true also means mesh, false none). Pads are included whenever copper is enabled",
         },
         "silkscreen": {"type": "boolean", "description": "KiCad board only: the silkscreen shapes and text (default true)"},
+        "holes": {
+            "type": "string",
+            "enum": ["none", "mounting", "pads", "all"],
+            "description": "KiCad board only: which drilled holes come in: mounting (default: unplated holes and MountingHole footprints), pads (adds through-hole pads), all (adds vias) or none. A hole that reaches the board's edge or a cutout is always kept",
+        },
         "color": {
             "anyOf": [
                 {"type": "string", "description": "#rrggbb"},
@@ -957,6 +962,9 @@ fn kicad_copper_schema(_: &mut SchemaGenerator) -> Schema {
 }
 fn kicad_silkscreen_schema(_: &mut SchemaGenerator) -> Schema {
     kicad_option_schema("silkscreen")
+}
+fn kicad_holes_schema(_: &mut SchemaGenerator) -> Schema {
+    kicad_option_schema("holes")
 }
 fn kicad_color_schema(_: &mut SchemaGenerator) -> Schema {
     kicad_option_schema("color")
@@ -1071,6 +1079,11 @@ pub struct OpenParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_silkscreen_schema")]
     pub silkscreen: Option<bool>,
+    /// For a KiCad board only (ignored for other files): which drilled holes come in. Default:
+    /// mounting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "kicad_holes_schema")]
+    pub holes: Option<String>,
     /// For a KiCad board only (ignored for other files): the substrate colour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "kicad_color_schema")]

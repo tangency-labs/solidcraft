@@ -88,6 +88,19 @@ impl FeatureKind {
     }
 }
 
+/// Metadata for a named driven sketch dimension exposed as a read-only parameter (#14426).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrivenParam {
+    pub name: String,
+    pub feature_index: usize,
+    pub feature_id: u64,
+    pub feature_name: String,
+    pub constraint_id: String,
+    pub value: Option<Value>,
+    pub is_angle: bool,
+    pub active: bool,
+}
+
 /// One row of the parameters table.
 #[derive(Clone, Debug, Serialize)]
 pub struct ParamRow {
@@ -101,9 +114,9 @@ pub struct ParamRow {
     pub display_value: Option<f64>,
     pub error: Option<String>,
     pub comment: String,
-    /// "user", "sketch" (a dimension) or "feature".
+    /// "user", "sketch" (a dimension), "driven" (a read-only driven dimension) or "feature".
     pub source: &'static str,
-    /// For feature inputs: the feature and the input's label.
+    /// For feature inputs and driven dimensions: the owning feature or sketch name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,14 +128,9 @@ pub struct ParamRow {
     /// A text parameter's text (its unit is `text`, its value none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-}
-
-fn unit_of(k: Kind) -> &'static str {
-    match k {
-        Kind::Length => "mm",
-        Kind::Angle => "deg",
-        Kind::Unitless => "",
-    }
+    /// True for read-only evaluated parameters (such as driven sketch dimensions, #14426).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 #[cfg(test)]
@@ -146,18 +154,235 @@ impl Document {
         v
     }
 
+    /// Whether any sketch in this document exposes a named driven dimension parameter (#14426).
+    pub fn has_driven_params(&self) -> bool {
+        self.features.iter().any(|f| match &f.kind {
+            FeatureKind::Sketch { sketch, .. } => {
+                sketch.constraints.iter().any(|c| c.driven && c.driven_param.is_some())
+                    || sketch.wire_constraints.iter().any(|c| c.driven && c.driven_param.is_some())
+            }
+            _ => false,
+        })
+    }
+
+    /// Every named driven sketch dimension in timeline order (#14426).
+    pub fn driven_params(&self) -> Vec<DrivenParam> {
+        let marker = self.marker.unwrap_or(usize::MAX);
+        let mut out = Vec::new();
+        for (feature_index, f) in self.features.iter().enumerate() {
+            let FeatureKind::Sketch { sketch, .. } = &f.kind else { continue };
+            let active = feature_index < marker && !f.suppressed;
+            for (cid, name, val, is_angle) in sketch.driven_dimensions() {
+                let value = val.filter(|v| v.is_finite()).map(|v| if is_angle { Value::angle(v) } else { Value::length(v) });
+                out.push(DrivenParam {
+                    name: name.to_string(),
+                    feature_index,
+                    feature_id: f.id,
+                    feature_name: f.name.clone(),
+                    constraint_id: cid.to_string(),
+                    value,
+                    is_angle,
+                    active,
+                });
+            }
+        }
+        out
+    }
+
+    /// Whether `name` is a read-only driven sketch dimension parameter (#14426).
+    pub fn is_driven_param(&self, name: &str) -> bool {
+        self.features.iter().any(|f| match &f.kind {
+            FeatureKind::Sketch { sketch, .. } => {
+                sketch.constraints.iter().any(|c| c.driven && c.driven_param.as_deref() == Some(name))
+                    || sketch.wire_constraints.iter().any(|c| c.driven && c.driven_param.as_deref() == Some(name))
+            }
+            _ => false,
+        })
+    }
+
+    /// Metadata for driven sketch dimension parameter `name`, if any (#14426).
+    pub fn driven_param(&self, name: &str) -> Option<DrivenParam> {
+        self.driven_params().into_iter().find(|d| d.name == name)
+    }
+
+    /// Set or clear the read-only parameter name of driven constraint `constraint_id` in sketch
+    /// `sketch_id` (#14426). Validates name syntax, uniqueness and timeline ordering.
+    pub fn set_driven_dimension_param(&mut self, sketch_id: u64, constraint_id: &str, name: Option<&str>) -> Result<()> {
+        let name = name.map(str::trim);
+        if let Some(n) = name {
+            if let Some(why) = Self::param_name_problem(n) {
+                return Err(DocError::Invalid(why));
+            }
+            let current = self.sketch(sketch_id)?.driven_dimensions().into_iter().find(|(cid, ..)| *cid == constraint_id).map(|(_, p, ..)| p);
+            if current != Some(n) && self.name_taken(n) {
+                return Err(DocError::Invalid(format!("there is already a parameter `{n}`")));
+            }
+        }
+        let mut next = self.clone();
+        let sk = next.sketch_mut(sketch_id)?;
+        let mut found = false;
+        if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == constraint_id) {
+            if !c.driven || !c.kind.is_dimension() {
+                return Err(DocError::Invalid(format!("`{constraint_id}` is not a driven dimension")));
+            }
+            c.driven_param = name.map(str::to_string);
+            found = true;
+        } else if let Some(c) = sk.wire_constraints.iter_mut().find(|c| c.id == constraint_id) {
+            if !c.driven || !c.kind.is_dimension() {
+                return Err(DocError::Invalid(format!("`{constraint_id}` is not a driven dimension")));
+            }
+            c.driven_param = name.map(str::to_string);
+            found = true;
+        }
+        if !found {
+            return Err(DocError::Unknown(format!("constraint `{constraint_id}`")));
+        }
+        next.check_driven_timeline()?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Check that no feature or sketch references a driven dimension defined by itself or a later
+    /// sketch in the timeline (directly or through other parameters) (#14426).
+    pub fn check_driven_timeline(&self) -> Result<()> {
+        if let Some(err) = self.driven_timeline_violations().1 {
+            return Err(DocError::Expr(err));
+        }
+        Ok(())
+    }
+
+    /// Timeline ordering violations for driven sketch dimensions: `(param_errors, first_error)`.
+    pub(crate) fn driven_timeline_violations(&self) -> (BTreeMap<String, String>, Option<String>) {
+        let mut driven_owner: BTreeMap<&str, (usize, &str)> = BTreeMap::new();
+        for (i, f) in self.features.iter().enumerate() {
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                for (_, name, _, _) in sketch.driven_dimensions() {
+                    driven_owner.entry(name).or_insert((i, f.name.as_str()));
+                }
+            }
+        }
+        if driven_owner.is_empty() {
+            return (BTreeMap::new(), None);
+        }
+        let mut refs_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (name, e, _) in self.all_param_exprs() {
+            refs_map.insert(name, expr::references(&e));
+        }
+        let first_bad = |start: &[String], feat_idx: usize| -> Option<String> {
+            let mut stack: Vec<String> = start.to_vec();
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            while let Some(cur) = stack.pop() {
+                if !seen.insert(cur.clone()) || seen.len() > 10_000 {
+                    continue;
+                }
+                if let Some(&(owner_idx, owner_name)) = driven_owner.get(cur.as_str())
+                    && owner_idx >= feat_idx
+                {
+                    return Some(if owner_idx == feat_idx {
+                        format!("circular reference: driven dimension `{cur}` cannot be used in the sketch `{owner_name}` that defines it")
+                    } else {
+                        format!(
+                            "forward reference: driven dimension `{cur}` (from `{owner_name}`) cannot be used before `{owner_name}` in the timeline"
+                        )
+                    });
+                }
+                if let Some(next) = refs_map.get(&cur) {
+                    stack.extend(next.iter().cloned());
+                }
+            }
+            None
+        };
+        let mut param_errors: BTreeMap<String, String> = BTreeMap::new();
+        let mut first_error: Option<String> = None;
+        for (feat_idx, f) in self.features.iter().enumerate() {
+            for (k, (_, e, _)) in f.kind.inputs().into_iter().enumerate() {
+                let refs = expr::references(&e);
+                if let Some(err) = first_bad(&refs, feat_idx) {
+                    if let Some(pname) = f.param_names.get(k).filter(|n| !n.is_empty()) {
+                        param_errors.entry(pname.clone()).or_insert_with(|| err.clone());
+                    }
+                    first_error.get_or_insert(err);
+                }
+            }
+            for e in f.kind.placement_exprs() {
+                let refs = expr::references(e);
+                if let Some(err) = first_bad(&refs, feat_idx) {
+                    first_error.get_or_insert(err);
+                }
+            }
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                for p in sketch.dimension_params() {
+                    if let Some(err) = first_bad(std::slice::from_ref(p), feat_idx) {
+                        param_errors.entry(p.clone()).or_insert_with(|| err.clone());
+                        first_error.get_or_insert(err);
+                    }
+                }
+                for p in &sketch.patterns {
+                    for e in p.count_expression.iter().chain(p.expressions.values()) {
+                        let refs = expr::references(e);
+                        if let Some(err) = first_bad(&refs, feat_idx) {
+                            first_error.get_or_insert(err);
+                        }
+                    }
+                }
+                for (_, e) in sketch.text_exprs() {
+                    let refs = expr::references(e);
+                    if let Some(err) = first_bad(&refs, feat_idx) {
+                        first_error.get_or_insert(err);
+                    }
+                }
+            }
+            if let FeatureKind::CapturePosition { joints, .. } = &f.kind {
+                for e in joints.iter().flat_map(|cj| cj.exprs.iter().flatten()) {
+                    let refs = expr::references(e);
+                    if let Some(err) = first_bad(&refs, feat_idx) {
+                        first_error.get_or_insert(err);
+                    }
+                }
+            }
+        }
+        (param_errors, first_error)
+    }
+
     pub(crate) fn name_taken(&self, n: &str) -> bool {
-        self.param(n).is_some() || self.text_param(n).is_some() || self.features.iter().any(|f| f.param_names.iter().any(|x| x == n))
+        self.param(n).is_some()
+            || self.text_param(n).is_some()
+            || self.features.iter().any(|f| f.param_names.iter().any(|x| x == n))
+            || self.is_driven_param(n)
+    }
+
+    /// Every name a parameter, a text parameter or a feature input has (the names `name_taken` refuses), to gather once:
+    /// asking `name_taken` for each candidate searched the whole design once per candidate, quadratic in the named inputs.
+    fn taken_names(&self) -> impl Iterator<Item = &str> {
+        let inputs = self.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str));
+        self.params.iter().map(|p| p.name.as_str()).chain(self.text_params.iter().map(|p| p.name.as_str())).chain(inputs)
+    }
+
+    /// The first of `base`, `base2`, `base3`, … that no parameter or feature input has.
+    fn free_name(&self, base: &str) -> String {
+        let taken: std::collections::HashSet<&str> = self.taken_names().collect();
+        // One candidate more than there are names, so one of them is free.
+        (1..=taken.len() + 1)
+            .map(|n| if n == 1 { base.to_string() } else { format!("{base}{n}") })
+            .find(|name| !taken.contains(name.as_str()))
+            .unwrap_or_else(|| base.to_string())
     }
 
     /// The next free `dN` name.
     pub fn next_d_name(&self) -> String {
-        // Every taken name at once: asking `name_taken` for d1, d2, … searched the whole
-        // design once per number, quadratic in the number of named inputs.
         // Their numbers, so trying d1, d2 … writes no names: a design with thousands of named
         // inputs wrote that many for every new one.
-        let names = self.params.iter().map(|p| p.name.as_str()).chain(self.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)));
-        let taken = numbers_after("d", names);
+        let driven: Vec<&str> = self
+            .features
+            .iter()
+            .filter_map(|f| match &f.kind {
+                FeatureKind::Sketch { sketch, .. } => Some(sketch.driven_dimension_params()),
+                _ => None,
+            })
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        let taken = numbers_after("d", self.taken_names().chain(driven));
         let n = (1..).find(|n| !taken.contains(n)).unwrap_or(1);
         format!("d{n}")
     }
@@ -166,18 +391,24 @@ impl Document {
     pub fn name_feature_inputs(&mut self, id: u64) {
         let Some(idx) = self.feature_index(id) else { return };
         let n = self.features.get(idx).map(|f| f.kind.inputs().len()).unwrap_or(0);
-        for k in 0..n {
-            let have = self.features.get(idx).and_then(|f| f.param_names.get(k)).is_some_and(|x| !x.is_empty());
-            if have {
-                continue;
-            }
-            let name = self.next_d_name();
+        let missing = self.features.get(idx).is_some_and(|f| (0..n).any(|k| f.param_names.get(k).is_none_or(|x| x.is_empty())));
+        if missing {
+            // Text parameters too, as `next_d_name` counts them: an input never takes a text parameter's name.
+            let taken = numbers_after("d", self.taken_names());
+            let mut next = 1u64;
             if let Some(f) = self.features.get_mut(idx) {
-                while f.param_names.len() <= k {
-                    f.param_names.push(String::new());
+                if f.param_names.len() < n {
+                    f.param_names.resize(n, String::new());
                 }
-                if let Some(slot) = f.param_names.get_mut(k) {
-                    *slot = name;
+                for slot in f.param_names.iter_mut().take(n) {
+                    if !slot.is_empty() {
+                        continue;
+                    }
+                    while taken.contains(&next) {
+                        next += 1;
+                    }
+                    *slot = format!("d{next}");
+                    next += 1;
                 }
             }
         }
@@ -194,6 +425,13 @@ impl Document {
         let mut taken: BTreeMap<String, usize> = BTreeMap::new();
         for name in self.params.iter().map(|p| &p.name).chain(self.features.iter().flat_map(|f| &f.param_names)) {
             *taken.entry(name.clone()).or_default() += 1;
+        }
+        for f in &self.features {
+            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                for name in sketch.driven_dimension_params() {
+                    *taken.entry(name.clone()).or_default() += 1;
+                }
+            }
         }
         // `next` never goes down. Every `dN` with N below it is taken or in `freed` (the names
         // that surplus names gave back), so the lowest free name is the lowest of `freed`, or else
@@ -311,6 +549,9 @@ impl Document {
     }
 
     pub fn change_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
+        if self.is_driven_param(name) {
+            return Err(DocError::Invalid(format!("`{name}` is a read-only driven dimension parameter and cannot be edited")));
+        }
         let hit = self.features.iter().enumerate().find_map(|(i, f)| f.param_names.iter().position(|n| n == name).map(|k| (i, k)));
         let Some((i, k)) = hit else { return self.set_param(name, expr_s, unit, comment) };
         if expr_s.len() > 4096 {
@@ -331,6 +572,7 @@ impl Document {
         if let Some(e) = errors.get(name) {
             return Err(DocError::Expr(e.clone()));
         }
+        next.check_driven_timeline()?;
         *self = next;
         Ok(())
     }
@@ -351,6 +593,9 @@ impl Document {
             }
             if expression.len() > 4096 || expression.trim().is_empty() {
                 return Err(DocError::Expr("expression is empty or too long".into()));
+            }
+            if next.is_driven_param(name) {
+                return Err(DocError::Invalid(format!("`{name}` is a read-only driven dimension parameter and cannot be edited")));
             }
             if let Some(p) = next.text_params.iter_mut().find(|p| p.name == *name) {
                 let text = crate::text_params::unquote(expression);
@@ -386,13 +631,19 @@ impl Document {
                 return Err(DocError::Expr(format!("parameter `{name}`: {error}")));
             }
         }
+        next.check_driven_timeline()?;
         *self = next;
         Ok(())
     }
 
-    /// The parameters table (user, sketch dimensions, feature inputs).
+    /// The parameters table (user, sketch dimensions, driven dimensions, feature inputs).
     pub fn param_rows(&self) -> Vec<ParamRow> {
-        let (vals, errs) = self.param_values();
+        self.param_rows_with(None)
+    }
+
+    /// [`Document::param_rows`], using live evaluated driven dimension values when provided (#14426).
+    pub fn param_rows_with(&self, live_driven: Option<&BTreeMap<String, Value>>) -> Vec<ParamRow> {
+        let (vals, errs) = self.param_values_with(live_driven);
         let all = self.all_param_exprs();
         let refs: BTreeMap<String, Vec<String>> = all.iter().map(|(n, e, _)| (n.clone(), expr::references(e))).collect();
         // Who uses each name, in name order: one pass over the references (a design an agent
@@ -456,6 +707,27 @@ impl Document {
                 uses: refs.get(&p.name).cloned().unwrap_or_default(),
                 used_by: used_by(&p.name),
                 text: None,
+                read_only: false,
+            });
+        }
+        for d in self.driven_params() {
+            let unit = if d.is_angle { "deg".to_string() } else { expr::length_unit_or_mm(&self.units).to_string() };
+            rows.push(ParamRow {
+                name: d.name.clone(),
+                expression: "(driven)".into(),
+                unit: unit.clone(),
+                value: unified(&d.name),
+                display_value: vals.get(&d.name).map(|v| expr::round_reported(expr::value_in_unit(*v, &unit))),
+                error: errs.get(&d.name).cloned(),
+                comment: self.param_comments.get(&d.name).cloned().unwrap_or_default(),
+                source: "driven",
+                feature: Some(d.feature_name),
+                input: Some("Driven Dimension"),
+                favorite: self.favorites.contains(&d.name),
+                uses: Vec::new(),
+                used_by: used_by(&d.name),
+                text: None,
+                read_only: true,
             });
         }
         for f in &self.features {
@@ -466,7 +738,7 @@ impl Document {
                 rows.push(ParamRow {
                     name: name.clone(),
                     expression: e,
-                    unit: unit_of(k).into(),
+                    unit: k.default_unit().into(),
                     value: value(name, k),
                     // A feature input's own unit is mm / deg, so its display value is its value.
                     display_value: value(name, k),
@@ -479,6 +751,7 @@ impl Document {
                     uses: refs.get(name).cloned().unwrap_or_default(),
                     used_by: used_by(name),
                     text: None,
+                    read_only: false,
                 });
             }
         }
@@ -498,6 +771,7 @@ impl Document {
                 uses: Vec::new(),
                 used_by: text_readers.get(&p.name).cloned().unwrap_or_default(),
                 text: Some(p.text.clone()),
+                read_only: false,
             });
         }
         rows
@@ -643,6 +917,7 @@ impl Document {
         if let Some(e) = rows.iter().find_map(|(n, ..)| errors.get(n)) {
             return Err(DocError::Expr(e.clone()));
         }
+        next.check_driven_timeline()?;
         *self = next;
         Ok(names)
     }
@@ -653,6 +928,9 @@ impl Document {
     fn import_row(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>, vals: &mut BTreeMap<String, Value>) -> Result<()> {
         if expr_s.len() > 4096 {
             return Err(DocError::Expr("expression too long".into()));
+        }
+        if self.is_driven_param(name) {
+            return Err(DocError::Invalid(format!("`{name}` is a read-only driven dimension parameter and cannot be edited")));
         }
         let hit = self.features.iter().enumerate().find_map(|(i, f)| f.param_names.iter().position(|n| n == name).map(|k| (i, k)));
         if let Some((i, k)) = hit {
@@ -677,10 +955,8 @@ impl Document {
         if expr_s.trim().is_empty() {
             return Err(DocError::Expr("empty expression".into()));
         }
-        if let Some(u) = unit
-            && expr::unit_info(u).is_none()
-        {
-            return Err(DocError::Expr(format!("unknown unit `{u}` (mm, cm, m, in, ft, deg, rad or none)")));
+        if let Some(why) = unit.and_then(expr::unit_problem) {
+            return Err(DocError::Expr(why));
         }
         if comment.is_some_and(|c| c.len() > 4096) {
             return Err(DocError::Invalid("comment too long".into()));
@@ -781,6 +1057,12 @@ fn doc_len(units: &str) -> f64 {
 /// [`Document::rename_param`] renames a design's sketches with it, and the model the solved
 /// copies it keeps of them (#611).
 pub(crate) fn rename_param_in_sketch(sketch: &mut solidcraft_sketch::Sketch, old: &str, new: &str) -> usize {
+    rename_param_in_sketch_with(sketch, old, new, expr::rename_reference)
+}
+
+/// [`rename_param_in_sketch`] with the given rename for the sketch's formulas (the unit-word
+/// rename passes its own).
+fn rename_param_in_sketch_with(sketch: &mut solidcraft_sketch::Sketch, old: &str, new: &str, rename: fn(&str, &str, &str) -> String) -> usize {
     let mut n = 0;
     for param in sketch.dimension_params_mut() {
         if param.as_deref() == Some(old) {
@@ -788,15 +1070,20 @@ pub(crate) fn rename_param_in_sketch(sketch: &mut solidcraft_sketch::Sketch, old
             n += 1;
         }
     }
+    for param in sketch.driven_dimension_params_mut() {
+        if param.as_deref() == Some(old) {
+            *param = Some(new.to_string());
+        }
+    }
     for e in sketch.patterns.iter_mut().flat_map(|p| p.count_expression.iter_mut().chain(p.expressions.values_mut())) {
-        let r = expr::rename_reference(e, old, new);
+        let r = rename(e, old, new);
         if r != *e {
             *e = r;
             n += 1;
         }
     }
     for e in sketch.text_exprs_mut() {
-        let r = expr::rename_reference(e, old, new);
+        let r = rename(e, old, new);
         if r != *e {
             *e = r;
             n += 1;
@@ -808,7 +1095,7 @@ pub(crate) fn rename_param_in_sketch(sketch: &mut solidcraft_sketch::Sketch, old
         if variable == old {
             continue;
         }
-        let r = expr::rename_reference(e, old, new);
+        let r = rename(e, old, new);
         if r != *e {
             *e = r;
             n += 1;
@@ -838,29 +1125,94 @@ impl Document {
     pub fn param_defs(&self) -> Vec<ParamDef> {
         let mut v: Vec<ParamDef> =
             self.params.iter().map(|p| ParamDef { name: p.name.clone(), expr: p.expr.clone(), unit: p.unit.clone() }).collect();
+        let design_unit = expr::unit_info(self.units.trim()).is_some_and(|(k, _)| k == Kind::Length).then(|| self.units.trim());
         for f in &self.features {
-            for (name, (_, e, k)) in f.param_names.iter().zip(f.kind.inputs()) {
-                if !name.is_empty() {
+            if f.param_names.is_empty() {
+                continue;
+            }
+            let mut slot = 0usize;
+            f.kind.walk_exprs(&mut |(_, e, k, role)| {
+                if role != ExprRole::Input {
+                    return;
+                }
+                if let Some(name) = f.param_names.get(slot)
+                    && !name.is_empty()
+                {
                     // A bare number stored in an input is mm (the design's units are written in
                     // when it is typed); anything else that comes out unit-less (a unit-less
                     // parameter used as a length) is in the design's units.
-                    let unit = match k {
-                        Kind::Length if !expr::is_literal(&e) && expr::unit_info(self.units.trim()).is_some_and(|(k, _)| k == Kind::Length) => {
-                            self.units.trim().to_string()
-                        }
-                        _ => unit_of(k).to_string(),
+                    let unit = match (k, design_unit) {
+                        (Kind::Length, Some(u)) if !expr::is_literal(e) => u.to_string(),
+                        _ => k.default_unit().to_string(),
                     };
-                    v.push(ParamDef { name: name.clone(), expr: e, unit });
+                    v.push(ParamDef { name: name.clone(), expr: e.to_string(), unit });
                 }
-            }
+                slot += 1;
+            });
         }
         v
     }
 
-    /// Evaluate all parameters: values (mm / rad / unit-less) and errors by name. Errors name
+    /// Evaluate all parameters: values (mm, rad, g, unit-less…) and errors by name. Errors name
     /// the problem (`circular reference: a → b → a`, `cannot add a length and an angle`).
     pub fn param_values(&self) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
-        expr::eval_params(&self.param_defs(), doc_len(&self.units))
+        self.param_values_with(None)
+    }
+
+    /// Evaluate all parameters, incorporating named driven sketch dimensions (#14426). When
+    /// `live_driven` is `Some`, active driven dimensions read their values from it (so failed or
+    /// unevaluated sketches report unavailable rather than stale stored values); when `None`,
+    /// active driven dimensions read the measured values stored on the sketch constraints.
+    pub fn param_values_with(&self, live_driven: Option<&BTreeMap<String, Value>>) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+        if !self.has_driven_params() && live_driven.is_none_or(BTreeMap::is_empty) {
+            return expr::eval_params(&self.param_defs(), doc_len(&self.units));
+        }
+        let mut driven = BTreeMap::new();
+        let mut unavailable = BTreeMap::new();
+        for d in self.driven_params() {
+            if !d.active {
+                unavailable.insert(
+                    d.name.clone(),
+                    format!(
+                        "driven dimension `{}` (from `{}`) is unavailable because `{}` is suppressed or rolled back",
+                        d.name, d.feature_name, d.feature_name
+                    ),
+                );
+                continue;
+            }
+            match live_driven {
+                Some(live) => match live.get(&d.name) {
+                    Some(&v) => {
+                        driven.insert(d.name, v);
+                    }
+                    None => {
+                        unavailable.insert(
+                            d.name.clone(),
+                            format!(
+                                "driven dimension `{}` (from `{}`) is unavailable because `{}` was not evaluated",
+                                d.name, d.feature_name, d.feature_name
+                            ),
+                        );
+                    }
+                },
+                None => match d.value {
+                    Some(v) => {
+                        driven.insert(d.name, v);
+                    }
+                    None => {
+                        unavailable
+                            .insert(d.name.clone(), format!("driven dimension `{}` (from `{}`) has no measured value", d.name, d.feature_name));
+                    }
+                },
+            }
+        }
+        let (mut vals, mut errs) = expr::eval_params_with_driven(&self.param_defs(), &driven, &unavailable, doc_len(&self.units));
+        let (timeline_errs, _) = self.driven_timeline_violations();
+        for (name, err) in timeline_errs {
+            vals.remove(&name);
+            errs.insert(name, err);
+        }
+        (vals, errs)
     }
 
     /// A parameter's value in its own unit (e.g. 2 for a 50.8 mm parameter in inches).
@@ -868,13 +1220,23 @@ impl Document {
         let v = vals.get(name)?;
         let unit = match self.param(name) {
             Some(p) => p.unit.clone(),
-            None => v.kind().map(|k| unit_of(k).to_string()).unwrap_or_default(),
+            None => match self.driven_param(name) {
+                Some(d) => {
+                    if d.is_angle {
+                        "deg".to_string()
+                    } else {
+                        expr::length_unit_or_mm(&self.units).to_string()
+                    }
+                }
+                None => v.kind().map(|k| k.default_unit().to_string()).unwrap_or_default(),
+            },
         };
         Some(expr::value_in_unit(*v, &unit))
     }
 
-    /// The unit for a new parameter with this expression: that of its value; a bare number is
-    /// a length in the design's units, as a typed length reads it (#8865).
+    /// The unit for a new parameter with this expression: its kind's (`50 g` is a mass, shown in
+    /// kg), a length, an area or a volume in the design's units ([`expr::unit_for_design`]); a bare
+    /// number, or a value of no kind, is a length, as a typed length reads it (#8865).
     pub(crate) fn infer_unit(&self, e: &str) -> String {
         Self::infer_unit_in(&self.param_values().0, e, &self.units)
     }
@@ -885,8 +1247,8 @@ impl Document {
         let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))));
         match v.ok().and_then(|v| v.kind()) {
             Some(Kind::Unitless) if !expr::references(e).is_empty() => String::new(),
-            Some(Kind::Angle) => "deg".into(),
-            _ => expr::length_unit_or_mm(units).to_string(),
+            Some(Kind::Unitless) | None => expr::unit_for_design(Kind::Length, units),
+            Some(k) => expr::unit_for_design(k, units),
         }
     }
 
@@ -1023,6 +1385,9 @@ impl Document {
             return self.remove_text_param(name);
         }
         if self.param(name).is_none() {
+            if self.is_driven_param(name) {
+                return Err(DocError::Invalid(format!("`{name}` is a driven dimension parameter: delete or edit the sketch dimension instead")));
+            }
             if self.features.iter().any(|f| f.param_names.iter().any(|n| n == name)) {
                 return Err(DocError::Invalid(format!("`{name}` is a feature's input: delete or edit the feature instead")));
             }
@@ -1042,6 +1407,32 @@ impl Document {
     /// dimension, favourite and comment that refers to it follows. Returns how many
     /// references were updated.
     pub fn rename_param(&mut self, old: &str, new: &str) -> Result<usize> {
+        self.rename_param_with(old, new, expr::rename_reference)
+    }
+
+    /// Rename the parameters and feature inputs of an older design whose names are now units
+    /// (`names`, which a format step listed as the design opened): `g` becomes `g_param` (or
+    /// `g_param2`, … when that is taken), every expression that uses it follows as the build that
+    /// saved the design read it (`2 g` was 2 × `g`, not 2 grams), and its comment says why. No
+    /// value changes. A listed name that isn't reserved now, or that nothing has, is left alone.
+    pub(crate) fn rename_unit_word_params(&mut self, names: &[String]) -> Result<()> {
+        for old in names {
+            if !expr::is_reserved(old) || !self.name_taken(old) {
+                continue;
+            }
+            let new = self.free_name(&format!("{old}_param"));
+            self.rename_param_with(old, &new, expr::rename_word)?;
+            let note = format!("renamed from `{old}`, which is now a unit");
+            let had = self.param_comment(&new);
+            let comment = if had.is_empty() { note } else { format!("{had} ({note})") };
+            // A comment already at its longest keeps its own text: the rename is what matters.
+            let _ = self.set_param_comment(&new, &comment);
+        }
+        Ok(())
+    }
+
+    /// [`Document::rename_param`], renaming the name in expressions with `rename`.
+    fn rename_param_with(&mut self, old: &str, new: &str, rename: fn(&str, &str, &str) -> String) -> Result<usize> {
         let new = new.trim();
         if !self.name_taken(old) {
             return Err(DocError::Unknown(format!("parameter `{old}`")));
@@ -1081,7 +1472,7 @@ impl Document {
             if p.name == old {
                 p.name = new.to_string();
             }
-            let r = expr::rename_reference(&p.expr, old, new);
+            let r = rename(&p.expr, old, new);
             if r != p.expr {
                 p.expr = r;
                 n += 1;
@@ -1094,25 +1485,25 @@ impl Document {
                 }
             }
             for e in f.kind.placement_exprs_mut() {
-                let r = expr::rename_reference(e, old, new);
+                let r = rename(e, old, new);
                 if r != *e {
                     *e = r.into();
                     n += 1;
                 }
             }
             for (_, e, _) in f.kind.inputs_mut() {
-                let r = expr::rename_reference(e, old, new);
+                let r = rename(e, old, new);
                 if r != *e {
                     *e = r.into();
                     n += 1;
                 }
             }
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-                n += rename_param_in_sketch(sketch, old, new);
+                n += rename_param_in_sketch_with(sketch, old, new, rename);
             }
             if let FeatureKind::CapturePosition { joints, .. } = &mut f.kind {
                 for e in joints.iter_mut().flat_map(|cj| cj.exprs.iter_mut()).flatten() {
-                    let r = expr::rename_reference(e, old, new);
+                    let r = rename(e, old, new);
                     if r != *e {
                         *e = r;
                         n += 1;
@@ -1130,14 +1521,14 @@ impl Document {
         }
         // Configuration cells refer to parameters too.
         for rule in &mut self.configs.rules {
-            rule.rename_parameter(old, new);
+            rule.rename_parameter(old, new, rename);
         }
         // A text parameter's cells are texts, not expressions.
         let texts: BTreeSet<String> = self.text_params.iter().map(|p| p.name.clone()).collect();
         for r in &mut self.configs.rows {
             for (column, cell) in self.configs.columns.iter().zip(&mut r.cells) {
                 if !text && matches!(column, crate::config::Column::Param(c) if !texts.contains(c)) {
-                    *cell = expr::rename_reference(cell, old, new);
+                    *cell = rename(cell, old, new);
                 }
             }
         }
@@ -1149,7 +1540,7 @@ impl Document {
             }
         }
         for e in self.assembly.exprs_mut() {
-            let r = expr::rename_reference(e, old, new);
+            let r = rename(e, old, new);
             if r != *e {
                 *e = r;
                 n += 1;
@@ -1166,7 +1557,7 @@ impl Document {
         let rules = self.sheet.rules.iter_mut().flat_map(|r| r.fields_mut()).chain(self.plastic.rules.iter_mut().flat_map(|r| r.fields_mut()));
         // `Thickness` outside a rule's own thickness is the rule's, not the parameter (#9623).
         for (_, e) in rules.filter(|(field, _)| old != "Thickness" || *field == "thickness") {
-            let r = expr::rename_reference(e, old, new);
+            let r = rename(e, old, new);
             if r != *e {
                 *e = r;
                 n += 1;
@@ -1174,7 +1565,7 @@ impl Document {
         }
         for c in &mut self.canvases {
             c.plane.walk_exprs_mut(&mut |(_, e, _, _)| {
-                let r = expr::rename_reference(e, old, new);
+                let r = rename(e, old, new);
                 if r != *e {
                     *e = r.into();
                     n += 1;
@@ -1188,6 +1579,18 @@ impl Document {
     }
 
     /// Set a parameter's comment (stored parameters keep it, feature inputs in `param_comments`).
+    /// The comment of a parameter, a text parameter or a feature input, where
+    /// [`Document::set_param_comment`] keeps it.
+    fn param_comment(&self, name: &str) -> &str {
+        if let Some(p) = self.param(name) {
+            return &p.comment;
+        }
+        if let Some(p) = self.text_param(name) {
+            return &p.comment;
+        }
+        self.param_comments.get(name).map_or("", String::as_str)
+    }
+
     pub fn set_param_comment(&mut self, name: &str, comment: &str) -> Result<()> {
         if comment.len() > 4096 {
             return Err(DocError::Invalid("comment too long".into()));
@@ -1264,26 +1667,29 @@ impl Document {
     pub fn features_using_param(&self, name: &str) -> Vec<u64> {
         let defs = self.param_defs();
         let mut affected: BTreeSet<String> = BTreeSet::from([name.to_string()]);
-        for _ in 0..defs.len().min(MAX_PARAMS * 2) {
-            let before = affected.len();
-            for d in &defs {
-                if expr::references(&d.expr).iter().any(|r| affected.contains(r)) {
-                    affected.insert(d.name.clone());
+        let propagate = |affected: &mut BTreeSet<String>| {
+            for _ in 0..defs.len().min(MAX_PARAMS * 2) {
+                let before = affected.len();
+                for d in &defs {
+                    if expr::references(&d.expr).iter().any(|r| affected.contains(r)) {
+                        affected.insert(d.name.clone());
+                    }
+                }
+                if affected.len() == before {
+                    break;
                 }
             }
-            if affected.len() == before {
-                break;
-            }
-        }
-        // A rule that uses it changes every sheet metal (or plastic) feature: the evaluation
-        // hashes the rules into their fingerprint.
-        let uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| affected.contains(r));
-        let sheet = self.sheet.rules.iter().any(|r| r.fields().iter().any(|(f, e, _)| uses(f, e)));
-        let plastic = self.plastic.rules.iter().any(|r| r.fields().iter().any(|(f, e, _)| uses(f, e)));
+        };
+        propagate(&mut affected);
         let mut out = Vec::new();
         for f in &self.features {
+            // A rule that uses it changes every sheet metal (or plastic) feature: the evaluation
+            // hashes the rules into their fingerprint.
+            let uses = |field: &str, e: &str| rule_references(field, e).iter().any(|r| affected.contains(r));
+            let sheet = f.kind.is_sheet() && self.sheet.rules.iter().any(|r| r.fields().iter().any(|(fld, e, _)| uses(fld, e)));
+            let plastic = f.kind.is_plastic() && self.plastic.rules.iter().any(|r| r.fields().iter().any(|(fld, e, _)| uses(fld, e)));
             let mut hit = f.param_names.iter().any(|n| affected.contains(n));
-            hit |= (sheet && f.kind.is_sheet()) || (plastic && f.kind.is_plastic());
+            hit |= sheet || plastic;
             hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 hit |= sketch.dimension_params().into_iter().any(|p| affected.contains(p));
@@ -1296,6 +1702,18 @@ impl Document {
             }
             if hit {
                 out.push(f.id);
+                // Any driven dimension exposed by an affected sketch also propagates downstream (#14426).
+                if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+                    let mut added = false;
+                    for dp in sketch.driven_dimension_params() {
+                        if affected.insert(dp.clone()) {
+                            added = true;
+                        }
+                    }
+                    if added {
+                        propagate(&mut affected);
+                    }
+                }
             }
         }
         out
@@ -1574,7 +1992,7 @@ pub(crate) mod param_rows_tests {
     use solidcore_record::Vec3;
     use solidcraft_sketch::{Link, Sketch};
 
-    use super::{ParamRow, unit_of};
+    use super::ParamRow;
     use crate::expr::{self, Expr, Kind};
     use crate::plastic::PlasticRule;
     use crate::sheet::{SheetRule, rule_references};
@@ -1666,6 +2084,7 @@ pub(crate) mod param_rows_tests {
                 uses: refs.get(&p.name).cloned().unwrap_or_default(),
                 used_by: used_by(&p.name),
                 text: None,
+                read_only: false,
             });
         }
         for f in &doc.features {
@@ -1676,7 +2095,7 @@ pub(crate) mod param_rows_tests {
                 rows.push(ParamRow {
                     name: name.clone(),
                     expression: e,
-                    unit: unit_of(k).into(),
+                    unit: k.default_unit().into(),
                     value: value(name, k),
                     display_value: value(name, k),
                     error: errs.get(name).cloned(),
@@ -1688,6 +2107,7 @@ pub(crate) mod param_rows_tests {
                     uses: refs.get(name).cloned().unwrap_or_default(),
                     used_by: used_by(name),
                     text: None,
+                    read_only: false,
                 });
             }
         }
@@ -1720,6 +2140,7 @@ pub(crate) mod param_rows_tests {
                 uses: Vec::new(),
                 used_by: readers.iter().filter_map(|id| doc.feature(*id)).map(|f| format!("Feature:{}", f.name)).collect(),
                 text: Some(p.text.clone()),
+                read_only: false,
             });
         }
         rows
@@ -1959,10 +2380,10 @@ pub(crate) mod param_rows_tests {
         let doc = rules_read_by_features(rules, features);
         RULES_READ.set(0);
         let rows = doc.param_rows();
-        // A sheet metal rule holds 8 expressions and a plastic rule 10, each read once. Reading
+        // A sheet metal rule holds 9 expressions and a plastic rule 10, each read once. Reading
         // the rules again for each of the 30 sheet metal and 30 plastic features read
-        // 30 × 40 × 8 + 30 × 40 × 10 = 21,600.
-        assert!(RULES_READ.get() <= rules * (8 + 10), "{}", RULES_READ.get());
+        // 30 × 40 × 9 + 30 × 40 × 10 = 22,800.
+        assert!(RULES_READ.get() <= rules * (9 + 10), "{}", RULES_READ.get());
         // `p0` lists every feature, in timeline order.
         let all: Vec<String> = (0..features).map(|i| format!("Feature:F{i}")).collect();
         assert_eq!(rows[0].used_by, all);

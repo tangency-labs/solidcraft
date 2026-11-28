@@ -545,7 +545,7 @@ pub(super) fn run(s: &mut Session, id: &str, p: &Value) -> Result<Value> {
 }
 
 /// A length for a message: at most three decimals, without trailing zeros.
-fn mm(v: f64) -> String {
+pub(super) fn mm(v: f64) -> String {
     let t = format!("{v:.3}");
     let t = t.trim_end_matches('0').trim_end_matches('.');
     if t == "-0" { "0".to_string() } else { t.to_string() }
@@ -927,6 +927,10 @@ impl Outline {
         let mut edges = Vec::new();
         let mut ends = Vec::new();
         let mut lines = HashSet::new();
+        // The arcs kept, by their end points' ids: each one's middle point. And the circles kept,
+        // by where their centres lie.
+        let mut arcs: HashMap<(usize, usize), Vec<Vec2>> = HashMap::new();
+        let mut circles: HashMap<(i64, i64), Vec<(Vec2, f64)>> = HashMap::new();
         let (mut repeated, mut ignored) = (0, 0);
         for g in geom {
             let edge = match *g {
@@ -971,11 +975,36 @@ impl Outline {
                 }
             };
             let e = edge.ends().map(|(a, b)| (points.id(a), points.id(b)));
+            // An arc or a circle drawn twice is one edge of the board too, as a line is: an outline
+            // drawn once with each of two tools, its corners arcs (#22607). An arc traced from short
+            // steps lies within `TRACE` of the arc the other tool draws.
+            match (edge, e) {
+                (Edge::Arc { c, r, from, sweep, .. }, Some((i, j))) => {
+                    let mid = c + Vec2::new((from + sweep / 2.0).cos(), (from + sweep / 2.0).sin()) * r;
+                    let kept = arcs.entry((i, j)).or_default();
+                    if kept.iter().any(|m| m.dist(mid) <= TRACE) {
+                        repeated += 1;
+                        continue;
+                    }
+                    kept.push(mid);
+                }
+                (Edge::Circle(c, r), _) => {
+                    let key = ((c.x / TRACE).floor() as i64, (c.y / TRACE).floor() as i64);
+                    let near = (-1..=1).flat_map(|dx| (-1..=1).map(move |dy| (key.0.saturating_add(dx), key.1.saturating_add(dy))));
+                    let seen = near.filter_map(|cell| circles.get(&cell)).flatten().any(|(d, q)| d.dist(c) <= TRACE && (q - r).abs() <= TRACE);
+                    if seen {
+                        repeated += 1;
+                        continue;
+                    }
+                    circles.entry(key).or_default().push((c, r));
+                }
+                _ => {}
+            }
             edges.push(edge);
             ends.push(e);
         }
         if repeated > 0 {
-            warnings.push(format!("{repeated} outline lines drawn twice were used once"));
+            warnings.push(format!("{repeated} outline curves drawn twice were used once"));
         }
         if ignored > 0 {
             warnings.push(format!("{ignored} points or texts on the outline layer were left out"));

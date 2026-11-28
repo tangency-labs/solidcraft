@@ -13,7 +13,15 @@
 //! also past an end where it crosses the face's side edge at that end heading out past it
 //! (or in from beyond it), as for a first or last run ([`past_end_through_side_edge`]): a
 //! rail run on round a closed loop of edges comes back onto its face beyond a seam
-//! elsewhere on the loop, after its end face has trimmed it. A first or last run is also past an
+//! elsewhere on the loop, after its end face has trimmed it. A closed rail of an open edge
+//! (#17646) is judged apart from that first, last and interior split, which only follows
+//! where the rail's parameter starts: a run across its seam is one run, and a run is judged
+//! by its stretches in span, where the edge point nearest the rail is not an end
+//! ([`in_span_stretches`]). A run with none lies wholly past the ends, which trim it; a
+//! stretch from an end's cross section to the run's crossing of the face's side edge at that
+//! end, which [`run_end_past`] puts past it, is the End's there to judge; any other stretch
+//! is off the face between the ends, and one from one end's cross section to the other's is
+//! a wrap past both ends. A first or last run is also past an
 //! end where the filleted edge is closed and the run lies beyond the plane on which the
 //! corner at its vertex cuts the rail ([`past_closed_corner`], #2498): the fork takes the
 //! top rail of a teardrop's rim, which crosses the rim itself just past the tip, for a
@@ -26,9 +34,7 @@
 //! fork's `IsKnifeEdge` ([`is_knife_edge`], `e418750`, WR-665) is here too, used by
 //! `SmFilletCorner::Create`. The
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
-//! the face's edge order, as the fork's strict `<` does. A closed rail's isolated contact
-//! with a sharp rim is reported separately: keeping both loops would intersect them
-//! (#20282). There is no recursion.
+//! the face's edge order, as the fork's strict `<` does. There is no recursion.
 
 use super::{RailClassificationContext, LENT_CLASSIFICATION, OP};
 use crate::blend::fillet_classification::FilletClassObject;
@@ -38,17 +44,17 @@ use crate::blend::fillet_solver::p1::{
 };
 use crate::curve::curve::Curve;
 use crate::error::blend::{BlendFailure, CrossingInput, FilletSetUp, SolverFailure};
-use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
-use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
+use crate::intersect::api_intersectors::curve_plane_parameters;
+use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::math::BIG_DOUBLE;
 use crate::topology::edgeuse::p2 as eu2;
-use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::face::p4 as face_p4;
 use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
 
@@ -60,9 +66,6 @@ pub struct RailsFit {
     /// `rbFit`: every rail stays on its face (`false` = a rail leaves its face between
     /// the filleted edge's ends, or is nowhere on it).
     pub fit: bool,
-    /// A closed rail stays on its face but touches a sharp boundary at isolated points.
-    /// Keeping both loops would make them intersect, rather than bound a face.
-    pub touches_rim: bool,
     /// `rbRollsOver`: a rail rolls over a tangent edge onto the next face.
     pub rolls_over: bool,
     /// `rbIntoMaterial`: a rail that leaves its face runs on inside the body (judged only
@@ -83,138 +86,12 @@ pub struct RailsFit {
     pub continued_cliffs: Vec<(EdgeId, FaceId)>,
     /// Not the fork's (tangency-labs/solidcore#2175): a closed rail leaves its face past
     /// one end of the filleted edge and comes back onto it past the other, round the far
-    /// side of the rail. An open edge's face is smaller than the blend beyond both ends;
-    /// on a closed edge the labels instead refer to its periodic seam. Only a certified
+    /// side of the rail. On an open edge only a run off its face across the whole span,
+    /// from one end's cross section to the other's, is one (#17646): a run wholly past the
+    /// ends is trimmed there, and its face is smaller than the blend between the ends.
+    /// On a closed edge the labels instead refer to its periodic seam. Only a certified
     /// concave crash on a closed edge may trim such a run at both boundaries.
     pub wraps_past_both_ends: bool,
-}
-
-/// Compare the adjacent face-use normals at this boundary contact, not elsewhere
-/// along the edge: a curved boundary can be smooth at one point and sharp at another.
-fn rim_is_smooth_at(
-    k: &Kernel,
-    target: &mut Brep,
-    e: EdgeId,
-    parameter: f64,
-    tangency_tol: f64,
-) -> Result<bool> {
-    let primary = eu::primary_edgeuse(target, e)?.ok_or_else(|| {
-        Failure::new(
-            OP,
-            BlendFailure::Defect {
-                why: "the rail classifier identified a solid rim without the primary edge use \
-                      that the kernel's solid topology must retain",
-            },
-        )
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
-    })?;
-    let radial = eu::radial(target, primary)?.ok_or_else(|| {
-        Failure::new(
-            OP,
-            BlendFailure::Defect {
-                why: "the rail classifier identified a solid rim without the radial partner \
-                      required to bound its material sector",
-            },
-        )
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
-    })?;
-    let options = BinormalOptions::default();
-    let first = evaluate_binormal(k, target, primary, parameter, false, &options)?.face_normal;
-    let second = evaluate_binormal(k, target, radial, parameter, false, &options)?.face_normal;
-    Ok(first.angle_between(second)? <= tangency_tol)
-}
-
-/// A closed rail touching a sharp rim without crossing it leaves two touching loops.
-/// Classification includes the modelling tolerance. A rail wholly on a boundary, a
-/// smooth seam, or one crossing the rim is handled by the existing trim/overflow paths.
-fn closed_rail_touches_rim(
-    k: &Kernel,
-    target: &mut Brep,
-    face: FaceId,
-    filleted: EdgeId,
-    intervals: &[CurveInterval<FilletClassObject>],
-    tangency_tol: f64,
-) -> Result<bool> {
-    if !edge::is_closed(target, filleted)?
-        || !intervals
-            .iter()
-            .any(|i| i.mid.point_class() == PointClassType::Face)
-        || intervals
-            .iter()
-            .any(|i| i.mid.point_class() == PointClassType::Unknown)
-    {
-        return Ok(false);
-    }
-    let mut previous = intervals.last();
-    for ivl in intervals {
-        let before = previous;
-        previous = Some(ivl);
-        let Some(before) = before else {
-            continue;
-        };
-        // Only an isolated contact: a stretch along the rim has an Edge midpoint
-        // and belongs to the existing trim path.
-        if before.mid.point_class() != PointClassType::Face
-            || ivl.mid.point_class() != PointClassType::Face
-        {
-            continue;
-        }
-        for point in [&before.end, &ivl.start] {
-            if !matches!(
-                point.point_class(),
-                PointClassType::Edge | PointClassType::Vertex
-            ) {
-                continue;
-            }
-            let Some(object) = point.object() else {
-                continue;
-            };
-            let edges = match (point.point_class(), object.target_entity()?) {
-                (PointClassType::Edge, EntityRef::Edge(e)) => {
-                    if !point.are_parameters_set() {
-                        return Err(Failure::new(
-                            OP,
-                            BlendFailure::Defect {
-                                why: "the rail classifier reported an edge contact without \
-                                      locating its parameter, which classification must supply",
-                            },
-                        )
-                        .with_status(SM_ERR_NULL_POINTER)
-                        .into_error());
-                    }
-                    // The classifier has already located the contact on this edge.
-                    vec![(e, point.t_param())]
-                }
-                (PointClassType::Vertex, EntityRef::Vertex(v)) => {
-                    let mut incident = Vec::new();
-                    for e in face_p4::edges(target, face, None, false, None)? {
-                        let (a, b) = edge::start_end_vertices(target, e)?;
-                        let interval = edge::interval(target, e)?;
-                        if a == Some(v) {
-                            incident.push((e, interval.min()));
-                        }
-                        // At a closed edge's seam, check both one-sided endpoints.
-                        if b == Some(v) {
-                            incident.push((e, interval.max()));
-                        }
-                    }
-                    incident
-                }
-                _ => continue,
-            };
-            for (e, parameter) in edges {
-                if e != filleted
-                    && !edge::face_on_both_sides(target, e, face)?
-                    && !rim_is_smooth_at(k, target, e, parameter, tangency_tol)?
-                {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-    Ok(false)
 }
 
 /// `SmFilletSolver::IsKnifeEdge` (the fork's, tangency-labs/smlib `e418750`, WR-665):
@@ -605,12 +482,15 @@ fn side_edge_ends(
 /// out past the end; else coming back onto it, heading in from beyond the end. On a loop of
 /// two edges, where the side edge joins both ends, the crossing is at the end nearer it.
 ///
-/// A rail that crosses its face's side edge at an end has reached the end face there, where
-/// the corner at that end trims the blend. A rail run on round a closed loop of edges can
-/// come back onto its face beyond a seam elsewhere on the loop, so its run off the face
-/// across the side edge is not a first or last one; and where the end face slopes back over
-/// the face, the crossing lies before the end's cross section, so the cross section test
-/// alone takes it for a rail leaving beside the edge.
+/// A rail that crosses its face's side edge at an end has reached the boundary the corner at
+/// that end owns, and the End there judges what lies past the crossing: an End on the end
+/// face trims the blend there, a tangent end builds its end curve from the crossing, and an
+/// End at a smooth vertex judges the rail on to its end on the cap plane. A rail run on round a
+/// closed loop of edges can come back onto its face beyond a seam elsewhere on the loop,
+/// and a closed rail's run is judged wherever its parameter starts (#17646), so the run off
+/// the face across the side edge need not be a first or last one; and where the end face
+/// slopes back over the face, the crossing lies before the end's cross section, so the
+/// cross section test alone takes it for a rail leaving beside the edge.
 #[allow(clippy::too_many_arguments)] // the run's crossing, as `leaves_past_an_end` takes it
 fn past_end_through_side_edge(
     k: &Kernel,
@@ -809,6 +689,106 @@ fn at_end_vertex(
     Ok(None)
 }
 
+/// A stretch of an off-face run of a closed rail on an open edge that lies in span, where
+/// the edge point nearest the rail is not an end ([`beyond_end_section`] finds none). Each
+/// bound is the run's own crossing of its face's boundary (`None`) or the cross section of
+/// the end of the edge the rail lies past on the far side of that bound (`Some(end)`, 0 the
+/// edge's interval's start, 1 its end).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InSpan {
+    from: Option<usize>,
+    to: Option<usize>,
+}
+
+/// The in-span stretches ([`InSpan`]), in rail order, of a run of `rail` off its face over
+/// `pieces`: the run's rail parameter intervals in rail order, one, or two where the run
+/// goes across the parameter seam of the closed rail (its last interval, then its first).
+///
+/// Whether a rail point is in span changes only where the point crosses the cross section
+/// of an end (the plane through the end square to the edge there, within
+/// [`beyond_end_section`]'s band) or where the nearest edge point jumps to an end (#16654).
+/// The run is cut at its crossings of both ends' planes, found exactly by the kernel's
+/// curve/plane solve ([`curve_plane_parameters`]), and each part between two cuts is
+/// classified at its middle, the run's two ends at themselves, by what
+/// [`beyond_end_section`] says there, so a bound means what it means at a crossing. A jump
+/// of the nearest point inside one part, with no plane crossing beside it (an arc of more
+/// than a half turn only), is not a cut.
+fn in_span_stretches(
+    solver: &FilletSolver,
+    k: &Kernel,
+    target: &Brep,
+    rail: &Curve,
+    pieces: &[Extent1d],
+) -> Result<Vec<InSpan>> {
+    let (edge_curve, ivl) = filleted_edge_curve(solver, target)?;
+    let jets = end_jets(k, edge_curve, &ivl)?;
+    // the run's classified points, in rail order
+    let mut points = Vec::new();
+    let count = pieces.len();
+    for (index, piece) in pieces.iter().enumerate() {
+        let mut cuts = vec![piece.min(), piece.max()];
+        for (end, tangent) in jets {
+            cuts.extend(
+                curve_plane_parameters(k, rail, piece, end, tangent)?
+                    .into_iter()
+                    .filter(|&t| t > piece.min() && t < piece.max()),
+            );
+        }
+        cuts.sort_by(f64::total_cmp);
+        if index == 0 {
+            points.push(piece.min());
+        }
+        for pair in cuts.windows(2) {
+            if let [a, b] = pair {
+                points.push(0.5 * (a + b));
+            }
+        }
+        if index + 1 == count {
+            points.push(piece.max());
+        }
+    }
+    let mut stretches = Vec::new();
+    // the stretch being walked: its first bound
+    let mut open: Option<Option<usize>> = None;
+    // the end the rail was last found past
+    let mut past = None;
+    for (index, &t) in points.iter().enumerate() {
+        let end = beyond_end_section(solver, k, target, rail, t)?;
+        match (end, open) {
+            (None, None) => open = Some(if index == 0 { None } else { past }),
+            (Some(e), Some(from)) => {
+                stretches.push(InSpan { from, to: Some(e) });
+                open = None;
+            }
+            _ => {}
+        }
+        if end.is_some() {
+            past = end;
+        }
+    }
+    if let Some(from) = open {
+        stretches.push(InSpan { from, to: None });
+    }
+    Ok(stretches)
+}
+
+/// A crossing of a rail with its face's side edge at an end of the filleted edge that
+/// [`FilletSolver::rails_fit_their_faces_judged_with_ops`] passes as past that end (#17646):
+/// where the End at that end takes the rail over. Nothing past the check reads it; the
+/// session's tests pin it to the End's own rail end.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))] // read only by the session's tests
+pub(crate) struct PassedCrossing {
+    /// The rail edge in the pseudo B-rep.
+    pub(crate) rail: EdgeId,
+    /// The crossing's rail parameter.
+    pub(crate) rail_param: f64,
+    /// The rail point there.
+    pub(crate) point: Point3,
+    /// The end it is passed to: 0 the filleted edge's interval's start, 1 its end.
+    pub(crate) end: usize,
+}
+
 impl FilletSolver {
     /// `SmFilletSolver::RailsFitTheirFaces` (the fork's refusal, see the module doc):
     /// whether every rail of this solver's fillet, untrimmed, stays on the face it rolls
@@ -817,8 +797,7 @@ impl FilletSolver {
     /// rollover onto the next face). A rail that is nowhere on its face, or that leaves it
     /// between its ends across an edge that is not tangent (a wall, an opening's rim)
     /// means the blend is larger than the faces: `false`. Touching or running along the
-    /// face's boundary is on the face. An isolated contact of a closed rail with a sharp
-    /// rim is also reported in [`RailsFit::touches_rim`]: keeping both loops is invalid.
+    /// face's boundary is on the face.
     ///
     /// The classification is made as `TestRollOver`'s is and is not kept: each rail's
     /// attached classification is as it was.
@@ -849,7 +828,6 @@ impl FilletSolver {
     /// As [`FilletSolver::rails_fit_their_faces_with_ops`]; those of the material
     /// judgements, and `SM_ERR` when the filleted edge's middle does not drop onto a rail
     /// nowhere on its face.
-    #[allow(clippy::too_many_lines)] // one fork routine
     pub fn rails_fit_their_faces_judged_with_ops(
         solver: &mut dyn FilletSolverOps,
         k: &Kernel,
@@ -858,8 +836,33 @@ impl FilletSolver {
         context: &mut impl RailClassificationContext,
         judge_material: bool,
     ) -> Result<RailsFit> {
+        Self::rails_fit_their_faces_with_crossings_with_ops(
+            solver,
+            k,
+            target,
+            fillets,
+            context,
+            judge_material,
+        )
+        .map(|(judged, _)| judged)
+    }
+
+    /// [`FilletSolver::rails_fit_their_faces_judged_with_ops`], and the crossings it
+    /// passed at the ends ([`PassedCrossing`]), in the order found.
+    ///
+    /// # Errors
+    /// As [`FilletSolver::rails_fit_their_faces_judged_with_ops`].
+    #[allow(clippy::too_many_lines)] // one fork routine
+    pub(crate) fn rails_fit_their_faces_with_crossings_with_ops(
+        solver: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        target: &mut Brep,
+        fillets: &mut FilletBrep,
+        context: &mut impl RailClassificationContext,
+        judge_material: bool,
+    ) -> Result<(RailsFit, Vec<PassedCrossing>)> {
+        let mut passed_crossings = Vec::new();
         let mut fit = true;
-        let mut touches_rim = false;
         let mut rolls_over = false;
         let mut into_material = false;
         let mut boundaries_into_material = judge_material;
@@ -877,17 +880,19 @@ impl FilletSolver {
         // no body to subtract from (not the fork's, whose `IsConcaveEdge` fails there).
         if let Some(e) = filleted {
             if !edge_bounds_material(target, e)? {
-                return Ok(RailsFit {
-                    fit: true,
-                    touches_rim: false,
-                    rolls_over: false,
-                    into_material: false,
-                    boundaries_into_material: false,
-                    left_across: Vec::new(),
-                    return_across: Vec::new(),
-                    continued_cliffs: Vec::new(),
-                    wraps_past_both_ends: false,
-                });
+                return Ok((
+                    RailsFit {
+                        fit: true,
+                        rolls_over: false,
+                        into_material: false,
+                        boundaries_into_material: false,
+                        left_across: Vec::new(),
+                        return_across: Vec::new(),
+                        continued_cliffs: Vec::new(),
+                        wraps_past_both_ends: false,
+                    },
+                    passed_crossings,
+                ));
             }
         }
         for id in solver.solver().fillet_geoms() {
@@ -940,19 +945,6 @@ impl FilletSolver {
                 classified?;
                 let intervals = intervals
                     .ok_or_else(|| SolidError::blend_null_defect(OP, LENT_CLASSIFICATION))?;
-                if let Some(e) = filleted {
-                    let tolerance = solver.solver().approx_tol_3d;
-                    let closed = curve.is_closed(k, &curve.natural_interval(), tolerance)?;
-                    touches_rim |= closed
-                        && closed_rail_touches_rim(
-                            k,
-                            target,
-                            face,
-                            e,
-                            &intervals,
-                            solver.solver().tangency_tolerance,
-                        )?;
-                }
 
                 let n = intervals.len();
                 let off_face = |j: usize| {
@@ -961,6 +953,22 @@ impl FilletSolver {
                         .is_some_and(|i| i.mid.point_class() == PointClassType::Unknown)
                 };
                 let mut on_face = false;
+                // A closed rail on an open edge (#17646): its runs off the face are judged
+                // by their stretches in span, a run across its parameter seam as one run.
+                let natural = curve.natural_interval();
+                let closed_rail = match filleted {
+                    Some(e) => {
+                        edge::start_vertex(target, e)? != edge::end_vertex(target, e)?
+                            && curve.is_closed(k, &natural, 0.0)?
+                    }
+                    None => false,
+                };
+                let across_seam = closed_rail && n > 1 && off_face(0) && off_face(n - 1);
+                // the last interval of the run off the face at the rail's start
+                let mut seam_first = 0;
+                while across_seam && off_face(seam_first + 1) {
+                    seam_first += 1;
+                }
                 for (j, ivl) in intervals.iter().enumerate() {
                     if ivl.mid.point_class() != PointClassType::Unknown {
                         on_face = true;
@@ -977,16 +985,23 @@ impl FilletSolver {
                     while off_face(j_last + 1) {
                         j_last += 1;
                     }
-                    let last = intervals.get(j_last).ok_or_else(|| {
-                        SolidError::blend_null_defect(
-                            OP,
-                            "the run off the face ends past the classification's last \
+                    // the run at the rail's start goes on from the run at its end
+                    if across_seam && j == 0 {
+                        continue;
+                    }
+                    let joined = across_seam && j_last + 1 == n;
+                    let last = intervals
+                        .get(if joined { seam_first } else { j_last })
+                        .ok_or_else(|| {
+                            SolidError::blend_null_defect(
+                                OP,
+                                "the run off the face ends past the classification's last \
                              interval: `j_last` advances only while the next interval exists",
-                        )
-                    })?;
+                            )
+                        })?;
                     // Where the rail leaves the face: the first interval ends there, the
                     // others start.
-                    let (leave, d_leave) = if j == 0 {
+                    let (leave, d_leave) = if j == 0 && !closed_rail {
                         (&last.end, last.interval.max())
                     } else {
                         (&ivl.start, ivl.interval.min())
@@ -996,7 +1011,7 @@ impl FilletSolver {
                     let past_end = |point: &PointClassification<FilletClassObject>, d: f64| {
                         leaves_past_an_end(solver.solver(), k, target, face, &curve, d, point)
                     };
-                    if j == 0 || j_last + 1 == n {
+                    if closed_rail {
                         if let Some((rim, wall)) = continued_cliff_crossing(
                             solver.solver(),
                             k,
@@ -1009,15 +1024,92 @@ impl FilletSolver {
                             continued_cliffs.push((rim, wall));
                             continue;
                         }
-                        if past_end(leave, d_leave)?
-                            || past_closed_corner(
-                                solver.solver(),
-                                k,
-                                target,
-                                &curve,
-                                d_leave,
-                                j == 0,
-                            )?
+                        let d_back = last.interval.max();
+                        let pieces = if joined {
+                            vec![
+                                Extent1d::from_min_max(d_leave, natural.max()),
+                                Extent1d::from_min_max(natural.min(), d_back),
+                            ]
+                        } else {
+                            vec![Extent1d::from_min_max(d_leave, d_back)]
+                        };
+                        // A stretch in span is passed only where one bound is the cross
+                        // section of an end E and the other the run's crossing of the face's
+                        // side edge at E heading out past it (or in from beyond it), which
+                        // `run_end_past` puts past E: the End at E judges what lies past the
+                        // crossing. A run with no stretch in span lies wholly past the ends,
+                        // which trim it. Any other stretch is off the face between the ends.
+                        let mut judged = false;
+                        for stretch in
+                            in_span_stretches(solver.solver(), k, target, &curve, &pieces)?
+                        {
+                            let crossing = match (stretch.from, stretch.to) {
+                                (None, Some(end)) => Some((end, d_leave, leave, true)),
+                                (Some(end), None) => Some((end, d_back, &last.end, false)),
+                                _ => None,
+                            };
+                            let mut passed = false;
+                            if let Some((end, d, at, leaving)) = crossing {
+                                if run_end_past(
+                                    solver.solver(),
+                                    k,
+                                    target,
+                                    face,
+                                    &curve,
+                                    d,
+                                    at,
+                                    leaving,
+                                )? == Some(end)
+                                {
+                                    passed = true;
+                                    passed_crossings.push(PassedCrossing {
+                                        rail,
+                                        rail_param: d,
+                                        point: curve.evaluate_point(k, d)?,
+                                        end,
+                                    });
+                                }
+                            }
+                            if !passed {
+                                judged = true;
+                                // off the face across the whole span, from one end's cross
+                                // section to the other's
+                                if let (Some(a), Some(b)) = (stretch.from, stretch.to) {
+                                    wraps |= a != b;
+                                }
+                            }
+                        }
+                        if !judged {
+                            continue;
+                        }
+                    } else if j == 0 || j_last + 1 == n {
+                        if let Some((rim, wall)) = continued_cliff_crossing(
+                            solver.solver(),
+                            k,
+                            target,
+                            context,
+                            &curve,
+                            leave,
+                            ivl.interval.evaluate(0.5),
+                        )? {
+                            continued_cliffs.push((rim, wall));
+                            continue;
+                        }
+                        if past_end(leave, d_leave)? {
+                            let fil_edge = filleted_edge(solver.solver(), target)?;
+                            if let Some(&end) =
+                                side_edge_ends(target, fil_edge, face, leave)?.first()
+                            {
+                                passed_crossings.push(PassedCrossing {
+                                    rail,
+                                    rail_param: d_leave,
+                                    point: curve.evaluate_point(k, d_leave)?,
+                                    end,
+                                });
+                            }
+                            continue;
+                        }
+                        if past_closed_corner(solver.solver(), k, target, &curve, d_leave, j == 0)?
                         {
                             continue;
                         }
@@ -1036,9 +1128,10 @@ impl FilletSolver {
                         // side edge there, or on or beyond its cross section) is trimmed by
                         // the corner there too (tangency-labs/solidcore#1580; the fork's
                         // `518566f` tried only the first and last runs). A run that leaves
-                        // past one end and comes back past the other runs round the far side
-                        // of a closed rail, and is judged as the fork judges it
-                        // (tangency-labs/solidcore#2175).
+                        // past one end and comes back past the other here is one of an open
+                        // rail's, and is judged as the fork judges it
+                        // (tangency-labs/solidcore#2175); a closed rail's is judged by its
+                        // stretches in span above (#17646).
                         let back = run_end_past(
                             solver.solver(),
                             k,
@@ -1106,7 +1199,7 @@ impl FilletSolver {
                             None => false,
                         };
                     boundaries_into_material &= leaves_into_material;
-                    if j > 0 && j_last + 1 < n {
+                    if (j > 0 && j_last + 1 < n) || closed_rail {
                         let returns_across = match (last.end.point_class(), last.end.object()) {
                             (PointClassType::Edge, Some(object)) => match object.target_entity()? {
                                 EntityRef::Edge(edge) => Some(edge),
@@ -1174,16 +1267,18 @@ impl FilletSolver {
                 }
             }
         }
-        Ok(RailsFit {
-            fit,
-            touches_rim,
-            rolls_over,
-            into_material,
-            boundaries_into_material,
-            left_across,
-            return_across,
-            continued_cliffs,
-            wraps_past_both_ends,
-        })
+        Ok((
+            RailsFit {
+                fit,
+                rolls_over,
+                into_material,
+                boundaries_into_material,
+                left_across,
+                return_across,
+                continued_cliffs,
+                wraps_past_both_ends,
+            },
+            passed_crossings,
+        ))
     }
 }

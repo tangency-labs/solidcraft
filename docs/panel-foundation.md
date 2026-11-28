@@ -210,10 +210,18 @@ refuses structural app commands. `NO_SPACE` refuses neutral or worsening overflo
 except Close, Collapse (including expansion), Focus, or a strict improvement of one
 extent without increasing the other.
 
-Drags start after six logical points. Invisible card-edge regions select adjacent
-columns or stacked sections; the centre joins tabs and measured tab halves choose
-insertion. Side ordering accounts for both dock side and RTL. Empty space has no
-implicit float fallback. Floating is an explicit menu/command action.
+Drags start after six logical points. Invisible card-edge regions select
+adjacent columns or stacked sections; the centre joins tabs and measured tab
+halves choose insertion. Side ordering accounts for both dock side and RTL. In
+the app, every point inside the app window that no dock target takes, including
+other cards and chrome, is an explicit Float target: the preview carries a
+Floating destination at the pointer, clamped into the workspace (just below the
+toolbar band when the pointer is over it), and the held panel is drawn there at
+full opacity. Release commits the shown float, even a few points off the last
+move. A lone floating panel keeps its grab offset. A rejected target never
+floats, Escape cancels, and outside the app window the Window target applies. A
+fixture host without `set_float_on_empty_drop(true)` keeps no landing on empty
+space, and the drag cancels. Floating is also an explicit menu/command action.
 
 Once a Move crosses that threshold, the current moved instance's full presentation
 title follows the cursor on the existing preview paint layer, including over

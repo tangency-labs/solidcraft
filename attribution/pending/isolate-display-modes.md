@@ -1,1 +1,0 @@
-| assets/locales/pending/isolate-display-modes.json | SolidCraft contributors | Original strings for how Isolate shows the rest of the model, and their translations; no commercial CAD text used | MIT OR Apache-2.0 |

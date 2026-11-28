@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 mod model;
 
-pub use model::{Grab, Matrices, Model, Orbit, Vertex, model};
+pub use model::{Grab, Matrices, Model, Orbit, Pan, Vertex, model};
 
 /// The container formats this reader knows (docs/design-container.md; the second is the
 /// pre-rename draft, docs/compatibility.md).

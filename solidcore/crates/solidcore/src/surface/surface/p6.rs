@@ -69,6 +69,10 @@
 //!   outputs otherwise grow as samples are computed. No function here recurses.
 //! - **[`LOCAL_CURVE_INTERSECT_STEPS`]** (not upstream) names the 20 iterations of
 //!   `LocalCurveIntersect`'s solve, for callers that report them.
+//! - **Seam reseed.** When `LocalCurveIntersect`'s point-match is not found, the
+//!   near-tangent closest-point solve may still land within the distance tolerance
+//!   while its residual is only the tilt. That point is a new guess for the same
+//!   point-match, not an intersection.
 //! - **Continuity arrays.** Upstream's surface cache fills its U and V continuity arrays
 //!   only when its tree is built (`BuildTreeBase`), so a cache made during a Boolean
 //!   operation answers empty arrays to a reader that calls no `GetTree`
@@ -670,10 +674,13 @@ impl Surface {
     /// near the guesses (`LocalCurveIntersect`): a Newton solve of the gap equations
     /// (`SmCSIntersectENFO`, clamped to the intervals, at most 20 steps), else the
     /// guesses; where the curve lies within 5 degrees of the tangent plane a closest
-    /// point solve that does better replaces it; at a singularity the degenerate
-    /// parameter moves to the end of `uv_domain` shared with the natural domain (or
-    /// nearer the solution). `None` unless the curve and surface points lie closer
-    /// than `distance_tolerance`.
+    /// point solve that does better replaces it. When that Newton solve is not found
+    /// and the closest point is not accepted, a closest point already within
+    /// `distance_tolerance` is only a new guess for the same Newton solve, kept when
+    /// the second solve is found and still within the tolerance. At a singularity the
+    /// degenerate parameter moves to the end of `uv_domain` shared with the natural
+    /// domain (or nearer the solution). `None` unless the curve and surface points lie
+    /// closer than `distance_tolerance`.
     ///
     /// # Errors
     ///
@@ -707,6 +714,7 @@ impl Surface {
             &guess,
             distance_tolerance * 4.0,
         )?;
+        let point_matched = solution.is_some();
         let (mut t, mut uv) = match solution {
             Some([s0, s1, s2]) => (s0, Point2::new(s1, s2)),
             None => (t_guess, uv_guess),
@@ -723,26 +731,79 @@ impl Surface {
         let normal = self.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         let scaled_zero = EFF_ZERO * (1.0 + p2.max_dimension());
         if normal.is_perpendicular_to(pv1_1, 5.0) {
-            // Find Curve/Surface closest point pair
-            let found = self.local_curve_solve(
-                k,
-                uv_domain,
-                curve,
-                interval,
-                SolverOperation::Minimize,
-                distance_tolerance,
-                &[],
-                uv,
-                t,
-            )?;
+            if point_matched {
+                // Find Curve/Surface closest point pair
+                let found = self.local_curve_solve(
+                    k,
+                    uv_domain,
+                    curve,
+                    interval,
+                    SolverOperation::Minimize,
+                    distance_tolerance,
+                    &[],
+                    uv,
+                    t,
+                )?;
 
-            // when a better solution was found or we have two good solutions
-            if let Some(s) = found {
-                if s.distance < dist || s.distance < scaled_zero {
-                    // save the better solution
-                    dist = s.distance;
-                    t = s.t;
-                    uv = s.uv;
+                // when a better solution was found or we have two good solutions
+                if let Some(s) = found {
+                    if s.distance < dist || s.distance < scaled_zero {
+                        // save the better solution
+                        dist = s.distance;
+                        t = s.t;
+                        uv = s.uv;
+                    }
+                }
+            } else {
+                let (minimize_found, best) = self.local_curve_minimize_point(
+                    k,
+                    uv_domain,
+                    curve,
+                    interval,
+                    distance_tolerance,
+                    uv,
+                    t,
+                )?;
+                // An accepted point is the old `local_curve_solve` answer, including its
+                // evaluation error. An unaccepted point that cannot be evaluated is no
+                // seed: that solve used to return no point.
+                let evaluated = self.curve_surface_solution_at(k, curve, false, &[], &best);
+                let s = if minimize_found {
+                    Some(evaluated?)
+                } else if best.len() >= 3 {
+                    evaluated.ok()
+                } else {
+                    None
+                };
+                if let Some(s) = s {
+                    if minimize_found {
+                        if s.distance < dist || s.distance < scaled_zero {
+                            dist = s.distance;
+                            t = s.t;
+                            uv = s.uv;
+                        }
+                    } else if s.distance < distance_tolerance {
+                        // The point-match step in t overshoots a short leaf interval on the seam.
+                        // The closest point on the seam is a seed: its residual is the tilt.
+                        let seed = [s.t, s.uv.x, s.uv.y];
+                        if let Some(again) = cs_intersect_local_solve(
+                            k,
+                            self,
+                            curve,
+                            EFF_ZERO * EFF_ZERO,
+                            &intervals,
+                            &seed,
+                            distance_tolerance * 4.0,
+                        )? {
+                            let hit =
+                                self.curve_surface_solution_at(k, curve, false, &[], &again)?;
+                            if hit.distance < distance_tolerance {
+                                dist = hit.distance;
+                                t = hit.t;
+                                uv = hit.uv;
+                            }
+                        }
+                    }
                 }
             }
         }

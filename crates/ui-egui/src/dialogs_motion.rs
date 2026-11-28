@@ -430,11 +430,12 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
         let made = sc.execute("motion.study", &params).and_then(|r| {
             sc.execute(
                 "motion.export_animation",
-                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes}),
+                // At the rate the dialog plays it, so the GIF lasts as long as playing does.
+                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes, "fps": STEPS_PER_S}),
             )
         });
         match made {
-            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &path)]), false),
+            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&path))]), false),
             Err(e) => app.set_status(e.to_string(), true),
         }
     });
@@ -545,24 +546,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 }
             });
             if let Some(c) = check {
-                let hits = c.get("collisions").and_then(Value::as_array).cloned().unwrap_or_default();
+                let hits = c.get("collisions").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
                 crate::ui_kit::section(ui, "contact_collisions", "Collisions", true, |ui| {
                     if let Some(e) = c.get("error").and_then(Value::as_str) {
                         ui.label(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.error));
                     } else if hits.is_empty() {
                         ui.label(RichText::new(solidcraft_ui_text::tr_label("none")).color(t.text_dim));
                     } else {
-                        ui.vertical(|ui| {
-                            for h in hits {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{} · {}  {:.3} mm",
-                                        name_of(&h["a"]),
-                                        name_of(&h["b"]),
-                                        h["depth_mm"].as_f64().unwrap_or(0.0)
-                                    ))
-                                    .color(t.error),
-                                );
+                        let columns = [
+                            crate::ui_kit::Column::new(solidcraft_ui_text::tr("ui.bodies"), 2.0).flex(),
+                            crate::ui_kit::Column::new(solidcraft_ui_text::tr("ui.depth"), 1.0).flex(),
+                        ];
+                        crate::ui_kit::report_list(ui, "contact_collisions", crate::ui_kit::table_row_height() * 8.0, &columns, "", |ui, table| {
+                            for (index, h) in hits.iter().enumerate() {
+                                table.row(ui, &index.to_string(), false, |row| {
+                                    row.cell(|ui| {
+                                        crate::ui_kit::text(ui, &format!("{} · {}", name_of(&h["a"]), name_of(&h["b"])), crate::ui_kit::Text::Cell)
+                                    });
+                                    row.cell(|ui| ui.label(RichText::new(format!("{:.3} mm", h["depth_mm"].as_f64().unwrap_or(0.0))).color(t.error)));
+                                });
                             }
                         });
                     }
@@ -1112,27 +1114,17 @@ mod tests {
         assert_eq!(cell_value("param:width", "90 mm"), json!("90 mm"));
     }
 
-    fn click_rule_button(h: &mut crate::scenario::Harness, name: &str) {
-        // The table header also contains this name. Its TextRun may be emitted
-        // after the popup, so select the actual choice rather than matching text.
-        let bounds = h
-            .output
-            .accesskit_update
-            .as_ref()
-            .unwrap()
-            .nodes
-            .iter()
-            .rev()
-            .find_map(|(_, n)| {
-                (n.role() == egui::accesskit::Role::Button && !n.is_disabled() && n.label() == Some(name)).then(|| n.bounds()).flatten()
-            })
-            .expect("rule button");
-        h.step(&json!({"click": [(bounds.x0 + bounds.x1) / 2.0, (bounds.y0 + bounds.y1) / 2.0]})).unwrap();
+    fn select_rule_parameter(h: &mut crate::scenario::Harness, name: &str) {
+        h.step(&json!({"click":{"handle":format!("dialog:Parameter:{name}")}})).unwrap();
+        assert!(h.widget("Choose…").is_none(), "parameter choice should close and update the dropdown");
     }
 
-    fn select_rule_parameter(h: &mut crate::scenario::Harness, name: &str) {
-        click_rule_button(h, name);
-        assert!(h.widget("Choose…").is_none(), "parameter choice should close and update the dropdown");
+    fn assert_preview_parameter(h: &crate::scenario::Harness, name: &str, value: &str) {
+        let cell = crate::scenario::handle_at(&format!("config:preview:param:{name}")).unwrap();
+        assert!(
+            h.widgets(value).iter().any(|at| egui::pos2(at[0] as f32, at[1] as f32).distance(cell) < 1.0),
+            "preview of {name} should show {value}"
+        );
     }
 
     // Kit rows publish identities independently of translated text. Long forms scroll through
@@ -1179,6 +1171,7 @@ mod tests {
                 Some("Preview Row") => Some("config:preview_row"),
                 Some("Apply") => Some("config:activate:Default"),
                 Some("Drive parameter") => Some("dialog:Then"),
+                Some("Choose…") => Some("config:choice:effect_parameter"),
                 Some("Preview: Default") => Some("dialog:section:Preview: Default"),
                 _ => step
                     .get("click")
@@ -1223,14 +1216,42 @@ mod tests {
             {"widget":"Preview Row"},{"widget":"Preview: Default"}
         ])).unwrap();
         reveal_config_handle(&mut h, "config:preview:param:length");
-        assert!(h.widget("length = 20 mm").is_some());
+        assert_preview_parameter(&h, "length", "20 mm");
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, "40 mm");
         click_config_handle(&mut h, "config:rule:last:up");
         click_config_handle(&mut h, "config:preview_row");
         assert_eq!(h.app.session.doc.configs.rules[0].id, "last");
         reveal_config_handle(&mut h, "config:preview:param:length");
-        assert!(h.widget("length = 10").is_some());
+        assert_preview_parameter(&h, "length", "10");
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, "40 mm");
+    }
+
+    #[test]
+    fn configuration_rule_tables_keep_actions_and_preview_bands_at_small_widths() {
+        for width in [1280, 720] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.resize", json!({"width":width,"height":720}));
+            h.run(&json!([
+                {"call":"engine.execute","params":{"command":"parameters.change","params":{"name":"length","expression":"40 mm"}}},
+                {"call":"engine.execute","params":{"command":"config.configure","params":{"params":["length"]}}},
+                {"call":"engine.execute","params":{"command":"config.rule","params":{"rule":{"id":"drive","name":"Drive length","condition":{"type":"always"},"effect":{"type":"drive_parameter","parameter":"length","expression":"20 mm"}}}}},
+                {"start":"config.table"}
+            ])).unwrap();
+            click_config_handle(&mut h, "config:rule:drive:enabled");
+            assert!(!h.app.session.doc.configs.rules[0].enabled);
+            click_config_handle(&mut h, "config:rule:drive:enabled");
+            assert!(h.app.session.doc.configs.rules[0].enabled);
+            let before = h.app.session.doc.clone();
+            configuration_steps(&mut h, &json!([{"widget":"Preview Row"},{"widget":"Preview: Default"}])).unwrap();
+            reveal_config_handle(&mut h, "config:preview:param:length");
+            assert_preview_parameter(&h, "length", "20 mm");
+            assert!(h.widget("Matched").is_some());
+            click_config_handle(&mut h, "dialog:table:configuration_preview:group:parameters");
+            assert!(crate::scenario::handle_at("config:preview:param:length").is_none());
+            click_config_handle(&mut h, "dialog:table:configuration_preview:group:parameters");
+            assert!(crate::scenario::handle_at("config:preview:param:length").is_some());
+            assert_eq!(h.app.session.doc, before, "preview and its section bands leave the design unchanged");
+        }
     }
 
     #[test]
@@ -1442,7 +1463,8 @@ mod tests {
     }
 
     /// Export Animation saves the study the dialog shows (its keys need not be saved) as a GIF,
-    /// also when the name is typed without `.gif`, and the design keeps no study.
+    /// also when the name is typed without `.gif`, and the design keeps no study. The GIF plays
+    /// at the dialog's rate: its 5 frames (steps 0 to 4) last 5/24 s, in hundredths.
     #[test]
     fn export_animation_saves_the_dialogs_study_as_a_gif() {
         // Drawn as the CLI draws (the headless device), as scenario shots are.
@@ -1480,6 +1502,19 @@ mod tests {
         let gif = std::fs::read(h.dir.join("swing.gif")).unwrap();
         assert!(gif.starts_with(b"GIF89a"), "{:?}", h.app.status);
         assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "{:?}", h.app.status);
+        // Each frame's delay, from its graphic control block (after the 256-colour table).
+        let (mut at, mut delays) = (13 + 768, Vec::new());
+        while gif[at] != 0x3B {
+            if gif[at] == 0x21 && gif[at + 1] == 0xF9 {
+                delays.push(u16::from_le_bytes([gif[at + 4], gif[at + 5]]));
+            }
+            at += if gif[at] == 0x2C { 11 } else { 2 };
+            while gif[at] != 0 {
+                at += usize::from(gif[at]) + 1;
+            }
+            at += 1;
+        }
+        assert_eq!(delays, [4, 4, 5, 4, 4], "24 frames a second");
         assert!(h.app.session.doc.assembly.studies.is_empty(), "exporting saves no study");
     }
 

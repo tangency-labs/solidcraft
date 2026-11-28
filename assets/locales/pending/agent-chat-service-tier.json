@@ -1,0 +1,66 @@
+{
+  "en": {
+    "ui.agent_chat_service_tier": "Service tier",
+    "ui.agent_chat_service_tier_default": "Provider default",
+    "ui.agent_chat_service_tier_fast": "Fast",
+    "ui.agent_chat_service_tier_tip": "Availability depends on your model and account. Faster tiers can cost more.",
+    "ui.agent_chat_service_tier_ultrafast": "Ultrafast",
+    "ui.agent_chat_service_tier_value": "Service tier · {tier}"
+  },
+  "ar": {
+    "ui.agent_chat_service_tier": "مستوى الخدمة",
+    "ui.agent_chat_service_tier_default": "الافتراضي للمزوّد",
+    "ui.agent_chat_service_tier_fast": "سريع",
+    "ui.agent_chat_service_tier_tip": "يعتمد توفّر الخيارات على النموذج والحساب. قد تكون المستويات الأسرع أعلى تكلفة.",
+    "ui.agent_chat_service_tier_ultrafast": "فائق السرعة",
+    "ui.agent_chat_service_tier_value": "مستوى الخدمة · {tier}"
+  },
+  "de": {
+    "ui.agent_chat_service_tier": "Servicestufe",
+    "ui.agent_chat_service_tier_default": "Standard des Anbieters",
+    "ui.agent_chat_service_tier_fast": "Schnell",
+    "ui.agent_chat_service_tier_tip": "Die Verfügbarkeit hängt vom Modell und vom Konto ab. Schnellere Stufen können mehr kosten.",
+    "ui.agent_chat_service_tier_ultrafast": "Ultraschnell",
+    "ui.agent_chat_service_tier_value": "Servicestufe · {tier}"
+  },
+  "he": {
+    "ui.agent_chat_service_tier": "רמת שירות",
+    "ui.agent_chat_service_tier_default": "ברירת המחדל של הספק",
+    "ui.agent_chat_service_tier_fast": "מהירה",
+    "ui.agent_chat_service_tier_tip": "הזמינות תלויה במודל ובחשבון. רמות שירות מהירות יותר עשויות לעלות יותר.",
+    "ui.agent_chat_service_tier_ultrafast": "מהירה במיוחד",
+    "ui.agent_chat_service_tier_value": "רמת שירות · {tier}"
+  },
+  "ja": {
+    "ui.agent_chat_service_tier": "サービスティア",
+    "ui.agent_chat_service_tier_default": "プロバイダーの既定値",
+    "ui.agent_chat_service_tier_fast": "高速",
+    "ui.agent_chat_service_tier_tip": "利用できるティアはモデルとアカウントによって異なります。より高速なティアでは料金が高くなる場合があります。",
+    "ui.agent_chat_service_tier_ultrafast": "超高速",
+    "ui.agent_chat_service_tier_value": "サービスティア · {tier}"
+  },
+  "ko": {
+    "ui.agent_chat_service_tier": "서비스 등급",
+    "ui.agent_chat_service_tier_default": "제공자 기본값",
+    "ui.agent_chat_service_tier_fast": "고속",
+    "ui.agent_chat_service_tier_tip": "사용 가능 여부는 모델과 계정에 따라 달라집니다. 더 빠른 등급은 비용이 더 높을 수 있습니다.",
+    "ui.agent_chat_service_tier_ultrafast": "초고속",
+    "ui.agent_chat_service_tier_value": "서비스 등급 · {tier}"
+  },
+  "vi": {
+    "ui.agent_chat_service_tier": "Cấp dịch vụ",
+    "ui.agent_chat_service_tier_default": "Mặc định của nhà cung cấp",
+    "ui.agent_chat_service_tier_fast": "Nhanh",
+    "ui.agent_chat_service_tier_tip": "Tùy chọn khả dụng phụ thuộc vào mô hình và tài khoản. Cấp nhanh hơn có thể tốn kém hơn.",
+    "ui.agent_chat_service_tier_ultrafast": "Siêu nhanh",
+    "ui.agent_chat_service_tier_value": "Cấp dịch vụ · {tier}"
+  },
+  "zh": {
+    "ui.agent_chat_service_tier": "服务等级",
+    "ui.agent_chat_service_tier_default": "提供商默认",
+    "ui.agent_chat_service_tier_fast": "快速",
+    "ui.agent_chat_service_tier_tip": "可用性取决于你的模型和账户。使用更快的等级可能需要支付更高的费用。",
+    "ui.agent_chat_service_tier_ultrafast": "极速",
+    "ui.agent_chat_service_tier_value": "服务等级 · {tier}"
+  }
+}

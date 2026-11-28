@@ -117,19 +117,73 @@ struct Found {
     selection: Vec<Sel>,
 }
 
+/// Whether a row keyed by `key` starts open under the current preferences.
+fn row_starts_open(app: &SolveApp, key: &str) -> bool {
+    if key == "c0" {
+        true
+    } else if is_placement_key(key) {
+        app.preferences.browser_components_open && rows_start_open(app)
+    } else {
+        rows_start_open(app)
+    }
+}
+
+/// Open `rows` and close any rows that the previous reveal auto-opened (unless they are also in
+/// `rows`, were toggled by hand since, or now start open by preference).
+fn open_found_rows(app: &mut SolveApp, rows: Vec<(String, bool)>) {
+    let mut opened = Vec::new();
+    for (key, was_collapsed) in std::mem::take(&mut app.tree.found_rows) {
+        if row_starts_open(app, &key) {
+            continue;
+        }
+        if rows.iter().any(|(row, _)| *row == key) {
+            opened.push((key, was_collapsed));
+        } else {
+            app.tree.expanded.remove(&key);
+            if was_collapsed {
+                app.tree.collapsed.insert(key);
+            }
+        }
+    }
+    for (key, default) in rows {
+        let was_collapsed = app.tree.collapsed.contains(&key);
+        if set_open(app, &key, default, true) && !default && !opened.iter().any(|(row, _)| *row == key) {
+            opened.push((key, was_collapsed));
+        }
+    }
+    app.tree.found_rows = opened;
+}
+
+/// Open the rows down to an item of `folder` (keyed `key` there) in the placement at `path` of
+/// `component`: the design, the placements, the folder and the groups around the item. Rows that
+/// started closed and were opened by the last find close again unless they are on this path or
+/// were toggled by hand since.
+fn open_found_item_rows(app: &mut SolveApp, component: u64, path: &[u64], folder: &str, key: &str) {
+    let start_open = rows_start_open(app);
+    let placement_start_open = app.preferences.browser_components_open && start_open;
+    // An item of the design itself is in no placement: its folder is the design's (`c0`).
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
+    let mut rows = vec![("c0".to_string(), true)];
+    rows.extend((1..=path.len()).map(|depth| (occurrence_key(&path[..depth]), placement_start_open)));
+    rows.push((format!("{scope}/{folder}"), start_open));
+    rows.extend(group_chain(app, component, folder, key).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
+    open_found_rows(app, rows);
+}
+
 /// Open the rows that hold a body and no others: the document, the placements down to it, its
-/// Bodies folder and any group around it. While the rows start closed, the rows the last find
-/// opened close again, unless they were opened or closed by hand since or are on this path. The
+/// Bodies folder and any group around it. Rows that started closed and were opened by the last
+/// find close again, unless they were opened or closed by hand since or are on this path. The
 /// body's row is scrolled into view, and the path lights the rows leading to it. The path is
 /// looked up once, here: the rows are opened before drawing, because a closed row never draws
 /// what is inside it.
 fn find_in_tree(app: &mut SolveApp, body: &str) {
     app.tree.reveal_feature = None;
+    app.tree.reveal_occurrence = None;
     app.tree.reveal_construction = None;
     app.tree.reveal = Some(body.to_string());
     remember_reveal_source(app, body);
     let Some((component, source, path)) = body_placement(app, body) else { return };
-    open_found_rows(app, component, &path, "bodies", &source);
+    open_found_item_rows(app, component, &path, "bodies", &source);
     app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
 }
 
@@ -144,9 +198,25 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
     }
     let (component, sel) = (f.component, solidcraft_engine::browser_find::construction_sel(f));
     let _ = app.run("select.set", json!({ "items": [sel] }));
+    // With the Construction folder hidden ("Hide the Construction folder"), the History lists it:
+    // in the Browser, or in its own panel, as Find in History goes.
+    if folder_hidden_by_preference(app, "construction") {
+        app.tree.reveal_construction = None;
+        if app.preferences.history_in_browser {
+            reveal_in_history(app, id);
+        } else {
+            app.ui.show_timeline = true;
+            crate::timeline_left::reveal_feature(app, id);
+            request_timeline_reveal(app, id);
+            reveal_shared_panel(app, "history");
+        }
+        return;
+    }
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
+    app.tree.reveal_source = None;
+    app.tree.reveal_occurrence = None;
     app.tree.reveal_feature = None;
     app.tree.found = None;
     app.tree.reveal_construction = Some(id);
@@ -159,39 +229,27 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
             None => return,
         }
     };
-    open_found_rows(app, component, &path, "construction", &id.to_string());
+    open_found_item_rows(app, component, &path, "construction", &id.to_string());
 }
 
-/// Open the rows down to an item of `folder` (keyed `key` there) in the placement at `path` of
-/// `component`: the design, the placements, the folder and the groups around the item. While the
-/// rows start closed, the rows the last find opened close again unless they are on this path.
-fn open_found_rows(app: &mut SolveApp, component: u64, path: &[u64], folder: &str, key: &str) {
-    let start_open = rows_start_open(app);
-    // An item of the design itself is in no placement: its folder is the design's (`c0`).
-    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
+/// Open the rows above a component placement and no others: the document and each ancestor
+/// placement down to its parent, leaving the placement itself and its Bodies folder as they were.
+/// Rows that started closed and were opened by the previous reveal close again unless toggled by
+/// hand since or needed by this path.
+fn find_occurrence_in_tree(app: &mut SolveApp, path: &[u64]) {
+    if path.is_empty() || app.session.doc.placement_frame(path).is_err() {
+        return;
+    }
+    app.tree.reveal = None;
+    app.tree.reveal_source = None;
+    app.tree.reveal_feature = None;
+    app.tree.reveal_construction = None;
+    app.tree.found = None;
+    app.tree.reveal_occurrence = Some(path.to_vec());
+    let placement_start_open = app.preferences.browser_components_open && rows_start_open(app);
     let mut rows = vec![("c0".to_string(), true)];
-    rows.extend((1..=path.len()).map(|depth| (occurrence_key(&path[..depth]), start_open)));
-    rows.push((format!("{scope}/{folder}"), start_open));
-    rows.extend(group_chain(app, component, folder, key).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
-    // Rows that start open stay open after a find, as they always have: only rows that start
-    // closed close again at the next one.
-    if start_open {
-        app.tree.found_rows.clear();
-    }
-    let mut opened = Vec::new();
-    for (key, default) in std::mem::take(&mut app.tree.found_rows) {
-        if rows.iter().any(|(row, _)| *row == key) {
-            opened.push((key, default));
-        } else {
-            set_open(app, &key, default, false);
-        }
-    }
-    for (key, default) in rows {
-        if set_open(app, &key, default, true) && !start_open {
-            opened.push((key, default));
-        }
-    }
-    app.tree.found_rows = opened;
+    rows.extend((1..path.len()).map(|depth| (occurrence_key(&path[..depth]), placement_start_open)));
+    open_found_rows(app, rows);
 }
 
 /// Another design is shown: the rows the last Find in Browser opened were that design's, and the
@@ -271,9 +329,13 @@ pub struct TreeState {
     pub reveal: Option<String>,
     /// Enough provenance to distinguish temporary rollback/suppression from target removal.
     reveal_source: Option<BodyRevealSource>,
+    /// Scroll to this component placement's row (its path of occurrence ids): a component picked
+    /// in the viewport while the Browser follows the 3D view. [`find_occurrence_in_tree`] opens
+    /// only its ancestor placements.
+    pub reveal_occurrence: Option<Vec<u64>>,
     /// Runtime owner of the active pending requests, including requests with numeric IDs.
     reveal_session: Option<u64>,
-    /// The rows the last Find in Browser opened (key, starts open), for the next one to close
+    /// The rows the last reveal auto-opened `(key, was_collapsed)`, for the next one to close
     /// again. A row opened or closed by hand since leaves the list.
     found_rows: Vec<(String, bool)>,
     /// What the last Find in Browser found, until the selection changes.
@@ -338,6 +400,9 @@ pub struct TreeState {
     cache: Option<cache::Cache>,
     /// The tree key of each item row the panel has seen, by its id: a Shift range comes back as ids.
     node_keys: std::collections::HashMap<NodeId, String>,
+    /// The session, active component and active placement the Browser last saw, so "Fold other
+    /// components on activate" folds once per change ([`fold_other_components`]).
+    seen_active: Option<(u64, u64, Option<Vec<u64>>)>,
 }
 
 struct FolderPick {
@@ -360,6 +425,7 @@ pub(crate) struct PendingReveals {
     body: Option<String>,
     construction: Option<u64>,
     source: Option<BodyRevealSource>,
+    occurrence: Option<Vec<u64>>,
     feature: Option<features::Reveal>,
     timeline: Option<u64>,
 }
@@ -367,6 +433,7 @@ pub(crate) struct PendingReveals {
 pub(crate) fn discard_reveals(app: &mut SolveApp) {
     app.tree.reveal = None;
     app.tree.reveal_source = None;
+    app.tree.reveal_occurrence = None;
     app.tree.reveal_feature = None;
     app.tree.reveal_construction = None;
     app.tree.timeline_reveal = None;
@@ -394,6 +461,7 @@ pub(crate) fn take_reveals(app: &mut SolveApp) -> PendingReveals {
         body: app.tree.reveal.take(),
         construction: app.tree.reveal_construction.take(),
         source: app.tree.reveal_source.take(),
+        occurrence: app.tree.reveal_occurrence.take(),
         feature: app.tree.reveal_feature.take(),
         timeline: app.tree.timeline_reveal.take(),
     }
@@ -405,6 +473,7 @@ pub(crate) fn restore_reveals(app: &mut SolveApp, pending: PendingReveals) {
         app.tree.reveal = pending.body;
         app.tree.reveal_construction = pending.construction;
         app.tree.reveal_source = pending.source;
+        app.tree.reveal_occurrence = pending.occurrence;
         app.tree.reveal_feature = pending.feature;
         app.tree.timeline_reveal = pending.timeline;
     }
@@ -1187,16 +1256,29 @@ pub(crate) fn picked_body(sel: &Sel) -> Option<&str> {
 }
 
 /// A pick in the viewport, while the Browser is shown and follows the 3D view ([`follows_view`]):
-/// the Browser finds the body of the last item picked, as Find in Browser does (#3005). A search
-/// stays (#1413): a body it found opens in it, and one it didn't leaves the tree as it is.
+/// the Browser finds the body or component placement of the last item picked, as Find in Browser
+/// does (#3005). A search stays (#1413): an item it found opens in it, and one it didn't leaves
+/// the tree as it is.
 pub(crate) fn reveal_pick(app: &mut SolveApp) {
     sync_reveals(app);
-    if follows_view(app)
-        && app.ui.show_browser
-        && let Some(body) = app.session.selection.last().and_then(picked_body).map(str::to_string)
-        && app.tree.search.hits().is_none_or(|hits| hits.found_body(&body))
-    {
-        find_in_tree(app, &body);
+    if !follows_view(app) || !panel_open(app) {
+        return;
+    }
+    match app.session.selection.last() {
+        Some(Sel::Occurrence { path }) if !path.is_empty() => {
+            let path = path.clone();
+            if app.tree.search.hits().is_none_or(|hits| hits.matches(&path)) {
+                find_occurrence_in_tree(app, &path);
+            }
+        }
+        Some(sel) => {
+            if let Some(body) = picked_body(sel).map(str::to_string)
+                && app.tree.search.hits().is_none_or(|hits| hits.found_body(&body))
+            {
+                find_in_tree(app, &body);
+            }
+        }
+        None => {}
     }
 }
 
@@ -1379,6 +1461,8 @@ impl Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
         let mut holding = std::collections::HashSet::new();
+        let follows = follows_view(app);
+        let (mut paths, mut components) = (Vec::new(), Vec::new());
         // Bodies chosen in an open dialog light up even when the click was in the 3D view,
         // which does not rewrite the browser selection.
         let dialog_picks = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
@@ -1414,6 +1498,12 @@ impl Lit {
                 Sel::Plane { name } => Thing::Plane(name.clone()),
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
+                Sel::Occurrence { path } if !path.is_empty() => {
+                    if follows {
+                        paths.push(path.clone());
+                    }
+                    continue;
+                }
                 Sel::Occurrence { .. } | Sel::Drawing { .. } | Sel::PointCloudPoint { .. } => continue,
             };
             selected.insert(thing);
@@ -1454,12 +1544,10 @@ impl Lit {
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
         // Browser found is known, until the selection changes.
-        let follows = follows_view(app);
         if app.tree.found.as_ref().is_some_and(|found| found.selection != app.session.selection) {
             app.tree.found = None;
         }
         let doc = app.session.doc.clone();
-        let (mut paths, mut components) = (Vec::new(), Vec::new());
         for thing in selected.iter().chain(&holding).chain(&hovered) {
             match thing {
                 Thing::Body(b) if follows => {
@@ -1557,6 +1645,7 @@ impl Actions {
 /// Existing Browser content without placement, title or collapse chrome.
 pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
+    fold_other_components(app);
     // The rows above a hovered or selected body are marked from its placement's path: a large
     // assembly names its placements beside the window, so the first hover never waits for them.
     if follows_view(app) {
@@ -1585,6 +1674,43 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// "Fold other components on activate": when the active component changes, every placement row
+/// that is not on the way down to the active one folds, and the rows down to it open. However the
+/// component was made active (its radio, Edit in Place, a command, undo), the Browser sees the
+/// change the next time it draws. The first look at a session only remembers what is active, so
+/// opening or switching designs leaves the rows as they were.
+pub(crate) fn fold_other_components(app: &mut SolveApp) {
+    let session = &app.session;
+    let unchanged = app.tree.seen_active.as_ref().is_some_and(|(uid, component, path)| {
+        *uid == session.uid && *component == session.active_component && *path == session.active_occurrence_path
+    });
+    if unchanged {
+        return;
+    }
+    let before = app.tree.seen_active.replace((session.uid, session.active_component, session.active_occurrence_path.clone()));
+    if !app.preferences.browser_fold_other_components || before.is_none_or(|(uid, ..)| uid != app.session.uid) {
+        return;
+    }
+    let placements = app.session.doc.placements();
+    let active = app.session.active_occurrence_path.clone().or_else(|| {
+        let component = app.session.active_component;
+        (component != 0).then(|| placements.iter().find(|(c, ..)| *c == component).map(|(_, path, _)| path.clone())).flatten()
+    });
+    for (_, path, _) in &placements {
+        if active.as_ref().is_some_and(|active| active.starts_with(path)) {
+            continue;
+        }
+        let key = occurrence_key(path);
+        if fold_open(app, &key, true) {
+            app.tree.found_rows.retain(|(row, _)| *row != key);
+            set_open(app, &key, true, false);
+        }
+    }
+    if let Some(active) = active {
+        open_path(app, &active);
+    }
+}
+
 /// Gives the search's field the keyboard, showing its bar and opening and unfolding the Browser's
 /// panel ([`reveal_shared_panel`]).
 fn show_search(app: &mut SolveApp) {
@@ -1599,6 +1725,32 @@ pub(crate) fn magnifier(app: &mut SolveApp) {
     } else {
         show_search(app);
     }
+}
+
+/// The Browser's view options, as on/off rows of its panel's ⋯ menu: (action id, label id, on).
+/// Each is a saved setting, off by default.
+pub(crate) fn menu_toggles(app: &SolveApp) -> Vec<(&'static str, &'static str, bool)> {
+    vec![
+        ("hide-sketches-folder", "prefs.browser_hide_sketches_folder", app.preferences.browser_hide_sketches_folder),
+        ("hide-construction-folder", "prefs.browser_hide_construction_folder", app.preferences.browser_hide_construction_folder),
+        ("fold-other-components", "prefs.browser_fold_other_components", app.preferences.browser_fold_other_components),
+    ]
+}
+
+/// A row of the Browser panel's header or ⋯ menu: the search's magnifier, or one of
+/// [`menu_toggles`], which turns its setting over.
+pub(crate) fn menu_action(app: &mut SolveApp, action: &str) -> Result<(), String> {
+    let setting = match action {
+        "hide-sketches-folder" => "browser_hide_sketches_folder",
+        "hide-construction-folder" => "browser_hide_construction_folder",
+        "fold-other-components" => "browser_fold_other_components",
+        _ => {
+            magnifier(app);
+            return Ok(());
+        }
+    };
+    let on = menu_toggles(app).iter().any(|(id, _, on)| *id == action && *on);
+    crate::prefs::set(app, &json!({ setting: !on })).map(|_| ())
 }
 
 /// In the compact layout with the History shown in the Browser, the Browser is the only side panel
@@ -1652,16 +1804,10 @@ fn model_children(app: &SolveApp, component: u64) -> Vec<u64> {
 fn model_body_indices(app: &SolveApp, component: u64) -> Vec<usize> {
     match app.tree.model.as_ref().filter(|model| model.matches(&app.session)) {
         Some(model) => model.bodies.get(&component).cloned().unwrap_or_default(),
-        None => app
-            .session
-            .model
-            .state()
-            .bodies
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| app.session.doc.model_body_component(b) == component)
-            .map(|(i, _)| i)
-            .collect(),
+        None => {
+            let state = app.session.model.state();
+            app.session.doc.model_body_components(&state).into_iter().enumerate().filter_map(|(i, owner)| (owner == component).then_some(i)).collect()
+        }
     }
 }
 
@@ -1837,6 +1983,11 @@ fn body_reveal(app: &SolveApp) -> Option<&str> {
     app.tree.content.browser_presentation().then_some(app.tree.reveal.as_deref()).flatten()
 }
 
+/// History's prefix must neither open ancestors nor acknowledge a Browser placement reveal.
+fn occurrence_reveal(app: &SolveApp) -> Option<&[u64]> {
+    app.tree.content.browser_presentation().then_some(app.tree.reveal_occurrence.as_deref()).flatten()
+}
+
 /// The construction row Find in Browser scrolls to, while the Browser shows its own rows.
 fn construction_reveal(app: &SolveApp) -> Option<u64> {
     app.tree.content.browser_presentation().then_some(app.tree.reveal_construction).flatten()
@@ -1865,6 +2016,9 @@ pub(crate) fn prune_reveals(app: &mut SolveApp) {
         }
     } else {
         app.tree.reveal_source = None;
+    }
+    if app.tree.reveal_occurrence.as_ref().is_some_and(|path| path.is_empty() || app.session.doc.placement_frame(path).is_err()) {
+        app.tree.reveal_occurrence = None;
     }
     if app.tree.reveal_feature.as_ref().is_some_and(|target| app.session.doc.feature(target.id).is_none()) {
         app.tree.reveal_feature = None;
@@ -1942,7 +2096,7 @@ fn component_rows_inner(
         secondary: &appearance.name,
         count: &appearance.count,
         // The design holds everything the tree lists.
-        mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
+        mark: if id == 0 && (acts.lit.any() || !acts.lit.paths.is_empty()) { Mark::Branch } else { Mark::None },
         status: cache.defects.get(&id).map(|_| Status::Warning),
         status_tip: cache.defects.get(&id),
         ..Default::default()
@@ -2132,7 +2286,7 @@ fn occurrence_rows_inner(
         badges,
         icon_badge: link.as_ref().map(|link| link.icon_badge()),
         emphasis,
-        mark: acts.lit.placement(&app.session.doc, path, placement.component),
+        mark: if selected { Mark::Here } else { acts.lit.placement(&app.session.doc, path, placement.component) },
         status: cache.defects.get(&placement.component).map(|_| Status::Warning),
         status_tip: cache.defects.get(&placement.component),
         ..Default::default()
@@ -2156,6 +2310,12 @@ fn occurrence_rows_inner(
         Spec { key, item: true, drag: Some(DRAG_PLACEMENTS), drops: panel::Drops { before: true, into: true }, accept: Some(&accept) },
         row,
     );
+    if occurrence_reveal(app).is_some_and(|target| target == path)
+        && let Some(rect) = r.rect
+        && crate::semantic_content::scroll_acknowledged(rows.ui(), rect)
+    {
+        app.tree.reveal_occurrence = None;
+    }
     if let Some(rect) = r.rect.filter(|_| r.resp.is_some()) {
         crate::semantic_content::record_occurrence(rows.ui(), (path.to_vec(), placement.name.clone(), rect, open));
         // Near the row's end, clear of an eye there.
@@ -2210,10 +2370,11 @@ fn occurrence_rows_inner(
         }
     } else if r.clicked && !r.double && !rename_here {
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
-        if !offer_bodies(app, &names, Take::Toggle) {
+        let nested_whole = app.dialog.as_ref().is_some_and(|d| crate::dialogs_assembly::row_adds_nested_whole(d, path));
+        if !offer_bodies(app, &names, if nested_whole { Take::Add } else { Take::Toggle }) {
             click_select(app, r.how.as_ref(), Some(Sel::Occurrence { path: path.to_vec() }));
         } else if let Some(d) = app.dialog.as_mut() {
-            crate::dialogs_assembly::picked_whole_component(d, &names);
+            crate::dialogs_assembly::picked_whole_component(d, path, &names);
         }
     }
     if rename_here {
@@ -3245,6 +3406,18 @@ fn folder_static(folder: &str) -> &'static str {
 /// under the component or placement row (Preferences › Interface › Bodies folders, #4217).
 /// `scope` is that row's tree key (`c{id}`, `o:{path}`) and `bodies` how many items the folder
 /// holds. The design's own folder always stays, and so does a hidden one: its eye is the way back.
+/// Whether this folder is left out because "Hide the Sketches folder" or "Hide the Construction
+/// folder" is on: the History lists those items. A search still lists the folder, so an item can be
+/// found by name.
+fn folder_hidden_by_preference(app: &SolveApp, folder: &str) -> bool {
+    let hidden = match folder {
+        "sketches" => app.preferences.browser_hide_sketches_folder,
+        "construction" => app.preferences.browser_hide_construction_folder,
+        _ => false,
+    };
+    hidden && !app.tree.search.on()
+}
+
 fn bodies_folded(app: &SolveApp, comp: u64, scope: &str, bodies: usize) -> bool {
     use crate::prefs::BodiesFolders;
     if comp == 0 || bodies == 0 || app.session.folder_hidden(&format!("{scope}/bodies")) {
@@ -3275,6 +3448,10 @@ fn folder_rows_at(
     }
     // A search lists the folders that hold a match (`folder_level` lists the matches).
     let searching = app.tree.search.on();
+    // A folder hidden by its own eye stays listed, so that eye can show its items again.
+    if folder_hidden_by_preference(app, folder) && !app.session.folder_hidden(&data.key) {
+        return;
+    }
     if app.tree.search.hits().is_some_and(|h| !h.folder(path.unwrap_or(&[]), folder)) {
         return;
     }

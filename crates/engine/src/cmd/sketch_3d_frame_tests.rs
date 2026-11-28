@@ -1628,20 +1628,20 @@ fn move_z_copies_a_plane_line_and_a_drawn_curve_together() {
 fn move3d_point_lift_takes_lines_joined_by_coincident() {
     let (mut s, sketch) = plane_3d_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
-    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
-    let (end_pt, start_pt) = {
-        let sk = s.doc.sketch(sketch).unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]],"connect":false}));
+    {
+        let sk = s.doc_mut().sketch_mut(sketch).unwrap();
         let end = match &sk.curves[0].kind {
-            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            solidcraft_sketch::CurveKind::Line { b, .. } => *b,
             _ => panic!("first curve is not a line"),
         };
         let start = match &sk.curves[1].kind {
-            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            solidcraft_sketch::CurveKind::Line { a, .. } => *a,
             _ => panic!("second curve is not a line"),
         };
-        (end, start)
-    };
-    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+        sk.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: end, q: start }, None).unwrap();
+    }
+    s.refresh();
     let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
     let r = run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "by":[0,0,4]}));
     let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
@@ -1661,20 +1661,20 @@ fn move3d_point_lift_takes_lines_joined_by_coincident() {
 fn move3d_joined_lift_keeps_unrelated_points() {
     let (mut s, sketch) = plane_3d_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
-    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
-    let (end_pt, start_pt) = {
-        let sk = s.doc.sketch(sketch).unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]],"connect":false}));
+    {
+        let sk = s.doc_mut().sketch_mut(sketch).unwrap();
         let end = match &sk.curves[0].kind {
-            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            solidcraft_sketch::CurveKind::Line { b, .. } => *b,
             _ => panic!("first curve is not a line"),
         };
         let start = match &sk.curves[1].kind {
-            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            solidcraft_sketch::CurveKind::Line { a, .. } => *a,
             _ => panic!("second curve is not a line"),
         };
-        (end, start)
-    };
-    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+        sk.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: end, q: start }, None).unwrap();
+    }
+    s.refresh();
     run(&mut s, "sketch.line", json!({"points":[[20,0],[25,0]]}));
     run(&mut s, "sketch.point", json!({"point":[30,30]}));
     let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
@@ -2039,6 +2039,51 @@ fn a_3d_line_is_held_to_the_sketchs_2d_point_and_line() {
     run(&mut s, "sketch.move", json!({"entities": [p2], "translate": [3, 0]}));
     run(&mut s, "sketch.finish", json!({}));
     near(solved_fit(&s, sketch, &w, 0), Vec3::new(8.0, 5.0, 0.0));
+}
+
+#[test]
+fn coincident_3d_accepts_model_picks_and_keeps_them_linked() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": "h"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let line = run(&mut s, "sketch.line3d", json!({"points": [[1, 1, 12], [30, 2, 15]]}))["curves"][0].as_str().unwrap().to_string();
+    let vertex = json!({"body": "Body1", "vertex": [0, 0, 10]});
+    let edge = json!({"body": "Body1", "edge": [20, 0, 10]});
+
+    // A curve-to-curve pick must refuse the edit, including the tentative model link.
+    let before = s.doc.to_json();
+    let error = s.execute("sketch.constraint.coincident", &json!({"a": edge, "b": line})).unwrap_err();
+    assert!(error.to_string().contains("give two points"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // A vertex is projected to the sketch plane, as for the planar Coincident command.
+    let result = run(&mut s, "sketch.constraint.coincident", json!({"a": vertex, "b": format!("{line}.start")}));
+    assert!(result["constraint"].is_string(), "{result}");
+    near(fit(&s, &line, 0), Vec3::new(0.0, 0.0, 0.0));
+
+    // The edge pick keeps its true height. The reverse operand order works too.
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": edge}));
+    let end = fit(&s, &line, 1);
+    near(end, Vec3::new(end.x, 0.0, 10.0));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "25 mm"}));
+    let end = solved_fit(&s, sketch, &line, 1);
+    near(end, Vec3::new(end.x, 0.0, 25.0));
+}
+
+#[test]
+fn coincident_3d_accepts_a_model_vertex_and_the_whole_3d_line() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    sketch_3d_on_xy(&mut s);
+    let line = run(&mut s, "sketch.line3d", json!({"points": [[1, 1, 12], [30, 2, 15]]}))["curves"][0].as_str().unwrap().to_string();
+    let result = run(&mut s, "sketch.constraint.coincident", json!({"a": {"body": "Body1", "vertex": [0, 0, 10]}, "b": line}));
+    assert!(result["constraint"].is_string(), "{result}");
+    let start = fit(&s, &line, 0);
+    let direction = fit(&s, &line, 1) - start;
+    assert!(direction.len() > 1.0);
+    assert!(start.cross(direction).len() / direction.len() < 1e-7, "{start:?}, {direction:?}");
 }
 
 #[test]

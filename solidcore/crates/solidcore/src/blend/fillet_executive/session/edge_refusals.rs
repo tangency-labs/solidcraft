@@ -116,11 +116,12 @@ impl FilletSession<'_> {
     }
 
     /// `DoFilleting`'s result with its refusal typed, its status unchanged: a Setback's
-    /// refusal noted on the way (a setback asked for too short or too long:
-    /// [`BlendRefusal::SetbackTooShort`], [`BlendRefusal::SetbackTooLong`]), which the
-    /// later steps return as their own failure; else a round that ends where its edge runs
-    /// on tangentially ([`NoRoomReason::TangentContinuationEndUnsupported`]): the first such
-    /// end's edge and vertex and the edge not blended that it runs on into
+    /// refusal noted on the way (a setback asked for too short or too long, or one whose
+    /// growth the rails' reach held: [`BlendRefusal::SetbackTooShort`],
+    /// [`BlendRefusal::SetbackTooLong`], [`BlendRefusal::SetbackUncertifiedWithinRails`]),
+    /// which the later steps return as their own failure; else a round that ends where its
+    /// edge runs on tangentially ([`NoRoomReason::TangentContinuationEndUnsupported`]): the
+    /// first such end's edge and vertex and the edge not blended that it runs on into
     /// ([`BlendRefusal::ContinuesInto`]), at the tangency of the vertex's corner. A refusal
     /// that names no such data stays as it was.
     pub(crate) fn typed_filleting(&mut self, k: &Kernel, result: Result<()>) -> Result<()> {

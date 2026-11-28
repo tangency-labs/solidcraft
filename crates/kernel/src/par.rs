@@ -51,10 +51,13 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
             let stop = solidcraft_smlib::stop::current();
             let traced = solidcraft_smlib::trace::current();
             let watch = crate::watch::current();
+            let held_heal = crate::tolerance_heal::held_current();
             pool.install(|| {
-                crate::watch::scoped(watch, || {
-                    solidcraft_smlib::trace::scoped(traced, || {
-                        solidcraft_smlib::stop::scoped(stop, || crate::validation::within(scope, || guard("mesh worker", || f(item))))
+                crate::tolerance_heal::within_held(held_heal, || {
+                    crate::watch::scoped(watch, || {
+                        solidcraft_smlib::trace::scoped(traced, || {
+                            solidcraft_smlib::stop::scoped(stop, || crate::validation::within(scope, || guard("mesh worker", || f(item))))
+                        })
                     })
                 })
             })
@@ -72,16 +75,19 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
 /// item panicked).
 pub fn map_on_threads<T: Sync, R: Send>(items: &[T], max_threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<Option<R>> {
     // The threads run under the caller's validation mode (`crate::validation`), stop token,
-    // traced run (`solidcraft_smlib::trace`) and progress/cancellation watch (`crate::watch`).
+    // watch (`crate::watch`), test heal preference and traced run (`solidcraft_smlib::trace`).
     let scope = crate::validation::current();
     let stop = solidcraft_smlib::stop::current();
     let traced = solidcraft_smlib::trace::current();
     let watch = crate::watch::current();
+    let held_heal = crate::tolerance_heal::held_current();
     let one = |item: &T| {
-        crate::watch::scoped(watch.clone(), || {
-            solidcraft_smlib::trace::scoped(traced.clone(), || {
-                solidcraft_smlib::stop::scoped(stop.clone(), || {
-                    crate::validation::within(scope.clone(), || guard("parallel item", || Ok(f(item))).ok())
+        crate::tolerance_heal::within_held(held_heal, || {
+            crate::watch::scoped(watch.clone(), || {
+                solidcraft_smlib::trace::scoped(traced.clone(), || {
+                    solidcraft_smlib::stop::scoped(stop.clone(), || {
+                        crate::validation::within(scope.clone(), || guard("parallel item", || Ok(f(item))).ok())
+                    })
                 })
             })
         })
@@ -186,6 +192,27 @@ mod tests {
         let items = [80u8; 16];
         let on_helpers = kernel_thread("deep-helpers").spawn(move || map_on_threads(&items, 8, |&d| deep(d))).unwrap().join().unwrap();
         assert!(on_helpers.iter().all(|r| *r == Some(want)), "{on_helpers:?}");
+    }
+
+    #[test]
+    fn map_on_threads_propagates_watch_and_heal_preference() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct FlagWatch(AtomicBool);
+        impl crate::watch::Watch for FlagWatch {
+            fn cancelled(&self) -> bool {
+                self.0.load(Ordering::Relaxed)
+            }
+            fn progress(&self, _: &'static str, _: usize, _: usize) {}
+        }
+
+        let watch = Arc::new(FlagWatch(AtomicBool::new(true)));
+        let items: Vec<usize> = (0..16).collect();
+        let _hold = crate::heal_preference_for_tests(false);
+        let seen = crate::watch::watching(watch, || map_on_threads(&items, 4, |_| (crate::watch::cancelled(), crate::heals_tolerance_defects())));
+        assert_eq!(seen.len(), 16);
+        assert!(seen.iter().all(|r| *r == Some((true, false))), "{seen:?}");
     }
 
     #[test]

@@ -286,7 +286,7 @@ pub struct ModelThread {
     pub feature: u64,
     /// The body it is on.
     pub body: String,
-    /// Its size, such as `M6x1`.
+    /// Its size and any tolerance class, such as `M6x1`, `M8-6g` or `1/4-20 UNC-2A`.
     pub designation: String,
     /// Its major diameter (mm).
     pub major_diameter: f64,
@@ -323,7 +323,8 @@ pub enum ThreadHand {
 }
 
 /// A thread form: ISO metric and Unified inch 60°, metric trapezoidal 30°, Acme 29°, metric buttress 3°/30°,
-/// buttress inch 7°/45°, square, and the 55° and 60° pipe threads.
+/// buttress inch 7°/45°, square, the 55° and 60° pipe threads, and a custom profile (the ISO 68-1
+/// basic profile at the included angle its designation gives).
 #[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadForm {
@@ -338,6 +339,7 @@ pub enum ThreadForm {
     Rp,
     Bspt,
     Npt,
+    Custom,
 }
 
 impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
@@ -363,6 +365,7 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
                 Form::Rp => ThreadForm::Rp,
                 Form::Bspt => ThreadForm::Bspt,
                 Form::Npt => ThreadForm::Npt,
+                Form::Custom => ThreadForm::Custom,
             },
             hand: match t.hand {
                 Hand::Right => ThreadHand::Right,
@@ -617,11 +620,15 @@ pub struct ErrorCodeReply {
     /// The kernel routine that failed (a module path), or for kind 0 the library's name of the
     /// error.
     pub operation: String,
+    /// The kernel's class of the error: `refusal` (a fact of the geometry: change the input),
+    /// `defect` (the kernel's fault), `port_failure` (a part of the kernel not ported, or a
+    /// preparation it needs), or `unclassed` (none of them, and every failure of kind 0).
+    pub class: String,
 }
 
 impl From<&solidcraft_kernel::ErrorCode> for ErrorCodeReply {
     fn from(c: &solidcraft_kernel::ErrorCode) -> Self {
-        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone() }
+        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone(), class: c.class.clone() }
     }
 }
 
@@ -904,7 +911,8 @@ pub enum MeasureRegionMode {
     Inside,
 }
 
-/// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
+/// How `inspect.measure` selects: bodies, or picked items (one or two, or three or more round
+/// ones for their spacing). With `items`, `bodies` and
 /// `names_only` are not read, so the check leaves them alone.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -927,14 +935,22 @@ pub struct MeasureKeys {
     pub mode: Option<MeasureRegionMode>,
     /// One or two selections to measure, instead of bodies: a face or edge `{type, body, point}`,
     /// `{type, body, index}` (as `model.faces` and `model.edges` list it) or both, or a body,
-    /// vertex, sketch curve or profile as `Sel` has it.
+    /// vertex, sketch curve or profile as `Sel` has it. Or 3 to 64 round edges or cylinder faces
+    /// with parallel axes (a row of holes, a bolt circle), for their `spacing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "items_schema")]
     pub items: Option<Vec<Value>>,
 }
 
+/// The most items `inspect.measure` takes.
+pub(crate) const MEASURE_MAX_ITEMS: usize = 64;
+/// What `inspect.measure` says of a number of items it cannot measure together.
+pub(crate) const MEASURE_ITEM_COUNT: &str = "measure one or two items, or three or more round edges or holes";
+/// What `inspect.measure` says of more than [`MEASURE_MAX_ITEMS`] items.
+pub(crate) const MEASURE_TOO_MANY: &str = "measure at most 64 items";
+
 fn items_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": 1000})
+    json_schema!({"type": "array", "items": {"type": "object"}, "minItems": 1, "maxItems": 64})
 }
 
 /// `inspect.measure`'s parameters: [`MeasureKeys`], read as the handler reads them: with `items`
@@ -947,8 +963,11 @@ impl<'de> Deserialize<'de> for MeasureParams {
         let value = Value::deserialize(d)?;
         if let Some(items) = value.get("items") {
             let list = items.as_array().ok_or_else(|| D::Error::custom(whole("`items` must be a list of selections")))?;
-            if list.is_empty() || list.len() > 1000 {
-                return Err(D::Error::custom(whole("measure one or two items")));
+            if list.is_empty() {
+                return Err(D::Error::custom(whole(MEASURE_ITEM_COUNT)));
+            }
+            if list.len() > MEASURE_MAX_ITEMS {
+                return Err(D::Error::custom(whole(MEASURE_TOO_MANY)));
             }
             if value.get("within").is_some() || value.get("mode").is_some() {
                 return Err(D::Error::custom(whole("`within` and `mode` cannot be combined with `items`")));
@@ -1044,8 +1063,8 @@ pub struct MeasureTotal {
     pub vertices: u64,
 }
 
-/// One or two picked items measured: each item, then what its shape gives (for one item) or what
-/// lies between the two.
+/// The picked items measured: each item, then what its shape gives (for one item), what lies
+/// between the two, or the spacing of three or more round ones.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct MeasuredItems {
     /// Each item described: its kind, what it is and its own figures.
@@ -1131,6 +1150,59 @@ pub struct MeasuredItems {
     /// Two items: which distance is the one to read, `center` or `min`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measure: Option<MeasureKind>,
+    /// Three or more round items: their spacing, centre to centre.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spacing: Option<Spacing>,
+}
+
+/// What the centres of three or more round items lie on, seen along their axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SpacingPattern {
+    /// One straight line: a row of holes.
+    Line,
+    /// One circle: a bolt circle.
+    Circle,
+    /// Neither: the gaps are in the order the items were given.
+    None,
+}
+
+/// The spacing of three or more round items with parallel axes (holes along a row or round a
+/// bolt circle): the centre-to-centre gaps of neighbours, measured in the plane through the
+/// first item's centre square to its axis.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Spacing {
+    pub pattern: SpacingPattern,
+    /// The items (indices into `items`) in order along the row or round the circle (about the
+    /// first item's axis, from the first item); for `none`, as given.
+    pub order: Vec<usize>,
+    /// The centre-to-centre distance (mm) of each neighbouring pair in `order`. A circle has
+    /// one more: from the last item back to the first.
+    pub gaps: Vec<f64>,
+    /// The two centres each gap lies between.
+    pub gap_points: Vec<[[f64; 3]; 2]>,
+    /// The distance (mm) from the first centre in `order` to the last.
+    pub span: f64,
+    /// Whether every gap is the same.
+    pub even: bool,
+    /// The gap (mm) when they are even; otherwise the gap most of the others share, absent when
+    /// no two gaps are the same.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<f64>,
+    /// The gaps (indices into `gaps`) that differ from `pitch`.
+    pub odd_gaps: Vec<usize>,
+    /// A circle: the pitch-circle diameter (mm).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pcd: Option<f64>,
+    /// A circle: the pitch circle's centre.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pcd_center: Option<[f64; 3]>,
+    /// A circle: the angle at its centre between neighbours, in degrees, one for each gap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub angle_deg: Option<Vec<f64>>,
+    /// A circle with even gaps: the angle between neighbouring holes, in degrees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub angle_pitch_deg: Option<f64>,
 }
 
 /// Which of two items' distances is the one to read.

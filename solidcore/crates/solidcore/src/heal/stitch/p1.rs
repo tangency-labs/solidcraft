@@ -960,6 +960,12 @@ pub struct Stitch<'c> {
     /// Split edges that come within tolerance of a vertex
     /// (`m_bSplitEdgesWithVertices`, default `TRUE`).
     pub split_edges_with_vertices: bool,
+    /// Evaluate candidate-list membership per vertex and per edge in
+    /// `split_edges_with_vertices` and expand its spatial query boxes by entity
+    /// tolerances (not upstream: upstream `SmStitch::DoStitching` declares its
+    /// candidate flags outside both loops and never resets them, permanently
+    /// disabling splits after the first non-candidate vertex and edge).
+    pub(crate) per_entity_candidate_split: bool,
     /// Only glue pairs of lamina edges and their vertices (`m_bMakingManifoldSolid`,
     /// default `TRUE`).
     pub making_manifold_solid: bool,
@@ -1338,6 +1344,7 @@ impl<'c> Stitch<'c> {
             fast_edge_compare: false,
             squeeze_small_edges: false,
             split_edges_with_vertices: true,
+            per_entity_candidate_split: false,
             making_manifold_solid: true,
             remove_laminar_slivers: false,
             report_gaps: None,

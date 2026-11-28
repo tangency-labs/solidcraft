@@ -951,7 +951,7 @@ fn a_design_saved_before_pieces_were_numbered_by_place_opens_marked_and_names_al
     let kept = listed(&mut reopened, "Disc");
     assert_eq!(kept.len(), by_place.len());
     let mut legacy = solidcraft_doc::Document::clone(&s.doc);
-    legacy.features.iter_mut().for_each(|f| f.kernel_piece_order = true);
+    legacy.features.iter_mut().for_each(|f| (f.kernel_piece_order, f.least_face_piece_order) = (true, true));
     let mut saved_with = Session::new(legacy);
     saved_with.refresh();
     assert_eq!(listed(&mut saved_with, "Disc"), kept);
@@ -1633,4 +1633,193 @@ fn saved_projections_of_a_revolve_cuts_flanks_open_with_0_45_numbered_names() {
         let cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
         assert!(error(&cold, "Projection").is_some(), "{name} at {at:?}");
     }
+}
+
+/// A 40 x 30 x 20 block ("Block") with a blind hole ("Hole", 16 deep from the bottom) whose wall
+/// breaks out through the block's y = 30 side, and a slot ("Slot", z 8 to 12) across the hole that
+/// cuts its wall in pieces. A sketch ("Projection") projects the four lines where the hole's
+/// wall meets that side, each between the side and a piece of the wall.
+fn hole_wall_in_pieces_projected() -> (Session, u64, [Vec3; 4]) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 29], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 16, "operation": "cut", "name": "Hole"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -5], "p1": [30, 35]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 4, "start_offset": 8, "operation": "cut", "name": "Slot"}));
+    // The hole's wall meets the y = 30 side where x = 20 ± √(3² - 1²).
+    let dx = 8f64.sqrt();
+    let at = [Vec3::new(20.0 - dx, 30.0, 4.0), Vec3::new(20.0 + dx, 30.0, 4.0), Vec3::new(20.0 - dx, 30.0, 14.0), Vec3::new(20.0 + dx, 30.0, 14.0)];
+    let profile = run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Projection"}))["sketch"].as_u64().unwrap();
+    let refs: Vec<Value> = at.iter().map(|p| json!({"edge": [p.x, p.y, p.z]})).collect();
+    run(&mut s, "sketch.project", json!({"refs": refs}));
+    run(&mut s, "sketch.finish", json!({}));
+    (s, profile, at)
+}
+
+#[test]
+fn saved_projections_of_numbered_edges_open_after_the_face_they_bound_is_split_into_named_pieces() {
+    let (s, profile, at) = hole_wall_in_pieces_projected();
+    let state = s.model.state();
+    let expected = &state.sketch(profile).unwrap().sketch;
+    assert_eq!(expected.links.len(), 4);
+    assert!(expected.links.iter().all(|link| !link.lost));
+    // Today the hole's wall is in pieces, each named after the faces around it, and each line
+    // lies between the side and a piece.
+    let names: Vec<String> = expected.links.iter().map(|link| link.edge_name.clone().unwrap_or_default()).collect();
+    assert!(names.iter().all(|n| n.contains(":side:c1#[")), "{names:?}");
+    // 0.46.2 saved such a wall as one face, and the lines between it and the side as numbered
+    // edges between those two faces (#22928): synthetic saved links of that form, in two orders.
+    let whole = |n: &str, k: usize| format!("{}~{k}", n.split_once("#[").unwrap().0);
+    let old: Vec<String> = names.iter().enumerate().map(|(i, n)| whole(n, i + 1)).collect();
+    let reversed: Vec<String> = names.iter().enumerate().map(|(i, n)| whole(n, names.len() - i)).collect();
+    assert!(old.iter().all(|n| !n.contains('#')), "{old:?}");
+    for saved in [names.clone(), old.clone(), reversed] {
+        let mut doc = solidcraft_doc::Document::clone(&s.doc);
+        let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+        for (link, name) in sketch.links.iter_mut().zip(&saved) {
+            link.edge_name = Some(name.clone());
+        }
+        let mut cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+        cold.model.no_cache = true;
+        cold.refresh();
+        assert_eq!(error(&cold, "Projection"), None, "{saved:?}");
+        let reopened = cold.model.state();
+        let actual = &reopened.sketch(profile).unwrap().sketch;
+        assert!(actual.links.iter().all(|link| !link.lost), "{saved:?}");
+        assert_eq!(actual.curves, expected.curves, "{saved:?}");
+        assert_eq!(actual.points, expected.points, "{saved:?}");
+    }
+    // A point off every such edge (on the side, 3 mm from the wall) still finds nothing.
+    let mut doc = solidcraft_doc::Document::clone(&s.doc);
+    let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
+    sketch.links[0].edge_name = Some(old[0].clone());
+    sketch.links[0].source = solidcraft_sketch::LinkSource::Edge { body: "Body1".into(), at: at[0] - Vec3::new(3.0, 0.0, 0.0) };
+    let cold = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    assert!(error(&cold, "Projection").is_some(), "{} off the edge", old[0]);
+}
+
+/// The volume of body `name` (0 when there is none).
+fn volume_of(s: &Session, name: &str) -> f64 {
+    s.model.state().body(name).map_or(0.0, |b| solidcraft_kernel::measure(&b.body).unwrap().volume)
+}
+
+/// A 100 x 20 x 20 bar ("Bar") notched at the top of its +x end ("Notch") and sawn in two at
+/// x 88 to 90 ("Saw"); the long piece renamed "Main" and slotted ("Slot", which names it).
+fn sawn_bar(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 100, "width": 20, "height": 20, "corner": [0, 0, 0], "operation": "new", "body_name": "Bar"}));
+    run(s, "solid.box", json!({"length": 5, "width": 40, "height": 10, "corner": [95, -10, 10], "operation": "cut", "name": "Notch"}));
+    run(s, "solid.box", json!({"length": 2, "width": 40, "height": 40, "corner": [88, -10, -10], "operation": "cut", "name": "Saw"}));
+    // The end piece (x 90 to 100) keeps the bar's name, the long piece (x 0 to 88) is the saw's.
+    assert_eq!(body_at(s, [95.0, 10.0, 5.0]).as_deref(), Some("Bar"));
+    assert_eq!(body_at(s, [50.0, 10.0, 5.0]).as_deref(), Some("Bar (1)"));
+    run(s, "body.rename", json!({"body": "Bar (1)", "name": "Main"}));
+    let stored = s.doc.features.iter().find(|f| f.name == "Saw").map(|f| f.body_names.clone()).unwrap_or_default();
+    assert_eq!(stored, ["Main"], "the saw stores its piece's name");
+    run(
+        s,
+        "solid.box",
+        json!({"length": 10, "width": 40, "height": 5, "corner": [40, -10, 15], "operation": "cut", "targets": ["Main"], "name": "Slot"}),
+    );
+}
+
+/// Whether body `name` has volume `want` (mm³).
+fn has_volume(s: &Session, name: &str, want: f64) -> bool {
+    (volume_of(s, name) - want).abs() < 1e-6 * want
+}
+
+/// #21552: the pieces a cut saws a body into take their names first by the faces the cut made
+/// on them, so a renamed piece keeps its name when an upstream edit takes away the face that
+/// held a piece's least face name. Edited to take the whole end of the bar, the notch took the
+/// end piece's `+x` face: the long piece's least name then sorted first, it took the bar's name
+/// and the end piece took `Main`, so the slot cut into `Main` silently missed it.
+#[test]
+fn a_renamed_piece_of_a_sawn_bar_keeps_its_name_when_an_upstream_notch_takes_the_end() {
+    let mut s = Session::default();
+    sawn_bar(&mut s);
+    assert!(has_volume(&s, "Main", 88.0 * 400.0 - 1000.0), "{}", volume_of(&s, "Main"));
+    assert!(has_volume(&s, "Bar", 4000.0 - 1000.0), "{}", volume_of(&s, "Bar"));
+    // The notch now takes the whole end: the end piece is x 90 to 95.
+    run(&mut s, "timeline.edit", json!({"feature": "Notch", "set": {"height": "20", "corner": [95, -10, 0]}}));
+    for feature in ["Notch", "Saw", "Slot"] {
+        assert_eq!(error(&s, feature), None, "{feature}");
+    }
+    assert_eq!(body_at(&s, [50.0, 10.0, 5.0]).as_deref(), Some("Main"));
+    assert_eq!(body_at(&s, [92.0, 10.0, 5.0]).as_deref(), Some("Bar"));
+    assert!(!solid_at(&s, [45.0, 10.0, 17.5]), "the slot still cuts the long piece");
+    assert!(has_volume(&s, "Main", 88.0 * 400.0 - 1000.0), "{}", volume_of(&s, "Main"));
+    assert!(has_volume(&s, "Bar", 2000.0), "{}", volume_of(&s, "Bar"));
+    // Evaluated again from its features alone, as on opening it, the design names them so too.
+    let mut again = solidcraft_doc::Model::new();
+    again.no_cache = true;
+    again.evaluate(&s.doc);
+    let state = again.state();
+    let starts_at = |name: &str, x: f64| state.body(name).is_some_and(|b| (b.mesh().bounds().min.x - x).abs() < 1e-9);
+    assert!(starts_at("Main", 0.0) && starts_at("Bar", 90.0), "{:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    // And back: the notch at the top of the end again leaves every name where it was.
+    run(&mut s, "timeline.edit", json!({"feature": "Notch", "set": {"height": "10", "corner": [95, -10, 10]}}));
+    assert_eq!(body_at(&s, [50.0, 10.0, 5.0]).as_deref(), Some("Main"));
+    assert_eq!(body_at(&s, [95.0, 10.0, 5.0]).as_deref(), Some("Bar"));
+    assert!(has_volume(&s, "Main", 88.0 * 400.0 - 1000.0), "{}", volume_of(&s, "Main"));
+}
+
+/// A design saved before #21552 keeps naming the pieces its features split bodies into by their
+/// least face name alone, which the body names it stores mean: it opens with every piece under
+/// the name it was saved with, and its features say so.
+#[test]
+fn a_design_saved_before_pieces_followed_their_cut_faces_opens_with_its_names() {
+    let mut s = Session::default();
+    sawn_bar(&mut s);
+    let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert!(file["features"].as_array().unwrap().iter().all(|f| f.get("least_face_piece_order").is_none()));
+    file["format"] = json!("solidcraft/67");
+    file.as_object_mut().unwrap().remove("format_pending");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&file.to_string()).unwrap());
+    assert!(reopened.doc.features.iter().all(|f| f.least_face_piece_order));
+    assert_eq!(body_at(&reopened, [50.0, 10.0, 5.0]).as_deref(), Some("Main"));
+    assert_eq!(body_at(&reopened, [95.0, 10.0, 5.0]).as_deref(), Some("Bar"));
+    assert!(has_volume(&reopened, "Main", 88.0 * 400.0 - 1000.0), "{}", volume_of(&reopened, "Main"));
+    assert_eq!(error(&reopened, "Slot"), None);
+}
+
+/// #21552: a feature mirror that saws a body into pieces also orders its pieces by the faces
+/// the mirrored cut made (`F<src>:<role>@F<mirror>.1`), so a renamed piece keeps its name when
+/// an upstream edit removes the face holding a piece's least face name.
+#[test]
+fn a_renamed_piece_of_a_mirrored_cut_keeps_its_name_when_an_upstream_notch_takes_the_end() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 200, "width": 20, "height": 20, "corner": [-100, -10, -10], "operation": "new", "body_name": "Beam"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 40, "height": 10, "corner": [95, -20, 0], "operation": "cut", "name": "Notch"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 40, "height": 40, "corner": [-90, -20, -20], "operation": "cut", "name": "Saw"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Saw"], "plane": "YZ", "name": "MirrorSaw"}));
+    assert_eq!(body_at(&s, [0.0, 0.0, 0.0]).as_deref(), Some("Beam"));
+    assert_eq!(body_at(&s, [-95.0, 0.0, 0.0]).as_deref(), Some("Beam (1)"));
+    assert_eq!(body_at(&s, [92.0, 0.0, 5.0]).as_deref(), Some("Beam (2)"));
+    run(&mut s, "body.rename", json!({"body": "Beam (2)", "name": "RightEnd"}));
+    let stored = s.doc.features.iter().find(|f| f.name == "MirrorSaw").map(|f| f.body_names.clone()).unwrap_or_default();
+    assert_eq!(stored, ["RightEnd"], "the mirror stores its piece's name");
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 2, "width": 40, "height": 5, "corner": [91, -20, -10], "operation": "cut", "targets": ["RightEnd"], "name": "Slot"}),
+    );
+    assert!(has_volume(&s, "Beam", 176.0 * 400.0), "{}", volume_of(&s, "Beam"));
+    assert!(has_volume(&s, "RightEnd", 3000.0 - 200.0), "{}", volume_of(&s, "RightEnd"));
+    // The notch now takes the whole +x end, removing the beam's original `+x` face.
+    run(&mut s, "timeline.edit", json!({"feature": "Notch", "set": {"height": "20", "corner": [95, -20, -10]}}));
+    for feature in ["Notch", "Saw", "MirrorSaw", "Slot"] {
+        assert_eq!(error(&s, feature), None, "{feature}");
+    }
+    assert_eq!(body_at(&s, [0.0, 0.0, 0.0]).as_deref(), Some("Beam"));
+    assert_eq!(body_at(&s, [-95.0, 0.0, 0.0]).as_deref(), Some("Beam (1)"));
+    assert_eq!(body_at(&s, [92.0, 0.0, 5.0]).as_deref(), Some("RightEnd"));
+    assert!(!solid_at(&s, [92.0, 0.0, -7.5]), "the slot still cuts the right end piece");
+    assert!(has_volume(&s, "Beam", 176.0 * 400.0), "{}", volume_of(&s, "Beam"));
+    assert!(has_volume(&s, "RightEnd", 2000.0 - 200.0), "{}", volume_of(&s, "RightEnd"));
 }

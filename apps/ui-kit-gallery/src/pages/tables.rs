@@ -11,6 +11,8 @@ pub const TABLE: Page = Page {
     group: Group::Tables,
     items: &[
         "table_custom",
+        "table_fitted",
+        "settings_mouse_mapping",
         "Column",
         "Table",
         "TableRow",
@@ -49,6 +51,13 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
         "Don't delete a row without a bin in the row itself.",
     ],
     demo: |ui, d| {
+        state(ui, solidcraft_ui_text::tr("prefs.navigation"), |ui| {
+            // These three bindings are shared by the app's default mouse presets.
+            let bindings =
+                [("prefs.wheel", "prefs.zoom_toward_cursor"), ("prefs.left_click", "prefs.select"), ("prefs.right_click", "prefs.context_menu")]
+                    .map(|(input, action)| (vec![solidcraft_ui_text::tr(input).to_owned()], solidcraft_ui_text::tr(action).to_owned()));
+            ui_kit::settings_mouse_mapping(ui, &bindings, |_| {});
+        });
         state(ui, "Editable, sortable (click Name)", |ui| {
             let columns =
                 [ui_kit::Column::new("Name", 1.0), ui_kit::Column::new("Expression", 1.5).flex(), ui_kit::Column::new("Delete", 0.3).icon_only()];
@@ -94,8 +103,8 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
             ("gallery_cell_selection", "ui.table.gallery.cell_selection", "Cell selection", ui_kit::SelectionMode::Cell),
             ("gallery_range_selection", "ui.table.gallery.range_selection", "Range selection", ui_kit::SelectionMode::Range),
         ] {
-            // The standalone gallery embeds the folded English catalogue. Keep the specimen
-            // name readable while these two new messages are still in a pending catalogue.
+            // The gallery build includes pending messages. Keep the fallback for hosts that
+            // draw this page with only the folded English catalogue installed.
             let translated = solidcraft_ui_text::tr(label);
             state(ui, if translated == label { fallback } else { translated }, |ui| {
                 let state_id = ui.make_persistent_id((id, "selection"));
@@ -328,31 +337,93 @@ pub const REPORTS: Page = Page {
     id: "reports",
     title: "Report list",
     group: Group::Tables,
-    items: &["report_list", "report_header", "list_frame", "empty_box", "path_chip", "report_divider"],
-    what: "A bounded scrolling list of reports (crash reports, check results) with a header per report, a path chip and an empty state.",
+    items: &["report_list", "report_header", "report_card", "list_frame", "empty_box", "path_chip", "report_divider"],
+    what: "Shared tables for comparable results, and individual diagnostic cards with quiet actions for crash reports.",
     usage: r#"
-ui_kit::report_list(ui, "reports", 160.0, |ui| {
-    ui_kit::report_header(ui, "Internal error", 3, "2026-10-18 21:04", "Report", |ui| { ui_kit::bin_button(ui, "Delete"); });
+let columns = [ui_kit::Column::new("Report", 1.0).flex(), ui_kit::Column::new("Actions", 0.0).icon_only()];
+ui_kit::report_list(ui, "reports", 160.0, &columns, "No reports.", |ui, table| {
+    ui_kit::report_header(ui, table, "r1", "2026-10-18 21:04 · Internal error ×3", |ui| { ui_kit::bin_button(ui, "Delete"); });
     ui_kit::text(ui, "solid.fillet · replayable", ui_kit::Text::MonoNote("r1"));
 });
+let summary = ui_kit::ReportCardSummary { title: "Fillet stopped unexpectedly", subtitle: "24 Nov, 09:30 · replayable", icon: "warning", ink: Tokens::get().form_error };
+let fields = [("version", "Version", "0.49.0 · abc1234"), ("command", "Command", "solid.fillet"), ("system", "System", "Windows · x86_64")];
+let details = ui_kit::ReportCardDetails { fields: &fields, code: "index out of bounds\nblends.rs:418" };
+ui_kit::report_card(ui, "crash", summary, details, &mut expanded, "Copy path", |action, response| { /* handle response.clicked() */ });
 ui_kit::empty_box(ui, "none", "No crash reports.");
 "#,
     dos: &["Say plainly in the empty box that there is nothing, and why that is good."],
     donts: &["Don't let a long list grow the dialog: give `report_list` a height."],
     demo: |ui, _| {
-        state(ui, "With reports", |ui| {
+        state(ui, "Crash report cards", |ui| {
             ui_kit::path_chip(ui, "~/.local/share/solidcraft/reports", |ui| {
                 ui_kit::button(ui, "Copy path", ui_kit::Button::Small);
             });
-            ui_kit::report_list(ui, "gallery_reports", 140.0, |ui| {
-                ui_kit::report_header(ui, "Internal error", 3, "2026-10-18 21:04:12", "Report", |ui| {
-                    ui_kit::bin_button(ui, "Delete");
-                });
-                ui_kit::text(ui, "solid.fillet · replayable", ui_kit::Text::MonoNote("r1"));
-                ui_kit::report_divider(ui, "gallery_reports");
-                ui_kit::report_header(ui, "Panic", 1, "2026-10-17 09:12:40", "Report", |ui| {
-                    ui_kit::bin_button(ui, "Delete");
-                });
+            ui.spacing_mut().item_spacing.y = Tokens::get().space_8;
+            let t = Tokens::get();
+            for (index, (key, title, subtitle, icon, ink, command, code)) in [
+                (
+                    "crash1",
+                    "Fillet stopped unexpectedly",
+                    "24 Nov, 09:30 · happened 3 times · replayable",
+                    "warning",
+                    t.form_error,
+                    "solid.fillet",
+                    "index out of bounds: the len is 4 but the index is 4\nblends.rs:418",
+                ),
+                (
+                    "crash2",
+                    "SolidCraft closed unexpectedly",
+                    "23 Nov, 18:14 · while running Shell",
+                    "stop",
+                    t.warning,
+                    "solid.shell",
+                    "The previous SolidCraft session did not close cleanly",
+                ),
+                (
+                    "crash3",
+                    "Sketch offset failed, your design was restored",
+                    "23 Nov, 16:02 · nothing was lost",
+                    "shield",
+                    t.form_success,
+                    "sketch.offset",
+                    "The kernel could not rebuild the offset",
+                ),
+                (
+                    "crash4",
+                    "Extrude stopped unexpectedly",
+                    "22 Nov, 11:32 · replayable",
+                    "warning",
+                    t.form_error,
+                    "solid.extrude",
+                    "An internal error occurred while rebuilding Extrude2\nextrude.rs:205",
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let id = ui.make_persistent_id(("crash_card", key));
+                let mut expanded = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(index == 0);
+                let fields = [("version", "Version", "0.49.0 · abc1234"), ("command", "Command", command), ("system", "System", "Windows · x86_64")];
+                ui_kit::report_card(
+                    ui,
+                    key,
+                    ui_kit::ReportCardSummary { title, subtitle, icon, ink },
+                    ui_kit::ReportCardDetails { fields: &fields, code },
+                    &mut expanded,
+                    solidcraft_ui_text::tr("crash.copy_path"),
+                    |_, _| {},
+                );
+                ui.data_mut(|data| data.insert_temp(id, expanded));
+            }
+        });
+        state(ui, "Result table", |ui| {
+            let columns = [ui_kit::Column::new("Report", 1.0).flex(), ui_kit::Column::new("Actions", 0.0).icon_only()];
+            ui_kit::report_list(ui, "gallery_results", 140.0, &columns, "No reports.", |ui, table| {
+                for (key, title) in [("check1", "No interference"), ("check2", "Everything is fully constrained")] {
+                    ui_kit::report_header(ui, table, key, title, |ui| {
+                        ui_kit::StageBar::icon_action(ui, "copy", "Copy");
+                    });
+                }
             });
         });
         state(ui, "Empty", |ui| {

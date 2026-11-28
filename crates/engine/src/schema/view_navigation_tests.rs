@@ -61,6 +61,8 @@ fn the_camera_type_matches_the_view_commands_reader() {
         camera(json!({"target": [0.5, -2, 1e6]})),
         without("roll"),
         without("up"),
+        camera(json!({"frame": {"front": [1, 0, 0], "top": [0, 0, 1]}})),
+        camera(json!({"frame": null})),
         camera(json!({"distance": 0})),
         camera(json!({"distance": -5})),
         camera(json!({"fov": std::f64::consts::PI})),

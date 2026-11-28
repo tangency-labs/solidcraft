@@ -91,6 +91,87 @@ pub fn system(app: &SolveApp, ctx: Option<&egui::Context>) -> (serde_json::Map<S
     (f, s)
 }
 
+/// The system info of a report about a crash: the graphics of the run that crashed, from its
+/// crash report, in place of this run's. After a crash at startup this run is often safe mode on
+/// the software renderer, which says nothing about the GPU that failed. This run's graphics stay,
+/// as `reported_from`. Unchanged when the crash report names no renderer.
+pub fn crashed_system(report: &Value, fields: &mut serde_json::Map<String, Value>, text: &mut String) {
+    let Some(environment) = report.get("system").and_then(|s| s.get("environment")).and_then(Value::as_str).filter(|e| !e.trim().is_empty()) else {
+        return;
+    };
+    let environment = super::limited(environment, 500);
+    let version = report.get("app").and_then(|a| a.get("version")).and_then(Value::as_str).unwrap_or_default();
+    let mut from = serde_json::Map::new();
+    for key in ["renderer", "gpu", "graphics_api"] {
+        if let Some(v) = fields.remove(key) {
+            from.insert(key.into(), v);
+        }
+    }
+    let mut failed = json!({ "environment": environment });
+    if !version.is_empty() {
+        failed["version"] = json!(super::limited(version, 100));
+    }
+    // The text's graphics lines become the crashed run's; this run's go on a labelled line.
+    let (renderer_line, api_line) = match solidcraft_engine::crash::graphics(&environment) {
+        Some(g) => {
+            let api = g.api_id().unwrap_or(g.api.as_str()).to_string();
+            let renderer = if g.device_type.as_deref() == Some("Cpu") { "CPU" } else { "GPU" };
+            let gpu = match &g.device_type {
+                Some(t) => format!("{} ({}, {t})", g.adapter, g.api),
+                None => g.adapter.clone(),
+            };
+            let mut line = format!("Renderer: {renderer}, {gpu}");
+            if let Some(d) = &g.driver {
+                fields.insert("driver".into(), json!(super::limited(d, 200)));
+                line.push_str(&format!(", driver {d}"));
+            }
+            fields.insert("renderer".into(), json!(renderer));
+            fields.insert("gpu".into(), json!(gpu));
+            fields.insert("graphics_api".into(), json!(api));
+            failed["graphics_api"] = json!(api);
+            failed["gpu"] = json!(g.adapter);
+            (format!("{line} (the run that crashed)"), Some(format!("Graphics API: {api} (the run that crashed)")))
+        }
+        None => (format!("{environment} (the run that crashed)"), None),
+    };
+    fields.insert("crashed_run".into(), failed);
+    let mut lines: Vec<String> = Vec::new();
+    let mut placed = false;
+    for line in text.lines() {
+        if line.starts_with("Renderer:") || line.starts_with("Graphics API:") {
+            if !placed {
+                lines.push(renderer_line.clone());
+                lines.extend(api_line.clone());
+                placed = true;
+            }
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+    if !placed {
+        lines.push(renderer_line);
+        lines.extend(api_line);
+    }
+    if !from.is_empty() {
+        let said: Vec<&str> = ["renderer", "gpu", "graphics_api"].iter().filter_map(|k| from.get(*k).and_then(Value::as_str)).collect();
+        lines.push(format!("Reported from: {}", said.join(", ")));
+        fields.insert("reported_from".into(), Value::Object(from));
+    }
+    *text = lines.join("\n");
+    text.push('\n');
+}
+
+/// The crashed run's own log lines, home folder as `~`: found by the run (`run`: its process and
+/// start) the crash report names, in the logs kept from earlier runs (`log_file::run_tail_in`).
+fn crashed_log_lines(report: &Value) -> Option<Vec<String>> {
+    let run = report.get("run")?;
+    let pid = u32::try_from(run.get("pid")?.as_u64()?).ok()?;
+    let start = run.get("start")?.as_str()?;
+    let lines = crate::log_file::run_tail_in(crate::log_file::dir()?, pid, start, LOG_LINES, LOG_BYTES)?;
+    let home = super::home_text();
+    Some(lines.iter().map(|l| clean(l, home.as_deref(), 2000)).collect())
+}
+
 /// `s` as a report carries it: at most `limit` bytes, the home folder as `~`.
 fn clean(s: &str, home: Option<&str>, limit: usize) -> String {
     let s = super::limited(s, limit);
@@ -343,7 +424,17 @@ pub fn evidence(
         Some(r) => crash_steps(r),
         None => app.issue_report.steps.iter().cloned().collect(),
     };
-    let (system_fields, system_text) = system(app, ctx);
+    let (mut system_fields, mut system_text) = system(app, ctx);
+    if let Some(r) = &report {
+        crashed_system(r, &mut system_fields, &mut system_text);
+    }
+    // About a crash: the crashed run's own log, which may be several starts back by now; none when
+    // the logs kept no longer have it (never another run's in its place). A report from before
+    // reports named their run gets the end of this run's and the run before's, as it did.
+    let log = match &report {
+        Some(r) if r.get("run").is_some() => crashed_log_lines(r).unwrap_or_default(),
+        _ => log_lines(app),
+    };
     payload::Evidence {
         system: system_text,
         system_fields,
@@ -352,7 +443,7 @@ pub fn evidence(
         session,
         failing,
         steps,
-        log: log_lines(app),
+        log,
         screenshot: None,
         design,
         design_from,
@@ -462,7 +553,7 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
         _ => (draft.title.clone(), draft.description.clone()),
     };
     let mut form = payload::Form { app: api::DEFAULT_APP.into(), title, description, kind: payload::Kind::Bug };
-    // The crash report, like the design, is the person's to tick: never ticked to start with.
+    // The crash report's details start ticked (the person can untick them); the design never does.
     let mut ticks = payload::Ticks::default();
     if let Some(ask) = &draft.agent {
         // What the agent asked for, but the design and crash report stay the person's to tick.
@@ -615,9 +706,17 @@ pub fn without_unanswered(description: &str) -> String {
 /// What the dialog shows instead of the form once Send was pressed.
 enum Phase {
     Form,
-    Sending { done: usize, total: usize },
+    Sending {
+        done: usize,
+        total: usize,
+    },
     Opened(String),
-    Error { why: String, kept: bool },
+    /// The same report was sent a few minutes ago: its page, offered instead of a second one.
+    AlreadySent(String),
+    Error {
+        why: String,
+        kept: bool,
+    },
 }
 
 fn phase(app: &SolveApp, id: u64) -> Phase {
@@ -629,6 +728,7 @@ fn phase(app: &SolveApp, id: u64) -> Phase {
     }
     match &app.tickets.outcome {
         Some(Outcome::Opened(url)) => Phase::Opened(url.clone()),
+        Some(Outcome::AlreadySent(url)) => Phase::AlreadySent(url.clone()),
         Some(Outcome::Queued(why)) => Phase::Error { why: why.clone(), kept: true },
         Some(Outcome::Failed(why)) => Phase::Error { why: why.clone(), kept: false },
         _ => Phase::Form,
@@ -670,6 +770,16 @@ fn after_send(app: &mut SolveApp, ui: &mut Ui, id: u64, phase: Phase) {
         Phase::Opened(url) => {
             ui_kit::text(ui, tr("report.thanks"), ui_kit::Text::Heading("report.thanks"));
             note(ui, "report.opened", tr("report.opened"));
+            link_with_copy(ui, &url);
+            let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
+            crate::scenario::publish_target("report:open_again", r.rect);
+            if r.clicked() {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            }
+        }
+        Phase::AlreadySent(url) => {
+            ui_kit::text(ui, tr("report.already_sent_title"), ui_kit::Text::Heading("report.already_sent_title"));
+            note(ui, "report.already_sent", tr("report.already_sent"));
             link_with_copy(ui, &url);
             let r = ui_kit::button(ui, tr("report.open_again"), ui_kit::Button::Normal);
             crate::scenario::publish_target("report:open_again", r.rect);

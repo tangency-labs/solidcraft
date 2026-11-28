@@ -1,6 +1,7 @@
 use super::*;
 use crate::blur_plan::{self, PxRect, Run};
-use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
+use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
+use solidcraft_window_gpu::FrameCompositor;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -59,7 +60,7 @@ struct Host {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: std::sync::Weak<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
-    lost: egui_wgpu::DeviceLost,
+    lost: solidcraft_viewport_gpu::DeviceLost,
     format: wgpu::TextureFormat,
     capability: std::sync::OnceLock<Capability>,
     split: bool,
@@ -108,17 +109,18 @@ impl State {
         self.retire();
         self.failure = None;
         self.hook = None;
+        let window = solidcraft_viewport_egui::window_device(rs);
         self.host = Some(Host {
             adapter: rs.adapter.clone(),
             device_type: rs.adapter.get_info().device_type,
             device: rs.device.clone(),
             queue: rs.queue.clone(),
             renderer: Arc::downgrade(&rs.renderer),
-            lost: rs.device_lost.clone(),
+            lost: window.lost,
             format: rs.target_format,
             capability: std::sync::OnceLock::new(),
             split,
-            msaa: rs.msaa_samples,
+            msaa: window.msaa_samples,
         });
     }
 
@@ -133,7 +135,9 @@ impl State {
                 windows.map.clear();
             }
             if let Some(renderer) = self.host.as_ref().and_then(|h| h.renderer.upgrade()) {
-                renderer.write().frame_compositor = None;
+                let mut renderer = renderer.write();
+                renderer.frame_compositor = None;
+                renderer.callback_resources.remove::<solidcraft_window_gpu::Compositor>();
             }
         }
     }
@@ -290,7 +294,10 @@ impl State {
             inner.drawn_before = inner.counts.markers_drawn;
         }
         if let Some(renderer) = host.renderer.upgrade() {
-            renderer.write().frame_compositor = Some(shared.clone());
+            let mut renderer = renderer.write();
+            // eframe's painter (the vendored egui-wgpu's hook) and our own runner's painter.
+            renderer.frame_compositor = Some(Arc::new(Vendored(shared.clone())));
+            renderer.callback_resources.insert(solidcraft_window_gpu::Compositor(shared.clone()));
         }
         CURRENT.with(|c| *c.borrow_mut() = Some(Current { shared: shared.clone(), window: id }));
         scope
@@ -312,7 +319,7 @@ impl State {
         if validate_radius(hook.blur)? == 0.0 {
             return Err("a panel hook needs a blur radius above 0".into());
         }
-        let (built, error) = egui_wgpu::capture_errors(&host.device, || HookPipeline::new(host, &hook));
+        let (built, error) = solidcraft_viewport_gpu::capture_errors(&host.device, || HookPipeline::new(host, &hook));
         if let Some(error) = error {
             return Err(error.to_string());
         }
@@ -540,7 +547,7 @@ pub fn fixture_state(
             device: device.clone(),
             queue: queue.clone(),
             renderer: Arc::downgrade(renderer),
-            lost: egui_wgpu::DeviceLost::watch(device),
+            lost: solidcraft_viewport_gpu::DeviceLost::watch(device),
             format,
             capability: match policy {
                 FixturePolicy::Production => std::sync::OnceLock::new(),
@@ -878,8 +885,9 @@ impl Shared {
         if !current {
             inner.gpu = None;
             inner.counts.clear_live();
-            let (gpu, failure) =
-                egui_wgpu::capture_errors(device, || Gpu::new(device, self.host.format, size, steps, offset, self.hook.is_some(), &mut inner.counts));
+            let (gpu, failure) = solidcraft_viewport_gpu::capture_errors(device, || {
+                Gpu::new(device, self.host.format, size, steps, offset, self.hook.is_some(), &mut inner.counts)
+            });
             if let Some(error) = failure {
                 log::warn!("blur resources refused: {error}");
                 return fail(windows, "GPU refused blur resources");
@@ -892,7 +900,7 @@ impl Shared {
         let Inner { gpu, counts, .. } = &mut *inner;
         let Some(gpu) = gpu else { return false };
         gpu.ready_serial = serial;
-        let (_, failed) = egui_wgpu::capture_errors(device, || {
+        let (_, failed) = solidcraft_viewport_gpu::capture_errors(device, || {
             gpu.grow_markers(device, bindings, counts);
             if let Some(hook) = &self.hook {
                 gpu.grow_hook_markers(device, hook, bindings);
@@ -903,6 +911,36 @@ impl Shared {
             return fail(windows, "GPU refused blur marker resources");
         }
         true
+    }
+}
+
+/// The blur as the vendored egui-wgpu's frame hook, which eframe's painter calls; it does what
+/// [`Shared`] does for our own runner's painter.
+struct Vendored(Arc<Shared>);
+
+impl egui_wgpu::FrameCompositor for Vendored {
+    fn begin_viewport(&self, viewport: u64) {
+        self.0.begin_viewport(viewport);
+    }
+    fn screen(&self, screen: &ScreenDescriptor, resources: &mut CallbackResources) {
+        self.0.screen(screen, resources);
+    }
+    fn suspend(&self) {
+        self.0.suspend();
+    }
+    fn render(
+        &self,
+        renderer: &egui_wgpu::Renderer,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        jobs: &[egui::ClippedPrimitive],
+        screen: &ScreenDescriptor,
+        clear: [f32; 4],
+    ) -> bool {
+        self.0.render(renderer, encoder, target, jobs, screen, clear)
+    }
+    fn submitted(&self) {
+        self.0.submitted();
     }
 }
 
@@ -992,7 +1030,7 @@ impl FrameCompositor for Shared {
             }
             if start < end {
                 let mut ui = load_pass(encoder, "blur_ui_segment", &composition);
-                renderer.render_with_mesh_offset(&mut ui, &jobs[start..end], screen, mesh_offset);
+                solidcraft_window_gpu::render_run(renderer, &mut ui, &jobs[start..end], screen, mesh_offset);
                 mesh_offset += jobs[start..end].iter().filter(|job| matches!(&job.primitive, egui::epaint::Primitive::Mesh(_))).count();
                 segment_passes += 1;
             }

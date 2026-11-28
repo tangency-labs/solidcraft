@@ -178,4 +178,73 @@ fn zoom_is_clamped_and_hostile_sizes_give_finite_matrices() {
     orbit.zoom_by(1e9);
     assert_eq!(orbit.zoom, 50.0);
     assert!(orbit.matrices(0.0, f32::NAN).clip.iter().all(|v| v.is_finite()));
+    orbit.target = [f32::NAN, 0.0, 0.0];
+    orbit.zoom = f32::NAN;
+    assert!(orbit.matrices(10.0, 1.5).clip.iter().all(|v| v.is_finite()));
+}
+
+#[test]
+fn pan_follows_the_pointer_and_keeps_the_panned_point_centred() {
+    let radius = 10.0;
+    for (w, h) in [(800.0_f32, 400.0), (400.0, 800.0)] {
+        let aspect = w / h;
+        let mut orbit = Orbit::default();
+        orbit.zoom_by(2.5);
+        let before = project(&orbit.matrices(radius, aspect), [0.0; 3]);
+        let pan = orbit.pan_start(100.0, 120.0, w, h).unwrap();
+        let (dx, dy) = (80.0, -60.0);
+        orbit.pan_to(&pan, 100.0 + dx, 120.0 + dy, w, h);
+        let after = project(&orbit.matrices(radius, aspect), [0.0; 3]);
+        // The model moves by the exact clip-space delta of the pointer drag.
+        assert!(((after[0] - before[0]) - 2.0 * dx / w).abs() < 1e-4, "{w}x{h}: {before:?} -> {after:?}");
+        assert!(((after[1] - before[1]) - 2.0 * dy / h).abs() < 1e-4, "{w}x{h}: {before:?} -> {after:?}");
+        assert_eq!(after[2], 0.5, "panning leaves depth centred on the model");
+        // Returning to where the pan started puts the model back where it was.
+        orbit.pan_to(&pan, 100.0, 120.0, w, h);
+        assert_eq!(orbit.target, [0.0; 3]);
+    }
+    // Zooming and orbiting after a pan keep the panned model point at the middle of the view.
+    let mut orbit = Orbit::default();
+    let pan = orbit.pan_start(200.0, 150.0, 400.0, 300.0).unwrap();
+    orbit.pan_to(&pan, 280.0, 190.0, 400.0, 300.0);
+    let focus = orbit.target.map(|v| v * radius);
+    orbit.zoom_by(8.0);
+    let at_zoom = project(&orbit.matrices(radius, 4.0 / 3.0), focus);
+    assert!(at_zoom[0].abs() < 1e-4 && at_zoom[1].abs() < 1e-4, "{at_zoom:?}");
+    let grab = orbit.grab(200.0, 150.0, 400.0, 300.0).unwrap();
+    orbit.drag_to(&grab, 260.0, 210.0, 400.0, 300.0);
+    let after_turn = project(&orbit.matrices(radius, 4.0 / 3.0), focus);
+    assert!(after_turn[0].abs() < 1e-4 && after_turn[1].abs() < 1e-4, "{after_turn:?}");
+    // Every corner of the model stays within the depth range even at the pan limit.
+    let far = orbit.pan_start(200.0, 150.0, 400.0, 300.0).unwrap();
+    orbit.pan_to(&far, 200.0 + 1e5, 150.0, 400.0, 300.0);
+    let dist = ball::dot(orbit.target, orbit.target).sqrt();
+    assert!((dist - MAX_PAN).abs() < 1e-4, "target clamped to {MAX_PAN}, got {dist}");
+    let m = orbit.matrices(radius, 1.5);
+    for p in [[radius, 0.0, 0.0], [0.0, -radius, 0.0], [0.0, 0.0, radius], [0.0, 0.0, -radius]] {
+        let z = project(&m, p)[2];
+        assert!((0.0..=1.0).contains(&z), "{p:?} clipped at depth {z}");
+    }
+    // Re-anchoring an active pan after zoom keeps the next drag 1:1 from the new scale without jumping.
+    let mut zoom_pan = Orbit::default();
+    let p1 = zoom_pan.pan_start(200.0, 150.0, 400.0, 300.0).unwrap();
+    zoom_pan.pan_to(&p1, 280.0, 150.0, 400.0, 300.0);
+    zoom_pan.zoom_by(2.0);
+    let before_next = project(&zoom_pan.matrices(radius, 4.0 / 3.0), [0.0; 3]);
+    let p2 = zoom_pan.pan_start(280.0, 150.0, 400.0, 300.0).unwrap();
+    zoom_pan.pan_to(&p2, 281.0, 150.0, 400.0, 300.0);
+    let after_next = project(&zoom_pan.matrices(radius, 4.0 / 3.0), [0.0; 3]);
+    assert!(((after_next[0] - before_next[0]) - 2.0 / 400.0).abs() < 1e-4, "{before_next:?} -> {after_next:?}");
+    // Reset restores the default isometric view, target and zoom.
+    orbit.reset();
+    assert_eq!(orbit, Orbit::default());
+    // Hostile input changes nothing.
+    assert!(orbit.pan_start(f32::NAN, 1.0, 400.0, 300.0).is_none());
+    assert!(orbit.pan_start(1.0, 1.0, 0.0, 300.0).is_none());
+    assert!(orbit.pan_start(1.0, 1.0, f32::INFINITY, 300.0).is_none());
+    let valid = orbit.pan_start(10.0, 10.0, 400.0, 300.0).unwrap();
+    orbit.pan_to(&valid, f32::INFINITY, 10.0, 400.0, 300.0);
+    orbit.pan_to(&valid, 20.0, 20.0, f32::INFINITY, 300.0);
+    orbit.pan_to(&valid, 20.0, 20.0, 400.0, -1.0);
+    assert_eq!(orbit, Orbit::default());
 }

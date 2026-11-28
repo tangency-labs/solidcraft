@@ -1264,3 +1264,74 @@ fn concentric_arcs_read_with_centres_apart_keep_their_ids() {
     let CurveKind::Arc { c, .. } = sk.curves[sk.curve_index(&ids[2]).unwrap()].kind else { panic!("the inner rim is an arc") };
     assert!(sk.points[c].pos.dist(Vec2::new(0., 5e-7)) < 1e-12, "the inner arc keeps its own centre");
 }
+
+/// A face's rim read again unchanged, but with its pieces numbered afresh (#22919: the pieces of
+/// a cut rim are numbered by their exact centroids since 0.49.1, by their mesh's before), so the
+/// names the link kept call its two splines by each other's names. The curves are where they
+/// were, up to the rounding of a fresh fit, so they keep their ids (a profile picked by them still
+/// finds it) and take their new names; only a spline that really moved is changed.
+#[test]
+fn a_face_whose_edge_pieces_are_numbered_afresh_keeps_its_curve_ids() {
+    let v = Vec2::new;
+    // A spline through `pts` (degree 2), its inner knots spread over `0..k`.
+    let spline = |pts: Vec<Vec2>, k: f64| {
+        let inner = pts.len() - 3;
+        let mut knots = vec![0.; 3];
+        knots.extend((1..=inner).map(|i| k * i as f64 / (inner + 1) as f64));
+        knots.extend([k; 3]);
+        LinkGeom::Spline { pts, control: true, degree: 2, periodic: false, nurbs: Some(crate::Nurbs { knots, weights: vec![] }) }
+    };
+    // Two bulging splines, of five and four control points as the two pieces of a cut rim have
+    // as many as their lengths need, and two arcs of the unit circle closing one loop, in the
+    // order a face's edges came in #22919: each arc ends where the next-but-one spline starts.
+    // `e`: rounding in the last digits; `gap`: how far from the arc's end a fresh reading leaves
+    // the first spline's start. A spline's ends are merged with other points only where they are
+    // equal, so a rounding apart they are two points, and the arc's end takes the held one (as in
+    // #22919), leaving the spline's start without it; `far`: how far a spline really moved.
+    let read = |e: f64, gap: f64, far: f64| {
+        vec![
+            spline(vec![v(1., gap), v(1.4, 0.6 + e), v(1.5 + e + far, 1.5), v(0.6, 1.4), v(0., 1.)], 30.0 + e),
+            LinkGeom::Arc { c: Vec2::ZERO, a: v(0., -1.), b: v(1., 0.) },
+            spline(vec![v(-1., 0.), v(-1.4, -0.8), v(-0.8, -1.4 - e), v(0., -1.)], 20.0 - e),
+            LinkGeom::Arc { c: Vec2::ZERO, a: v(0., 1.), b: v(-1., 0.) },
+        ]
+    };
+    let names = |a: u8, b: u8| vec![format!("rim#{a}"), "rim#2".to_string(), format!("rim#{b}"), "rim#4".to_string()];
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &read(0., 0., 0.)).unwrap();
+    assert!(!sk.update_link_named(&link, &read(0., 0., 0.), &names(1, 3)).unwrap());
+    // Each curve's id with where it is (its geometry's spot), in id order.
+    let ids = |sk: &Sketch| {
+        let mut out: Vec<(String, Vec2)> =
+            sk.link_curves(&link).into_iter().map(|c| (sk.curves[c].id.clone(), sk.curve_link_geom(c).unwrap().spot())).collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    };
+    let same_ids =
+        |a: &[(String, Vec2)], b: &[(String, Vec2)]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0 && x.1.dist(y.1) < 1e-6);
+    let saved = ids(&sk);
+    assert_eq!(sk.links[0].curve_edges, names(1, 3));
+
+    // Read again: rounding in the last digits, and the splines' numbers the other way round.
+    assert!(!sk.update_link_named(&link, &read(1e-12, 0., 0.), &names(3, 1)).unwrap(), "the same rim is not rebuilt");
+    assert!(same_ids(&ids(&sk), &saved), "{:?}", ids(&sk));
+    assert_eq!(sk.links[0].curve_edges, names(3, 1), "each curve takes the name its edge has now");
+    // And with the first spline's start read a rounding off the arc's end as well: the link is
+    // made again with the two points apart, each curve under its own id.
+    sk.update_link_named(&link, &read(1e-12, 1e-14, 0.), &names(1, 3)).unwrap();
+    assert!(same_ids(&ids(&sk), &saved), "{:?}", ids(&sk));
+    let edge_of = |sk: &Sketch, id: &str| {
+        let k = sk.link_curves(&link).into_iter().position(|c| sk.curves[c].id == id)?;
+        sk.links[0].curve_edges.get(k).cloned()
+    };
+    let first_spline = &saved.iter().find(|(_, spot)| spot.dist(v(1.5, 1.5)) < 1e-6).unwrap().0;
+    assert_eq!(edge_of(&sk, first_spline).as_deref(), Some("rim#1"), "{:?}", sk.links[0].curve_edges);
+
+    // A spline that really moved is not taken for the one held: it follows.
+    sk.update_link_named(&link, &read(0., 0., 0.1), &names(3, 1)).unwrap();
+    let moved = sk.link_curves(&link).into_iter().find_map(|c| match &sk.curves[c].kind {
+        CurveKind::Spline { pts, .. } if sk.points[pts[0]].pos.dist(v(1., 0.)) < 1e-9 => Some(sk.points[pts[2]].pos),
+        _ => None,
+    });
+    assert!(moved.is_some_and(|p| p.dist(v(1.6, 1.5)) < 1e-9), "{moved:?}");
+}

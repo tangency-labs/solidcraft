@@ -26,6 +26,7 @@ its own page." Tag: In profile. Source today: Navigation page (`prefs/navigation
 |---|---|---|---|---|---|---|
 | Orbit: Turntable / Free | Segmented | `Prefs.free_orbit` (Free = `true`) | Turntable (`false`) | "Free turns through both poles, with roll and no Shift axis snap." | none | |
 | Turn about the world's up axis | Checkbox | `Prefs.free_orbit_upright` | `false` | "With Free." | none | Dimmed unless Free is chosen. |
+| Free orbit while holding | Dropdown (No key, Alt/Option, Ctrl/Cmd) | `Prefs.free_orbit_key` (`FreeOrbitKey`) | `"none"` | "Hold this key when an orbit drag starts to orbit the other way for that drag (while \"A drag keeps the navigation it started with\" is on)." | none | Mouse drags only. A key the mapping already needs for the orbit does nothing. |
 
 ## Wheel and trackpad
 

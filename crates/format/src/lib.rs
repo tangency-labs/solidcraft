@@ -239,8 +239,9 @@ impl<E: From<FormatError>> Family<'_, E> {
 }
 
 /// Take a short list of names out of a file's JSON: its `format_pending` (the pending changes it
-/// has).
-fn take_names(v: &mut Value, key: &str, noun: &str) -> Result<Option<Vec<String>>, FormatError> {
+/// has), or a list a family's own upgrade step left in it (designs' `unit_word_params`). `noun` is
+/// what the file is, for the refusal of a damaged list ("damaged design: …").
+pub fn take_names(v: &mut Value, key: &str, noun: &str) -> Result<Option<Vec<String>>, FormatError> {
     let Some(list) = v.as_object_mut().and_then(|o| o.remove(key)) else { return Ok(None) };
     let invalid = || FormatError::Invalid(format!("damaged {noun}: `{key}` is not a short list of names"));
     let list = list.as_array().filter(|l| l.len() <= 1000).ok_or_else(invalid)?;

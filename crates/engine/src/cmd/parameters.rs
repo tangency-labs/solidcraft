@@ -41,8 +41,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CHANGE_CONTRACT)
         .output(output_schema_for::<ParamChanged>)
         .params(
-        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit, a length the design's units; \
-         a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
+        "name, expression (number or text), unit?: a unit expressions know (mm, in, deg, kg, mm³, m²…; every one is listed in \
+         docs/book/src/guide/parameters.md), \"\" or text (new parameters default to their value's kind's unit, a length the design's units; a text \
+         parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
              favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
          or sets `new` when the expression is just `new`); or delete: name; or changes: {name: expression, …} (existing \
          parameters, checked together and rebuilt once, all or nothing) → changed?: {name: value} (with changes), recomputed: features rebuilt, \
@@ -58,8 +59,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ParamListResult>)
         .params(
-        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value (mm/deg in every \
-         reply), display_value (in its own unit), source, feature/input, comment, favorite, uses, used_by, error) and cycles",
+        "favorites?: bool (only favourites), filter?: all|user|sketch|driven|feature|model|favorites → parameters (name, expression, unit, value (mm/deg in every \
+         reply), display_value (in its own unit), source, feature/input, comment, favorite, uses, used_by, read_only, error) and cycles",
     ),
     CommandSpec::new("parameters.add", "Add User Parameter", crate::checked!("parameters.add", add))
         .icon("new")
@@ -120,7 +121,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&EVALUATE_CONTRACT)
         .output(output_schema_for::<ExprEvaluated>)
-        .params("expression, kind?: length|angle|unitless (or unit?: mm|in|deg…; text: the text a text parameter would hold, as `text`) → ok, value (mm/rad), display_value, references, error"),
+        .params(
+            "expression, kind?: length|angle|mass|volume|area|unitless (or unit?: mm|in|deg|kg…; text: the text a text \
+             parameter would hold, as `text`) → ok, value (mm/rad/g/mm³/mm²), kind, display_value (in the unit, else the \
+             kind's: deg, kg…), references, error",
+        ),
     CommandSpec::new("parameters.complete", "Complete Expression", crate::checked!("parameters.complete", complete))
         .icon("params")
         .noundo()
@@ -148,7 +153,10 @@ fn failing(s: &Session) -> Vec<FailedFeature> {
 }
 
 pub(super) fn known(s: &Session, name: &str) -> bool {
-    s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name))
+    s.doc.param(name).is_some()
+        || s.doc.text_param(name).is_some()
+        || s.doc.is_driven_param(name)
+        || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name))
 }
 
 /// Whether `name` is (or, with this unit, becomes) a text parameter, whose expression is text.
@@ -289,6 +297,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         name = new.trim().to_string();
     }
     let has_expr = p.get("expression").is_some() || p.get("value").is_some();
+    if (has_expr || str_(p, "unit").is_some()) && s.doc.is_driven_param(&name) {
+        return Err(bad(cmd, format!("`{name}` is a read-only driven dimension parameter and cannot be edited")));
+    }
     let mut e = if has_expr {
         Some(expr_arg(p, "expression").or_else(|| expr_arg(p, "value")).ok_or_else(|| bad(cmd, "`expression` must be a number or text"))?)
     } else if renamed.is_some() || p.get("favorite").is_some() || p.get("comment").is_some() {
@@ -327,7 +338,8 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         e = Some(rhs);
     }
     let (unit, comment) = (str_(p, "unit"), str_(p, "comment"));
-    let before = s.doc.param_values().0;
+    let live_before = s.model.state().driven_params();
+    let before = s.doc.param_values_with(Some(&live_before)).0;
     match &e {
         Some(e) => s.doc_mut().change_param(&name, e, unit, comment)?,
         None => {
@@ -352,7 +364,8 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         keep_dimension_start(s, &name);
     }
     s.settle_value_edit(&solved)?;
-    let (vals, _) = s.doc.param_values();
+    let live_driven = s.model.state().driven_params();
+    let (vals, _) = s.doc.param_values_with(Some(&live_driven));
     let one = ParamChangedOne {
         renamed,
         changed_through,
@@ -562,7 +575,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
         }
         list.push((name.trim().to_string(), e));
     }
-    let before = s.doc.param_values().0;
+    let live_before = s.model.state().driven_params();
+    let before = s.doc.param_values_with(Some(&live_before)).0;
     s.doc_mut().change_params_atomic(&list)?;
     let switched = switch_by_rules(s, &before);
     for (name, expr) in &list {
@@ -570,7 +584,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
         keep_dimension_start(s, name);
     }
     s.settle_value_edit(solved)?;
-    let (vals, _) = s.doc.param_values();
+    let live_driven = s.model.state().driven_params();
+    let (vals, _) = s.doc.param_values_with(Some(&live_driven));
     let changed = list.iter().map(|(n, _)| (n.clone(), vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v))))).collect();
     let body = ParamChangedBody::Many { changed, recomputed: s.model.last_recomputed, restored: s.model.last_restored, errors: failing(s), switched };
     reply(cmd, ParamChanged { body, param_warnings: Vec::new() })
@@ -600,13 +615,14 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         (_, Some(f)) => f.to_ascii_lowercase(),
         _ => "all".to_string(),
     };
+    let live_driven = s.model.state().driven_params();
     let mut rows: Vec<solidcraft_doc::ParamRow> = s
         .doc
-        .param_rows()
+        .param_rows_with(Some(&live_driven))
         .into_iter()
         .filter(|r| match filter.as_str() {
             "favorites" | "favourites" | "favorite" => r.favorite,
-            "user" | "sketch" | "feature" => r.source == filter,
+            "user" | "sketch" | "driven" | "feature" => r.source == filter,
             "model" => r.source != "user",
             _ => true,
         })
@@ -629,7 +645,8 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(f) = bool_(p, "favorite") {
         s.doc_mut().set_favorite(&name, f)?;
     }
-    let (vals, _) = s.doc.param_values();
+    let live_driven = s.model.state().driven_params();
+    let (vals, _) = s.doc.param_values_with(Some(&live_driven));
     let value = match s.doc.text_param(&name) {
         Some(t) => AddedValue::Text { unit: solidcraft_doc::text_params::TEXT_UNIT.into(), text: t.text.clone(), value: None },
         None => AddedValue::Number {
@@ -718,8 +735,10 @@ fn users(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn graph(s: &mut Session, _p: &Value) -> Result<Value> {
     let cmd = "parameters.graph";
-    let (_, errs) = s.doc.param_values();
-    let nodes: Vec<String> = s.doc.param_defs().into_iter().map(|d| d.name).collect();
+    let live_driven = s.model.state().driven_params();
+    let (_, errs) = s.doc.param_values_with(Some(&live_driven));
+    let mut nodes: Vec<String> = s.doc.param_defs().into_iter().map(|d| d.name).collect();
+    nodes.extend(s.doc.driven_params().into_iter().map(|d| d.name));
     let edges: Vec<[String; 2]> = s.doc.param_graph().into_iter().map(|(a, b)| [a, b]).collect();
     let cycles = solidcraft_doc::cycles(&s.doc.all_param_exprs());
     reply(cmd, ParamGraphResult { nodes, edges, cycles: cycles.into_iter().collect(), errors: errs, param_warnings: Vec::new() })
@@ -781,20 +800,21 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
         let body = ExprEvaluatedBody::Text { ok: true, kind: "text".into(), text: solidcraft_doc::text_params::unquote(&e), references: Vec::new() };
         return reply(cmd, ExprEvaluated { body, param_warnings: Vec::new() });
     }
-    if let Some(u) = unit
-        && expr::unit_info(u).is_none()
-    {
-        return Err(bad(cmd, format!("unknown unit `{u}`")));
+    if let Some(why) = unit.and_then(expr::unit_problem) {
+        return Err(bad(cmd, why));
     }
+    // A kind by the name `Kind` has for itself (`length`, `mass`…), or `number` for a unit-less one.
     let kind = match (str_(p, "kind"), unit) {
-        (Some("length"), _) => Some(Kind::Length),
-        (Some("angle"), _) => Some(Kind::Angle),
-        (Some("unitless" | "number"), _) => Some(Kind::Unitless),
-        (Some(other), _) => return Err(bad(cmd, format!("unknown kind `{other}` (length, angle or unitless)"))),
+        (Some("number"), _) => Some(Kind::Unitless),
+        (Some(name), _) => Some(serde_json::from_value::<Kind>(json!(name)).map_err(|_| {
+            let names: Vec<String> = Kind::ALL.iter().filter_map(|k| json!(k).as_str().map(str::to_string)).collect();
+            bad(cmd, format!("unknown kind `{name}` ({} or number)", names.join(", ")))
+        })?),
         (None, Some(u)) => Some(Kind::from_unit(u)),
         (None, None) => None,
     };
-    let (vals, _) = s.doc.param_values();
+    let live_driven = s.model.state().driven_params();
+    let (vals, _) = s.doc.param_values_with(Some(&live_driven));
     // Bare numbers follow the asked-for unit when given, else the design's length unit (#9015).
     let doc_len = expr::unit_info(s.doc.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
     let defaults = expr::Defaults::for_unit(unit.unwrap_or(""), doc_len);
@@ -808,16 +828,8 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
     let defines = expr::definition(&e).map(|(n, _)| n);
     let body = match r {
         Ok((v, k)) => {
-            let value = match k {
-                Kind::Length => expr::Value::length(v),
-                Kind::Angle => expr::Value::angle(v),
-                Kind::Unitless => expr::Value::num(v),
-            };
-            let shown = match (unit, k) {
-                (Some(u), _) => expr::value_in_unit(value, u),
-                (None, Kind::Angle) => v.to_degrees(),
-                (None, _) => v,
-            };
+            // Shown in the unit asked for, else in its kind's (degrees, kilograms…).
+            let shown = expr::value_in_unit(expr::Value::of_kind(k, v), unit.unwrap_or(k.default_unit()));
             ExprEvaluatedBody::Value {
                 ok: true,
                 value: expr::round_reported(v),
@@ -851,7 +863,8 @@ fn complete(s: &mut Session, p: &Value) -> Result<Value> {
     let contains = |n: &str| word.is_empty() || n.to_ascii_lowercase().contains(&lower);
     let within = |n: &str| contains(n) || solidcraft_doc::name_words_match(n, &word);
     let mut out: Vec<Completion> = Vec::new();
-    let mut rows: Vec<solidcraft_doc::ParamRow> = s.doc.param_rows().into_iter().filter(|r| within(&r.name)).collect();
+    let live_driven = s.model.state().driven_params();
+    let mut rows: Vec<solidcraft_doc::ParamRow> = s.doc.param_rows_with(Some(&live_driven)).into_iter().filter(|r| within(&r.name)).collect();
     // Names that start with the word, then names that contain it, then names matched only by
     // the starts of their words; within each, favourites, then user parameters, then the others.
     rows.sort_by_key(|r| (!starts(&r.name), !contains(&r.name), !r.favorite, r.source != "user"));

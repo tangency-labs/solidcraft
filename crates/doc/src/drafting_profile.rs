@@ -101,7 +101,7 @@ impl DraftingProfile {
         let decimals = match kind {
             Kind::Length => self.length_decimals,
             Kind::Angle => self.angle_decimals,
-            Kind::Unitless => return Err(invalid("a dimension is a length or an angle")),
+            Kind::Unitless | Kind::Mass | Kind::Volume | Kind::Area => return Err(invalid("a dimension is a length or an angle")),
         };
         Ok(DimensionStyle { unit: unit.into(), number: self.number, decimals, tolerance_decimals: self.tolerance_decimals, repeat: self.repeat })
     }

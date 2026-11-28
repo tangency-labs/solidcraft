@@ -1,0 +1,298 @@
+{
+ "cam": {
+  "spec": "A flat cam, one solid, 10 mm thick (z 0..10). Its outline is the closed polygon (straight lines) through the 72 points at angles \u03b8 = 0\u00b0, 5\u00b0, 10\u00b0, ..., 355\u00b0 (measured from +X towards +Y), each at distance r(\u03b8) = 40 + 8\u00b7sin(3\u03b8) mm from the origin. A 12 mm diameter bore goes through it along Z, centred on the origin.",
+  "bodies": [
+   {
+    "name": "cam",
+    "volume": 50040.557,
+    "bbox": [
+     [
+      -44.10113466670049,
+      -48.0,
+      0.0
+     ],
+     [
+      44.10113466670049,
+      34.64101615137755,
+      10.0
+     ]
+    ]
+   }
+  ]
+ },
+ "bestfit": {
+  "spec": "These 10 points (x, y in mm) were measured on the round edge of a boss: (35.757, -3.91), (15.942, 18.429), (5.029, 17.623), (-10.729, -0.026), (-4.348, -21.343), (15.994, -27.855), (19.084, -27.121), (22.454, -25.848), (28.63, -21.453), (31.025, -18.809). Make the boss: one cylinder along Z from z 0 to 15 whose circle is the best fit through the points: the centre (cx, cy) and radius r that minimise the sum of squared distances from each point to the circle (geometric least squares). Round cx, cy and r to 0.01 mm before building.",
+  "bodies": [
+   {
+    "name": "boss",
+    "volume": 25935.6506,
+    "bbox": [
+     [
+      -11.210000000000004,
+      -28.17,
+      0.0
+     ],
+     [
+      35.71,
+      18.750000000000004,
+      15.000000000000002
+     ]
+    ]
+   }
+  ]
+ },
+ "table": {
+  "spec": "A base plate 120 (X) by 80 (Y) by 3 mm, spanning x 0..120, y 0..80, z -3..0, as one body. On it stand cylindrical standoffs, each a separate body (not joined to the plate), standing on z = 0 along Z, centred at (x, y) with the height and diameter from this CSV table:\nname,x,y,height,diameter\nS1,10,10,12,6\nS2,110,10,12,6\nS3,10,70,12,6\nS4,110,70,12,6\nS5,45.5,22.25,8.5,5\nS6,74.5,22.25,8.5,5\nS7,45.5,57.75,8.5,5\nS8,74.5,57.75,20,7.5",
+  "bodies": [
+   {
+    "name": "base",
+    "volume": 28800.0,
+    "bbox": [
+     [
+      0.0,
+      0.0,
+      -3.0
+     ],
+     [
+      120.0,
+      80.0,
+      0.0
+     ]
+    ]
+   },
+   {
+    "name": "S1",
+    "volume": 339.292,
+    "bbox": [
+     [
+      6.999999999999999,
+      6.999999999999999,
+      0.0
+     ],
+     [
+      13.000000000000002,
+      13.000000000000002,
+      12.000000000000002
+     ]
+    ]
+   },
+   {
+    "name": "S2",
+    "volume": 339.292,
+    "bbox": [
+     [
+      106.99999999999999,
+      6.999999999999998,
+      0.0
+     ],
+     [
+      113.00000000000001,
+      13.000000000000002,
+      12.000000000000002
+     ]
+    ]
+   },
+   {
+    "name": "S3",
+    "volume": 339.292,
+    "bbox": [
+     [
+      6.999999999999998,
+      67.0,
+      0.0
+     ],
+     [
+      13.000000000000002,
+      73.00000000000001,
+      12.000000000000002
+     ]
+    ]
+   },
+   {
+    "name": "S4",
+    "volume": 339.292,
+    "bbox": [
+     [
+      107.0,
+      67.0,
+      0.0
+     ],
+     [
+      113.00000000000001,
+      73.00000000000001,
+      12.000000000000002
+     ]
+    ]
+   },
+   {
+    "name": "S5",
+    "volume": 166.8971,
+    "bbox": [
+     [
+      42.999999999999986,
+      19.749999999999996,
+      0.0
+     ],
+     [
+      48.00000000000001,
+      24.750000000000004,
+      8.5
+     ]
+    ]
+   },
+   {
+    "name": "S6",
+    "volume": 166.8971,
+    "bbox": [
+     [
+      72.0,
+      19.749999999999996,
+      0.0
+     ],
+     [
+      77.00000000000001,
+      24.750000000000004,
+      8.500000000000002
+     ]
+    ]
+   },
+   {
+    "name": "S7",
+    "volume": 166.8971,
+    "bbox": [
+     [
+      42.99999999999999,
+      55.24999999999999,
+      0.0
+     ],
+     [
+      48.00000000000001,
+      60.25,
+      8.5
+     ]
+    ]
+   },
+   {
+    "name": "S8",
+    "volume": 883.5729,
+    "bbox": [
+     [
+      70.75,
+      54.0,
+      0.0
+     ],
+     [
+      78.25000000000001,
+      61.5,
+      20.000000000000004
+     ]
+    ]
+   }
+  ]
+ },
+ "optbox": {
+  "spec": "One solid block with its minimum corner at the origin, (200 \u2212 2x) mm long in X, (120 \u2212 2x) mm wide in Y and x mm high in Z, where x is the value that makes the block's volume as large as possible. Round x to 0.01 mm before building.",
+  "bodies": [
+   {
+    "name": "block",
+    "volume": 262682.2579,
+    "bbox": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      151.46,
+      71.46000000000001,
+      24.27
+     ]
+    ]
+   }
+  ]
+ },
+ "hull": {
+  "spec": "One solid plate 6 mm thick (z 0..6) whose outline is the convex hull of these 25 points (x, y in mm): (-0.2, -15.1), (-29.3, -18.5), (11.5, -18), (-7.8, -29.8), (19.8, -20.7), (-13.9, 22.8), (0.6, 20.8), (8.4, 14.5), (-24.5, 2.5), (0.5, 22.3), (-8.3, 5.9), (-26.4, -6.7), (-10.6, -21), (19, -7.2), (28.7, 5.4), (6.3, 8.3), (10.6, -21), (-3.6, -15.6), (-5.9, -24.2), (28.1, -17.1), (10.3, -12), (22.4, 9.7), (-22.1, 20.7), (26.7, 24.2), (4.2, -21.3). The outline is the hull polygon itself (straight edges between hull points).",
+  "bodies": [
+   {
+    "name": "hull",
+    "volume": 15278.85,
+    "bbox": [
+     [
+      -29.3,
+      -29.8,
+      0.0
+     ],
+     [
+      28.7,
+      24.199999999999996,
+      6.0
+     ]
+    ]
+   }
+  ]
+ },
+ "terraces": {
+  "spec": "One solid made of 10 blocks side by side along X: block k (k = 0..9) spans x 10k..10k+10, y 0..30 and z 0..h_k, where h_k = 20\u00b7e^(\u22120.3k) + 5 mm, rounded to 0.01 mm. The blocks are joined into one body.",
+  "bodies": [
+   {
+    "name": "terraces",
+    "volume": 36996.0,
+    "bbox": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      100.0,
+      30.0,
+      25.0
+     ]
+    ]
+   }
+  ]
+ },
+ "turned": {
+  "spec": "A turned part, one solid, made by revolving a profile 360\u00b0 about the Z axis. The profile, in the XZ plane (x = radius), is the closed polygon through (0, 0), then (r, z) for each row of this table in order, then (0, 50):\nz,r\n0,20\n5,20\n10,17.5\n15,14\n20,12\n25,12\n30,15.5\n35,18\n40,18\n45,11\n50,8",
+  "bodies": [
+   {
+    "name": "turned",
+    "volume": 37934.7313,
+    "bbox": [
+     [
+      -20.0,
+      -20.0,
+      0.0
+     ],
+     [
+      20.0,
+      20.0,
+      50.0
+     ]
+    ]
+   }
+  ]
+ },
+ "beam": {
+  "spec": "A cantilever beam of square cross-section s \u00d7 s mm, 200 mm long along X: x 0..200, y 0..s, z 0..s, one solid. It is aluminium (E = 70000 N/mm\u00b2) and carries an end load P = 500 N. Use the smallest s, in whole millimetres, for which the tip deflection P\u00b7L\u00b3 / (3\u00b7E\u00b7I), with I = s\u2074/12, is at most 1 mm.",
+  "bodies": [
+   {
+    "name": "beam",
+    "volume": 96800.0,
+    "bbox": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      200.0,
+      22.0,
+      22.0
+     ]
+    ]
+   }
+  ]
+ }
+}

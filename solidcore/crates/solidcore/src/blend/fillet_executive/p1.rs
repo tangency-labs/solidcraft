@@ -1271,6 +1271,11 @@ pub enum CornerCreation<O> {
         /// The size of `fit_edge`'s blend that builds and what it sizes, where one does
         /// (the chamfer event's, WR-716); `None` notes 0, no size.
         fit: Option<(f64, crate::blend::fillet_executive::FitKind)>,
+        /// Not the fork's: the refusal as data where the corner names one (a Swept turn's
+        /// side edge the ball cannot pass,
+        /// [`crate::blend::blend_refusal::BlendRefusal::SweptTurnPastSharpEdge`]), which the
+        /// operation's failure carries.
+        refusal: Option<crate::blend::blend_refusal::BlendRefusal>,
     },
 }
 
@@ -1332,7 +1337,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`Self::create_fillet_corners`]; `SM_ERR` after a refused corner.
+    /// Those of [`Self::create_fillet_corners`]; `SM_ERR` after a refused corner: the refusal
+    /// of the corner last noted as data ([`SolidError::BlendRefused`]) where it has one, else
+    /// [`BlendFailure::CornerRefused`].
     pub fn create_fillet_corners_recording_vertex_errors(
         &mut self,
         k: &Kernel,
@@ -1343,6 +1350,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
         const OP: &str = "blend::fillet_executive::p1::FilletExecutive::create_fillet_corners";
         let mut refused = false;
+        // the typed refusal of the corner last noted, whose note the error info keeps
+        let mut typed = None;
         for &vertex in &self.filleted_vertices {
             let pending = match self.vertex_corner_map.get(&vertex) {
                 Some(VertexEntry::SolverEdgeuses(edgeuses)) => edgeuses,
@@ -1363,7 +1372,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     comment,
                     fit_edge,
                     fit,
+                    refusal,
                 } => {
+                    // `note_vertex_error` notes nothing for a null vertex
+                    if vertex.is_some() {
+                        typed = refusal;
+                    }
                     // NoteFitRadius(0.0, edge), or the size that builds where one does
                     if let Some(edge) = fit_edge {
                         let (size, kind) =
@@ -1402,7 +1416,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             info.assign(&self.error);
         }
         if refused {
-            return Err(SolidError::blend(OP, BlendFailure::CornerRefused));
+            return Err(match typed {
+                Some(refusal) => refusal.error(OP, crate::error::SM_ERR),
+                None => SolidError::blend(OP, BlendFailure::CornerRefused),
+            });
         }
         Ok(())
     }
@@ -1475,9 +1492,19 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             edges.push(edge_id);
             shares_edge_curve.push(shares);
         }
-        let mut bs_curves = access.smooth_with_target_mut(&edges, |target| {
+        let (mut bs_curves, turned) = access.smooth_with_target_mut(&edges, |target| {
+            let mut starts = Vec::new();
+            for &edge_id in &edges {
+                starts.push(topo_edge::start_vertex(target, edge_id)?);
+            }
             // fork 873c7c9 passes this on (SER)
             topo_edge::orient_edge_sequence(k, target, &edges)?;
+            // Not upstream: the edges the orientation reversed, whose solvers' laws must run
+            // back along their reversed curves to keep their radius where it was.
+            let mut turned = Vec::new();
+            for (&edge_id, start) in edges.iter().zip(&starts) {
+                turned.push(topo_edge::start_vertex(target, edge_id)? != *start);
+            }
 
             let mut prev_ivl = Extent1d::new();
             let mut curves = Vec::new();
@@ -1537,8 +1564,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 prev_ivl = edge_ivl;
                 prev_edge = Some(edge_id);
             }
-            Ok(curves)
+            Ok((curves, turned))
         })?;
+
+        for (&fs, &reversed) in sequence.iter().zip(&turned) {
+            if reversed {
+                access.smooth_reverse_solver_law(fs)?;
+            }
+        }
 
         for ((&fs, &edge_id), &shares) in sequence.iter().zip(&edges).zip(&shares_edge_curve) {
             if shares {
@@ -1714,6 +1747,16 @@ pub trait SmoothSequenceAccess<O: ClassObject + SolutionObject + Ord> {
     /// # Errors
     /// Solver lookup failure.
     fn smooth_set_solver_law_interval(&mut self, solver: O, interval: Extent1d) -> Result<()>;
+    /// Not upstream: flip a variable-radius solver's law orientation (`m_bLawOrientation`)
+    /// after `OrientEdgeSequence` reversed its edge, so the law keeps running along the edge
+    /// as it did: a law that varies along a chain (`FilletLaw::chain_of_radii`) then agrees
+    /// with its neighbours where the edges meet. Other solvers have no law: nothing to do.
+    ///
+    /// # Errors
+    /// Solver lookup failure.
+    fn smooth_reverse_solver_law(&mut self, _solver: O) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ---- RemoveTopoEdges -----------------------------------------------------------------------

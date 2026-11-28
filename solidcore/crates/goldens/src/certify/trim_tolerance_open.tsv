@@ -1,17 +1,10 @@
 # unit	case	body	edge	class	sampled gap (diagnostic, not a bound)	new tolerance
 topology.brep_local_operation	gen0031	0	39	face-bound-loose	-	-
 topology.brep_local_operation	fc0000	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0000	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	fc0006	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0006	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	fc0008	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0008	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	fc0025	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0025	0	93	loose-raise	-	1.7004360849853164e-3
-topology.brep_local_operation	gen0014	0	2	loose-raise	-	8.901624201947024e-5
-topology.brep_mirror	mat0019	0	46	loose-raise	-	1.7091295435254202e-3
-topology.brep_mirror	mat0049	0	46	loose-raise	-	1.7004360860211109e-3
-topology.brep_mirror	mat0094	0	46	loose-raise	-	1.7004360860307453e-3
+topology.brep_local_operation	gen0014	0	2	loose-raise	-	8.901612908474592e-5
 primitive.api_primitives	gen0195	0	1	no-estimate	-	1e-05
 primitive.api_primitives	gen0195	0	3	no-estimate	-	1e-05
 primitive.api_primitives	gen0195	0	5	no-estimate	-	1e-05
@@ -20,10 +13,10 @@ primitive.api_primitives	gen0195	0	v8	invalid-input	-	1.0000000006523193e-5
 primitive.api_primitives	gen0195	0	v9	invalid-input	-	1e-5
 primitive.api_primitives	gen0195	0	v10	invalid-input	-	1e-5
 primitive.api_primitives	gen0195	0	v11	invalid-input	-	1.0000000006523193e-5
-primitive.api_primitives	gen1157	0	v8	rounding-bound	-	1.4784277855986652e-5
-primitive.api_primitives	gen1157	0	v9	rounding-bound	-	1.4784277855986652e-5
-primitive.api_primitives	gen1157	0	v10	rounding-bound	-	1.4784277986763153e-5
-primitive.api_primitives	gen1157	0	v11	rounding-bound	-	1.4784277986763153e-5
+primitive.api_primitives	gen1157	0	v8	rounding-bound	-	1.478427785598659e-5
+primitive.api_primitives	gen1157	0	v9	rounding-bound	-	1.478427785598659e-5
+primitive.api_primitives	gen1157	0	v10	rounding-bound	-	1.4784277986763077e-5
+primitive.api_primitives	gen1157	0	v11	rounding-bound	-	1.4784277986763077e-5
 blend.fillet_executive_p3	stubs4-coons_01_03_29-e0-r0.5	0	19	blend-surface	9.171832023335658e-6	4e-5
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	0	42	blend-surface	3.728639867721419e-6	5.781816090334979e-5
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	0	47	blend-surface	2.8876436781797284e-5	5.781816090334979e-5

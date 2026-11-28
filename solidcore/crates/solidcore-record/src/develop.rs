@@ -151,6 +151,14 @@ pub enum Lap {
     /// Each panel's metal kept `gap / 2` off the surface halfway between the two, through its
     /// whole thickness: a mitered corner, or a slit `gap` wide through a flat panel.
     Miter { gap: f64 },
+    /// One panel covers the other's thickness, with `gap` between their facing surfaces: a
+    /// lapped corner. `covering_a` says the joint's `a` panel is the one that covers; `None`
+    /// as the amount covers the whole thickness, and so follows the sheet's.
+    Overlap {
+        covering_a: bool,
+        amount: Option<f64>,
+        gap: f64,
+    },
     /// Each panel cut back the given distance from the edge, `(a, b)`, whatever the turn.
     Cut(f64, f64),
 }

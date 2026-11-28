@@ -1,6 +1,7 @@
 //! Build information for Help › About: the git commit and the build date (UTC). Both fall back to
 //! "unknown" when git is missing (a source tarball). Also one test per UI scenario file
-//! (`tests/scenarios/*.json`), so adding a scenario needs no Rust edit.
+//! (`tests/scenarios/*.json`), so adding a scenario needs no Rust edit, and the built-in keyboard
+//! profiles (`keyboard-profiles/*.json`).
 // A build script reports to cargo on stderr; nothing else reads it (see print_stderr in Cargo.toml).
 #![allow(clippy::print_stderr)]
 
@@ -42,6 +43,38 @@ fn main() {
         eprintln!("locales: {e}");
         std::process::exit(1);
     }
+    if let Err(e) = keyboard_profiles() {
+        eprintln!("keyboard profiles: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// `$OUT_DIR/keyboard_profiles.rs`: `BUILTIN`, `(id, JSON text)` for each file in
+/// `keyboard-profiles/`, sorted by id, so adding a profile needs no Rust edit (#15302). Each file
+/// says where its keys come from on a `"provenance"` line, kept beside its generated entry.
+fn keyboard_profiles() -> Result<(), String> {
+    let dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?).join("keyboard-profiles");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let mut out = String::from("/// The keyboard profiles shipped with SolidCraft.\npub const BUILTIN: &[(&str, &str)] = &[\n");
+    for path in files {
+        let id = path.file_stem().and_then(|s| s.to_str()).ok_or("profile file name is not UTF-8")?;
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let provenance = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("\"provenance\":"))
+            .ok_or_else(|| format!("{}: missing provenance", path.display()))?;
+        out += &format!("    ({id:?}, include_str!({:?})), // {}\n", path.display().to_string(), provenance.trim());
+    }
+    out += "];\n";
+    let dest = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("keyboard_profiles.rs");
+    std::fs::write(dest, out).map_err(|e| e.to_string())
 }
 
 /// `$OUT_DIR/locales/<id>.json.z`, which the app embeds (the JSON deflated: the 38 catalogs are
@@ -88,6 +121,7 @@ fn merged_locales() -> Result<(), String> {
         .unwrap_or_default();
     files.sort();
     for file in files {
+        println!("cargo:rerun-if-changed={}", file.display());
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
         let map: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> =
             serde_json::from_str(&text).map_err(|e| format!("{}: expected {{\"<locale>\": {{\"<id>\": \"<text>\"}}}}: {e}", file.display()))?;

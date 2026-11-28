@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>New weld bead</title>
+  <path d="M4.25 34.86L28 48.57L28 52L4.25 38.29Z" fill="#b8c3cf"/>
+  <path d="M51.75 34.86L28 48.57L28 52L51.75 38.29Z" fill="#8e9faf"/>
+  <path d="M28 21.14L51.75 34.86L28 48.57L4.25 34.86Z" fill="#e2e8ef"/>
+  <path d="M28 21.14L51.75 34.86L51.75 38.29L28 52L4.25 38.29L4.25 34.86Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4.25 34.86L28 48.57L51.75 34.86" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28 48.57L28 52" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16.87 10.43L40.62 24.14L40.62 41.29L16.87 27.57Z" fill="#b8c3cf"/>
+  <path d="M45.07 21.57L40.62 24.14L40.62 41.29L45.07 38.71Z" fill="#8e9faf"/>
+  <path d="M21.32 7.86L45.07 21.57L40.62 24.14L16.87 10.43Z" fill="#e2e8ef"/>
+  <path d="M21.32 7.86L45.07 21.57L45.07 38.71L40.62 41.29L16.87 27.57L16.87 10.43Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16.87 10.43L40.62 24.14L45.07 21.57" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40.62 24.14L40.62 41.29" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16.87 22.43L40.62 36.14L36.17 43.86L12.41 30.14Z" fill="#328bd3"/>
+  <path d="M40.62 41.29L40.62 36.14L36.17 43.86Z" fill="#236ead"/>
+  <path d="M16.87 22.43L40.62 36.14L36.17 43.86L12.41 30.14Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40.62 41.29L40.62 36.14L36.17 43.86Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="49" cy="49" r="13.2" fill="#ffffff"/>
+  <circle cx="49" cy="49" r="11" fill="#236ead"/>
+  <path d="M49 44L49 54M44 49L54 49" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

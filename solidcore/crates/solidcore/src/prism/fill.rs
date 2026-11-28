@@ -86,6 +86,7 @@
 //! Walls of lines and arcs only (conics and Béziers are refused). One planar section: a
 //! channel whose section changes along its length is the caller's to slice.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use crate::error::{Failure, Fit, FitMeasure, Reason, Result, SolidError};
@@ -93,7 +94,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Vec2};
 use crate::prism::arc_conversion::{bulge_arc, Vertex};
 use crate::prism::profile::{
-    check_regions, loop_crosses, near_miss, on_arc, on_seg, smallest_arc_sweep, Loop2,
+    check_regions, gamma, loop_crosses, near_miss, on_arc, on_seg, smallest_arc_sweep, Loop2,
     ProfileRefusal, Region2, Seg2, MAX_ARC_RADIUS, MAX_SEGMENTS,
 };
 
@@ -529,7 +530,29 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
         outer: Loop2 { segs }.reversed(),
         holes: Vec::new(),
     };
-    if let Err(refusal) = check_regions(std::iter::once(&region), eps.max(1e-12), zone) {
+    // the loop's joins: within the section's allowance, or within the rounding of an arc's ends
+    // where that is larger (a nearly straight arc of a large radius): an end read from its
+    // centre, radius and angle lies within gamma(4) (|c| + r) + gamma(1) r |angle| of the exact
+    // one in each coordinate, and an arc built through two points has its angles rounded too;
+    // gamma(8) of the reach below covers both of a join's ends
+    let reach = region
+        .outer
+        .segs
+        .iter()
+        .filter_map(|s| match *s {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => Some(
+                center.x.abs().max(center.y.abs()) + radius * (1.0 + start.abs() + sweep.abs()),
+            ),
+            _ => None,
+        })
+        .fold(0.0_f64, f64::max);
+    let closure = eps.max(1e-12).max(gamma(8) * reach);
+    if let Err(refusal) = check_regions(std::iter::once(&region), closure, zone) {
         return Err(SolidError::invalid_input(
             OP,
             match refusal {
@@ -816,7 +839,7 @@ fn shallow(
     let m = a.max(overlap);
     let b = MAX_ARC_RADIUS;
     let turn = if overlap > 0.0 { 0.5 } else { 0.25 };
-    let floor = (x * (turn * smallest_arc_sweep(f64::MAX, zone)).tan())
+    let floor = (x * det::tan(turn * smallest_arc_sweep(f64::MAX, zone)))
         .max(x * m / (b + (b * b - m * m).max(0.0).sqrt()))
         * (1.0 + 1e-9);
     if size < floor && !matches!(contour, Contour::Concave { .. }) {
@@ -983,7 +1006,7 @@ pub fn arc_clearance(p: Point2, q: Point2, others: &[Seg2], eps: f64) -> (f64, b
                 continue;
             };
             let toward = (other - toe) * (1.0 / (2.0 * a));
-            let angle = (-dir.dot(n)).atan2(dir.dot(toward));
+            let angle = det::atan2(-dir.dot(n), dir.dot(toward));
             if angle > 0.0 && angle < PI {
                 // read from the step back past the toe, not from the point's coordinates (whose
                 // rounding is large beside a step of `off`)
@@ -999,7 +1022,7 @@ pub fn arc_clearance(p: Point2, q: Point2, others: &[Seg2], eps: f64) -> (f64, b
                 }
                 if !found {
                     // a side all but along the chord: the touch itself
-                    take(a * (0.5 * angle).tan());
+                    take(a * det::tan(0.5 * angle));
                 }
             }
         }
@@ -1122,7 +1145,7 @@ fn leaving(seg: &Seg2, toe: Point2, tol: f64) -> Option<Vec2> {
             start: s, sweep, ..
         } => {
             let at = if start { s } else { s + sweep };
-            let travel = Vec2::new(-at.sin(), at.cos()) * sweep.signum();
+            let travel = Vec2::new(-det::sin(at), det::cos(at)) * sweep.signum();
             if start {
                 travel
             } else {
@@ -1156,12 +1179,12 @@ fn roots(a: f64, b: f64, c: f64) -> Vec<f64> {
 /// of its bulge `tan(sweep / 4)`; `None` past half a circle.
 fn arc_about(center: Point2, p: Point2, q: Point2, ccw: bool) -> Option<Seg2> {
     let (dp, dq) = (p - center, q - center);
-    let turn = (dq.y.atan2(dq.x) - dp.y.atan2(dp.x)).rem_euclid(TAU);
+    let turn = (det::atan2(dq.y, dq.x) - det::atan2(dp.y, dp.x)).rem_euclid(TAU);
     let sweep = if ccw { turn } else { turn - TAU };
     bulge_arc(
         Vertex {
             at: p,
-            bulge: (sweep / 4.0).tan(),
+            bulge: det::tan(sweep / 4.0),
         },
         q,
     )
@@ -1195,8 +1218,8 @@ pub fn cut_chain(chain: &[Seg2], s: f64, origin: Point2, up: Vec2, eps: f64) -> 
                 if k.abs() > 1.0 {
                     None
                 } else {
-                    let base = up.y.atan2(up.x);
-                    let off = k.acos();
+                    let base = det::atan2(up.y, up.x);
+                    let off = det::acos(k);
                     [base + off, base - off]
                         .into_iter()
                         .filter_map(|ang| {

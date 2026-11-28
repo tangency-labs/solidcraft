@@ -91,6 +91,21 @@
 //! the pass did not visit carries its line parameters too (the whole line where they cannot
 //! be enclosed), so that a ray can tell whether it lies before a hit.
 //!
+//! **The order of the boxes.** The pass visits the box of least line parameter first (a
+//! half takes the least line parameter of the box it is cut from), of equal ones the last
+//! cut. What it decides of a box reads the box alone, so the order changes only where a pass
+//! at its limit stops: the boxes it left lie along the line past the ones it decided. A
+//! crossing's line parameter is the foot of its point, inside the line parameters of every
+//! box holding it, so every crossing of the leaf before the least line parameter of the boxes
+//! left lies in a box decided, as every crossing of a finished pass does; the solve adds those
+//! crossings and keeps the guesses' answer past them ([`publishable_roots`]: below the least
+//! line parameter of the boxes left by every leaf of the solve at its limit, so that no
+//! crossing a leaf at its limit adds comes after one another leaf left undecided; a finished
+//! leaf adds all its crossings, as before). A
+//! shallow chord of a wide cylinder's side, whose leaf takes several thousand boxes along the
+//! silhouette between its crossings (where the line's direction lies in the tangent plane and
+//! no box about it is regular), gets its first crossing so.
+//!
 //! **The exclusion phase.** After a finished pass (only there: the records of a leaf say
 //! that a box is excluded by distance by its absence, which an unfinished leaf does not
 //! prove), a phase with its own budget ([`MAX_EXCLUSION_BOXES`] enclosures) cuts the boxes
@@ -128,6 +143,9 @@
 //!    searched) is shown farther than the tolerance by an enclosure of that side;
 //! 2. every crease side of a member is shown farther by its own enclosure, or lies in closed
 //!    excluded boxes (no other member meets it, and what lies across it is read as below);
+//!    a crease where the net breaks (a knot of multiplicity above the degree) is shown by its
+//!    own enclosure only: the two pieces' edges there are apart, so the box excluded across
+//!    it holds the other piece's edge, not this one's;
 //! 3. every other point of `R`'s outer border lies in a closed excluded box: no record but a
 //!    member meets a member, corners included, and every leaf across a member's side on its
 //!    leaf's border is read as above (a leaf whose pass did not run, or whose records were
@@ -501,10 +519,14 @@
 //! frame, at most [`FRAME_TIGHTENINGS`] operators for each tight box: two a junction of the
 //! chain, one an end), [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
 //! told apart; at most [`MAX_KEPT_SEARCHES`] searches and [`MAX_KEPT_BYTES`] bytes kept in
-//! one [`LinePasses`], past which a search is not kept (a solve repeating it searches).
+//! one [`LinePasses`], past which a search is not kept (a solve repeating it searches); at
+//! most [`crate::surface::implicit::MAX_SIDE_POINTS`] control points in a net the side
+//! bounds read, and as many in the Bézier patches they decompose it into, past which (or
+//! past [`crate::nurbs::knots::MAX_DEGREE`]) the net has no side bound.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use crate::math::det;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -559,6 +581,9 @@ pub(crate) struct LineNet {
     /// The interior knots of multiplicity at least the degree, in u and in v: the knot lines
     /// across which the net is below `C¹` in parameter (each once, ascending).
     creases: [Vec<f64>; 2],
+    /// Of the creases, those of multiplicity above the degree, in u and in v: where the net
+    /// breaks, its two pieces' edges apart (each once, ascending).
+    breaks: [Vec<f64>; 2],
     /// The complete surface of revolution the net is a patch of, for the kinds the side
     /// test reads ([`Revolved`]); `None` for every other surface.
     revolved: Option<Revolved>,
@@ -604,6 +629,11 @@ impl LineNet {
         let (Some(u), Some(v)) = (ends(&net.u, net.p, net.nu), ends(&net.v, net.q, net.nv)) else {
             return Ok(None);
         };
+        // (a break is a crease of multiplicity above the degree)
+        let breaks = [
+            creases(&net.u, net.p.saturating_add(1), u),
+            creases(&net.v, net.q.saturating_add(1), v),
+        ];
         let creases = [creases(&net.u, net.p, u), creases(&net.v, net.q, v)];
         let revolved = Revolved::of(surface, &net);
         let form = revolved.and_then(|_| base.gw_nurb().cloned());
@@ -612,6 +642,7 @@ impl LineNet {
             net,
             range: [u, v],
             creases,
+            breaks,
             revolved,
             form,
             closes,
@@ -646,6 +677,18 @@ impl LineNet {
                 cu && lo.x <= u0 && hi.x >= u1,
                 cv && lo.y <= v0 && hi.y >= v1,
             ],
+        }
+    }
+
+    /// Whether the side `s` of the `(u, v)` box `b` (in the order of
+    /// [`LineNet::side_kinds`]) lies on a break of the net ([`LineNet::breaks`]).
+    fn breaks_at(&self, b: Scratch, s: usize) -> bool {
+        let [bu, bv] = &self.breaks;
+        match s {
+            0 => bu.contains(&b.u.lo),
+            1 => bu.contains(&b.u.hi),
+            2 => bv.contains(&b.v.lo),
+            _ => bv.contains(&b.v.hi),
         }
     }
 
@@ -1488,6 +1531,75 @@ struct Scratch {
     v: Ivl,
 }
 
+/// The work list of a leaf's pass (module docs, "The order of the boxes"): the box of least
+/// line parameter first (its key: the least line parameter of the box it was cut from,
+/// before it is enclosed itself), and of equal keys the last pushed, so that a pass stopped
+/// at its limit has decided every box whose points meet the line before the boxes it left.
+/// Each box carries its place in the cutting (the halves taken from the whole leaf, `false`
+/// the first). The order changes which boxes a pass at its limit reaches, never what it
+/// decides of a box ([`visit`] reads the box alone), so a finished pass decides the same
+/// boxes in any order.
+#[derive(Default)]
+struct Queue {
+    heap: std::collections::BinaryHeap<Queued>,
+    pushed: u64,
+}
+
+/// A box of the [`Queue`] with its key, its place in the order pushed and in the cutting.
+struct Queued {
+    key: f64,
+    seq: u64,
+    b: Scratch,
+    path: Vec<bool>,
+}
+
+impl Ord for Queued {
+    /// The greater pops first: the lesser key, then the later pushed.
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        other
+            .key
+            .total_cmp(&self.key)
+            .then(self.seq.cmp(&other.seq))
+    }
+}
+
+impl PartialOrd for Queued {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Queued {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == core::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for Queued {}
+
+impl Queue {
+    fn push(&mut self, b: Scratch, key: f64, path: Vec<bool>) {
+        self.pushed = self.pushed.wrapping_add(1);
+        self.heap.push(Queued {
+            key,
+            seq: self.pushed,
+            b,
+            path,
+        });
+    }
+
+    fn pop(&mut self) -> Option<(Scratch, f64, Vec<bool>)> {
+        self.heap.pop().map(|q| (q.b, q.key, q.path))
+    }
+
+    /// The boxes still to visit, in the order they would have been visited.
+    fn into_boxes(self) -> Vec<Scratch> {
+        let mut left = self.heap.into_sorted_vec();
+        left.reverse();
+        left.into_iter().map(|q| q.b).collect()
+    }
+}
+
 /// The certified crossings of `line` with the surface of `net` over the leaf's `domain`,
 /// reported for `t` in the leaf's `interval` (module docs), with what the pass decided of
 /// every box; `sides` is what lies across the leaf's sides.
@@ -1535,27 +1647,19 @@ fn isolate_within(
         // nor of a domain off the net's knots
         return Ok(out);
     }
-    let mut work = vec![Scratch { u, v }];
+    let mut work = Queue::default();
+    work.push(Scratch { u, v }, f64::NEG_INFINITY, Vec::new());
+    // the boxes decided and the roots certified, each with its place in the cutting (the
+    // order a pass that visits the first half's boxes before the second's decides them in)
+    let mut decided: Vec<(Vec<bool>, FloorBox)> = Vec::new();
+    let mut certified: Vec<(Vec<bool>, CertifiedRoot)> = Vec::new();
+    let mut left_to_visit: Vec<Scratch> = Vec::new();
     out.stop = Stop::Finished;
-    while let Some(b) = work.pop() {
+    while let Some((b, key, path)) = work.pop() {
         if out.boxes >= MAX_SCRATCH_BOXES {
             out.stop = Stop::AtLimit;
-            work.push(b);
-            // each with its line parameters, so that a ray can tell whether it lies
-            // before a hit (the whole line where they cannot be enclosed)
-            out.floor.extend(work.iter().map(|w| {
-                FloorBox {
-                    u: w.u,
-                    v: w.v,
-                    t: Some(
-                        enclosed(net, &line, w.u, w.v)
-                            .map(|e| line.feet(&e.r).1)
-                            .filter(|feet| feet.is_finite())
-                            .unwrap_or_else(Ivl::whole),
-                    ),
-                    kind: FloorKind::Unvisited,
-                }
-            }));
+            work.push(b, key, path);
+            left_to_visit = work.into_boxes();
             break;
         }
         if out.boxes % 64 == 0 {
@@ -1576,23 +1680,8 @@ fn isolate_within(
                 (kind, Some(t))
             }
             Visit::Root(root, t) => {
-                // one root, however many boxes hold it on their borders: the same root
-                // when its enclosure lies in a box another is the only root of (Rump,
-                // Thm 13.3), or when the hull of the two enclosures is regular (it then
-                // holds one root at most); roots with enclosures apart are two
-                let known = out.roots.iter().any(|r| {
-                    let [ru, rv, _] = root.enclosure;
-                    let [qu, qv] = r.unique;
-                    let [su, sv, _] = r.enclosure;
-                    (within(ru, qu) && within(rv, qv))
-                        || (meet(ru, su).is_some()
-                            && meet(rv, sv).is_some()
-                            && regular_over(net, &line, ru.hull(su), rv.hull(sv)))
-                });
                 let (unique, enclosure) = (root.unique, root.enclosure);
-                if !known {
-                    out.roots.push(root);
-                }
+                certified.push((path.clone(), root));
                 (FloorKind::Root { unique, enclosure }, Some(t))
             }
             Visit::Unshown(unique, enclosure, t) => {
@@ -1603,18 +1692,68 @@ fn isolate_within(
                 out.left += 1;
                 (FloorKind::Left, t)
             }
-            Visit::Halve(first, second) => {
-                work.push(second);
-                work.push(first);
+            Visit::Halve(first, second, feet) => {
+                // (halves inherit the least line parameter of the box they are cut from)
+                let key = feet.map_or(key, |t| t.lo);
+                let mut second_path = path.clone();
+                second_path.push(true);
+                let mut first_path = path;
+                first_path.push(false);
+                work.push(second, key, second_path);
+                work.push(first, key, first_path);
                 continue;
             }
         };
-        out.floor.push(FloorBox {
-            u: b.u,
-            v: b.v,
-            t,
-            kind,
+        decided.push((
+            path,
+            FloorBox {
+                u: b.u,
+                v: b.v,
+                t,
+                kind,
+            },
+        ));
+    }
+    // the records and the roots in the order of the cutting, first halves first: what a
+    // finished pass records and reports is then the same in whatever order it visited (the
+    // exclusion phase reads the records in this order within its budget, and of two boxes
+    // holding one root the first reports it); no decided box's place is the start of
+    // another's (a decided box is not cut), so the places are apart
+    decided.sort_by(|a, b| a.0.cmp(&b.0));
+    certified.sort_by(|a, b| a.0.cmp(&b.0));
+    out.floor = decided.into_iter().map(|(_, f)| f).collect();
+    // the boxes left to visit, each with its line parameters, so that a ray can tell whether
+    // it lies before a hit (the whole line where they cannot be enclosed)
+    out.floor.extend(left_to_visit.into_iter().map(|w| {
+        FloorBox {
+            u: w.u,
+            v: w.v,
+            t: Some(
+                enclosed(net, &line, w.u, w.v)
+                    .map(|e| line.feet(&e.r).1)
+                    .filter(|feet| feet.is_finite())
+                    .unwrap_or_else(Ivl::whole),
+            ),
+            kind: FloorKind::Unvisited,
+        }
+    }));
+    for (_, root) in certified {
+        // one root, however many boxes hold it on their borders: the same root when its
+        // enclosure lies in a box another is the only root of (Rump, Thm 13.3), or when the
+        // hull of the two enclosures is regular (it then holds one root at most); roots with
+        // enclosures apart are two
+        let known = out.roots.iter().any(|r| {
+            let [ru, rv, _] = root.enclosure;
+            let [qu, qv] = r.unique;
+            let [su, sv, _] = r.enclosure;
+            (within(ru, qu) && within(rv, qv))
+                || (meet(ru, su).is_some()
+                    && meet(rv, sv).is_some()
+                    && regular_over(net, &line, ru.hull(su), rv.hull(sv)))
         });
+        if !known {
+            out.roots.push(root);
+        }
     }
     if out.stop == Stop::Finished {
         let mut phase = Exclude {
@@ -1707,7 +1846,7 @@ fn enclose_strip_within(
         // (step 1 reads the surface's points alone: their partials only where it halves)
         let Some(r) = enclosed_value(net, &line, b.u, b.v) else {
             match wider(None) {
-                Visit::Halve(first, second) => {
+                Visit::Halve(first, second, _) => {
                     work.push(second);
                     work.push(first);
                 }
@@ -1748,7 +1887,7 @@ fn enclose_strip_within(
             None => Some(wider(Some(feet))),
         };
         match halved {
-            Some(Visit::Halve(first, second)) => {
+            Some(Visit::Halve(first, second, _)) => {
                 work.push(second);
                 work.push(first);
             }
@@ -1865,7 +2004,7 @@ impl Exclude<'_> {
         match halved {
             // (each half carries the line parameters of the box it is cut from until it is
             // enclosed: they hold its own)
-            Some(Visit::Halve(first, second)) => Cut::Halves(
+            Some(Visit::Halve(first, second, _)) => Cut::Halves(
                 FloorBox {
                     u: first.u,
                     v: first.v,
@@ -2013,6 +2152,73 @@ impl SearchedLeaf {
     }
 }
 
+/// The certified roots each searched leaf of one solve adds (module docs, "The order of the
+/// boxes"), in the order of `leaves`: every root of a leaf whose pass finished; of a leaf
+/// whose pass stopped at its limit, those whose line parameters lie wholly below `b`, the
+/// least line parameter of the boxes left to visit by EVERY leaf of the solve at its limit
+/// (each box records the feet of its points widened by the tolerance, the whole line where
+/// they cannot be enclosed), lowered to the least line parameter of any of those leaves'
+/// roots reaching it until none does; none from a leaf whose pass did not run, or from any
+/// leaf at its limit where one such leaf's records were not kept (nothing is then known of
+/// the boxes it left). A crossing's line parameter is the foot of its point, so a crossing in
+/// a box left to visit by any leaf has it at `b` or past it: every crossing of the solve's
+/// searched leaves below `b` lies in a box a pass decided: no root added from a leaf at its
+/// limit comes after a crossing a box left to visit may hold. The culled strips and the
+/// leaves whose pass did not run are no part of the bound: what they hold is the guesses'
+/// answer, as before the pass. A finished leaf's roots are all added, as before this bound
+/// existed, whatever boxes a leaf at its limit left: such a root can come after a crossing
+/// left in a box a leaf at its limit did not visit, as it could before (where a leaf at its
+/// limit added nothing).
+pub(crate) fn publishable_roots(leaves: &[SearchedLeaf]) -> Vec<Vec<CertifiedRoot>> {
+    let at_limit = || {
+        leaves
+            .iter()
+            .filter(|l| !l.strip && l.stop == Stop::AtLimit)
+    };
+    let mut bound = f64::INFINITY;
+    for leaf in at_limit() {
+        let least = match &leaf.floor {
+            Some(floor) => floor
+                .iter()
+                .filter(|f| f.kind == FloorKind::Unvisited)
+                .map(|f| f.t.map_or(f64::NEG_INFINITY, |t| t.lo))
+                .fold(f64::INFINITY, f64::min),
+            None => f64::NEG_INFINITY,
+        };
+        bound = bound.min(least);
+    }
+    let line_parameters = |r: &CertifiedRoot| {
+        let [_, _, t] = r.enclosure;
+        t
+    };
+    // lowered until no root reaches it (each step lowers it to a root's start, or ends: at
+    // most one step a root)
+    loop {
+        let lower = at_limit()
+            .flat_map(|l| l.roots.iter())
+            .map(line_parameters)
+            .filter(|t| t.hi >= bound)
+            .fold(bound, |b, t| b.min(t.lo));
+        if lower.total_cmp(&bound).is_ge() {
+            break;
+        }
+        bound = lower;
+    }
+    leaves
+        .iter()
+        .map(|leaf| match leaf.stop {
+            Stop::Finished => leaf.roots.clone(),
+            Stop::AtLimit => leaf
+                .roots
+                .iter()
+                .filter(|r| line_parameters(r).hi < bound)
+                .copied()
+                .collect(),
+            Stop::NotRun => Vec::new(),
+        })
+        .collect()
+}
+
 /// What a solve's drop did (module docs, "The drop").
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Drops {
@@ -2138,7 +2344,11 @@ pub(crate) fn drop_fenced(
                         // crease; what lies across it is another leaf's end, which the
                         // drop's sets do not reach)
                         SideKind::Boundary => want.push(side),
-                        SideKind::Crease if net.on_a_seam(&line.solve_domain, b, s) => {
+                        // (nor does a break: the box excluded across it holds the other
+                        // piece's edge, apart from this side)
+                        SideKind::Crease
+                            if net.on_a_seam(&line.solve_domain, b, s) || net.breaks_at(b, s) =>
+                        {
                             want.push(side);
                         }
                         SideKind::Crease => {
@@ -2778,8 +2988,8 @@ fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> (Touch
 /// placed (`unplaced`: nothing has enclosed it) or the components passed their bounds;
 /// complete only with none of these. A strip's boxes it left undecided are in the
 /// components, over their own line parameters. A leaf whose pass ran beside leaves not run
-/// leaves the record undecided: a finished one may have added certified roots, so the
-/// solutions are no longer the guesses' alone.
+/// leaves the record undecided: its pass may have added certified roots, so the solutions
+/// are no longer the guesses' alone.
 pub(crate) fn side_record(
     leaves: &[SearchedLeaf],
     components: &Components,
@@ -2885,7 +3095,7 @@ impl Revolved {
                     slope: if c.cylinder {
                         0.0
                     } else {
-                        c.semi_angle_deg.to_radians().tan()
+                        det::tan(c.semi_angle_deg.to_radians())
                     },
                 },
             ),
@@ -3325,7 +3535,7 @@ impl Chart {
 /// The unit vector along `v`, `None` where it is not finite or of no length.
 fn unit2(v: [f64; 2]) -> Option<[f64; 2]> {
     let [a, b] = v;
-    let len = a.hypot(b);
+    let len = det::hypot(a, b);
     (len > 0.0 && len.is_finite()).then(|| [a / len, b / len])
 }
 
@@ -5772,8 +5982,9 @@ enum Visit {
     Unshown([Ivl; 2], I3, Ivl),
     /// At the floor (step 3), with its line parameters where it was enclosed.
     Left(Option<Ivl>),
-    /// Its two halves, the first to visit first.
-    Halve(Scratch, Scratch),
+    /// Its two halves, the first to visit first, with the box's line parameters where it was
+    /// enclosed (the order [`isolate`] visits boxes in).
+    Halve(Scratch, Scratch, Option<Ivl>),
 }
 
 /// A box enclosed about the surface's point at its middle: the quotient's terms are then
@@ -5880,6 +6091,7 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
                     u: Ivl::new(knot, b.u.hi),
                     ..b
                 },
+                None,
             )
         } else {
             Visit::Halve(
@@ -5891,6 +6103,7 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
                     v: Ivl::new(knot, b.v.hi),
                     ..b
                 },
+                None,
             )
         };
     }
@@ -5969,9 +6182,9 @@ fn halves(b: Scratch, split_u: bool, mid: f64, t: Option<Ivl>) -> Visit {
     }
     let (first, second) = (Ivl::new(lo, mid), Ivl::new(mid, hi));
     if split_u {
-        Visit::Halve(Scratch { u: first, ..b }, Scratch { u: second, ..b })
+        Visit::Halve(Scratch { u: first, ..b }, Scratch { u: second, ..b }, t)
     } else {
-        Visit::Halve(Scratch { v: first, ..b }, Scratch { v: second, ..b })
+        Visit::Halve(Scratch { v: first, ..b }, Scratch { v: second, ..b }, t)
     }
 }
 
@@ -6461,6 +6674,7 @@ impl LineNet {
             net,
             range,
             creases,
+            breaks,
             revolved,
             form,
             closes,
@@ -6485,7 +6699,7 @@ impl LineNet {
         list(&mut out, pw);
         let [[u0, u1], [v0, v1]] = *range;
         out.extend([u0, u1, v0, v1].map(f64::to_bits));
-        for c in creases {
+        for c in creases.iter().chain(breaks) {
             list(&mut out, c);
         }
         out.extend(closes.map(u64::from));
@@ -6910,7 +7124,7 @@ mod tests {
         let found = pass(
             &k,
             &s,
-            Vec3::new(a.cos(), a.sin(), -1.0),
+            Vec3::new(det::cos(a), det::sin(a), -1.0),
             Vec3::new(0.0, 0.0, 3.0),
             [0.0, 1.0],
             1.0e-5,
@@ -7115,6 +7329,139 @@ mod tests {
     }
 
     /// A searched leaf over `domain`, its pass ended at `stop`, with the records `floor`.
+    /// A certified root whose line parameters are `[lo, hi]` (its `(u, v)` boxes unit).
+    fn root_over(lo: f64, hi: f64) -> CertifiedRoot {
+        let unit = Ivl::new(0.0, 1.0);
+        CertifiedRoot {
+            point: [0.5, 0.5, 0.5 * (lo + hi)],
+            enclosure: [unit, unit, Ivl::new(lo, hi)],
+            unique: [unit, unit],
+        }
+    }
+
+    /// A box left to visit whose line parameters are `t`.
+    fn unvisited(t: Ivl) -> FloorBox {
+        FloorBox {
+            u: Ivl::new(0.0, 1.0),
+            v: Ivl::new(0.0, 1.0),
+            t: Some(t),
+            kind: FloorKind::Unvisited,
+        }
+    }
+
+    /// The bound of a solve's roots is taken over every leaf at its limit: a leaf whose
+    /// root at 10 lies before every box it left adds nothing while another leaf at its limit
+    /// left a box from 5 (a crossing at 6 there would come first along the line); a root of
+    /// the second leaf below 5 is added; a finished leaf adds all its roots whatever the
+    /// others left; a culled strip's undecided boxes and a leaf whose pass did not run bound
+    /// nothing; a leaf at its limit whose records were not kept withholds every leaf at its
+    /// limit.
+    #[test]
+    fn a_leaf_at_its_limit_adds_no_root_past_a_box_another_left() {
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let t = |r: &CertifiedRoot| r.enclosure[2].lo;
+        let leaf = |stop: Stop, floor: Option<Vec<FloorBox>>, roots: Vec<CertifiedRoot>| {
+            let mut l = leaf_of(d, stop, floor);
+            l.roots = roots;
+            l
+        };
+        let first = leaf(
+            Stop::AtLimit,
+            Some(vec![unvisited(Ivl::new(20.0, 30.0))]),
+            vec![root_over(10.0, 10.5)],
+        );
+        let second = leaf(
+            Stop::AtLimit,
+            Some(vec![unvisited(Ivl::new(5.0, 8.0))]),
+            vec![root_over(2.0, 2.5)],
+        );
+        let finished = leaf(
+            Stop::Finished,
+            Some(Vec::new()),
+            vec![root_over(12.0, 12.5)],
+        );
+        let mut strip = leaf(
+            Stop::AtLimit,
+            Some(vec![FloorBox {
+                kind: FloorKind::Culled,
+                ..unvisited(Ivl::new(1.0, 2.0))
+            }]),
+            Vec::new(),
+        );
+        strip.strip = true;
+        let not_run = leaf(Stop::NotRun, None, vec![root_over(0.5, 0.6)]);
+        let added = |leaves: &[SearchedLeaf]| -> Vec<Vec<f64>> {
+            publishable_roots(leaves)
+                .iter()
+                .map(|roots| roots.iter().map(t).collect())
+                .collect()
+        };
+        assert_eq!(added(core::slice::from_ref(&first)), vec![vec![10.0]]);
+        assert_eq!(
+            added(&[first.clone(), second.clone(), finished, strip, not_run]),
+            vec![vec![], vec![2.0], vec![12.0], vec![], vec![]]
+        );
+        assert_eq!(added(&[second, first.clone()]), vec![vec![2.0], vec![]]);
+        let unkept = leaf(Stop::AtLimit, None, Vec::new());
+        let none: Vec<f64> = Vec::new();
+        assert_eq!(added(&[first, unkept]), vec![none.clone(), none]);
+    }
+
+    /// The roots a leaf's pass adds (`publishable_roots`, one leaf): all of a finished pass;
+    /// of a pass at its limit, those wholly below the least line parameter of the boxes it
+    /// left, that bound lowered to the start of every root reaching it until none does; none
+    /// where a box left holds the whole line, the records were not kept, or the pass did not
+    /// run.
+    #[test]
+    fn a_pass_at_its_limit_adds_the_roots_before_every_box_it_left() {
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let t = |r: &CertifiedRoot| r.enclosure[2].lo;
+        let with = |stop: Stop, floor: Option<Vec<FloorBox>>, roots: Vec<CertifiedRoot>| {
+            let mut leaf = leaf_of(d, stop, floor);
+            leaf.roots = roots;
+            publishable_roots(&[leaf])
+                .concat()
+                .iter()
+                .map(t)
+                .collect::<Vec<f64>>()
+        };
+        let roots = vec![
+            root_over(4.0, 5.0),
+            root_over(9.5, 10.5),
+            root_over(20.0, 21.0),
+        ];
+        assert_eq!(
+            with(Stop::Finished, Some(Vec::new()), roots.clone()),
+            vec![4.0, 9.5, 20.0]
+        );
+        // the box left from 10 on: the root reaching it is withheld, and so is every root
+        // past it
+        let left = vec![
+            unvisited(Ivl::new(12.0, 30.0)),
+            unvisited(Ivl::new(10.0, 11.0)),
+        ];
+        assert_eq!(
+            with(Stop::AtLimit, Some(left.clone()), roots.clone()),
+            vec![4.0]
+        );
+        // a box left over the whole line decides nothing, nor do records not kept, nor a pass
+        // that did not run
+        let whole = vec![unvisited(Ivl::whole())];
+        assert!(with(Stop::AtLimit, Some(whole), roots.clone()).is_empty());
+        assert!(with(Stop::AtLimit, None, roots.clone()).is_empty());
+        assert!(with(Stop::NotRun, Some(left.clone()), roots).is_empty());
+        // a chain of overlapping roots below the bound: the one reaching 10 lowers it to 8,
+        // the one reaching 8 to 7, the one reaching 7 to 6.5; only the root wholly below that
+        // is added
+        let chain = vec![
+            root_over(8.0, 10.5),
+            root_over(7.0, 8.5),
+            root_over(6.5, 7.5),
+            root_over(1.0, 2.0),
+        ];
+        assert_eq!(with(Stop::AtLimit, Some(left), chain), vec![1.0]);
+    }
+
     fn leaf_of(domain: Extent2d, stop: Stop, floor: Option<Vec<FloorBox>>) -> SearchedLeaf {
         SearchedLeaf {
             domain,
@@ -7318,6 +7665,73 @@ mod tests {
         let (kept, done) = excluded(&k, near, d, whole, set(), MAX_DROP_ENCLOSURES);
         assert_eq!(kept, set());
         assert_eq!(done.no_root + done.edge, 0);
+    }
+
+    /// A crease where the net breaks (a knot of multiplicity above the degree) is no fence:
+    /// the box excluded across it holds the other piece's edge, which may lie far from this
+    /// one's. A net of degree 1 in u with a double knot at u = ½, its left piece `(u, v, 0)`
+    /// and its right piece `(u + 10, v, 0)`, and a box with no root against the knot on the
+    /// left: a vertical line through `(0.5005, 0.5)` has no root but passes half a tolerance
+    /// (0.0005 of 0.001) from the left piece's edge, and the right piece leaves nothing
+    /// across. The set is kept (its side on the break is enclosed, and is not farther). With
+    /// a line 0.01 above the net the same side is shown farther by its own enclosure (one
+    /// made) and the set is dropped; on the net continuous across u = ½ (a single knot) the
+    /// excluded box across still fences the side, and no enclosure is made.
+    #[test]
+    fn a_crease_where_the_net_breaks_is_shown_by_its_own_enclosure() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let net_of = |xs: &[f64], u: Vec<f64>| {
+            let rows = xs
+                .iter()
+                .map(|&x| {
+                    (0..2)
+                        .map(|j| CPoint::new(x, f64::from(j), 0.0, NOW))
+                        .collect()
+                })
+                .collect();
+            let n = crate::nurbs::srf_basic::Surface::new(rows, 1, 1, u, vec![0.0, 0.0, 1.0, 1.0])
+                .unwrap();
+            Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::from_nurb(
+                n, false,
+            ))
+        };
+        let broken = net_of(&[0.0, 0.5, 10.5, 11.0], vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+        let joined = net_of(&[0.0, 0.5, 1.0], vec![0.0, 0.0, 0.5, 1.0, 1.0]);
+        let tol = 1.0e-3;
+        let drop = |s: &Surface, p: Vec3, d: Vec3| {
+            let net = LineNet::of(&k, s).unwrap().unwrap();
+            let solve = s.natural_uv_domain_with_nurb(&k).unwrap();
+            let line = PassLine {
+                point: p,
+                vector: d,
+                span: [0.0, 1.0],
+                solve_domain: solve,
+                tol,
+            };
+            let recs = vec![rec(FloorKind::NoRoot, [0.45, 0.5], [0.45, 0.55])];
+            let mut leaves = [leaf_of(solve, Stop::Finished, Some(recs))];
+            let sides = leaf_sides(&[solve], &solve, net.seams(&solve));
+            let done =
+                drop_fenced(&net, &line, &mut leaves, &sides, None, MAX_DROP_ENCLOSURES).unwrap();
+            (leaves[0].floor.take().unwrap(), done)
+        };
+        assert_eq!(
+            LineNet::of(&k, &broken).unwrap().unwrap().breaks,
+            [vec![0.5], vec![]]
+        );
+        assert!(LineNet::of(&k, &joined).unwrap().unwrap().breaks[0].is_empty());
+        let (near, down) = (Vec3::new(0.5005, 0.5, -1.0), Vec3::new(0.0, 0.0, 2.0));
+        let (kept, done) = drop(&broken, near, down);
+        assert_eq!(kept.len(), 1, "{done:?}");
+        assert_eq!((done.no_root, done.enclosures), (0, 1));
+        let (above, along) = (Vec3::new(-2.0, 0.5, 0.01), Vec3::new(4.0, 0.0, 0.0));
+        let (kept, done) = drop(&broken, above, along);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!((done.no_root, done.enclosures), (1, 1));
+        let (kept, done) = drop(&joined, above, along);
+        assert!(kept.is_empty(), "{kept:?}");
+        assert_eq!((done.no_root, done.enclosures), (1, 0));
     }
 
     /// A crease side shared by two members is shown farther by its own enclosure or keeps
@@ -7659,7 +8073,7 @@ mod tests {
         let found = pass(
             &k,
             &s,
-            Vec3::new(-2.0, a.sin(), 0.5),
+            Vec3::new(-2.0, det::sin(a), 0.5),
             Vec3::new(4.0, 0.0, 0.0),
             [0.0, 1.0],
             TOL,
@@ -8355,10 +8769,13 @@ mod tests {
     /// A net fitted to a definition is not its surface, and gets no pass: a B-spline net
     /// carrying a swept wall's definition (a screw motion, its bound above 0) is refused, and
     /// so is the evaluation copy a surface cache holds of it, which drops the definition but
-    /// keeps that its net is fitted. The same net with no definition (a plain B-spline: its
-    /// net is the surface), and its evaluation copy, keep the pass.
+    /// keeps that its net is fitted, and so is a copy or a piece of that copy, and the plane
+    /// its copy with analytics recognises (the net is planar). The same net with no
+    /// definition (a plain B-spline: its net is the surface), its evaluation copy and their
+    /// copies keep the pass.
     #[test]
     fn a_net_fitted_to_a_definition_gets_no_pass() {
+        use crate::nurbs::b_spline_surface::SurfParamType;
         use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
         let k = Kernel::default();
         let bare = Surface::from(
@@ -8395,6 +8812,35 @@ mod tests {
         assert!(LineNet::of(&k, &copy.clone_for_evaluation().unwrap())
             .unwrap()
             .is_none());
+        // a copy (or a copy with analytics) of the evaluation copy is still a fitted net, and
+        // gets no pass; a copy of the plain B-spline, or of its evaluation copy, is its net
+        let (left, right) = copy.split_at(&k, 0.5, SurfParamType::U).unwrap();
+        for again in [
+            copy.copy(&k).unwrap(),
+            copy.copy_and_add_analytics(&k).unwrap(),
+            left,
+            right,
+        ] {
+            assert!(again.net_is_fitted());
+            assert!(LineNet::of(&k, &again).unwrap().is_none());
+        }
+        // the swept wall's net is planar: its copy with analytics is a plane, which keeps no
+        // sweep, but keeps that it is made from the fitted net
+        let plane = swept.copy_and_add_analytics(&k).unwrap();
+        assert!(matches!(
+            plane.kind(),
+            crate::surface::surface::SurfaceKind::Plane(_)
+        ));
+        assert!(plane.procedural_definition().is_none());
+        assert!(plane.net_is_fitted());
+        assert!(LineNet::of(&k, &plane).unwrap().is_none());
+        for plain in [
+            bare.copy(&k).unwrap(),
+            bare.clone_for_evaluation().unwrap().copy(&k).unwrap(),
+        ] {
+            assert!(!plain.net_is_fitted());
+            assert!(LineNet::of(&k, &plain).unwrap().is_some());
+        }
     }
 
     /// The side bounds poll the solve's cancel token before each Bézier patch: a token
@@ -9774,7 +10220,7 @@ mod tests {
         use crate::nurbs::b_spline_surface::BSplineSurface;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
-        let (sin, cos) = bend.to_radians().sin_cos();
+        let (sin, cos) = det::sin_cos(bend.to_radians());
         let mut profile = vec![[-1.0, -0.2], [-0.5, 0.0], [0.0, 0.0]];
         let mut knots = vec![0.0, 0.0, 0.0, 0.5, 0.5];
         if broken {
@@ -9800,7 +10246,7 @@ mod tests {
     /// direction, and its direction doubled is its vector, so the stored line passes through
     /// the ridge point exactly), and along x half the tolerance above it.
     fn crease_lines(bend: f64, tol: f64) -> [(Vec3, Vec3); 3] {
-        let (sin, cos) = bend.to_radians().sin_cos();
+        let (sin, cos) = det::sin_cos(bend.to_radians());
         let (along, out) = (Vec3::new(cos, 0.0, -sin), Vec3::new(sin, 0.0, cos));
         let ridge = Vec3::new(0.0, 0.5, 0.0);
         let through = |d: Vec3| (ridge - d, d * 2.0);

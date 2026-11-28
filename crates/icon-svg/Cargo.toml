@@ -3,8 +3,7 @@ name = "solidcraft-icon-svg"
 description = "Toolkit-free parsing of palette-role icon SVGs for rendering and plugin validation"
 version.workspace = true
 edition.workspace = true
-# Extracted from the UI kit; retain the original interface licence.
-license-file = "LICENSE"
+license.workspace = true
 
 [lints]
 workspace = true

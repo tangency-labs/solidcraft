@@ -675,6 +675,15 @@ fn a_tangent_field_edge_at_the_smooth_vertex_keeps_the_cap() {
     let r = blend(&mut k, &mut b, Kind::Round, &[[0.0, 8.5, 20.0]], 1.0);
     assert_eq!(r, Ok(()), "the round builds");
     assert_eq!(b.faces().ids().count(), 9, "capped at the smooth vertex");
+    // A tangent-field value is a direction, not a position. It must not inflate
+    // vertex tolerances to the size of the part.
+    let max_tol = b
+        .vertices()
+        .ids()
+        .map(|id| b.vertex(id).unwrap().tolerance)
+        .fold(0.0_f64, f64::max);
+    assert!(max_tol < 1e-4, "vertex tolerance grew to {max_tol}");
+    eprintln!("maximum vertex tolerance: {max_tol}");
 }
 
 /// tangency-labs/solidcore#2680's review (the blend corner): the run-on check passes a

@@ -71,7 +71,7 @@ impl CornerKind {
             return Self::Pinned;
         };
         match blend.event {
-            BlendCornerEvent::Ball => Self::Ball,
+            BlendCornerEvent::Ball | BlendCornerEvent::SupportBall => Self::Ball,
             BlendCornerEvent::Setback => Self::Setback,
             BlendCornerEvent::End => Self::End,
             BlendCornerEvent::Join | BlendCornerEvent::CliffJoin { .. } => Self::Join,
@@ -198,6 +198,21 @@ impl BlendFaceLog {
     pub fn last(&self) -> &[MadeBlendFace] {
         self.sessions.last().map_or(&[], Vec::as_slice)
     }
+}
+
+/// Keep a blend operation's face records only if its surrounding edit commits.
+pub(crate) fn keeping_blend_face_log<T>(
+    k: &mut crate::kernel::Kernel,
+    edit: impl FnOnce(&mut crate::kernel::Kernel) -> Result<T>,
+) -> Result<T> {
+    use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
+    let log_before = k.blend_face_log.clone();
+    let result = catch_unwind(AssertUnwindSafe(|| edit(k)));
+    if !matches!(&result, Ok(Ok(_))) {
+        k.blend_face_log = log_before;
+    }
+    result.unwrap_or_else(|panic| resume_unwind(panic))
 }
 
 /// A blend face whose surface is not a definition.

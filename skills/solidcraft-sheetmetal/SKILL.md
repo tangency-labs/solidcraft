@@ -8,7 +8,7 @@ description: Use when building or changing a sheet metal part in SolidCraft thro
 ## Overview
 A sheet metal part is a flat sheet plus bends: base first, then flanges. Work the numbers first (rule, flat size, stock, angles, heights, segments), build in `batch` calls, then check with `measure`, `sheet.flat_pattern`, `sheet.export_bend_table`. Contract, bend arithmetic, recipes: `reference.md`.
 
-`segments` needs `feat/sheet-flange-segments`; `unfold_method` needs #9911.
+`segments` needs `feat/sheet-flange-segments`.
 
 ## Before the first call
 1. `skill_reference {"skill":"solidcraft-sheetmetal"}`; elsewhere read `reference.md`.
@@ -17,7 +17,7 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 4. Plan flat size, bend fractions, volume (flat area × thickness), stock.
 
 ## Build
-- **Rule:** `sheet.manage_rules {"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}`. Ask the shop for the K-factor; never invent it.
+- **Rule:** `sheet.manage_rules {"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}`. Ask the shop for K-factor or chart value, `unfold_method`; never invent it.
 - **Base:** a closed sketch profile, then `sheet.flange {"sketch":"Base"}`.
 - **Edge:** `sheet.flange {"type":"edge","edges":[...],"height":...,"angle":...}`; `{point, angle, height, segments}` gives one edge its own values.
 - **Segments:** stretches `{from, to}` tiling the stretch the sheet still has, each a bend with its own angle, height and side; opposite sides are cut in the flat.

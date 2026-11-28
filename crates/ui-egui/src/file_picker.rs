@@ -12,6 +12,8 @@ use crate::SolveApp;
 
 /// A host picker answer: a selected path, or `None` when cancelled.
 pub type FilePickerFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
+/// A host picker answer for several files: the selected paths, none when cancelled.
+pub type FilesPickerFuture = Pin<Box<dyn Future<Output = Vec<String>>>>;
 type Completion = Box<dyn FnOnce(&mut SolveApp, Option<String>)>;
 
 type Ready = Box<dyn FnOnce(&mut SolveApp)>;
@@ -85,10 +87,59 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
+    /// Ask for files, several at once (the agent chat's files): the types `extensions` names listed
+    /// under `label`, or any type when it names none. The host's dialog for several, else one file
+    /// as [`Self::pick_file`] asks.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_files(&mut self, label: &str, extensions: &[&str], complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_files.as_ref() {
+            Some(pick) => {
+                let future = pick(label, extensions);
+                self.begin_file_task(future, complete);
+            }
+            None => self.pick_file(label, extensions, move |app, path| complete(app, path.into_iter().collect())),
+        }
+    }
+
+    /// Ask for folders, several at once (the agent chat's files): the host's dialog for several,
+    /// else one as [`Self::pick_folder`] asks.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_folders(&mut self, complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_folders.as_ref() {
+            Some(pick) => {
+                let future = pick();
+                self.begin_file_task(future, complete);
+            }
+            None => self.pick_folder("", move |app, path| complete(app, path.into_iter().collect())),
+        }
+    }
+
+    /// Ask for files and folders in one dialog, several at once, where the host's dialog can
+    /// (macOS). Without one, the answer is a cancel (the chat then offers files and folders apart).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_files_or_folders(&mut self, complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_files_or_folders.as_ref() {
+            Some(pick) => {
+                let future = pick();
+                self.begin_file_task(future, complete);
+            }
+            None => complete(self, Vec::new()),
+        }
+    }
+
     /// Ask for a folder, starting in `current` (empty: the folder last used): a plugin field's
-    /// Browse button, the document library's folder, or a folder setting. The plugin dialog shows
-    /// Browse only when this service is set. Without a host dialog, the answer is a cancel and
-    /// nothing is changed.
+    /// Browse button, the document library's folder, a folder setting, or one the agent chat
+    /// attaches. The plugin dialog shows Browse only when this service is set. Without a host
+    /// dialog, the answer is a cancel and nothing is changed.
     pub(crate) fn pick_folder(&mut self, current: &str, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
@@ -283,12 +334,17 @@ mod tests {
     fn sheet_exports_wait_for_a_path_and_write_only_on_completion() {
         for (command, extension, field) in [("sheet.export_dxf", "dxf", "dxf"), ("sheet.export_bend_table", "csv", "text")] {
             let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
             for (id, params) in [
                 ("sketch.create", json!({"plane": "XY", "name": "Base"})),
                 ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
                 ("sketch.finish", json!({})),
                 ("sheet.flange", json!({"sketch": "Base"})),
                 ("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": "20 mm", "position": "outside"})),
+                ("sketch.create", json!({"plane": "XY", "name": "Marks"})),
+                ("sketch.text", json!({"text": "AB", "at": [40, 28], "height": 8})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"})),
             ] {
                 h.app.run(id, params).unwrap();
             }
@@ -299,9 +355,31 @@ mod tests {
             let text = expected[field].as_str().unwrap();
             assert!(text.contains(if extension == "dxf" { "BEND_UP" } else { "Body1" }));
             let path = h.dir.join(format!("flat.{extension}"));
+            let custom = if extension == "dxf" {
+                assert!(text.contains("ETCH"), "fixture includes a shallow marking");
+                h.app.start(command);
+                h.frames(2);
+                h.step(&json!({"click": {"handle": "dialog:sheet_dxf:markings"}})).unwrap();
+                h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+                assert!(!h.app.file_picker_busy());
+                assert!(h.app.dialog.is_none());
+                Some(h.app.session.execute(command, &json!({"units":"inches", "bend_lines":false, "markings":false})).unwrap())
+            } else {
+                None
+            };
             for outcome in ["cancel", "fail", "save"] {
                 h.app.start(command);
                 h.frames(2);
+                if extension == "dxf" {
+                    assert!(!h.app.file_picker_busy(), "DXF options are shown before the save picker");
+                    if outcome == "save" {
+                        h.step(&json!({"click": {"handle": "dialog:sheet_dxf:units"}})).unwrap();
+                        h.step(&json!({"click": {"handle": "dialog:Units:in"}})).unwrap();
+                        h.step(&json!({"click": {"handle": "dialog:sheet_dxf:bend_lines"}})).unwrap();
+                        h.step(&json!({"click": {"handle": "dialog:sheet_dxf:markings"}})).unwrap();
+                    }
+                    h.step(&json!({"click": {"handle": "dialog:Export DXF…"}})).unwrap();
+                }
                 assert!(h.app.file_picker_busy(), "{command} must open the save picker");
                 assert!(!path.exists());
                 assert_eq!(h.app.session.doc.to_json(), before);
@@ -317,7 +395,7 @@ mod tests {
                 }
                 assert_eq!(h.app.session.doc.to_json(), before);
             }
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), custom.as_ref().map_or(text, |v| v[field].as_str().unwrap()));
             assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| text.starts_with("Exported ") && !error));
         }
     }
@@ -493,7 +571,7 @@ mod tests {
         }));
         crate::params_dialog::open(&mut h.app);
         h.frames(2);
-        h.step(&json!({"widget": "Import…"})).unwrap();
+        h.step(&json!({"click": {"handle": "params:import"}})).unwrap();
         h.frames(2);
         h.app.params = None;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();

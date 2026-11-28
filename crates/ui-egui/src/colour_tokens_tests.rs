@@ -180,6 +180,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("view_tiles.rs", 2, "the black shadows under a view card and the name pill: a shadow is black at an opacity in every theme"),
     ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
     ("links.rs", 1, "the link pills' white ink on the brand fills"),
+    ("ui_kit/file_preview.rs", 2, "a preview's shadow: a black tint over its coverage mask, kept in white; a shadow is black in every theme"),
     ("ui_kit/icons/mod.rs", 3, "the white tint carrying an icon's opacity, greyscale, and a pixel's brightness for a plugin tint"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),

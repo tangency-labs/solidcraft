@@ -197,6 +197,20 @@ pub enum GeomFailure {
         /// The pivot or determinant that fell below the kernel's zero.
         measure: f64,
     },
+    /// A knot span the caller names, in u or in v, is not one of the net's: it must lie in
+    /// `first ..= last` (the degree to the control points less one), or the control points
+    /// it names would start before the net's first. [`ErrorKind::InvalidInput`]; status
+    /// `SM_ERR_INVALID_INPUT`.
+    SpanOutsideNet {
+        /// Whether the span is in v (else in u).
+        in_v: bool,
+        /// The span given.
+        span: usize,
+        /// The net's first span in that direction (its degree).
+        first: usize,
+        /// The net's last span in that direction (its control points less one).
+        last: usize,
+    },
     /// A span to add to a periodic extent does not lie in `[0, period]`.
     /// [`ErrorKind::InvalidInput`].
     SpanOutsidePeriod {
@@ -281,7 +295,7 @@ impl GeomFailure {
             Self::CoincidentPoints => 0,
             Self::Missing(_) | Self::EdgeWithoutCurve => SM_ERR_NULL_POINTER,
             Self::NearlySingular => SM_ERR_WARNING,
-            Self::ToleranceTooSmall { .. } => SM_ERR_INVALID_INPUT,
+            Self::ToleranceTooSmall { .. } | Self::SpanOutsideNet { .. } => SM_ERR_INVALID_INPUT,
             _ => SM_ERR,
         }
     }
@@ -305,6 +319,7 @@ impl GeomFailure {
             | Self::PairBreaksCardinality
             | Self::PairNotRelated
             | Self::PointSetFull { .. }
+            | Self::SpanOutsideNet { .. }
             | Self::SpanOutsidePeriod { .. }
             | Self::TooFewRows { .. }
             | Self::VoxelArrayTooLarge { .. } => ErrorKind::InvalidInput,
@@ -421,6 +436,16 @@ impl core::fmt::Display for GeomFailure {
             Self::Singular { measure } => write!(
                 f,
                 "the system is singular (its pivot or determinant is {measure:e})"
+            ),
+            Self::SpanOutsideNet {
+                in_v,
+                span,
+                first,
+                last,
+            } => write!(
+                f,
+                "a span index outside the net's spans: the span {span} in {} is not in {first} ..= {last}",
+                if *in_v { "v" } else { "u" }
             ),
             Self::SpanOutsidePeriod { from, to, period } => write!(
                 f,
