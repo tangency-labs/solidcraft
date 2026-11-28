@@ -23,8 +23,9 @@
 //!
 //! # Not covered
 //!
-//! T joints, whose toe on the through part is no edge, are refused ([`GrooveRefusal::TJoint`]);
-//! their toe and the seam mark come in a later PR (brett19 on #18500). A joint whose section
+//! A T joint's through part has no toe edge: its outer face is its only groove face, and its
+//! toe is where the stem's outer face meets it ([`groove_weld`]). The seam mark for a joint
+//! with no groove modelled comes later (brett19 on #18500). A joint whose section
 //! changes along it, or whose parts do not run alongside each other all along it, is refused
 //! with the stretches that keep one section ([`GrooveRefusal::SectionChanges`], brett19 on
 //! #18500, Q56); each one builds on its own ([`groove_weld_over`]). Building them all at once
@@ -40,9 +41,7 @@
 //! refused with the stretch where every groove face is whole, which builds on its own, as for
 //! parts of different length (brett19's point 1 on #22033 review 5). A weld whose end follows the
 //! plate's end comes later. A J or U face reads its arc from an end square to the joint: one whose
-//! ends are both cut at an angle gives no section. A right outer face turned 45° or more from the
-//! left one (a corner joint), or too near 45° to tell, is refused
-//! ([`GrooveRefusal::OuterFaceWrongSide`]); corner joints come in the next PR.
+//! ends are both cut at an angle gives no section.
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_kernel::affine;
@@ -76,20 +75,27 @@ pub enum GrooveRefusal {
     /// of their chain: there is no toe.
     #[error("the {part:?} part's outer face {face} does not meet its groove faces at a toe")]
     ArrowFaceNotAtToe { part: JointPart, face: usize },
-    /// A part's outer face is one of its groove faces: a T joint, whose toe on the through part
-    /// is no edge. Not built yet.
-    #[error("the {part:?} part's outer face is one of its groove faces (a T joint)")]
+    /// A part's outer face is one of several groove faces picked on it: a T joint's through part
+    /// has its outer face as its only groove face. [`chain`] refuses any outer face among the
+    /// groove faces: a through part has no chain.
+    #[error("the {part:?} part's outer face is one of its groove faces (a T joint's through part picks its outer face alone)")]
     TJoint { part: JointPart },
+    /// A T joint whose stem (`part`) does not stand on the through part's outer face: the stem's
+    /// outer face does not meet that face ahead of the stem's toe, or the stem's groove does not
+    /// end on it (a stem standing off it). Not built.
+    #[error("the {part:?} part's groove does not end on the through part's outer face")]
+    StemOffThroughPart { part: JointPart },
     /// A part's outer face `face` is not a plane.
     #[error("the {part:?} part's outer face {face} is not a plane")]
     OuterFaceNotPlane { part: JointPart, face: usize },
-    /// The right part's outer face `face` is not clearly a butt joint's on the arrow side the left
-    /// one sets: it does not face within 45° of the left outer face's side, or does not run from
-    /// its toe within 45° of straight away from the left part, by more than [`same_side`]'s margin.
-    /// That is a corner joint's face (turned 45° or more, not built yet), one too near 45° to tell,
-    /// or a face turned back over the groove (brett19's point A on #22033 review 6).
+    /// The second part's outer face `face` is not on the arrow side the first one's sets: it
+    /// neither faces within 45° of the first outer face's side and runs away from the first part
+    /// (a butt), nor faces within 45° of straight out of the joint and runs away from the arrow
+    /// side (a corner), each by more than [`same_side`]'s margin: a face turned back over the
+    /// groove or into the joint, or one too near 45° to tell (brett19's point A on #22033
+    /// review 6).
     #[error(
-        "the {part:?} part's outer face {face} is not clearly within 45° of the left outer face: a corner joint, not built yet, or a face turned back over the groove"
+        "the {part:?} part's outer face {face} is not on the arrow side of the joint: turned back over the groove or into it, or too near 45° to tell"
     )]
     OuterFaceWrongSide { part: JointPart, face: usize },
     /// Face `face` of a part (a groove face or its outer face) strays across the joint's direction
@@ -263,10 +269,12 @@ fn picked(pick: &GroovePick<'_>, part: JointPart) -> Result<Vec<usize>> {
 /// outer face from its toe edge ([`Body::edge_inward`], read from the face's loop, so an outer face
 /// that is not convex is read as a convex one is). Swapping the parts reverses `d`. The origin is
 /// the middle of the left toe's first edge. The right outer face must lie on the same side: facing
-/// within 45° of `y`, and running from its toe within 45° of `x`, away from the left part, each by
-/// more than a margin ([`same_side`]). The 45° keeps a face square to the left one (a corner joint,
-/// not covered) off the line the rounding decides (brett19's point 3 on #22033 review 5), and the
-/// margin keeps a face at 45° off it (his point A on review 6).
+/// within 45° of `y` and running from its toe within 45° of `x`, away from the left part (a butt),
+/// or facing within 45° of `x` and running from its toe within 45° of `-y`, away from the arrow
+/// side (a corner), each by more than a margin ([`same_side`]). The 45° keeps a face square to the
+/// left one off the line the rounding decides (brett19's point 3 on #22033 review 5): a square
+/// corner is decided by components near 1; the margin keeps a face at 45° off it (his point A on
+/// review 6).
 ///
 /// # Errors
 /// The errors of [`chain`] for either pick; [`GrooveRefusal::OuterFaceNotPlane`];
@@ -290,7 +298,7 @@ pub fn joint_frame(picks: [&GroovePick<'_>; 2]) -> Result<Plane> {
     };
     let (frame, _) = signed_frame(left, toe, d, outer[0].value)?;
     let margin = side_margin(picks, &outer, zone_tolerance()?)?;
-    same_side(right, right_toe, &frame, outer[1].value, margin)?;
+    same_side(right, JointPart::Right, right_toe, &frame, outer[1].value, margin)?;
     Ok(frame)
 }
 
@@ -374,21 +382,23 @@ fn signed_frame(left: &GroovePick<'_>, toe: usize, d: [f64; 3], outer: [f64; 3])
     Ok((Plane { origin: v(toe), x: v(x), y: v(y) }, d))
 }
 
-/// Whether the right part's outer face, of outward normal `outer`, lies on the arrow side the
-/// left one sets in `frame`: facing nearer its `y` than across the joint, and running from the toe
-/// edge `toe` nearer its `x` than its `y`, away from the left part ([`Body::edge_inward`]), each
-/// by more than `margin` ([`side_margin`]). Each is a comparison of two components of one unit
-/// vector, so a face square to the left one has a component near 1 against one near 0, and one at
-/// 45° two equal components, and both are refused whatever the rounding.
+/// Whether the second part's outer face, of outward normal `outer`, lies on the arrow side the
+/// first one sets in `frame`, as at a butt joint or at a corner. A butt: facing nearer its `y`
+/// than across the joint, and running from the toe edge `toe` nearer its `x` than its `y`, away
+/// from the first part. A corner: facing nearer its `x` (out of the joint) than its `y`, and
+/// running from the toe nearer its `-y` than its `x`, away from the arrow side
+/// ([`Body::edge_inward`]). Each by more than `margin` ([`side_margin`]), and each a comparison of
+/// two components of one unit vector, so a face square to the first one is decided by a component
+/// near 1 against one near 0, and one at 45° is refused, whatever the rounding.
 ///
 /// # Errors
-/// [`GrooveRefusal::OuterFaceWrongSide`]; the errors of the kernel calls.
-fn same_side(right: &GroovePick<'_>, toe: usize, frame: &Plane, outer: [f64; 3], margin: f64) -> Result<()> {
+/// [`GrooveRefusal::OuterFaceWrongSide`] naming `part`; the errors of the kernel calls.
+fn same_side(right: &GroovePick<'_>, part: JointPart, toe: usize, frame: &Plane, outer: [f64; 3], margin: f64) -> Result<()> {
     let inward = right.part.edge_inward(toe, right.outer)?;
     let along = |axis: Vec3, v: [f64; 3]| affine::distance_along([0.0; 3], point(axis), v);
-    let faces_up = along(frame.y, outer) > along(frame.x, outer).abs() + margin;
-    let runs_away = along(frame.x, inward) > along(frame.y, inward).abs() + margin;
-    if faces_up && runs_away { Ok(()) } else { Err(GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: right.outer }) }
+    let butt = along(frame.y, outer) > along(frame.x, outer).abs() + margin && along(frame.x, inward) > along(frame.y, inward).abs() + margin;
+    let corner = along(frame.x, outer) > along(frame.y, outer).abs() + margin && -along(frame.y, inward) > along(frame.x, inward).abs() + margin;
+    if butt || corner { Ok(()) } else { Err(GrooveRefusal::OuterFaceWrongSide { part, face: right.outer }) }
 }
 
 /// A groove weld: its body and what built it.
@@ -433,13 +443,22 @@ pub struct Stretch {
 /// measured from the left outer face's level where both outer faces are square to the frame's
 /// `y` (a butt joint), else from the chord between the toes. Nothing writes to a part.
 ///
+/// A wall whose last face is a plane that runs on past the other wall's end (an upright plate's
+/// side at a corner joint) ends where that end lies on it. A part whose outer face is its only
+/// groove face is a T joint's through part (brett19 on #18500): its toe is where the other
+/// part's (the stem's) outer face meets that face, found by a ray from the stem's toe along the
+/// frame's `x`, and its wall runs along that face from the toe to the stem's root, which must
+/// lie on it. The frame is then the stem's, whichever part was passed first, and the through
+/// part only counts where it runs alongside the stem.
+///
 /// # Errors
 /// [`GrooveRefusal::SectionChanges`] with the stretches that keep one section, for a joint that
 /// is not one stretch ([`groove_weld_over`] builds one of them); the errors of [`chain`] where no
-/// piece keeps one section and the faces of one are not one chain; [`GrooveRefusal::Invalid`],
-/// [`GrooveRefusal::TJoint`], [`GrooveRefusal::OuterFaceNotPlane`];
-/// [`GrooveRefusal::ArrowFaceNotAtToe`] when no groove face of a part meets its outer face;
-/// [`GrooveRefusal::OuterFaceWrongSide`];
+/// piece keeps one section and the faces of one are not one chain; [`GrooveRefusal::Invalid`]
+/// (both parts through parts among them), [`GrooveRefusal::TJoint`],
+/// [`GrooveRefusal::StemOffThroughPart`], [`GrooveRefusal::OuterFaceNotPlane`];
+/// [`GrooveRefusal::ArrowFaceNotAtToe`] when no groove face of a part meets its outer face (of the
+/// stem, in a T joint); [`GrooveRefusal::OuterFaceWrongSide`];
 /// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
 /// [`GrooveRefusal::GrooveFaceNotStraight`] for a picked face not straight along the joint or a groove face with no length along it;
 /// [`GrooveRefusal::GrooveFaceNeverWhole`]; [`GrooveRefusal::GrooveFaceInterrupted`];
@@ -448,7 +467,8 @@ pub struct Stretch {
 /// fill's input the kernel refuses among them.
 pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result<GrooveWeld> {
     let zone = zone_tolerance()?;
-    let joint = cut(picks, zone)?;
+    let (picks, parts, through) = stem_first(picks)?;
+    let joint = cut(picks, parts, through, zone)?;
     match joint.stretches.as_slice() {
         [(s, walls)] if s.from <= zone && s.to >= joint.end - joint.start - zone => build(picks, &joint, *s, walls, options, zone),
         _ => Err(joint.refusal()),
@@ -467,7 +487,8 @@ pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result
 /// to it, no longer than the zone tolerance; otherwise as [`groove_weld`].
 pub fn groove_weld_over(picks: [&GroovePick<'_>; 2], options: &FillOptions, over: Stretch) -> Result<GrooveWeld> {
     let zone = zone_tolerance()?;
-    let joint = cut(picks, zone)?;
+    let (picks, parts, through) = stem_first(picks)?;
+    let joint = cut(picks, parts, through, zone)?;
     let within = |s: &Stretch| s.from <= over.from + zone && over.to <= s.to + zone;
     match joint.stretches.iter().find(|(s, _)| within(s)) {
         Some((s, walls)) => {
@@ -475,6 +496,21 @@ pub fn groove_weld_over(picks: [&GroovePick<'_>; 2], options: &FillOptions, over
             if held.to - held.from > zone { build(picks, &joint, held, walls, options, zone) } else { Err(joint.refusal()) }
         }
         None => Err(joint.refusal()),
+    }
+}
+
+/// The picks with a T joint's stem first, their parts as passed, and whether the second is a
+/// T joint's through part (its outer face its only groove face).
+///
+/// # Errors
+/// [`GrooveRefusal::Invalid`] when both are.
+fn stem_first<'p, 'a>(picks: [&'p GroovePick<'a>; 2]) -> Result<([&'p GroovePick<'a>; 2], [JointPart; 2], bool)> {
+    let through = |p: &GroovePick<'_>| !p.faces.is_empty() && p.faces.iter().all(|&f| f == p.outer);
+    let [left, right] = picks;
+    match (through(left), through(right)) {
+        (false, t) => Ok((picks, [JointPart::Left, JointPart::Right], t)),
+        (true, false) => Ok(([right, left], [JointPart::Right, JointPart::Left], true)),
+        (true, true) => Err(GrooveRefusal::Invalid("both parts' only groove face is their outer face: no groove on either")),
     }
 }
 
@@ -499,10 +535,19 @@ impl Joint {
 }
 
 /// The joint between the two picks cut where each groove face's whole section starts and ends
-/// along it ([`face_read`]), and its stretches that keep one section (see [`groove_weld`]).
-fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
-    let parts = [JointPart::Left, JointPart::Right];
-    let faces = [picked(picks[0], parts[0])?, picked(picks[1], parts[1])?];
+/// along it ([`face_read`]), and its stretches that keep one section (see [`groove_weld`]). With
+/// `through`, the second part is a T joint's through part: its outer face is read in place of
+/// groove faces, and only where it runs alongside the stem.
+fn cut(picks: [&GroovePick<'_>; 2], parts: [JointPart; 2], through: bool, zone: f64) -> Result<Joint> {
+    let second = if through {
+        if picks[1].outer >= picks[1].part.record().faces.len() {
+            return Err(GrooveRefusal::Invalid("a groove or outer face the part does not have"));
+        }
+        vec![picks[1].outer]
+    } else {
+        picked(picks[1], parts[1])?
+    };
+    let faces = [picked(picks[0], parts[0])?, second];
     let outer = [outer_normal(picks[0], parts[0])?, outer_normal(picks[1], parts[1])?];
     let mut all: Vec<(JointPart, &GroovePick<'_>, usize)> = Vec::new();
     for ((pick, part), f) in picks.into_iter().zip(parts).zip(&faces) {
@@ -511,14 +556,17 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
     let d = direction(&all)?;
     let [left, _] = picks;
     let Some(toe) = toe_edge(left, &faces[0])? else {
-        return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Left, face: left.outer });
+        return Err(GrooveRefusal::ArrowFaceNotAtToe { part: parts[0], face: left.outer });
     };
     let (frame, d) = signed_frame(left, toe, d, outer[0].value)?;
-    let right = picks[1];
-    let Some(right_toe) = toe_edge(right, &faces[1])? else {
-        return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Right, face: right.outer });
-    };
-    same_side(right, right_toe, &frame, outer[1].value, side_margin(picks, &outer, zone)?)?;
+    // a T's through part is found by the ray from the stem's toe ([`through_wall`])
+    if !through {
+        let right = picks[1];
+        let Some(right_toe) = toe_edge(right, &faces[1])? else {
+            return Err(GrooveRefusal::ArrowFaceNotAtToe { part: parts[1], face: right.outer });
+        };
+        same_side(right, parts[1], right_toe, &frame, outer[1].value, side_margin(picks, &outer, zone)?)?;
+    }
 
     // each groove face's span along the joint and its section, read from its own edges
     let mut reads: [Vec<FaceRead>; 2] = [Vec::new(), Vec::new()];
@@ -529,6 +577,15 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
                 Some(_) => return Err(GrooveRefusal::GrooveFaceNeverWhole { part, face }),
                 None => return Err(GrooveRefusal::GrooveFaceNotStraight { part, face }),
             }
+        }
+    }
+    if through {
+        // a T joint's through part may run on past the stem: only where it runs alongside counts
+        let lo = reads[0].iter().map(|r| r.span[0]).fold(f64::INFINITY, f64::min);
+        let hi = reads[0].iter().map(|r| r.span[1]).fold(f64::NEG_INFINITY, f64::max);
+        for r in &mut reads[1] {
+            r.span[0] = r.span[0].max(lo);
+            r.span[1] = r.span[1].min(hi).max(r.span[0]);
         }
     }
 
@@ -546,7 +603,8 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
     let mut why = None;
     for w in cuts.windows(2) {
         let &[lo, hi] = w else { continue };
-        let Some(walls) = piece_walls(picks, &reads, [lo, hi], &frame, d, zone, &mut why)? else {
+        let piece = Piece { frame: &frame, d, along: [lo, hi], zone };
+        let Some(walls) = piece_walls(picks, parts, through, &reads, &piece, &mut why)? else {
             joined = false;
             continue;
         };
@@ -566,51 +624,165 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
     Ok(Joint { frame, start, end, stretches })
 }
 
-/// The two walls, read in `frame`, of the piece of the joint from `lo` to `hi` along `d`, where
-/// it keeps one section (see [`groove_weld`]); `None` where it does not. Where that is because
-/// the piece's faces are not one chain from the toe, `why` keeps the first such refusal.
+/// A piece of the joint: from `along[0]` to `along[1]` along `d`, measured from the frame's
+/// origin, every wall read in `frame`.
+struct Piece<'f> {
+    /// The joint's frame.
+    frame: &'f Plane,
+    /// The joint's direction, the frame's normal.
+    d: [f64; 3],
+    /// Where the piece starts and ends along `d`.
+    along: [f64; 2],
+    /// The kernel's zone tolerance.
+    zone: f64,
+}
+
+impl Piece<'_> {
+    /// The point `p` of the frame's plane (along its `x` and `y`) moved along `d` to the piece's
+    /// middle.
+    fn in_space(&self, p: Vec2) -> [f64; 3] {
+        let [lo, hi] = self.along;
+        let on = affine::parallelogram_point(point(self.frame.origin), self.d, point(self.frame.x), (lo + hi) / 2.0, p.x);
+        affine::parallelogram_point(on, point(self.frame.y), self.d, p.y, 0.0)
+    }
+
+    /// The point `p` in the frame's plane: how far it stands from the origin along `x` and `y`.
+    fn in_frame(&self, p: [f64; 3]) -> Vec2 {
+        let o = point(self.frame.origin);
+        Vec2::new(affine::distance_along(o, point(self.frame.x), p), affine::distance_along(o, point(self.frame.y), p))
+    }
+}
+
+/// The two walls of `piece`, where it keeps one section (see [`groove_weld`]); `None` where it
+/// does not. Where that is because a part's faces in the piece are not one chain from the toe,
+/// `why` keeps the first such refusal. With `through`, the second part is a T joint's through
+/// part ([`through_wall`]). A wall that runs on past the other's end along a plane ends there
+/// ([`ended_at`]).
+///
+/// # Errors
+/// [`GrooveRefusal::StemOffThroughPart`]; the errors of the kernel calls.
 fn piece_walls(
     picks: [&GroovePick<'_>; 2],
+    parts: [JointPart; 2],
+    through: bool,
     reads: &[Vec<FaceRead>; 2],
-    [lo, hi]: [f64; 2],
-    frame: &Plane,
-    d: [f64; 3],
-    zone: f64,
+    piece: &Piece<'_>,
     why: &mut Option<GrooveRefusal>,
 ) -> Result<Option<[Vec<Seg2>; 2]>> {
-    let parts = [JointPart::Left, JointPart::Right];
-    let o = point(frame.origin);
-    let mut walls: [Vec<Seg2>; 2] = [Vec::new(), Vec::new()];
-    for (((pick, read), part), wall) in picks.into_iter().zip(reads).zip(parts).zip(&mut walls) {
-        let faces: Vec<usize> = read.iter().filter(|r| r.span[0] <= lo + zone && r.span[1] >= hi - zone).map(|r| r.face).collect();
-        if faces.is_empty() {
+    let Some((mut left, left_face)) = part_wall(picks[0], parts[0], &reads[0], piece, why)? else {
+        return Ok(None);
+    };
+    let ([lo, hi], zone) = (piece.along, piece.zone);
+    let (mut right, right_face) = if through {
+        if !reads[1].iter().any(|r| r.span[0] <= lo + zone && r.span[1] >= hi - zone) {
             return Ok(None);
         }
-        let links = match chain(&GroovePick { faces: &faces, ..*pick }, part) {
-            Ok(links) => links,
-            Err(e @ GrooveRefusal::Kernel(_)) => return Err(e),
-            Err(e) => {
-                why.get_or_insert(e);
-                return Ok(None);
-            }
-        };
-        let Some(&toe) = links.toe().first() else {
-            return Ok(None);
-        };
-        for &f in links.faces().iter().chain([&pick.outer]) {
-            if !straight(pick, f, d, zone)? {
-                return Ok(None);
-            }
+        match through_wall(picks[1], parts[0], &left, piece)? {
+            Some(wall) => (wall, picks[1].outer),
+            None => return Ok(None),
         }
-        // the toe in the frame: its edge's middle, along x and y
-        let at = edge_middle(pick.part, toe)?;
-        let toe = Vec2::new(affine::distance_along(o, point(frame.x), at), affine::distance_along(o, point(frame.y), at));
-        let Some(read) = wall_of(read, &links, toe, zone) else {
-            return Ok(None);
-        };
-        *wall = read;
+    } else {
+        match part_wall(picks[1], parts[1], &reads[1], piece, why)? {
+            Some(wall) => wall,
+            None => return Ok(None),
+        }
+    };
+    let root = |w: &[Seg2]| w.last().map(|s| ends(s).1);
+    if let (Some(l), Some(r)) = (root(&left), root(&right))
+        && !near(l, r, zone * ALLOWANCE)
+    {
+        if let Some(ended) = ended_at(picks[1], right_face, &right, l, piece)? {
+            right = ended;
+        } else if let Some(ended) = ended_at(picks[0], left_face, &left, r, piece)? {
+            left = ended;
+        }
     }
-    Ok(Some(walls))
+    Ok(Some([left, right]))
+}
+
+/// One part's wall in `piece`, and its last groove face: its groove faces over the whole piece
+/// (from `reads`) as one chain from the toe, every one of them and the outer face straight along
+/// the joint, each read as one line or arc ([`wall_of`]); `None` where they are not. Where they
+/// are not one chain, `why` keeps the first such refusal.
+fn part_wall(
+    pick: &GroovePick<'_>,
+    part: JointPart,
+    reads: &[FaceRead],
+    piece: &Piece<'_>,
+    why: &mut Option<GrooveRefusal>,
+) -> Result<Option<(Vec<Seg2>, usize)>> {
+    let ([lo, hi], zone) = (piece.along, piece.zone);
+    let faces: Vec<usize> = reads.iter().filter(|r| r.span[0] <= lo + zone && r.span[1] >= hi - zone).map(|r| r.face).collect();
+    if faces.is_empty() {
+        return Ok(None);
+    }
+    let links = match chain(&GroovePick { faces: &faces, ..*pick }, part) {
+        Ok(links) => links,
+        Err(e @ GrooveRefusal::Kernel(_)) => return Err(e),
+        Err(e) => {
+            why.get_or_insert(e);
+            return Ok(None);
+        }
+    };
+    let (Some(&last), Some(&toe)) = (links.faces().last(), links.toe().first()) else {
+        return Ok(None);
+    };
+    for &f in links.faces().iter().chain([&pick.outer]) {
+        if !straight(pick, f, piece.d, zone)? {
+            return Ok(None);
+        }
+    }
+    // the toe in the frame: its edge's middle, along x and y
+    let toe = piece.in_frame(edge_middle(pick.part, toe)?);
+    Ok(wall_of(reads, &links, toe, zone).map(|wall| (wall, last)))
+}
+
+/// A T joint's through part's wall in `piece`, beside the stem's wall `stem`: along its outer
+/// face (straight along the joint) from its toe, where the stem's outer face meets it (the
+/// first face a ray from the stem's toe along the frame's `x` meets), to the stem's root, which
+/// must lie on that face. `None` where the outer face is not straight along the joint.
+///
+/// # Errors
+/// [`GrooveRefusal::StemOffThroughPart`] naming the stem `part` where the ray meets no face, or
+/// another face first, or the stem's root is not on the outer face; the errors of the kernel calls.
+fn through_wall(pick: &GroovePick<'_>, part: JointPart, stem: &[Seg2], piece: &Piece<'_>) -> Result<Option<Vec<Seg2>>> {
+    let tol = piece.zone * ALLOWANCE;
+    let off = GrooveRefusal::StemOffThroughPart { part };
+    if !straight(pick, pick.outer, piece.d, piece.zone)? {
+        return Ok(None);
+    }
+    let (Some(first), Some(last)) = (stem.first(), stem.last()) else {
+        return Err(off);
+    };
+    let hits = pick.part.face_hits_by_ray(piece.in_space(ends(first).0), point(piece.frame.x))?;
+    let Some(hit) = hits.first().filter(|h| h.face == pick.outer) else {
+        return Err(off);
+    };
+    let (toe, root) = (piece.in_frame(hit.point), ends(last).1);
+    if near(toe, root, tol) || !on_face(pick, pick.outer, piece.in_space(root), tol)? {
+        return Err(off);
+    }
+    Ok(Some(vec![Seg2::Line { a: toe, b: root }]))
+}
+
+/// `wall` ended at `root`, the other wall's end, where its last piece is a line along `face`, a
+/// plane, and `root` lies on that face short of the line's end: a plain plate face that runs on
+/// past the groove's root, as an upright plate's side does at a corner joint. `None` otherwise.
+fn ended_at(pick: &GroovePick<'_>, face: usize, wall: &[Seg2], root: Vec2, piece: &Piece<'_>) -> Result<Option<Vec<Seg2>>> {
+    let tol = piece.zone * ALLOWANCE;
+    let Some((&Seg2::Line { a, b }, before)) = wall.split_last() else {
+        return Ok(None);
+    };
+    let plane = pick.part.face_plane_normal(face)?.is_some();
+    if !plane || near(a, root, tol) || near(b, root, tol) || !on_face(pick, face, piece.in_space(root), tol)? {
+        return Ok(None);
+    }
+    Ok(Some(before.iter().copied().chain([Seg2::Line { a, b: root }]).collect()))
+}
+
+/// Whether point `p` lies on record face `face` of `pick`'s part, within `tol`.
+fn on_face(pick: &GroovePick<'_>, face: usize, p: [f64; 3], tol: f64) -> Result<bool> {
+    Ok(pick.part.closest_to_point(&[face], &[], p)?.is_some_and(|c| c.distance <= tol))
 }
 
 /// The weld over `over`, a stretch (or part of one) whose walls are `walls`.

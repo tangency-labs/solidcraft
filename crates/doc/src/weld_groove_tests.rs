@@ -4,9 +4,10 @@
 //! same whatever the order of the picks, mirrored when the parts swap (also off the world axes),
 //! signed by the toe on an outer face that is not convex, along the axis of a round groove, the
 //! parts only read, and a plate not straight along the joint (naming its wall), an outer face that
-//! is no plane, a right outer face off the arrow side, square to the left one or turned 45° or more
+//! is no plane, a right outer face off the arrow side or turned back over the groove by 45° or more
 //! (on and off the world axes), a round groove whose walls are no cylinders and faces past the
-//! direction search's budget refused; the weld filling a Y groove and a round groove flat (their
+//! direction search's budget refused, and a right outer face square to the left one read as a
+//! corner (on and off the world axes); the weld filling a Y groove and a round groove flat (their
 //! volumes in closed form), a fill the groove cannot take refused with the size that builds; parts
 //! of different length, a gap that steps along the joint and a plate whose ends lean (both, or one
 //! with the other square) refused with the stretches that keep one section, each of which builds on
@@ -23,6 +24,9 @@ use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{Body, Contour, extrude_planar_regions};
 
 use super::*;
+
+#[path = "weld_groove_t_corner_tests.rs"]
+mod t_corner;
 
 /// A plate: the polygon `corners` (x, y, counter-clockwise) swept 120 along z.
 fn plate(corners: &[(f64, f64)]) -> Body {
@@ -273,13 +277,13 @@ fn a_right_outer_face_off_the_arrow_side_is_refused() {
     assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, down)[0] });
 }
 
-/// brett19's point 3 on #22033 review 5: a right outer face square to the left one (a corner joint,
-/// not covered here) is refused whatever the rounding, on the world axes and off them (the plane of
-/// [`a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance`]). The right
-/// plate stands below the joint: its top is its groove face, its side facing away from the left
-/// plate its outer face.
+/// brett19's point 3 on #22033 review 5, at a corner: a right outer face square to the left one is
+/// read as a corner joint's whatever the rounding, on the world axes and off them (the plane of
+/// [`a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance`]), and the frame
+/// is the left plate's. The right plate stands below the joint: its top is its groove face, its
+/// side facing away from the left plate its outer face.
 #[test]
-fn a_right_outer_face_square_to_the_left_one_is_refused_on_and_off_the_world_axes() {
+fn a_right_outer_face_square_to_the_left_one_is_read_as_a_corner_on_and_off_the_world_axes() {
     let r5 = 5.0_f64.sqrt();
     let off = Plane { origin: Vec3::new(3.0, -2.0, 7.0), x: Vec3::new(2.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0), y: Vec3::new(-1.0 / r5, 2.0 / r5, 0.0) };
     for plane in [Plane::XY, off] {
@@ -289,18 +293,18 @@ fn a_right_outer_face_square_to_the_left_one_is_refused_on_and_off_the_world_axe
         let right = swept(&plane, &[(1.0, -40.0), (7.0, -40.0), (7.0, 0.0), (1.0, 0.0)]);
         let (lf, rf) = (facing(&left, world(1.0, 0.0)), facing(&right, world(0.0, 1.0)));
         assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
-        let side = world(1.0, 0.0);
-        let got = frame_of([pick_up(&left, &lf, world(0.0, 1.0)), pick_up(&right, &rf, side)]).unwrap_err();
-        assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, side)[0] });
+        let frame = frame_of([pick_up(&left, &lf, world(0.0, 1.0)), pick_up(&right, &rf, world(1.0, 0.0))]).unwrap();
+        let (x, y) = (world(1.0, 0.0), world(0.0, 1.0));
+        assert!(near(frame.x, x) && near(frame.y, y), "{frame:?}");
     }
 }
 
 /// brett19's point A on #22033 review 6: a right plate turned up from the left one about its toe, so
-/// the plates meet at 180° less the turn, on the world axes and off them. At 40° it is a butt
-/// joint; at 45° (two equal components, decided by the margin, not the rounding) and at 50° it is
-/// refused as a corner joint, not as a face off the arrow side.
+/// the plates meet at 180° less the turn and its outer face faces back over the groove, on the
+/// world axes and off them. At 40° it is a butt joint; at 45° (two equal components, decided by
+/// the margin, not the rounding) and at 50° it is refused as a face off the arrow side.
 #[test]
-fn a_right_outer_face_turned_45_degrees_or_more_is_refused_as_a_corner_on_and_off_the_world_axes() {
+fn a_right_outer_face_turned_back_45_degrees_or_more_is_refused_on_and_off_the_world_axes() {
     let r5 = 5.0_f64.sqrt();
     let off = Plane { origin: Vec3::new(3.0, -2.0, 7.0), x: Vec3::new(2.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0), y: Vec3::new(-1.0 / r5, 2.0 / r5, 0.0) };
     for plane in [Plane::XY, off] {
@@ -322,7 +326,7 @@ fn a_right_outer_face_turned_45_degrees_or_more_is_refused_as_a_corner_on_and_of
             }
             let got = got.unwrap_err();
             assert_eq!(got, GrooveRefusal::OuterFaceWrongSide { part: JointPart::Right, face: facing(&right, up)[0] }, "{degrees}");
-            assert!(got.to_string().contains("a corner joint, not built yet"), "{got}");
+            assert!(got.to_string().contains("turned back over the groove"), "{got}");
         }
     }
 }
