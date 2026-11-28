@@ -18363,15 +18363,16 @@ fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centr
     if let Some(square) = square_face_level(st, (bi, fi), plane) {
         return square.level;
     }
-    // A curved or slanted face: where the profile's middle meets it.
-    for dir in [n, n * -1.0] {
-        if let Some((t, hit_face)) = ray_face(b, centre, dir)
-            && hit_face == fi
-        {
-            return h(centre + dir * t);
-        }
+    // A curved or slanted face: where the profile's middle meets it. A surface round the sketch
+    // plane is met both ways, and the end is on the side the pick is on (#23614): the level nearer
+    // the pick's, the one along the normal when they are as near.
+    let [along, against] =
+        [n, n * -1.0].map(|dir| ray_face(b, centre, dir).filter(|(_, hit_face)| *hit_face == fi).map(|(t, _)| h(centre + dir * t)));
+    let away = |level: f64| (level - h(p)).abs();
+    match (along, against) {
+        (Some(along), Some(against)) if away(against) < away(along) => against,
+        _ => along.or(against).unwrap_or_else(|| h(p)),
     }
-    h(p)
 }
 
 /// The face a To Object pick is on: the nearest face over every solid body, `(body index,

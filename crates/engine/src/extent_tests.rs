@@ -1504,3 +1504,27 @@ fn extend_the_to_face_must_be_a_boolean() {
         assert!(r.expect_err("refused").to_string().contains("extend_to_face"));
     }
 }
+
+/// #23614: a sketch plane through a cylinder has its surface on both sides of the profile; the cut
+/// To that face ends on the side the pick is on. Over the unit square (x ±0.5) on y = 0, with the
+/// cylinder r 5 about the line (0, 1), the surface lies at y = 1 ∓ √(25 − x²): toward −y the cut
+/// takes A − 1 and toward +y it takes A + 1, A = ∫ √(25 − x²) dx over x ±0.5.
+#[test]
+fn a_cut_to_a_cylinder_on_both_sides_of_the_profile_ends_on_the_side_picked() {
+    let (a, r) = (0.5_f64, 5.0_f64);
+    let area = a * (r * r - a * a).sqrt() + r * r * (a / r).asin();
+    for extend in [false, true] {
+        for (pick_y, want) in [(-4.0, area - 1.0), (6.0, area + 1.0)] {
+            let mut s = Session::default();
+            run(&mut s, "solid.cylinder", json!({"base": [0, 1, 0], "axis": [0, 0, 1], "radius": r, "height": 10, "body_name": "B"}));
+            // x along +x, y along +z: the normal is −y.
+            run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-a, 2], "p1": [a, 3]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"operation": "cut", "to": [0, pick_y, 2.5], "extend_to_face": extend}));
+            let left = body(&mut s, "B")["volume_mm3"].as_f64().unwrap();
+            let removed = PI * r * r * 10.0 - left;
+            assert!((removed - want).abs() < 1e-6, "extend {extend}, pick y {pick_y}: removed {removed}, want {want}");
+        }
+    }
+}
