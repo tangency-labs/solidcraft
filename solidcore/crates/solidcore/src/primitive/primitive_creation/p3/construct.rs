@@ -26,6 +26,8 @@
 //! Not upstream (tangency-labs/solidcore#2192, WR-675): a sweep along a closed path
 //! whose end sections lie on its start sections (`sweep_ends_coincide`) is not capped,
 //! so the stitch joins its side faces' end edges to their start edges.
+//! Not upstream: an exact path sweep whose face boundary is only approximately
+//! singular refuses, and the closed path is built piece by piece at the true offset.
 //! Not upstream (the SolidCraft fork's tangency-labs/smlib 5d3939e, WR-523, #1450):
 //! [`PrimitiveCreation::create_curve_sweep_with_placements`] reports the rigid motions
 //! carrying the profile onto the first, middle and last sections.
@@ -51,6 +53,7 @@ use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::Curve;
 use crate::error::primitive::PrimitiveFailure;
+use crate::error::sweep::SweepFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -67,7 +70,7 @@ use crate::surface::surface::{
 };
 use crate::sweep::skin_ends::{end_tangents_of, skinned_surface_with_end_tangents, SkinEnd};
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef};
-use crate::topology::{BrepId, EdgeuseId, FaceId};
+use crate::topology::{Brep, BrepId, EdgeuseId, FaceId};
 
 use super::skin_sources::{layer_sources, LoopSpans, NotTraced, Segment, SkinSources, SkinTrace};
 
@@ -967,6 +970,7 @@ impl PrimitiveCreation {
                 && !composites.composites.is_empty()
                 && path_leaves_its_start(&prepared.path, a.brep(brep)?.tolerance())?;
             let tolerance = a.brep(brep)?.tolerance();
+            let closed_path = path_returns_to_its_start(&prepared.path, tolerance)?;
             for (index, composite) in composites.composites.into_iter().enumerate() {
                 let mut composite = join_collinear_lines(composite, tolerance)?;
                 let profile = composite.make_composite_nurb()?;
@@ -998,6 +1002,7 @@ impl PrimitiveCreation {
                     .filter(|(exact, _)| exact.bound() <= ZONE_TOL_3D),
                     _ => None,
                 };
+                let definition_is_exact = exact.is_some();
                 let (net, definition) = if let Some((exact, built)) = exact {
                     (built, Some(exact))
                 } else {
@@ -1009,6 +1014,9 @@ impl PrimitiveCreation {
                     };
                     (net, fitted)
                 };
+                // Only a closed path is refused below: the piece-by-piece sweep that takes over
+                // there is for closed paths. An open or fitted sweep keeps its previous result.
+                let refuse_near_singular = closed_path && definition_is_exact;
                 // Compare complete sections before the surface is split into faces.
                 // A closed sweep's individual path pieces need not close on themselves.
                 if closed_sections {
@@ -1027,6 +1035,18 @@ impl PrimitiveCreation {
                 let domain = surface.natural_uv_domain_if_built();
                 let mut made = Vec::new();
                 ignore_status(a.surface_faces(brep, surface, domain, &mut made))?;
+                // a corner arc whose inner radius is inside the approximation tolerance
+                // leaves a boundary close to a point. Surface test 5 refuses that, and moving
+                // the straight walls onto the bend's centre changes the volume. Refuse here;
+                // the exact piece sweep keeps the true offset.
+                if refuse_near_singular {
+                    let near = a.with_primitive_brep(brep, |k, model| {
+                        boundary_only_approximately_singular(k, model, &made)
+                    })?;
+                    if near {
+                        return Err(SolidError::sweep(OP, SweepFailure::SweptWallNearlySingular));
+                    }
+                }
                 let first = side_faces.len();
                 side_faces.extend(made);
                 groups.push(first..side_faces.len());
@@ -1174,6 +1194,34 @@ fn join_collinear_lines(composite: CompositeCurve, tol: f64) -> Result<Composite
         Some(&senses),
         Some(&gaps),
     )
+}
+
+/// Whether the path's end point lies within `tol` of its start point.
+fn path_returns_to_its_start(path: &BSplineCurve, tol: f64) -> Result<bool> {
+    let (lo, hi) = path.nurb_ref()?.param_bounds();
+    let start = path.evaluate_point(lo)?;
+    let end = path.evaluate_point(hi)?;
+    let distance = start.distance(end);
+    Ok(distance.is_finite() && distance <= tol)
+}
+
+/// Whether a face of an exact path sweep fails surface test 5: a natural boundary is
+/// approximately singular and not exactly singular (`assert_test_surface5`).
+fn boundary_only_approximately_singular(
+    k: &crate::kernel::Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+) -> Result<bool> {
+    for &face in faces {
+        let Some(surface) = crate::topology::face::p2::surface(b, face)? else {
+            continue;
+        };
+        let sing = surface.get_singularities(k, false, false)?;
+        if sing.approx_singular.wrapping_sub(sing.singular) != 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The rigid motions carrying the profile as given onto the sweep's sections placed
@@ -1616,6 +1664,47 @@ mod tests {
             trim: None,
         })
         .unwrap()
+    }
+
+    /// The near-singular refusal is for a closed path only: a path returns to its start
+    /// when its end point lies within the tolerance of its start point, and an open path
+    /// (a line, an arc, a loop with a gap) does not.
+    #[test]
+    fn a_path_returns_to_its_start_only_when_it_closes() {
+        let tol = 1e-6;
+        let square = |gap: f64| {
+            let points = [
+                Vec3::ZERO,
+                Vec3::new(10.0, 0.0, 0.0),
+                Vec3::new(10.0, 10.0, 0.0),
+                Vec3::new(0.0, 10.0, 0.0),
+                Vec3::new(0.0, gap, 0.0),
+            ];
+            canonical(
+                1,
+                &points,
+                &[2, 1, 1, 1, 2],
+                &[0.0, 0.25, 0.5, 0.75, 1.0],
+                None,
+            )
+        };
+        assert!(path_returns_to_its_start(&square(0.0), tol).unwrap());
+        assert!(path_returns_to_its_start(&square(1e-7), tol).unwrap());
+        assert!(!path_returns_to_its_start(&square(1e-3), tol).unwrap());
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        let points = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        let arc = canonical(
+            2,
+            &points,
+            &[3, 3],
+            &[0.0, 1.0],
+            Some(&[1.0, half, 1.0][..]),
+        );
+        assert!(!path_returns_to_its_start(&arc, tol).unwrap());
     }
 
     /// A review case on #17100: a closed path whose parameter dwells near its start. The

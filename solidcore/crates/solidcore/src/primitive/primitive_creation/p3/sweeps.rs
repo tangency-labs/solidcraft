@@ -625,6 +625,45 @@ impl PrimitiveCreation {
         angle_deg: f64,
         options: RepeatedSweepOptions,
     ) -> Result<()> {
+        self.partial_rotational_sweep(a, brep, curves, axis_base, axis, angle_deg, options, None)
+    }
+
+    /// [`Self::create_partial_rotational_sweep`] with the path arc's radius as the
+    /// omitted-corner scale. Only a closed path of lines and arcs calls this.
+    pub(crate) fn create_partial_rotational_sweep_at_scale(
+        &mut self,
+        a: &mut impl PrimitiveAccess,
+        brep: BrepId,
+        curves: &mut Vec<Option<Curve>>,
+        axis_base: Point3,
+        axis: Vec3,
+        angle_deg: f64,
+        options: RepeatedSweepOptions,
+        feature_scale: f64,
+    ) -> Result<()> {
+        self.partial_rotational_sweep(
+            a,
+            brep,
+            curves,
+            axis_base,
+            axis,
+            angle_deg,
+            options,
+            Some(feature_scale),
+        )
+    }
+
+    fn partial_rotational_sweep(
+        &mut self,
+        a: &mut impl PrimitiveAccess,
+        brep: BrepId,
+        curves: &mut Vec<Option<Curve>>,
+        axis_base: Point3,
+        axis: Vec3,
+        angle_deg: f64,
+        options: RepeatedSweepOptions,
+        corner_scale: Option<f64>,
+    ) -> Result<()> {
         self.init_entity_maps();
         let region = target(self, brep)?;
         let previous = a.kernel(brep)?.context.doing_boolean();
@@ -709,7 +748,12 @@ impl PrimitiveCreation {
                 }
             }
             // Not upstream (WR-448, #545): analytic side faces (with `make_analytics`, the default)
-            let rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
+            let mut rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
+            // A closed line-and-arc path: the band is the arc's own zone. Unset, on-axis
+            // tests stay on `tolerance`.
+            if let Some(scale) = corner_scale {
+                rotation.set_omitted_corner_scale(scale);
+            }
             let geometry = SweepGeometry::Rotation(rotation);
             let mut sweep = TopologySweep {
                 repetitions: options.repetitions,
