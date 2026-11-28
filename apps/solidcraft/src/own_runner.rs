@@ -6,12 +6,13 @@
 //! egui-wgpu as it ships. What eframe does around the app, it does too: the settings file
 //! (`app.ron`, written the same way), egui's memory in it, saving every `auto_save_interval` and
 //! at exit, the main window's size and place (`persist_window`), and the control channel's logic
-//! passes (#743). Not yet: `Frame::storage_mut` is `None` during a pass (the app saves through
-//! `App::save`).
+//! passes (#743). eframe's `Frame::storage_mut` is `None` here; the app is handed the settings
+//! file after each pass instead (`App::write_settings`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use eframe::App as _;
 use solidcraft_window_gpu::runner::{self, Created, Frame, RunOptions};
 
 /// The variable that chooses the runner (after the `SOLIDCRAFT_` prefix): `own` runs ours.
@@ -63,8 +64,8 @@ const EGUI_MEMORY: &str = "egui";
 const WINDOW: &str = "window";
 
 /// The app on our runner.
-struct OnRunner<'a> {
-    app: Box<dyn eframe::App + 'a>,
+struct OnRunner {
+    app: crate::App,
     frame: eframe::Frame,
     settings: Settings,
     ctx: egui::Context,
@@ -72,7 +73,7 @@ struct OnRunner<'a> {
     persist_window: bool,
 }
 
-impl OnRunner<'_> {
+impl OnRunner {
     fn sync(&mut self, frame: &Frame<'_>) {
         if self.frame.wgpu_render_state.is_none() {
             self.frame.wgpu_render_state = frame.render_state().cloned();
@@ -80,7 +81,7 @@ impl OnRunner<'_> {
     }
 }
 
-impl runner::App for OnRunner<'_> {
+impl runner::App for OnRunner {
     fn logic(&mut self, ctx: &egui::Context, frame: &Frame<'_>) {
         self.sync(frame);
         self.app.logic(ctx, &mut self.frame);
@@ -88,6 +89,9 @@ impl runner::App for OnRunner<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &Frame<'_>) {
         self.sync(frame);
         self.app.ui(ui, &mut self.frame);
+        // eframe's `Frame::storage_mut` is the settings file during a pass; here the app is
+        // handed ours after it (#8275: a changed setting is written soon, not at the next save).
+        self.app.write_settings(ui.ctx(), &mut self.settings, std::time::Instant::now());
     }
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         self.app.clear_color(visuals)
@@ -126,7 +130,12 @@ impl runner::App for OnRunner<'_> {
 
 /// Run the window on our own runner, as `eframe::run_native` would with `options` and `creator`:
 /// the same viewport, device setup, settings file and app. `x11` starts winit on X11 (Linux).
-pub fn run(options: eframe::NativeOptions, creator: eframe::AppCreator<'_>, x11: bool, wake: &crate::control_server::Wake) -> eframe::Result {
+pub fn run(
+    options: eframe::NativeOptions,
+    creator: impl FnOnce(&eframe::CreationContext<'_>) -> Result<crate::App, Box<dyn std::error::Error + Send + Sync>>,
+    x11: bool,
+    wake: &crate::control_server::Wake,
+) -> eframe::Result {
     solidcraft_engine::note!("SolidCraft: the window runs on its own runner (SOLIDCRAFT_{ENV}=own)");
     let renderer = eframe::egui_wgpu::RendererOptions {
         msaa_samples: u32::from(options.multisampling.max(1)),
