@@ -145,7 +145,20 @@ const STEP_NAMES: OptionSpec = OptionSpec {
     },
 };
 
+/// Write leaf parts and assemblies as linked `.sc` files (see `file.insert_step`'s `split_to_files`).
+const SPLIT_TO_FILES: OptionSpec = OptionSpec { param: "split_to_files", label: "Save as separate files", kind: OptionKind::Bool { default: false } };
+
+/// Destination folder for [`SPLIT_TO_FILES`] (empty: the STEP file's directory).
+const SPLIT_FOLDER: OptionSpec = OptionSpec {
+    param: "split_folder",
+    label: "Folder for part files",
+    kind: OptionKind::Text { default: "", hint: "Same folder as the STEP file" },
+};
+
 const BREP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES];
+
+/// STEP Open / Insert options, including split-to-files (IGES, FreeCAD and Rhino stay on [`BREP_IMPORT`]).
+const STEP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, SPLIT_TO_FILES, SPLIT_FOLDER];
 
 /// What a FreeCAD file brings: its feature history rebuilt as features (sketches, Pad, Pocket,
 /// Revolution, Groove, Fillet, Chamfer, primitives), or only its solids (see `doc.open`).
@@ -271,7 +284,7 @@ pub static FORMATS: &[FormatSpec] = &[
         label: "STEP",
         extensions: &["step", "stp"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: false }),
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: STEP_IMPORT, native_only: false }),
         export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
     FormatSpec {

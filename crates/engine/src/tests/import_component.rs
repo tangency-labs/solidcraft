@@ -1315,3 +1315,79 @@ fn a_link_names_its_importer_and_older_designs_load_without_one() {
     assert!(unaware.links.values().all(|l| l.importer.is_none()) && unaware.links.len() == 2);
     assert_eq!(unaware.features.len(), s.doc.features.len(), "the bodies' features are kept");
 }
+
+/// `split_to_files` writes each leaf once and each assembly as a linked `.sc`, then inserts the top.
+#[test]
+fn split_to_files_writes_leaves_once_and_nested_assemblies() {
+    let dir = temp_dir("split-assembly");
+    let path = rig_file(&dir);
+    let out = dir.join("parts");
+    std::fs::create_dir_all(&out).unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy(), "overwrite": true}));
+    let files = r["split_files"].as_array().expect("split_files");
+    let names: Vec<String> =
+        files.iter().filter_map(|f| f.as_str()).map(|p| std::path::Path::new(p).file_stem().unwrap().to_string_lossy().into_owned()).collect();
+    for n in ["Base", "Beam", "Pin", "Arm", "rig"] {
+        assert!(names.iter().any(|x| x == n), "{n} in {names:?}; {r}");
+    }
+    assert_eq!(names.iter().filter(|n| *n == "Pin").count(), 1, "Pin once: {names:?}");
+    // The design holds a link to the top assembly, not a live STEP Import of the whole tree.
+    assert!(s.doc.links.values().any(|l| l.path.contains("rig")), "{:?}", s.doc.links);
+    let arm = out.join("Arm.sc");
+    let mut arm_s = Session::default();
+    run(&mut arm_s, "doc.open", json!({"path": arm.to_string_lossy()}));
+    assert_eq!(arm_s.doc.links.len(), 2, "Arm links Beam and Pin: {:?}", arm_s.doc.links);
+    let pin_links: Vec<_> = arm_s.doc.links.values().filter(|l| l.path.contains("Pin")).collect();
+    assert_eq!(pin_links.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn split_to_files_refuses_flatten_and_existing_files_without_overwrite() {
+    let dir = temp_dir("split-refuse");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    let err = s
+        .execute("file.insert_step", &json!({"path": path, "split_to_files": true, "flatten": true, "split_folder": dir.to_string_lossy()}))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("flatten") && err.contains("split_to_files"), "{err}");
+
+    let out = dir.join("once");
+    std::fs::create_dir_all(&out).unwrap();
+    run(&mut s, "file.insert_step", json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy(), "overwrite": true}));
+    let err =
+        s.execute("file.insert_step", &json!({"path": path, "split_to_files": true, "split_folder": out.to_string_lossy()})).unwrap_err().to_string();
+    assert!(err.contains("already exists") || err.contains("overwrite"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn split_to_files_keeps_a_multi_body_part_as_one_file() {
+    let dir = temp_dir("split-multibody");
+    let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let b = box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(5.0, 5.0, 5.0)).unwrap();
+    let products = vec![ExportProduct {
+        name: "Block".into(),
+        bodies: vec![ExportBody { name: "A".into(), body: &a, color: None }, ExportBody { name: "B".into(), body: &b, color: None }],
+        children: Vec::new(),
+    }];
+    let text = step_export_products(&products, 0, &StepHeader::default()).unwrap();
+    let path = dir.join("block.step");
+    std::fs::write(&path, text).unwrap();
+    let out = dir.join("parts");
+    std::fs::create_dir_all(&out).unwrap();
+    let mut s = Session::default();
+    let r = run(
+        &mut s,
+        "file.insert_step",
+        json!({"path": path.to_string_lossy(), "split_to_files": true, "split_folder": out.to_string_lossy(), "overwrite": true}),
+    );
+    let files = r["split_files"].as_array().unwrap();
+    assert_eq!(files.len(), 1, "{r}");
+    let mut part = Session::default();
+    run(&mut part, "doc.open", json!({"path": files[0]}));
+    assert_eq!(part.model.state().bodies.len(), 2, "both solids in one part file");
+    let _ = std::fs::remove_dir_all(&dir);
+}

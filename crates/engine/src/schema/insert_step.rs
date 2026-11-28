@@ -80,6 +80,27 @@ fn flatten_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error
     value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(FLATTEN_MESSAGE)))
 }
 
+/// What `split_to_files` says when it is neither true nor false.
+pub(crate) const SPLIT_TO_FILES_MESSAGE: &str = "`split_to_files` must be a boolean";
+
+/// `split_to_files`: true or false, `null` as left out.
+fn split_to_files_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    let value = Value::deserialize(d)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(SPLIT_TO_FILES_MESSAGE)))
+}
+
+/// `overwrite` with split: true or false, `null` as left out.
+fn overwrite_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    let value = Value::deserialize(d)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole("`overwrite` must be a boolean")))
+}
+
 /// `matrix`: as given, `null` as left out, which is how the handler has it.
 fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ExprMatrixParam>, D::Error> {
     let value = Value::deserialize(d)?;
@@ -181,6 +202,19 @@ pub struct InsertStepKeys {
     #[serde(default, deserialize_with = "envelope_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<EnvelopeParam>")]
     pub envelope: Option<String>,
+    /// On a STEP file (`.step` / `.stp`): true writes each leaf product once as a `.sc` and each
+    /// assembly as a `.sc` that links its children, under `split_folder`, then inserts the top
+    /// assembly. Mutually exclusive with `flatten`. Default: false.
+    #[serde(default, deserialize_with = "split_to_files_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub split_to_files: Option<bool>,
+    /// With `split_to_files`: folder for the written `.sc` files. Default: the STEP file's directory.
+    #[serde(default)]
+    pub split_folder: Option<String>,
+    /// With `split_to_files`: replace an existing `.sc` at the same path. Default: false (refused).
+    #[serde(default, deserialize_with = "overwrite_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub overwrite: Option<bool>,
 }
 
 /// Leaves out the keys the handler does not read for this call, in the order it looks at them.
@@ -191,7 +225,22 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_step_path(path) {
         // A file of another kind is refused before any other key is read.
-        for key in ["name", "up", "names", "folder", "history", "flatten", "reader", "matrix", "tolerance", "envelope", "link"] {
+        for key in [
+            "name",
+            "up",
+            "names",
+            "folder",
+            "history",
+            "flatten",
+            "reader",
+            "matrix",
+            "tolerance",
+            "envelope",
+            "link",
+            "split_to_files",
+            "split_folder",
+            "overwrite",
+        ] {
             keys.remove(key);
         }
         return;
@@ -326,6 +375,12 @@ pub struct StepInserted {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+    /// With `split_to_files`: the top assembly (or part) `.sc` that was written and inserted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_root: Option<String>,
+    /// With `split_to_files`: every `.sc` written, including `split_root`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_files: Option<Vec<String>>,
 }
 
 #[cfg(test)]

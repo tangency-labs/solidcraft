@@ -59,6 +59,17 @@ Files from different systems differ in which way is up and in what they call the
 {"command": "file.insert_step", "params": {"path": "frame.step", "up": "y", "names": "instance"}}
 ```
 
+- **`split_to_files`**: `true` writes each leaf product once as a `.sc` part file and each assembly
+  (including nested ones) as a `.sc` that links its children with `component.insert_design`, under
+  **`split_folder`** (default: the STEP file's directory). STEP (`.step` / `.stp`) only. A multi-body
+  part that is not an assembly stays one file. Open then opens the top assembly; Insert links it
+  into the current design. Mutually exclusive with `flatten`. An existing target file is refused
+  unless **`overwrite`: true**. The reply names `split_root` and `split_files`.
+
+```json
+{"command": "file.insert_step", "params": {"path": "machine.step", "split_to_files": true, "split_folder": "/path/to/out"}}
+```
+
 In automatic naming, a body labelled `NONE` uses its original face label when every imported
 face shares one meaningful label. Mixed or missing face labels keep the original body name;
 an explicit `names: "solid"` always keeps it. This only chooses the displayed body name: the

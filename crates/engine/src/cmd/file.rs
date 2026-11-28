@@ -9,6 +9,9 @@ pub(crate) mod import;
 #[path = "file_open_steps.rs"]
 pub(crate) mod open_steps;
 
+#[path = "file_split_step.rs"]
+pub(crate) mod split_step;
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "file_send.rs"]
 mod send;
@@ -75,6 +78,9 @@ pub static COMMANDS: &[CommandSpec] = &[
             "units?: for an STL or OBJ file (see file.insert_mesh); ",
             "origin?: bool for a mesh file (see file.insert_mesh); ",
             "folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
+            "split_to_files?: bool for a STEP file (see file.insert_step; opens the written top `.sc`); ",
+            "split_folder?: folder path with `split_to_files` (default: the file's directory); ",
+            "overwrite?: bool with `split_to_files` (default false: refuse when a target `.sc` already exists); ",
             "reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); ",
             "history?: features|solids for a FreeCAD file (see file.insert_step); ",
             "reader?: solidcraft|cadmpeg for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
@@ -110,7 +116,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!(
             "path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); ",
             "folder?: bool (default false; true: an assembly's import, which has subcomponents, goes into a new history folder named `Group #N`); ",
-            "flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); ",
+            "flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); refused with `split_to_files`); ",
+            "split_to_files?: bool (default false; a STEP `.step`/`.stp` file: true writes each leaf product once as a `.sc` and each assembly node as a `.sc` that links its children, under `split_folder`, then insert the top assembly; mutually exclusive with `flatten` → split_root, split_files); ",
+            "split_folder?: folder path (with `split_to_files`; default: the STEP file's directory); ",
+            "overwrite?: bool (with `split_to_files`; default false: refuse when a target `.sc` already exists); ",
             "name? (the feature's and the component's); ",
             "up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); ",
             "names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); ",
@@ -498,7 +507,8 @@ fn usd_geometry(p: &Value, path: &str, cmd: &str) -> Result<solidcraft_io::UsdGe
 
 /// How a STEP or IGES file comes in beyond its path: which way is up in the file, and what its
 /// bodies are named after.
-struct StepOptions {
+#[derive(Clone)]
+pub(super) struct StepOptions {
     /// `up: "y"`: the file has Y up, so the bodies it brings are turned a quarter turn about X
     /// (Y becomes Z), as the app's "Stand it up" offer does. `z` (the default) keeps the file's axes.
     y_up: bool,
@@ -518,6 +528,12 @@ struct StepOptions {
     /// model; `solidcraft` (the default) is SolidCraft's own STEP or IGES reader (for FreeCAD and
     /// Rhino, of the STEP that cadmpeg's writer restates them as).
     reader: solidcraft_io::StepReader,
+    /// Write each leaf product and each assembly node as its own `.sc` under `split_folder`.
+    split_to_files: bool,
+    /// Destination folder for `split_to_files` (default: the STEP file's directory).
+    split_folder: Option<String>,
+    /// Optional stem for a single-part split (from `name`).
+    split_name: Option<String>,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -557,7 +573,7 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
         None | Some(Value::Null) => solidcraft_io::StepReader::default(),
         Some(v) => v.as_str().and_then(solidcraft_io::StepReader::parse).ok_or_else(|| bad(cmd, READER_MESSAGE))?,
     };
-    Ok(StepOptions { y_up, names, folder, history, flatten: false, reader })
+    Ok(StepOptions { y_up, names, folder, history, flatten: false, reader, split_to_files: false, split_folder: None, split_name: None })
 }
 
 /// The warning, logged, for a STEP file that may need more memory than the machine can spare,
@@ -592,7 +608,7 @@ fn exporter_up(import: &solidcraft_kernel::StepImport) -> Option<(&'static str, 
 }
 
 /// A quarter turn about X through the origin: a file's Y up becomes Z up.
-fn quarter_turn_x() -> solidcraft_doc::Mat {
+pub(super) fn quarter_turn_x() -> solidcraft_doc::Mat {
     solidcraft_doc::rigid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, std::f64::consts::FRAC_PI_2)
 }
 
@@ -636,7 +652,7 @@ impl DesignSnapshot {
 /// While the profiler records, the reply's `profile` is the import's share of it (reading,
 /// building the solids in SMLib, placing, meshing and evaluating them), as
 /// `diagnostics.profile` reports it.
-fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions, keep_link: bool) -> Result<Value> {
+pub(super) fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions, keep_link: bool) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
     let keep_link = keep_link && !cfg!(target_arch = "wasm32") && super::component_link::is_step_source(path);
     let warning = memory_warning(path);
@@ -805,6 +821,8 @@ fn add_read_step(
         envelope: None,
         profile: profiled.map(|mark| crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20)),
         param_warnings: Vec::new(),
+        split_root: None,
+        split_files: None,
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
@@ -956,6 +974,8 @@ fn add_rebuilt(
         envelope: None,
         profile: None,
         param_warnings: Vec::new(),
+        split_root: None,
+        split_files: None,
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
@@ -1108,6 +1128,9 @@ fn add_usd_exact(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<b
         history: false,
         flatten: false,
         reader: solidcraft_io::StepReader::Cadmpeg,
+        split_to_files: false,
+        split_folder: None,
+        split_name: None,
     };
     let mut out = add_read_step(s, path, name, &options, sf, &bytes, profiled)?;
     if origin {
@@ -1290,6 +1313,7 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(flatten)) => *flatten,
         Some(_) => return Err(bad(cmd, crate::schema::insert_step::FLATTEN_MESSAGE)),
     };
+    let split = split_step::read_split_flags(p, cmd, &mut options)?;
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
         Some(m) => {
@@ -1309,6 +1333,36 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(link)) => *link,
         Some(_) => return Err(bad(cmd, "`link` must be a boolean")),
     };
+    if split {
+        let folder = split_step::split_folder_of(path, &options)?;
+        let overwrite = split_step::read_overwrite(p, cmd)?;
+        let written = split_step::write(path, &options, &folder, overwrite, s.validation())?;
+        let mut out = split_step::insert_root(s, &written, str_(p, "name"), placement)?;
+        if envelope {
+            // Linked insert: envelope around the placed link, when the reply names a component.
+            if out.get("component").and_then(Value::as_u64).is_some() {
+                out["envelope"] = json!(import_envelope(s, &out)?);
+            }
+        }
+        if kept.iter().any(Option::is_some)
+            && let Some(occ) = out["occurrence"].as_u64()
+            && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ)
+            && let Some(m) = placement
+        {
+            let at = [m[3][0], m[3][1], m[3][2]];
+            o.expressed_moves.push(solidcraft_doc::ExpressedMove {
+                translate: kept,
+                at,
+                frame: solidcraft_doc::IDENTITY,
+                world: false,
+                origin: Default::default(),
+                origin_at: [0.0; 3],
+                rotation: solidcraft_doc::IDENTITY,
+                grounded_ok: false,
+            });
+        }
+        return Ok(out);
+    }
     let mut out = add_step(s, path, str_(p, "name"), &options, keep_link)?;
     if envelope {
         out["envelope"] = json!(import_envelope(s, &out)?);
@@ -2003,6 +2057,24 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) || solidcraft_io::is_kicad_path(path) {
+        // Split a STEP assembly to linked `.sc` files, then open the top assembly as a design.
+        if split_step::is_step_file(path) {
+            let mut options = step_options(p, "doc.open")?;
+            if split_step::read_split_flags(p, "doc.open", &mut options)? {
+                let folder = split_step::split_folder_of(path, &options)?;
+                let overwrite = split_step::read_overwrite(p, "doc.open")?;
+                let written = split_step::write(path, &options, &folder, overwrite, s.validation())?;
+                let mut open_again = json!({"path": written.root.to_string_lossy()});
+                for key in ["read_only", "verify", "linked_bodies", "new_tab", "tab"] {
+                    if let Some(v) = p.get(key).filter(|v| !v.is_null()) {
+                        open_again[key] = v.clone();
+                    }
+                }
+                let mut result = open(s, &open_again)?;
+                split_step::annotate(&mut result, &written);
+                return Ok(result);
+            }
+        }
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let (mut fresh, r) = if solidcraft_io::is_kicad_path(path) {

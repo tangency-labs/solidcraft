@@ -326,7 +326,7 @@ mod tests {
         let none = Map::new();
         let step = Values::for_path("part.STEP", &[], &none).expect("STEP imports");
         let params: Vec<&str> = step.fields.iter().map(|f| f.param).collect();
-        assert_eq!(params, ["names"], "the up axis stays with the stand-up offer");
+        assert_eq!(params, ["names", "split_to_files", "split_folder"], "the up axis stays with the stand-up offer");
         assert!(step.params().is_empty(), "untouched, the import is as before");
 
         let mut solids = Map::new();
@@ -348,6 +348,7 @@ mod tests {
         for path in ["part.igs", "model.FCStd", "shape.3dm"] {
             let v = Values::for_path(path, &[], &none).expect("imports");
             assert!(v.fields.iter().all(|f| f.param != "up"), "{path}: its up axis is the stand-up offer's");
+            assert!(v.fields.iter().all(|f| f.param != "split_to_files"), "{path}: split is STEP only");
         }
         let board = Values::for_path("b.kicad_pcb", &["components", "copper", "silkscreen", "holes", "color"], &none).unwrap();
         assert_eq!(board.fields.iter().map(|f| f.param).collect::<Vec<_>>(), ["thickness", "representation"], "`skip` leaves options out");
