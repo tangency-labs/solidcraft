@@ -302,26 +302,27 @@ impl Shared {
         if builder.icon.is_none() {
             builder.icon = self.viewports.get(&ids.parent).and_then(|parent| parent.builder.icon.clone());
         }
-        if !self.viewports.contains_key(&ids.this) {
-            self.viewports.insert(ids.this, Viewport::new(ids, class, builder, ui_cb));
-        } else if let Some(viewport) = self.viewports.get_mut(&ids.this) {
-            viewport.class = class;
-            viewport.ids.parent = ids.parent;
-            viewport.ui_cb = ui_cb;
-            let (mut commands, recreate) = viewport.builder.patch(builder);
-            if recreate {
-                if let Some(window) = viewport.window.take() {
-                    self.by_window.remove(&window.id());
+        match self.viewports.entry(ids.this) {
+            std::collections::hash_map::Entry::Vacant(entry) => entry.insert(Viewport::new(ids, class, builder, ui_cb)),
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                let viewport = entry.into_mut();
+                viewport.class = class;
+                viewport.ids.parent = ids.parent;
+                viewport.ui_cb = ui_cb;
+                let (mut commands, recreate) = viewport.builder.patch(builder);
+                if recreate {
+                    if let Some(window) = viewport.window.take() {
+                        self.by_window.remove(&window.id());
+                    }
+                    viewport.state = None;
+                    if let Err(error) = pollster::block_on(self.painter.set_window(ids.this, None)) {
+                        log::warn!("The window of viewport {:?} could not be let go: {error}", ids.this);
+                    }
                 }
-                viewport.state = None;
-                if let Err(error) = pollster::block_on(self.painter.set_window(ids.this, None)) {
-                    log::warn!("The window of viewport {:?} could not be let go: {error}", ids.this);
-                }
+                viewport.deferred_commands.append(&mut commands);
+                viewport
             }
-            viewport.deferred_commands.append(&mut commands);
         }
-        let Some(viewport) = self.viewports.get_mut(&ids.this) else { unreachable!("inserted above") };
-        viewport
     }
 }
 
@@ -339,8 +340,7 @@ fn render_immediate(shared: &Rc<RefCell<Shared>>, immediate: ImmediateViewport<'
         (shared.ctx.clone(), shared.take_input(ids.this))
     };
     let Some((input, _window)) = input else {
-        let mut raw = egui::RawInput::default();
-        raw.viewport_id = ids.this;
+        let raw = egui::RawInput { viewport_id: ids.this, ..Default::default() };
         // Nothing to paint into yet: the output is dropped.
         drop(ctx.run_ui(raw, |ui| viewport_ui_cb(ui)));
         return;
@@ -355,8 +355,7 @@ fn render_immediate(shared: &Rc<RefCell<Shared>>, immediate: ImmediateViewport<'
 /// Runs an immediate viewport's callback in a pass that paints nothing.
 fn run_without_window(ctx: &egui::Context, immediate: ImmediateViewport<'_>) {
     let ImmediateViewport { ids, mut viewport_ui_cb, .. } = immediate;
-    let mut raw = egui::RawInput::default();
-    raw.viewport_id = ids.this;
+    let raw = egui::RawInput { viewport_id: ids.this, ..Default::default() };
     drop(ctx.run_ui(raw, |ui| viewport_ui_cb(ui)));
 }
 
