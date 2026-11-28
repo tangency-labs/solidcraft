@@ -391,7 +391,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "shared options apply to every face, automatic size fits each independently; ",
             "cosmetic replies include threads for faces and retain thread as the first; ",
             "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
-            "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); ",
+            "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1), optionally then an ISO 965-1 tolerance class after a hyphen, \"M8-6g\", \"M8x1-6H\", \"M10x1.25-5g6g\" (e, f, g or h on a shaft, G or H in a hole; kept in the callout, refused on the wrong side, changes no geometry); ",
             "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
             "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); ",
@@ -1598,17 +1598,7 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     if ps.iter().all(|p| p.region.holes.is_empty()) && !gaps.iter().any(|g| *g) {
         return ProfileSel::All;
     }
-    // Each profile has the profiles directly inside it as holes, so the number of holes around a
-    // point of a profile's material is its nesting depth.
-    let material: Vec<_> = ps
-        .iter()
-        .zip(&gaps)
-        .filter(|(p, gap)| {
-            let probe = p.region.interior_point();
-            !**gap && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
-        })
-        .map(|(p, _)| p)
-        .collect();
+    let material = material_profiles(&ps, &gaps);
     let all = solidcraft_sketch::without_text_counters(&ss.sketch, ps.clone());
     if material.iter().map(|p| &p.outer_curves).eq(all.iter().map(|p| &p.outer_curves)) {
         return ProfileSel::All;
@@ -1626,6 +1616,23 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
         Ok(found) if found.len() == material.len() && material.iter().all(|p| !p.outer_curves.is_empty()) => sel,
         _ => ProfileSel::All,
     }
+}
+
+/// The material among a sketch's profiles, by even-odd nesting: a loop inside an outline is its
+/// hole, a loop inside that hole material again. Each profile has the profiles directly inside it
+/// as holes, so the number of holes around a point of a profile's material is its nesting depth.
+/// A profile marked in `gaps` ([`solidcraft_sketch::enclosed_gaps`]) is never material; one past
+/// the end of `gaps` is not a gap.
+pub(super) fn material_profiles<'a>(ps: &'a [solidcraft_sketch::Profile], gaps: &[bool]) -> Vec<&'a solidcraft_sketch::Profile> {
+    ps.iter()
+        .enumerate()
+        .filter(|(i, p)| {
+            let probe = p.region.interior_point();
+            !gaps.get(*i).copied().unwrap_or(false)
+                && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
+        })
+        .map(|(_, p)| p)
+        .collect()
 }
 
 /// The matrix taking a point of the active component's frame into the frame `b`'s geometry is
@@ -2050,6 +2057,11 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         None => solidcraft_doc::RevolveConvention::SketchNormal,
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be sketch_normal or legacy_axis_start"))?,
     };
+    let join_profile_arcs = match p.get("join_profile_arcs") {
+        None => true,
+        Some(Value::Bool(join)) => *join,
+        Some(_) => return Err(bad(cmd, "`join_profile_arcs` must be a boolean")),
+    };
     let operation = operation(p, cmd)?;
     let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
     let unnamed = targets.is_empty() && string_list(cmd, p, "participants")?.is_empty();
@@ -2081,6 +2093,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         angle2,
         symmetric,
         convention,
+        join_profile_arcs,
         to: to.map(FacePick),
     };
     add_feature(s, &p, kind)
@@ -4374,11 +4387,16 @@ fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<
     let mut seen: std::collections::BTreeSet<(String, Vec<u64>)> = std::collections::BTreeSet::new();
     for (name, path) in names.into_iter().zip(placements) {
         let (at, _) = s.doc.path_placement(&path).ok_or_else(|| bad(cmd, format!("no placement {path:?}")))?;
-        let own = if let Some(mb) = st.body(&name) {
-            if s.doc.model_body_component(mb) != at {
-                return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
-            }
+        let own = if let Some(mb) = st.bodies.iter().find(|b| b.name == name && s.doc.model_body_component(b) == at) {
             mb.name.clone()
+        } else if let Some((_, own, ..)) = frames.iter().find(|(world, own, component, matched_path, _)| {
+            *component == at
+                && matched_path == &path
+                && (world == &name || qualified_body_name(&occ_names, own, matched_path).as_deref() == Some(name.as_str()))
+        }) {
+            own.clone()
+        } else if st.body(&name).is_some() {
+            return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
         } else if let Some(((_, own, component, matched_path, _), _)) = find_placed_frame(&occ_names, &frames, &name, cmd)? {
             if matched_path != &path {
                 return Err(bad(cmd, format!("body `{name}` is at placement {matched_path:?}, not {path:?}")));

@@ -287,7 +287,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::sketch_selection::coincident)
         .contract(&COINCIDENT_CONTRACT)
         .output(output_schema_for::<CoincidentResult>)
-        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (they become collinear), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two points or a point and a line or circle, at least one of them drawn 3D geometry (`<3D curve>.start`, `.end`, `.through`, `.<n>`, a 3D point's id, a drawn 3D line or arc); the other may be fixed: a model curve included with sketch.include_3d (`<curve>.start`, `.end`, or the straight or circular curve itself) or a 2D point, line, circle or arc of the sketch", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (they become collinear), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two points or a point and a line or circle, at least one of them drawn 3D geometry (`<3D curve>.start`, `.end`, `.through`, `.<n>`, a 3D point's id, a drawn 3D line or arc); the other may be fixed: a picked model edge is included as 3D geometry and a picked model vertex is projected onto the sketch plane, or give a model curve already included with sketch.include_3d (`<curve>.start`, `.end`, or the straight or circular curve itself) or a 2D point, line, circle or arc of the sketch", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", crate::checked!("sketch.constraint.tangent", c_tangent))
         .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
@@ -2651,7 +2651,7 @@ pub(super) fn slot_width_dimension(
 ) -> Result<Option<String>> {
     let Some(e) = driven else { return Ok(None) };
     let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-    let pname = doc.new_model_param(e, &unit);
+    let pname = doc.new_model_param(e, &unit)?;
     Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
 }
 
@@ -2674,7 +2674,7 @@ fn size_dimension(
     let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
     if !paper {
         let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-        let pname = doc.new_model_param(e, &unit);
+        let pname = doc.new_model_param(e, &unit)?;
         return Ok(sk.add_constraint(mk(value), Some(pname))?);
     }
     if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
@@ -4874,7 +4874,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             doc.add_user_param(name, &rhs, Some(&unit), None).map_err(|e| bad(cmd, format!("value: {e}")))?;
         }
         let e = value.as_ref().map(|e| doc.with_design_unit(e, kind)).unwrap_or(default_expr);
-        let pname = doc.new_model_param(&e, &unit);
+        let pname = doc.new_model_param(&e, &unit)?;
         // The value must evaluate.
         let (vals, errs) = doc.param_values();
         if let Some(err) = errs.get(&pname) {

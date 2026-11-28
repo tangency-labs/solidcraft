@@ -48,13 +48,13 @@ const MAX_CUSTOM: usize = 24;
 /// The dialog's values.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaveMesh {
-    format: usize,
+    pub(crate) format: usize,
     /// Send to Slicer: bodies, slicer and format are asked (no quality row).
     open: bool,
     /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
-    quality: usize,
+    pub(crate) quality: usize,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
-    slicer: String,
+    pub(crate) slicer: String,
     /// Send to Slicer: the format to send, as `file.send_to_slicer` names it. Empty until a slicer
     /// is chosen; 3MF is then sent.
     send_format: String,
@@ -151,6 +151,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let p = &app.preferences;
     let format = FORMATS.iter().position(|f| f.1 == p.save_mesh_format).unwrap_or(0);
     let slicer = match id {
+        // The organization's slicer stays, from Open in EasyPrint too.
+        _ if open && app.policy.locks("send_slicer") => p.send_slicer.clone(),
         "file.open_in_easyprint" => EASYPRINT.into(),
         _ if open => p.send_slicer.clone(),
         _ => String::new(),
@@ -293,7 +295,9 @@ pub fn tick_wait(app: &mut SolveApp, ctx: &egui::Context) {
 /// File › Export STL… and Export 3MF…. The user can still change it in the dialog.
 pub fn start_with_format(app: &mut SolveApp, format: &str) {
     app.start("file.save_mesh");
-    if let Some(index) = FORMATS.iter().position(|f| f.1 == format)
+    // A format the organization set stays: Export STL… opens the dialog with it.
+    if !app.policy.locks("save_mesh_format")
+        && let Some(index) = FORMATS.iter().position(|f| f.1 == format)
         && let Some(Kind::SaveMesh(k)) = app.dialog.as_mut().map(|d| &mut d.kind)
     {
         k.format = index;
@@ -444,9 +448,37 @@ fn send_format_row(app: &SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     }
     let labels: Vec<&str> = offered.iter().map(|f| f.0).collect();
     let mut i = offered.iter().position(|f| f.1 == k.send_format).unwrap_or(0);
-    choice_row(ui, "Format", "sm_format", &mut i, &labels);
-    if let Some(f) = offered.get(i) {
-        k.send_format = f.1.to_string();
+    let policy = policy_send_format(format_policy(app), &k.slicer, &app.slicer_menu.entries());
+    crate::policy::row_below(ui, policy.is_some(), |ui| choice_row(ui, "Format", "sm_format", &mut i, &labels));
+    if let Some(f) = policy.or_else(|| offered.get(i).map(|f| f.1)) {
+        k.send_format = f.to_string();
+    }
+}
+
+/// The format an organization's MeshExportFormat policy sets, when it is set.
+fn format_policy(app: &SolveApp) -> Option<&str> {
+    app.policy.locks("save_mesh_format").then_some(app.preferences.save_mesh_format.as_str())
+}
+
+/// The format a design is sent to `slicer` in under the MeshExportFormat policy: the policy's,
+/// when the slicer takes it. A slicer that does not take it (a resin slicer and 3MF, EasyPrint and
+/// STL) keeps its own, as with no policy.
+fn policy_send_format(policy: Option<&str>, slicer: &str, entries: &[Entry]) -> Option<&'static str> {
+    let policy = policy?;
+    if slicer == EASYPRINT {
+        return None;
+    }
+    let target = entries.iter().find(|e| e.key == slicer).map(|e| e.slicer.target());
+    offered_formats(target).into_iter().map(|f| f.1).find(|f| *f == policy)
+}
+
+/// Preselect the active slicer's format ([`preselect_format`]), the policy's when it sets one the
+/// slicer takes.
+fn preselect(app: &SolveApp, k: &mut SaveMesh) {
+    let entries = app.slicer_menu.entries();
+    preselect_format(k, &entries, &app.preferences.send_formats);
+    if let Some(f) = policy_send_format(format_policy(app), &k.slicer, &entries) {
+        k.send_format = f.to_string();
     }
 }
 
@@ -466,8 +498,18 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         });
     }
     if !k.open {
-        choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
-        choice_row(ui, "Quality", "sm_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
+        // An organization's MeshExportFormat and MeshExportQuality policies set these.
+        // Greyed out and noted; a pick in a locked row changes nothing.
+        let (format_locked, quality_locked) = (app.policy.locks("save_mesh_format"), app.policy.locks("save_mesh_quality"));
+        let (mut format, mut quality) = (k.format, k.quality);
+        crate::policy::row_below(ui, format_locked, |ui| choice_row(ui, "Format", "sm_format", &mut format, &FORMATS.map(|f| f.0)));
+        crate::policy::row_below(ui, quality_locked, |ui| choice_row(ui, "Quality", "sm_quality", &mut quality, &QUALITIES.map(|q| q.0)));
+        if !format_locked {
+            k.format = format;
+        }
+        if !quality_locked {
+            k.quality = quality;
+        }
         return false;
     }
     if k.stale {
@@ -479,7 +521,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         app.slicer_menu.refresh(&app.preferences.custom_slicers);
         let entries = app.slicer_menu.entries();
         let easyprint = crate::easyprint_ui::available(app);
-        k.slicer = if easyprint && k.slicer == EASYPRINT {
+        k.slicer = if app.policy.locks("send_slicer") {
+            // The organization's slicer, the install of it when there is one, never another in its place.
+            let base = app.preferences.send_slicer.clone();
+            app.slicer_menu
+                .key_for(&base)
+                .or_else(|| entries.iter().find(|e| !e.user && e.slicer.base_id() == base).map(|e| e.key.clone()))
+                .unwrap_or(base)
+        } else if easyprint && k.slicer == EASYPRINT {
             EASYPRINT.into()
         } else {
             app.slicer_menu
@@ -488,21 +537,26 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
                 .or_else(|| easyprint.then(|| EASYPRINT.to_string()))
                 .unwrap_or_default()
         };
-        preselect_format(k, &entries, &app.preferences.send_formats);
+        preselect(app, k);
     }
 
-    form_row(ui, "Slicer", |ui| {
-        if let Some(path) = app.slicer_menu.picked.take() {
-            match add_custom(app, &path) {
-                Ok(()) => {
-                    k.slicer = path;
-                    preselect_format(k, &app.slicer_menu.entries(), &app.preferences.send_formats);
+    // The note goes under the whole row, as Format's and Quality's do: beside it, the panel has no
+    // room left for the combo.
+    let locked = app.policy.locks("send_slicer");
+    crate::policy::row_below(ui, locked, |ui| {
+        form_row(ui, "Slicer", |ui| {
+            if let Some(path) = app.slicer_menu.picked.take() {
+                match add_custom(app, &path) {
+                    Ok(()) => {
+                        k.slicer = path;
+                        preselect(app, k);
+                    }
+                    Err(e) => app.set_status(e, true),
                 }
-                Err(e) => app.set_status(e, true),
             }
-        }
-        let choosing = app.file_picker_busy();
-        ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
+            let choosing = app.file_picker_busy();
+            ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
+        })
     });
     if k.slicer != EASYPRINT {
         send_format_row(app, ui, k);
@@ -635,14 +689,14 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         && k.slicer != key
     {
         k.slicer = key;
-        preselect_format(k, &entries, &app.preferences.send_formats);
+        preselect(app, k);
     }
     if let Some(key) = delete {
         app.preferences.custom_slicers.retain(|p| *p != key);
         app.slicer_menu.set_custom(&app.preferences.custom_slicers);
         if k.slicer == key {
             k.slicer = app.slicer_menu.entries().first().map(|e| e.key.clone()).unwrap_or_default();
-            preselect_format(k, &app.slicer_menu.entries(), &app.preferences.send_formats);
+            preselect(app, k);
         }
     }
     if pick_custom {
@@ -722,8 +776,14 @@ pub fn button(k: &SaveMesh) -> &'static str {
 pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), String> {
     let (_, params) = commands(k, inputs)?.into_iter().next().ok_or("nothing to save")?;
     if k.open {
-        app.preferences.send_slicer = k.slicer.clone();
-        if k.slicer != EASYPRINT && !k.send_format.is_empty() {
+        if !app.policy.locks("send_slicer") {
+            app.preferences.send_slicer = k.slicer.clone();
+        }
+        // A format the organization set is not the user's pick, so it is not remembered as one.
+        if k.slicer != EASYPRINT
+            && !k.send_format.is_empty()
+            && policy_send_format(format_policy(app), &k.slicer, &app.slicer_menu.entries()).is_none()
+        {
             app.preferences.send_formats.insert(k.slicer.clone(), k.send_format.clone());
         }
         if k.slicer == EASYPRINT {
@@ -748,8 +808,12 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
     let bodies = crate::selection::items(inputs, 0).body_names();
     let default_name = crate::export_name::default_for_bodies(app, &bodies);
     let name = crate::export_name::offered(app, bodies.first().map(String::as_str), &default_name);
-    app.preferences.save_mesh_format = format.into();
-    app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
+    if !app.policy.locks("save_mesh_format") {
+        app.preferences.save_mesh_format = format.into();
+    }
+    if !app.policy.locks("save_mesh_quality") {
+        app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
+    }
     // The file dialog answers later; the dialog closes meanwhile, as for every export.
     app.pick_save(&format!("{name}.{ext}"), &[ext], move |app, path| {
         if let Some(path) = path {
@@ -1253,6 +1317,19 @@ mod tests {
         k.slicer = EASYPRINT.into();
         preselect_format(&mut k, &entries, &remembered);
         assert_eq!(k.send_format, "3mf");
+    }
+
+    /// An organization's MeshExportFormat is the format sent to each slicer that takes it, over the
+    /// one the slicer was last sent; a slicer that does not take it, and EasyPrint, keep their own.
+    #[test]
+    fn the_mesh_format_policy_sets_the_format_sent_to_a_slicer_that_takes_it() {
+        let entries = entries(&["orca", "chitubox"]);
+        assert_eq!(policy_send_format(Some("stl"), "orca", &entries), Some("stl"));
+        assert_eq!(policy_send_format(Some("3mf-tagged"), "orca", &entries), Some("3mf-tagged"));
+        assert_eq!(policy_send_format(Some("3mf"), "chitubox", &entries), None, "a resin slicer takes STL only");
+        assert_eq!(policy_send_format(Some("stl"), "chitubox", &entries), Some("stl"));
+        assert_eq!(policy_send_format(Some("stl"), EASYPRINT, &entries), None, "EasyPrint is sent 3MF");
+        assert_eq!(policy_send_format(None, "orca", &entries), None, "no policy, no override");
     }
 
     /// #16089: each slicer is offered the formats it takes: STEP for the slicers that read it,

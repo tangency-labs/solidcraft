@@ -635,3 +635,20 @@ fn three_point_arc_centre_snaps_to_the_corner_of_the_l() {
     off.frames(2);
     assert!(!centre_held(&off), "with the snaps off the centre is held on nothing");
 }
+
+/// `ui.key` Enter confirms a typed value although the window is not the focused one: a script
+/// drives the app from another window (#23137).
+#[test]
+fn enter_places_a_typed_line_while_the_window_is_not_focused() {
+    let mut h = start("sketch.line");
+    h.window_unfocused = true;
+    h.step(&json!({"move":{"sketch":[30, 15]}})).unwrap();
+    h.step(&json!({"text":"20"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    let state = h.app.session.world_state().unwrap();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let lengths: Vec<_> =
+        sketch.curves.iter().filter_map(|c| c.kind.ends()).filter_map(|(a, b)| Some(sketch.point(a)?.dist(sketch.point(b)?))).collect();
+    assert!(lengths.iter().any(|length| (length - 20.0).abs() < 1e-6), "a line 20 long is placed: {lengths:?}");
+}

@@ -26,6 +26,9 @@ solidcraft-color = { workspace = true }
 # The blurred backing behind translucent panels: drawn over the viewport's GPU picture.
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
+# 3D mouse descriptors, reports and calibration, re-exported as `space_mouse` so other hosts
+# (FieldCraft) read devices the way SolidCraft does (#23205). It has no dependencies of its own.
+solidcraft-space-mouse = { workspace = true, features = ["serde"] }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 serde = { workspace = true }

@@ -1061,6 +1061,10 @@ pub enum FeatureKind {
         /// Missing fields retain the angular placement of existing designs.
         #[serde(default)]
         convention: RevolveConvention,
+        /// Join pieces of a circular profile before turning it. Older designs retain their
+        /// separate faces and edges so their stored references still resolve.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        join_profile_arcs: bool,
         /// To Object: turn until the face, vertex or point here.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
@@ -5805,7 +5809,9 @@ impl Document {
             let opacity = self.model_body_opacity(b) as f32;
             // The look's name goes with its colour (a STEP `COLOUR_RGB` name), so it comes back on import.
             let name = c.and_then(|_| self.model_display_look(b)).and_then(|l| l.file_name());
-            let paint = solidcraft_kernel::Paint { opacity, faces, name };
+            // The browser folder it sits in goes as its layer (a STEP layer), so it comes back as a folder.
+            let layer = self.model_body_folder(b);
+            let paint = solidcraft_kernel::Paint { opacity, faces, name, layer };
             if c != b.body.color() || b.body.paint() != Some(&paint) {
                 b.body = b.body.clone().with_color(c).with_paint(Some(paint));
             }
@@ -5814,10 +5820,10 @@ impl Document {
     }
 
     /// The copy-lineage source(s) of `body` from the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`).
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`).
     ///
-    /// A multi-seed `Pattern` with `join: true` booleans all seeds and copies together before
-    /// splitting disconnected `lumps()`, so `body_names` has no per-seed slot mapping; unmerged
+    /// A multi-seed `Pattern` with `join: true` (or `Mirror` with `combine: true`) splits
+    /// disconnected `lumps()` without a fixed per-seed slot layout in `body_names`; unmerged
     /// lumps resolve unanimously when every seed carries the same material.
     fn copy_material_sources(&self, body: &str) -> CopyMaterialSources<'_> {
         if body.is_empty() {
@@ -5846,8 +5852,14 @@ impl Document {
                         None
                     }
                 }
-                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => {
-                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                FeatureKind::Mirror { bodies, combine, .. } if !bodies.is_empty() => {
+                    if !*combine {
+                        bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                    } else if bodies.len() == 1 {
+                        (bodies[0].0.as_str() != body).then_some(CopyMaterialSources::Single(bodies[0].0.as_str()))
+                    } else {
+                        (!bodies.iter().any(|b| b.0.as_str() == body)).then_some(CopyMaterialSources::Unanimous(bodies.as_slice()))
+                    }
                 }
                 FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => {
                     bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
@@ -5860,9 +5872,9 @@ impl Document {
     }
 
     /// The seed body `body` was copied from by the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
-    /// lineage is unambiguous from pinned `body_names`. Multi-seed joined patterns merge all
-    /// seeds before splitting disconnected lumps and therefore have no single per-slot seed.
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`), when that lineage is unambiguous
+    /// from pinned `body_names`. Multi-seed joined patterns and combined mirrors emit unmerged
+    /// lumps without a single per-slot seed.
     pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
         match self.copy_material_sources(body) {
             CopyMaterialSources::Single(seed) => Some(seed),
@@ -6679,14 +6691,20 @@ impl Document {
     }
 
     /// Create the next free model parameter `dN` with the given expression and unit.
-    pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> String {
+    pub fn new_model_param(&mut self, expr_s: &str, unit: &str) -> Result<String> {
+        if self.params.len() >= MAX_PARAMS {
+            return Err(DocError::Invalid("too many parameters".into()));
+        }
         let name = self.next_d_name();
         self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
-        name
+        Ok(name)
     }
 
     /// Create a model parameter with a name the caller chose (checked: valid and free).
     pub fn new_named_model_param(&mut self, name: &str, expr_s: &str, unit: &str) -> Result<String> {
+        if self.params.len() >= MAX_PARAMS {
+            return Err(DocError::Invalid("too many parameters".into()));
+        }
         if let Some(why) = Self::param_name_problem(name) {
             return Err(DocError::Invalid(why));
         }
