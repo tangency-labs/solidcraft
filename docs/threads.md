@@ -33,6 +33,15 @@ The pipe threads' crest and root rounds (ISO 228-1/7-1 r = 0.137329 P, 0.137278 
 modelled as flats at the basic height, as the other forms' radii; NPT takes the minimum truncation
 0.033 P at both. The flanks' bisector is square to the axis in all three.
 
+**Custom profile** (`custom`, `C10x1.5x90`): not a standard, the user's own profile, named as such
+in the callout. The designation is `C<major diameter>x<pitch>x<included angle>`, in mm and
+degrees. The profile is the ISO 68-1 basic profile with its fundamental triangle at that angle:
+H = P / (2 tan(α/2)), basic depth 5H/8, flats P/8 at d and P/4 at D1. At 60° it is the ISO
+metric profile, and at 90° the depth is 0.3125 P. The angle is 20° to 90°, and the minor
+diameter d − 5H/4 must be above zero. It has no size table, and a chamfered tip is refused
+(ISO 4753's is for metric threads). Above 73.7° the external groove's section reaches past the
+crest by less than 0.05 P, so the groove is never wider than 0.95 P there.
+
 **Taper pipe threads** (`bspt`, `npt`): the diameters change 1 in 16 along the axis. The thread
 starts at a free end, the pipe's end or the hole's mouth (`from`), with the diameter its standard
 puts there: an external thread its major diameter at the gauge (reference) plane its gauge length

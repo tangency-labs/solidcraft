@@ -1374,9 +1374,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle, direction_only } => {
+        Kind::AnglePlane { angle, direction_only, through_axis } => {
             enter |= expr_row(ui, "Angle", angle);
-            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
+            let was = (*through_axis, *direction_only);
+            // One column: both labels are long and would be cut short side by side.
+            ui_kit::section(ui, "plane_angle_options", "Options", true, |ui| {
+                ui_kit::checkbox_grid(ui, &mut [("Through the axis", through_axis), ("Use axis direction only", direction_only)], 1)
+            });
+            // The two exclude each other (#6180): the one just turned on wins.
+            if *through_axis && !was.0 {
+                *direction_only = false;
+            } else if *direction_only && !was.1 {
+                *through_axis = false;
+            }
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
@@ -1639,7 +1649,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
-            let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            let from_sketch =
+                *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.items.iter().any(|item| matches!(item, Sel::Profile { .. })));
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
@@ -1665,7 +1676,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             if *cmd == "solid.coil" {
                 let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
-                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis, from_sketch);
+                let placed_axis = d.inputs.first().and_then(|input| input.items.first()).and_then(|sel| match sel {
+                    Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name).map(|plane| plane.normal()),
+                    _ => None,
+                });
+                enter |= coil_rows(ui, &mut d.extra, placed_axis.or(at.and_then(|(_, normal)| normal)), picked_axis, unresolved_axis, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);

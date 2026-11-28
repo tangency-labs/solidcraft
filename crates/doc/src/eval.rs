@@ -695,9 +695,9 @@ impl ModelBody {
     /// (once, however often this is asked) and `None` comes back meanwhile, so a caller drawing a
     /// frame (a face highlighted under the pointer) is not held up by a large body's plan
     /// (#3745): the plan mesh of a long modelled thread takes most of a second. The browser
-    /// build has no threads: there it is made now.
-    pub fn plan_mesh_soon(&self) -> Option<Arc<Mesh>> {
-        let q = crate::display_quality::current();
+    /// build has no threads: there it is made now. At `q`, the display quality the window asking
+    /// draws at (another window in the process may have set the process-wide level since).
+    pub fn plan_mesh_soon(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<Mesh>> {
         let cell = self.plan_mesh.get(q.index())?;
         if let Some(mesh) = cell.get() {
             return mesh.clone();
@@ -789,14 +789,14 @@ impl ModelBody {
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
     /// spaced across the face (faces on one surface spaced together, so they share them), exact
     /// and cut to its trims ([`kernel::iso_grid`]), their points at the chord
-    /// tolerance of the viewport's display quality. Worked out once per face, count and display
-    /// quality, and shared by every clone of this body (timeline snapshots, world states). A mesh
-    /// body has no surfaces, so none.
-    pub fn iso_lines(&self, face: usize, count: usize) -> Result<Arc<[kernel::IsoLine]>> {
+    /// tolerance of display quality `quality` (a viewport's: the one its window draws at, which
+    /// another window in the process may have changed the process-wide level from). Worked out
+    /// once per face, count and display quality, and shared by every clone of this body (timeline
+    /// snapshots, world states). A mesh body has no surfaces, so none.
+    pub fn iso_lines(&self, face: usize, count: usize, quality: crate::display_quality::DisplayQuality) -> Result<Arc<[kernel::IsoLine]>> {
         if self.body.is_mesh() {
             return Err(DocError::Invalid(format!("{} is a mesh body: its faces have no surface parameters, so no isoparametric curves", self.name)));
         }
-        let quality = crate::display_quality::current();
         let key = (face, count, quality.index());
         let make = || kernel::iso_grid(&self.body, face, count, quality.chord(self.body.size())).map(Arc::from);
         let Ok(mut cache) = self.iso.lock() else { return Ok(make()?) };
@@ -6576,6 +6576,12 @@ impl Model {
                 }
                 resolved_joints = s.resolved_joints;
                 checks.refuse(refused.index, refused.failure);
+                // The snapshots of the features that are evaluated again predate the refused
+                // results: they are dropped, so that a pattern that copies one of them reads no
+                // state of the refused pass.
+                for f in doc.features.iter().skip(start) {
+                    before_states.remove(&f.id);
+                }
             }
             for (i, f) in doc.features.iter().enumerate().skip(start) {
                 if let Some(refused) = checks.settle(false, &self.cache, &self.kept) {
@@ -8487,7 +8493,8 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 }
 
 /// A Join whose material meets none of its targets still joins it, to the first target as a
-/// separate piece (see `apply_traced`): a valid body in several pieces, but rarely what was meant
+/// separate piece (see `apply_traced`), and so does an Emboss, which raises its profiles with a Join
+/// and has no operation to pick (#23375): a valid body in several pieces, but rarely what was meant
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
 fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
@@ -8495,14 +8502,14 @@ fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &
     if bodies.is_empty() && features.iter().filter_map(|id| doc.feature(id.0)).any(|source| {
         !source.suppressed && matches!(source.kind, FeatureKind::Extrude { operation: Operation::Join, .. })
     }));
-    if feature_operation(f) != Some(Operation::Join) && !mirrored_join {
+    let emboss = matches!(&f.kind, FeatureKind::Emboss { deboss: false, .. });
+    if feature_operation(f) != Some(Operation::Join) && !mirrored_join && !emboss {
         return;
     }
+    // The Emboss window has no New Body to point to.
+    let hint = if emboss { "" } else { " (New Body makes it a body of its own)" };
     for (name, n) in join_pieces_added(before, after) {
-        append_warning(
-            warning,
-            format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces (New Body makes it a body of its own)"),
-        );
+        append_warning(warning, format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces{hint}"));
     }
 }
 
@@ -16542,6 +16549,10 @@ fn replay(
                 // the model as it was then, so that it is the source's own tool, moved (#14305).
                 Err(e) => {
                     let Some(before) = sources.and_then(|s| s.get(&src.id)) else { return Err(e) };
+                    // The retry is built against the model as it was before the source ran, with
+                    // that model's frames: a target the source's own result consumed is measured
+                    // where it is shown, and not in the frames of the model as it is now (#14305).
+                    let _retry_frames = ToolFrames::install(doc, src, before).unwrap_or_else(ToolFrames::clear);
                     feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), before, &mut None, &mut Vec::new(), &mut None)?
                 }
             };
@@ -20742,6 +20753,13 @@ impl ToolFrames {
             return None;
         }
         Some(ToolFrames(TOOL_FRAMES.with(|t| std::mem::replace(&mut *t.borrow_mut(), frames))))
+    }
+
+    /// The frames of [`TOOL_FRAMES`] cleared: what was there before is put back when it is
+    /// dropped. A model with no body placed differently has no frames of its own, so a tool
+    /// built against it must not meet the bodies in the frames of another model.
+    fn clear() -> ToolFrames {
+        ToolFrames(TOOL_FRAMES.with(|t| std::mem::take(&mut *t.borrow_mut())))
     }
 }
 
