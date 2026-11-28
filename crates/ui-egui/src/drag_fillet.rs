@@ -130,11 +130,12 @@ fn crossing(proj: &Proj, g: &Gesture, p: Pos2) -> Option<bool> {
         return None;
     }
     let n = proj.to_screen(g.base).zip(proj.to_screen(g.base + g.out)).map(|(a, b)| b - a).filter(|n| n.length() > 1e-3)?;
-    let unit = delta / delta.length();
-    let c = (n / n.length()).dot(unit);
+    // How closely the drag follows a direction on screen: the kernel's cosine between the two.
+    let follows = |d: egui::Vec2| solidcraft_kernel::direction_cosine_2d([d.x.into(), d.y.into()], [delta.x.into(), delta.y.into()]);
+    let c = follows(n)? as f32;
     // A drag that follows the edge more than it crosses it is a box selection, as is one where
     // the edge and the way out of the material show the same way on screen.
-    if g.along.is_some_and(|t| (t / t.length()).dot(unit).abs() >= c.abs()) {
+    if g.along.and_then(follows).is_some_and(|t| t.abs() as f32 >= c.abs()) {
         return None;
     }
     (c.abs() > ACROSS).then_some(c < 0.0)
