@@ -1,0 +1,104 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b11": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b12"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.0,
+                  -4.993595976083246,
+                  29.0
+                ],
+                [
+                  10.0,
+                  20.806404023916752,
+                  29.0
+                ]
+              ],
+              "index": 21
+            }
+          ],
+          "points": [
+            [
+              10.0,
+              7.906404023916752,
+              29.0
+            ]
+          ],
+          "tolerance": 3.558541285775894
+        },
+        "kind": "round",
+        "sizes": [
+          3.0
+        ],
+        "turn": "mitre"
+      },
+      "outputs": [
+        "b14"
+      ]
+    }
+  ],
+  "case": "22821-round-concave-edge-ends-on-split-cove",
+  "expected": {
+    "body_count": 1,
+    "method": "The part is one section in the YZ plane extruded along X: a block with slanted front and back (z 9..29, x -14..14) and an upright above it (z 29..65, x -10..10), with 5 mm coves where the slanted sides run into the upright's front and back, and 4 mm chamfers on the block's top edges at x = 14 and x = -14. The section's back outline is its front outline moved 25.8 mm along -Y, coves included ((12.9, 9), (20.9, 29), (20.9, 65) against (-12.9, 9), (-4.9, 29), (-4.9, 65)), so every line parallel to Y through the block or the upright crosses the part over 25.8 mm. Base volume (the part without the 2 mm chamfer): 32611.2000. The 3 mm round on the concave edge at x = 10, z = 29, between the upright's side x = 10 and the chamfer face x + z = 39, which meet at 135 degrees across the air, fills the region between the two faces and the round's arc: its contact lines lie r cot 67.5 = 3 (sqrt 2 - 1) = 1.2426 in from the edge on each face, and the region's area is r^2 (cot 67.5 - pi/8) = 9 (sqrt 2 - 1 - pi/8) = 0.19363 (the same formula gives the 2 mm round's 25.8 x 4 (sqrt 2 - 1 - pi/8) = 2.2203 the kernel builds). The fill ends flush with the part's front and back faces (each end on the faces there carried on), so it is 25.8 mm long: added volume 25.8 x 9 (sqrt 2 - 1 - pi/8) = 4.9957. V = 32616.1957 mm3.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#22821"
+    ],
+    "volume_mm3": 32616.1957,
+    "what": "a 3 mm round on the concave edge between an upright's side and a 4 mm chamfer below it, both ends on a 5 mm cove split at the edge's height"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "result": [
+    {
+      "body": "Part",
+      "made": "b14"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#22821"
+  ],
+  "ungraded": [],
+  "what": "a 3 mm round on the concave edge between an upright's side and a 4 mm chamfer below it, both ends on a 5 mm cove split at the edge's height",
+  "why_not": [],
+  "records": "22821-round-concave-edge-ends-on-split-cove.bodies.json.gz"
+}

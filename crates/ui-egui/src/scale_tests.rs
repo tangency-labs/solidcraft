@@ -836,6 +836,55 @@ fn sketch_scene_cost_while_the_camera_moves() {
     }
 }
 
+/// Orbiting over many finished, shown sketches (#22709): the window thread's frame while the camera
+/// turns, how many sketch scenes those frames built, and the frame once the view rests.
+/// `SOLIDCRAFT_SCALE_SKETCHES` sketches (default 300) of 4 × 4 blobs each. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "manual sketch scene measurement"]
+fn orbit_over_many_finished_sketches() {
+    let n: usize = std::env::var("SOLIDCRAFT_SCALE_SKETCHES").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let mut h = Harness::new();
+    let logo = blob_logo(4);
+    for i in 0..n {
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.insert_svg", json!({"text": logo, "at": [(i % 20) as f64 * 16.0, (i / 20) as f64 * 16.0]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    // The sketch scene is built only for a GPU target; this one draws nothing.
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: true,
+        oit: false,
+        edges: false,
+    });
+    h.frames(3);
+    h.app.fit_view();
+    h.frames(30);
+    let median = |mut t: Vec<f64>| {
+        t.sort_by(f64::total_cmp);
+        (t[t.len() / 2], t[0], t[t.len() - 1])
+    };
+    let one_scene = ms(|| drop(crate::viewport::build_sketch_scene(&h.app, &crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap()))));
+    let built = h.app.viewport.sketch_scenes_built;
+    let mut moving = Vec::new();
+    for i in 0..30 {
+        h.app.cam.yaw += 0.02;
+        h.app.cam.pitch = 0.9 + 0.01 * f64::from(i % 5);
+        moving.push(ms(|| h.frame()));
+    }
+    let built_moving = h.app.viewport.sketch_scenes_built - built;
+    let (m, mmin, mmax) = median(moving);
+    // The harness clock moves 1/60 s a frame: 30 frames are half a second at rest.
+    let rest = ms(|| h.frames(30));
+    println!(
+        "MANYSKETCHES sketches={n} one_scene_ms={one_scene:.2} orbit_frame_ms={m:.2} ({mmin:.2}-{mmax:.2}) scenes_built_in_30_orbit_frames={built_moving} rest_30_frames_ms={rest:.2} scenes_built_after_rest={}",
+        h.app.viewport.sketch_scenes_built - built - built_moving
+    );
+}
+
 /// Orbiting a large design with the right button, as a person turns the view: per frame, the
 /// window thread's frame (the model scene built, as the app builds it once a renderer is there),
 /// its named steps, and the renderer's prepare, draw recording and GPU work on an offscreen device

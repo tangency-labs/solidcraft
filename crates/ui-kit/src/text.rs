@@ -49,6 +49,10 @@ pub(super) fn paint_text_aligned(ui: &Ui, rect: egui::Rect, text: &str, font: eg
     if spaced {
         format.extra_letter_spacing = size * Tokens::get().font_section_tracking;
     }
+    // Optical centring: egui centres the row box, but this font's capitals sit low in it (the
+    // ascent exceeds the cap height, and a descent hangs under the baseline), so the row box
+    // goes up by the measured offset and the ink reads centred (#23381).
+    let rise = egui::cap_ink_rise(ui.painter(), &font);
     let shown = if middle { ellipsize_middle(ui, text, font, rect.width().max(0.0)) } else { text.to_owned() };
     let mut job = egui::text::LayoutJob::single_section(shown, format);
     job.wrap.max_width = rect.width().max(0.0);
@@ -57,7 +61,31 @@ pub(super) fn paint_text_aligned(ui: &Ui, rect: egui::Rect, text: &str, font: eg
     // Snap to whole device pixels: a fractional origin blurs every glyph edge.
     let ppp = ui.ctx().pixels_per_point().max(0.5);
     let snap = |v: f32| (v * ppp).round() / ppp;
-    let at = egui::pos2(snap(rect.left()), snap(rect.center().y - galley.size().y / 2.0));
+    let at = egui::pos2(snap(rect.left()), snap(rect.center().y - galley.size().y / 2.0 - rise));
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
     painter.galley(at, galley, ink);
+}
+
+/// [`egui::Painter::text`] whose vertically centred anchors (`LEFT_CENTER`, `CENTER_CENTER`,
+/// `RIGHT_CENTER`) are lifted by [`egui::galley_cap_ink_rise`], so the capitals read centred on
+/// `pos` the way [`centred_in`] centres them (#23399). Returns the rectangle painted in.
+pub fn paint_anchored(
+    painter: &egui::Painter,
+    pos: egui::Pos2,
+    anchor: egui::Align2,
+    text: impl ToString,
+    font: egui::FontId,
+    ink: egui::Color32,
+) -> egui::Rect {
+    let galley = painter.layout_no_wrap(text.to_string(), font, ink);
+    let rise = if anchor.y() == egui::Align::Center { egui::galley_cap_ink_rise(painter, &galley) } else { 0.0 };
+    let rect = anchor.anchor_size(pos, galley.size()).translate(egui::vec2(0.0, -rise));
+    painter.galley(rect.min, galley, ink);
+    rect
+}
+
+/// Where to paint `galley` so its capitals read centred on `centre` (#23381): egui's geometric
+/// centre of the row box, lifted by [`egui::galley_cap_ink_rise`].
+pub(crate) fn centred_in(painter: &egui::Painter, galley: &egui::Galley, centre: egui::Pos2) -> egui::Pos2 {
+    centre - galley.size() / 2.0 - egui::vec2(0.0, egui::galley_cap_ink_rise(painter, galley))
 }

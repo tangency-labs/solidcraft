@@ -306,7 +306,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
-fn find(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+pub(super) fn find(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     let key = match p.get("cloud") {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),
