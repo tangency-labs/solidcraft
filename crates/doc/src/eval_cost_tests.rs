@@ -2775,6 +2775,120 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
 }
 
 /// Different points on the same cylindrical interval create just one marking.
+fn tapped_plate() -> Document {
+    let mut doc = Document::new("tapped plate");
+    block(&mut doc, "Plate", Vec3::ZERO, [90.0, 30.0, 10.0]);
+    doc
+}
+
+/// Centres of the seed and its three +X copies on the top face.
+fn tapped_spots() -> [Vec3; 4] {
+    [10.0, 30.0, 50.0, 70.0].map(|x| Vec3::new(x, 10.0, 10.0))
+}
+
+/// An M8 hole at `at`, drilled 8 mm deep with the metric tap drill. `modelled` cuts the groove
+/// (thread depth 6 mm); otherwise the hole is the same drill with no thread.
+fn m8_hole(at: Vec3, modelled: bool) -> FeatureKind {
+    let diameter = crate::metric_tap_drill(8.0, 1.25).to_string();
+    FeatureKind::Hole {
+        position: FacePick(at),
+        at: None,
+        direction: crate::dir_expr(-Vec3::Z),
+        diameter: diameter.into(),
+        depth: Some("8".into()),
+        hole: HoleKind::default(),
+        points: None,
+        thread: modelled.then(|| "M8".into()),
+        thread_depth: modelled.then(|| "6".into()),
+        hand: crate::thread_forms::ThreadHand::Right,
+        thread_class: None,
+        modeled: modelled,
+        ease_out: None,
+        to: None,
+        references: Vec::new(),
+        old_surface_start: false,
+        hardware: None,
+    }
+}
+
+/// Rectangular pattern of `feature` only: +X, four instances, 20 mm apart.
+fn pattern_along_x(feature: u64) -> FeatureKind {
+    FeatureKind::Pattern {
+        features: vec![FeatureId(feature)],
+        pattern: PatternKind::Rectangular {
+            dir1: Dir(Vec3::X),
+            count1: "4".into(),
+            spacing1: "20".into(),
+            dir2: None,
+            count2: None,
+            spacing2: None,
+            alignment: solidcraft_sketch::PatternAlignment::Right,
+            alignment2: Default::default(),
+            reversed: false,
+            reversed2: false,
+            distance1: Default::default(),
+            distance2: Default::default(),
+            extent1: None,
+            extent2: None,
+            copy_at_end1: false,
+            copy_at_end2: false,
+            spacing_list1: Vec::new(),
+            spacing_list2: Vec::new(),
+        },
+        bodies: Vec::new(),
+        placements: Vec::new(),
+        components: Vec::new(),
+        occurrences: Vec::new(),
+        join: false,
+    }
+}
+
+fn built(doc: &Document) -> Model {
+    let mut model = Model::new();
+    model.evaluate(doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()), "{:?}", model.results);
+    model
+}
+
+/// Every modelled copy of a tapped hole on one plate shares one thread boolean.
+#[test]
+fn a_pattern_of_modelled_tapped_holes_cuts_each_body_once() {
+    let mut doc = tapped_plate();
+    let hole = doc.add_feature(m8_hole(Vec3::new(10.0, 10.0, 10.0), true), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(hole).unwrap().error, None);
+    let pattern = doc.add_feature(pattern_along_x(hole), None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.result(pattern).unwrap().error, None);
+    let grooved = volume(&model, "Plate");
+    let mut plain = tapped_plate();
+    for at in tapped_spots() {
+        plain.add_feature(m8_hole(at, false), None).unwrap();
+    }
+    let plain = volume(&built(&plain), "Plate");
+    assert!(plain - grooved >= 1.0, "grooves remove material the plain bores do not: plain {plain}, grooved {grooved}");
+    assert_eq!(work.thread_cuts, 1, "every copy on one body shares one cut, got {}", work.thread_cuts);
+}
+
+/// The patterned plate matches four separate modelled holes at the same spots.
+#[test]
+fn a_pattern_of_modelled_tapped_holes_matches_separate_holes() {
+    let mut patterned = tapped_plate();
+    let hole = patterned.add_feature(m8_hole(Vec3::new(10.0, 10.0, 10.0), true), None).unwrap();
+    patterned.add_feature(pattern_along_x(hole), None).unwrap();
+    let patterned = built(&patterned);
+    let mut separate = tapped_plate();
+    for at in tapped_spots() {
+        separate.add_feature(m8_hole(at, true), None).unwrap();
+    }
+    let separate = built(&separate);
+    let (patterned_volume, separate_volume) = (volume(&patterned, "Plate"), volume(&separate, "Plate"));
+    let scale = patterned_volume.abs().max(separate_volume.abs());
+    assert!((patterned_volume - separate_volume).abs() < 1e-6 * scale, "{patterned_volume} vs {separate_volume}");
+}
+
+/// Different points on the same cylindrical interval create just one marking.
 #[test]
 fn duplicate_grouped_thread_picks_resolve_to_one_marking() {
     let (mut doc, id) = grouped_thread_document(false);

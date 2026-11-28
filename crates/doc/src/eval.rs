@@ -17749,12 +17749,7 @@ fn replay(
             *missed += m + cut.iter().filter(|c| **c == CopyCut::Missed).count();
             *total += t + (instances.len() - unsure.len());
         }
-        let mut unthreaded = 0;
-        for (on, reach) in axes.iter().zip(&reaches) {
-            if let Some((_, d)) = on.first() {
-                unthreaded += hole_threads(vals, st, src, f.id, on.iter().map(|(at, _)| *at), *d, reach, true)?;
-            }
-        }
+        let unthreaded = hole_threads_copies(vals, st, src, f.id, &axes, &reaches)?;
         if unthreaded > 0 {
             append_warning(warning, format!("{unthreaded} hole copies are not threaded: their walls cannot take the thread"));
         }
@@ -17830,12 +17825,7 @@ fn replay(
             *total += t + (entry.instances.len() - unsure.len());
         }
         for entry in &batch.entries {
-            let mut unthreaded = 0;
-            for (on, reach) in entry.axes.iter().zip(&entry.reaches) {
-                if let Some((_, d)) = on.first() {
-                    unthreaded += hole_threads(vals, st, entry.src, scoped.id, on.iter().map(|(at, _)| *at), *d, reach, true)?;
-                }
-            }
+            let unthreaded = hole_threads_copies(vals, st, entry.src, scoped.id, &entry.axes, &entry.reaches)?;
             if unthreaded > 0 {
                 append_warning(warning, format!("{unthreaded} hole copies are not threaded: their walls cannot take the thread"));
             }
@@ -18411,6 +18401,7 @@ fn hole_threads(
     dir: Vec3,
     reaches: &[f64],
     copy: bool,
+    collect: Option<&mut TapBatch>,
 ) -> Result<usize> {
     let FeatureKind::Hole { thread: Some(d), thread_depth, diameter, hand, modeled, ease_out, .. } = &src.kind else { return Ok(0) };
     let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
@@ -18493,8 +18484,39 @@ fn hole_threads(
         }
         Ok(Tapped::Listed(threads))
     };
+    let spots: Vec<(Vec3, f64)> = spots.zip(reaches.iter().copied()).collect();
+    // Modelled taps lying apart on one body share one cut and one check, however many copies a
+    // pattern makes. Every spot is planned on the uncut model first; a spot that cannot be
+    // planned, or tools that meet, leave the spots to the one-by-one loop below.
+    let collecting = collect.is_some();
+    if *modeled && (collecting || spots.len() > 1) {
+        let mut own = TapBatch::default();
+        let into: &mut TapBatch = match collect {
+            Some(caller) => caller,
+            None => &mut own,
+        };
+        for &(p, reach) in &spots {
+            let walls = parallel_tapped_wall(st, p, dir, r, reach);
+            if copy && walls.is_empty() {
+                continue;
+            }
+            match plan(st, p, walls) {
+                Ok(Tapped::Cut(on)) => into.ons.extend(on),
+                _ => into.failed = true,
+            }
+        }
+        if collecting {
+            return Ok(0);
+        }
+        if !own.failed
+            && let Some(next) = thread::cut_apart_taps(st, &own.ons)?
+        {
+            *st = next;
+            return Ok(0);
+        }
+    }
     let mut skipped = 0;
-    for (p, reach) in spots.zip(reaches.iter().copied()) {
+    for (p, reach) in spots {
         let walls = parallel_tapped_wall(st, p, dir, r, reach);
         if copy && walls.is_empty() {
             continue;
@@ -18512,6 +18534,48 @@ fn hole_threads(
         }
     }
     Ok(skipped)
+}
+
+/// The modelled taps a feature's copies need, planned on the uncut model so one cut can make them.
+#[derive(Default)]
+struct TapBatch {
+    ons: Vec<thread::ThreadOn>,
+    /// A spot could not be planned: the copies go one by one, as before.
+    failed: bool,
+}
+
+/// Threads the hole copies at every axis group of one source: the modelled taps that lie apart
+/// are cut together, the rest one by one. The count is the copies left unthreaded.
+fn hole_threads_copies(
+    vals: &BTreeMap<String, Value>,
+    st: &mut ModelState,
+    src: &Feature,
+    id: u64,
+    axes: &[Vec<(Vec3, Vec3)>],
+    reaches: &[Vec<f64>],
+) -> Result<usize> {
+    let modeled = matches!(&src.kind, FeatureKind::Hole { modeled: true, .. });
+    if modeled && axes.len() > 1 {
+        let mut batch = TapBatch::default();
+        for (on, reach) in axes.iter().zip(reaches) {
+            if let Some((_, d)) = on.first() {
+                hole_threads(vals, st, src, id, on.iter().map(|(at, _)| *at), *d, reach, true, Some(&mut batch))?;
+            }
+        }
+        if !batch.failed
+            && let Some(next) = thread::cut_apart_taps(st, &batch.ons)?
+        {
+            *st = next;
+            return Ok(0);
+        }
+    }
+    let mut unthreaded = 0;
+    for (on, reach) in axes.iter().zip(reaches) {
+        if let Some((_, d)) = on.first() {
+            unthreaded += hole_threads(vals, st, src, id, on.iter().map(|(at, _)| *at), *d, reach, true, None)?;
+        }
+    }
+    Ok(unthreaded)
 }
 
 enum Tapped {
@@ -20154,7 +20218,7 @@ fn eval_feature_kind(
             } else {
                 apply_beside_sheet_cut(doc, st, f, tools, Operation::Cut, &[], &handled)?;
             }
-            hole_threads(vals, st, f, f.id, spots.iter().map(|spot| spot.at), dir, &reaches, false)?;
+            hole_threads(vals, st, f, f.id, spots.iter().map(|spot| spot.at), dir, &reaches, false, None)?;
             Ok(())
         }
         FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st, warning),
