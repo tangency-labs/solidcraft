@@ -18,6 +18,43 @@ use crate::geom::nurbs_enclosure::{partials_over_piece, Shift};
 
 const OP: &str = "blend::fillet_section::offset_box";
 
+/// Whether a homogeneous control-point array `pw` (`(x w, y w, z w, w)` per point) lies far
+/// enough from the origin that uncentred rational enclosures lose significant accuracy:
+/// `max_i max(|x_i|, |y_i|, |z_i|) > 8 * max(bbox_extent, 1)`. Near-origin geometry stays
+/// bit-exact with uncentred (`Shift::None`) enclosures.
+pub(crate) fn pw_is_far_from_origin(pw: &[f64]) -> bool {
+    let (mut min_x, mut min_y, mut min_z) = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let (mut max_x, mut max_y, mut max_z) =
+        (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut far = 0.0_f64;
+    let mut any = false;
+    for p in pw.chunks_exact(4) {
+        let &[x, y, z, w] = p else {
+            return false;
+        };
+        if !(w.is_finite() && w > 0.0) {
+            return false;
+        }
+        let (px, py, pz) = (x / w, y / w, z / w);
+        if !(px.is_finite() && py.is_finite() && pz.is_finite()) {
+            return false;
+        }
+        min_x = min_x.min(px);
+        min_y = min_y.min(py);
+        min_z = min_z.min(pz);
+        max_x = max_x.max(px);
+        max_y = max_y.max(py);
+        max_z = max_z.max(pz);
+        far = far.max(px.abs()).max(py.abs()).max(pz.abs());
+        any = true;
+    }
+    if !any {
+        return false;
+    }
+    let size = (max_x - min_x).max(max_y - min_y).max(max_z - min_z);
+    far.is_finite() && size.is_finite() && far > 8.0 * size.max(1.0)
+}
+
 #[inline]
 fn v_dot(a: V3<Ivl>, b: V3<Ivl>) -> Ivl {
     (a.x * b.x + a.y * b.y) + a.z * b.z
@@ -85,10 +122,10 @@ pub fn offset_and_base_partials_over_piece(
             "offset partials requested past second order",
         ));
     }
-    let shift = if ua == ub && va == vb {
-        Shift::None
-    } else {
+    let shift = if pw_is_far_from_origin(&net.pw) && !(ua == ub && va == vb) {
         Shift::Middle
+    } else {
+        Shift::None
     };
     // Exact-zero offset identity (Q = S), not a tolerance.
     if d.lo == 0.0 && d.hi == 0.0 {
@@ -219,12 +256,13 @@ fn unit_normal_over_parts(
     pv: &[(f64, f64, usize)],
 ) -> Result<V3<Ivl>> {
     let mut out: Option<V3<Ivl>> = None;
+    let far = pw_is_far_from_origin(&net.pw);
     for &(ua, ub, ku) in pu {
         for &(va, vb, kv) in pv {
-            let shift = if ua == ub && va == vb {
-                Shift::None
-            } else {
+            let shift = if far && !(ua == ub && va == vb) {
                 Shift::Middle
+            } else {
+                Shift::None
             };
             let b = partials_over_piece(net, ku, kv, ua, ub, va, vb, 1, None, shift)?;
             let m = v_cross(b.at(1, 0), b.at(0, 1));

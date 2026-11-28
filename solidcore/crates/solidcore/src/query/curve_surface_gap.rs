@@ -39,7 +39,9 @@ use crate::blend::fillet_section::certificate::{
     knot_cuts, partials_hull, past_one_low_line, EndContinuation, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
-use crate::blend::fillet_section::offset_box::offset_and_base_partials_over_piece;
+use crate::blend::fillet_section::offset_box::{
+    offset_and_base_partials_over_piece, pw_is_far_from_origin,
+};
 use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::{
     as_b_spline, knot, nurbs_partials, span, Nurbs, Partials,
@@ -323,6 +325,22 @@ fn identity_psi([r0, r1]: [f64; 2]) -> NurbsCurve {
     }
 }
 
+fn is_far_from_origin(net: &Nurbs) -> bool {
+    pw_is_far_from_origin(&net.pw)
+}
+
+fn curve_is_far_from_origin(cn: &NurbsCurve) -> bool {
+    pw_is_far_from_origin(&cn.pw)
+}
+
+fn curve_derivs_for_gap(cn: &NurbsCurve, s: Ivl, ld: usize) -> Result<Vec<V3<Ivl>>> {
+    if curve_is_far_from_origin(cn) {
+        curve_derivs_over_centred(cn, s, ld, None)
+    } else {
+        curve_derivs_over(cn, s, ld, None)
+    }
+}
+
 /// A surface prepared for enclosure: its net and the directions it continues past the net.
 ///
 /// With `offset` the surface is the offset `Q = S + d (S_u x S_v) / |S_u x S_v|` of the net
@@ -332,6 +350,7 @@ pub(crate) struct NetSurface {
     net: Nurbs,
     ends: EndContinuation,
     offset: Option<Ivl>,
+    far_from_origin: bool,
 }
 
 impl NetSurface {
@@ -371,10 +390,12 @@ impl NetSurface {
         } else {
             ends
         };
+        let far_from_origin = is_far_from_origin(&net);
         Self {
             net,
             ends,
             offset: None,
+            far_from_origin,
         }
         .probed(k, surface, probe)
     }
@@ -424,10 +445,12 @@ impl NetSurface {
         let Ok(net) = Nurbs::of(&bs) else {
             return Ok(None);
         };
+        let far_from_origin = is_far_from_origin(&net);
         Self {
             net,
             ends: EndContinuation::default(),
             offset: Some(Ivl::from(d)),
+            far_from_origin,
         }
         .probed(k, surface, probe)
     }
@@ -473,11 +496,13 @@ impl NetSurface {
             pw,
             ..self.net.clone()
         };
+        let far_from_origin = is_far_from_origin(&net);
         Some((
             Self {
                 net,
                 ends: self.ends,
                 offset: None,
+                far_from_origin,
             },
             slack,
         ))
@@ -643,10 +668,10 @@ impl NetSurface {
         let n = &self.net;
         // (an offset of exactly zero is its base, and evaluates as it, with no step-off)
         let Some(d) = self.offset.filter(|d| !(d.lo == 0.0 && d.hi == 0.0)) else {
-            let shift = if a0 == a1 && b0 == b1 {
-                Shift::None
-            } else {
+            let shift = if self.far_from_origin && !(a0 == a1 && b0 == b1) {
                 Shift::Middle
+            } else {
+                Shift::None
             };
             return partials_over_piece(n, ku, kv, a0, a1, b0, b1, lk, None, shift);
         };
@@ -1217,7 +1242,7 @@ fn piece(
         ends = ends.max(g);
     }
     let span = Ivl::new(a, b);
-    let cd = curve_derivs_over_centred(cn, span, 2, None)?;
+    let cd = curve_derivs_for_gap(cn, span, 2)?;
     let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2)) = (cd.get(1), cd.get(2)) else {
         return Ok(None);
@@ -1393,7 +1418,7 @@ fn piece_reparametrised(
     let (Some(&r0), Some(&p1), Some(&p2)) = (r.first(), r.get(1), r.get(2)) else {
         return Ok(None);
     };
-    let cd = curve_derivs_over_centred(cn, r0, 2, None)?;
+    let cd = curve_derivs_for_gap(cn, r0, 2)?;
     let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2), Some(w1)) = (cd.get(1), cd.get(2), wd.get(1)) else {
         return Ok(None);
@@ -4475,7 +4500,7 @@ fn surface_piece(
     }
     let span = Ivl::new(a, b);
     let h = Ivl::from(b) - Ivl::from(a);
-    let cd = curve_derivs_over_centred(cn, span, 2, None)?;
+    let cd = curve_derivs_for_gap(cn, span, 2)?;
     let (Some(c1), Some(c2)) = (cd.get(1).copied(), cd.get(2).copied()) else {
         return Ok(None);
     };
@@ -4551,7 +4576,7 @@ fn target_piece(
     }
     let span = Ivl::new(a, b);
     let h = Ivl::from(b) - Ivl::from(a);
-    let cd = curve_derivs_over_centred(cn, span, 2, None)?;
+    let cd = curve_derivs_for_gap(cn, span, 2)?;
     let (Some(c1), Some(c2)) = (cd.get(1).copied(), cd.get(2).copied()) else {
         return Ok(None);
     };
@@ -4564,7 +4589,7 @@ fn target_piece(
         Prepared::Curve(dn, [s0, s1]) => {
             let w1 = slope(range, [*s0, *s1]);
             let s = clamp_ivl(along(span, range, [*s0, *s1]), *s0, *s1);
-            let dd = curve_derivs_over_centred(dn, s, 2, None)?;
+            let dd = curve_derivs_for_gap(dn, s, 2)?;
             let (Some(d1), Some(d2)) = (dd.get(1).copied(), dd.get(2).copied()) else {
                 return Ok(None);
             };
@@ -9051,6 +9076,7 @@ mod tests {
             net: net.clone(),
             ends: EndContinuation::default(),
             offset: None,
+            far_from_origin: is_far_from_origin(net),
         };
         let mid = |v: V3<Ivl>| crate::math::Vec3::new(v.x.mid(), v.y.mid(), v.z.mid());
         let mut worst = 0.0_f64;

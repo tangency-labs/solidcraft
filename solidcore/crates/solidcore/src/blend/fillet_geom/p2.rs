@@ -2087,6 +2087,7 @@ pub fn srf_srf_intersection_with_context(
     // analytic intersector gives exactly. Points off a surface, and an end where the surface
     // touches the plane, are met by the intersectors below. A round of touch circles needs it
     // (#2704): its end section leaves the end face's plane, so its side curve is this one.
+    let mut plane_curve_fallback = false;
     if curves_3d.is_empty() {
         let plane_first = matches!(surf1.kind(), SurfaceKind::Plane(_));
         if let (Some(start_pnt), Some(end_pnt), true) = (
@@ -2104,7 +2105,7 @@ pub fn srf_srf_intersection_with_context(
                 && !surface.is_planar(k, approx_tol)?.is_planar
                 && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
             {
-                if let Some(c) = ignore_status(surface_plane_curve(
+                match surface_plane_curve(
                     k,
                     surface,
                     plane,
@@ -2113,25 +2114,45 @@ pub fn srf_srf_intersection_with_context(
                     opt_dir.as_deref().copied(),
                     approx_tol,
                     angle_tol,
-                ))? {
-                    // Not upstream: with `closed_by_start_direction`, a curve that does not leave
-                    // the start along its heading is passed over (the intersectors below go on)
-                    let headed = match wanted_heading {
-                        Some(h) => leaves_along(k, &c.curve_3d, h)?,
-                        None => true,
-                    };
-                    if headed {
-                        let (uv1, uv2) = if plane_first {
-                            (c.uv_plane, c.uv_surface)
-                        } else {
-                            (c.uv_surface, c.uv_plane)
+                ) {
+                    Ok(c) => {
+                        // Not upstream: with `closed_by_start_direction`, a curve that does not
+                        // leave the start along its heading is passed over (the intersectors below
+                        // go on)
+                        let headed = match wanted_heading {
+                            Some(h) => leaves_along(k, &c.curve_3d, h)?,
+                            None => true,
                         };
-                        return Ok(SrfSrfCurves {
-                            curve_3d: Some(c.curve_3d),
-                            uv_curve1: Some(uv1),
-                            uv_curve2: Some(uv2),
-                        });
+                        if headed {
+                            let (uv1, uv2) = if plane_first {
+                                (c.uv_plane, c.uv_surface)
+                            } else {
+                                (c.uv_surface, c.uv_plane)
+                            };
+                            return Ok(SrfSrfCurves {
+                                curve_3d: Some(c.curve_3d),
+                                uv_curve1: Some(uv1),
+                                uv_curve2: Some(uv2),
+                            });
+                        }
                     }
+                    // Recoverable plane-curve failures fall back to the intersectors below;
+                    // `PlaneCurveLeavesDomain` and non-recoverable errors propagate immediately
+                    // so `opt_dir` is never perturbed by a failing fallback.
+                    Err(err)
+                        if matches!(
+                            err.blend_failure(),
+                            Some(
+                                BlendFailure::PlaneCurveTouches { .. }
+                                    | BlendFailure::PlaneCurveEndOff { .. }
+                                    | BlendFailure::PlaneCurveStepVanished { .. }
+                                    | BlendFailure::PlaneCurveFitCap { .. }
+                            )
+                        ) =>
+                    {
+                        plane_curve_fallback = true;
+                    }
+                    Err(err) => return Err(err),
                 }
             }
         }
@@ -2144,11 +2165,16 @@ pub fn srf_srf_intersection_with_context(
             // `None`, not an error. Upstream also ignores the call's other statuses (an
             // error here just means that it couldn't find a solution), so the intersector's
             // own failures still mean "no curve" and the search goes on below.
+            let mut fallback_dir = *dir;
             let r = ignore_status(two_pnts_intersection(
                 k,
                 start_pnt,
                 end,
-                dir,
+                if plane_curve_fallback {
+                    &mut fallback_dir
+                } else {
+                    dir
+                },
                 opt_end_dir,
                 surf1,
                 surf2,
@@ -2156,6 +2182,9 @@ pub fn srf_srf_intersection_with_context(
             ))?
             .flatten();
             if let Some(pi) = r {
+                if plane_curve_fallback {
+                    *dir = fallback_dir;
+                }
                 // Not upstream: with `closed_by_start_direction`, a curve that does not leave
                 // the start along its heading is passed over
                 let mut traced = pi.curve_3d;
