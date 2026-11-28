@@ -1488,6 +1488,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         pts: Vec::new(),
         hover: None,
         picks: Vec::new(),
+        picks_dropped: false,
         point_picks: Vec::new(),
         dims: Vec::new(),
         dim_history: Vec::new(),
@@ -1499,6 +1500,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
         arc_modes: false,
+        rotatable: crate::sketch_dims::last_rectangle_rotatable(),
         preselected: false,
         finished: false,
     })
@@ -2009,7 +2011,9 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             if periodic_start_snap(app, tool, proj, pos).is_some() {
                 // Only this deliberate click selects periodic interpolation. A
                 // right-click finish and all previously saved splines stay natural.
-                let params = json!({"points":tool.pts.iter().map(arg).collect::<Vec<_>>(),"periodic":true});
+                // A stored click whose snap the Undo button took away goes as the place clicked.
+                let points: Vec<_> = tool.pts.iter().map(|p| arg(&crate::tools::standing(app, p))).collect();
+                let params = json!({"points": points, "periodic": true});
                 if app.run(cmd, params).is_ok() {
                     tool.pts.clear();
                     crate::sketch_dims::reset(tool);
@@ -2045,8 +2049,12 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 return;
             }
             if !tool.picks.contains(&id) {
+                // Every clicked pick gets its place, also when the click misses the sketch
+                // plane (a view along it): the places then stay matched to the last picks.
+                let place = at.map(|(p, _)| p).or_else(|| hit_place(app, &hits, &id));
                 tool.picks.push(id);
-                if let Some((p, _)) = at {
+                tool.picks_dropped = false;
+                if let Some(p) = place {
                     tool.pts.push((p, None));
                 }
             }
@@ -2138,6 +2146,15 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         return;
     }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
+    // Tangent Arc and Blend Curve take the sketch point itself, since the tangent comes from its
+    // curve. When the Undo button took that point away after the click, the place clicked is no
+    // answer, so the stored click goes and the tool says where to click to start over (#22766).
+    if matches!(tool.cmd, "sketch.arc.tangent" | "sketch.blend_curve") && tool.pts.iter().any(|q| crate::tools::standing(app, q).1 != q.1) {
+        tool.pts.clear();
+        crate::sketch_dims::reset(tool);
+        app.set_status(hint(tool.cmd).unwrap_or_default(), true);
+        return;
+    }
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
         app.set_status(tr_engine_error(&error), true);
         return;
@@ -2169,7 +2186,10 @@ fn tangent_start(app: &SolveApp, p: &(Vec2, Option<String>)) -> bool {
 }
 
 fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
-    let p = &t.pts;
+    // A stored click whose snap the Undo button took away goes as the place clicked, as
+    // `run_shape` sends it, so the command does not refuse click after click (#22766).
+    let pts: Vec<_> = t.pts.iter().map(|p| crate::tools::standing(app, p)).collect();
+    let p = &pts;
     let width = |a: Vec2, b: Vec2, c: Vec2| -> f64 { 2.0 * (b - a).normalized().map(|d| d.cross(c - a).abs()).unwrap_or(1.0) };
     let slot_width = |fallback: f64| crate::sketch_dims::locked_value(app, t, "Width").unwrap_or_else(|| fallback.max(1e-3));
     let params = match (t.cmd, p.as_slice()) {
@@ -2203,6 +2223,59 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
         _ => return false,
     };
     crate::tools::draw(app, t, params).is_ok()
+}
+
+/// Drops the picks of a curve-picking tool that no longer name a curve or point of the active
+/// sketch, with their click places, so the user picks again instead of the command refusing the
+/// stale id on every try: the Undo button can take away a picked curve and leaves the tool on
+/// (#23086). An origin axis pick (`x`, `y` or a JSON reference) is kept. Run on every frame
+/// before the value boxes are decided, so 2-Tangent Circle's Radius box goes with the pair.
+/// After a drop the boxes start over and true is returned, for the caller to show the hint.
+pub(crate) fn drop_gone_picks(app: &SolveApp, t: &mut Tool) -> bool {
+    if !matches!(mode(t.cmd), Some(Mode::Entities(_))) || t.picks.is_empty() {
+        return false;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return false };
+    let stands =
+        |id: &str| ss.sketch.curve_index(id).is_some() || ss.sketch.resolve_point(id).is_some() || matches!(id, "x" | "y") || id.starts_with('{');
+    let keep: Vec<bool> = t.picks.iter().map(|id| stands(id)).collect();
+    if keep.iter().all(|k| *k) {
+        return false;
+    }
+    // Each click adds its pick and its place together, after any preselected picks, which have
+    // no place: the places belong to the last picks.
+    let offset = t.picks.len().saturating_sub(t.pts.len());
+    let mut i = offset;
+    t.pts.retain(|_| {
+        let kept = keep.get(i).copied().unwrap_or(true);
+        i = i.saturating_add(1);
+        kept
+    });
+    let mut flags = keep.iter();
+    t.picks.retain(|_| flags.next().copied().unwrap_or(true));
+    crate::sketch_dims::reset(t);
+    t.picks_dropped = t.picks.is_empty();
+    true
+}
+
+/// A right-click on the view while a tool runs: true when the Undo button just took every pick
+/// of a curve-picking tool away, so the right-click that was meant to apply keeps the tool on for
+/// the user to pick again, as a pick still standing would (#23086). Esc still ends the tool.
+pub(crate) fn keep_on_right_click(app: &mut SolveApp) -> bool {
+    app.tool.as_mut().is_some_and(|t| std::mem::take(&mut t.picks_dropped) && t.picks.is_empty())
+}
+
+/// Where on the active sketch the hit for entity `id` is, in sketch coordinates.
+fn hit_place(app: &SolveApp, hits: &[Hit], id: &str) -> Option<Vec2> {
+    let sid = active_sketch(app)?;
+    let st = crate::open_meshing::session_world(&app.session);
+    let plane = st.sketch(sid)?.plane;
+    hits.iter().find_map(|h| match h {
+        Hit::SketchPoint { sketch, id: hit, at } if *sketch == sid && hit == id => Some(*at),
+        Hit::SketchCurve { sketch, id: hit, point, .. } if *sketch == sid && hit == id => Some(plane.to_local(*point)),
+        _ => None,
+    })
 }
 
 fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
@@ -2619,6 +2692,48 @@ fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<It
     })
 }
 
+/// Whether a constraint refers to the selected point or curve. Selecting a point also
+/// exposes constraints on curves that use that point, so clicking a tangent endpoint can
+/// reveal its line/circle constraint without turning on every other badge (#18817).
+fn constraint_matches_selection(
+    sk: &solidcraft_engine::sketch::Sketch,
+    kind: &solidcraft_engine::sketch::ConstraintKind,
+    selected: &[solidcraft_engine::Sel],
+) -> bool {
+    let (curves, points) = constraint_entities(kind);
+    selected.iter().any(|item| match item {
+        solidcraft_engine::Sel::SketchCurve { id, .. } => curves.iter().any(|&index| sk.curves.get(index).is_some_and(|curve| curve.id == *id)),
+        solidcraft_engine::Sel::SketchPoint { id } => {
+            points.iter().any(|&index| sk.points.get(index).is_some_and(|point| point.id == *id))
+                || curves.iter().any(|&index| {
+                    sk.curves
+                        .get(index)
+                        .is_some_and(|curve| curve.kind.point_ids().into_iter().any(|p| sk.points.get(p).is_some_and(|point| point.id == *id)))
+                })
+        }
+        _ => false,
+    })
+}
+
+/// A shared glyph is visible when any constraint represented by it qualifies. In
+/// particular, a failing or selected second Midpoint constraint must not disappear
+/// because glyph_constraints() chose the first as the displayed representative.
+fn glyph_group_visible_when_selected(
+    sk: &solidcraft_engine::sketch::Sketch,
+    id: &str,
+    selected: &[solidcraft_engine::Sel],
+    picked: Option<&str>,
+    is_failing: impl Fn(&String) -> bool,
+) -> bool {
+    let group = glyph_group(sk, id);
+    sk.constraints.iter().filter(|c| group.contains(&c.id)).any(|c| {
+        is_failing(&c.id)
+            || picked == Some(c.id.as_str())
+            || selected.iter().any(|sel| matches!(sel, solidcraft_engine::Sel::SketchConstraint { id } if id == &c.id))
+            || constraint_matches_selection(sk, &c.kind, selected)
+    })
+}
+
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
 fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
     let a = proj.to_screen(plane.to_world(Vec2::ZERO))?;
@@ -2668,6 +2783,11 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     for c in glyph_constraints(&ss.sketch) {
+        if app.ui.constraint_glyphs_selected_only
+            && !glyph_group_visible_when_selected(&ss.sketch, &c.id, &app.session.selection, picked.as_deref(), |id| ss.report.failing.contains(id))
+        {
+            continue;
+        }
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.
@@ -3128,6 +3248,70 @@ mod glyph_zoom_tests {
         assert_eq!(anchors.len(), 1);
         assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
         assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
+    }
+
+    /// Opt-in filtering ties visible glyphs to selected curves and points, including a
+    /// curve's endpoints. Without a selection the normal glyph list is untouched (#18817).
+    #[test]
+    fn selected_geometry_can_reveal_its_constraint_glyphs() {
+        use solidcraft_engine::Sel;
+        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(super::Vec2::new(20.0, 0.0), None).unwrap();
+        let other = sk.add_point(super::Vec2::new(0.0, 20.0), None).unwrap();
+        let line = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        let horizontal = ConstraintKind::Horizontal { l: line };
+        let curve = Sel::SketchCurve { id: sk.curves[line].id.clone(), sketch: None };
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[curve]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[b].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &horizontal, &[]), "unselected geometry has no filtered glyph");
+        assert!(
+            !super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]),
+            "unrelated points do not reveal every constraint"
+        );
+        let point_constraint = ConstraintKind::Fix { p: other };
+        assert!(super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(!crate::UiState::default().constraint_glyphs_selected_only, "the old display remains the default");
+    }
+
+    /// A shared midpoint badge must remain visible if any represented constraint fails or
+    /// belongs to the selection, even when the first constraint is not the relevant one.
+    #[test]
+    fn grouped_midpoint_glyph_respects_all_members() {
+        use solidcraft_engine::Sel;
+        use solidcraft_engine::sketch::{Constraint, ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(super::Vec2::new(10.0, 0.0), None).unwrap();
+        let c = sk.add_point(super::Vec2::new(5.0, -5.0), None).unwrap();
+        let d = sk.add_point(super::Vec2::new(5.0, 5.0), None).unwrap();
+        let mid = sk.add_point(super::Vec2::new(5.0, 0.0), None).unwrap();
+        let other = sk.add_point(super::Vec2::new(20.0, 20.0), None).unwrap();
+        let line1 = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        let line2 = sk.add_curve(CurveKind::Line { a: c, b: d }, None).unwrap();
+        for (id, line) in [("first", line1), ("second", line2)] {
+            sk.constraints.push(Constraint {
+                id: id.into(),
+                kind: ConstraintKind::Midpoint { p: mid, l: line },
+                param: None,
+                driven: false,
+                text: None,
+            });
+        }
+        assert_eq!(super::glyph_constraints(&sk).count(), 1, "both constraints share a glyph");
+        assert_eq!(super::glyph_group(&sk, "first").len(), 2);
+        let show = |selected: &[Sel], picked: Option<&str>, failing: &str| {
+            super::glyph_group_visible_when_selected(&sk, "first", selected, picked, |id| id.as_str() == failing)
+        };
+        assert!(!show(&[], None, ""), "no matching selection hides the grouped badge");
+        assert!(show(&[], None, "second"), "a failure in the second constraint shows the shared error glyph");
+        assert!(show(&[], Some("second"), ""), "picking the second constraint reveals the group");
+        assert!(show(&[Sel::SketchConstraint { id: "second".into() }], None, ""), "explicitly selecting the second constraint reveals the group");
+        assert!(show(&[Sel::SketchCurve { id: sk.curves[line2].id.clone(), sketch: None }], None, ""), "selecting the second line reveals the group");
+        assert!(!show(&[Sel::SketchPoint { id: sk.points[other].id.clone() }], None, ""), "unrelated geometry does not reveal the group");
     }
 
     #[test]

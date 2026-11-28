@@ -39,6 +39,7 @@ mod construct;
 mod construct_auto;
 pub(crate) mod delete;
 pub(crate) mod diagnostics;
+mod dogbone;
 mod drawing;
 mod drawing_auto_mark;
 mod drawing_balloon;
@@ -142,6 +143,7 @@ pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
 pub use joints::MAX_REACH_JOINTS;
+pub use joints::drive_preview;
 pub use joints::posed_joints;
 pub use joints::reach_from;
 pub use joints::reach_preview;
@@ -215,6 +217,7 @@ mod point_cloud_deviation;
 mod pulleys;
 #[cfg(test)]
 mod pulleys_tests;
+pub(crate) mod scan_align;
 mod script;
 mod section;
 mod selection;
@@ -326,6 +329,7 @@ mod tab_views;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
+mod weld;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -652,6 +656,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(point_cloud::COMMANDS.iter());
     v.extend(point_cloud_deviation::COMMANDS.iter());
+    v.extend(scan_align::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
@@ -661,6 +666,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(sketch_links::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
+    v.extend(dogbone::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
@@ -674,6 +680,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(frame_gusset::COMMANDS.iter());
     v.extend(frame_rotate_member::COMMANDS.iter());
+    v.extend(weld::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());

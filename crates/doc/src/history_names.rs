@@ -134,6 +134,7 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
     let centres = || crate::naming::face_centres(b).unwrap_or_default();
     let parents: Vec<(String, bool)> = named.iter().map(|n| (n.name.clone(), n.verified)).collect();
     let names = qualify_at(named, &adjacency(h), by_place(&o.feature, &centres));
+    let names = fold_cap_pieces(names, &parents, &lineage.cap_pieces);
     Some(match lineage.pieces.as_deref() {
         Some(pieces) => split_pieces(names, &parents, pieces, fid, &centres),
         None => names,
@@ -143,17 +144,61 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
 /// What starts the role of a piece of a Split Face (`F7:split:in`): no face has it.
 const SPLIT_ROLE: &str = "split:";
 
-/// Whether a piece qualifier is a Split Face's piece role (`F7:split:in`), not a face around it.
-pub(crate) fn is_split_role(q: &str) -> bool {
-    q.strip_prefix('F')
-        .and_then(|rest| rest.split_once(':'))
-        .is_some_and(|(id, role)| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && role.starts_with(SPLIT_ROLE))
+/// Whether a piece qualifier is a feature's role of the piece, not a face around it: a Split
+/// Face's (`F7:split:in`) or a Fold's of a piece of a panel's cap (`F30:fold:1`).
+pub(crate) fn is_piece_role(q: &str) -> bool {
+    q.strip_prefix('F').and_then(|rest| rest.split_once(':')).is_some_and(|(id, role)| {
+        !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && (role.starts_with(SPLIT_ROLE) || role.starts_with(crate::sheet::FOLD_ROLE))
+    })
 }
 
-/// Whether `name` names a piece of a face a Split Face cut, by the feature's own name for it: then
-/// it stands for that piece alone, not every piece of the face.
+/// Whether `name` names a piece of a face by a feature's own role for it (a piece a Split Face cut,
+/// a piece of a cap a Fold parted): then it stands for that piece alone, not every piece of the face.
 pub fn names_split_piece(name: &str) -> bool {
-    crate::piece_names::piece_parts(name).is_some_and(|(_, around)| around.iter().any(|q| is_split_role(q)))
+    crate::piece_names::piece_parts(name).is_some_and(|(_, around)| around.iter().any(|q| is_piece_role(q)))
+}
+
+/// The pieces of panel caps folds parted that nothing around them told apart (numbered by place,
+/// `F2:bottom#2`), named by the folds' roles of the piece each is on (`roles`, see
+/// `Lineage::cap_pieces`): `F2:bottom#[F30:fold:stay]`, `F2:bottom#[F30:fold:1]`, exact as the
+/// face they came from (`parents`, their names before they were told apart). The number by place
+/// stays each piece's [`FaceInfo::former`] name, so a design saved before still finds it (#21300).
+/// A piece the faces around it told apart keeps that name; pieces the roles do not tell apart
+/// either keep their numbers.
+fn fold_cap_pieces(mut names: Names, parents: &[(String, bool)], roles: &[Option<Vec<String>>]) -> Names {
+    if roles.len() != names.faces.len() || parents.len() != names.faces.len() {
+        return names;
+    }
+    let mut faces: Vec<String> = names.faces.as_ref().clone();
+    let mut renamed: Vec<(usize, String)> = Vec::new();
+    for (i, own) in roles.iter().enumerate() {
+        let (Some(own), Some((parent, _)), Some(now)) = (own, parents.get(i), faces.get(i)) else { continue };
+        if tie_number(now).is_none() || tie_number(parent).is_some() {
+            continue;
+        }
+        let (stem, inherited, _) = split_piece(parent);
+        let mut key: BTreeSet<&str> = inherited.iter().map(String::as_str).collect();
+        key.extend(own.iter().map(String::as_str));
+        let key: Vec<&str> = key.into_iter().collect();
+        renamed.push((i, piece_name(&stem, &key, None)));
+    }
+    let mut count: BTreeMap<&str, usize> = BTreeMap::new();
+    for (_, name) in &renamed {
+        *count.entry(name.as_str()).or_default() += 1;
+    }
+    let taken: BTreeSet<&str> = faces.iter().map(String::as_str).collect();
+    let keep: Vec<(usize, String)> =
+        renamed.iter().filter(|(_, n)| count.get(n.as_str()) == Some(&1) && !taken.contains(n.as_str())).cloned().collect();
+    for (i, name) in keep {
+        let (Some(slot), Some(info), Some((_, exact))) = (faces.get_mut(i), names.info.get_mut(i), parents.get(i)) else { continue };
+        info.verified = *exact;
+        if let Some(own) = roles.get(i).and_then(Option::as_ref) {
+            info.bounds.extend(own.iter().cloned());
+        }
+        info.former = Some(std::mem::replace(slot, name));
+    }
+    names.faces = Arc::new(faces);
+    names
 }
 
 /// The pieces a Split Face (feature `fid`) cut faces into, named by it: each piece is the face it
@@ -794,7 +839,7 @@ pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Opti
     // A Split Face's piece role its own name carries tells it apart too, when the piece was split
     // again since (the role is no face around it).
     let own: Vec<&str> =
-        crate::piece_names::piece_parts(current).map(|(_, around)| around.into_iter().filter(|q| is_split_role(q)).collect()).unwrap_or_default();
+        crate::piece_names::piece_parts(current).map(|(_, around)| around.into_iter().filter(|q| is_piece_role(q)).collect()).unwrap_or_default();
     if let Some((stem, around)) = crate::piece_names::piece_parts(name)
         && (crate::naming::parent_piece(current) == Some(stem) || (current == stem && !around.is_empty() && name.ends_with(']')))
         && info.is_some_and(|i| {
