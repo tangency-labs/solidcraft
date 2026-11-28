@@ -5055,6 +5055,7 @@ fn pick_cached_with(app: &mut SolveApp, proj: &Proj, pos: Pos2, feedback: Option
     app.viewport.woken_centre.hash(&mut h);
     crate::sketch3d::drawing(app).hash(&mut h);
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
+    crate::snap_wake::pivot_face(app).is_some().hash(&mut h);
     crate::hole_place::snapping(app).hash(&mut h);
     crate::drag_snap::suppressed().hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
@@ -5300,6 +5301,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // Select Other and tool picks share the same visible-image boundary as ordinary picks.
     if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && !proj.rect.contains(pos) {
         return Some(Vec::new());
+    }
+    // These are deliberate screen-space handles, not candidates on the body under the pointer.
+    // A nearby edge, or material in front of a centre, must not steal the click.
+    if crate::snap_wake::pivot_face(app).is_some() {
+        return Some(crate::snap_wake::hits(app, proj, pos).into_iter().map(|(_, hit, _)| hit).collect());
     }
     let s = &app.session;
     // A joint drag drawn by moving its bodies shows them where the world it began on has them,
@@ -9144,6 +9150,11 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
+    let picking_pivot = crate::snap_wake::pivot_face(app).is_some();
+    if picking_pivot {
+        // This input knows its face before hover testing and needs no hover to show its handles.
+        crate::snap_wake::update(app, &[], false, None);
+    }
     // Where the pick under the pointer runs: nowhere while something else owns the pointer. An
     // empty `hits` means empty space only where it ran (`picked`).
     let picked = hover.filter(|_| {
@@ -9180,16 +9191,18 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let cand = stable_alignment_hover(app, &proj, hover.filter(|_| inside && !navigating), cand);
     // The view moved under a still pointer: the highlight under it stays on the face it
     // was on instead of going off (#2130). It is picked again when the gesture ends.
-    if !(hover_frozen && inside) {
+    if picking_pivot || !(hover_frozen && inside) {
         app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     }
     wake_centre(app, &hits, hover, &proj);
 
-    let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
-        ui.input(|i| i.modifiers),
-        crate::tool_modifiers::Platform::of(ui.ctx()),
-    ));
-    crate::snap_wake::update(app, &hits, keep, hover.filter(|_| inside).map(|p| (&proj, p)));
+    if !picking_pivot {
+        let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
+            ui.input(|i| i.modifiers),
+            crate::tool_modifiers::Platform::of(ui.ctx()),
+        ));
+        crate::snap_wake::update(app, &hits, keep, hover.filter(|_| inside).map(|p| (&proj, p)));
+    }
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels

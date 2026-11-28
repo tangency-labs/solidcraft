@@ -8,7 +8,7 @@ use solidcore::geom::vector3d::Point3;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 
-use super::{offset_faces, offset_sheet, shell, thicken};
+use super::{offset_faces, offset_sheet, shell, thicken, transform_face};
 use crate::blend::{blend, Blend, Corners};
 use crate::session::{self, run};
 use crate::{make_box, make_cylinder, make_sphere, Body, Error, Order};
@@ -1024,6 +1024,233 @@ fn the_top_moves_out() {
     let o = order(&b);
     offset_faces(&b, &o, &[top(&b, &o)], 2.0).unwrap();
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
+}
+
+// Definitions and certificates §5: at tens of mm, coordinates within this floor agree.
+const PART_SCALE_FLOOR_MM: f64 = 1e-10;
+
+/// The roof is z = 12 + y: a 45-degree turn around the line at y=0, z=10
+/// followed by a 2 mm lift. The volume is base area times mean height.
+#[test]
+fn transform_face_tilt_meets_the_kept_sides() {
+    use crate::history::{recorded_if_changed, Change, FaceOrigin, Made};
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let mut o = order(&b);
+    // A recorder's input order need not match the kernel's output order.
+    o.faces.rotate_left(1);
+    let roof = top(&b, &o);
+    let history = recorded_if_changed(&b, &o, Made::Local { moved: &[roof] }, || {
+        transform_face(
+            &b,
+            &o,
+            roof,
+            [0.0, 0.0, 2.0],
+            [0.0, 0.0, 10.0],
+            [1.0, 0.0, 0.0],
+            PI / 4.0,
+        )
+    })
+    .unwrap()
+    .expect("the roof changed");
+    let new_roof = through(&b, &order(&b), [5.0, 5.0, 17.0]);
+    assert_eq!(history.faces[new_roof].change, Change::Modified);
+    assert_eq!(history.faces[new_roof].origins, [FaceOrigin::Face(roof)]);
+    let record = b.to_record().unwrap().0;
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+    for x in [0.0, 10.0] {
+        for y in [0.0, 10.0] {
+            assert!(record.vertices.iter().any(|v| v.point == [x, y, 0.0]));
+            assert!(
+                record.vertices.iter().any(|v| {
+                    (v.point[0] - x).abs() <= PART_SCALE_FLOOR_MM
+                        && (v.point[1] - y).abs() <= PART_SCALE_FLOOR_MM
+                        && (v.point[2] - (12.0 + y)).abs() <= PART_SCALE_FLOOR_MM
+                }),
+                "missing roof corner at ({x}, {y})"
+            );
+        }
+    }
+    b.check_solid().unwrap();
+    assert!(b.is_manifold_solid().unwrap());
+    assert!(rel(volume(&b), 1700.0) <= 1e-9);
+}
+
+/// A hole r=2 going through the block still removes 40π mm³ after its axis
+/// moves 1 mm along x. The centres of the circular rims, not the volume, move.
+#[test]
+fn transform_face_translates_a_bore_without_resizing_it() {
+    all_fixes();
+    let drill = make_cylinder([10.0, 10.0, -1.0], 2.0, 12.0).unwrap();
+    let b = crate::boolean::boolean(block(), drill, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let o = order(&b);
+    let wall = through(&b, &o, [10.0, 12.0, 5.0]);
+    assert!(transform_face(
+        &b,
+        &o,
+        wall,
+        [1.0, 0.0, 0.0],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        0.0
+    )
+    .unwrap());
+    let (record, _) = b.to_record().unwrap();
+    assert_eq!(record.faces.len(), 7);
+    let (frame, radius) = record
+        .faces
+        .iter()
+        .find_map(|f| match &f.surface {
+            solidcore_record::brep::Surface::Cylinder { frame, radius } => Some((frame, radius)),
+            _ => None,
+        })
+        .expect("the bore must retain its cylindrical support");
+    assert!((radius - 2.0).abs() <= PART_SCALE_FLOOR_MM);
+    assert!((frame.origin[0] - 11.0).abs() <= PART_SCALE_FLOOR_MM);
+    assert!((frame.origin[1] - 10.0).abs() <= PART_SCALE_FLOOR_MM);
+    // Across either radius the rim must stay in its plane to the same linear floor.
+    assert!(radius * frame.x_axis[2].abs() <= PART_SCALE_FLOOR_MM);
+    assert!(radius * frame.y_axis[2].abs() <= PART_SCALE_FLOOR_MM);
+    for x in [0.0, 30.0] {
+        for y in [0.0, 20.0] {
+            for z in [0.0, 10.0] {
+                assert!(record.vertices.iter().any(|v| v.point == [x, y, z]));
+            }
+        }
+    }
+    b.check_solid().unwrap();
+    assert!(rel(volume(&b), ABC - 40.0 * PI) <= 1e-9);
+}
+
+#[test]
+fn transform_face_on_an_invariant_plane_preserves_topology_and_origins() {
+    use crate::history::{recorded, Change, FaceOrigin, Made};
+    all_fixes();
+    let b = block();
+    let o = order(&b);
+    let f = top(&b, &o);
+    let before = b.to_smb(false).unwrap();
+    for (slide, spin) in [
+        ([0.0; 3], 0.0),
+        ([2.0, -4.0, 0.0], 0.0),
+        ([0.0; 3], PI / 4.0),
+    ] {
+        let h = recorded(&b, &o, Made::Plain, || {
+            let changed =
+                transform_face(&b, &o, f, slide, [4.0, 5.0, 10.0], [0.0, 0.0, 1.0], spin)?;
+            assert!(!changed);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(h.faces.len(), 6);
+        for (i, f) in h.faces.iter().enumerate() {
+            assert_eq!(f.change, Change::Kept);
+            assert_eq!(f.origins, [FaceOrigin::Face(i)]);
+        }
+        assert_eq!(h.edges.len(), 12);
+        for (i, origins) in h.edges.iter().enumerate() {
+            assert_eq!(origins, &[i]);
+        }
+        assert_eq!(b.to_smb(false).unwrap(), before);
+    }
+}
+
+#[test]
+fn transform_face_slide_along_an_oblique_plane_is_exact() {
+    use crate::sweep::{extrude, Curve, DraftCorner};
+    all_fixes();
+    let a = [1000.0, 0.0, 0.0];
+    let b = [1010.0, 10.0, 0.0];
+    let c = [1000.0, 10.0, 0.0];
+    let profile = [(a, b), (b, c), (c, a)].map(|(start, end)| Curve::Line { start, end });
+    let prism = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let o = order(&prism);
+    let diagonal = through(&prism, &o, [1005.0, 5.0, 5.0]);
+    // The sweep reconstructs a segment endpoint from its direction and length.
+    // Use the stored plane's tangent, not its nominal (1,1,0) direction.
+    let slide = {
+        let brep = prism.lock();
+        let surface = solidcore::topology::face::p2::surface(&brep, o.faces[diagonal])
+            .unwrap()
+            .unwrap();
+        let solidcore::surface::surface::SurfaceKind::Plane(plane) = surface.kind() else {
+            panic!("the diagonal wall must be a plane");
+        };
+        let frame = plane.position();
+        let u = frame.x_axis();
+        assert!(u.x.abs() > 0.5 && (u.x - u.y).abs() < 1e-12 && u.z == 0.0);
+        let d = u * 0.125; // exact binary scaling
+        let origin = frame.origin();
+        let rounded = (origin + d) - origin;
+        assert_ne!(
+            rounded.x * d.y,
+            rounded.y * d.x,
+            "rounding must break tangency"
+        );
+        d.to_array()
+    };
+    let before = prism.to_smb(false).unwrap();
+    assert!(!transform_face(&prism, &o, diagonal, slide, a, [0.0, 0.0, 1.0], 0.0).unwrap());
+    assert_eq!(prism.to_smb(false).unwrap(), before);
+}
+
+#[test]
+fn transform_face_refuses_an_inverted_box_and_restores_its_input() {
+    all_fixes();
+    let b = block();
+    let o = order(&b);
+    let f = top(&b, &o);
+    let before = b.to_smb(false).unwrap();
+    let reason =
+        transform_face(&b, &o, f, [0.0, 0.0, -11.0], [0.0; 3], [0.0, 0.0, 1.0], 0.0).unwrap_err();
+    assert!(
+        matches!(
+            reason,
+            Error::OffsetRefused { .. }
+                | Error::NotSolidBecause(_)
+                | Error::NoRoom
+                | Error::WallsTouch
+                | Error::Refused { .. }
+        ),
+        "inverting the top must give a geometric refusal, not {reason}"
+    );
+    assert_eq!(b.to_smb(false).unwrap(), before);
+    b.check_solid().unwrap();
+    assert!(rel(volume(&b), ABC) <= 1e-9);
+}
+
+#[test]
+fn transform_face_checks_inputs_before_accepting_identity() {
+    all_fixes();
+    let b = block();
+    let o = order(&b);
+    let f = top(&b, &o);
+    let z = [0.0, 0.0, 1.0];
+    for (face, delta, origin, axis, angle) in [
+        (o.faces.len(), [0.0; 3], [0.0; 3], z, 0.0),
+        (f, [0.0; 3], [0.0; 3], [0.0; 3], 0.0),
+        (f, [0.0; 3], [0.0; 3], [f64::NAN; 3], 0.0),
+        (f, [0.0; 3], [f64::INFINITY; 3], z, 0.0),
+        (f, [f64::NAN; 3], [0.0; 3], z, 0.0),
+        (f, [0.0; 3], [0.0; 3], z, f64::NAN),
+    ] {
+        assert_eq!(
+            transform_face(&b, &o, face, delta, origin, axis, angle),
+            Err(Error::Argument)
+        );
+    }
+    let sheet = plate();
+    assert!(transform_face(&sheet, &order(&sheet), 0, [0.0; 3], [0.0; 3], z, 0.0).is_err());
 }
 
 /// An 82 x 47 x 20 box with a post r 10, 10 high, about each corner (#14370), the posts'
@@ -2338,7 +2565,9 @@ fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
     );
     assert_eq!(
         e.map(|e| e.to_string()).as_deref(),
-        Some("the offset is refused: its offset's loops cross in a way the offset cannot resolve: three loops cross at one point")
+        Some(
+            "the offset is refused: its offset's loops cross in a way the offset cannot resolve: three loops cross at one point"
+        )
     );
     let what = Unsoundness::NotManifoldSolid;
     assert_eq!(

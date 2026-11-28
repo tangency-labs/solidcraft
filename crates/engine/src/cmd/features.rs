@@ -13,7 +13,7 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
-use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams};
+use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams, TransformFaceParams};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DraftParams,
@@ -53,6 +53,7 @@ const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new()
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const DELETE_FACE_CONTRACT: TypedContract<DeleteFaceParams> = TypedContract::new();
 const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new();
+const TRANSFORM_FACE_CONTRACT: TypedContract<TransformFaceParams> = TypedContract::new();
 const SHELL_CONTRACT: TypedContract<ShellParams> = TypedContract::new();
 const DRAFT_CONTRACT: TypedContract<DraftParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
@@ -381,6 +382,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OFFSET_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
+    CommandSpec::new("solid.transform_face", "Transform Face", crate::checked!("solid.transform_face", transform_face)).begins_edit()
+        .at("SOLID", "MODIFY")
+        .icon("move")
+        .contract(&TRANSFORM_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("face: [x,y,z] or name from model.faces; body?; translate?: [dx,dy,dz]; axis?: X|Y|Z|[x,y,z]; origin?: [x,y,z]; angle?: expr"),
     CommandSpec::new("solid.thread", "Thread", crate::checked!("solid.thread", thread)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("thread")
@@ -1225,6 +1232,15 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
                 return Err(EngineError::Other("selected cylinder face has no persistent identity".into()));
             }
             names
+        } else if let FeatureKind::TransformFace { body, face, .. } = &kind {
+            // Never recapture a named pick from a point or borrow an unnamed face's identity
+            // from a coincident neighbour. Store the name on the input body alone.
+            let name = str_(p, "face").map(str::to_owned).or_else(|| {
+                let owner = before.body(body)?;
+                let index = owner.body.face_at_point(face.0).ok().flatten()?;
+                solidcraft_doc::naming::face_names(owner).get(index).filter(|name| !name.is_empty()).cloned()
+            });
+            vec![name.ok_or_else(|| bad("solid.transform_face", "the picked face has no persistent name"))?]
         } else if pts.is_empty() {
             Vec::new()
         } else if matches!(kind, FeatureKind::Hole { .. }) {
@@ -6507,6 +6523,44 @@ fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::OffsetFace { faces: faces.into_iter().map(FacePick).collect(), distance, body: picked.body.clone().map(BodyName) },
     )
+}
+
+/// Check motion in the frame it was given in. The frame mapper uses this before composing
+/// expressions, so an invalid coordinate cannot disappear while mapping to the owner's frame.
+pub(crate) fn transform_face_motion(s: &Session, p: &Value) -> Result<(PointExpr, Dir, Option<PointExpr>, Option<Expr>)> {
+    let cmd = "solid.transform_face";
+    if p.get("translate").is_none() && p.get("angle").is_none() {
+        return Err(bad(cmd, "give `translate`, `angle`, or both"));
+    }
+    let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
+    let axis = Dir(p.get("axis").map(axis_dir_form).transpose().map_err(|why| bad(cmd, why))?.unwrap_or(Vec3::Z));
+    let origin = point_param(s, p, "origin", cmd)?;
+    let angle = p.get("angle").map(|_| req_expr(cmd, p, "angle")).transpose()?;
+    if let Some(angle) = &angle {
+        check_expr(s, angle, Kind::Angle, cmd, "angle")?;
+    }
+    Ok((translate, axis, origin, angle))
+}
+
+fn transform_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.transform_face";
+    // Unlike Move/Copy this command must not silently ignore a copy, matrix or multi-body
+    // request. Enforce its shape even when the session does not require contracts.
+    if s.param_check != crate::schema::ParamCheck::Strict
+        && let Some(issue) = crate::schema::Contract::check(&TRANSFORM_FACE_CONTRACT, p).into_iter().next()
+    {
+        return Err(bad(cmd, issue.message));
+    }
+    let (translate, rotate_axis, origin, angle) = transform_face_motion(s, p)?;
+    let input = s.model.state();
+    let pick = p.get("face").ok_or_else(|| bad(cmd, "`face` is required"))?;
+    let owner = super::face::transform_face_owner(&input, pick, str_(p, "body"))?;
+    // A nested constructor also receives component-local picks. Look up a named face in this
+    // input state even when the enclosing command has no coordinate mapping of its own.
+    let _local = crate::frames::local_geometry();
+    let face = FacePick(super::face::face_ref(s, pick, Some(&owner.name), cmd)?);
+    let body = BodyName(owner.definition_name().to_owned());
+    add_feature_local(s, p, FeatureKind::TransformFace { face, body, translate, rotate_axis, origin, angle })
 }
 
 #[cfg(test)]

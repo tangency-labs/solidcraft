@@ -307,6 +307,13 @@ offset_face
   inputs:
     Distance = offset_face.distance (Length)
   expressions: offset_face.distance
+transform_face
+  inputs:
+    X distance = tx (Length)
+    Y distance = ty (Length)
+    Z distance = tz (Length)
+    Angle = turn (Angle)
+  expressions: tx, ty, tz, turn, ox, oy, oz
 delete_face
 bounding_solid
   inputs:

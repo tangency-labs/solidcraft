@@ -17,6 +17,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::Vec3;
+use solidcraft_smlib::history::Order;
 use solidcraft_smlib::{Brep, CheckLevel, Error as SmError};
 
 use crate::body::Body;
@@ -89,6 +90,12 @@ fn pick_tolerance(b: &Body) -> f64 {
     b.size() * 1e-3 + 1e-6
 }
 
+/// The pick reach widened by the display chord deviation: a near-rim click picks the
+/// nearest exact trimmed face, including on a curved wall.
+pub(crate) fn exact_pick_reach(b: &Body) -> f64 {
+    2.0 * pick_tolerance(b)
+}
+
 fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
     p.iter().map(|v| [v.x, v.y, v.z]).collect()
 }
@@ -107,19 +114,24 @@ pub(crate) fn run(
     run_ordered(name, b, wall, |tagged, _| op(tagged))
 }
 
-/// Like [`run`], also passing the operand's SMLib-to-record [`solidcraft_smlib::history::Order`]
+/// Like [`run`], also passing the operand's SMLib-to-record [`Order`]
 /// so the operation can name edges directly by SMLib index.
 pub(crate) fn run_ordered(
     name: &str,
     b: &Body,
     wall: Option<f64>,
-    op: impl FnOnce(&Brep, Option<&solidcraft_smlib::history::Order>) -> std::result::Result<Brep, SmError>,
+    op: impl FnOnce(&Brep, Option<&Order>) -> std::result::Result<Brep, SmError>,
 ) -> Result<(Body, Option<History>)> {
-    use crate::validation::Step;
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
     let r = op(&tagged, ob.as_ref()).map_err(|e| refused(name, wall, e))?;
+    finish_run(name, b, &sb, ob, r)
+}
+
+/// Bring a tagged operation's result back, with its checked geometry and native origins.
+fn finish_run(name: &str, b: &Body, sb: &Brep, ob: Option<Order>, r: Brep) -> Result<(Body, Option<History>)> {
+    use crate::validation::Step;
     let step = crate::validation::step();
     let (body, or) = body_from_smlib_ordered(&r)?;
     if step == Step::Check
@@ -232,7 +244,11 @@ pub(crate) fn offset_faces(b: &Body, chosen: &[usize], distance: f64) -> Result<
     let tol = pick_tolerance(b);
     let pts = points(&at);
     let (r, h) = run("offset faces", b, None, |s| s.offset_faces(&pts, tol, distance))?;
-    let h = h.map(|mut h| {
+    Ok(moved_faces(r, h, b, chosen))
+}
+
+fn moved_faces(r: Body, history: Option<History>, input: &Body, chosen: &[usize]) -> Body {
+    let h = history.map(|mut h| {
         for f in &mut h.faces {
             if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {
                 f.change = Change::Modified;
@@ -240,7 +256,33 @@ pub(crate) fn offset_faces(b: &Body, chosen: &[usize], distance: f64) -> Result<
         }
         h
     });
-    Ok(r.with_checked_history(h, &record::counts(&[b])))
+    r.with_checked_history(h, &[(input.face_count(), input.edge_count())])
+}
+
+/// Retrim a single support. Resolve the pick on the original body, without healing away
+/// split faces, and carry that exact face into the tagged copy in its native order.
+pub(crate) fn transform_face(b: &Body, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+    const NAME: &str = "transform face";
+    let _span = solidcraft_profile::span("kernel", "transform_face");
+    b.require_brep(NAME)?;
+    let tolerance = exact_pick_reach(b);
+    let chosen = b.face_within(at, tolerance)?.ok_or_else(|| KernelError::Invalid(format!("no face at {at}")))?;
+    let (sb, ob) = smlib_body_ordered(b)?;
+    let order = ob.ok_or_else(|| KernelError::Failed("transform face: cannot match the body's face order".into()))?;
+    let index = if order.faces.is_empty() {
+        chosen
+    } else {
+        order.faces.iter().position(|&face| face == chosen).ok_or_else(|| KernelError::Failed("transform face: missing selected face".into()))?
+    };
+    let pick = solidcraft_smlib::PickedFace { index, at: at.into(), tolerance };
+    let tagged = sb.tagged(0).map_err(|e| failed(NAME, "tag", e))?;
+    let (r, changed) = tagged.transform_face(pick, translate.into(), origin.into(), axis.into(), angle).map_err(|e| refused(NAME, None, e))?;
+    if !changed {
+        solidcraft_smlib::trace::exported(&r, b.record());
+        return Ok(b.unchanged_step());
+    }
+    let (r, h) = finish_run(NAME, b, &sb, Some(order), r)?;
+    Ok(moved_faces(r, h, b, &[chosen]).with_split_lines(b.splits.clone()).inherit_regularization_protection(b))
 }
 
 /// [`crate::thicken`] through SMLib: the sheet `b` grown by `thickness` along its faces'
@@ -295,15 +337,7 @@ pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcore_record::Plane, pu
     let pts = points(&face_points(b, &chosen)?);
     let o = neutral.origin;
     let (r, h) = run("draft", b, None, |s| s.draft(&pts, tol, [o.x, o.y, o.z], [normal.x, normal.y, normal.z], [pull.x, pull.y, pull.z], angle))?;
-    let h = h.map(|mut h| {
-        for f in &mut h.faces {
-            if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {
-                f.change = Change::Modified;
-            }
-        }
-        h
-    });
-    Ok(r.with_checked_history(h, &record::counts(&[b])))
+    Ok(moved_faces(r, h, b, &chosen))
 }
 
 /// The face of `b` under each point: the face of the nearest triangle, within the picking reach.

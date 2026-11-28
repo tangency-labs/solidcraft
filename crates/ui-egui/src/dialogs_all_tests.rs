@@ -2315,6 +2315,50 @@ fn offset_face_dialog_accepts_a_curved_display_triangle_hit() {
 }
 
 #[test]
+fn transform_face_accepts_a_curved_display_pick_and_disables_ok_for_invalid_fields() {
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"radius":10,"height":20,"body_name":"Cylinder"})).unwrap();
+    h.app.start("solid.transform_face");
+    h.frames(3);
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0), "a face is required");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let body = state.body("Cylinder").unwrap();
+    let index = body.body.face_at_point(Vec3::new(10.0, 0.0, 10.0)).unwrap().unwrap();
+    let mesh = body.mesh();
+    let triangle = mesh.triangles.iter().zip(&mesh.tri_face).find_map(|(t, f)| if *f as usize == index { mesh.tri(t) } else { None }).unwrap();
+    let point = Vec3::from(annular_samples::triangle_centroid(triangle.map(|p| [p.x, p.y, p.z])));
+    assert_eq!(body.body.face_at_point(point).unwrap(), None);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.pick(&h.app.session, Sel::Face { body: "Cylinder".into(), index, point });
+    h.frames(3);
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "a curved pick and explicit zero motion are valid");
+    let base = h.app.dialog.as_ref().unwrap().clone();
+    let cmds = apply_commands(&h.app, &base).unwrap();
+    assert_eq!(cmds[0].1["body"], "Cylinder");
+    assert!(cmds[0].1.get("origin").is_none(), "the default pivot follows the picked face");
+    h.app.session.preview(&cmds).unwrap();
+    for invalid in ["empty length", "angle dimension", "zero axis", "pivot length"] {
+        let mut d = base.clone();
+        let Kind::TransformFace { translate, angle, axis, custom_axis, explicit_pivot, origin } = &mut d.kind else { panic!("expected face form") };
+        match invalid {
+            "empty length" => translate[1].clear(),
+            "angle dimension" => *angle = "5 mm".into(),
+            "zero axis" => {
+                *axis = 3;
+                *custom_axis = ["0"; 3].map(String::from);
+            }
+            _ => {
+                *explicit_pivot = true;
+                origin[0] = "bad_length".into();
+            }
+        }
+        h.app.dialog = Some(d);
+        h.frames(3);
+        assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0), "{invalid}");
+    }
+}
+
+#[test]
 fn draft_rejects_faces_from_different_bodies() {
     let h = Harness::new();
     let mut d = Dialog::for_command(&h.app, "solid.draft").unwrap();
