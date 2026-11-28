@@ -1604,7 +1604,6 @@ impl SolveApp {
         }
         render_workspace::sync_backend(self);
         ai_connect::tick(self);
-        self.msaa_supported = rs.msaa_supported.clone();
         let info = rs.adapter.get_info();
         self.help.gpu = Some(format!("{} ({:?}, {:?})", info.name.trim(), info.backend, info.device_type));
         self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
