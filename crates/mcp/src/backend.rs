@@ -9,6 +9,34 @@ use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::view::Guides;
 use solidcraft_viewport::StandardView;
 
+/// Structural inventory of a design's resource-visible items (bodies, sketches, features).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesignStructure {
+    pub bodies: Vec<String>,
+    pub sketches: Vec<(u64, String)>,
+    pub features: Vec<(u64, String)>,
+}
+
+/// Snapshot of the active design's identity, revision, and optional structural inventory.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesignState {
+    pub document_id: String,
+    pub revision: u64,
+    /// Present when the backend can inspect the design locally (`Headless`). When `None` (e.g. a
+    /// bridged `Remote` queried via `document.revision`), any change to `(document_id, revision)`
+    /// is conservatively treated as potentially changing the resource list as well.
+    pub structure: Option<DesignStructure>,
+}
+
+impl DesignState {
+    /// Parse a `document.revision` reply (`{"document_id": "...", "revision": N}`).
+    pub fn from_revision_reply(v: &Value) -> Option<Self> {
+        let document_id = v.get("document_id")?.as_str()?.to_owned();
+        let revision = v.get("revision")?.as_u64()?;
+        Some(Self { document_id, revision, structure: None })
+    }
+}
+
 /// Something that answers control-channel methods: `engine.execute`, `engine.commands`,
 /// `document.inspect`, `ui.help` (build metadata), `ui.view`, `ui.render`, `ui.screenshot`, `control.running`, and
 /// `control.pending` (the result of a request that was still running when its call returned:
@@ -67,6 +95,11 @@ pub trait Backend {
     /// Attach or clear an out-of-band cancellation flag for the active tool call
     /// (`notifications/cancelled`). Default does nothing.
     fn set_cancel_flag(&mut self, _cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>) {}
+    /// Current active design identity, revision, and optional structural inventory, used to detect
+    /// changes for MCP resource notifications. Returns `None` when unavailable.
+    fn design_state(&mut self) -> Option<DesignState> {
+        None
+    }
 }
 
 /// How a tool error starts when a request is still running in the app after the wait: the
@@ -195,6 +228,7 @@ impl Headless {
             "engine.script" => s.run_script(&p).map(Value::from).map_err(|e| e.to_string()),
             "engine.commands" => s.execute("engine.commands", &json!({})).map_err(|e| e.to_string()),
             "document.inspect" => s.execute("document.inspect", &p).map_err(|e| e.to_string()),
+            "document.revision" => s.execute("document.revision", &p).map_err(|e| e.to_string()),
             "document.selection" => Ok(json!({"selection": solidcraft_engine::selection_context::selection_reply(s)})),
             "ui.help" if p.get("item").is_none_or(Value::is_null) => {
                 Ok(json!({"version": env!("CARGO_PKG_VERSION"), "commit": solidcraft_engine::io::SOURCE_COMMIT}))
@@ -285,5 +319,14 @@ impl Backend for Headless {
     }
     fn param_check(&self) -> ParamCheck {
         self.session.param_check
+    }
+    fn design_state(&mut self) -> Option<DesignState> {
+        let revision = self.session.design_revision();
+        let document_id = self.session.document_id.clone();
+        let model = self.session.model.state();
+        let bodies = model.bodies.iter().map(|b| b.name.clone()).collect();
+        let sketches = model.sketches.iter().map(|sk| (sk.feature, sk.name.clone())).collect();
+        let features = self.session.doc.features.iter().map(|f| (f.id, f.name.clone())).collect();
+        Some(DesignState { document_id, revision, structure: Some(DesignStructure { bodies, sketches, features }) })
     }
 }

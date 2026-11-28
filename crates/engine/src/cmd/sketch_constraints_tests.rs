@@ -2291,6 +2291,7 @@ fn saved_sketch_with_coincident_constraints_replays_unchanged() {
                 kind: ConstraintKind::Coincident { p, q },
                 param: None,
                 driven: false,
+                driven_param: None,
                 text: None,
             });
         }

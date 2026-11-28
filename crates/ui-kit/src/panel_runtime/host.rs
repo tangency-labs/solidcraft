@@ -176,10 +176,18 @@ pub struct PanelPresentation {
     pub status: Option<String>,
     pub attention: bool,
     pub actions: Vec<RuntimeAction>,
+    /// Already localised. With one, the actions listed in the panel's ⋯ menu sit under this
+    /// heading, and each on/off one shows a check mark.
+    pub menu_heading: Option<String>,
 }
 impl PanelPresentation {
     pub fn validate(&self) -> PanelResult<()> {
-        if self.title.is_empty() || self.title.len() > 256 || self.status.as_ref().is_some_and(|s| s.len() > 1024) || self.actions.len() > MAX_TABS {
+        if self.title.is_empty()
+            || self.title.len() > 256
+            || self.status.as_ref().is_some_and(|s| s.len() > 1024)
+            || self.menu_heading.as_ref().is_some_and(|h| h.is_empty() || h.len() > 256)
+            || self.actions.len() > MAX_TABS
+        {
             return Err(error(Rule::CollectionLimit, "presentation bound"));
         }
         valid_id(&self.icon)?;

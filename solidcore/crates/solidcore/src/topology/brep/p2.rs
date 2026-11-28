@@ -2211,23 +2211,24 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
 
     // check all solutions to find closest one with lowest dimensional object
     let mut best = *first;
+    let scaled_zero = EFF_ZERO_SQRT * 100.0 * (1.0 + radius);
+    let mut min_distance = best.start.solution_value;
     for ii in 1..solutions.len() {
         let this = *solutions.get(ii).ok_or(null_deref("solution index"))?;
-        let scaled_zero = EFF_ZERO_SQRT * 100.0 * (1.0 + radius);
-        if this.start.solution_value - best.start.solution_value < scaled_zero {
-            // Hit the same thing take the lowest dimensional element
-            // -- it is the one with the lowest number of variables
-            // If there is a tie just use the start value below.
-            if this.num_variables < best.num_variables {
-                best = this;
-                continue;
-            }
-            if this.num_variables > best.num_variables {
-                continue;
-            }
-        }
-        if this.start.param(0)? < best.start.param(0)? {
+        let distance = this.start.solution_value;
+        if distance < min_distance - scaled_zero {
             best = this;
+            min_distance = distance;
+        } else if distance - min_distance < scaled_zero {
+            if distance < min_distance {
+                min_distance = distance;
+            }
+            if this.num_variables < best.num_variables
+                || (this.num_variables == best.num_variables
+                    && distance < best.start.solution_value)
+            {
+                best = this;
+            }
         }
     }
 

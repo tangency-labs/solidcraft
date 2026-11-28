@@ -1515,15 +1515,7 @@ fn classify_remaining(
             let edges = traverser::face_edges(source, f)?;
             let mut region = None;
             for &edge_id in &edges {
-                // Upstream deliberately/repeatedly uses sFaceEdges[0] in the
-                // primary pass; the other pass uses j and a different fraction.
-                // (inside the loop over `edges`, so the list has a first edge)
-                let selected = if reverse {
-                    edge_id
-                } else {
-                    edges.first().copied().unwrap_or(edge_id)
-                };
-                let e = source.edge(selected)?;
+                let e = source.edge(edge_id)?;
                 let curve = e
                     .curve
                     .as_ref()

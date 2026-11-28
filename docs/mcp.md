@@ -64,7 +64,69 @@ solidcraft-cli mcp          # finds the running app; headless when none runs (--
 # A fixed port, or a second app: name it.
 solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
+
+# Local Streamable HTTP server: multiple local clients share one warm headless session
+# (for example a large .sc assembly kept hot in RAM, optionally with --render-gpu).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc --render-gpu
 ```
+
+### Streamable HTTP (`--http`)
+
+`solidcraft-cli mcp --http <addr>` serves the standard MCP Streamable HTTP transport on `/mcp` so
+multiple local MCP clients (Claude Code sessions, Codex, Python scripts) can share **one**
+persistent warm SolidCraft session in RAM without reloading a large `.sc` assembly per client:
+
+```sh
+# Fixed loopback port + generated bearer token written to an info file
+# (stderr logs the ready URL and info-file path; generated tokens are never printed to stderr).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc --render-gpu
+
+# Ephemeral loopback port + connection metadata file:
+# writes {"url": "http://127.0.0.1:<port>/mcp", "token": "...", "pid": ...}.
+solidcraft-cli mcp --http 127.0.0.1:0 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc
+
+# Explicit bearer token from a file or environment variable (no --http-info-file required;
+# preferred over command-line arguments).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-token-file ~/.config/solidcraft/mcp.token --in assembly.sc
+SOLIDCRAFT_MCP_TOKEN="..." solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc
+```
+
+Security model:
+
+- **Loopback only:** `--http` accepts only loopback bind addresses (`127.0.0.1:PORT`,
+  `127.0.0.1:0`, `[::1]:PORT`, or `localhost:PORT`). Non-loopback addresses (`0.0.0.0`, `[::]`,
+  LAN IPs) are refused at startup.
+- **Mandatory Bearer authentication:** every HTTP request must carry `Authorization: Bearer <token>`
+  (verified in constant time; missing or wrong tokens receive `401 Unauthorized`). Pass
+  `--http-token-file` or `SOLIDCRAFT_MCP_TOKEN` to supply a token explicitly; otherwise the server
+  generates a random 32-byte hex token from OS entropy and requires `--http-info-file` to write
+  `url`, `token` and `pid`. Generated tokens are never printed to stderr (MCP clients often record a
+  server's stderr in log files); stderr prints only the ready URL and the info-file path. On Unix
+  the info file is created with owner-only permissions (`0600`); on Windows it does not get an
+  owner-only ACL (it inherits its parent directory's permissions), so on shared Windows machines
+  place `--http-info-file` inside a user-private directory (for example under `%LOCALAPPDATA%` or
+  `%USERPROFILE%`).
+- **DNS rebinding protection:** requests with a non-loopback `Host` or `Origin` header are refused
+  with `403 Forbidden`.
+- **File scope:** `--allow-path`, `--require-allow-path` and `--allow-any-path` apply identically
+  to stdio mode.
+
+Endpoints and multi-client serialization:
+
+- `POST /mcp` accepts JSON-RPC requests and notifications (up to 16 MiB). `initialize` creates a
+  new per-client `Mcp-Session-Id` returned in the response header; subsequent requests must send
+  that `Mcp-Session-Id`. Requests return `200 OK` (`application/json`, or `text/event-stream` when
+  `Accept` requests SSE only); notifications return `202 Accepted`.
+- `DELETE /mcp` with `Mcp-Session-Id` closes that client's MCP session (`204 No Content`) without
+  shutting down the shared SolidCraft server or disrupting other connected clients.
+- `GET /mcp` returns `405 Method Not Allowed` (`Allow: POST, DELETE`) because this server does not
+  push unsolicited server-initiated SSE streams.
+- **Serialized shared session & atomic `batch` guidance:** all connected clients share the same
+  in-memory design session, and concurrent HTTP requests are dispatched serially in strict FIFO
+  order so the session is never corrupted. When multiple clients edit the same design, wrap
+  multi-step edits (such as sketch creation, geometry, `sketch.finish` and `solid.extrude`) in a
+  single atomic `batch` (default `rollback: true`) so another client's request cannot interleave
+  mid-sequence, and check `document.revision` when coordinating reads and writes across clients.
 
 `execute` `view.pick` with `rays: [{origin, dir}…]` answers in every session, headless too:
 for each world ray, the body, face index, world `point`, outward `normal` and `depth` where it
@@ -646,13 +708,13 @@ volume, mass and body count; check `ok` and `diagnostics` before applying any ca
 Apply the selected values separately with `parameters.change {changes}` if you intend to
 edit the design. Use `describe_command` for the input and output schemas.
 
-### Resources, prompts, and completions
+### Resources, subscriptions, prompts, and completions
 
-In addition to tools, the MCP server exposes read-only resources, resource templates, workflow prompts, and argument completions:
+In addition to tools, the MCP server exposes read-only resources, resource templates, subscriptions, workflow prompts, and argument completions:
 
 - **Static resources** (`resources/list`):
-  - `solidcraft://design` — full `document.inspect` JSON with measurements.
-  - `solidcraft://commands` — the complete engine command catalog as JSON.
+  - `solidcraft://design` (`application/json`) — full `document.inspect` JSON with measurements.
+  - `solidcraft://commands` (`application/json`) — the complete engine command catalog as JSON.
 - **Resource templates** (`resources/templates/list`) for targeted reads without dumping the whole design:
   - `solidcraft://body/{name}` — geometry, physical properties, and component of one body.
   - `solidcraft://sketch/{name}` — plane, DOF, curves, points, constraints, and profiles of one sketch (by name or feature id).
@@ -666,6 +728,46 @@ In addition to tools, the MCP server exposes read-only resources, resource templ
   - `diagnose-feature` (`feature?`) — inspect failing or warning timeline features and apply a minimal fix.
   - `assembly-clearance` (`occurrences?`, `joint?`) — verify grounding, static clearances, and motion interference.
 - **Autocompletion** (`completion/complete`): completes template variables (body names, sketch names, feature ids/names, command ids, skill names and files) and prompt arguments (including prioritizing failing or warning features first for `diagnose-feature`).
+
+#### Resource subscriptions
+
+The server advertises `"resources": {"subscribe": true, "listChanged": true}` in its `initialize` capabilities so clients can follow changes with `resources/subscribe` and `resources/unsubscribe`:
+
+- **`resources/subscribe`** (`{"uri": "solidcraft://design"}`) registers the URI for the current
+  session and returns `{}`. Re-subscribing an already subscribed URI is idempotent. Missing or
+  non-string/empty `uri` values fail with JSON-RPC `-32602` (`Invalid params`); unknown URIs fail
+  with `-32002` (`Resource not found`). Each session allows at most 256 concurrent subscriptions
+  (exceeding the limit returns `-32602`).
+- **`resources/unsubscribe`** (`{"uri": "solidcraft://design"}`) removes the URI from the session's
+  subscriptions and returns `{}` (idempotent for known URIs that are not currently subscribed;
+  `-32602` for missing/invalid `uri`, `-32002` for unknown URIs).
+- **`notifications/resources/list_changed`** (`{"jsonrpc":"2.0","method":"notifications/resources/list_changed"}`)
+  is emitted when the active design identity changes (`new_design`, `open`, or switching tabs) or
+  when the set of bodies, sketches, or features changes (for example after `execute`, `batch`,
+  `undo`, or `redo`).
+- **`notifications/resources/updated`** (`{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"solidcraft://design"}}`)
+  is emitted for each subscribed design resource affected by a revision change (including parameter
+  edits that keep the same bodies and features). Static resources unaffected by design edits, such
+  as `solidcraft://commands`, do not receive spurious `updated` notifications on design edits.
+- **No spurious notifications:** read-only calls (`inspect_design`, `measure`, `body_topology`,
+  `list_commands`, `describe_command`, `version`, `running`, `pending`, `skill_reference`,
+  `crash_reports`), failed edits, rolled-back batches, and `check_parameters` leave the design
+  revision unchanged and emit neither notification.
+- **Live desktop changes (`--connect`):** once initialized or subscribed, `solidcraft-cli mcp`
+  also observes `document.revision` on the connected desktop app while idle, so edits made directly
+  in the SolidCraft window or by the built-in Assistant emit `notifications/resources/list_changed`
+  and `notifications/resources/updated` without waiting for the next MCP tool call.
+
+```text
+→ {"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"solidcraft://design"}}
+← {"jsonrpc":"2.0","id":1,"result":{}}
+→ {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"execute","arguments":{"command":"solid.box","params":{"length":10,"width":10,"height":10}}}}
+← {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"..."}]}}
+← {"jsonrpc":"2.0","method":"notifications/resources/list_changed"}
+← {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"solidcraft://design"}}
+→ {"jsonrpc":"2.0","id":3,"method":"resources/unsubscribe","params":{"uri":"solidcraft://design"}}
+← {"jsonrpc":"2.0","id":3,"result":{}}
+```
 
 Errors: an unknown tool or arguments that don't match the tool's schema are JSON-RPC
 `-32602` errors (an unknown argument's error lists the tool's arguments); an engine failure
