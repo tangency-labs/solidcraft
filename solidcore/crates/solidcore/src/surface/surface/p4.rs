@@ -2988,7 +2988,8 @@ mod tests {
                 None,
             )
             .unwrap()
-            .expect("the tree solve answers");
+            .expect("the tree solve answers")
+            .0;
         check(on_face.as_slice(), "the tree solve on a face's surface");
         assert_eq!(owned.owner(), Some(owner));
         assert!(!owned.has_trim_cache());

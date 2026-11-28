@@ -2569,9 +2569,11 @@ mod tests {
     /// when it proves that no surface point lies within its bound. The arch's nearest
     /// points to `(1/2, 1/2, -10)` are `sqrt(100.25)` away (closed form:
     /// `f >= 100.25 + 39u(1 - u)`, equality at `v = 1/2`, `u` 0 or 1), so a drop bounded
-    /// by 1 is proved empty and starts nothing; unbounded it finds a foot; an empty
-    /// drop not proved so (no candidate, or a tree solve that failed) is still the
-    /// error "the drop found no foot point".
+    /// by 1 is proved empty (every leaf's box is farther than 1) and starts nothing;
+    /// unbounded it finds a foot; an empty drop not proved so (a leaf the tree had to
+    /// solve, as above the arch's top within 9.499995 of `(1/2, 1/2, 10)`, whose nearest
+    /// point is 9.5 away; no candidate; or a tree solve that failed) is still the error
+    /// "the drop found no foot point".
     #[test]
     fn a_singular_start_is_skipped_only_on_a_proved_empty_drop() {
         let k = &Kernel::default();
@@ -2603,6 +2605,32 @@ mod tests {
         let foot = singular_step_off(&found, answer, 0).unwrap().unwrap();
         let d = s.evaluate_point(k, foot).unwrap().distance(below);
         assert!((d - 100.25_f64.sqrt()).abs() < 1e-6, "{foot:?} at {d}");
+
+        // above the arch's top, (1/2, 1/2, 1/2), the nearest point of (1/2, 1/2, 10) is
+        // 9.5 away, and the tree's boxes, hulls of the patches' control nets padded by
+        // 1e-5, come within 9.49999 of it: bounded by 9.499995 the tree must solve the
+        // leaf at the top, whose solve finds 9.5 and culls it. Its box does not prove
+        // that nothing lies within the bound, so the empty drop is unproved and stays
+        // the error
+        let above = Point3::new(0.5, 0.5, 10.0);
+        let (found, answer) = surface_global_point_solve_answer(
+            k,
+            &s,
+            &dom,
+            SolverOperation::Minimize,
+            above,
+            EFF_ZERO,
+            Some(9.499_995),
+            SolutionRequested::All,
+        )
+        .unwrap();
+        assert!(found.is_empty(), "{found:?}");
+        assert_eq!(answer, EmptyAnswer::Unproved);
+        let err = singular_step_off(&found, answer, 0).unwrap_err();
+        assert!(
+            err.to_string().contains("the drop found no foot point"),
+            "{err}"
+        );
 
         // an empty drop that is not proved empty stays the error
         let err = singular_step_off(&[], EmptyAnswer::Unproved, 0).unwrap_err();
