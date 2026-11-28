@@ -1093,6 +1093,20 @@ pub fn height(frame: &Frame, q: Point3) -> f64 {
     (q - o).dot(n)
 }
 
+/// Which side of `frame`'s plane `q` lies on, past `tol`: `Some(true)` on the side its normal
+/// `x × y` points to, `Some(false)` on the other, `None` within `tol` of the plane.
+#[must_use]
+pub fn side(frame: &Frame, q: Point3, tol: f64) -> Option<bool> {
+    let h = height(frame, q);
+    if h > tol {
+        Some(true)
+    } else if h < -tol {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Whether `frame`'s axes are unit and square to each other, to within 1e-12.
 #[must_use]
 pub fn frame_is_orthonormal(frame: &Frame) -> bool {
