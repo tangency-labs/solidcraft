@@ -2519,6 +2519,17 @@ fn moved_surface_on_own_frame(
 fn move_faces(k: &mut Kernel, b: &mut Brep, new_brep: &mut Brep) -> Result<()> {
     let old_faces = bp1::faces(b, None)?;
     p5::remove_faces(k, b, true, &old_faces)?;
+    // (not upstream) the read's kept-trim cover record ([`Brep::trim_cover_raises`]) names
+    // edges and vertices of the faces just removed: none of them is in the body now, so
+    // the record keeps none of them (a writer reads each edge and vertex it names)
+    let mut raises = b.trim_cover_raises().clone();
+    raises
+        .edges
+        .retain(|&e, _| b.is_live_entity(EntityRef::Edge(e)));
+    raises
+        .vertices
+        .retain(|&v, _| b.is_live_entity(EntityRef::Vertex(v)));
+    b.set_trim_cover_raises(raises);
     let new_faces = bp1::faces(new_brep, None)?;
     // (not upstream: upstream's surface owner is the face itself) the copied faces'
     // surfaces are owned under the identity `b`'s naming scheme names a face by when it

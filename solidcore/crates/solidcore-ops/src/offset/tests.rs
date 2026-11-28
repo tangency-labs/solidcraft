@@ -1026,6 +1026,56 @@ fn the_top_moves_out() {
     assert!(rel(volume(&b), ABC + 2.0 * 600.0) < 1e-9);
 }
 
+/// #18301 (stress corpus S0561): a frustum r 25 at z = 0 to r 10 at z = 50 (its side falls
+/// 0.3 per mm), with a blind hole r 1.2 from z = 40 up through the top, its axis 6.5 out on
+/// +X (it reaches r 7.7). The top moved up 8 meets the extended side at r 25 - 0.3 * 58 = 7.6,
+/// inside the hole's reach: the extended hole wall leaves through the narrowing side from
+/// z0 = (25 - 7.7) / 0.3 = 57.67 up, and the hole opens into the side there. The body is the
+/// frustum r 25 to 7.6 over z 0 to 58 less the hole: the r 1.2 disc from z = 40 to z0, and above
+/// z0 the part of it inside the side's circle (`discs_overlap`).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle and face picks, not ops geometry
+fn a_cones_top_moved_up_past_a_holes_reach_opens_the_hole_through_the_side() {
+    all_fixes();
+    let cone = crate::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
+    let hole = make_cylinder([6.5, 0.0, 40.0], 1.2, 10.0).unwrap();
+    let b = crate::boolean::boolean(cone, hole, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let o = order(&b);
+    let top = face(&b, &o, |bx| {
+        (bx.min().z - 50.0).abs() < 1e-9 && (bx.max().z - 50.0).abs() < 1e-9
+    });
+    offset_faces(&b, &o, &[top], 8.0).unwrap();
+    let side = |z: f64| 25.0 - 0.3 * z;
+    let z0 = (25.0 - 7.7) / 0.3;
+    let frustum = PI * 58.0 / 3.0 * (25.0 * 25.0 + 25.0 * 7.6 + 7.6 * 7.6);
+    let hole =
+        PI * 1.2 * 1.2 * (z0 - 40.0) + integral(z0, 58.0, |z| discs_overlap(side(z), 1.2, 6.5));
+    let got = volume(&b);
+    assert!(
+        rel(got, frustum - hole) < 1e-9,
+        "{got} vs {}",
+        frustum - hole
+    );
+    // the hole's outermost line near the top is open to the outside; its axis is void, the
+    // material beside it solid
+    for (point, wanted) in [
+        ([7.65, 0.0, 57.9], crate::PointClass::Outside),
+        ([6.5, 0.0, 55.0], crate::PointClass::Outside),
+        ([6.5, 0.0, 39.0], crate::PointClass::Inside),
+        ([4.0, 0.0, 57.9], crate::PointClass::Inside),
+    ] {
+        assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+    }
+    assert!(b.is_manifold_solid().unwrap());
+    b.check_solid().unwrap();
+    let report = b.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    // the body records whole: no face, edge or vertex of it names one the cut deleted
+    b.to_record().unwrap();
+}
+
 // Definitions and certificates §5: at tens of mm, coordinates within this floor agree.
 const PART_SCALE_FLOOR_MM: f64 = 1e-10;
 
