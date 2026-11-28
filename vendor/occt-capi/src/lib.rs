@@ -33,6 +33,8 @@ mod raw {
         pub fn occt_cut(a: u32, b: u32) -> u32;
         pub fn occt_common(a: u32, b: u32) -> u32;
         pub fn occt_fillet_nearest(h: u32, points: *const f64, count: usize, radius: f64) -> u32;
+        pub fn occt_prism_profile(data: *const f64, count: usize, dx: f64, dy: f64, dz: f64, distance: f64) -> u32;
+        pub fn occt_revol_profile(data: *const f64, count: usize, ox: f64, oy: f64, oz: f64, dx: f64, dy: f64, dz: f64, angle: f64) -> u32;
 
         pub fn occt_volume(h: u32) -> f64;
         pub fn occt_area(h: u32) -> f64;
@@ -44,7 +46,7 @@ mod raw {
 }
 
 /// The ABI these bindings were written for.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// Why the module refused a call, in its own words.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,6 +172,24 @@ impl Shape {
         let flat: Vec<f64> = points.iter().flatten().copied().collect();
         // SAFETY: a live handle and `points.len()` triples of doubles.
         shape(unsafe { raw::occt_fillet_nearest(self.0, flat.as_ptr(), points.len(), radius) })
+    }
+
+    /// A planar profile's face extruded `distance` along the unit `dir`. `profile` is the loop
+    /// count, then each loop (outer first, then its holes) as its curve count and curves: `0`
+    /// and a line's start and end; `1` and an arc's centre, unit axis, unit reference, radius
+    /// and start and end angles (counter-clockwise about the axis from the reference); `2` and
+    /// a NURBS's degree, point count and knot count, its points as x, y, z, weight, and its
+    /// clamped knots.
+    pub fn prism_profile(profile: &[f64], dir: [f64; 3], distance: f64) -> Result<Shape> {
+        // SAFETY: `profile.len()` readable doubles.
+        shape(unsafe { raw::occt_prism_profile(profile.as_ptr(), profile.len(), dir[0], dir[1], dir[2], distance) })
+    }
+
+    /// A planar profile's face ([`Shape::prism_profile`]'s encoding) turned `angle` radians
+    /// (above 0, at most a full turn) about the line through `origin` along the unit `dir`.
+    pub fn revolve_profile(profile: &[f64], origin: [f64; 3], dir: [f64; 3], angle: f64) -> Result<Shape> {
+        // SAFETY: `profile.len()` readable doubles.
+        shape(unsafe { raw::occt_revol_profile(profile.as_ptr(), profile.len(), origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], angle) })
     }
 
     /// Whether OCCT's own checker passes the shape.

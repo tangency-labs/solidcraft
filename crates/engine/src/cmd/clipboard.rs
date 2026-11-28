@@ -304,10 +304,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             for param in sketch.dimension_params_mut() {
                 if let Some(pn) = param.clone() {
                     let (e, u) = doc.param(&pn).map(|x| (x.expr.clone(), x.unit.clone())).unwrap_or_else(|| (pn.clone(), "mm".into()));
-                    *param = Some(doc.new_model_param(&e, &u));
+                    *param = Some(doc.new_model_param(&e, &u)?);
                 }
             }
-            super::clipboard_foreign::reframe_wires(sketch, doc, &m, &world_shift);
+            super::clipboard_foreign::reframe_wires(sketch, doc, &m, &world_shift)?;
         }
         if moved {
             if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut kind {
