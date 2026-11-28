@@ -66,10 +66,15 @@ fn arr(p: Point3) -> [f64; 3] {
 /// # Errors
 ///
 /// Those of reading the profile.
-pub fn face_sweep(surface: &Surface) -> Result<Option<SweepRecord>> {
+pub fn face_sweep(k: &Kernel, surface: &Surface) -> Result<Option<SweepRecord>> {
     let Some(d) = surface.kept_sweep() else {
         return Ok(None);
     };
+    // A label is checked against its net before the record names the net by it: an edit of
+    // the net in place that kept the label (a span added at an end) leaves the net alone.
+    if d.is_label() && !agrees(k, surface, d).unwrap_or(false) {
+        return Ok(None);
+    }
     let Motion::Screw(m) = d.motion() else {
         return Ok(None);
     };

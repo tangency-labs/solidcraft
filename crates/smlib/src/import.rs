@@ -771,6 +771,11 @@ impl crate::Brep {
             return Ok(self);
         }
         if crate::core::counts(self.core())?[0] != record.faces.len() {
+            // A sweep's definition is only its label: a body whose faces the build changed (a
+            // healed record) goes on without them, as it did before records kept them.
+            if faces.is_empty() {
+                return Ok(self);
+            }
             return Err(crate::Error::Record(Unsupported::Invalid("the body built has another number of faces than its record")));
         }
         if !faces.is_empty() {

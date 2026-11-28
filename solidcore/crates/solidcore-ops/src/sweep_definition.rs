@@ -16,13 +16,15 @@ use crate::error::{status, Error, Result};
 ///
 /// # Errors
 ///
-/// The kernel's, as the operation's ([`Error`]).
-pub fn definitions(b: &Brep) -> Result<Vec<Option<SweepDefinition>>> {
+/// The kernel's reading of the body's faces, as the operation's ([`Error`]).
+pub fn definitions(k: &Kernel, b: &Brep) -> Result<Vec<Option<SweepDefinition>>> {
     let mut out = Vec::with_capacity(b.face_list().len());
     for &f in b.face_list() {
         out.push(match b.face(f).map_err(status)?.surface.as_ref() {
-            Some(surface) => face_sweep(surface)
-                .map_err(status)?
+            // A definition that does not read is no definition: the face is written as its net.
+            Some(surface) => face_sweep(k, surface)
+                .ok()
+                .flatten()
                 .and_then(|d| solidcore_convert::sweep::record_sweep(&d)),
             None => None,
         });

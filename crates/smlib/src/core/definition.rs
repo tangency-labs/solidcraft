@@ -32,7 +32,7 @@ pub(crate) fn adopt(body: &Body, faces: &[(usize, &BlendDefinition)]) -> Result<
 /// Each face's screw-sweep definition, in the body's face order (the arrays'), where its surface is
 /// a screw-swept wall's net carrying one (`solidcore_ops::sweep_definition::definitions`).
 pub(crate) fn sweeps(body: &Body) -> Result<Vec<Option<SweepDefinition>>> {
-    with_body("sweep_definition::definitions", body, |_, b| Ok(solidcore_ops::sweep_definition::definitions(b)))?.map_err(refused)
+    with_body("sweep_definition::definitions", body, |k, b| Ok(solidcore_ops::sweep_definition::definitions(k, b)))?.map_err(refused)
 }
 
 /// Give the faces `faces` names (by their index in the body's face order) their screw-sweep

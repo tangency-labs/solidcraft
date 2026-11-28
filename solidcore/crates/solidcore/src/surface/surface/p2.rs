@@ -3737,12 +3737,19 @@ impl Surface {
         // (#2485, #2488) a definition moves with its net; one that cannot move so (a scale
         // that is not uniform) refuses before the net moves. A sweep's (#2572) that cannot
         // follow the motion is left behind: the net moves as it did without it.
+        // A sweep kept as its label only is left behind by a motion it cannot follow: the net
+        // moves exactly as a plain one does.
+        let label =
+            matches!(self.definition.as_deref(), Some(KeptDefinition::Sweep(s)) if s.is_label());
         let moved = match self.definition.as_deref() {
             Some(kept) if !kept.follows(scale) => Some(None),
             Some(kept) => {
                 let mut moved = kept.clone();
-                moved.transform(k, rotate_n_move, scale, depth)?;
-                Some(Some(Box::new(moved)))
+                match moved.transform(k, rotate_n_move, scale, depth) {
+                    Ok(()) => Some(Some(Box::new(moved))),
+                    Err(_) if label => Some(None),
+                    Err(e) => return Err(e),
+                }
             }
             None => None,
         };
@@ -3751,10 +3758,18 @@ impl Surface {
             self.definition = moved;
         }
         // a sweep's bound takes in the rounding of moving its net, as a blend's does
+        let mut drop_label = false;
         if let (Some(KeptDefinition::Sweep(sweep)), SurfaceKind::BSpline(net)) =
             (self.definition.as_deref_mut(), &self.kind)
         {
-            sweep.add_motion_rounding(net)?;
+            match sweep.add_motion_rounding(net) {
+                Ok(()) => {}
+                Err(_) if label => drop_label = true,
+                Err(e) => return Err(e),
+            }
+        }
+        if drop_label {
+            self.definition = None;
         }
         Ok(())
     }
