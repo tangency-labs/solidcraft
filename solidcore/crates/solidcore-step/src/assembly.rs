@@ -222,8 +222,7 @@ pub struct Assembly<'t> {
     /// Makes the pcurves of uses that have no closed form; without it such a face is refused.
     pub(crate) trims: Option<&'t dyn Trims>,
     /// Bytes of the STEP text this assembly was read from, or zero when it was not.
-    /// [`Self::finish`] sizes the item budget from it, so a hand-built assembly keeps the floor
-    /// unless memory is tight.
+    /// [`Self::finish`] sizes the item budget from it, so a hand-built assembly keeps the floor.
     pub(crate) source_bytes: u64,
     pub(crate) vertices: Vec<Vertex>,
     pub(crate) edges: Vec<EdgeB>,
@@ -1307,7 +1306,7 @@ impl<'t> Assembly<'t> {
                 from.iter().enumerate().filter(|(_, i)| turned_faces.contains(&(**i as u32))).map(|(i, _)| index(i)).collect::<R<Vec<_>>>()?;
             brep = completed;
         }
-        solidcore_ops::record_check::validate_file(&brep, self.source_bytes, solidcore_record::brep::available_memory_bytes())
+        solidcore_ops::record_check::validate_file(&brep, self.source_bytes)
             .map_err(|e| if e.contains("the file is valid but too large") { e } else { format!("the record is invalid: {e}") })?;
         // A disagreement on a face names the file's face too, so a reader can leave it out.
         solidcore_ops::record_check::agreement(&brep).map_err(|e| {

@@ -15,19 +15,14 @@ pub fn validate(b: &Brep) -> Result<()> {
     geometry(b)
 }
 
-/// [`Brep::validate_file`] for a file of `file_bytes` with `available_bytes` of free memory,
-/// then [`geometry`].
+/// [`Brep::validate_file`] for a file of `file_bytes`, then [`geometry`].
 ///
 /// # Errors
 /// The first check the record fails, as text. Past the file's item cap the message says the
 /// file is valid but too large and names the count and the cap. A geometric record the kernel
 /// refuses is that error's message (`to_string`).
-pub fn validate_file(
-    b: &Brep,
-    file_bytes: u64,
-    available_bytes: Option<u64>,
-) -> std::result::Result<(), String> {
-    b.validate_file(file_bytes, available_bytes)?;
+pub fn validate_file(b: &Brep, file_bytes: u64) -> std::result::Result<(), String> {
+    b.validate_file(file_bytes)?;
     geometry(b).map_err(|e| e.to_string())
 }
 

@@ -29,10 +29,8 @@ pub const MAX_ITEMS: usize = 4_000_000;
 /// About 0.9e6 STEP points per 100 MB, plus knots and pcurves, so 16 bytes per item puts a
 /// 64 MB file on the `4_000_000` floor and a 256 MB file at `16_000_000`.
 pub const ITEM_BYTES: u64 = 16;
-/// The most items [`item_limit`] allows when free memory is unknown.
+/// The most items [`item_limit`] allows, whatever the size of the file.
 pub const ITEM_LIMIT_CEILING: usize = 16_000_000;
-/// Bytes of memory one item is charged when the cap is a quarter of free memory.
-pub const ITEM_MEMORY_BYTES: u64 = 512;
 pub const MAX_SHELLS: usize = 1024;
 /// Maximum number of nested geometry edges, with the root at depth zero.
 pub const MAX_DEPTH: usize = 16;
@@ -40,53 +38,12 @@ pub const MAX_DEPTH: usize = 16;
 pub const MAX_SPLINE_DEGREE: usize = 16;
 const TAU: f64 = std::f64::consts::TAU;
 
-/// The item cap for a file of `file_bytes`, with `available_bytes` of free memory.
-///
-/// [`None`] means free memory is unknown. The cap is the minimum of the ceiling and the
-/// maximum of [`MAX_ITEMS`] and `file_bytes / `[`ITEM_BYTES`]. The ceiling is
-/// `available_bytes / 4 / `[`ITEM_MEMORY_BYTES`], or [`ITEM_LIMIT_CEILING`] when free memory
-/// is unknown. A cap that does not fit in [`usize`] is [`usize::MAX`].
-pub fn item_limit(file_bytes: u64, available_bytes: Option<u64>) -> usize {
-    let ceiling = match available_bytes {
-        Some(available) => available / 4 / ITEM_MEMORY_BYTES,
-        None => ITEM_LIMIT_CEILING as u64,
-    };
-    let cap = ceiling.min((MAX_ITEMS as u64).max(file_bytes / ITEM_BYTES));
+/// The item cap for a file of `file_bytes`: `file_bytes / `[`ITEM_BYTES`], but never under
+/// [`MAX_ITEMS`] and never over [`ITEM_LIMIT_CEILING`]. It is the same on every machine, so a
+/// file that imports on one imports on all, and it only ever grows from [`MAX_ITEMS`].
+pub fn item_limit(file_bytes: u64) -> usize {
+    let cap = (file_bytes / ITEM_BYTES).clamp(MAX_ITEMS as u64, ITEM_LIMIT_CEILING as u64);
     usize::try_from(cap).unwrap_or(usize::MAX)
-}
-
-/// Bytes the operating system reports free, for [`item_limit`].
-///
-/// Linux reads `MemAvailable` from `/proc/meminfo` and converts that kB figure to bytes. The
-/// file missing, the line missing, or any other operating system, is [`None`]: the cap then
-/// stops at [`ITEM_LIMIT_CEILING`].
-pub fn available_memory_bytes() -> Option<u64> {
-    #[cfg(target_os = "linux")]
-    {
-        linux_available_memory_bytes()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
-    }
-}
-
-/// `MemAvailable` from `/proc/meminfo`, in bytes. Missing file or line: [`None`].
-#[cfg(target_os = "linux")]
-fn linux_available_memory_bytes() -> Option<u64> {
-    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-    for line in text.lines() {
-        // `?` on `strip_prefix` would return on the first other line.
-        let Some(rest) = line.strip_prefix("MemAvailable:") else {
-            continue;
-        };
-        let kb = rest
-            .split_whitespace()
-            .next()
-            .and_then(|token| token.parse::<u64>().ok())?;
-        return Some(kb.saturating_mul(1024));
-    }
-    None
 }
 
 /// A body (SMLib `SmBrep`, STEP `MANIFOLD_SOLID_BREP`/`BREP_WITH_VOIDS`/`SHELL_BASED_SURFACE_MODEL`).
@@ -848,21 +805,21 @@ impl Brep {
         self.validate_within(&mut Budget::input())
     }
 
-    /// [`Self::validate`] for a record read from a file of `file_bytes`, with `available_bytes`
-    /// of free memory ([`available_memory_bytes`]).
+    /// [`Self::validate`] for a record read from a file of `file_bytes`.
     ///
     /// The same walk, with the item cap from [`item_limit`] instead of [`MAX_ITEMS`]. Past that
-    /// cap the record is valid but too large: the error names the count that first passed the
-    /// cap and the cap. Any other refusal is that [`Invalid`]'s message, not prefixed again.
-    pub fn validate_file(
-        &self,
-        file_bytes: u64,
-        available_bytes: Option<u64>,
-    ) -> std::result::Result<(), String> {
-        let mut budget = Budget::capped(item_limit(file_bytes, available_bytes));
+    /// cap the walk stops, so the rest of the record is checked without a cap before the error
+    /// says the record is valid but too large: a record that is also invalid reports that
+    /// refusal, never "valid". The error names the count that first passed the cap and the cap.
+    /// Any other refusal is that [`Invalid`]'s message, not prefixed again.
+    pub fn validate_file(&self, file_bytes: u64) -> std::result::Result<(), String> {
+        let mut budget = Budget::capped(item_limit(file_bytes));
         match self.validate_within(&mut budget) {
             Ok(()) => Ok(()),
             Err(Invalid("item budget")) => {
+                if let Err(e) = self.validate_built() {
+                    return Err(e.to_string());
+                }
                 let counted = budget.overflowed.unwrap_or(usize::MAX);
                 let cap = budget.limit;
                 Err(format!(
