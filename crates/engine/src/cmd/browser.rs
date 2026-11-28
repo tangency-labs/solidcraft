@@ -2005,6 +2005,33 @@ pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) ->
         pins.insert(line, name.to_string());
         Some(pins)
     });
+    let marker = s.doc.marker.unwrap_or(usize::MAX);
+    let unbuilt: HashSet<u64> = s.doc.features.iter().enumerate().filter(|(i, _)| *i >= marker).map(|(_, f)| f.id).collect();
+    let follows_copies = s.doc.features.iter().any(|f| {
+        unbuilt.contains(&f.id)
+            && matches!(&f.kind, FeatureKind::Pattern { bodies, .. } if bodies.iter().any(|b| b.0 == old))
+            && f.body_names.iter().any(|n| n.starts_with(&derived))
+    });
+    let mut taken: HashSet<String> = HashSet::new();
+    let mut copies_named_elsewhere = false;
+    if follows_copies {
+        taken.extend(st.bodies.iter().map(|b| b.name.clone()));
+        for f in &s.doc.features {
+            taken.extend(f.body_names.iter().cloned());
+            if let FeatureKind::Remove { bodies } = &f.kind {
+                taken.extend(bodies.iter().map(|b| b.0.clone()));
+            }
+        }
+        let quoted = format!("\"{derived}");
+        copies_named_elsewhere = s.doc.features.iter().any(|f| {
+            !matches!(&f.kind, FeatureKind::Pattern { bodies, .. } if !bodies.is_empty() && bodies.iter().all(|b| b.0 == old))
+                && (f.participants.iter().any(|b| b.starts_with(&derived)) || serde_json::to_string(&f.kind).is_ok_and(|json| json.contains(&quoted)))
+        });
+    }
+    let copy_number = |stored: &str| -> Option<String> {
+        let number = stored.strip_prefix(&derived)?.strip_suffix(')')?;
+        (!number.is_empty() && number.bytes().all(|c| c.is_ascii_digit())).then(|| number.to_string())
+    };
     let d = s.doc_mut();
     for ((id, made, left_out), pins) in later.iter().zip(later_pins) {
         if let Some(f) = d.feature_mut(*id) {
@@ -2043,7 +2070,25 @@ pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) ->
     }
     // Later features refer to bodies by name.
     let mut failed = None;
+    let mut renamed_copies: Vec<(String, String)> = Vec::new();
     for f in d.features.iter_mut().filter(|f| f.id != fid) {
+        if let FeatureKind::Pattern { bodies, .. } = &f.kind
+            && bodies.iter().any(|b| b.0 == old)
+            && unbuilt.contains(&f.id)
+            && !copies_named_elsewhere
+        {
+            let follows: Vec<String> = f
+                .body_names
+                .iter()
+                .map(|stored| copy_number(stored).map(|number| format!("{name} ({number})")).unwrap_or_else(|| stored.clone()))
+                .collect();
+            if follows.iter().zip(&f.body_names).all(|(new, stored)| new == stored || !taken.contains(new)) {
+                renamed_copies.extend(
+                    f.body_names.iter().zip(&follows).filter(|(stored, new)| stored != new).map(|(stored, new)| (stored.clone(), new.clone())),
+                );
+                f.body_names = follows;
+            }
+        }
         // The bodies a join/cut/intersect may change (a primitive's `targets`) are kept beside
         // the feature's kind, not in it (#1108).
         for b in f.participants.iter_mut().filter(|b| **b == old) {
@@ -2116,6 +2161,9 @@ pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) ->
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
+    for (stored, new) in &renamed_copies {
+        d.rename_body_keys(stored, new);
+    }
     // A sketch projecting the body in another placement of its component keeps it.
     super::sketch_project::follow_placed_renames(d, &st, &placed, Some((&old, name)));
     s.remember_body_rename(&previous, &old, name);
