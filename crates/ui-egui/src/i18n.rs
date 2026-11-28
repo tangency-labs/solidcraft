@@ -534,6 +534,17 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn navigation_held_key_ships_in_the_packed_runtime_catalogs() {
+        // Read the app's packed catalogs directly: the kit's test catalog must not
+        // make a missing production message pass this regression.
+        let id = "prefs.navigation.held_key";
+        assert_eq!(ENGLISH.messages().get(id).map(String::as_str), Some("Held key"), "shipped English: {id}");
+        for catalog in [&ARABIC, &GERMAN, &HEBREW, &JAPANESE, &KOREAN, &VIETNAMESE, &CHINESE] {
+            assert!(catalog.messages().get(id).is_some_and(|text| !text.trim().is_empty()), "{}: {id}", catalog.id);
+        }
+    }
+
     /// Strings a pull request adds under `assets/locales/pending/` work before they are folded
     /// into the catalogs (the build merges them in).
     #[test]
@@ -968,6 +979,10 @@ mod tests {
         for source in [
             include_str!("toolbar.rs"),
             include_str!("prefs.rs"),
+            include_str!("prefs/navigation.rs"),
+            include_str!("prefs/mouse3d.rs"),
+            include_str!("mouse_gesture.rs"),
+            include_str!("../../ui-kit/src/preferences_navigation.rs"),
             include_str!("documents.rs"),
             include_str!("dialogs.rs"),
             include_str!("browser.rs"),

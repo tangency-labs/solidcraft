@@ -143,6 +143,7 @@ pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
 pub use joints::MAX_REACH_JOINTS;
+pub use joints::drive_preview;
 pub use joints::posed_joints;
 pub use joints::reach_from;
 pub use joints::reach_preview;
@@ -217,6 +218,7 @@ mod point_cloud_deviation;
 mod pulleys;
 #[cfg(test)]
 mod pulleys_tests;
+pub(crate) mod scan_align;
 mod script;
 mod section;
 mod selection;
@@ -655,6 +657,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(point_cloud::COMMANDS.iter());
     v.extend(point_cloud_deviation::COMMANDS.iter());
+    v.extend(scan_align::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());

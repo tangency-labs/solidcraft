@@ -53,6 +53,7 @@ fn schemas_and_the_key_check_agree() {
             "distance",
             "distance2",
             "exact_regions",
+            "extend_to_face",
             "extent",
             "face",
             "face_body",
@@ -162,7 +163,10 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<ScaleParams>(), &["about", "bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
-    assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
+    assert_keys(
+        input_schema_for::<PlaneAtAngleParams>(),
+        &["angle", "axis", "base", "direction_only", "name", "participants", "pivot", "through_axis"],
+    );
     assert_keys(
         input_schema_for::<MirrorParams>(),
         &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "placements", "plane", "touching"],

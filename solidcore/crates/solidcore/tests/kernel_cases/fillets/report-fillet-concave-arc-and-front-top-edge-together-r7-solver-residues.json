@@ -1,15 +1,15 @@
 {
   "area": "fillets",
   "bodies": {
-    "b3": {
-      "keeping_splines": false,
-      "trusted": true
-    },
     "b4": {
       "keeping_splines": false,
       "trusted": true
     },
-    "b6": {
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
       "keeping_splines": false,
       "trusted": true
     }
@@ -103,7 +103,7 @@
       "inputs": [],
       "op": "extrude",
       "outputs": [
-        "b2"
+        "b3"
       ],
       "params": {
         "cap": true,
@@ -165,12 +165,12 @@
     },
     {
       "inputs": [
-        "b3",
-        "b4"
+        "b4",
+        "b5"
       ],
       "op": "boolean_tagged",
       "outputs": [
-        "b5"
+        "b6"
       ],
       "params": {
         "op": "union"
@@ -178,37 +178,34 @@
     },
     {
       "inputs": [
-        "b6"
+        "b8"
       ],
       "op": "copy",
       "outputs": [
-        "b7"
+        "b9"
       ],
       "params": {}
     },
     {
       "inputs": [
-        "b7"
+        "b9"
       ],
       "op": "tagged",
       "outputs": [
-        "b8"
+        "b10"
       ],
       "params": {
         "operand": 0
       }
     },
     {
-      "code": {
-        "call": "blend",
-        "kind": 6,
-        "operation": "blend::fillet_executive::p1::FilletExecutive::create_fillet_corners"
-      },
-      "error": "not supported yet: a corner of this kind is not supported yet by SMLib's blends at (41.650, 0.058, 10.000): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
       "inputs": [
-        "b8"
+        "b10"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b11"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -269,34 +266,58 @@
   ],
   "case": "report-fillet-concave-arc-and-front-top-edge-together-r7-solver-residues",
   "expected": {
-    "method": "the plane of the bar's front face, y = 0.0579254505, bounds the whole body (the cylinder's wall runs tangent into it), as do the planes of its back face, bottom, left end and the cylinder's top and far side: every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, x 0.4892940775 .. 41.6497118311 + 8, y 0.0579254505 .. 16.0579254508, z 0 .. 20; graded to 4e-5, the corner patch's own tolerance (the fillet's approximation tolerance) Refused since #22151: the front top edge runs tangentially into the concave arc, so the top face narrows to zero width at the arc's end. The corner there (the Mixed corner) was a Coons patch of its sides, not a rolling ball's surface: on a mirror-symmetric part it gave the two halves different volumes, following where a neighbouring cone's parametric seam lay. Until the blend corner's Roll-over takes this configuration, the correct outcome is a refusal at that point, naming it.",
-    "outcome": "refused",
-    "refusal": "their common face narrows to zero width",
+    "bbox": {
+      "max": [
+        49.64971183108453,
+        16.05792545083297,
+        20
+      ],
+      "min": [
+        0.4892940775280783,
+        0.05792545052986289,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the plane of the bar's front face, y = 0.0579254505, bounds the whole body (the cylinder's wall runs tangent into it), as do the planes of its back face, bottom, left end and the cylinder's top and far side: every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, x 0.4892940775 .. 41.6497118311 + 8, y 0.0579254505 .. 16.0579254508, z 0 .. 20; graded to 4e-5, the corner patch's own tolerance (the fillet's approximation tolerance)",
     "source": "invariants",
-    "sources": [
-      "tangency-labs/solidcraft#22151"
-    ],
+    "tolerance": {
+      "abs_mm": 4e-05
+    },
     "what": "as report-fillet-concave-arc-and-front-top-edge-together-solver-residues, at r7: the corner patch stands out of the bar's front face (known limit past r4); reported from the app (2026-10-30, test-peg part)"
   },
   "expressible": true,
   "operation_expressible": true,
   "outcome": {
-    "engine_error": "step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind at (41.650, 0.058, 10.000), which SMLib's blends do not handle yet (where its edges run on tangentially into each other, or meet in a way no blend corner builds): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
-    "kernel_error": "not supported yet: a corner of this kind is not supported yet by SMLib's blends at (41.650, 0.058, 10.000): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
-    "ran": false
+    "ran": true,
+    "raw_counts": {
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14
+    }
   },
   "records": "report-fillet-concave-arc-and-front-top-edge-together-r7-solver-residues.bodies.json.gz",
-  "result": [],
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b11"
+    }
+  ],
   "rig": {
     "error": null,
     "known_failing": null,
-    "measured": null,
-    "refused_with": "step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind at (41.650, 0.058, 10.000), which SMLib's blends do not handle yet (where its edges run on tangentially into each other, or meet in a way no blend corner builds): a convex and a concave round run into each other at a point where their common face narrows to zero width; the corner they need there is not built yet, so neither round is made",
+    "measured": {
+      "area_mm2": 3117.061883347888,
+      "body_count": 1,
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14,
+      "volume_mm3": 9368.9523031694
+    },
+    "refused_with": null,
     "status": "pass"
   },
-  "sources": [
-    "tangency-labs/solidcraft#22151"
-  ],
+  "sources": null,
   "traced_ops": [
     "extrude",
     "extrude",

@@ -153,4 +153,75 @@ mod tests {
             crate::blend::chamfer_sides_carrying_face(&b, &edges[..1], 2.0, side, true).unwrap().record()
         );
     }
+
+    /// The draft and split entry points are the adapter's calls: the same records as calling
+    /// solidcore's directly.
+    #[test]
+    fn routed_drafts_and_splits_are_the_adapters() {
+        use solidcore_record::Plane;
+        let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap();
+        let side = [Vec3::new(20.0, 5.0, 5.0)];
+        assert_eq!(
+            draft(&b, &side, &Plane::XY, Vec3::Z, 0.1).unwrap().record(),
+            crate::polyhedron::draft(&b, &side, &Plane::XY, Vec3::Z, 0.1).unwrap().record()
+        );
+        let tool = crate::SplitTool::Plane(Plane { origin: Vec3::new(7.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z });
+        let routed: Vec<_> = split_body(&b, &tool).unwrap();
+        let direct: Vec<_> = crate::splitface::split_body(&b, &tool).unwrap();
+        assert_eq!(routed.len(), 2);
+        assert_eq!(routed.iter().map(|p| p.record()).collect::<Vec<_>>(), direct.iter().map(|p| p.record()).collect::<Vec<_>>());
+        let top = b.face_at(Vec3::new(10.0, 5.0, 10.0), 1e-6).unwrap();
+        let (r, rm) = split_faces_with_map(&b, &[top], &tool).unwrap();
+        let (d, dm) = crate::splitface::split_faces_with_map(&b, &[top], &tool).unwrap();
+        assert_eq!((r.record(), rm), (d.record(), dm));
+    }
+
+    /// Every sweep and loft entry point is the adapter's call, its path and options copied to the
+    /// interface's plain data and back: the same records as calling solidcore's builders directly.
+    #[test]
+    fn routed_sweeps_and_lofts_are_the_adapters() {
+        use crate::{PathSeg, PointPath, RailFit, SweepControl, SweepOrientation};
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+        use solidcraft_geom::prelude::*;
+        let sq = |h: f64| Loop2::polygon(&[Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)]);
+        let region = Region2 { outer: sq(1.0), holes: vec![] };
+        let path = [
+            PathSeg::Line { a: Vec3::new(0.0, 0.0, 0.0), b: Vec3::new(0.0, 0.0, 10.0) },
+            PathSeg::Arc { a: Vec3::new(0.0, 0.0, 10.0), center: Vec3::new(5.0, 0.0, 10.0), axis: Vec3::new(0.0, 1.0, 0.0), angle: 1.0 },
+        ];
+        let pl = Plane::XY;
+        assert_eq!(
+            sweep(&pl, &region, &path).unwrap().record(),
+            crate::build::sweep_with(&pl, &region, &path, &SweepControl::default()).unwrap().record()
+        );
+        let ctl = SweepControl { twist: 0.5, scale: 1.5, orientation: SweepOrientation::Perpendicular, ..SweepControl::default() };
+        assert_eq!(sweep_with(&pl, &region, &path, &ctl).unwrap().record(), crate::build::sweep_with(&pl, &region, &path, &ctl).unwrap().record());
+        let points = PointPath::polyline(vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 5.0), Vec3::new(3.0, 0.0, 9.0)]);
+        let plain = SweepControl::default();
+        assert_eq!(
+            sweep_point_path_with(&pl, &region, &points, &plain).unwrap().record(),
+            crate::point_path::sweep_point_path_with(&pl, &region, &points, &plain).unwrap().record()
+        );
+        let off =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(4.0, -0.5), Vec2::new(5.0, -0.5), Vec2::new(5.0, 0.5), Vec2::new(4.0, 0.5)]), holes: vec![] };
+        let xz = Plane::XZ;
+        let (o, z) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+        assert_eq!(sweep_helix(&xz, &off, o, z, 2.0, 1.5).unwrap().record(), crate::helix::sweep_helix(&xz, &off, o, z, 2.0, 1.5).unwrap().record());
+        let law = [(0.0, 0.0), (1.5, -0.3)];
+        assert_eq!(
+            sweep_helix_radial(&xz, &off, o, z, 2.0, 1.5, &law, true).unwrap().record(),
+            crate::helix::sweep_helix_radial(&xz, &off, o, z, 2.0, 1.5, &law, true).unwrap().record()
+        );
+        let sections = [(Plane::XY, sq(2.0)), (Plane::XY.offset(5.0), sq(1.0))];
+        assert_eq!(loft(&sections).unwrap().record(), crate::build::loft(&sections).unwrap().record());
+        let rails = [vec![Vec3::new(2.0, 2.0, 0.0), Vec3::new(1.5, 1.5, 2.5), Vec3::new(1.0, 1.0, 5.0)]];
+        assert_eq!(
+            loft_with_rails(&sections, &rails, RailFit::Stretch).unwrap().record(),
+            crate::build::loft_with_rails(&sections, &rails, RailFit::Stretch).unwrap().record()
+        );
+        let regions = [(Plane::XY, region.clone()), (Plane::XY.offset(4.0), Region2 { outer: sq(2.0), holes: vec![] })];
+        assert_eq!(loft_regions(&regions).unwrap().record(), crate::build::loft_regions(&regions).unwrap().record());
+        let apex = Vec3::new(0.0, 0.0, 6.0);
+        assert_eq!(loft_to_point(&pl, &sq(2.0), apex).unwrap().record(), crate::helix::loft_to_point(&pl, &sq(2.0), apex).unwrap().record());
+    }
 }
