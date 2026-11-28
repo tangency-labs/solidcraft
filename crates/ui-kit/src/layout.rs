@@ -115,15 +115,17 @@ pub fn catalog_footer(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), catalog_footer_height(ui)), egui::Sense::hover());
     t.secondary_hline(ui.painter(), rect.x_range(), rect.top(), t.dialog_rule);
-    let icon =
-        egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_6, rect.top() + t.space_8 + t.font_small * 0.5), vec2(t.space_12, t.space_12));
-    ui.painter().circle_stroke(icon.center(), t.space_4, t.control_border_stroke(t.form_dim));
-    ui.painter().text(icon.center(), egui::Align2::CENTER_CENTER, "i", crate::type_face::semibold(t.font_badge), t.form_dim);
     let mut job =
         egui::text::LayoutJob::simple(text.to_owned(), egui::FontId::proportional(t.font_small), t.form_dim, (rect.width() - t.space_24).max(1.0));
     job.wrap.max_rows = 1;
     let galley = ui.painter().layout_job(job);
-    ui.painter().galley(rect.left_top() + vec2(t.space_24, t.space_8), galley, t.form_dim);
+    let text_at = rect.left_top() + vec2(t.space_24, t.space_8);
+    // The glyph sits on the middle of the text's line, whatever the font's line gap.
+    let line_middle = text_at.y + galley.rows.first().map_or(galley.size().y / 2.0, |line| line.rect().center().y);
+    let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_6, line_middle), vec2(t.space_12, t.space_12));
+    ui.painter().circle_stroke(icon.center(), t.space_4, t.control_border_stroke(t.form_dim));
+    ui.painter().text(icon.center(), egui::Align2::CENTER_CENTER, "i", crate::type_face::semibold(t.font_badge), t.form_dim);
+    ui.painter().galley(text_at, galley, t.form_dim);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     solidcraft_ui_registry::publish_rect("catalog:footer", rect);
     response

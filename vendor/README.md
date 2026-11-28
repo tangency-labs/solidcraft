@@ -101,6 +101,13 @@ SolidCraft changes to egui and eframe:
   once. The control channel (#743) serves a request with it without waiting for the compositor's
   next frame: on Wayland a window that gets no frames (off-screen, on another workspace) otherwise
   stalled each request for up to a second. Normal redraws still paint.
+- `crates/epaint/src/text/font_face.rs` (`FontFace::styled_metrics`): half of a face's line gap
+  goes above its text and half below it, as in CSS; upstream puts all of it below. Hiragino
+  Sans, the Japanese face on macOS, has a line gap of half an em, so in a Japanese interface
+  every label sat a quarter of an em high in its button or frame, and Japanese words in an
+  English interface sat above the Latin baseline. A face without a line gap (IBM Plex) is
+  unchanged. Tests: `line_gap_is_split_above_and_below_the_text` and
+  `fallback_line_gap_keeps_the_primary_baseline` (`crates/epaint/src/text/text_layout.rs`).
 - `crates/egui/src/viewport.rs`, `crates/egui-winit/src/lib.rs`, `winit/src/platform/macos.rs`,
   `winit/src/platform_impl/macos/window_delegate.rs`: `ViewportCommand::TitlebarButtonsHidden(bool)`
   hides or shows the traffic lights of an open macOS window (winit's `with_titlebar_buttons_hidden`

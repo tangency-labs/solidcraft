@@ -2436,6 +2436,87 @@ mod tests {
         );
     }
 
+    // SolidCraft: the tests of the half line gap above the text (`FontFace::styled_metrics`).
+
+    /// `font` with the line gap in its `hhea` table (the one Hack's line metrics come from)
+    /// set to `line_gap` font units.
+    #[cfg(feature = "default_fonts")]
+    fn with_line_gap(font: &[u8], line_gap: i16) -> Vec<u8> {
+        let mut font = font.to_vec();
+        let num_tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
+        let record = (0..num_tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&record| &font[record..record + 4] == b"hhea")
+            .expect("the font has an hhea table");
+        let offset = &font[record + 8..record + 12];
+        let hhea = u32::from_be_bytes([offset[0], offset[1], offset[2], offset[3]]) as usize;
+        font[hhea + 8..hhea + 10].copy_from_slice(&line_gap.to_be_bytes());
+        font
+    }
+
+    /// The row height and the baseline of `text` at 14 points, drawn with `faces` (the first
+    /// one is the primary face, the others its fallbacks).
+    #[cfg(feature = "default_fonts")]
+    fn row_height_and_baseline(faces: Vec<(&str, Vec<u8>)>, text: &str) -> (f32, f32) {
+        let mut definitions = FontDefinitions::empty();
+        let names = faces.iter().map(|(name, _)| (*name).to_owned()).collect();
+        for (name, bytes) in faces {
+            definitions
+                .font_data
+                .insert(name.to_owned(), Arc::new(FontData::from_owned(bytes)));
+        }
+        definitions.families.insert(FontFamily::Proportional, names);
+        let mut fonts = FontsImpl::new(TextOptions::default(), definitions);
+        let job = LayoutJob::simple(
+            text.to_owned(),
+            FontId::proportional(14.0),
+            Color32::WHITE,
+            f32::INFINITY,
+        );
+        let galley = layout(&mut fonts, 1.0, job.into());
+        (galley.size().y, galley.rows[0].row.glyphs[0].pos.y)
+    }
+
+    /// Half of a face's line gap goes above its text and half below, as in CSS, so text centred
+    /// in a button stays centred. Hiragino Sans, the Japanese face on macOS, has a line gap of
+    /// half an em; with all of it below, Japanese labels sat a quarter of an em high.
+    #[test]
+    #[cfg(feature = "default_fonts")]
+    fn line_gap_is_split_above_and_below_the_text() {
+        let hack = epaint_default_fonts::HACK_REGULAR;
+        let half_em = 1024; // Hack has 2048 units per em.
+        let (height, baseline) = row_height_and_baseline(vec![("Hack", hack.to_vec())], "a");
+        let (gap_height, gap_baseline) =
+            row_height_and_baseline(vec![("Hack", with_line_gap(hack, half_em))], "a");
+        let gap = gap_height - height;
+        assert!(
+            (gap - 7.0).abs() <= 1.0,
+            "half an em at 14 points, got {gap}"
+        );
+        assert!(
+            (gap_baseline - baseline - 0.5 * gap).abs() <= 1.0,
+            "half the gap should be above the text: baseline {baseline} -> {gap_baseline}, gap {gap}"
+        );
+    }
+
+    /// A fallback face's line gap does not lift its glyphs above the primary face's baseline
+    /// (Japanese words in an English interface, drawn with Hiragino Sans).
+    #[test]
+    #[cfg(feature = "default_fonts")]
+    fn fallback_line_gap_keeps_the_primary_baseline() {
+        // The egui icons have no "a", so Hack draws it as a fallback.
+        let icons = ("icons", epaint_default_fonts::EGUI_ICONS.to_vec());
+        let hack = epaint_default_fonts::HACK_REGULAR;
+        let (_, baseline) =
+            row_height_and_baseline(vec![icons.clone(), ("Hack", hack.to_vec())], "a");
+        let (_, gap_baseline) =
+            row_height_and_baseline(vec![icons, ("Hack", with_line_gap(hack, 1024))], "a");
+        assert!(
+            (gap_baseline - baseline).abs() <= 1.0,
+            "baseline {baseline} -> {gap_baseline}"
+        );
+    }
+
     #[test]
     fn test_combining_diacritics() {
         // ɔ̃ = U+0254 (LATIN SMALL LETTER OPEN O) + U+0303 (COMBINING TILDE)

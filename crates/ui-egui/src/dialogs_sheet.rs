@@ -2758,9 +2758,10 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
     for (label, col) in [("Bend up", up_col), ("Bend down", down_col)] {
         y += 20.0;
         painter.line_segment([pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)], Stroke::new(2.0, col));
+        // Each label is centred on its sample line, whatever the font's line gap.
         painter.text(
-            pos2(rect.left() + 44.0, y),
-            Align2::LEFT_TOP,
+            pos2(rect.left() + 44.0, y + 7.0),
+            Align2::LEFT_CENTER,
             label,
             FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,
@@ -2775,8 +2776,8 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             3.0,
         ));
         painter.text(
-            pos2(rect.left() + 44.0, y),
-            Align2::LEFT_TOP,
+            pos2(rect.left() + 44.0, y + 7.0),
+            Align2::LEFT_CENTER,
             "Roll start and end (middle dashed)",
             FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,
@@ -2791,8 +2792,8 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             3.0,
         ));
         painter.text(
-            pos2(rect.left() + 44.0, y),
-            Align2::LEFT_TOP,
+            pos2(rect.left() + 44.0, y + 7.0),
+            Align2::LEFT_CENTER,
             "Pocket boundary (material remains)",
             FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,

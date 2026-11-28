@@ -454,8 +454,8 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
         ui.painter().rect_stroke(thumb.expand(2.0), 8, Stroke::new(2.0, t.form_primary), egui::StrokeKind::Outside);
     }
     let mut text_rect = Rect::from_min_max(thumb.left_bottom() + vec2(0.0, 5.0), rect.right_bottom());
+    let dot_x = text_rect.left() + 3.5;
     if custom {
-        ui.painter().circle_filled(pos2(text_rect.left() + 3.5, text_rect.center().y), 3.5, t.pref_note);
         text_rect.min.x += t.space_12;
     }
     let font =
@@ -464,6 +464,11 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
     job.wrap.max_width = text_rect.width();
     job.wrap.max_rows = 1;
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    if custom {
+        // On the middle of the name's line, whatever the font's line gap.
+        let line_middle = text_rect.top() + galley.rows.first().map_or(galley.size().y / 2.0, |line| line.rect().center().y);
+        ui.painter().circle_filled(pos2(dot_x, line_middle), 3.5, t.pref_note);
+    }
     ui.painter().galley(text_rect.min, galley, ink);
     let kind = if matches!(item, Tile::Saved(entry) if entry.user) { app.tr("ui.panel_layout.your_layout") } else { "" };
     let hint = if custom {
