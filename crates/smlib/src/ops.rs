@@ -346,6 +346,29 @@ impl Brep {
         r
     }
 
+    /// The edges nearest to `edges` (each within `tolerance`), one tangent chain, rounded in one
+    /// blend with the radius law of `degree`, `knots` and `radii` along the whole chain, 0 at its
+    /// end nearest `start`: each edge takes the part of the law its interval in the joined-curve parameterization
+    /// gives, scaled by endpoint-speed ratios so speed agrees at joints. Edges that are not one open chain are [`Error::Unported`], naming why.
+    pub fn fillet_variable_chain(
+        &self,
+        edges: &[[f64; 3]],
+        tolerance: f64,
+        start: [f64; 3],
+        degree: usize,
+        knots: &[f64],
+        radii: &[f64],
+    ) -> Result<Brep> {
+        let r = core::blend::fillet_variable_chain(self.core(), edges, tolerance, start, degree, knots, radii).map(Brep::made_core);
+        trace::made(
+            "fillet_variable_chain",
+            &[self],
+            &r,
+            || json!({"edges": trace::picks(self, PickKind::Edge, edges, tolerance), "start": start, "degree": degree, "knots": knots, "radii": radii}),
+        );
+        r
+    }
+
     /// The edges nearest to `edges` (each within `tolerance`), exactly those, cut by
     /// a chamfer `distance` back along the face whose outward normal leans most along `first`,
     /// and by `second` on the other, with bevelled corners (setbacks measured at each edge's

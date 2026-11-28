@@ -39,6 +39,28 @@ impl Param {
     }
 }
 
+/// How points of the target body are projected onto the base surface in `surface.morph`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MorphProjection {
+    /// Closest-point (normal) projection onto the base surface.
+    #[default]
+    Normal,
+    /// Parallel projection along a fixed direction vector.
+    Direction { dir: [f64; 3] },
+}
+
+/// How offsets from the base surface are carried onto the target surface in `surface.morph`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MorphMapMode {
+    /// Preserve signed normal distance along the target surface's unit normal.
+    #[default]
+    NormalToNormal,
+    /// Preserve the 3D offset vector directly (`P + (S_target - S_base)`).
+    Translate,
+}
+
 /// Where a sketch lies.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -539,6 +561,12 @@ pub struct Extent {
     /// From Object as a reference, as `to_ref`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_ref: Option<ObjectRef>,
+    /// To Object on a curved face: end every part of the profile on the face's surface carried
+    /// on past its edges (a cylinder, cone or torus continued along its surface, a plane
+    /// without end) instead of refusing a profile that reaches past the face. Off in a
+    /// design saved before it: they keep the refusal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub extend_to_face: bool,
 }
 
 /// A To / From Object that is a construction plane or point, not a body face: see
@@ -1422,6 +1450,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Length")]
         length: Option<Expr>,
+        /// How far from the end it starts at (`from`) the thread starts, leaving that much of the
+        /// face plain; `length` and `up_to` are measured from there. `None` (or 0): at that end.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
         /// Continuous flank faces for this feature. Missing in older designs: keep
@@ -2216,8 +2249,10 @@ pub enum FeatureKind {
         #[walk(angle = "Entry chamfer angle")]
         entry_chamfer_angle: Option<Expr>,
     },
-    /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
-    /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
+    /// A helical coil: a circular, square or triangular section swept `turns` times about `axis`,
+    /// rising `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or
+    /// outside). A picked circular edge, round face or flat end face (`axis_ref`) can give the
+    /// diameter when `diameter` is absent.
     Coil {
         #[serde(with = "point_expr")]
         #[walk(placement)]
@@ -2982,8 +3017,9 @@ pub enum FeatureKind {
     },
     /// A surface body's boundary edges through `edges` extended outward: by `distance`, or up
     /// to `up_to`; the surface continued (`mode` natural) or a run-off face along each edge
-    /// (tangent, curvature). `neighbours`: the edges next to an extended edge are lengthened to
-    /// meet it (else the extension's sides run square to the edge).
+    /// (tangent, curvature), or a strip built from the edges themselves leaving them at `angle`
+    /// to the surface (law; 0° when missing). `neighbours`: the edges next to an extended edge
+    /// are lengthened to meet it (else the extension's sides run square to the edge).
     SurfaceExtend {
         body: BodyName,
         edges: Vec<Position>,
@@ -2991,6 +3027,10 @@ pub enum FeatureKind {
         distance: Expr,
         #[serde(default, skip_serializing_if = "ExtendMode::is_natural")]
         mode: ExtendMode,
+        /// The law extension's angle to the surface at the edge (0: tangent), law mode only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         up_to: Option<ExtendTo>,
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
@@ -3088,6 +3128,36 @@ pub enum FeatureKind {
         keep_edges: bool,
         #[walk(length = "Tolerance")]
         tolerance: Expr,
+    },
+    /// Morph a solid or sheet body (or selected `faces` of it) by mapping a base reference surface
+    /// (`base`, optional `base_face` pick) onto a target reference surface (`control`, optional
+    /// `control_face` pick) (`surface.morph`).
+    SurfaceMorph {
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        base: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_face: Option<Position>,
+        control: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control_face: Option<Position>,
+        #[serde(default)]
+        projection: MorphProjection,
+        #[serde(default)]
+        map_mode: MorphMapMode,
+        #[walk(unitless = "Scale factor")]
+        scale: Expr,
+        #[walk(length = "Tolerance")]
+        tolerance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_u: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_v: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        swap_uv: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_original: bool,
     },
     /// A surface body trimmed by a plane, a complete bounded sheet (`tool_body`), a face of a
     /// body (`tool`, its surface extended), or sketch curves swept onto it (`curves`). A sheet
@@ -3343,6 +3413,9 @@ pub enum ExtendMode {
     Tangent,
     /// A run-off that keeps the surface's curvature across the edge (G2).
     Curvature,
+    /// A ruled strip built from the edges themselves, leaving them at the feature's angle to the
+    /// surface (trimmed edges too).
+    Law,
 }
 
 impl ExtendMode {
@@ -3401,6 +3474,8 @@ pub enum FilletStyle {
     Curvature,
     /// `radius` at the end of each edge nearest `start`, `radius2` at the other; `mid` radii at
     /// positions between (0 to 1 from the start end); straight between them, or `smooth`.
+    /// With the fillet's `tangent_chain`, "each edge" is each picked edge's tangent chain when
+    /// it has two ends: the radius runs along the whole chain in one round.
     Variable {
         #[walk(length = "End radius")]
         radius2: Expr,
@@ -3413,7 +3488,8 @@ pub enum FilletStyle {
     },
     /// The radius along each edge as a clamped B-spline of the position from the end nearest
     /// `start` (0) to the other (1): `radius` is its first control radius and `radii` the rest,
-    /// its degree what `knots` leave (knots = control radii + degree + 1).
+    /// its degree what `knots` leave (knots = control radii + degree + 1). With the fillet's
+    /// `tangent_chain`, "each edge" is each picked edge's tangent chain, as for `Variable`.
     Spline {
         start: Position,
         knots: Vec<f64>,
@@ -3867,6 +3943,9 @@ pub enum CoilSection {
     #[default]
     Circular,
     Square,
+    /// An equilateral triangle of side `section_size`, its point toward the axis: a thread-like
+    /// groove when cut, or a thread when joined.
+    Triangle,
 }
 
 /// Where a coil's wire ends: in a plane through the axis, or square to the wire.
@@ -4374,6 +4453,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "BoundaryFeature",
             FeatureKind::SurfaceMatch { .. } => "MatchFeature",
             FeatureKind::SurfaceFair { .. } => "FairFeature",
+            FeatureKind::SurfaceMorph { .. } => "MorphFeature",
             FeatureKind::Stitch { .. } => "StitchFeature",
             FeatureKind::Thicken { .. } => "ThickenFeature",
             FeatureKind::SurfaceTrim { .. } => "TrimFeature",
@@ -4481,6 +4561,7 @@ impl FeatureKind {
             FeatureKind::SurfaceNetwork { .. } => "surface_network",
             FeatureKind::SurfaceMatch { .. } => "surface_match",
             FeatureKind::SurfaceFair { .. } => "surface_fair",
+            FeatureKind::SurfaceMorph { .. } => "surface_morph",
             FeatureKind::SurfaceTrim { .. } => "surface_trim",
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
@@ -4575,6 +4656,7 @@ impl FeatureKind {
             "BoundaryFeature" => "surface_boundary",
             "MatchFeature" => "surface_match",
             "FairFeature" => "surface_fair",
+            "MorphFeature" => "surface_morph",
             "StitchFeature" => "stitch",
             "ThickenFeature" => "thicken",
             "TrimFeature" => "surface_trim",
@@ -4679,6 +4761,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "Boundary",
             FeatureKind::SurfaceMatch { .. } => "Match",
             FeatureKind::SurfaceFair { .. } => "Fair",
+            FeatureKind::SurfaceMorph { .. } => "Morph",
             FeatureKind::Stitch { .. } => "Stitch",
             FeatureKind::Thicken { .. } => "Thicken",
             FeatureKind::SurfaceTrim { .. } => "Trim",

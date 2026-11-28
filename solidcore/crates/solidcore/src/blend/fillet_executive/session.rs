@@ -11,6 +11,7 @@
 //! | [`FilletSession::fillet_corners`] | `GetFilletCorners` |
 //! | [`FilletSession::set_bevel_corner`] | `SetBevelCorner` |
 //! | [`FilletSession::prepare_variable_radius_edges`] | `SetFilletParameters` (same parameters on each edge) with `SM_FS_VARIABLE_RADIUS` |
+//! | [`FilletSession::prepare_variable_radius_edge_laws`] | the same with each edge's own law (the laws `CreateSequenceOfLaws` makes, without its sequence list) |
 //! | [`FilletSession::preview_fillet_surfaces`] | `GetPreviewFilletSurfaces` |
 //!
 //! Deviations: the retained handler's algorithm type is copied into every loaded
@@ -2340,14 +2341,61 @@ impl<'target> FilletSession<'target> {
                 crate::error::blend::BlendFailure::NoEdgesGiven,
             ));
         }
+        let law = self.objects.allocate_law(law)?;
+        // The same-parameters overload passes the one law to every edge's solver.
+        let laws = vec![Some(law); edges.len()];
+        self.prepare_variable_radius_with(k, edges, radius, &laws, xsect_type, continuity)
+    }
+
+    /// [`FilletSession::prepare_variable_radius_edges`] with each edge's own law, in the
+    /// order of `edges`: the laws of one radius running along a tangent chain
+    /// ([`FilletLaw::chain_of_radii`]), each edge's solver given its part.
+    ///
+    /// # Errors
+    /// Native invalid input for an empty edge list or one law fewer or more than edges; real
+    /// parameter/constructor/loader errors.
+    pub fn prepare_variable_radius_edge_laws(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        radius: f64,
+        laws: Vec<FilletLaw>,
+        xsect_type: u32,
+        continuity: u32,
+    ) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::prepare");
+        if edges.is_empty() {
+            return Err(SolidError::blend(
+                OP,
+                crate::error::blend::BlendFailure::NoEdgesGiven,
+            ));
+        }
+        if laws.len() != edges.len() {
+            return Err(invalid("one variable-radius law per edge"));
+        }
+        let mut objects = Vec::new();
+        for law in laws {
+            objects.push(Some(self.objects.allocate_law(law)?));
+        }
+        self.prepare_variable_radius_with(k, edges, radius, &objects, xsect_type, continuity)
+    }
+
+    /// The `SetFilletParameters` call of [`FilletSession::prepare_variable_radius_edges`],
+    /// with the laws already retained, one per edge.
+    fn prepare_variable_radius_with(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        radius: f64,
+        laws: &[Option<FilletObject>],
+        xsect_type: u32,
+        continuity: u32,
+    ) -> Result<()> {
         let xsect = match xsect_type {
             0 => FilletSurfaceGeneratorType::Linear,
             2 => FilletSurfaceGeneratorType::BlendCurve,
             _ => FilletSurfaceGeneratorType::Circular,
         };
-        let law = self.objects.allocate_law(law)?;
-        // The same-parameters overload passes the one law to every edge's solver.
-        let laws = vec![Some(law); edges.len()];
         let edges = edges
             .iter()
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
@@ -2362,7 +2410,7 @@ impl<'target> FilletSession<'target> {
                 xsect_types: &[xsect],
                 radius_types: &[FilletSolverType::VariableRadius],
                 radius_values: &[radius],
-                var_rad_laws: Some(&laws),
+                var_rad_laws: Some(laws),
                 approx_tol: -1.0,
                 ang_tol_deg: -1.0,
                 tan_tol_deg: -1.0,
@@ -4311,6 +4359,21 @@ impl crate::blend::fillet_executive::p1::SmoothSequenceAccess<FilletObject> for 
             .ok_or_else(|| invalid("solver is not live"))?;
         if let SolverObject::VariableRadius(vr) = s {
             vr.set_fillet_law_interval(interval);
+        }
+        Ok(())
+    }
+
+    fn smooth_reverse_solver_law(&mut self, solver: FilletObject) -> Result<()> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let s = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live"))?;
+        if let SolverObject::VariableRadius(vr) = s {
+            vr.law_orientation = !vr.law_orientation;
         }
         Ok(())
     }

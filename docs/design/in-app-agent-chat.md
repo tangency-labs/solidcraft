@@ -235,7 +235,8 @@ loads the user's claude.ai connectors and their own MCP servers (#19554). The se
 `_meta.claudeCode.options`, which the adapter spreads over its own defaults, close all of that:
 - `tools: ["ExitPlanMode"]` (`acp::CLAUDE_TOOLS`): the only built-in tools. A list of what is
   allowed, so a tool a later Claude Code adds stays off. `ExitPlanMode` ends the plan mode the
-  mode picker offers; without it the agent stays in plan mode.
+  mode picker offers; without it the agent stays in plan mode. Read, Glob and Grep, and Write and
+  Edit for the plan, join it when the adapter was recognised (below).
 - `disallowedTools` (`acp::CLAUDE_DISALLOWED_TOOLS`): the shell, file and web tools, a second
   guard.
 - `strictMcpConfig: true`: only the servers in `session/new`'s `mcpServers`, that is
@@ -248,8 +249,70 @@ a proxy). Plugins synced from the user's claude.ai organisation still load too; 
 tool their skills can't run, but their hooks do. Checked with `claude-agent-acp` 0.107.0, from the
 session's `init` event and with `ToolSearch` over ACP after the connectors had time to load:
 before, 39 connector tools, the user's own servers and 21 built-in tools outside the disallowed
-list; after, `solidcraft-app`'s tools and `ExitPlanMode`. Other agents' own permission requests
-appear in the panel with their options.
+list; after, `solidcraft-app`'s tools and `ExitPlanMode`.
+
+Claude Code's read tools (Read, Glob, Grep) are on when the agent's command names
+the adapter (`acp::is_claude_adapter`, decided once when it starts), behind a
+`permissions.ask` rule (`_meta.claudeCode.options.settings`), so every read arrives as
+`session/request_permission` with the path in `rawInput` (`file_path` for Read, `path` and
+`pattern` for Glob, `path` or `file_path` and `glob` for Grep). `acp::read_path` accepts only
+that form, with an absolute path and a pattern that can't leave it; the chat answers allow-once
+when the path, links followed, lies inside a file or folder sent by path in this conversation
+(`AgentChat::by_path`, cleared by New chat), and declines any other read of Claude Code's (kind
+`read` or `search`) without asking, whatever the mode or a remembered answer. Checked with
+`claude-agent-acp` 0.107.0: without the rule these tools read any path without asking.
+
+It fails closed when the adapter runs some other way (a wrapper script, `node …/dist/index.js`).
+The session keeps the read tools out of `tools` and in `disallowedTools`, and the chat still knows Claude Code's own
+read from the adapter's `_meta.claudeCode.toolName`, which it puts on every tool call's updates
+(the question carries the call's `toolCallId`): such a question is declined unless it reads what
+was sent, whatever command started the agent. The same names catch an adapter that stops
+honouring the ask rule: a read tool call that completes without having asked
+(`acp::ClaudeCalls`) stops the message with an error, so the rule can't be lost quietly. Its
+write tools (Write, Edit, for its plan) follow the same rule: off unless the adapter was
+recognised, a write the adapter names declined unless it writes a plan file, and one that never
+asked stops the message.
+
+An earlier version kept the read tools off until a message first sent a file by path, then opened
+the session again with them on (`session/new` with `_meta.claudeCode.options.resume`). That
+reopen raced New chat and the first session's opening, could lose another agent's conversation
+(only Claude Code knows `resume`), and needed a notice when a resume failed. With the tools on
+from the start and every unsent read declined, the agent can read exactly what it could then,
+with none of those cases. The chat sees only the
+path a Glob or Grep starts from, not where its walk goes, so a link inside an attached folder
+that points out of it is safe only because Claude Code's walk doesn't follow links. Checked with
+0.107.0, with a linked folder and a linked file that both point outside: Glob `**/*`, a Grep over
+the folder, and patterns that name a link (`linkdir/**/*`, `linkfile*`) returned only the
+folder's own file, even with a ripgrep config saying `--follow` (`RIPGREP_CONFIG_PATH`). Check
+this again when the adapter's version moves.
+
+Claude Code's plan mode needs its write tools (#19571). It writes the plan to a Markdown file in
+its `plansDirectory`, and `ExitPlanMode`'s "Approve Plan" question (`session/request_permission`,
+kind `switch_mode`) carries that file's text as `rawInput.plan`. With Write off, the write fails
+and the question arrives with `rawInput: {}`; asking the agent in the system note to write the
+plan in its reply worked for a first plan but never for a revised one. So Write and Edit aren't in
+`disallowedTools`, every session's settings ask for them (`permissions.ask`, beside the read
+tools) and set `plansDirectory: "plans"`, which Claude Code resolves against the
+working folder: `<data>/agent-chat/work/plans`, not the user's `~/.claude/plans`.
+`acp::write_path` takes the file from a `Write <path>` or `Edit <path>` question of kind `edit`
+from its `rawInput.file_path` (a WSL agent's `/mnt/c/...` taken back to its drive); the chat allows
+it when the file is an absolute `.md` path right in that folder, the folder reached through links
+but the file itself not a link (`is_plan_file`), and declines any other write of Claude Code's
+before the user's mode or remembered answers are consulted. Another agent's write is never a plan
+write: it goes through the user's mode. A Read of a plan file is allowed the same way, so Claude
+Code can read its plan back before revising it. `acp::plan_text` takes the plan (at most 20 000
+characters) and the panel draws it as Markdown inside the question, above its answers; a question
+with a plan is never answered by the mode or a remembered answer. Starting
+the agent makes the folder and deletes plans not changed for seven days (`tidy_plans`). Several
+SolidCraft windows share the folder and the cleanup doesn't know which conversation wrote a plan,
+so a plan left unchanged for seven days in a conversation still open is deleted too. Checked with `claude-agent-acp` 0.107.0 and Sonnet: with these options, a first plan and a
+revised one both arrived in the question (two runs each), and Claude Code wrote nowhere else.
+Other agents' own permission requests appear in the panel with their options, writes included.
+
+A coding agent gets every attached file and folder by its path (`attach::reference`,
+`attach::folder`); an endpoint, which has no tool that opens a path, gets pictures, text and PDFs
+in the message (a PDF as an OpenAI `file` part or an Anthropic `document` block) and CAD files
+imported (`attach::read`), at most eight, and is refused any other file.
 
 ### Processes
 

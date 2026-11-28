@@ -95,6 +95,7 @@ pub fn arc_of_circle(frame: &Frame, radius: f64, interval: [f64; 2]) -> Result<A
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn frame(x: [f64; 3], y: [f64; 3]) -> Frame {
         Frame {
@@ -115,7 +116,7 @@ mod tests {
         // the arc's points are the record circle's: origin + r (cos t x + sin t y)
         for t in [0.25, 1.0, 2.0] {
             let p = arc.point_at(t).unwrap();
-            let want = Vec3::new(1.0, 2.0 + 5.0 * t.cos(), 3.0 + 5.0 * t.sin());
+            let want = Vec3::new(1.0, 2.0 + 5.0 * det::cos(t), 3.0 + 5.0 * det::sin(t));
             assert!((p - want).length() < 1e-12, "{p:?} at {t}");
         }
         // a whole turn is an arc

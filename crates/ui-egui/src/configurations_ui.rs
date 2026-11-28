@@ -219,7 +219,7 @@ pub(super) fn configurations_rows(
                 });
             }
             if rule_editor.adding_row {
-                let menu_was_open = egui::Popup::is_any_open(ui.ctx());
+                let menu_was_open = egui::Popup::is_any_open(ui.ctx()) || crate::ui_kit::Menu::any_open(ui.ctx());
                 let mut commit = false;
                 let mut discard = false;
                 let mut left = false;
@@ -515,65 +515,79 @@ fn column_menu(
         // again would be clipped to that small height, so a list that scrolls takes the full one.
         let list_height = solidcraft_theme::Tokens::get().space_24 * 12.0;
         egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height).show(ui, |ui| {
-            for (label, p) in &matching {
-                if ui_kit::button(ui, label.as_str(), ui_kit::Button::Normal).clicked() {
-                    pick = Some(p.clone());
-                    ui.close();
-                }
+            let choices: Vec<_> = matching
+                .iter()
+                .enumerate()
+                .map(|(index, (label, params))| ui_kit::Item::action(&format!("column:{index}"), label, "").with(params.clone()))
+                .collect();
+            let output = ui_kit::Menu::items(ui, ui.make_persistent_id("config_column_choices"), &choices, !was_open);
+            if let Some(picked) = output.picked {
+                pick = picked.params;
+            }
+            if output.close {
+                ui.close();
             }
             if !faces {
                 return;
             }
-            ui_kit::action_menu(ui, "Face Appearance", |ui| {
-                ui_kit::text(
-                    ui,
-                    solidcraft_ui_text::tr_label("Semantic faces share their appearance across instances."),
-                    ui_kit::Text::Note("semantic_faces"),
-                );
+            let face_button = ui_kit::text_button(ui, "Face Appearance", true);
+            let bodies = if face_button.clicked() || ui_kit::Menu::response_is_open(&face_button) {
                 let state = app.session.model.state();
+                let mut bodies = Vec::new();
                 for body in &state.bodies {
                     if body.body.is_mesh() {
                         continue;
                     }
-                    ui_kit::action_menu(ui, &format!("Faces on {}", body.name), |ui| {
-                        // Measured once per body, at the same tolerance: this menu is drawn again
-                        // every frame while it is open, and measuring meshes the whole body.
-                        if let Ok(faces) = body.joint_faces() {
-                            let mut seen = std::collections::BTreeSet::new();
-                            let mesh = body.mesh();
-                            let mut points = std::collections::BTreeMap::new();
-                            for (triangle, index) in mesh.triangles.iter().zip(&mesh.tri_face) {
-                                if let std::collections::btree_map::Entry::Vacant(entry) = points.entry(*index as usize)
-                                    && let Some([a, b, c]) = mesh.tri(triangle)
-                                {
-                                    entry.insert((a + b + c) * (1. / 3.));
-                                }
-                            }
-                            for face in faces.iter() {
-                                // A curved face centroid can lie on another surface.
-                                // Pick an interior triangle point on this actual face.
-                                let Some(point) = points.get(&face.index).copied() else { continue };
-                                let Ok(target) = app.session.doc.configuration_face_target(body, face.index, point) else { continue };
-                                let supported = if target.certificate.is_some() {
-                                    // Capture read this exact face's current source certificate.
-                                    // Enumerate its pieces once in the command, not per menu face.
-                                    app.session.doc.certify_config_face(&target).is_ok()
-                                } else {
-                                    app.session.doc.configuration_face_indices(body, &target).is_ok()
-                                };
-                                if !supported || !seen.insert(target.name.clone()) {
-                                    continue;
-                                }
-                                let Some((_, role)) = solidcraft_engine::doc::persistent_name::split_feature(&target.name) else { continue };
-                                if ui_kit::button(ui, role, ui_kit::Button::Normal).clicked() {
-                                    pick = Some(json!({"face_appearance":{"target":target}}));
-                                    ui.close();
-                                }
+                    let body_id = format!("faces:{}", body.name);
+                    let mut face_items = Vec::new();
+                    if ui_kit::Menu::branch_open(ui.ctx(), face_button.id.with("shared_menu"), &body_id)
+                        && let Ok(faces) = body.joint_faces()
+                    {
+                        let mut seen = std::collections::BTreeSet::new();
+                        let mesh = body.mesh();
+                        let mut points = std::collections::BTreeMap::new();
+                        for (triangle, index) in mesh.triangles.iter().zip(&mesh.tri_face) {
+                            if let std::collections::btree_map::Entry::Vacant(entry) = points.entry(*index as usize)
+                                && let Some([a, b, c]) = mesh.tri(triangle)
+                            {
+                                entry.insert((a + b + c) * (1. / 3.));
                             }
                         }
-                    });
+                        for face in faces.iter() {
+                            // A curved face centroid can lie on another surface.
+                            // Pick an interior triangle point on this actual face.
+                            let Some(point) = points.get(&face.index).copied() else { continue };
+                            let Ok(target) = app.session.doc.configuration_face_target(body, face.index, point) else { continue };
+                            let supported = if target.certificate.is_some() {
+                                // Capture read this exact face's current source certificate.
+                                // Enumerate its pieces once in the command, not per menu face.
+                                app.session.doc.certify_config_face(&target).is_ok()
+                            } else {
+                                app.session.doc.configuration_face_indices(body, &target).is_ok()
+                            };
+                            if !supported || !seen.insert(target.name.clone()) {
+                                continue;
+                            }
+                            let Some((_, role)) = solidcraft_engine::doc::persistent_name::split_feature(&target.name) else { continue };
+                            face_items.push(
+                                ui_kit::Item::action(&format!("face:{}:{}", body.name, face.index), role, "")
+                                    .with(json!({"face_appearance":{"target":target}})),
+                            );
+                        }
+                    }
+                    let mut entry = ui_kit::Item::lazy_submenu(&body_id, &format!("Faces on {}", body.name), "");
+                    entry.children = face_items;
+                    entry.tip = Some(solidcraft_ui_text::tr_label("Semantic faces share their appearance across instances.").to_string());
+                    bodies.push(entry);
                 }
-            });
+                bodies
+            } else {
+                Vec::new()
+            };
+            if let Some(picked) = ui_kit::Menu::button_items(&face_button, &bodies) {
+                pick = picked.params;
+                ui.close();
+            }
         });
     });
     rule_editor.column_menu_open = shown.is_some();

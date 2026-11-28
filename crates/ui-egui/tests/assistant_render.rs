@@ -57,6 +57,7 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
                     key: 1,
                     title: "Export plate.step".into(),
                     answer: None,
+                    plan: None,
                     options: vec![
                         PermissionOption { id: "deny".into(), name: "Deny".into(), kind: "reject_once".into() },
                         PermissionOption { id: "always".into(), name: "Always allow".into(), kind: "allow_always".into() },
