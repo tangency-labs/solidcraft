@@ -381,6 +381,10 @@ struct Stopped {
     mitred: Vec<EdgeId>,
     /// The Roll-over corners the corners step refused, with [`RollOverStep::Classify`].
     roll_overs: Vec<RollOver>,
+    /// The edges of each two blends whose bands cross only past free ends of their edges, two
+    /// by two, where that was the band check's only refusal (the kernel's
+    /// `FilletSession::bands_crossing_past_ends`, #22798).
+    crossing: Vec<EdgeId>,
 }
 
 /// The kernel's reason for a blend too large, as ops names it; `None` for the reasons it does
@@ -1114,6 +1118,7 @@ fn pass(
                         stopped.overflow = Some(s.overflow_edges());
                         stopped.mitred = s.mitred_edges();
                     }
+                    stopped.crossing = s.bands_crossing_past_ends().to_vec();
                     let (error, edge) = blend_failure(&s, e, call);
                     fit_edge = edge;
                     Ok(Err(Refused::Error(error)))
@@ -1769,7 +1774,10 @@ const NO_COMMENT: &str = "<no comment>";
 /// filled), the overflowing ones go first and the others then round what is left of their
 /// edges, meeting them as one blend; an edge the overflow removed whole is reported dropped.
 /// A closed manifold body gives one. Two rounds that meet at a sharp side edge on a face they share turn
-/// mitred ([`blend_ordered`] takes the [`Turn`]).
+/// mitred ([`blend_ordered`] takes the [`Turn`]). Rounds whose bands cross only past free ends
+/// of their edges (neighbouring edges that share no vertex and end on a face beyond, such as a
+/// block's top edges where a sphere trims its corners) are built in turns and mitred where they
+/// cross.
 ///
 /// # Errors
 /// [`Error::Argument`] for no edges, an index past its list or repeated, sizes neither one nor
@@ -1883,6 +1891,40 @@ fn blend_impl(
     corners: Corners,
     options: BlendOptions,
 ) -> Result<Blended> {
+    blend_impl_in(
+        body,
+        order,
+        kind,
+        edges,
+        sizes,
+        setbacks,
+        corners,
+        options,
+        InTurn::No,
+    )
+}
+
+/// Whether [`blend_impl_in`] builds one turn of [`crossing_in_turns`], which is never itself
+/// built in turns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InTurn {
+    No,
+    Yes,
+}
+
+/// [`blend_impl`], `in_turn` saying whether it builds a turn of [`crossing_in_turns`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn blend_impl_in(
+    body: &Body,
+    order: Option<&crate::Order>,
+    kind: Blend,
+    edges: &[usize],
+    sizes: &[f64],
+    setbacks: &[SetBack],
+    corners: Corners,
+    options: BlendOptions,
+    in_turn: InTurn,
+) -> Result<Blended> {
     let turn = options.turn;
     let one_size = sizes.len() == 1;
     if edges.is_empty()
@@ -1907,7 +1949,19 @@ fn blend_impl(
                 .unwrap_or(0.0)
         })
         .collect();
-    let blended = match blend_session(body, order, kind, edges, &each, setbacks, corners, options) {
+    let mut crossing = Vec::new();
+    let first = blend_session(
+        body,
+        order,
+        kind,
+        edges,
+        &each,
+        setbacks,
+        corners,
+        options,
+        &mut crossing,
+    );
+    let blended = match first {
         // Auto never refuses a blend the mitre builds: its swept turns are chosen per corner
         // ([`TurnChoice::Auto`]), each one the blend corner builds on its own, but a swept turn
         // can still leave a round no room beside another corner of it (a round shorter than its
@@ -1922,7 +1976,18 @@ fn blend_impl(
                 turn: Turn::Mitre,
                 ..options
             };
-            blend_session(body, order, kind, edges, &each, setbacks, corners, mitred)
+            crossing.clear();
+            blend_session(
+                body,
+                order,
+                kind,
+                edges,
+                &each,
+                setbacks,
+                corners,
+                mitred,
+                &mut crossing,
+            )
         }
         other => other,
     };
@@ -1939,20 +2004,270 @@ fn blend_impl(
         ) if matches!(kind, Blend::Chamfer | Blend::Round) && setbacks.is_empty() => {
             // a run-out that cannot be built (`body` untouched) leaves the kernel's refusal,
             // which says what to change, the answer
-            match blend_running_out(body, order, kind, edges, &each) {
-                Ok(Some(made)) => Ok(Blended {
+            if let Ok(Some(made)) = blend_running_out(body, order, kind, edges, &each) {
+                return Ok(Blended {
                     dropped: vec![false; edges.len()],
                     holes: Vec::new(),
                     made,
-                }),
-                Ok(None) | Err(_) => Err(refused),
+                });
             }
+            // (#22798) rounds refused only for bands that cross past free ends of their edges,
+            // built in turns; where they do not build, the refusal stands
+            let in_turns = in_turn == InTurn::No
+                && kind == Blend::Round
+                && corners == Corners::Filled
+                && !crossing.is_empty();
+            if in_turns {
+                let asked = Asked {
+                    order,
+                    edges,
+                    each: &each,
+                };
+                match crossing_in_turns(body, asked, options, &crossing) {
+                    Ok(Some(made)) => return Ok(made),
+                    Err(e @ (Error::Cancelled | Error::OutOfFuel { .. })) => return Err(e),
+                    Ok(None) | Err(_) => {}
+                }
+            }
+            Err(refused)
         }
         other => other,
     }
 }
 
-/// [`blend_impl`]'s kernel session on `body`.
+/// The asked rounds of [`crossing_in_turns`]: the edges at `edges` (through `order`, or the
+/// body's own edge order), `each` the radius of each.
+#[derive(Clone, Copy)]
+struct Asked<'a> {
+    order: Option<&'a crate::Order>,
+    edges: &'a [usize],
+    each: &'a [f64],
+}
+
+/// The attribute id of the faces a turn of [`crossing_in_turns`] made, below [`PICKED_ID`] and
+/// the kernel's own separate-End mark (`ids::USER_1 - 2`).
+const TURN_MADE_ID: u64 = ids::USER_1 - 3;
+
+/// The faces a turn of [`crossing_in_turns`] made, marked through the later turns.
+#[derive(Debug, Clone, PartialEq)]
+struct TurnMade;
+
+impl AttributeHandlers for TurnMade {}
+
+/// The rounds of `asked` whose bands the kernel found crossing only past free ends of their
+/// edges (`crossing`, each pair by its places in `asked.edges`; #22798), built in turns on a
+/// copy of `body`: no two that cross in one turn, each turn a blend of its own on what the
+/// earlier ones left, as [`blend`] builds it, with `options`. Two neighbouring rounds on the
+/// top of a block whose corners a sphere trims share no vertex, so no corner trims them where
+/// their rails, run on past the edges' ends, cross on the top face. Built in turn, the later
+/// one is cut where it crosses the earlier one: the two meet in their mitre, the curve where
+/// their surfaces cross, ended on the face beyond (the sphere). The kernel notes only crossings
+/// past free ends of both edges, so neither round's ball, along its own edge, rolls on what the
+/// other takes off, and the result is `body` less both rounds' removal regions whichever goes
+/// first.
+///
+/// Each asked edge takes the first turn that none of the rounds it crosses has taken, in the
+/// body's own edge order (so the turns do not depend on the order of selection). Every edge
+/// carries its asked edge's tag ([`Picked`]) through the turns, and a turn rounds the edges
+/// carrying its asked edges' tags, each at its radius; the faces each turn made are marked
+/// ([`TurnMade`]) and returned, as [`Blended::made`], by index in the result's face list.
+/// `body` takes the result. `None`, `body` untouched, where an asked edge is not found again,
+/// fewer than two turns are needed, or a turn is refused in both orders
+/// of the turns (the body's, then the other way round: [`in_turns`]).
+///
+/// # Errors
+/// The kernel's errors from tagging and reading the copies; a turn's cancellation.
+fn crossing_in_turns(
+    body: &Body,
+    asked: Asked<'_>,
+    options: BlendOptions,
+    crossing: &[[usize; 2]],
+) -> Result<Option<Blended>> {
+    let Asked { order, edges, each } = asked;
+    // each asked edge's place in the body's native list (a copy keeps it)
+    let places = with_body("blend_in_turns", body, |_, b| {
+        let edge_order = order.map_or_else(|| b.edge_list().to_vec(), |o| o.edges.clone());
+        let native = b.edge_list();
+        let places: Option<Vec<usize>> = edges
+            .iter()
+            .map(|&i| {
+                let e = edge_order.get(i)?;
+                native.iter().position(|n| n == e)
+            })
+            .collect();
+        Ok(Ok::<_, Error>(places))
+    })??;
+    let Some(places) = places else {
+        return Ok(None);
+    };
+    let mut by_place: Vec<usize> = (0..edges.len()).collect();
+    by_place.sort_unstable_by_key(|&i| places.get(i).copied().unwrap_or(usize::MAX));
+    let mut turn_of: Vec<Option<usize>> = vec![None; edges.len()];
+    for &i in &by_place {
+        let taken: Vec<usize> = crossing
+            .iter()
+            .filter_map(|&[a, b]| {
+                let other = if a == i {
+                    b
+                } else if b == i {
+                    a
+                } else {
+                    return None;
+                };
+                turn_of.get(other).copied().flatten()
+            })
+            .collect();
+        // at most as many turns are taken as it has crossings, so one is free
+        let first = (0..=taken.len()).find(|t| !taken.contains(t));
+        if let (Some(slot), Some(first)) = (turn_of.get_mut(i), first) {
+            *slot = Some(first);
+        }
+    }
+    let turns = turn_of.iter().flatten().max().map_or(0, |&t| t + 1);
+    if turns < 2 {
+        return Ok(None);
+    }
+    // the turns in the body's order, else the other way round: the result is the same either
+    // way, but where the rounds only just cross, the later turn's blend can refuse one order
+    // and build the other (a round 0.01 past the size at which the bands meet)
+    let forward: Vec<usize> = (0..turns).collect();
+    let backward: Vec<usize> = (0..turns).rev().collect();
+    for sequence in [forward, backward] {
+        let turned = Turned {
+            places: &places,
+            turn_of: &turn_of,
+            each,
+            options,
+        };
+        if let Some((out, made)) = in_turns(body, turned, &sequence)? {
+            body.take_from(&out);
+            return Ok(Some(Blended {
+                dropped: vec![false; edges.len()],
+                holes: Vec::new(),
+                made,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+/// What [`in_turns`] builds: each asked edge's place in the body's native list, its turn and
+/// its radius, and the options of every turn's blend.
+#[derive(Clone, Copy)]
+struct Turned<'a> {
+    places: &'a [usize],
+    turn_of: &'a [Option<usize>],
+    each: &'a [f64],
+    options: BlendOptions,
+}
+
+/// [`crossing_in_turns`]' turns in the order `sequence`, on a copy of `body`: the copy and the
+/// faces the turns made (by index in its face list), or `None` where an asked edge is not found
+/// again or a turn is refused.
+///
+/// # Errors
+/// The kernel's errors from tagging and reading the copy; a turn's cancellation.
+fn in_turns(
+    body: &Body,
+    turned: Turned<'_>,
+    sequence: &[usize],
+) -> Result<Option<(Body, Vec<usize>)>> {
+    let Turned {
+        places,
+        turn_of,
+        each,
+        options,
+    } = turned;
+    let out = body.copy()?;
+    with_body("blend_in_turns", &out, |_, b| {
+        let native = b.edge_list().to_vec();
+        for (i, place) in places.iter().enumerate() {
+            let Some(&e) = native.get(*place) else {
+                return Ok(Err(Error::Exception));
+            };
+            b.add_attribute(
+                EntityRef::Edge(e),
+                Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)),
+            )?;
+        }
+        Ok(Ok(()))
+    })??;
+    for &t in sequence {
+        let mine: Vec<usize> = (0..places.len())
+            .filter(|&i| turn_of.get(i).copied().flatten() == Some(t))
+            .collect();
+        let found = with_body("blend_in_turns", &out, |_, b| {
+            let (mut at, mut sizes) = (Vec::new(), Vec::new());
+            for &i in &mine {
+                let mut left = false;
+                for (place, &e) in b.edge_list().iter().enumerate() {
+                    if picked_on(b, e).is_some_and(|(_, p)| p == i) {
+                        at.push(place);
+                        sizes.push(each.get(i).copied().unwrap_or(0.0));
+                        left = true;
+                    }
+                }
+                if !left {
+                    return Ok(Ok::<_, Error>(None));
+                }
+            }
+            Ok(Ok(Some((at, sizes))))
+        })??;
+        let Some((at, sizes)) = found else {
+            return Ok(None);
+        };
+        let made = match blend_impl_in(
+            &out,
+            None,
+            Blend::Round,
+            &at,
+            &sizes,
+            &[],
+            Corners::Filled,
+            options,
+            InTurn::Yes,
+        ) {
+            Ok(made) => made.made,
+            Err(e @ (Error::Cancelled | Error::OutOfFuel { .. })) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        with_body("blend_in_turns", &out, |_, b| {
+            let faces = b.face_list().to_vec();
+            for i in &made {
+                if let Some(&f) = faces.get(*i) {
+                    b.add_attribute(
+                        EntityRef::Face(f),
+                        Attribute::application(TURN_MADE_ID, Behavior::Copy, TurnMade),
+                    )?;
+                }
+            }
+            Ok(Ok::<_, Error>(()))
+        })??;
+    }
+    // the marks off, the faces the turns made by index
+    let made = with_body("blend_in_turns", &out, |_, b| {
+        untagged(b)?;
+        let mut made = Vec::new();
+        for (i, f) in b.face_list().to_vec().into_iter().enumerate() {
+            let marks: Vec<AttributeHandle> = b
+                .entity_attributes(EntityRef::Face(f))
+                .into_iter()
+                .filter(|(_, a)| a.attribute_id() == TURN_MADE_ID)
+                .map(|(h, _)| h)
+                .collect();
+            if !marks.is_empty() {
+                made.push(i);
+            }
+            for h in marks {
+                b.remove_attribute(EntityRef::Face(f), h)?;
+            }
+        }
+        Ok(Ok::<_, Error>(made))
+    })??;
+    Ok(Some((out, made)))
+}
+
+/// [`blend_impl`]'s kernel session on `body`; `crossing` as [`blend_on_body`] fills it.
 #[allow(clippy::too_many_arguments)]
 fn blend_session(
     body: &Body,
@@ -1963,12 +2278,15 @@ fn blend_session(
     setbacks: &[SetBack],
     corners: Corners,
     options: BlendOptions,
+    crossing: &mut Vec<[usize; 2]>,
 ) -> Result<Blended> {
     with_body("blend", body, |k, b| {
         // the faces the blend makes, as the kernel's fillet sessions mark them: its log on for
         // this blend, whatever the caller had it at, and put back after
         let outer = k.blend_face_log.replace(BlendFaceLog::default());
-        let ran = blend_on_body(k, b, order, kind, edges, each, setbacks, corners, options);
+        let ran = blend_on_body(
+            k, b, order, kind, edges, each, setbacks, corners, options, crossing,
+        );
         let ours = std::mem::replace(&mut k.blend_face_log, outer);
         let made: HashSet<FaceId> = ours
             .iter()
@@ -1992,7 +2310,9 @@ fn blend_session(
 }
 
 /// [`blend_impl`] on the kernel's body: every pass, its corners and refusals, the body
-/// finished as the result.
+/// finished as the result. Where the first call is refused only for bands that cross past free
+/// ends of their edges, `crossing` takes those pairs, as places in `edges`
+/// ([`Stopped::crossing`]; [`crossing_in_turns`] builds them).
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn blend_on_body(
     k: &mut Kernel,
@@ -2004,6 +2324,7 @@ fn blend_on_body(
     setbacks: &[SetBack],
     corners: Corners,
     options: BlendOptions,
+    crossing: &mut Vec<[usize; 2]>,
 ) -> solidcore::Result<Result<Blended>> {
     let turn = options.turn;
     let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
@@ -2131,6 +2452,8 @@ fn blend_on_body(
         None
     };
     let merged = through.is_some();
+    // the asked edges, at their places in `edges`, for the crossings noted below
+    let asked = picked.clone();
     let (picked, sizes): (Vec<EdgeId>, Vec<f64>) = match through {
         Some((clean, picks, kept)) => {
             *b = clean;
@@ -2289,6 +2612,13 @@ fn blend_on_body(
             k.blend_face_log = log;
             crate::session::note_back(note);
         }
+    }
+    // blends refused only for bands that cross past free ends of their edges (#22798): the
+    // pairs, by their places in `edges`, for [`crossing_in_turns`]
+    if !merged && made.is_err() && stopped.overflow.is_none() {
+        let at = |e: &EdgeId| asked.iter().position(|a| a == e);
+        let (pairs, _) = stopped.crossing.as_chunks::<2>();
+        crossing.extend(pairs.iter().filter_map(|[x, y]| Some([at(x)?, at(y)?])));
     }
     if stopped.overflow.is_some() {
         let Some(fresh) = fresh else {

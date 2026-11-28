@@ -128,6 +128,17 @@ fn encode_profile(curves: &[Curve]) -> Result<Vec<f64>, BackendError> {
     Ok(out)
 }
 
+/// Rounds turning as OCCT turns them, mitred: a mitre asked for, or the automatic turn where no
+/// two picked edges meet (it only chooses a swept turn where two rounds meet at a side edge).
+fn mitred_turns(body: &Shape, points: &[[f64; 3]], turn: FilletTurn) -> Result<(), BackendError> {
+    match turn {
+        FilletTurn::Mitre => Ok(()),
+        FilletTurn::Auto if !body.picked_edges_meet(points).map_err(failed)? => Ok(()),
+        FilletTurn::Auto => unsupported("automatic turns where picked edges meet"),
+        FilletTurn::Swept => unsupported("swept fillet turns"),
+    }
+}
+
 fn finite(v: &[f64]) -> bool {
     v.iter().all(|x| x.is_finite())
 }
@@ -152,7 +163,7 @@ impl Backend for Occt {
             OpKind::Box | OpKind::Cylinder | OpKind::Sphere | OpKind::Torus | OpKind::Boolean => Support::Yes,
             OpKind::Extrude => Support::Some("straight extrusions; not tapered, not the material of overlapping regions".into()),
             OpKind::Revolve => Support::Yes,
-            OpKind::Fillet => Support::Some("constant radii (one for each edge) with mitred turns".into()),
+            OpKind::Fillet => Support::Some("constant radii (one for each edge) with mitred turns, or automatic turns of edges apart".into()),
             OpKind::Chamfer => Support::Some("equal chamfers".into()),
             OpKind::Shell => Support::Some("open at one face or more".into()),
             OpKind::Thicken => Support::Yes,
@@ -277,13 +288,11 @@ impl Modelling for Occt {
     }
 
     fn fillet(&self, body: &Shape, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Shape, BackendError> {
-        if turn != FilletTurn::Mitre {
-            return unsupported("swept fillet turns");
-        }
         if edges.is_empty() || !(radius > 0.0) || !radius.is_finite() || edges.iter().any(|p| !finite(&xyz(*p))) {
             return unsupported("a fillet solidcore refuses");
         }
         let points: Vec<[f64; 3]> = edges.iter().map(|p| xyz(*p)).collect();
+        mitred_turns(body, &points, turn)?;
         body.fillet_nearest(&points, radius).map_err(failed)
     }
 
@@ -294,9 +303,6 @@ impl Modelling for Occt {
     }
 
     fn fillet_each(&self, body: &Shape, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Shape, BackendError> {
-        if turn != FilletTurn::Mitre {
-            return unsupported("swept fillet turns");
-        }
         if edges.is_empty()
             || edges.len() != radii.len()
             || radii.iter().any(|r| !(*r > 0.0) || !r.is_finite())
@@ -305,6 +311,7 @@ impl Modelling for Occt {
             return unsupported("a fillet solidcore refuses");
         }
         let points: Vec<[f64; 3]> = edges.iter().map(|p| xyz(*p)).collect();
+        mitred_turns(body, &points, turn)?;
         body.fillet_each(&points, radii).map_err(failed)
     }
 
@@ -951,6 +958,27 @@ mod tests {
         same_solid("two edges apart, r 1 and r 2", 1000.0 - off(1.0) - off(2.0), || {
             crate::route::fillet_each(&cube()?, &[v(5.0, 0.0, 10.0), v(5.0, 10.0, 0.0)], &[1.0, 2.0], FilletTurn::Mitre)
         });
+    }
+
+    #[test]
+    fn automatic_turns_of_edges_apart_match_solidcore() {
+        use std::f64::consts::PI;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let off = |r: f64| 10.0 * r * r * (1.0 - PI / 4.0);
+        same_solid("one edge, turns automatic", 1000.0 - off(1.0), || {
+            crate::route::fillet_removing(&cube()?, &[v(5.0, 0.0, 10.0)], 1.0, FilletTurn::Auto).map(|(b, _)| b)
+        });
+        same_solid("two edges apart, turns automatic", 1000.0 - 2.0 * off(1.0), || {
+            crate::route::fillet_removing(&cube()?, &[v(5.0, 0.0, 10.0), v(5.0, 10.0, 0.0)], 1.0, FilletTurn::Auto).map(|(b, _)| b)
+        });
+        // Two top edges meeting at a corner: the automatic turn is solidcore's to choose.
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        let _chosen = crate::route::foreign::choosing();
+        set_kernel(Kernel::Occt);
+        let before = fell_back();
+        crate::route::fillet_removing(&cube().unwrap(), &[v(5.0, 0.0, 10.0), v(10.0, 5.0, 10.0)], 1.0, FilletTurn::Auto).unwrap();
+        set_kernel(Kernel::Solidcore);
+        assert!(fell_back() > before, "edges that meet run on solidcore");
     }
 
     #[test]

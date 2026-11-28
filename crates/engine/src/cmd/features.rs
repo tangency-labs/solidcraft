@@ -1598,17 +1598,7 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     if ps.iter().all(|p| p.region.holes.is_empty()) && !gaps.iter().any(|g| *g) {
         return ProfileSel::All;
     }
-    // Each profile has the profiles directly inside it as holes, so the number of holes around a
-    // point of a profile's material is its nesting depth.
-    let material: Vec<_> = ps
-        .iter()
-        .zip(&gaps)
-        .filter(|(p, gap)| {
-            let probe = p.region.interior_point();
-            !**gap && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
-        })
-        .map(|(p, _)| p)
-        .collect();
+    let material = material_profiles(&ps, &gaps);
     let all = solidcraft_sketch::without_text_counters(&ss.sketch, ps.clone());
     if material.iter().map(|p| &p.outer_curves).eq(all.iter().map(|p| &p.outer_curves)) {
         return ProfileSel::All;
@@ -1626,6 +1616,23 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
         Ok(found) if found.len() == material.len() && material.iter().all(|p| !p.outer_curves.is_empty()) => sel,
         _ => ProfileSel::All,
     }
+}
+
+/// The material among a sketch's profiles, by even-odd nesting: a loop inside an outline is its
+/// hole, a loop inside that hole material again. Each profile has the profiles directly inside it
+/// as holes, so the number of holes around a point of a profile's material is its nesting depth.
+/// A profile marked in `gaps` ([`solidcraft_sketch::enclosed_gaps`]) is never material; one past
+/// the end of `gaps` is not a gap.
+pub(super) fn material_profiles<'a>(ps: &'a [solidcraft_sketch::Profile], gaps: &[bool]) -> Vec<&'a solidcraft_sketch::Profile> {
+    ps.iter()
+        .enumerate()
+        .filter(|(i, p)| {
+            let probe = p.region.interior_point();
+            !gaps.get(*i).copied().unwrap_or(false)
+                && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
+        })
+        .map(|(_, p)| p)
+        .collect()
 }
 
 /// The matrix taking a point of the active component's frame into the frame `b`'s geometry is

@@ -96,6 +96,18 @@ fn offset_folds_keep_the_largest_wall() {
     assert_eq!(refused(refusal, "offset::face: a folded wall".into()), Error::WallFolds { largest: Some(1.0) });
 }
 
+/// #22792: what the kernel cannot handle keeps its words, as a draft's refusal does. A shell of a
+/// threaded boss or a split sphere read "not supported yet: SMLib shell for this geometry", which
+/// hid the construction that refused (the offset's seam reconstruction, not the room test).
+#[test]
+fn unsupported_offset_refusals_keep_their_reason() {
+    let why = "periodic rim needs exactly two boundary ends";
+    let refusal = solidcore_ops::Error::Unsupported(why);
+    let error = refused(refusal.clone(), format!("offset::offset_executive::periodic_boundary: {why}"));
+    assert_eq!(error, Error::Refused(refusal));
+    assert!(error.to_string().contains(why), "{error}");
+}
+
 /// How near a pick point must be.
 const TOL: f64 = 0.01;
 

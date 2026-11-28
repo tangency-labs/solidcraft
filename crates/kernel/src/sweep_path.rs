@@ -202,9 +202,25 @@ fn frames_toward(tangents: &[Vec3], d: Vec3) -> Result<Vec<[Vec3; 3]>> {
 /// Kept as drawn (parallel), the profile flattens to nothing where the path runs along its
 /// plane: the path, by its directions of travel `tangents` (the first leaving the profile), has to
 /// cross the plane at 5 degrees or more all the way.
-pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3]) -> Result<()> {
+///
+/// With `turning` (any orientation but parallel) the profile is instead carried by motions that
+/// take the path's direction where it starts onto its direction farther along, so the angle
+/// between its plane and the path stays what it is at the start. `tangents` is then the start
+/// direction alone, and a profile the path starts in (the caller's test) whose plane holds it
+/// (to 1e-6 rad) lies along the path everywhere and sweeps no volume, for example a circle drawn on XZ swept round a coil's end
+/// section, a circle in XZ.
+pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3], turning: bool) -> Result<()> {
     let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
     let t0 = *tangents.first().ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
+    if turning {
+        let t = t0.normalized().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+        if n.dot(t).abs() < 1e-6 {
+            return Err(KernelError::Invalid(
+                "the profile lies along the path where the sweep starts (its plane holds the path's direction there), so carried along the path it would sweep no volume: draw the profile across the path".into(),
+            ));
+        }
+        return Ok(());
+    }
     let axis = if n.dot(t0) < 0.0 { n * -1.0 } else { n };
     if tangents.iter().any(|t| t.dot(axis) < 5f64.to_radians().sin()) {
         return Err(KernelError::Invalid(
@@ -241,7 +257,7 @@ pub(crate) fn controlled_stations(
     // square to the path this is its normal, pointing the way the path leaves it.
     let axis = t0.normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
     if ctl.orientation == SweepOrientation::Parallel {
-        crossing_check(plane, tangents)?;
+        crossing_check(plane, tangents, false)?;
     }
     let mut run = Vec::with_capacity(pts.len());
     let mut total = 0.0;
