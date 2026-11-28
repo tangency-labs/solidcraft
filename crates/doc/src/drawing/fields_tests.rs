@@ -442,7 +442,16 @@ fn a_view_at_a_scale_of_its_own_leaves_the_sheet_its_main_scale() {
     let (first, second, third) = (d.sheets[0].id, d.sheets[1].id, d.sheets[2].id);
     let view = |id, sheet, kind, scale: Option<&str>| {
         let settings = ViewOverrides { scale: scale.map(|s| s.parse().unwrap()), ..ViewOverrides::default() };
-        Arc::new(View { id, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None, centre_marks: None })
+        Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At([150.0, 150.0]),
+            settings,
+            reference_shown_percent: 0.0,
+            label: None,
+            centre_marks: None,
+        })
     };
     let base = |named| ViewKind::Base { source, view: ViewDirection::Named(named) };
     let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 5.0), Vec2::new(30.0, 5.0)], ArrowSide::Right).unwrap();
