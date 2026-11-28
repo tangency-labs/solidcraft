@@ -721,7 +721,11 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::ArcLength { curve, start, len } => {
             let c = build(curve)?;
             let r = tri!(o, c.find_parameter_at_arc_length(&k, *start, *len));
-            o.extend([f64::from(crate::output::arc_length_status(&r)), r.end_param, b(r.past_end)]);
+            o.extend([
+                f64::from(crate::output::arc_length_status(&r)),
+                r.end_param,
+                b(r.past_end),
+            ]);
         }
         OpIn::PcExtrema {
             curve,
@@ -1757,7 +1761,7 @@ mod tests {
 
     /// One bound hit cannot establish a minimum while another parameter remains free.
     #[test]
-    fn review_projected_minimum_requires_stationarity_or_a_known_failure() {
+    fn review_projected_minimum_requires_stationarity_or_refusal() {
         let case = crate::case::regression_case(&Runner, "gen0607");
         let input: OpIn = case.parse().unwrap();
         let OpIn::CurveSolve {
@@ -1820,12 +1824,9 @@ mod tests {
         };
         let stationary = meets_bound_condition(u, *ivl1, project(direction))
             && meets_bound_condition(v, *ivl2, -project(derivative));
-        let known =
-            crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
         assert!(
-            stationary || known.contains_key(&case.name),
-            "accepted projected pair ({u}, {v}) violates constrained stationarity; \
-             it must be repaired or recorded as known wrong, never blessed"
+            stationary,
+            "accepted projected pair ({u}, {v}) violates constrained stationarity"
         );
     }
 

@@ -1610,6 +1610,65 @@ impl Curve {
 
 // ---- LocalCurveSolve --------------------------------------------------------------------
 
+/// A necessary first-order condition for a constrained projected minimum.
+/// The slope has the caller's distance units, independent of tangent speed.
+/// At a boundary only the feasible direction is tested; interior points
+/// must be stationary in both directions.
+fn projected_minimum_slope_ok(
+    t: f64,
+    interval: &Extent1d,
+    gap: Vec3,
+    tangent: Vec3,
+    tol: f64,
+    from_left: bool,
+) -> bool {
+    if !t.is_finite() || !tol.is_finite() || tol < 0.0 || t < interval.min() || t > interval.max() {
+        return false;
+    }
+    let speed = tangent.length();
+    if !speed.is_finite() || speed == 0.0 {
+        return false;
+    }
+    let slope = gap.dot(tangent / speed);
+    slope.is_finite()
+        && if from_left {
+            slope <= tol
+        } else {
+            slope >= -tol
+        }
+}
+
+fn projected_minimum_stationary<C: CurveEvaluate + ?Sized>(
+    k: &Kernel,
+    curve: &C,
+    t: f64,
+    interval: &Extent1d,
+    gap: Vec3,
+    normal: Vec3,
+    tol: f64,
+) -> Result<bool> {
+    if !t.is_finite() || t < interval.min() || t > interval.max() {
+        return Ok(false);
+    }
+    // At an interior knot the two one-sided derivatives can differ. Test
+    // each feasible direction, without replacing a zero tangent.
+    for from_left in [true, false] {
+        if (from_left && t == interval.min()) || (!from_left && t == interval.max()) {
+            continue;
+        }
+        let values = match eval_n::<2, _>(k, curve, t, 1, from_left, false) {
+            Ok(values) => values,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        };
+        let tangent = normal.cross(values[1]).cross(normal);
+        if !projected_minimum_slope_ok(t, interval, gap, tangent, tol, from_left) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// The local curve/curve solve of every operation but
 /// [`SolverOperation::Signed3dDirectedMinimize`] (see [`local_curve_solve`]).
 fn curve_solve_newton<O: Copy, C1, C2>(
@@ -1767,6 +1826,30 @@ where
             )
         {
             return Ok((false, solution));
+        }
+    }
+
+    // An unsuccessful Newton solve that hits a bound is not evidence that
+    // the other parameter has stopped descending (#14238). Keep the candidate
+    // in the result, but do not promote it when a feasible descent remains.
+    if !r.found && op == SolverOperation::ProjectedMinimize {
+        let normal = opt_vectors
+            .and_then(|v| v.first())
+            .copied()
+            .ok_or(SolidError::invalid_input(OP_CURVE, "missing option vector"))?;
+        let gap = normal.cross(pnt1 - pnt2).cross(normal);
+        if !projected_minimum_stationary(k, this, sol0, interval, gap, normal, dist_tol_3d)?
+            || !projected_minimum_stationary(
+                k,
+                other,
+                sol1,
+                other_interval,
+                -gap,
+                normal,
+                dist_tol_3d,
+            )?
+        {
+            found = false;
         }
     }
 
@@ -2609,6 +2692,25 @@ mod tests {
             &Extent1d::from_min_max(a, b),
             &BoundedLineOptions::default(),
         ))
+    }
+
+    #[test]
+    fn projected_minimum_boundary_checks_each_feasible_direction() {
+        let k = Kernel::default();
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let c = line([0.0; 3], [1.0, 0.0, 0.0], 0.0, 1.0);
+        let normal = Vec3::Z;
+        let tol = 1e-6;
+        let stationary =
+            |t, gap| projected_minimum_stationary(&k, &c, t, &interval, gap, normal, tol).unwrap();
+        assert!(stationary(0.0, Vec3::X));
+        assert!(!stationary(0.0, -Vec3::X));
+        assert!(stationary(1.0, -Vec3::X));
+        assert!(!stationary(1.0, Vec3::X));
+        assert!(!stationary(0.5, Vec3::X));
+        assert!(!stationary(0.5, -Vec3::X));
+        assert!(stationary(0.5, Vec3::Y));
+        assert!(!stationary(1.5, Vec3::Y));
     }
 
     /// The curve property solver's status 1 (upstream `return TRUE`: a pseudo box corner
