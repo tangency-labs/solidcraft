@@ -14,6 +14,22 @@ For sandboxed plugins and parametric timeline
 features that also use `run(command, args)`, see [RFC 0002](rfcs/0002-plugins.md). Desktop MCP in this
 document remains the reference implementation today.
 
+## Choosing a mode
+
+If you only want an interactive chat docked inside the desktop window—with viewport selection pills,
+per-message undo, and built-in **Ask / Edits / All** approvals—use the in-app
+[Agent chat](agent-chat.md) panel instead of configuring an external MCP client.
+
+Use `solidcraft-cli mcp` (or `uvx solidcraft mcp`) directly when you want an external coding agent
+(Claude Code, Codex, Cursor, Claude Desktop, OpenCode, VS Code, Zed, etc.) or your own program to
+drive SolidCraft:
+
+| Mode | Command | When to use |
+|---|---|---|
+| **Auto (default)** | `uvx solidcraft mcp` or `solidcraft-cli mcp` | Everyday use with an external coding agent. Bridges to the running desktop app if **Preferences → Assistant → Agents through MCP → Let AI agents connect** is on; otherwise starts a headless session and upgrades to the app on the next call as long as no design work has happened yet. |
+| **Bridged (explicit)** | `solidcraft-cli mcp --connect 127.0.0.1:7878` | Watch an agent model live in a specific desktop window (`solidcraft --control 7878`), or start the MCP server before launching SolidCraft without falling back to headless. Supports window screenshots, selection context, and desktop app management tools. |
+| **Headless** | `solidcraft-cli mcp --headless` (or `--in part.sc`) | Deterministic automation, CI, multi-part batch generation, or machines without a desktop window. Runs in-process with no GUI; add `--structured` for programmatic clients and `--render-gpu` when headless GPU render jobs are needed. |
+
 ## Start it
 
 With [uv](https://docs.astral.sh/uv/) there is nothing to install first: `uvx solidcraft mcp` runs
@@ -48,7 +64,69 @@ solidcraft-cli mcp          # finds the running app; headless when none runs (--
 # A fixed port, or a second app: name it.
 solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
+
+# Local Streamable HTTP server: multiple local clients share one warm headless session
+# (for example a large .sc assembly kept hot in RAM, optionally with --render-gpu).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc --render-gpu
 ```
+
+### Streamable HTTP (`--http`)
+
+`solidcraft-cli mcp --http <addr>` serves the standard MCP Streamable HTTP transport on `/mcp` so
+multiple local MCP clients (Claude Code sessions, Codex, Python scripts) can share **one**
+persistent warm SolidCraft session in RAM without reloading a large `.sc` assembly per client:
+
+```sh
+# Fixed loopback port + generated bearer token written to an info file
+# (stderr logs the ready URL and info-file path; generated tokens are never printed to stderr).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc --render-gpu
+
+# Ephemeral loopback port + connection metadata file:
+# writes {"url": "http://127.0.0.1:<port>/mcp", "token": "...", "pid": ...}.
+solidcraft-cli mcp --http 127.0.0.1:0 --http-info-file ~/.cache/solidcraft-mcp.json --in assembly.sc
+
+# Explicit bearer token from a file or environment variable (no --http-info-file required;
+# preferred over command-line arguments).
+solidcraft-cli mcp --http 127.0.0.1:8765 --http-token-file ~/.config/solidcraft/mcp.token --in assembly.sc
+SOLIDCRAFT_MCP_TOKEN="..." solidcraft-cli mcp --http 127.0.0.1:8765 --in assembly.sc
+```
+
+Security model:
+
+- **Loopback only:** `--http` accepts only loopback bind addresses (`127.0.0.1:PORT`,
+  `127.0.0.1:0`, `[::1]:PORT`, or `localhost:PORT`). Non-loopback addresses (`0.0.0.0`, `[::]`,
+  LAN IPs) are refused at startup.
+- **Mandatory Bearer authentication:** every HTTP request must carry `Authorization: Bearer <token>`
+  (verified in constant time; missing or wrong tokens receive `401 Unauthorized`). Pass
+  `--http-token-file` or `SOLIDCRAFT_MCP_TOKEN` to supply a token explicitly; otherwise the server
+  generates a random 32-byte hex token from OS entropy and requires `--http-info-file` to write
+  `url`, `token` and `pid`. Generated tokens are never printed to stderr (MCP clients often record a
+  server's stderr in log files); stderr prints only the ready URL and the info-file path. On Unix
+  the info file is created with owner-only permissions (`0600`); on Windows it does not get an
+  owner-only ACL (it inherits its parent directory's permissions), so on shared Windows machines
+  place `--http-info-file` inside a user-private directory (for example under `%LOCALAPPDATA%` or
+  `%USERPROFILE%`).
+- **DNS rebinding protection:** requests with a non-loopback `Host` or `Origin` header are refused
+  with `403 Forbidden`.
+- **File scope:** `--allow-path`, `--require-allow-path` and `--allow-any-path` apply identically
+  to stdio mode.
+
+Endpoints and multi-client serialization:
+
+- `POST /mcp` accepts JSON-RPC requests and notifications (up to 16 MiB). `initialize` creates a
+  new per-client `Mcp-Session-Id` returned in the response header; subsequent requests must send
+  that `Mcp-Session-Id`. Requests return `200 OK` (`application/json`, or `text/event-stream` when
+  `Accept` requests SSE only); notifications return `202 Accepted`.
+- `DELETE /mcp` with `Mcp-Session-Id` closes that client's MCP session (`204 No Content`) without
+  shutting down the shared SolidCraft server or disrupting other connected clients.
+- `GET /mcp` returns `405 Method Not Allowed` (`Allow: POST, DELETE`) because this server does not
+  push unsolicited server-initiated SSE streams.
+- **Serialized shared session & atomic `batch` guidance:** all connected clients share the same
+  in-memory design session, and concurrent HTTP requests are dispatched serially in strict FIFO
+  order so the session is never corrupted. When multiple clients edit the same design, wrap
+  multi-step edits (such as sketch creation, geometry, `sketch.finish` and `solid.extrude`) in a
+  single atomic `batch` (default `rollback: true`) so another client's request cannot interleave
+  mid-sequence, and check `document.revision` when coordinating reads and writes across clients.
 
 `execute` `view.pick` with `rays: [{origin, dir}…]` answers in every session, headless too:
 for each world ray, the body, face index, world `point`, outward `normal` and `depth` where it
@@ -463,8 +541,9 @@ Quit Claude Desktop completely (from the notification area) and start it again t
 
 ### Agent skills
 
-[`skills/`](https://github.com/bherbruck/solidcraft/tree/main/skills) holds five [Agent Skills](https://agentskills.io) for agents that model through this server:
+[`skills/`](https://github.com/bherbruck/solidcraft/tree/main/skills) holds six [Agent Skills](https://agentskills.io) for agents that model through this server:
 - `solidcraft-modeling` covers building a new part.
+- `solidcraft-sheetmetal` covers sheet-metal parts: base, edge and contour flanges, segments, hems, fold/unfold, flat patterns, DXF export, and bend tables.
 - `solidcraft-editing` covers changing an existing design.
 - `solidcraft-checking` adds checks for errors SolidCraft does not report, regression tests and porting, next to the other two.
 - `solidcraft-mechanisms` covers assemblies: joints placed by world coordinates, motion links, closed loops such as actuators, contact sets and motion studies, checked against analytic values.
@@ -472,7 +551,7 @@ Quit Claude Desktop completely (from the notification area) and start it again t
 
 They cover the workflow, the command shapes, how to verify with `measure`, and the known traps. With them an agent builds a part in a few `batch` calls and reads far less output. To install them for Claude Code, copy the folders into `~/.claude/skills/`; [skills/README.md](https://github.com/bherbruck/solidcraft/blob/main/skills/README.md) has the details.
 
-The `skill_reference` tool returns these documents from the copies built into SolidCraft, so an agent without file access can follow them: `{"skill": "solidcraft-modeling"}` returns its `reference.md`, the default file. Mechanisms also has `reference.md`, checking has `reference/porting.md`, and every skill has `SKILL.md` (editing uses modeling's reference). It never reads a path from disk, and an unknown skill or file is refused with the available choices. SolidCraft's own chat turns the agent's file tools off, so this is how its agent reads the skills there. The instructions the server sends at `initialize` point agents at `skill_reference` first, then say how to plan the numbers, build in a few `batch` calls and verify each stage with `measure`; the same pointer is in the system note SolidCraft's own chat gives its agent.
+The `skill_reference` tool returns all six skills from the copies built into SolidCraft, so an agent without file access can follow them: `{"skill": "solidcraft-modeling"}` returns its `reference.md` (or `SKILL.md` for skills without `reference.md`). `solidcraft-modeling`, `solidcraft-mechanisms`, and `solidcraft-sheetmetal` include `reference.md`, `solidcraft-checking` includes `reference/porting.md`, `solidcraft-reporting` includes `reference/report-template.md`, and every skill includes `SKILL.md` (editing uses modeling's reference). It never reads a path from disk, and an unknown skill or file is refused with the available choices. SolidCraft's own chat turns the agent's file tools off, so this is how its agent reads the skills there. The instructions the server sends at `initialize` point agents at `skill_reference` first, then say how to plan the numbers, build in a few `batch` calls and verify each stage with `measure`; the same pointer is in the system note SolidCraft's own chat gives its agent.
 
 ## Tools
 
@@ -532,7 +611,7 @@ builds it.
 | `undo`, `redo` | — | Undo / redo one change. |
 | `pending` | — | Bridged: the result of a request that was still running when its call returned (an error starting `still running:`), waiting up to 60 s for it; `done: false` while it runs (call again), `pending: null` when nothing runs. See [Long-running requests](#long-running-requests). |
 | `crash_reports` | `id?`, `limit?` | The crash reports on this computer, newest first; with `id`, the whole report (backtrace, command, recent commands, `design_path`/`replay_path`). See [crash-reports.md](crash-reports.md). |
-| `skill_reference` | `skill`, `file?` (default `reference.md`) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`. |
+| `skill_reference` | `skill`, `file?` (default `reference.md`, or `SKILL.md` if absent) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-sheetmetal`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`, `solidcraft-reporting`. |
 | `running` | - | What the app is running or has queued, for every client (`control.running`, see [control-protocol.md](control-protocol.md#limits)): each request's connection and id, method, command id or a batch's step count, `running_s` and `queued`, never its parameters. Answers at once while the app is busy, also while another call from this client, such as a long `batch`, is still waiting for its reply: bridged, it is then asked on a connection of its own (its `self` marks no request) and its reply comes before that call's. Ask it when a call timed out before sending a change again. Headless: always `{"running": []}`. |
 | `new_design` | `name?`, `new_tab?` | Start an empty design. With `new_tab: true` in the desktop app it opens in a tab of its own and becomes the active design, and the design that was open stays open; the reply names it (`document_id`). Every later call acts on the active design. `execute` `document.list` lists the open designs and which is active, and `execute` `document.activate {document_id}` shows one ([design tabs](control-protocol.md#design-tabs-and-the-active-design)). |
 | `cancel` | — | Bridged: cancel this server's request that was still running in the app when its call returned (`control.cancel`, see [Cancelling a request](#cancelling-a-request)). Headless: an error, as nothing is ever left running. Not a `batch` step. |
@@ -629,8 +708,66 @@ volume, mass and body count; check `ok` and `diagnostics` before applying any ca
 Apply the selected values separately with `parameters.change {changes}` if you intend to
 edit the design. Use `describe_command` for the input and output schemas.
 
-Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
-(the catalog).
+### Resources, subscriptions, prompts, and completions
+
+In addition to tools, the MCP server exposes read-only resources, resource templates, subscriptions, workflow prompts, and argument completions:
+
+- **Static resources** (`resources/list`):
+  - `solidcraft://design` (`application/json`) — full `document.inspect` JSON with measurements.
+  - `solidcraft://commands` (`application/json`) — the complete engine command catalog as JSON.
+- **Resource templates** (`resources/templates/list`) for targeted reads without dumping the whole design:
+  - `solidcraft://body/{name}` — geometry, physical properties, and component of one body.
+  - `solidcraft://sketch/{name}` — plane, DOF, curves, points, constraints, and profiles of one sketch (by name or feature id).
+  - `solidcraft://feature/{id}` — definition, inputs, and error/warning state of one timeline feature (by numeric id or name).
+  - `solidcraft://command/{id}` — parameter docs and input/output JSON Schemas for one command.
+  - `solidcraft://skill/{skill}/{file}` — any bundled skill Markdown document (for example `solidcraft://skill/solidcraft-modeling/reference.md`).
+- **Workflow prompts** (`prompts/list`, `prompts/get`) grounded in the bundled skills:
+  - `model-part` (`part?`, `material?`) — plan, build in staged batches, and verify a new parametric part.
+  - `edit-design` (`goal?`, `target?`) — map an open design and apply parametric in-place edits.
+  - `check-parameters` (`parameters?`, `ranges?`) — sweep driving parameters without mutating the saved design.
+  - `diagnose-feature` (`feature?`) — inspect failing or warning timeline features and apply a minimal fix.
+  - `assembly-clearance` (`occurrences?`, `joint?`) — verify grounding, static clearances, and motion interference.
+- **Autocompletion** (`completion/complete`): completes template variables (body names, sketch names, feature ids/names, command ids, skill names and files) and prompt arguments (including prioritizing failing or warning features first for `diagnose-feature`).
+
+#### Resource subscriptions
+
+The server advertises `"resources": {"subscribe": true, "listChanged": true}` in its `initialize` capabilities so clients can follow changes with `resources/subscribe` and `resources/unsubscribe`:
+
+- **`resources/subscribe`** (`{"uri": "solidcraft://design"}`) registers the URI for the current
+  session and returns `{}`. Re-subscribing an already subscribed URI is idempotent. Missing or
+  non-string/empty `uri` values fail with JSON-RPC `-32602` (`Invalid params`); unknown URIs fail
+  with `-32002` (`Resource not found`). Each session allows at most 256 concurrent subscriptions
+  (exceeding the limit returns `-32602`).
+- **`resources/unsubscribe`** (`{"uri": "solidcraft://design"}`) removes the URI from the session's
+  subscriptions and returns `{}` (idempotent for known URIs that are not currently subscribed;
+  `-32602` for missing/invalid `uri`, `-32002` for unknown URIs).
+- **`notifications/resources/list_changed`** (`{"jsonrpc":"2.0","method":"notifications/resources/list_changed"}`)
+  is emitted when the active design identity changes (`new_design`, `open`, or switching tabs) or
+  when the set of bodies, sketches, or features changes (for example after `execute`, `batch`,
+  `undo`, or `redo`).
+- **`notifications/resources/updated`** (`{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"solidcraft://design"}}`)
+  is emitted for each subscribed design resource affected by a revision change (including parameter
+  edits that keep the same bodies and features). Static resources unaffected by design edits, such
+  as `solidcraft://commands`, do not receive spurious `updated` notifications on design edits.
+- **No spurious notifications:** read-only calls (`inspect_design`, `measure`, `body_topology`,
+  `list_commands`, `describe_command`, `version`, `running`, `pending`, `skill_reference`,
+  `crash_reports`), failed edits, rolled-back batches, and `check_parameters` leave the design
+  revision unchanged and emit neither notification.
+- **Live desktop changes (`--connect`):** once initialized or subscribed, `solidcraft-cli mcp`
+  also observes `document.revision` on the connected desktop app while idle, so edits made directly
+  in the SolidCraft window or by the built-in Assistant emit `notifications/resources/list_changed`
+  and `notifications/resources/updated` without waiting for the next MCP tool call.
+
+```text
+→ {"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"solidcraft://design"}}
+← {"jsonrpc":"2.0","id":1,"result":{}}
+→ {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"execute","arguments":{"command":"solid.box","params":{"length":10,"width":10,"height":10}}}}
+← {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"..."}]}}
+← {"jsonrpc":"2.0","method":"notifications/resources/list_changed"}
+← {"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"solidcraft://design"}}
+→ {"jsonrpc":"2.0","id":3,"method":"resources/unsubscribe","params":{"uri":"solidcraft://design"}}
+← {"jsonrpc":"2.0","id":3,"result":{}}
+```
 
 Errors: an unknown tool or arguments that don't match the tool's schema are JSON-RPC
 `-32602` errors (an unknown argument's error lists the tool's arguments); an engine failure
@@ -714,6 +851,72 @@ is running: when `params.requestId` matches the in-flight request, a bridged ser
 local `batch` stops cleanly before the next step (rolling back when `rollback: true`). Notifications
 whose `requestId` does not match an active or queued request are ignored.
 
+## Workflow patterns
+
+### Test risky edits with `batch` (`dry_run` and `expect`)
+
+Before committing a multi-step edit—such as fillets, shelling, or boolean cuts—test it in a single
+`batch` call with `dry_run: true`, `verbose: false`, and an `expect` check. Every step runs
+normally so `measure`, `inspect.clearance`, `inspect.interference`, and `expect` evaluate the
+simulated model, and SolidCraft then unconditionally restores its checkpoint, leaving the design
+and undo history untouched:
+
+```json
+{
+  "commands": [
+    {"command": "solid.box", "params": {"body_name": "Plate", "corner": [0, 0, 0], "length": 40, "width": 30, "height": 10}},
+    {"command": "solid.fillet", "params": {"edges": [[0, 0, 5]], "radius": 3}},
+    {"command": "measure", "params": {"summary": true}}
+  ],
+  "dry_run": true,
+  "verbose": false,
+  "expect": {"bodies": 1, "bbox": {"min": [0, 0, 0], "max": [40, 30, 10]}}
+}
+```
+
+Once the simulated numbers match, replay the same `commands` without `dry_run: true` (rollback on
+error remains enabled by default). Disk-writing commands (`save`, `export`, `render.start`, etc.)
+and `rollback: false` are refused in dry runs before any step executes.
+
+### Verify geometry, parameters, and visual fit
+
+`ok: true` alone only proves commands ran without throwing an error—a missed cut or misplaced hole
+still succeeds. Combine numeric and visual checks after each stage:
+
+- **Mass properties and bounding box:** pass `expect` on `batch` / `execute`, or call `measure`
+  with `summary: true` (`volume_mm3`, `bbox`, `faces`, `closed`).
+- **Hole and boss positions:** call `body_topology` with `faces: "cylinders"` to inspect every
+  merged cylindrical axis, origin, radius, and extent in a few lines.
+- **Assembly overlaps and clearances:** call `execute` with `inspect.clearance` or
+  `inspect.interference` (and `inspect.compare` to compare bodies).
+- **Parametric robustness:** call `check_parameters` (`{"set": {"width": "60 mm"}}`) to rebuild,
+  measure, check feature errors/cylinders, and restore the design in one call, or `execute`
+  `inspect.parameter_variants` to compare several parameter sets side by side.
+- **Visual and silhouette checks:** take a clean model render with
+  `screenshot {"source": "model", "view": "iso", "grid": false}`, and when matching a reference
+  photo or concept view use `compare_picture` (`reference`, `view`, `fit`) to get quantitative
+  edge-offset errors in millimetres plus an overlay PNG.
+
+### Safe folder grants and permissions
+
+- **External MCP servers:** keep the default path scope and add only the directories the agent
+  needs via repeatable `--allow-path DIR` arguments (create the directory before starting the
+  server). In scripts and CI, add `--require-allow-path` so a missing or misspelled path fails at
+  startup instead of silently falling back to default roots. Avoid `--allow-any-path` unless you
+  explicitly trust every prompt and tool call.
+- **In-app Assistant:** add extra folders under **Preferences → Assistant → Allowed folders** and
+  pick a per-agent approval level (**Ask every time**, **Auto-allow model edits**, or
+  **Allow everything**); reconnect or start a **New chat** after changing allowed folders so the
+  bridged CLI picks up the updated `--allow-path` flags.
+
+### Reusing a persistent headless session
+
+For automated pipelines that generate or inspect many parts, start one `solidcraft-cli mcp --headless`
+process and reuse its stdio connection across jobs with `new_design` or `open` between parts—see
+[Reuse a headless session from another program](#reuse-a-headless-session-from-another-program).
+Add `--structured` when your host program prefers parsed `structuredContent`, and
+`--param-check strict` to catch typos or schema mismatches before any geometry runs.
+
 ## Camera and close-up recipe
 
 The `camera` of `screenshot` (the object `view.apply`, `view.save` and `solidcraft-cli snapshot --camera` take too) is an orbit camera, `{target, yaw, pitch, distance, fov?}`, in millimetres and **radians**. Unlike the `angle` of `solid.move`, a bare number is not degrees here. The eye is at `target + distance * (-sin(yaw) * cos(pitch), -cos(yaw) * cos(pitch), sin(pitch))`, looking at `target` with Z up on the screen. So `yaw: 0, pitch: 0` is the front view: the eye at -Y, looking along +Y, with +X to the right. A yaw of π/2 looks from -X, π from +Y and -π/2 from +X. The pitch is the elevation angle up from the XY plane, and π/2 looks straight down with +X to the right and +Y up; `view.apply` refuses a pitch past ±π/2. A positive `roll` turns the picture clockwise. The app's View angles readout (`view.angle_readout`) shows the same yaw, pitch and roll in degrees. `fov` is the vertical field of view in radians. `0`, or no `fov`, is an orthographic view whose visible half-height is 0.4 × `distance`; with a perspective `fov` the half-height at the target is `distance * tan(fov / 2)`. `inspect.section` removes what lies on the side its normal points to: it keeps the points `p` with `n · p < d`, where `d = n · origin` (`flip: true` keeps the other side, the plane staying put). `offset` moves the cut against the normal you give, so a positive offset cuts more away: from a face's outward normal it goes into the part. To look into the cut, put the eye on the removed side. With `add: true` the plane joins the section's others (up to six): each plane removes what lies beyond it, so the section keeps only what every plane keeps (a quarter for two planes square to each other), and a plane added on a face at offset 0 changes nothing; `replace: <id>` moves that plane to the new `plane` and keeps the others, `remove: <id>` takes one plane out, `hide` and `show` (an id or a list) keep a plane in the section without cutting, `folder: false` hides the browser's Analysis folder (the planes on show stop cutting until `folder: true`; meanwhile `hide` and `show` change only which come back), and the reply's `planes` lists every plane with its id and `hidden`, and `folder` the ids that come back with the hidden folder (null while it is shown). Each change is an undo step (`edit.undo` brings the section back), and none is saved with the design.
@@ -777,6 +980,48 @@ that gives no `bytes` keeps the script in the reply.
 All other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
+
+## Troubleshooting
+
+- **Check whether you are connected to the live app or headless (`version`).** Call `version {}`:
+  it returns `{version, commit, mode}` where `mode` is `"app"` when bridged to the desktop window
+  and `"headless"` when running in-process. Remember that `solidcraft-cli mcp` without `--connect`
+  or `--headless` automatically bridges only while the headless session has no design work yet—if
+  you started creating features before opening SolidCraft (or before turning on **Preferences →
+  Assistant → Agents through MCP → Let AI agents connect**), it stays headless. Start SolidCraft
+  first with the setting enabled, or configure explicit `--connect 127.0.0.1:PORT`.
+- **Stale, busy, or timed-out sessions (`running`, `pending`, `cancel`).** Never blindly resend a
+  mutating tool call after a client timeout or a `still running:` error:
+  - Call `running {}` to see what the desktop app is currently executing or queuing (it answers
+    immediately over a side channel even while a long `batch` is in flight).
+  - Call `pending {}` to wait for and retrieve the result of a `still running:` call, or `cancel {}`
+    to stop a queued or backgrounded request.
+  - If the desktop app closed or restarted mid-call, call `version {}` and `inspect_design` before
+    sending another edit. If the app reports it refused a call without running it, you have hit its
+    limit of 16 simultaneous control connections—close idle MCP clients or scripts and retry.
+- **Units and coordinate conventions.** Engine lengths are in **millimetres** and **Z is up**.
+  Bare numbers in modelling commands (such as `solid.move` `angle`) and expressions are in
+  **degrees**, whereas `screenshot` and `view.apply` `camera` angles (`yaw`, `pitch`, `roll`,
+  `fov`) are in **radians**. A bare number in a feature field stays fixed; pass an expression
+  string (such as `"width / 2"`) when a dimension must follow a parameter. If an imported STEP
+  model lies on its back, reopen it with `open {"path": "...", "up": "y"}`.
+- **Headless vs. desktop GUI differences.**
+  - `documents`, `quit_app`, `preferences`, and `agent_cursor` require a connected desktop app and
+    return an error in headless mode.
+  - `screenshot` with `source: "window"` and `execute` `view.pick` with `pixels` require a
+    connected desktop app (`view.pick` with world `rays` works headless too; headless screenshots
+    render offscreen on the GPU or fall back to CPU with `renderer: "cpu"`—run `solidcraft-cli gpu`
+    to check available adapters).
+  - In bridged desktop mode, a rollback `batch` is confined to one design tab (tab switches,
+    `open`, `file.import`, and `new_tab: true` are refused unless `rollback: false`), and relative
+    file paths resolve against the app's working directory rather than the MCP server's—always pass
+    absolute paths.
+  - `--render-gpu` is for headless sessions only and is refused with `--connect`.
+- **File path refused (`outside the folders this agent may use`).** The server's working directory
+  is not allowed by default, and hidden files or folders (`.git`, `.env`, etc.) inside a design
+  folder remain blocked. Verify that every `--allow-path DIR` directory already exists before the
+  server starts (missing folders are logged to stderr as `allow-path ... ignored`), and pass
+  `--require-allow-path` in scripts to fail fast if none are usable.
 
 ## Demo: an enclosure built over MCP
 

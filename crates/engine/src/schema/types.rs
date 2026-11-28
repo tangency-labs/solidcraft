@@ -422,7 +422,7 @@ impl JsonSchema for CameraParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A camera orbiting a target point, as the view commands give it back. Angles are in radians, measured in the frame of the up axis.",
+            "description": "A camera orbiting a target point, as the view commands give it back. Angles are in radians, about the design frame in `frame` when there is one, else about the up axis.",
             "type": "object",
             "properties": {
                 "target": {"description": "The point the camera looks at, in mm: [x, y, z].", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
@@ -431,7 +431,8 @@ impl JsonSchema for CameraParam {
                 "roll": {"description": "Turn about the viewing direction; 0 keeps the up axis upright. Default: 0.", "type": "number", "default": 0.0},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
                 "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI, "default": 0.0},
-                "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"}
+                "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"},
+                "frame": {"description": "The design's own frame the angles are in (#6455): {front, top}, two world axes at right angles. Omitted or null: the up axis. A frame that is not two principal axes at right angles reads as none.", "type": ["object", "null"]}
             },
             "required": ["target", "yaw", "pitch", "distance"]
         })

@@ -2487,7 +2487,8 @@ impl SolveApp {
                     self.cancel_computing();
                     self.tool = None;
                     self.preview.reset();
-                    self.cam = Camera::default();
+                    // A design opens at its own Home: its orientation, when it has one.
+                    self.cam = Camera { frame: self.session.doc.view_frame, ..Camera::default() };
                     self.fit_view();
                     history_folds::load(self);
                     timeline_scope::reset(self);
@@ -4393,6 +4394,17 @@ impl SolveApp {
         }
     }
 
+    /// The design's own FRONT and TOP changed (#6455): the camera takes them and keeps the picture
+    /// it shows, roll included. A Set as turns it to the face itself (`view.frame` sets the camera).
+    pub fn follow_view_frame(&mut self) {
+        let (right, _, back) = self.cam.basis();
+        self.cam_anim = None;
+        self.cam.frame = self.session.doc.view_frame;
+        if let Some(turned) = self.cam.with_frame(right, back) {
+            self.cam = turned;
+        }
+    }
+
     /// Frame the model at once (programmatic use; the toolbar animates).
     /// Make `up` the world's up axis: the camera turns to the same standard view in that world
     /// (home) and frames the model.
@@ -4877,6 +4889,9 @@ impl SolveApp {
         self.now = ctx.input(|i| i.time);
         if self.cam.up != self.ui.up_axis {
             self.set_up_axis(self.ui.up_axis);
+        }
+        if self.cam.frame != self.session.doc.view_frame {
+            self.follow_view_frame();
         }
         self.step_view_animation(ctx);
         self.poll_control_jobs(ctx);

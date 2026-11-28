@@ -26,9 +26,10 @@ fn literal_zero(value: &str, kind: crate::expr::Kind) -> bool {
 }
 
 /// A taper of 0 builds a straight extrude, whose caps and sides are certified as with no taper
-/// (the Extrude dialog saves a taper of 0, #15413).
+/// (the Extrude dialog saves a taper of 0, #15413). Both sides' tapers count: a second side's
+/// draft leans its walls as the first side's does.
 pub(crate) fn untapered(extent: &crate::Extent) -> bool {
-    extent.taper.as_deref().is_none_or(|value| literal_zero(value, crate::expr::Kind::Angle))
+    [&extent.taper, &extent.taper2].into_iter().all(|taper| taper.as_deref().is_none_or(|value| literal_zero(value, crate::expr::Kind::Angle)))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

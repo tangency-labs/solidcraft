@@ -273,6 +273,7 @@ pub use names::FeatureId;
 pub use names::FeatureName;
 pub use names::SketchId;
 pub use names::copy_name;
+pub use params::DrivenParam;
 pub use params::ParamRow;
 pub use params::ParamUser;
 pub use params::cycles;

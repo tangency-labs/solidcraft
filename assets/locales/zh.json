@@ -7082,7 +7082,7 @@
   "ui.drawing_dimension_tool.overall": "零件整体尺寸(含圆角)",
   "ui.drawing_dimension_tool.overall_hint": "双击:在面板中勾选“零件整体尺寸”,即可得到零件的整个宽度或高度",
   "ui.drawing_dimension_tool.pick": "点击工程图视图中的边。",
-  "ui.drawing_dimension_tool.place": "点击图纸以放置尺寸。",
+  "ui.drawing_dimension_tool.place": "点击图纸或按 Enter 以放置尺寸。",
   "ui.drawing_dimension_tool.refused": "无法在此处放置尺寸：{reason}",
   "ui.drawing_export.all_sheets": "所有图纸",
   "ui.drawing_export.dxf": "DXF（线条）",

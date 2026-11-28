@@ -3090,6 +3090,12 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
             }
             continue;
         }
+        // Enter places the Dimension tool's dimension where its preview is, as a click there does
+        // (#22661). A focused button keeps its own Enter: no shortcut runs while a widget has the
+        // keyboard (above). Otherwise Enter goes on to the keymap.
+        if drawing && k == Key::Enter && mods.is_none() && crate::drawing_workspace::dimension::place_preview(app) {
+            continue;
+        }
         // Delete and Backspace delete the selection through the model's own path.
         if drawing_history && matches!(k, Key::Delete | Key::Backspace) && !mods.command && !mods.alt {
             crate::viewport::delete_selection(app);
