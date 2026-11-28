@@ -1,4 +1,4 @@
-//! A loft guided by one or two rails: stations between its sections, each the plain loft there
+//! A loft guided by rails: stations between its sections, each the plain loft there
 //! moved so the points the rails guide land on them, skinned, with every guided edge certified
 //! within the caller's tolerance of its rail.
 //!
@@ -10,6 +10,7 @@
 //! | Rust                 | Upstream |
 //! |----------------------|----------|
 //! | [`loft_rails`]       | (none; SolidCraft's `railed`, then the loft) |
+//! | [`loft_rails_to_point`] | (none; SolidCraft's `railed_to_point`, then the loft to a point) |
 //! | [`sweep_two_rails`]  | (none; the two-rail sweep, The NURBS Book §10.4) |
 //! | [`RailSection`]      | (none; SolidCraft's `Section`) |
 //! | [`RailLoftOptions`]  | (none) |
@@ -62,6 +63,15 @@
 //! (the station shrinks to nothing, within `1e-6` of the loft's size, SolidCraft's convention);
 //! a tolerance not finite and positive.
 //!
+//! **To a point ([`loft_rails_to_point`]).** The apex is a last section whose curves are the
+//! base's with every control point on it; each rail guides there the point it guided at the
+//! base, and must end on the apex within the body tolerance. Each column of wires is skinned on
+//! its own, as a loft to a point makes its walls, and the rails are certified against those
+//! walls. A wall's edge at the apex closes to a point, where any foot along it is a foot: each
+//! rail's foot there is taken on the line of the wall's parameters its foot at the wire before
+//! lies on. Refused besides: fewer than three rails, an apex not finite or within the body
+//! tolerance of the base's plane.
+//!
 //! **One profile along two rails ([`sweep_two_rails`]).** The two-rail sweep (Piegl and
 //! Tiller, *The NURBS Book*, 2nd ed., §10.4: a sweep as a skin through placed sections): an open
 //! profile whose ends lie on the two rails' starts (within the body tolerance) is placed at
@@ -95,11 +105,14 @@ use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use crate::nurbs::b_spline_surface::BSplineSurface;
+use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use crate::nurbs::certificate;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::crv_fit::p1::{interp_given_params, interp_knot_vector};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{CPoint, NOW};
+use crate::surface::surface::Surface;
 use crate::sweep::api_surfaces::{create_skin_primitive, SkinPrimitive};
 use crate::sweep::stations::{apply, rail_crossing, rail_frame, Map, RailFit};
 
@@ -315,8 +328,12 @@ impl Plain {
     }
 
     fn curve(&self) -> Result<Curve> {
+        Ok(Curve::from(self.bspline()?))
+    }
+
+    fn bspline(&self) -> Result<BSplineCurve> {
         let (unique, mult) = unique(&self.knots);
-        let b = BSplineCurve::create_canonical(&CanonicalData {
+        BSplineCurve::create_canonical(&CanonicalData {
             dim: 3,
             degree: self.degree,
             control_points: &self.points,
@@ -326,8 +343,7 @@ impl Plain {
             knot_type: KnotType::Unspecified,
             weights: self.weights.as_deref(),
             trim: None,
-        })?;
-        Ok(Curve::from(b))
+        })
     }
 
     /// Its point `f` (0 to 1) of the way along its parameter range.
@@ -617,6 +633,8 @@ struct Loft<'a> {
     size: f64,
     /// The certificate's tolerance in mm, from `opts.tolerance` at this loft's size.
     tolerance: f64,
+    /// Whether the last section is a point the rails meet at.
+    to_point: bool,
 }
 
 impl<'a> Loft<'a> {
@@ -625,6 +643,7 @@ impl<'a> Loft<'a> {
         sources: &'a [RailSection<'a>],
         rails: &'a [&'a Curve],
         opts: &'a RailLoftOptions,
+        to_point: bool,
     ) -> Result<Self> {
         let count = sources.len();
         if !(2..=MAX_SECTIONS).contains(&count) {
@@ -774,6 +793,7 @@ impl<'a> Loft<'a> {
             anchors: Vec::new(),
             size,
             tolerance,
+            to_point,
         };
         loft.anchors = loft.anchor_rails(k)?;
         Ok(loft)
@@ -783,10 +803,24 @@ impl<'a> Loft<'a> {
     fn anchor_rails(&self, k: &Kernel) -> Result<Vec<Vec<Anchor>>> {
         let tol = k.tolerances.zone_tol_3d;
         let mut out = Vec::new();
+        let tip = self.to_point.then(|| self.sources.len().saturating_sub(1));
         for rail in self.rails {
-            let mut anchors = Vec::new();
-            for (s, curves) in self.sources.iter().zip(&self.sections) {
+            let mut anchors: Vec<Anchor> = Vec::new();
+            for (si, (s, curves)) in self.sources.iter().zip(&self.sections).enumerate() {
                 let (_, hit) = rail_crossing(k, rail, s.origin, s.normal)?;
+                if Some(si) == tip {
+                    if hit.distance(s.origin) > tol {
+                        return Err(invalid(
+                            "a guide rail does not end on the apex: a rail has to pass through every section",
+                        ));
+                    }
+                    let g = anchors.last().ok_or_else(|| invalid("sections"))?.g;
+                    anchors.push(Anchor {
+                        g,
+                        nudge: s.origin - hit,
+                    });
+                    continue;
+                }
                 let mut best: Option<(f64, Point3, f64)> = None;
                 for (i, c) in s.curves.iter().enumerate() {
                     let near = crate::query::api_queries::curve_closest_point(k, c, hit)?;
@@ -818,7 +852,7 @@ impl<'a> Loft<'a> {
         let two = out.len() == 2;
         for (r, a) in out.iter().enumerate() {
             for b in out.iter().skip(r + 1) {
-                for (p, q) in a.iter().zip(b) {
+                for (p, q) in a.iter().zip(b).take(tip.unwrap_or(usize::MAX)) {
                     if (p.g - q.g).abs() <= 0.0 {
                         return Err(invalid(if two {
                             "the two guide rails meet a section at the same point"
@@ -888,7 +922,6 @@ impl<'a> Loft<'a> {
         };
         let v = v0 + f * (v1 - v0);
         let station = self.plain(v)?;
-        let (mid, dir) = self.middle(v)?;
         let normal = (n0 + (n1 - n0) * f)
             .unitize()
             .map_err(|_| invalid("section planes turning through each other"))?;
@@ -912,6 +945,7 @@ impl<'a> Loft<'a> {
             let plains: Vec<Plain> = station.iter().map(|(c, _)| c.clone()).collect();
             warp_station(&plains, &gs, &pairs, normal, self.size)?
         } else {
+            let (mid, dir) = self.middle(v)?;
             let map = station_map(&pairs, mid, dir, self.opts.fit, self.size)?;
             station
                 .iter()
@@ -945,7 +979,7 @@ pub fn loft_rails(
     rails: &[&Curve],
     opts: &RailLoftOptions,
 ) -> Result<RailedLoft> {
-    let loft = Loft::new(k, sections, rails, opts)?;
+    let loft = Loft::new(k, sections, rails, opts, false)?;
     let spans = sections.len() - 1;
     // the sections, with the rails' own crossings
     let mut wires: Vec<Wire> = Vec::new();
@@ -973,7 +1007,7 @@ pub fn loft_rails(
             hits,
         });
     }
-    skin_and_certify(
+    let (skin, wires, bounds) = skin_and_certify(
         k,
         wires,
         spans,
@@ -981,7 +1015,182 @@ pub fn loft_rails(
         opts,
         loft.tolerance,
         &mut |k: &Kernel, i: usize, f: f64| loft.station(k, i, f),
-    )
+        &mut |k: &mut Kernel, w: &[Wire]| skin_of(k, w, opts),
+        side_surfaces,
+        false,
+    )?;
+    Ok(RailedLoft {
+        skin,
+        wires: wires.len(),
+        bounds,
+    })
+}
+
+/// A railed loft to a point: the rows its walls are skinned through (the base's curves first,
+/// the stations' after, the apex left out), each row's loft parameter and the apex's (1) last,
+/// and per rail the largest bound proved between it and the walls.
+#[derive(Debug)]
+pub struct RailedToPoint {
+    /// The base's curves and each station's, in loft order.
+    pub rows: Vec<Vec<Curve>>,
+    /// Each row's loft parameter, from 0, and the apex's, 1.
+    pub params: Vec<f64>,
+    /// Per rail, the largest bound proved between it and the walls.
+    pub bounds: Vec<f64>,
+}
+
+/// The loft from `base` to the point `apex` guided by `rails`, each from the base to the apex:
+/// the apex is a last section whose curves are the base's with every control point on it, each
+/// rail guiding there the point it guided at the base. Each column of rows is skinned on its own
+/// through the rows' parameters, as a loft to a point through them makes its walls, and each
+/// rail is certified against those walls. `opts.cap` and `opts.degree` are not used. It takes
+/// three to sixteen rails.
+///
+/// # Errors
+///
+/// `InvalidInput` for fewer than three rails or more than sixteen, an apex not finite or within
+/// the body tolerance of the base's plane, a rail not ending on the apex, and those of
+/// [`loft_rails`].
+pub fn loft_rails_to_point(
+    k: &mut Kernel,
+    base: &RailSection<'_>,
+    apex: Point3,
+    rails: &[&Curve],
+    opts: &RailLoftOptions,
+) -> Result<RailedToPoint> {
+    if !(apex.x.is_finite() && apex.y.is_finite() && apex.z.is_finite()) {
+        return Err(invalid("the apex of a loft to a point is not finite"));
+    }
+    if !(3..=MAX_RAILS).contains(&rails.len()) {
+        return Err(invalid(
+            "a railed loft to a point takes 3 to 16 guide rails",
+        ));
+    }
+    let normal = base
+        .normal
+        .unitize()
+        .map_err(|_| invalid("a section plane's normal of no length"))?;
+    if (apex - base.origin).dot(normal).abs() <= k.tolerances.zone_tol_3d {
+        return Err(invalid(
+            "the apex of a loft to a point lies in the base's plane",
+        ));
+    }
+    let tip_curves = base
+        .curves
+        .iter()
+        .map(|c| {
+            let plain = Plain::of(c)?;
+            plain.with(vec![apex; plain.points.len()]).curve()
+        })
+        .collect::<Result<Vec<Curve>>>()?;
+    let sections = [
+        base.clone(),
+        RailSection {
+            origin: apex,
+            normal: base.normal,
+            curves: tip_curves.iter().collect(),
+        },
+    ];
+    let loft = Loft::new(k, &sections, rails, opts, true)?;
+    let mut wires: Vec<Wire> = Vec::new();
+    for (i, s) in sections.iter().enumerate() {
+        let curves = loft
+            .sections
+            .get(i)
+            .ok_or_else(|| invalid("sections"))?
+            .iter()
+            .map(|(c, _)| c.clone())
+            .collect();
+        let mut hits = Vec::new();
+        for rail in rails {
+            hits.push(rail_crossing(k, rail, s.origin, s.normal)?);
+        }
+        wires.push(Wire {
+            span: 0,
+            f: if i == 0 { 0.0 } else { 1.0 },
+            curves,
+            hits,
+        });
+    }
+    let (_, wires, bounds) = skin_and_certify(
+        k,
+        wires,
+        1,
+        rails,
+        opts,
+        loft.tolerance,
+        &mut |k: &Kernel, i: usize, f: f64| loft.station(k, i, f),
+        &mut |k: &mut Kernel, w: &[Wire]| walls_of(k, w),
+        Walls::surfaces,
+        true,
+    )?;
+    let params: Vec<f64> = wires.iter().map(|w| w.f).collect();
+    let mut rows = Vec::new();
+    for w in wires.iter().take(wires.len().saturating_sub(1)) {
+        rows.push(
+            w.curves
+                .iter()
+                .map(Plain::curve)
+                .collect::<Result<Vec<_>>>()?,
+        );
+    }
+    Ok(RailedToPoint {
+        rows,
+        params,
+        bounds,
+    })
+}
+
+/// A loft to a point's walls, one per column.
+struct Walls(Vec<Surface>);
+
+impl Walls {
+    fn surfaces(&self) -> Vec<&Surface> {
+        self.0.iter().collect()
+    }
+}
+
+/// Each column of `wires` skinned on its own through the wires' parameters (one span, `f`).
+fn walls_of(k: &mut Kernel, wires: &[Wire]) -> Result<Walls> {
+    let params: Vec<f64> = wires.iter().map(|w| w.f).collect();
+    let degree = wires.len().saturating_sub(1).min(3);
+    let n = wires.first().map_or(0, |w| w.curves.len());
+    let mut walls = Vec::new();
+    for c in 0..n {
+        let column = wires
+            .iter()
+            .map(|w| {
+                w.curves
+                    .get(c)
+                    .ok_or_else(|| invalid("a station's curves"))?
+                    .bspline()
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let wall = BSplineSurface::create_skinned_surface(
+            k,
+            &column,
+            SkinnedSurfaceOptions {
+                deriv_surfs: Some([None, None]),
+                degree,
+                section_params: Some(&params),
+                ..Default::default()
+            },
+        )?;
+        walls.push(Surface::from(wall));
+    }
+    Ok(Walls(walls))
+}
+
+fn side_surfaces(skin: &SkinPrimitive) -> Vec<&Surface> {
+    skin.side_faces
+        .iter()
+        .filter_map(|&f| {
+            skin.brep
+                .face(f)
+                .ok()
+                .and_then(|face| face.surface.as_ref())
+        })
+        .collect()
 }
 
 /// One open profile swept along two rails (module docs, "One profile along two rails"): the
@@ -1104,7 +1313,7 @@ pub fn sweep_two_rails(
         hits: hits1,
     };
     let rail_list: Vec<&Curve> = ordered.to_vec();
-    let mut made = skin_and_certify(
+    let (skin, wires, mut bounds) = skin_and_certify(
         k,
         vec![start, end],
         1,
@@ -1112,11 +1321,18 @@ pub fn sweep_two_rails(
         opts,
         tolerance,
         &mut |k: &Kernel, _span: usize, f: f64| sweep.station(k, f),
+        &mut |k: &mut Kernel, w: &[Wire]| skin_of(k, w, opts),
+        side_surfaces,
+        false,
     )?;
     if swapped {
-        made.bounds.reverse();
+        bounds.reverse();
     }
-    Ok(made)
+    Ok(RailedLoft {
+        skin,
+        wires: wires.len(),
+        bounds,
+    })
 }
 
 /// Rail `c` at the common parameter `f` (its natural range mapped linearly onto `[0, 1]`): the
@@ -1216,7 +1432,8 @@ impl Birail<'_> {
 ///
 /// [`crate::error::sweep::SweepFailure::RailPastStationCap`] past the wire cap; those of
 /// `station`, the skin and the bound.
-fn skin_and_certify(
+#[allow(clippy::too_many_arguments)] // the loop's inputs, each a different kind
+fn skin_and_certify<S>(
     k: &mut Kernel,
     mut wires: Vec<Wire>,
     spans: usize,
@@ -1224,7 +1441,10 @@ fn skin_and_certify(
     opts: &RailLoftOptions,
     tolerance: f64,
     station: &mut dyn FnMut(&Kernel, usize, f64) -> Result<StationAt>,
-) -> Result<RailedLoft> {
+    skin_of: &mut dyn FnMut(&mut Kernel, &[Wire]) -> Result<S>,
+    surfaces_of: fn(&S) -> Vec<&Surface>,
+    to_point: bool,
+) -> Result<(S, Vec<Wire>, Vec<f64>)> {
     // one station at each span's middle
     let mut pending: Vec<(usize, f64)> = (0..spans).map(|i| (i, 0.5)).collect();
     // the largest bound the last skin proved (none before the first)
@@ -1251,15 +1471,12 @@ fn skin_and_certify(
             });
         }
         wires.sort_by(|a, b| a.span.cmp(&b.span).then(a.f.total_cmp(&b.f)));
-        let skin = skin_of(k, &wires, opts)?;
-        let (bounds, failing) = certify(k, &skin, &wires, rails, tolerance)?;
+        let skin = skin_of(k, &wires)?;
+        let (bounds, failing) =
+            certify(k, &surfaces_of(&skin), &wires, rails, tolerance, to_point)?;
         reached = bounds.iter().copied().fold(0.0_f64, f64::max);
         if failing.is_empty() {
-            return Ok(RailedLoft {
-                skin,
-                wires: wires.len(),
-                bounds,
-            });
+            return Ok((skin, wires, bounds));
         }
         for j in failing {
             let (Some(a), Some(b)) = (wires.get(j), wires.get(j + 1)) else {
@@ -1291,27 +1508,46 @@ fn skin_of(k: &mut Kernel, wires: &[Wire], opts: &RailLoftOptions) -> Result<Ski
     create_skin_primitive(k, &counts, &refs, opts.degree, opts.cap)
 }
 
+/// The last wire's feet on a wall's edge that closes to a point: any parameter along that edge
+/// is a foot there, so each takes the one the wire before it has, the point unchanged.
+fn apex_feet(
+    k: &Kernel,
+    surfaces: &[&Surface],
+    feet: &mut [Vec<Option<(Point2, f64)>>],
+    hits: &[(f64, Point3)],
+) -> Result<()> {
+    let (Some(&(_, apex)), [.., before, last]) = (hits.last(), feet) else {
+        return Ok(());
+    };
+    for ((surf, b), a) in surfaces.iter().zip(before.iter()).zip(last.iter_mut()) {
+        let (Some((uvb, _)), Some((uva, da))) = (b, a.as_ref()) else {
+            continue;
+        };
+        let mut best = (*uva, *da);
+        for uv in [Point2::new(uvb.x, uva.y), Point2::new(uva.x, uvb.y)] {
+            let d = surf.evaluate_point(k, uv)?.distance(apex);
+            if d <= best.1.max(k.tolerances.zone_tol_3d) {
+                best = (uv, d);
+                break;
+            }
+        }
+        *a = Some(best);
+    }
+    Ok(())
+}
+
 /// Per rail the largest bound between it and the skin over all spans between neighbouring
 /// wires, and the spans (by their first wire) whose bound is above `tol`.
 fn certify(
     k: &Kernel,
-    skin: &SkinPrimitive,
+    surfaces: &[&Surface],
     wires: &[Wire],
     rails: &[&Curve],
     tol: f64,
+    to_point: bool,
 ) -> Result<(Vec<f64>, Vec<usize>)> {
     let mut bounds = Vec::new();
     let mut failing: Vec<usize> = Vec::new();
-    let surfaces: Vec<&crate::surface::surface::Surface> = skin
-        .side_faces
-        .iter()
-        .filter_map(|&f| {
-            skin.brep
-                .face(f)
-                .ok()
-                .and_then(|face| face.surface.as_ref())
-        })
-        .collect();
     for (r, rail) in rails.iter().enumerate() {
         let nurb = Plain::of(rail)?.nurb()?;
         // each wire's rail point found on every skin surface: (surface, parameters, distance)
@@ -1329,6 +1565,9 @@ fn certify(
                     .collect(),
             );
             hits.push((t, q));
+        }
+        if to_point {
+            apex_feet(k, surfaces, &mut feet, &hits)?;
         }
         let mut worst = 0.0_f64;
         for j in 0..wires.len().saturating_sub(1) {

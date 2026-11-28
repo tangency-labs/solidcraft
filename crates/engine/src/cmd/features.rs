@@ -134,7 +134,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         )),
     CommandSpec::new("solid.loft", "Loft", loft).begins_edit().at("SOLID", "CREATE").icon("loft").params(concat!(
         "sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); ",
-        "rails?: [{sketch, curves: [ids in order]}] (1…16 guide rails from the first section to the last, through every section's outline: the loft follows them between the sections, passing through every rail; not with sections that have holes; one or two to an apex); ",
+        "rails?: [{sketch, curves: [ids in order]}] (1…16 guide rails from the first section to the last, through every section's outline: the loft follows them between the sections, passing through every rail; not with sections that have holes); ",
         "rail_fit?: scale|stretch (one or two rails; with three or more it has no effect: each section is warped between them to pass through them all; default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); ",
         "operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?",
     )),
