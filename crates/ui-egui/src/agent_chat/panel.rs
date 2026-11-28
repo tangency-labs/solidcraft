@@ -2204,12 +2204,27 @@ fn took_line(ui: &mut egui::Ui, stamp: &times::Stamp) {
 /// visible button, on the whole message area, beside the composer's own text menu.
 /// The area stays hover-only so partial text selection keeps working, so the menu opens on a
 /// right-click released over it rather than on a click the response itself would report.
+/// With text selected, the menu first offers Copy for just that text (#10882). The right-click
+/// keeps the selection, and the menu holds the text it opened with, since the press on the item
+/// ends the selection before the click is reported.
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &str) {
     solidcraft_ui_registry::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
     let opened = ui
         .input(|i| i.pointer.button_released(egui::PointerButton::Secondary) && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p)));
-    let mut copy = false;
+    let selection_id = response.id.with("selection");
+    if opened {
+        let selected = ui.ctx().plugin::<egui::text_selection::LabelSelectionState>().lock().selected_text();
+        ui.data_mut(|d| {
+            if let Some(selected) = selected {
+                d.insert_temp(selection_id, selected);
+            } else {
+                d.remove::<String>(selection_id);
+            }
+        });
+    }
+    let selected: Option<String> = ui.data(|d| d.get_temp(selection_id));
+    let mut copy = None;
     Container::new(ui.ctx(), Surface::Popup)
         .menu(response)
         .at_pointer_fixed()
@@ -2217,17 +2232,26 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
         .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
         .show(|ui| {
             ui_kit::Menu::show(ui, crate::ui_kit::LIST_W, |ui| {
+                if let Some(selected) = &selected {
+                    let row = ui_kit::MenuItem::new("copy_selection", tr("ui.agent_chat_copy"), "copy").show(ui);
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:copy_selection_menu:{n}"), row.rect.center());
+                    if row.clicked() {
+                        copy = Some(selected.clone());
+                        ui.close();
+                    }
+                }
                 let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
                 let row = item.show(ui);
                 solidcraft_ui_registry::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
                 if row.clicked() {
-                    copy = true;
+                    copy = Some(text.to_owned());
                     ui.close();
                 }
             });
         });
-    if copy {
-        ui.ctx().copy_text(text.to_owned());
+    if let Some(copy) = copy {
+        ui.data_mut(|d| d.remove::<String>(selection_id));
+        ui.ctx().copy_text(copy);
     }
 }
 

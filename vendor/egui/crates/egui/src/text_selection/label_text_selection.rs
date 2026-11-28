@@ -133,6 +133,11 @@ struct ViewportLabelSelectionState {
 
     /// Accumulated text to copy.
     text_to_copy: String,
+
+    /// SolidCraft: the selected text, as last reported with
+    /// [`crate::OutputCommand::TextSelectionSettled`], for [`LabelSelectionState::selected_text`]
+    /// (#10882).
+    settled_text: String,
     last_copied_galley_rect: Option<Rect>,
 
     /// Has the selection changed since it was last reported with [`crate::OutputCommand::TextSelectionSettled`]?
@@ -159,6 +164,7 @@ impl Default for ViewportLabelSelectionState {
             has_reached_primary: Default::default(),
             has_reached_secondary: Default::default(),
             text_to_copy: Default::default(),
+            settled_text: Default::default(),
             last_copied_galley_rect: Default::default(),
             selection_is_dirty: Default::default(),
             report_selection: Default::default(),
@@ -202,6 +208,17 @@ impl LabelSelectionState {
         self.states.clear();
     }
 
+    /// SolidCraft: the selected label text, as Copy would put it on the clipboard, once the
+    /// selection has settled (no button held), for a menu's Copy item (#10882). `None` without a
+    /// selection or while it is still being dragged out.
+    pub fn selected_text(&self) -> Option<String> {
+        self.states
+            .values()
+            .filter(|state| state.has_selection() && !state.selection_is_dirty)
+            .map(|state| state.settled_text.clone())
+            .find(|text| !text.is_empty())
+    }
+
     /// Handle text selection state for a label or similar widget.
     /// This also takes care of painting the galley.
     pub fn label_text_selection(
@@ -236,7 +253,9 @@ impl ViewportLabelSelectionState {
             // state.selection = None; // TODO(emilk): this makes sense, but doesn't work as expected.
         }
 
-        if ui.input(|i| i.pointer.any_pressed()) {
+        // SolidCraft: only the primary button starts or ends a selection, so a right-click keeps
+        // the selection for a menu that copies it (#10882).
+        if ui.input(|i| i.pointer.primary_pressed()) {
             if ui.input(|i| i.modifiers.shift) && self.selection.is_some() {
                 // A shift-click extends the current selection, keeping any double- or
                 // triple-clicked word/line selected, but now by the granularity of this press:
@@ -309,7 +328,9 @@ impl ViewportLabelSelectionState {
         }
 
         let pressed_escape = ui.input(|i| i.key_pressed(crate::Key::Escape));
-        let clicked_something_else = ui.input(|i| i.pointer.any_pressed()) && !self.any_hovered;
+        // SolidCraft: a right-click elsewhere keeps the selection too (#10882).
+        let clicked_something_else =
+            ui.input(|i| i.pointer.primary_pressed()) && !self.any_hovered;
         let delected_everything = pressed_escape || clicked_something_else;
 
         if delected_everything {
@@ -323,6 +344,8 @@ impl ViewportLabelSelectionState {
         let text_to_copy = core::mem::take(&mut self.text_to_copy);
         if self.report_selection {
             self.selection_is_dirty = false;
+            // SolidCraft: kept for `LabelSelectionState::selected_text` (#10882).
+            self.settled_text.clone_from(&text_to_copy);
             if !text_to_copy.is_empty() {
                 ui.ctx()
                     .send_cmd(crate::OutputCommand::TextSelectionSettled(
@@ -514,7 +537,8 @@ impl ViewportLabelSelectionState {
                     WidgetTextCursor::new(response.id, new_primary, global_from_galley, galley);
 
                 // We don't want the latency of `drag_started`.
-                let drag_started = ui.input(|i| i.pointer.any_pressed());
+                // SolidCraft: not on a right-click, which keeps the selection (#10882).
+                let drag_started = ui.input(|i| i.pointer.primary_pressed());
                 if drag_started {
                     if selection.layer_id == response.layer_id {
                         if ui.input(|i| i.modifiers.shift) {
@@ -646,7 +670,9 @@ impl ViewportLabelSelectionState {
         }
 
         self.any_hovered |= response.hovered();
-        self.is_dragging |= response.is_pointer_button_down_on(); // we don't want the initial latency of drag vs click decision
+        // SolidCraft: only the primary button drags a selection (#10882).
+        self.is_dragging |=
+            response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down()); // we don't want the initial latency of drag vs click decision
 
         let old_selection = self.selection;
 
@@ -654,8 +680,14 @@ impl ViewportLabelSelectionState {
 
         let old_range = cursor_state.range(galley);
 
+        // SolidCraft: a press of another button (a right-click) leaves the selection and the
+        // cursor where they are, for a menu that copies the selection (#10882). Text fields keep
+        // upstream's behaviour: there a right press still moves the caret.
+        let only_other_buttons =
+            ui.input(|i| i.pointer.any_pressed() && !i.pointer.primary_pressed());
         if let Some(pointer_pos) = ui.ctx().pointer_interact_pos()
             && response.contains_pointer()
+            && !only_other_buttons
         {
             let cursor_at_pointer =
                 galley.cursor_from_pos((galley_from_global * pointer_pos).to_vec2());
