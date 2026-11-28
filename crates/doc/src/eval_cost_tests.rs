@@ -4425,7 +4425,11 @@ fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
 #[test]
 fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     let (model, combine, work) = boxes_joined(12, 5.0);
-    assert!(model.result(combine).is_some_and(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.result(combine));
+    assert!(
+        model.result(combine).is_some_and(|r| r.error.is_none() && r.warning.as_deref().is_some_and(|w| w.contains("keeps the 12 separate pieces"))),
+        "{:?}",
+        model.result(combine)
+    );
     assert_eq!(work.joined_apart, 1, "{work:?}");
     let st = model.state();
     assert_eq!(st.bodies.len(), 1);
@@ -4435,7 +4439,7 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
 
     // Each box overlaps the next by half: the kernel's union makes them one piece.
     let (model, combine, work) = boxes_joined(4, 1.0);
-    assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.result(combine));
     assert_eq!(work.joined_apart, 0, "{work:?}");
     let st = model.state();
     assert_eq!(st.bodies.len(), 1);

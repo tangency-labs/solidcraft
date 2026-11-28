@@ -8744,8 +8744,20 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 /// separate piece (see `apply_traced`), and so does an Emboss, which raises its profiles with a Join
 /// and has no operation to pick (#23375): a valid body in several pieces, but rarely what was meant
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
-/// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
+/// in more pieces than they had (#4434). Combine also names the separate pieces it
+/// keeps under one body name, without changing the result (#18974).
 fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
+    if let FeatureKind::Combine { target, operation: Operation::Join | Operation::NewBody, .. } = &f.kind {
+        if let (Some(was), Some(now)) = (before.body(target), after.body(target))
+            && !now.body.same_shape(&was.body)
+            && now.body.shell_count() > 1
+            && let Ok(pieces) = now.body.lumps()
+            && pieces.len() > 1
+        {
+            append_warning(warning, format!("Combine Join keeps the {} separate pieces of `{}` in one body", pieces.len(), now.name));
+        }
+        return;
+    }
     let mirrored_join = matches!(&f.kind, FeatureKind::Mirror { features, bodies, .. }
     if bodies.is_empty() && features.iter().filter_map(|id| doc.feature(id.0)).any(|source| {
         !source.suppressed && matches!(source.kind, FeatureKind::Extrude { operation: Operation::Join, .. })
