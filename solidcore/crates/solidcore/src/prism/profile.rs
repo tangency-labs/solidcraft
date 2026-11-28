@@ -20,6 +20,7 @@
 
 pub mod line_family;
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::curve::curve::Curve;
@@ -58,7 +59,7 @@ pub fn counterclockwise_sweep(center: Point2, start: Point2, end: Point2) -> Opt
     {
         return None;
     }
-    Some((by.atan2(bx) - ay.atan2(ax)).rem_euclid(TAU))
+    Some((det::atan2(by, bx) - det::atan2(ay, ax)).rem_euclid(TAU))
 }
 
 /// The margin (degrees) kept from the circle builder's angle windows ([`CONIC_ANGLE_TOL_DEG`],
@@ -266,7 +267,7 @@ pub(crate) fn cross2(a: Vec2, b: Vec2) -> f64 {
 }
 
 fn unit(angle: f64) -> Vec2 {
-    Vec2::new(angle.cos(), angle.sin())
+    Vec2::new(det::cos(angle), det::sin(angle))
 }
 
 fn finite2(p: Point2) -> bool {
@@ -494,7 +495,7 @@ impl Seg2 {
                 #[allow(clippy::cast_precision_loss)]
                 let step = sweep / n as f64;
                 let half = step * 0.5;
-                let w = half.cos();
+                let w = det::cos(half);
                 (0..n)
                     .map(|i| {
                         #[allow(clippy::cast_precision_loss)]
@@ -557,7 +558,12 @@ impl Seg2 {
                 // but they cancel for a nearly straight arc of a large radius (its centre far
                 // off, the arc near the origin).
                 let end = start + sweep;
-                let (s0, c0, s1, c1) = (start.sin(), start.cos(), end.sin(), end.cos());
+                let (s0, c0, s1, c1) = (
+                    det::sin(start),
+                    det::cos(start),
+                    det::sin(end),
+                    det::cos(end),
+                );
                 let terms = [r * r * sweep, r * c.x * (s1 - s0), -(r * c.y * (c1 - c0))];
                 let size = r * r * sweep.abs() + 2.0 * r * (c.x.abs() + c.y.abs());
                 // the end's angle `start + sweep` is rounded, by up to gamma(1) |start + sweep|;
@@ -646,7 +652,7 @@ impl Seg2 {
 /// whose next term is below `θ³/6` times `2⁻⁵⁹` there.
 fn theta_less_sine(theta: f64) -> (f64, bool) {
     if theta.abs() >= 0.5 {
-        return (theta - theta.sin(), true);
+        return (theta - det::sin(theta), true);
     }
     let t2 = theta * theta;
     // θ³/6 (1 - θ²/20 (1 - θ²/42 (1 - θ²/72 (1 - θ²/110 (1 - θ²/156 (1 - θ²/210))))))
@@ -690,15 +696,15 @@ pub(super) fn conic_factor(w: f64) -> Option<(f64, f64)> {
         return Some((f, 2.0 * w * (tail + gamma(512) * size)));
     }
     let (f, terms) = if w < 1.0 {
-        let phi = w.acos();
-        let s = phi.sin();
+        let phi = det::acos(w);
+        let s = det::sin(phi);
         (
             w * (phi - w * s) / (s * s * s),
             w * (phi + w * s) / (s * s * s),
         )
     } else {
-        let psi = w.acosh();
-        let s = psi.sinh();
+        let psi = det::acosh(w);
+        let s = det::sinh(psi);
         (
             w * (w * s - psi) / (s * s * s),
             w * (w * s + psi) / (s * s * s),
@@ -1151,7 +1157,7 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             // The arc's own circle, its angle 0 at the arc's start: two arcs of one circle are
             // two curves, so a boolean keeps the points where they meet, and the trim never
             // crosses the circle's seam nor runs past a whole turn, whatever the start.
-            let (c, s) = (s0.cos(), s0.sin());
+            let (c, s) = (det::cos(s0), det::sin(s0));
             let placement = Axis2Placement::new(at(center), x * c + y * s, y * c - x * s);
             // The closed circle is asked for outright, so the builder's own full-turn window is
             // never what decides it.

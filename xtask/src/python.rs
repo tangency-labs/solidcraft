@@ -81,7 +81,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
 }
 
 /// Builds `solidcraft-cli` with the `ci` profile, as the fast gate does, and returns its path.
-fn build_cli(root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn build_cli(root: &Path) -> Result<PathBuf, String> {
     let mut build = crate::cargo();
     build.args(["build", "-q", "--profile", "ci", "-p", "solidcraft-cli"]);
     crate::run(build, "cargo build --profile ci -p solidcraft-cli")?;
@@ -89,7 +89,7 @@ fn build_cli(root: &Path) -> Result<PathBuf, String> {
     Ok(target.join("ci").join(if cfg!(windows) { "solidcraft-cli.exe" } else { "solidcraft-cli" }))
 }
 
-fn cli_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
+pub(crate) fn cli_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
     let out = Command::new(cli).args(args).output().map_err(|e| format!("python: {}: {e}", cli.display()))?;
     if !out.status.success() {
         return Err(format!("python: solidcraft-cli {} failed:\n{}", args.join(" "), String::from_utf8_lossy(&out.stderr)));
@@ -132,7 +132,7 @@ fn mcp_tools(cli: &Path) -> Result<(String, Vec<Value>), String> {
     Ok((version.ok_or("python: mcp sent no version")?, tools.ok_or("python: mcp sent no tools/list")?))
 }
 
-fn is_planned(c: &Value) -> bool {
+pub(crate) fn is_planned(c: &Value) -> bool {
     !c["planned"].is_null() && c["planned"] != json!(false)
 }
 

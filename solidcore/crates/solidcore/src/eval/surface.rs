@@ -15,6 +15,7 @@ use super::spline::{
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
 use super::{Collapse, CurveEval, EvalError};
+use crate::math::det;
 use crate::math::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -54,7 +55,7 @@ impl Axes {
     }
     /// The radial direction at angle `u` and its derivative.
     fn radial(&self, u: f64) -> (Vec3, Vec3) {
-        let (s, c) = u.sin_cos();
+        let (s, c) = det::sin_cos(u);
         (self.x * c + self.y * s, self.y * c - self.x * s)
     }
 }
@@ -64,7 +65,7 @@ fn angle(a: f64, b: f64, near: Option<f64>) -> f64 {
     if a == 0.0 && b == 0.0 {
         return near.unwrap_or(0.0);
     }
-    let u = b.atan2(a);
+    let u = det::atan2(b, a);
     if u < 0.0 {
         u + TAU
     } else {
@@ -154,7 +155,7 @@ impl SurfaceEval {
             } => Ok(SurfaceEval::Cone {
                 axes: Axes::new(frame),
                 radius_at_origin: *radius_at_origin,
-                slope: half_angle.tan(),
+                slope: det::tan(*half_angle),
             }),
             Surface::Sphere { frame, radius } => Ok(SurfaceEval::Sphere {
                 axes: Axes::new(frame),
@@ -276,7 +277,7 @@ impl SurfaceEval {
             }
             SurfaceEval::Sphere { axes: a, radius } => {
                 let (r, dr) = a.radial(u);
-                let (s, c) = v.sin_cos();
+                let (s, c) = det::sin_cos(v);
                 (
                     a.o + (r * c + a.z * s) * *radius,
                     dr * (c * radius),
@@ -290,7 +291,7 @@ impl SurfaceEval {
                 tube,
             } => {
                 let (r, dr) = a.radial(u);
-                let (s, c) = (v + tube).sin_cos();
+                let (s, c) = det::sin_cos(v + tube);
                 let ring = major + minor * c;
                 (
                     a.o + r * ring + a.z * (minor * s),
@@ -329,7 +330,7 @@ impl SurfaceEval {
             }
             SurfaceEval::Sphere { axes: a, radius } => {
                 let (r, dr) = a.radial(u);
-                let (s, c) = v.sin_cos();
+                let (s, c) = det::sin_cos(v);
                 (
                     r * (-c * radius),
                     dr * (-s * radius),
@@ -343,7 +344,7 @@ impl SurfaceEval {
                 tube,
             } => {
                 let (r, dr) = a.radial(u);
-                let (s, c) = (v + tube).sin_cos();
+                let (s, c) = det::sin_cos(v + tube);
                 (
                     r * -(major + minor * c),
                     dr * (-s * minor),
@@ -451,18 +452,21 @@ impl SurfaceEval {
                 let [a, b, h] = axes.local(p);
                 [
                     angle(a, b, near.map(|n| n[0])),
-                    ((a.hypot(b) - radius_at_origin) * slope + h) / (1.0 + slope * slope),
+                    ((det::hypot(a, b) - radius_at_origin) * slope + h) / (1.0 + slope * slope),
                 ]
             }
             SurfaceEval::Sphere { axes, .. } => {
                 let [a, b, h] = axes.local(p);
-                [angle(a, b, near.map(|n| n[0])), h.atan2(a.hypot(b))]
+                [
+                    angle(a, b, near.map(|n| n[0])),
+                    det::atan2(h, det::hypot(a, b)),
+                ]
             }
             SurfaceEval::Torus {
                 axes, major, tube, ..
             } => {
                 let [a, b, h] = axes.local(p);
-                let v = (h.atan2(a.hypot(b) - major) - tube).rem_euclid(TAU);
+                let v = (det::atan2(h, det::hypot(a, b) - major) - tube).rem_euclid(TAU);
                 [angle(a, b, near.map(|n| n[0])), v]
             }
         };
@@ -518,7 +522,7 @@ impl SurfaceEval {
                 // float: the parameter given for it is off by up to its rounding.
                 let err = radius.abs() * (g(3) + 2.0 * unit * v.abs());
                 (
-                    circle(radius * v.cos(), err, within(*radius))?,
+                    circle(radius * det::cos(v), err, within(*radius))?,
                     circle(*radius, 0.0, within(*radius))?,
                 )
             }
@@ -526,7 +530,7 @@ impl SurfaceEval {
                 major, minor, tube, ..
             } => {
                 let w = v + tube;
-                let ring = major + minor * w.cos();
+                let ring = major + minor * det::cos(w);
                 let err = g(4) * (major.abs() + minor.abs()) + minor.abs() * 2.0 * unit * w.abs();
                 (
                     circle(ring, err, within(major.abs() + minor.abs()))?,

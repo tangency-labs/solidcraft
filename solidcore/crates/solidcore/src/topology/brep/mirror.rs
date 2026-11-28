@@ -252,6 +252,109 @@ fn mirror_in(
     Ok(())
 }
 
+/// Replace mapped vertices, edge curves, and face surfaces on `b`, rebuild UV trim curves
+/// for `rebuild_faces`, and refresh infinite regions when present.
+///
+/// # Errors
+///
+/// Those of the underlying B-rep editing notifications, curve/surface replacements, trim
+/// curve rebuild, and region classification.
+pub(crate) fn apply_deformed_geometry(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mapped_vertices: &std::collections::BTreeMap<crate::topology::VertexId, crate::math::Point3>,
+    mapped_curves: std::collections::BTreeMap<
+        crate::topology::EdgeId,
+        crate::curve::curve::p2::Curve,
+    >,
+    mapped_surfaces: std::collections::BTreeMap<
+        crate::topology::FaceId,
+        crate::surface::surface::p2::Surface,
+    >,
+    rebuild_faces: &std::collections::BTreeSet<crate::topology::FaceId>,
+) -> Result<()> {
+    plain_edit(k, b, |k, b, env| {
+        let mut notifications = Some(env);
+        ignore_status(notify_pre_edit(k, b, notifications.as_deref_mut()))?;
+
+        for (&v, &pt) in mapped_vertices {
+            ignore_status(notify_vertex_pre_edit(
+                k,
+                b,
+                v,
+                notifications.as_deref_mut(),
+            ))?;
+            set_vertex_point(k, b, v, pt, notifications.as_deref_mut())?;
+        }
+
+        for (e, new_curve) in mapped_curves {
+            ignore_status(notify_edge_pre_edit(k, b, e, notifications.as_deref_mut()))?;
+            set_joined_edge_curve(
+                k,
+                b,
+                e,
+                Some(new_curve),
+                false,
+                notifications.as_deref_mut(),
+            )?;
+            set_edge_curve_owner(b, e, notifications.as_deref_mut())?;
+        }
+
+        for (f, new_surface) in mapped_surfaces {
+            ignore_status(notify_face_pre_edit(k, b, f, notifications.as_deref_mut()))?;
+            let mut modified = Vec::new();
+            replace_surface(
+                k,
+                b,
+                f,
+                new_surface,
+                false,
+                Some(&mut modified),
+                true,
+                notifications.as_deref_mut(),
+            )?;
+            for mf in modified {
+                with_notifications(b, notifications.as_deref_mut(), None, |b, env, _| {
+                    crate::topology::face::p1::remove_uv_trim_curves_with_notifications(b, mf, env)
+                })?;
+            }
+        }
+
+        for &f in rebuild_faces {
+            with_notifications(b, notifications.as_deref_mut(), None, |b, env, _| {
+                crate::topology::face::p3::create_uv_trim_curves_notified(
+                    k,
+                    b,
+                    f,
+                    false,
+                    None,
+                    Some(env),
+                )
+                .map(|_| ())
+            })?;
+        }
+
+        if brep_regions(b)?.len() > 1 {
+            make_missing_nurbs(k, b)?;
+            let previous = b.editing_enabled();
+            b.set_editing_enabled(false);
+            let query = BrepQuery::of_brep(b);
+            let result = find_and_set_infinite_region(
+                k,
+                b,
+                &query,
+                None,
+                SetRegionVoidType::InfiniteRegionSwap,
+                None,
+            );
+            b.set_editing_enabled(previous);
+            result?;
+        }
+
+        Ok(())
+    })
+}
+
 /// Makes the NURB of every analytic face surface that has none. Upstream's first
 /// `SmBSplineSurface::CalculateBoundingBox` makes it through the virtual
 /// `GetOrCreateGwNurbPointer` (`FindAndSetInfiniteRegion` calls it); the port's bounding
@@ -623,6 +726,7 @@ pub fn transform_matrix_with_notifications(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::primitive::api_primitives::create_box;
     use crate::topology::brep::p1;
 
@@ -646,7 +750,7 @@ mod tests {
             Point3::new(-20., 0., -10.),
         ];
         let line = |a, b| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
-        let angle = 100.0_f64.atan2(20.).to_degrees();
+        let angle = det::atan2(100.0_f64, 20.).to_degrees();
         let arc = Ellipse::create_canonical_circle(
             k,
             &Axis2Placement::new(Point3::new(0., 0., -110.), Vec3::X, Vec3::Z),
@@ -682,7 +786,7 @@ mod tests {
         let at = Point3::new(
             0.0,
             10.0,
-            -110.0 + 10_400.0_f64.sqrt() + 10.0 * 12.0_f64.to_radians().tan(),
+            -110.0 + 10_400.0_f64.sqrt() + 10.0 * det::tan(12.0_f64.to_radians()),
         );
         let edge = *body
             .edge_list()
@@ -1120,7 +1224,7 @@ mod tests {
     /// perpendicular unit vectors, row 2 zero, so `AngleBetween` fails.
     fn rank_two(t: [f64; 3]) -> [[f64; 4]; 4] {
         let (a, c) = (0.3_f64, 0.8_f64);
-        let (ca, sa, cc, sc) = (a.cos(), a.sin(), c.cos(), c.sin());
+        let (ca, sa, cc, sc) = (det::cos(a), det::sin(a), det::cos(c), det::sin(c));
         [
             [ca, sa, 0.0, 0.0],
             [-sa * cc, ca * cc, sc, 0.0],

@@ -689,9 +689,11 @@ fn drive_with_contact_within(
         }
         place_holding(s, &held)
     };
-    // Loops already open at the start stay as they are; a loop the motion opens stops it.
-    let open_at_start: BTreeSet<u64> = set(s, 0.0).conflicts.iter().map(|c| c.0).collect();
-    let opened = |sol: &joints::Solution| sol.conflicts.iter().find(|c| !open_at_start.contains(&c.0)).map(|c| c.1.clone());
+    // With contact sets enabled, place at t = 0 before building contact geometry. Otherwise skip
+    // the t = 0 solve unless the target pose has conflicts and needs to distinguish pre-existing
+    // open loops from newly opened ones.
+    let mut open_at_start: Option<BTreeSet<u64>> =
+        if s.doc.assembly.contact_enabled { Some(set(s, 0.0).conflicts.iter().map(|c| c.0).collect()) } else { None };
     let cache = if s.doc.assembly.contact_enabled { Some(contact_sweep::ContactGeometry::new(s)?) } else { None };
     let mut sol;
     let mut stopped = None;
@@ -797,21 +799,28 @@ fn drive_with_contact_within(
         sol = set(s, 1.0);
     }
     let mut stopped_by_loop = None;
-    if let Some(mut name) = opened(&sol) {
-        // The furthest the loops still close, short of where contact stopped; the joint named is
-        // the one whose loop opens first.
-        let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).or(budget_lo).unwrap_or(1.0));
-        for _ in 0..14 {
-            let mid = (lo + hi) / 2.0;
-            match opened(&set(s, mid)) {
-                None => lo = mid,
-                Some(n) => (hi, name) = (mid, n),
+    if !sol.conflicts.is_empty() {
+        let open_at_start = open_at_start.get_or_insert_with(|| {
+            let mut start_s = s.scratch();
+            set(&mut start_s, 0.0).conflicts.iter().map(|c| c.0).collect()
+        });
+        let opened = |sol: &joints::Solution| sol.conflicts.iter().find(|c| !open_at_start.contains(&c.0)).map(|c| c.1.clone());
+        if let Some(mut name) = opened(&sol) {
+            // The furthest the loops still close, short of where contact stopped; the joint named is
+            // the one whose loop opens first.
+            let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).or(budget_lo).unwrap_or(1.0));
+            for _ in 0..14 {
+                let mid = (lo + hi) / 2.0;
+                match opened(&set(s, mid)) {
+                    None => lo = mid,
+                    Some(n) => (hi, name) = (mid, n),
+                }
             }
+            sol = set(s, lo);
+            stopped = None;
+            budget_lo = None;
+            stopped_by_loop = Some(json!({"joint": name, "fraction": lo}));
         }
-        sol = set(s, lo);
-        stopped = None;
-        budget_lo = None;
-        stopped_by_loop = Some(json!({"joint": name, "fraction": lo}));
     }
     let values: Vec<Value> = want.iter().map(|(id, _)| json!({"joint": id, "values": effective_values(s, *id)})).collect();
     let mut out = json!({"values": values, "stopped_by_contact": stopped, "stopped_by_loop": stopped_by_loop, "conflicts": sol.conflicts.len()});
@@ -826,14 +835,14 @@ fn drive_with_contact_within(
 const MAX_ADVANCES: usize = 200;
 
 /// Drive one joint (joint.drive), honouring contact sets.
-pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize, stop_at_budget: bool) -> Result<Value> {
+pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize, stop_at_budget: bool) -> Result<(Value, joints::Solution)> {
     let given = (0..given.min(q.len())).map(|i| (id, i)).collect();
-    Ok(drive_with_contact_within(s, &[(id, q)], &given, stop_at_budget)?.0)
+    drive_with_contact_within(s, &[(id, q)], &given, stop_at_budget)
 }
 
 /// Drive exactly one coordinate, letting the other values follow loops and preserving expressions.
-pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize, stop_at_budget: bool) -> Result<Value> {
-    Ok(drive_with_contact_within(s, &[(id, q)], &[(id, index)].into_iter().collect(), stop_at_budget)?.0)
+pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize, stop_at_budget: bool) -> Result<(Value, joints::Solution)> {
+    drive_with_contact_within(s, &[(id, q)], &[(id, index)].into_iter().collect(), stop_at_budget)
 }
 
 /// A command's reply as JSON: the contact and motion study commands build their replies from the
