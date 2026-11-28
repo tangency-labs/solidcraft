@@ -30,7 +30,7 @@ fn failed(op: &str, what: &str, e: impl crate::Cause) -> KernelError {
 
 /// The error for SMLib's refusal of `op`, in the words of the operation; `wall` is its wall's
 /// thickness, where it has one.
-fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
+pub(crate) fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
     match e {
         SmError::NoRoom => KernelError::Invalid(format!("{op}: the wall is too thick: it leaves no room inside the body")),
         // The walls just meet: thinner they stay apart, thicker they cross and merge.
@@ -68,6 +68,24 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         // A face the operation cannot handle, named for what it is (a draft's face that is neither
         // a plane nor a cone or cylinder, #18541).
         SmError::Refused(solidcore_ops::Error::Unsupported(why)) => KernelError::Failed(format!("not supported yet: {op}: {why}")),
+        // For a local face move, distinguish a known geometric limit from
+        // a refusal for which a smaller distance may help.
+        SmError::Refused(solidcore_ops::Error::OffsetRefused { face, why }) if op == "offset faces" => {
+            use solidcore_ops::OffsetRefusal::*;
+            match why {
+                Collapses { radius, .. } => {
+                    KernelError::Invalid(format!("{op}: the moved surface would collapse; the distance must be less than {radius} mm in magnitude"))
+                }
+                PastSide { largest } => KernelError::Invalid(format!(
+                    "{op}: the face would move past the curved face beside it; keep the distance below {largest} mm in magnitude"
+                )),
+                FaceCloses { largest } => KernelError::Invalid(format!(
+                    "{op}: the face would close between its neighbours; keep the distance below {largest} mm in magnitude"
+                )),
+                FacesApart | LoopsCross { .. } | EdgeVanishes => KernelError::Invalid(format!("{op}: {why}; a smaller distance may work")),
+                why => failed(op, "operation", SmError::Refused(solidcore_ops::Error::OffsetRefused { face, why })),
+            }
+        }
         // A drafted cone or cylinder whose angle closes it within the face, or whose neutral plane
         // lies at or past its apex (#22807): a geometric refusal, not an unsupported feature.
         SmError::Refused(solidcore_ops::Error::OffsetRefused {
