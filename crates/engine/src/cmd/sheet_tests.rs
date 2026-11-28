@@ -8372,6 +8372,28 @@ fn edge_flange_offset_moves_the_bend_out_past_its_position() {
 }
 
 #[test]
+fn edge_flange_offset_past_the_bend_band_keeps_the_rim_names() {
+    let names = |offset: Option<&str>| {
+        let mut s = Session::default();
+        r2_base(&mut s);
+        let mut p = json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside"});
+        if let Some(d) = offset {
+            p["offset"] = json!(d);
+        }
+        run(&mut s, "sheet.flange", p);
+        let state = s.model.state();
+        let mut names = solidcraft_doc::naming::face_names(&state.bodies[0]).as_ref().clone();
+        names.sort_unstable();
+        names
+    };
+    let plain = names(None);
+    assert!(plain.iter().all(|n| !n.contains("/?")), "{plain:?}");
+    for d in ["3 mm", "20 mm", "-6.5 mm"] {
+        assert_eq!(names(Some(d)), plain, "offset {d}");
+    }
+}
+
+#[test]
 fn edge_flange_offset_is_a_parameter_carries_down_a_chain_and_is_saved_only_when_given() {
     let (t, r, k) = (2.0, 2.0, 0.4);
     let ba = FRAC_PI_2 * (r + k * t);

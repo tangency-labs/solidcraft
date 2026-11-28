@@ -1481,7 +1481,7 @@ pub(super) fn sheet_eval(
             }
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
-            tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
+            tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[], offset.abs()));
             if !corners.is_empty() {
                 let prev = std::mem::take(&mut sk.parts);
                 let solid = sk.build()?;
@@ -1547,7 +1547,7 @@ pub(super) fn sheet_eval(
                 let before = sk.clone();
                 let n0 = sk.sheet.panels.len();
                 sk.add_path_flange(edge.0, &path, rr)?;
-                tag_panels(sk, Some(&before), n0, f.id, PanelsBy::Bends(&lines));
+                tag_panels(sk, Some(&before), n0, f.id, PanelsBy::Bends(&lines, 0.0));
             }
             rebuild_surface_sheet(st, i)
         }
@@ -1619,7 +1619,7 @@ pub(super) fn sheet_eval(
             for edge in found {
                 sk.add_hem_on(edge, l, g, *flip)?;
             }
-            tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
+            tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[], 0.0));
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }
@@ -3237,8 +3237,9 @@ fn drawn_lines(ss: &SolvedSketch, ids: &[String]) -> Vec<(String, String)> {
 #[derive(Clone, Copy)]
 enum PanelsBy<'a> {
     /// Bends on rims of the sheet before the feature (flanges, hems), and on each other along a
-    /// path flange's path, whose lines these are (see [`drawn_lines`]), in its order.
-    Bends(&'a [(String, String)]),
+    /// path flange's path, whose lines these are (see [`drawn_lines`]), in its order; the second
+    /// is how far a bend may stand past its position's setback (an edge flange's bend offset).
+    Bends(&'a [(String, String)], f64),
     /// A fold along the line between these points (the body's coordinates), from the first to
     /// the second, parting panels of the sheet before it.
     Fold([Vec3; 2]),
@@ -3286,7 +3287,7 @@ fn tag_panels(sk: &mut crate::SurfaceSheet, before: Option<&crate::SurfaceSheet>
                 let along = fold_way(j.a.panel).map_or(j.b.origin.dot(j.b.dir), |way| j.b.origin.dot(way));
                 made.push((p, PanelMade::Fold { feature, from: on_key.clone(), place: 0 }, format!("F{feature}/{on_key}"), along));
             }
-            PanelsBy::Bends(lines) if j.a.panel >= from => {
+            PanelsBy::Bends(lines, _) if j.a.panel >= from => {
                 // Along a path flange's path: its line at the panel's place along the path.
                 let mut depth = 1;
                 let mut at = j.a.panel;
@@ -3302,12 +3303,12 @@ fn tag_panels(sk: &mut crate::SurfaceSheet, before: Option<&crate::SurfaceSheet>
                 let Some((curve, line)) = lines.get(depth) else { continue };
                 made.push((p, PanelMade::Chain { feature, curve: curve.clone() }, format!("F{feature}/{line}"), stands));
             }
-            PanelsBy::Bends(_) => {
+            PanelsBy::Bends(_, past) => {
                 // On a rim of the sheet as it was: a bend's anchor lies inside the edge it was
                 // drawn on by its setback, within the radius and a thickness, whichever way the
-                // bend was placed on the edge.
+                // bend was placed on the edge, and past that by its offset.
                 let band = match &j.kind {
-                    JointKind::Bend(bend) => 2.0 * (bend.radius + sk.thickness),
+                    JointKind::Bend(bend) => 2.0 * (bend.radius + sk.thickness) + past,
                     _ => 0.0,
                 };
                 let on = before.and_then(|b| b.rim_part_along(j.a.panel, j.a.origin, j.a.dir, band));
