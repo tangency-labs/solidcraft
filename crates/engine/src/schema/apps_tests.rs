@@ -8,7 +8,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<SendToAppParams>(), &["bodies", "copy_overwrite", "copy_to", "format", "target", "wait"]);
+    assert_keys(input_schema_for::<SendToAppParams>(), &["bodies", "copy_overwrite", "copy_to", "format", "name", "target", "wait"]);
     assert_keys(input_schema_for::<AppsParams>(), &[]);
 }
 
