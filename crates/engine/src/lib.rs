@@ -4353,23 +4353,37 @@ impl Session {
         design == *source.doc
     }
 
-    /// The design as it is now, with the editor's own marker: what the editor's edit is
-    /// computed on when the design gained a parameter while the editor was open (#9223).
+    /// The design the editor's edit is computed on when the design gained a parameter while
+    /// the editor was open (#9223): the design as it was when the editor was opened, with the
+    /// parameters it gained since. The parameters are not part of the edit, and no feature that
+    /// was already built reads them, so the editor's model and its capture state describe the
+    /// design this is.
     fn editor_base(&self, original: &Session) -> Session {
         let mut base = original.scratch();
-        let mut design = (*self.doc).clone();
-        design.marker = original.doc.marker;
+        let mut design = (*original.doc).clone();
+        design.params = self.doc.params.clone();
         base.doc = Arc::new(design);
         base
     }
 
     /// Cancel an unchanged feature editor by restoring its original evaluated model, even
     /// after preview work has evicted the old suffix from the shared evaluation cache.
+    ///
+    /// The design may have gained a parameter while the editor was open (#9223): the parameter
+    /// is not part of the edit being cancelled, so it stays, and the design is put back the way
+    /// it was with it. Every other change leaves the editor stale, and the cancel is refused.
     pub fn restore_editor(&mut self, source: &Session, mut original: Session) -> Result<()> {
         self.checked_sketch_owner(original.active_sketch, original.sketching_view)?;
         self.checked_sheet_sketch_owner(&self.view_context, original.active_sheet_sketch.as_deref(), &original.doc)?;
         if !self.same_document_context(source) {
-            return Err(EngineError::Other("the design changed while the feature editor was open; its current timeline was preserved".into()));
+            if !self.same_editor_context_with_gained_parameters(source) {
+                return Err(EngineError::Other("the design changed while the feature editor was open; its current timeline was preserved".into()));
+            }
+            // The parameters the design gained are not part of the edit being cancelled: they
+            // stay with the design it is put back to (#9223).
+            let mut design = (*original.doc).clone();
+            design.params = self.doc.params.clone();
+            original.doc = Arc::new(design);
         }
         let params = original.doc.marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
         crash::accepted_command(self, &self.doc, &original.doc, "timeline.roll_to", &params, !Arc::ptr_eq(&self.doc, &original.doc));
@@ -4399,9 +4413,19 @@ impl Session {
     /// Hide/show steps taken in an editor belong to the complete design, not its temporary
     /// rollback. Keep each step's visibility and ordering, on both sides of the history.
     fn restore_editor_history(&mut self, source: &Arc<Document>, original: &Arc<Document>) {
+        // The editor's rolled-back design, without the parameters the design gained since
+        // (#9223): a step taken while the editor was open holds it.
+        let pinned = source.params.len().min(original.params.len());
+        let rolled = if source.params.len() > pinned {
+            let mut design = (**source).clone();
+            design.params.truncate(pinned);
+            Arc::new(design)
+        } else {
+            source.clone()
+        };
         for snapshot in self.undo.iter_mut().chain(&mut self.redo) {
-            if Arc::ptr_eq(&snapshot.doc, source) {
-                snapshot.doc = original.clone();
+            if is_editor_rollback(&snapshot.doc, &rolled) {
+                snapshot.doc = restored_editor_document(original, &snapshot.doc);
             }
         }
     }
@@ -5018,6 +5042,37 @@ fn design_revision_generation(token: &str) -> Option<(&str, u64)> {
         return None;
     }
     Some((epoch, generation.parse().ok()?))
+}
+
+/// Whether the design is the editor's rolled-back one: the design as it was when the editor was
+/// opened, with the parameters the design gained since (#9223). Such a step belongs to the
+/// complete design, not to the editor's temporary rollback.
+fn is_editor_rollback(document: &Arc<Document>, rolled: &Arc<Document>) -> bool {
+    if Arc::ptr_eq(document, rolled) {
+        return true;
+    }
+    if !document.params.starts_with(&rolled.params) {
+        return false;
+    }
+    if document.params.len() == rolled.params.len() {
+        return **document == **rolled;
+    }
+    let mut design = (**document).clone();
+    design.params.truncate(rolled.params.len());
+    design == **rolled
+}
+
+/// The design a step of the editor's history is restored to: the design as it was when the
+/// editor was opened, with the parameters the step's own document had. The parameters the
+/// design gained are not part of the editor's edit, so a step taken after they were added keeps
+/// them (#9223).
+fn restored_editor_document(original: &Arc<Document>, step: &Arc<Document>) -> Arc<Document> {
+    if step.params == original.params {
+        return original.clone();
+    }
+    let mut design = (**original).clone();
+    design.params = step.params.clone();
+    Arc::new(design)
 }
 
 /// Whether two designs differ at most in their features. Every field is named, so a new one has
