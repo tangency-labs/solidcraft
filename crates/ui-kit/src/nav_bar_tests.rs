@@ -1,7 +1,7 @@
 //! The bar component driven with plain data, no app: what each click returns.
 use super::*;
 use crate::{NavigationEdge, NavigationIdle, NavigationKind};
-use egui::{Event, PointerButton, RawInput};
+use egui::{Event, PointerButton, RawInput, vec2};
 
 fn slot(index: usize, id: &'static str, kind: NavigationKind, x: f32) -> SlotView<'static> {
     SlotView {
@@ -45,20 +45,16 @@ fn bar() -> Bar<'static> {
 /// Styles closes on a pick; View stays open and has a submenu.
 fn menu(id: &str) -> Menu {
     match id {
-        "styles" => Menu { entries: vec![MenuEntry::Row(MenuRow::new("wire", "Wire", "", "test:wire"))], close_on_pick: true },
-        "view" => {
-            let mut preset = MenuRow::new("preset", "Preset", "", "test:preset");
-            preset.submenu = vec![MenuEntry::Row(MenuRow::new("fast", "Fast", "", "test:fast"))];
-            Menu {
-                entries: vec![
-                    MenuEntry::Heading("Show".into()),
-                    MenuEntry::Row(MenuRow::new("grid", "Grid", "", "test:grid")),
-                    MenuEntry::Separator,
-                    MenuEntry::Row(preset),
-                ],
-                close_on_pick: false,
-            }
-        }
+        "styles" => Menu { entries: vec![crate::Item::action("wire", "Wire", "").alias("test:wire")], close_on_pick: true },
+        "view" => Menu {
+            entries: vec![
+                crate::Item::heading("Show"),
+                crate::Item::action("grid", "Grid", "").alias("test:grid"),
+                crate::Item::sep(),
+                crate::Item::submenu("preset", "Preset", "", vec![crate::Item::action("fast", "Fast", "").alias("test:fast")]).alias("test:preset"),
+            ],
+            close_on_pick: false,
+        },
         _ => Menu::default(),
     }
 }
@@ -129,7 +125,7 @@ fn more_returns_a_folded_slot_and_opens_a_folded_menu_that_stays_open() {
     assert!(!rig.drawn("nav:slot:zoom"), "and More closes");
     rig.click_target("nav:more");
     assert_eq!(rig.click_target("nav:slot:view"), None, "a folded menu slot opens its menu");
-    assert!(rig.drawn("test:grid") && !rig.drawn("nav:slot:zoom"), "in place of More");
+    assert!(rig.drawn("test:grid") && rig.drawn("nav:slot:zoom"), "the shared submenu keeps More visible beside View");
     assert_eq!(rig.click_target("test:grid"), Some(NavAction::Item { menu: "view".into(), item: "grid".into() }));
     assert!(rig.drawn("test:grid"), "a menu that does not close on a pick stays open");
     assert_eq!(rig.click_target("test:preset"), None, "a row with a submenu opens it");
@@ -152,4 +148,29 @@ fn the_context_menus_return_customise_hide_reset_and_remove_with_the_slot_index(
     let folded = solidcraft_ui_registry::rect_of("nav:slot:view").expect("More is open").center();
     rig.click_with(folded, PointerButton::Secondary);
     assert_eq!(rig.click_target("nav:context:remove"), Some(NavAction::Context(ContextItem::Remove(3))), "a folded slot too");
+}
+
+#[test]
+fn removing_a_menu_trigger_discards_its_open_state() {
+    let mut rig = Rig::new();
+    rig.click_target("nav:slot:styles");
+    assert!(rig.drawn("test:wire"));
+    rig.bar.slots.retain(|slot| slot.id != "styles");
+    rig.bar.more = Rect::NOTHING;
+    rig.bar.overflow.clear();
+    rig.frame(Vec::new());
+    assert!(!rig.drawn("test:wire"));
+    rig.bar.slots.push(SlotView { alias: Some("test:styles"), ..slot(1, "styles", NavigationKind::Menu, 134.0) });
+    rig.frame(Vec::new());
+    rig.click_target("nav:slot:styles");
+    assert!(rig.drawn("test:wire"), "the returning trigger opens on its first click");
+}
+
+#[test]
+fn an_empty_folded_menu_never_dispatches_as_an_action_slot() {
+    let mut rig = Rig::new();
+    rig.bar.overflow.push(slot(4, "empty", NavigationKind::Menu, 0.0));
+    rig.click_target("nav:more");
+    assert_eq!(rig.click_target("nav:slot:empty"), None);
+    assert!(rig.drawn("nav:slot:zoom"), "an empty menu leaves More open");
 }

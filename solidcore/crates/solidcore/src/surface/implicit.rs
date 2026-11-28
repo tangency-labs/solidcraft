@@ -2043,6 +2043,21 @@ impl AnalyticSupport {
         }
     }
 
+    /// Whether `form` proves the analytic surface `s` as it stands: `form` lies on `s`'s
+    /// implicit surface ([`lies_on`]) and `s` evaluates as `form` at the form's own parameters
+    /// ([`evaluates_as`]). The two halves of [`Self::build`]'s proof, of a surface already made.
+    /// False for a surface of no analytic kind.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`lies_on`] and [`evaluates_as`].
+    pub fn proved_on(k: &Kernel, s: &Surface, form: &BSplineSurface) -> Result<bool> {
+        let Some(a) = Self::of(s) else {
+            return Ok(false);
+        };
+        Ok(lies_on(form, &a.implicit())? && evaluates_as(k, s, form)?)
+    }
+
     /// The analytic surface on the NURB `form`: refused unless `form` lies on it
     /// ([`lies_on`]) and its placement's axes are orthonormal. A plane keeps its placement
     /// as given; a cylinder, cone or sphere is parametrised as the kernel recognises it in
