@@ -27,6 +27,9 @@ use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::query::curve_surface_gap::{
+    trim_image_gap_bound_within, trim_same_parameter_gap_bound_within,
+};
 use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -36,7 +39,7 @@ use solidcore::sweep::screw::{
     Walls,
 };
 use solidcore::topology::brep::{p1, p2};
-use solidcore::topology::face;
+use solidcore::topology::{edgeuse, face};
 use solidcore::SolidError;
 use solidcore::{Brep, Kernel};
 
@@ -947,4 +950,74 @@ fn issue_2572_every_wall_is_a_definition_or_in_the_ledger() {
         fixed.is_empty(),
         "listed kinds no case makes bare any more (fixed? delete their ledger files): {fixed:?}"
     );
+}
+
+/// #22930: a cylinder piece's path is a chain of rational quadratic arcs, and its trim the
+/// path taken back through the cylinder's net exactly, on the same breakpoints. Each such
+/// trim is proved within the tolerance at once, by the net composed with the trim (some
+/// 1e-10, the roundings and the move of the trim's ends into their patches), both as a set
+/// and at equal parameters, where the bisection cut each into thousands of pieces and
+/// stopped just under the tolerance.
+#[test]
+fn issue_22930_a_cylinder_pieces_path_trims_are_proved_at_once() {
+    let mut k = Kernel::default();
+    let (p, turns) = (1.5, 3.0);
+    let tol = p * 1e-4;
+    let m = m10_groove(p);
+    let b = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        None,
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    let mut proved = 0;
+    for e in p1::edges(&b, None).unwrap() {
+        let rec = b.edge(e).unwrap();
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        if !matches!(curve.kind(), solidcore::curve::curve::CurveKind::BSpline(_)) {
+            continue;
+        }
+        let range = [rec.interval.min(), rec.interval.max()];
+        for &eu in &rec.edgeuses {
+            let Some(f) = edgeuse::p1::face(&b, eu).unwrap() else {
+                continue;
+            };
+            let s = face::p2::surface(&b, f).unwrap().unwrap();
+            if !matches!(s.kind(), SurfaceKind::Cone(_)) {
+                continue;
+            }
+            let (Some(trim), _) = edgeuse::p1::uv_trim_curve(&b, eu).unwrap() else {
+                continue;
+            };
+            let limits = [tol, f64::INFINITY];
+            let floor = 1e-3 * tol;
+            let set = trim_image_gap_bound_within(&k, s, curve, trim, range, floor, limits, None)
+                .unwrap();
+            // (at once: the same-parameter query does not bisect)
+            let before = k.work_counters.same_parameter_bisections();
+            let same = trim_same_parameter_gap_bound_within(
+                &k, s, curve, trim, range, floor, limits, None,
+            )
+            .unwrap();
+            assert_eq!(
+                k.work_counters.same_parameter_bisections(),
+                before,
+                "edge {e:?}: its same-parameter bound bisected"
+            );
+            for g in [set, same] {
+                assert!(g.is_some_and(|g| g <= 1e-9), "edge {e:?}: {g:?}");
+            }
+            proved += 1;
+        }
+    }
+    // (two cylinders, an edge along each side of each of their six half-turn pieces)
+    assert!(proved >= 24, "{proved} cylinder piece trims");
 }
