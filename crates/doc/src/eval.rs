@@ -8488,11 +8488,10 @@ fn note_join_apart(doc: &Document, before: &ModelState, after: &ModelState, f: &
     if feature_operation(f) != Some(Operation::Join) && !mirrored_join && !emboss {
         return;
     }
+    // The Emboss window has no New Body to point to.
+    let hint = if emboss { "" } else { " (New Body makes it a body of its own)" };
     for (name, n) in join_pieces_added(before, after) {
-        append_warning(
-            warning,
-            format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces (New Body makes it a body of its own)"),
-        );
+        append_warning(warning, format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces{hint}"));
     }
 }
 

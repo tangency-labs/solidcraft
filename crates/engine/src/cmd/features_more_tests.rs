@@ -4459,6 +4459,7 @@ fn an_emboss_apart_from_its_body_says_it_left_two_pieces() {
     let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 1, "mode": "emboss", "targets": ["A"]}));
     let warning = reply["warning"].as_str().unwrap_or_default();
     assert!(warning.contains("the joined piece doesn't touch `A`, so `A` is now in 2 separate pieces"), "{reply}");
+    assert!(!warning.contains("New Body"), "Emboss has no New Body: {reply}");
     assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), reply["warning"].as_str());
     assert!(rel(body_volume(&s, "A"), 8100.0) < 1e-9 && rel(body_volume(&s, "B"), 8000.0) < 1e-9);
     run(&mut s, "edit.undo", json!({}));
