@@ -395,16 +395,10 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    /// The mass of body `b` (its geometry `geometry` in its component's frame) for component
-    /// `component`, from its material's density and its closed mesh; a body that does not close
-    /// adds none, with a warning.
-    fn add_mass(&mut self, b: &ModelBody, geometry: &solidcraft_kernel::Body, component: u64) {
-        match crate::mass_properties(geometry) {
-            Ok(Some(mp)) => {
-                // g/cm³ to kg/mm³.
-                let rho = self.doc.density(&b.name) * 1e-6;
-                self.masses.entry(component).or_default().push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
-            }
+    /// The mass of a body in its component's frame, independent of export mesh quality.
+    fn add_mass(&mut self, b: &ModelBody, model: &ModelState, component: u64) {
+        match crate::urdf::measured_body_mass(self.doc, model, b) {
+            Ok(Some(mp)) => self.masses.entry(component).or_default().push(mp),
             Ok(None) => self.warnings.push(format!("{}: not a closed solid: it adds no mass", clean(&b.name).unwrap_or_else(|| "a body".into()))),
             Err(e) => self.warnings.push(format!("{}: its mass could not be measured: {e}", clean(&b.name).unwrap_or_else(|| "a body".into()))),
         }
@@ -748,7 +742,7 @@ impl<'a> Builder<'a> {
                 }
                 list.push(id);
                 if self.physics {
-                    self.add_mass(b, framed.as_ref().unwrap_or(&b.body), owner);
+                    self.add_mass(b, model, owner);
                 }
             }
         }
