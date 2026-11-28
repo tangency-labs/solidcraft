@@ -5641,7 +5641,7 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
         }
         if let Some(pc) = ss.sketch.point(c) {
             for (i, p) in ss.sketch.points.iter().enumerate() {
-                if (p.pos.x - pc.x).hypot(p.pos.y - pc.y) <= 1e-6
+                if solidcraft_kernel::curves::ordered_nearby_points(&[p.pos], &[pc], 1e-6, 16).unwrap_or(false)
                     && (p.link.is_some() || construction_closed_at(i))
                     && !ends.contains(&i)
                     && !regular_closed_at(i)
