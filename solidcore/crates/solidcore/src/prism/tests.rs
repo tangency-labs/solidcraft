@@ -1430,6 +1430,30 @@ fn sheet(k: &mut Kernel, region: &Region2, tol: f64) -> Brep {
     acc
 }
 
+/// A loop with a segment of no length at a corner (as a boolean can leave one) reads as the loop
+/// without it: the segment is split off where the loop passes the corner twice, and left out.
+#[test]
+fn a_segment_of_no_length_in_a_loop_is_left_out() {
+    let corner = p(10.0, 10.0 + 1e-12);
+    let line = |a: Point2, b: Point2| Seg2::Line { a, b };
+    let region = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                line(p(0.0, 0.0), p(10.0, 0.0)),
+                line(p(10.0, 0.0), p(10.0, 10.0)),
+                line(p(10.0, 10.0), corner),
+                line(corner, p(0.0, 10.0)),
+                line(p(0.0, 10.0), p(0.0, 0.0)),
+            ],
+        },
+        holes: vec![],
+    };
+    let lp = region_loops(&region, 1e-7).unwrap();
+    assert_eq!((lp.material.len(), lp.holes.len()), (1, 0), "{lp:?}");
+    let area = lp.material[0].signed_area().unwrap();
+    assert!((area.value - 100.0).abs() <= 1e-9, "{area:?}");
+}
+
 #[test]
 fn sheets_combined_read_back_as_their_regions() {
     let mut k = Kernel::default();
