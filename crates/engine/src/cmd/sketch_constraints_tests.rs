@@ -445,9 +445,17 @@ fn smart_constrain_and_driven_toggle() {
     let did = g["glyphs"].as_array().unwrap().iter().find(|x| x["param"] == d["param"]).unwrap()["id"].as_str().unwrap().to_string();
     let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
     assert_eq!(r["driven"], true);
-    assert!(s.doc.param(d["param"].as_str().unwrap()).is_none(), "the parameter goes");
+    // Its automatic name does not stay: a driven dimension nobody named has none (#5582).
+    let param = |s: &Session| sketch(s).constraints.iter().find(|c| c.id == did).and_then(|c| c.param.clone());
+    assert_eq!(param(&s), None);
+    // A name someone gave it stays, read-only while it is driven, and when it is made driving.
+    run(&mut s, "sketch.name_driven", json!({"constraint": did, "name": "bore"}));
+    assert!(s.doc.is_driven_param("bore"), "the name is read-only");
     let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
     assert_eq!(r["driven"], false);
+    assert!(!s.doc.is_driven_param("bore") && s.doc.param("bore").is_some(), "driving again under the same name");
+    run(&mut s, "sketch.toggle_driven", json!({"constraint": did}));
+    assert!(s.doc.is_driven_param("bore") && param(&s).as_deref() == Some("bore"), "driven again, still named");
 }
 
 /// #7499: a circle's or an arc's dimension switches between its radius and its diameter, the
@@ -2200,6 +2208,155 @@ fn midpoint_is_offered_for_a_point_and_an_arc_but_not_a_circle() {
     assert!(midpoint.for_selection(&s).is_some(), "a point and an arc");
     s.selection = pick(&circle);
     assert!(midpoint.for_selection(&s).is_none(), "a point and a circle");
+}
+
+fn volume(s: &mut Session) -> f64 {
+    run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+/// Place a driven (reference) dimension on `entities` and give it `name` (#5582): its constraint
+/// id. Before it is named it has no parameter.
+fn named_driven(s: &mut Session, entities: serde_json::Value, name: &str) -> String {
+    let r = run(s, "sketch.dimension", json!({"entities": entities, "driven": true}));
+    assert!(r["param"].is_null(), "a driven dimension nobody named has no parameter: {r}");
+    let id = r["created"]["dimensions"][0].as_str().expect("the driven dimension's id").to_string();
+    let named = run(s, "sketch.name_driven", json!({"constraint": id, "name": name}));
+    let typed = name.trim().trim_end_matches('=').trim();
+    assert_eq!(named["name"], typed, "{named}");
+    id
+}
+
+/// #5582, #11138, #9913: a driven (reference) dimension given a name is a read-only parameter.
+/// Another dimension of the same sketch, a user parameter and a later feature use it and follow
+/// what it measures; renamed, they follow the new name.
+#[test]
+fn a_named_driven_dimension_is_a_read_only_name_that_expressions_follow() {
+    let mut s = sketch_with_len();
+    let sid = s.active_sketch.unwrap();
+    let la =
+        run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": "len / 2"}))["created"]["dimensions"][0].as_str().unwrap().to_string();
+    let params = s.doc.params.len();
+    let id = named_driven(&mut s, json!(["la.start", "la.end"]), "span =");
+    let name = "span".to_string();
+    assert_eq!(s.doc.params.len(), params + 1, "naming it adds one parameter");
+    // A name the design has, one that is not a name, and a driving dimension are refused.
+    for (c, n, why) in [(&id, "len", "already a parameter"), (&id, "2x", "not a valid parameter name"), (&la, "half", "driving dimension")] {
+        let e = s.execute("sketch.name_driven", &json!({"constraint": c, "name": n})).unwrap_err().to_string();
+        assert!(e.contains(why), "{n}: {e}");
+    }
+    let row = param_row(&mut s, &name);
+    assert_eq!((row["driven"].as_bool(), row["source"].as_str()), (Some(true), Some("sketch")), "{row}");
+    assert!((row["value"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{row}");
+    // Nothing can set it.
+    let e = s.execute("parameters.change", &json!({"name": name, "expression": "12 mm"})).unwrap_err().to_string();
+    assert!(e.contains("driven dimension"), "{e}");
+    assert!(s.execute("parameters.change", &json!({"changes": {name.clone(): "12 mm"}})).is_err());
+    // A new dimension of the same sketch uses it.
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]], "ids": ["lb"], "infer": false}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["lb"], "value": format!("{name} / 2")}));
+    assert!((line_length(&s, "lb") - 15.0).abs() < 1e-6, "{}", line_length(&s, "lb"));
+    // So do a user parameter and a feature after the sketch.
+    run(&mut s, "parameters.add", json!({"name": "depth", "expression": format!("{name} / 3")}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": "depth"}));
+    assert!((volume(&mut s) - 1000.0).abs() < 1e-3, "{}", volume(&mut s));
+    // The sketch changes: all of them follow.
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "90 mm"}));
+    let row = param_row(&mut s, &name);
+    assert!((row["value"].as_f64().unwrap() - 45.0).abs() < 1e-6, "{row}");
+    let sk = s.model.state().sketch(sid).unwrap().sketch.clone();
+    let at = |r: &str| sk.point(sk.resolve_point(r).unwrap()).unwrap();
+    assert!((at("lb.start").dist(at("lb.end")) - 22.5).abs() < 1e-6);
+    assert!((volume(&mut s) - 1500.0).abs() < 1e-3, "{}", volume(&mut s));
+    // The design file keeps the name, and reads back the same.
+    let read = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert!(read.is_driven_param(&name));
+    assert_eq!(read.param_values().0.get(&name).map(|v| (v.v * 1e6).round()), Some(45e6));
+    // Renamed from the model view: what used the old name uses the new one.
+    run(&mut s, "sketch.name_driven", json!({"constraint": id, "name": "reach", "sketch": sid}));
+    assert!(s.doc.param(&name).is_none() && s.doc.is_driven_param("reach"));
+    assert_eq!(s.doc.param("depth").unwrap().expr, "reach / 3");
+    assert!((volume(&mut s) - 1500.0).abs() < 1e-3, "{}", volume(&mut s));
+}
+
+/// #5582: a dimension that would depend on itself through a driven dimension is refused, from
+/// Parameters and from the dimension tool alike, and nothing changes.
+#[test]
+fn a_dimension_cannot_depend_on_itself_through_a_driven_one() {
+    let mut s = sketch_with_len();
+    let d1 = run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": 30}))["param"].as_str().unwrap().to_string();
+    named_driven(&mut s, json!(["la.start", "la.end"]), "span");
+    let e = s.execute("parameters.change", &json!({"name": d1, "expression": "span * 2"})).unwrap_err().to_string();
+    assert!(e.contains("depend on itself"), "{e}");
+    assert_eq!(s.doc.param(&d1).unwrap().expr, "30");
+    assert!((line_length(&s, "la") - 30.0).abs() < 1e-6);
+    // A new dimension on the line a driven dimension measures.
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]], "ids": ["lb"], "infer": false}));
+    named_driven(&mut s, json!(["lb.start", "lb.end"]), "gap");
+    let e = s.execute("sketch.dimension", &json!({"entities": ["lb"], "value": "gap * 2"})).unwrap_err().to_string();
+    assert!(e.contains("depend on itself"), "{e}");
+    assert!((line_length(&s, "lb") - 10.0).abs() < 1e-6);
+}
+
+/// #5582: a feature that uses a driven dimension of a sketch that failed fails too, naming the
+/// sketch: it never builds from the value the design stored before the failure.
+#[test]
+fn a_feature_using_a_driven_dimension_of_a_failed_sketch_fails_naming_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 5, "name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 5]}, "name": "Top"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [6, 0]], "ids": ["lt"], "infer": false}));
+    named_driven(&mut s, json!(["lt.start", "lt.end"]), "rise");
+    let name = "rise".to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": name.as_str(), "name": "Post"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // Without the block, the sketch on its face fails, and so does the box that reads its dimension.
+    run(&mut s, "timeline.suppress", json!({"feature": "Block", "suppressed": true}));
+    let error = |feature: &str| {
+        let id = s.doc.features.iter().find(|f| f.name == feature).map(|f| f.id).unwrap();
+        s.model.results.iter().find(|r| r.id == id).and_then(|r| r.error.clone())
+    };
+    assert!(error("Top").is_some(), "the sketch on the suppressed block's face fails");
+    let post = error("Post").expect("the box can't build from the stale value");
+    assert!(post.contains("sketch `Top` failed") && post.contains(&name), "{post}");
+}
+
+/// #5582: a feature that comes before a driven dimension's sketch can't use it (it would read a
+/// value worked out later in the timeline): refused, naming the sketch.
+#[test]
+fn a_feature_before_a_driven_dimensions_sketch_cannot_use_it() {
+    let mut s = sketch_with_len();
+    let d1 = run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": 30}))["param"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 40], [50, 40]], "ids": ["lc"], "infer": false}));
+    named_driven(&mut s, json!(["lc.start", "lc.end"]), "far");
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("parameters.change", &json!({"name": d1, "expression": "far"})).unwrap_err().to_string();
+    assert!(e.contains("later in the timeline"), "{e}");
+    assert_eq!(s.doc.param(&d1).unwrap().expr, "30");
+}
+
+/// #5582: a design saved before driven dimensions could be named opens with them unnamed: they
+/// have no parameter, as before, until someone names them.
+#[test]
+fn an_older_designs_driven_dimensions_stay_without_a_name() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [25, 0]], "ids": ["la"], "infer": false}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": 25}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["la.start", "la.end"], "driven": true}));
+    // Saved by a build without this change.
+    let mut v: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    if let Some(serde_json::Value::Array(pending)) = v.get_mut("format_pending") {
+        pending.retain(|p| p != "driven-dimension-names");
+    }
+    let read = solidcraft_doc::format::read(&v.to_string()).unwrap();
+    assert!(read.driven_params().is_empty(), "{:?}", read.driven_params());
+    assert_eq!(read.params.len(), s.doc.params.len(), "no parameter is added");
 }
 
 #[test]

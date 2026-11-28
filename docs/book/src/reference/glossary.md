@@ -351,9 +351,11 @@ A file in which SolidCraft saves one design, with the `.sc` extension (`.solidcr
 
 A constraint that sets a size, such as a length, a distance, an angle or a radius, by its value.
 
-A dimension can drive the sketch, or be driven by it and only show the value.
+A dimension can drive the sketch, or be driven by it and only show the value. A driven
+dimension can be given a name (`sketch.name_driven`): a read-only parameter that
+expressions can use, its value what the dimension measures.
 
-- **In SolidCraft:** `sketch.dimension`, `sketch.dimension_text`, `sketch.toggle_driven`; a
+- **In SolidCraft:** `sketch.dimension`, `sketch.dimension_text`, `sketch.toggle_driven`, `sketch.name_driven`; a
   dimension's id is a constraint id.
 - **Don't use:** measurement (for a dimension), size.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.

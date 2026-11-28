@@ -37,7 +37,9 @@ pub(crate) mod window;
 #[derive(Clone, Debug)]
 struct Drawn {
     id: String,
+    /// The dimension's parameter; a driven dimension's is read-only (#5582).
     param: Option<String>,
+    driven: bool,
     text: Rect,
     segs: Vec<[Pos2; 2]>,
     /// Text centre in sketch coordinates.
@@ -96,12 +98,41 @@ struct Edit {
     /// Which opening of the box or window this is, new each time one opens (a refused value
     /// keeps it): where it was dragged belongs to this opening only (#22388).
     opened: u64,
+    /// A driven dimension being named (#5582): `expr` is the name typed for it.
+    naming: Option<Naming>,
 }
 
 /// A new [`Edit::opened`].
 fn next_opened() -> u64 {
     static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Naming a driven dimension (#5582): the box shows what it measures, greyed and read-only, and
+/// [`Edit::expr`] is the name typed for it. Enter gives it that name (`sketch.name_driven`), a
+/// read-only parameter that expressions can use.
+#[derive(Clone, Debug)]
+struct Naming {
+    /// The driven dimension's constraint id.
+    constraint: String,
+    /// What it measures, as the box shows it.
+    measured: String,
+    /// Why the name last tried was refused.
+    error: Option<String>,
+    /// The value being typed for another dimension when a click on this one opened the box: once
+    /// it is named its name goes in there, and Esc goes back to it as it was.
+    resume: Option<Box<Edit>>,
+}
+
+/// A click on a driven dimension that has no name yet, while another dimension's value is typed
+/// (#5582): once the double-click window has passed, the name box opens on it.
+#[derive(Clone, Debug)]
+struct Unnamed {
+    constraint: String,
+    /// The finished sketch it is in, for one shown in the model view.
+    sketch: Option<u64>,
+    /// Its text centre on screen.
+    at: Pos2,
 }
 
 #[derive(Clone, Debug)]
@@ -130,6 +161,8 @@ pub(crate) enum SheetText {
 struct Pending {
     /// The parameter whose name is inserted.
     name: String,
+    /// A driven dimension with no name to insert: the box names it first (#5582).
+    unnamed: Option<Unnamed>,
     /// When the click came (egui time), and where the caret and selection were then.
     at: f64,
     selection: Option<egui::text::CCursorRange>,
@@ -163,7 +196,7 @@ struct DimensionDraft {
     solve: u64,
     error: Option<String>,
     /// A dimension that would over-constrain the sketch, placed as a driven (reference) one:
-    /// it has no parameter and no value to edit (#320).
+    /// it has no value to edit (#320), only a read-only name (#5582).
     driven: bool,
     /// Draw ellipses with their axes, when the draft was made (see [`ellipse_as_before`]).
     half_axes: bool,
@@ -353,6 +386,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             sheet: None,
             create_variable: None,
             opened: next_opened(),
+            naming: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -398,6 +432,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             sheet: None,
             create_variable: None,
             opened: next_opened(),
+            naming: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -483,8 +518,8 @@ fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> R
     draft_of(app, sketch, &entities, at, false).or_else(|error| draft_of(app, sketch, &entities, at, true).map_err(|_| error))
 }
 
-/// The draft of one dimension: its parameter (for a driven one, its constraint id, since it
-/// has no parameter), the parameter's expression, and the scratch session it was added in.
+/// The draft of one dimension: its parameter (for a driven one, its constraint id, since its
+/// parameter is read-only), the parameter's expression, and the scratch session it was added in.
 fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, driven: bool) -> Result<(String, String, DimensionDraft), String> {
     let mut scratch = app.session.scratch();
     let mut params = json!({"entities": entities_value(entities), "driven": driven});
@@ -603,7 +638,9 @@ pub(crate) fn draft_text() -> Option<Rect> {
 pub(crate) struct ModelDim {
     pub sketch: u64,
     pub id: String,
+    /// The dimension's parameter; a driven dimension's is read-only (#5582).
     pub param: Option<String>,
+    pub driven: bool,
     pub text: Rect,
 }
 
@@ -641,10 +678,10 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
 
 /// Open a finished sketch's shown dimension in the inline editor (true: always).
 fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
-    let Some(param) = d.param else {
-        app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
-        return true;
-    };
+    if d.driven {
+        return open_naming(app, &d.id, Some(d.sketch), d.text.center(), None);
+    }
+    let Some(param) = d.param.clone() else { return true };
     let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     EDIT.with(|e| {
         *e.borrow_mut() = Some(Edit {
@@ -667,6 +704,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             sheet: None,
             create_variable: None,
             opened: next_opened(),
+            naming: None,
         })
     });
     true
@@ -740,17 +778,14 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
-    let (param, expr, driven) = match d.param {
+    let (param, expr, driven) = match d.param.clone().filter(|_| !d.driven) {
         Some(param) => {
             let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
             (param, expr, None)
         }
         None => match freed(app, &d.id) {
             Some((param, expr)) => (param, expr, Some(d.id.clone())),
-            None => {
-                app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
-                return true;
-            }
+            None => return open_naming(app, &d.id, None, d.text.center(), None),
         },
     };
     EDIT.with(|e| {
@@ -774,6 +809,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             sheet: None,
             create_variable: None,
             opened: next_opened(),
+            naming: None,
         })
     });
     true
@@ -804,6 +840,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
             sheet: Some(target),
             create_variable: None,
             opened: next_opened(),
+            naming: None,
         })
     });
 }
@@ -860,6 +897,106 @@ fn change_sheet_text(app: &mut SolveApp, target: SheetText, typed: &str) -> Resu
         SheetText::Note(id) => {
             app.run("drawing.note.edit", json!({"note": encode(id), "set": {"content": typed}})).map_err(|err| shown_error("drawing.note.edit", &err))
         }
+    }
+}
+
+/// Open the name box on driven dimension `constraint` (#5582), in the sketch being edited or the
+/// finished `sketch`, at `at` on screen: what it measures greyed out, and its name (empty while it
+/// has none) to type. `resume` is the value being typed for another dimension, which the box goes
+/// back to (true: always).
+fn open_naming(app: &SolveApp, constraint: &str, sketch: Option<u64>, at: Pos2, resume: Option<Box<Edit>>) -> bool {
+    let Some(e) = naming_edit(app, constraint, sketch, at, resume) else { return true };
+    EDIT.with(|x| *x.borrow_mut() = Some(e));
+    true
+}
+
+/// The name box of driven dimension `constraint` (see [`open_naming`]); None when it is not one.
+fn naming_edit(app: &SolveApp, constraint: &str, sketch: Option<u64>, at: Pos2, resume: Option<Box<Edit>>) -> Option<Edit> {
+    let doc = &app.session.doc;
+    let c = doc.sketch(sketch.or(app.session.active_sketch)?).ok()?.constraints.iter().find(|c| c.id == constraint)?;
+    let v = c.kind.value().filter(|v| v.is_finite())?;
+    let value = if c.kind.is_angle() { solidcraft_engine::doc::expr::Value::angle(v) } else { solidcraft_engine::doc::expr::Value::length(v) };
+    let name = c.param.clone().unwrap_or_default();
+    Some(Edit {
+        param: name.clone(),
+        expr: name,
+        at: Some(at),
+        fresh: FRESH,
+        wait: 0,
+        draft: None,
+        live: None,
+        selection: None,
+        owned: false,
+        typed: false,
+        shown: None,
+        pending: None,
+        caret: None,
+        sketch,
+        driven: None,
+        params: Default::default(),
+        sheet: None,
+        create_variable: None,
+        naming: Some(Naming { constraint: constraint.to_string(), measured: doc.measured_text(value), error: None, resume }),
+    })
+}
+
+/// Go back to the value the name box interrupted, with `name` going in at its caret.
+fn resume_value(resume: Option<Box<Edit>>, name: Option<String>) {
+    let Some(mut back) = resume else { return };
+    back.fresh = FRESH;
+    if let Some(name) = name {
+        let selection = back.caret.or(back.selection);
+        // Inserted on the next frame: the double-click window is long over.
+        back.pending = Some(Pending { name, unnamed: None, at: f64::NEG_INFINITY, selection });
+    }
+    EDIT.with(|x| *x.borrow_mut() = Some(*back));
+}
+
+/// Give the box's driven dimension the name typed (`sketch.name_driven`), or go back without one
+/// (`done`: Some(true) names it, Some(false) leaves it as it was, None keeps the box open). Named,
+/// the box goes back to the value it interrupted, with the name going in at its caret.
+fn settle_naming(app: &mut SolveApp, mut e: Edit, mut naming: Naming, done: Option<bool>) {
+    match done {
+        None => {
+            e.naming = Some(naming);
+            EDIT.with(|x| *x.borrow_mut() = Some(e));
+        }
+        // An empty name names nothing: the box closes as Esc closes it.
+        Some(true) if !e.expr.trim().is_empty() => {
+            let mut params = json!({"constraint": naming.constraint, "name": e.expr.trim()});
+            if let Some(sketch) = e.sketch {
+                params["sketch"] = json!(sketch);
+            }
+            match app.run("sketch.name_driven", params) {
+                Err(err) => {
+                    let err = shown_error("sketch.name_driven", &err);
+                    app.set_status(err.clone(), true);
+                    naming.error = Some(err);
+                    e.naming = Some(naming);
+                    EDIT.with(|x| *x.borrow_mut() = Some(Edit { fresh: FRESH, owned: false, ..e }));
+                }
+                Ok(reply) => {
+                    let name = reply.get("name").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+                    app.set_status(solidcraft_ui_text::format("sketch.driven_dimension_named", &[("name", &name)]), false);
+                    let mut resume = naming.resume;
+                    // A new dimension's draft was made from the design before the name: it is made
+                    // again from the design with it, at the same place.
+                    if let Some(r) = resume.as_mut()
+                        && let Some(d) = r.draft.take()
+                    {
+                        match draft_of(app, d.sketch, &d.entities, d.at, d.driven) {
+                            Ok((_, _, mut fresh)) => {
+                                reevaluate(app, &mut fresh, &r.expr);
+                                r.draft = Some(fresh);
+                            }
+                            Err(_) => resume = None,
+                        }
+                    }
+                    resume_value(resume, (!name.is_empty()).then_some(name));
+                }
+            }
+        }
+        Some(_) => resume_value(naming.resume, None),
     }
 }
 
@@ -1327,7 +1464,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 }
             });
         } else if !is_draft {
-            drawn.push(Drawn { id: c.id.clone(), param: c.param.clone(), text: r, segs, at: lay.text });
+            drawn.push(Drawn { id: c.id.clone(), param: c.param.clone(), driven: c.driven, text: r, segs, at: lay.text });
         }
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
@@ -1392,6 +1529,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             sheet: None,
             create_variable: None,
             opened: next_opened(),
+            naming: None,
         })
     });
 }
@@ -1474,13 +1612,18 @@ pub(super) fn hit_while_editing(pos: Pos2) -> Option<Hit> {
 }
 
 /// Consume dimension clicks while editing (true: the click was on a dimension). A single click
-/// on another driving dimension inserts its name at the caret (replacing selected text) once
-/// egui's double-click window has passed without a second click ([`flush_pending`]); the second
-/// click of a double-click instead applies the current value, as Enter does, and opens the
-/// clicked dimension for editing with its value selected. A value that does not apply keeps its
-/// box open with its error, and nothing switches.
+/// on another dimension, driving or driven (its read-only name, #5582), inserts its name at the
+/// caret (replacing selected text) once egui's double-click window has passed without a second
+/// click ([`flush_pending`]); the second click of a double-click instead applies the current
+/// value, as Enter does, and opens the clicked dimension for editing with its value selected. A
+/// value that does not apply keeps its box open with its error, and nothing switches.
 pub fn pick_reference(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     let Some(target) = hit_while_editing(pos) else { return false };
+    // The name box takes no references: a name is typed (#5582).
+    if EDIT.with(|e| e.borrow().as_ref().is_some_and(|e| e.naming.is_some())) {
+        EDIT.with(|e| e.borrow_mut().as_mut().map(|e| e.fresh = FRESH - 1));
+        return true;
+    }
     let Hit::Other { param, model, id } = target else {
         EDIT.with(|e| e.borrow_mut().as_mut().map(|e| e.fresh = FRESH - 1));
         return true;
@@ -1505,13 +1648,29 @@ pub fn pick_reference(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2, double
     EDIT.with(|editor| {
         let mut editor = editor.borrow_mut();
         let Some(edit) = editor.as_mut() else { return };
-        // Driven dimensions have no parameter to name.
+        let selection = edit
+            .caret
+            .or(edit.selection)
+            .or_else(|| egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()));
+        let at = ctx.input(|i| i.time);
+        // A dimension cannot refer to itself; a driven one gives its read-only name, and one with
+        // no name yet is named first (#5582).
+        let unnamed = match (&param, &model, &id) {
+            (Some(_), _, _) => None,
+            (None, Some(d), _) => d.driven.then(|| Unnamed { constraint: d.id.clone(), sketch: Some(d.sketch), at: d.text.center() }),
+            (None, None, Some(id)) => DRAWN.with(|drawn| {
+                drawn.borrow().iter().find(|d| d.id == *id && d.driven).map(|d| Unnamed {
+                    constraint: d.id.clone(),
+                    sketch: None,
+                    at: d.text.center(),
+                })
+            }),
+            (None, None, None) => None,
+        };
         if let Some(name) = param {
-            let selection = edit
-                .caret
-                .or(edit.selection)
-                .or_else(|| egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()));
-            edit.pending = Some(Pending { name, at: ctx.input(|i| i.time), selection });
+            edit.pending = Some(Pending { name, unnamed: None, at, selection });
+        } else if unnamed.is_some() {
+            edit.pending = Some(Pending { name: String::new(), unnamed, at, selection });
         }
         edit.fresh = FRESH - 1;
     });
@@ -1528,7 +1687,16 @@ fn flush_pending(app: &SolveApp, ctx: &egui::Context, edit: &mut Edit) {
         ctx.request_repaint_after(std::time::Duration::from_secs_f64((delay - waited).max(0.0) + 0.01));
         return;
     }
-    let Some(Pending { name, selection, .. }) = edit.pending.take() else { return };
+    let Some(Pending { name, unnamed, selection, .. }) = edit.pending.take() else { return };
+    if let Some(u) = unnamed {
+        // The value being typed waits behind the name box, its caret where the click found it.
+        let mut resume = edit.clone();
+        resume.caret = selection.or(resume.caret);
+        if let Some(naming) = naming_edit(app, &u.constraint, u.sketch, u.at, Some(Box::new(resume))) {
+            *edit = naming;
+        }
+        return;
+    }
     insert_reference(ctx, edit, &name, selection);
     // Solved now, as a typed value is: the overlays read the preview before the editor runs.
     if let Some(draft) = edit.draft.as_mut() {
@@ -1670,7 +1838,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     };
-    if e.sheet.is_none() && window::on(app) {
+    if e.sheet.is_none() && e.naming.is_none() && window::on(app) {
         let (done, escaped) = window::show(app, ctx, &mut e, at);
         return settle(app, e, done, escaped);
     }
@@ -1703,7 +1871,15 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::ui_kit::scope(ui, |ui| {
                     ui.set_max_width(popup_width);
                     let name_line = |ui: &mut egui::Ui| {
-                        if e.sheet.is_some() {
+                        if let Some(naming) = &e.naming {
+                            // What it measures, greyed out: read, never typed (#5582).
+                            ui.vertical(|ui| {
+                                crate::ui_kit::text(ui, solidcraft_ui_text::tr("sketch.driven_name_title"), crate::ui_kit::Text::Inline);
+                                crate::ui_kit::text(ui, &naming.measured, crate::ui_kit::Text::Hint("driven_measured"))
+                                    .backing_on_hover_text(solidcraft_ui_text::tr("parameters.driven_read_only"));
+                            })
+                            .response
+                        } else if e.sheet.is_some() {
                             crate::ui_kit::text(ui, &e.param, crate::ui_kit::Text::Inline)
                         } else {
                             crate::ui_kit::text(
@@ -1737,7 +1913,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         let focused = ui.memory(|m| m.has_focus(id));
                         e.owned = focused && ui.input(|i| i.events.iter().any(|ev| matches!(ev, egui::Event::Key { pressed: true, .. })));
                     }
-                    let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, "", false);
+                    let hint = if e.naming.is_some() { solidcraft_ui_text::tr("sketch.driven_name_hint") } else { "" };
+                    let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, hint, false);
                     if held {
                         r.request_focus();
                     }
@@ -1750,7 +1927,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                     }
                     // A sheet's text is words, not an expression: no parameter names are offered.
-                    let completed = e.sheet.is_none() && crate::params_dialog::complete(ui, &r, &mut e.expr);
+                    let completed = e.sheet.is_none() && e.naming.is_none() && crate::params_dialog::complete(ui, &r, &mut e.expr);
                     if completed {
                         e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                     }
@@ -1769,8 +1946,12 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         let expr = e.expr.clone();
                         reevaluate(app, draft, &expr);
                     }
-                    if let Some(error) =
-                        e.create_variable.as_ref().map(|offer| &offer.error).or_else(|| e.draft.as_ref().and_then(|d| d.error.as_ref()))
+                    if let Some(error) = e
+                        .naming
+                        .as_ref()
+                        .and_then(|n| n.error.as_ref())
+                        .or_else(|| e.create_variable.as_ref().map(|offer| &offer.error))
+                        .or_else(|| e.draft.as_ref().and_then(|d| d.error.as_ref()))
                     {
                         crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                     }
@@ -1825,6 +2006,9 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
 /// drops it, and `escaped` the Dimension tool's picks with it), or keep it open.
 fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
+    if let Some(naming) = e.naming.take() {
+        return settle_naming(app, e, naming, done);
+    }
     match done {
         Some(true) => {
             // The first attempt submits exactly what was typed. Only the explicit
@@ -1923,6 +2107,12 @@ pub fn previewed_sketch(app: &SolveApp) -> Option<u64> {
 /// Is the inline editor open (it has the keyboard)?
 pub fn editing() -> bool {
     EDIT.with(|e| e.borrow().is_some())
+}
+
+/// The driven dimension the name box is open on, and what it shows it measures (tests).
+#[cfg(test)]
+pub fn naming() -> Option<(String, String)> {
+    EDIT.with(|edit| edit.borrow().as_ref()?.naming.as_ref().map(|n| (n.constraint.clone(), n.measured.clone())))
 }
 
 /// The open draft's typed text and the text its preview was solved for (tests).

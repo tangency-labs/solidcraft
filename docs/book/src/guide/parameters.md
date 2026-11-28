@@ -8,7 +8,7 @@ uses them.
 When creating or editing a sketch dimension, its value editor shows its model parameter
 name (`d1`, `d2`, …). Double-click another dimension to edit it: the current value is applied,
 as **Enter** does (if it is not valid, the box stays open with its error), and the clicked
-dimension opens with its value selected. Single-click another driving dimension to insert its
+dimension opens with its value selected. Single-click another dimension to insert its
 name: when the value is just a number (such as `10` or `10 mm`) the name replaces it; otherwise
 it goes in at the cursor, replacing selected text and keeping what you typed, so typing `10 + `
 and clicking `d1` gives `10 + d1`. The name goes in a moment after the click, once it is clear
@@ -22,6 +22,19 @@ Add and edit user parameters through the existing **Change Parameters** command.
 **1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
 **3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
 **5** The value it works out to
+
+A **driven** (reference) dimension measures the sketch and has no parameter until you name
+it. Double-click it: the box shows what it measures, greyed out, and takes a name. Type one,
+such as `width` (`width =` works too), and press **Enter**: the dimension becomes a read-only
+parameter that **Parameters** lists in its sketch's group. Clicking a driven dimension that
+has no name while you type another dimension's value opens the same box; once it is named,
+the name goes into the value. Any expression can use the name, such as `width / 2`, and
+follows the measured value as the sketch changes; renaming it renames it in those expressions
+too. A feature that comes before the driven dimension's sketch in the timeline can't use it,
+and a feature that uses it fails when its sketch fails. A dimension of the same sketch can,
+unless the driven dimension measures geometry that this dimension moves: then the dimension
+would depend on itself, and the change is refused. The sketch's other expressions (points
+placed by expressions, patterns, texts and equation curves) can't use it.
 
 ## Naming a value as you type it
 

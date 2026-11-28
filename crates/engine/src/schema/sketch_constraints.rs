@@ -153,6 +153,10 @@ fn driven_required(schema: &mut Schema) {
     require_keys(schema, &["constraint"]);
 }
 
+fn name_driven_required(schema: &mut Schema) {
+    require_keys(schema, &["constraint", "name"]);
+}
+
 fn snap_required(schema: &mut Schema) {
     require_keys(schema, &["at"]);
 }
@@ -287,8 +291,8 @@ pub struct FinishAutoConstrainParams {
     pub sketch: Option<SketchTarget>,
 }
 
-/// Make a dimension driven (it measures, and is no longer a parameter) or driving again (it gets
-/// a parameter holding its current value).
+/// Make a dimension driven (it measures; a name someone gave it stays, read-only) or driving again
+/// (it gets a parameter holding its current value: a driven one's name stays).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = driven_required)]
 pub struct ToggleDrivenParams {
@@ -299,6 +303,23 @@ pub struct ToggleDrivenParams {
     /// `true` for driven, `false` for driving. Default: the other one from now.
     #[serde(default)]
     pub driven: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// Give a driven (reference) dimension a read-only parameter name that expressions can use: its
+/// value is what the dimension measures (#5582).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = name_driven_required)]
+pub struct NameDrivenParams {
+    // Optional in the type and required in the schema, as `a` above.
+    /// The driven dimension's constraint id.
+    #[serde(default)]
+    pub constraint: Option<DimensionId>,
+    /// The name: `width`, also `width =` or `#width`. A dimension named already is renamed.
+    #[serde(default)]
+    pub name: Option<String>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -433,6 +454,24 @@ pub struct ToggleDrivenResult {
     pub param_warnings: Vec<String>,
 }
 
+/// What `sketch.name_driven` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NameDrivenResult {
+    /// The dimension's constraint id (unchanged).
+    pub constraint: String,
+    /// The name it has now, which expressions can use.
+    pub name: String,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// What the command added to its sketch, `{points, curves, constraints, dimensions}` (lists
+    /// of ids): the session adds it to the reply of a sketch command, so the handler leaves it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Value>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// One constraint of `sketch.glyphs`, with where its glyph goes.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Glyph {
@@ -446,7 +485,8 @@ pub struct Glyph {
     pub driven: bool,
     /// A dimension's value (mm, or radians for an angle); `null` for another constraint.
     pub value: Option<f64>,
-    /// The parameter a driving dimension takes its value from; `null` for none.
+    /// A dimension's parameter: a driving one takes its value from it, a driven one's is read-only
+    /// (what it measures); `null` for none.
     pub param: Option<String>,
     /// Where to draw the glyph, [x, y] in sketch coordinates; `null` when it has no place.
     pub at: Option<[f64; 2]>,

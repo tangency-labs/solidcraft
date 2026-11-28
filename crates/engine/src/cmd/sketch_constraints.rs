@@ -8,12 +8,12 @@ use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, dof_now, edit, keep_redundant, listed, redundancy, residual_of};
 use super::sketch_store;
-use super::{CommandSpec, in_sketch};
+use super::{CommandSpec, always, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list, vec2};
 use crate::schema::sketch_constraints::{
     AutoConstrainDatumParams, AutoConstrainParams, AutoConstrainResult, ConstrainerParams, ConstrainerResult, ConstraintAdded, CurvatureParams,
-    FinishAutoConstrainParams, Glyph, GlyphsParams, GlyphsResult, PolygonParams, PolygonResult, Snap, SnapParams, SnapResult, ToggleDiameterParams,
-    ToggleDiameterResult, ToggleDrivenParams, ToggleDrivenResult,
+    FinishAutoConstrainParams, Glyph, GlyphsParams, GlyphsResult, NameDrivenParams, NameDrivenResult, PolygonParams, PolygonResult, Snap, SnapParams,
+    SnapResult, ToggleDiameterParams, ToggleDiameterResult, ToggleDrivenParams, ToggleDrivenResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -26,6 +26,7 @@ const AUTO_CONSTRAIN_DATUM_CONTRACT: TypedContract<AutoConstrainDatumParams> = T
 const FINISH_AUTO_CONSTRAIN_CONTRACT: TypedContract<FinishAutoConstrainParams> = TypedContract::new();
 const CONSTRAINER_CONTRACT: TypedContract<ConstrainerParams> = TypedContract::new();
 const TOGGLE_DRIVEN_CONTRACT: TypedContract<ToggleDrivenParams> = TypedContract::new();
+const NAME_DRIVEN_CONTRACT: TypedContract<NameDrivenParams> = TypedContract::new();
 const GLYPHS_CONTRACT: TypedContract<GlyphsParams> = TypedContract::new();
 const SNAP_CONTRACT: TypedContract<SnapParams> = TypedContract::new();
 
@@ -78,7 +79,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&TOGGLE_DRIVEN_CONTRACT)
         .output(output_schema_for::<ToggleDrivenResult>)
-        .params("constraint: dimension id, driven?: bool (default toggles); a driving dimension gets a parameter with its current value"),
+        .params(
+            "constraint: dimension id, driven?: bool (default toggles); a driving dimension gets a parameter with its current value (a driven one's name, given with `sketch.name_driven`, stays and takes that value); a driven one keeps a name someone gave it (read-only: what it measures) and has no parameter otherwise",
+        ),
+    CommandSpec::new("sketch.name_driven", "Name Driven Dimension", crate::checked!("sketch.name_driven", name_driven))
+        .icon("dimension")
+        .enabled(always)
+        .contract(&NAME_DRIVEN_CONTRACT)
+        .output(output_schema_for::<NameDrivenResult>)
+        .params(
+            "constraint: driven (reference) dimension id, name: `width` (also `width =` or `#width`); sketch?: id|name (default: the one being edited). Gives the driven dimension a read-only parameter `name` that expressions can use, such as `width / 2`: its value is what the dimension measures, and follows the sketch (#5582). One that has a name already is renamed, and whatever uses the name follows. Refused for a driving dimension (type `name = value` as its value instead), on a drawing's sheet, and for a name that is taken or not a valid parameter name. Returns name",
+        ),
     CommandSpec::new("sketch.toggle_diameter", "Toggle Radius / Diameter", crate::checked!("sketch.toggle_diameter", toggle_diameter))
         .icon("dimension")
         .enabled(in_sketch)
@@ -460,14 +471,29 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(driven);
         }
         let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
+        let (unit, e) =
+            if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
+        // A driven dimension's name stays when it is made driving (#5582): it takes the value it
+        // measures now, and whatever used the name keeps using it.
+        let kept = c.param.clone().filter(|n| doc.param(n).is_some_and(|p| p.model));
         if driven {
             slot.driven = true;
-            slot.param = None;
+            // A name someone gave it stays (#5582); an automatic `dN` does not: a driven
+            // dimension nobody named has no parameter.
+            if kept.as_deref().is_none_or(automatic_name) {
+                slot.param = None;
+            }
         } else {
-            let (unit, e) =
-                if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
             slot.driven = false;
-            slot.param = Some(doc.new_model_param(&e, &unit)?);
+            match kept {
+                Some(name) => {
+                    if let Some(p) = doc.params.iter_mut().find(|p| p.name == name) {
+                        p.expr = e;
+                        p.unit = unit;
+                    }
+                }
+                None => slot.param = Some(doc.new_model_param(&e, &unit)?),
+            }
             before = None;
         }
         Ok(driven)
@@ -487,6 +513,23 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.doc_mut().prune_model_params();
     reply(cmd, ToggleDrivenResult { constraint: cid, driven, sketch: info, created: None, param_warnings: Vec::new() })
+}
+
+/// An automatic model parameter name (`d1`, `d2`, …), as a driving dimension gets one.
+fn automatic_name(name: &str) -> bool {
+    name.strip_prefix('d').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Give a driven dimension a name expressions can use (#5582): `sketch.name_driven`.
+fn name_driven(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.name_driven";
+    let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a driven dimension id"))?.to_string();
+    let typed = str_(p, "name").ok_or_else(|| bad(cmd, "`name` must be the name to give it, such as `width`"))?.to_string();
+    if s.sheet_sketching() {
+        return Err(bad(cmd, "a dimension on a drawing's sheet has no name: a sheet sketch never adds to the design's parameters"));
+    }
+    let (name, info) = edit(s, p, cmd, false, |sk, doc| doc.name_driven(sk, &cid, &typed).map_err(|e| bad(cmd, e.to_string())))?;
+    reply(cmd, NameDrivenResult { constraint: cid, name, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// What a radius / diameter toggle acts on.
@@ -561,15 +604,18 @@ fn toggle_diameter(s: &mut Session, p: &Value) -> Result<Value> {
             if !others.is_empty() {
                 return Err(bad(cmd, format!("`{name}` is also used by {}; switching `{cid}` would change them", others.join(", "))));
             }
-            let e = doc.param(name).map(|p| p.expr.clone()).ok_or_else(|| bad(cmd, format!("no parameter `{name}`")))?;
-            let e = if solidcraft_doc::expr::references(&e).is_empty() {
-                doc.design_length(value).1
-            } else if diameter {
-                format!("2 * ({e})")
-            } else {
-                format!("({e}) / 2")
-            };
-            doc.set_param(name, &e, None, None).map_err(|e| bad(cmd, e.to_string()))?;
+            // A driven dimension's parameter reads what it measures: nothing to set (#5582).
+            if !c.driven {
+                let e = doc.param(name).map(|p| p.expr.clone()).ok_or_else(|| bad(cmd, format!("no parameter `{name}`")))?;
+                let e = if solidcraft_doc::expr::references(&e).is_empty() {
+                    doc.design_length(value).1
+                } else if diameter {
+                    format!("2 * ({e})")
+                } else {
+                    format!("({e}) / 2")
+                };
+                doc.set_param(name, &e, None, None).map_err(|e| bad(cmd, e.to_string()))?;
+            }
         }
         let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
         slot.kind = kind;

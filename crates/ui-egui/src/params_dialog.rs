@@ -150,6 +150,8 @@ struct Row {
     reader_features: usize,
     /// A text parameter's text.
     text: Option<String>,
+    /// A driven dimension's parameter: read-only (#5582).
+    driven: bool,
 }
 
 impl Row {
@@ -216,6 +218,7 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                 comment: s(r, "comment"),
                 favorite: r.get("favorite").and_then(Value::as_bool).unwrap_or(false),
                 text: r.get("text").and_then(Value::as_str).map(str::to_string),
+                driven: r.get("driven").and_then(Value::as_bool).unwrap_or(false),
                 source,
                 group,
                 name,
@@ -735,9 +738,10 @@ impl ui_kit::GridSource for ParamGrid<'_> {
     }
 
     fn kind(&self, row: usize, col: usize) -> Option<ui_kit::CellKind> {
-        let col = self.column(col);
-        // A model parameter's unit is the dimension's: shown, not chosen.
-        (col == UNIT && self.row(row).is_some_and(|r| r.source != "user")).then_some(ui_kit::CellKind::ReadOnly)
+        // A model parameter's unit is the dimension's: shown, not chosen. A driven dimension's
+        // parameter is what it measures: read, never typed (#5582).
+        let r = self.row(row)?;
+        ((col == UNIT && r.source != "user") || (col == EXPRESSION && r.driven)).then_some(ui_kit::CellKind::ReadOnly)
     }
 
     fn message(&self, row: usize, col: usize) -> Option<(std::borrow::Cow<'_, str>, bool)> {
@@ -753,6 +757,8 @@ impl ui_kit::GridSource for ParamGrid<'_> {
         match col {
             NAME if !redesign::named(r) => redesign::validate_name(self.app, &r.name, text, true),
             NAME if text.trim().is_empty() => Err(solidcraft_ui_text::tr("parameters.grid_name_required").to_owned()),
+            // A paste over a range writes cells the grid shows read-only too (#5582).
+            EXPRESSION if r.driven => Err(solidcraft_ui_text::tr("parameters.driven_read_only").to_owned()),
             UNIT => unit_from(text).map(|_| ()),
             // Applied as you go, an expression is checked before it is handed back, so a wrong one
             // keeps its box open; held for Apply, it is checked when it is held (#9279).
@@ -797,6 +803,9 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 Some(response)
             }
             UNIT if r.source != "user" => Some(ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell)),
+            EXPRESSION if r.driven => {
+                Some(ui_kit::text(ui, &r.expression, ui_kit::Text::MonoCell).on_hover_text(solidcraft_ui_text::tr("parameters.driven_read_only")))
+            }
             VALUE => {
                 let (shown, error) = self.shown(r);
                 let number = if self.d.redesign.view == redesign::View::Named && !self.d.redesign.narrow && !error && !r.unit.is_empty() {

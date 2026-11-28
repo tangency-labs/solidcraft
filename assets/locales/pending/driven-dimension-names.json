@@ -1,0 +1,65 @@
+{
+  "en": {
+    "cmd.sketch_name_driven": "Name Driven Dimension",
+    "parameters.driven_read_only": "Driven dimension: its value is what it measures in the sketch, so it can't be edited. Other expressions can use it.",
+    "sketch.driven_dimension_named": "{name} names the driven dimension: other expressions can use what it measures",
+    "sketch.driven_name_hint": "width",
+    "sketch.driven_name_title": "Name this driven dimension"
+  },
+  "ar": {
+    "cmd.sketch_name_driven": "تسمية البُعد المُشتق",
+    "parameters.driven_read_only": "بُعد مُشتق: قيمته هي ما يقيسه في الرسم، لذا لا يمكن تعديله. يمكن للتعبيرات الأخرى استخدامه.",
+    "sketch.driven_dimension_named": "{name} هو اسم البُعد المُشتق: يمكن للتعبيرات الأخرى استخدام ما يقيسه",
+    "sketch.driven_name_hint": "width",
+    "sketch.driven_name_title": "سمِّ هذا البُعد المُشتق"
+  },
+  "de": {
+    "cmd.sketch_name_driven": "Abhängiges Maß benennen",
+    "parameters.driven_read_only": "Abhängiges Maß: Sein Wert ist das, was es in der Skizze misst, daher kann er nicht bearbeitet werden. Andere Ausdrücke können ihn verwenden.",
+    "sketch.driven_dimension_named": "{name} benennt das abhängige Maß: Andere Ausdrücke können verwenden, was es misst",
+    "sketch.driven_name_hint": "breite",
+    "sketch.driven_name_title": "Dieses abhängige Maß benennen"
+  },
+  "fr": {
+    "cmd.sketch_name_driven": "Nommer la cote pilotée",
+    "parameters.driven_read_only": "Cote pilotée : sa valeur est ce qu'elle mesure dans l'esquisse, elle ne peut donc pas être modifiée. D'autres expressions peuvent l'utiliser.",
+    "sketch.driven_dimension_named": "{name} nomme la cote pilotée : d'autres expressions peuvent utiliser ce qu'elle mesure",
+    "sketch.driven_name_hint": "largeur",
+    "sketch.driven_name_title": "Nommer cette cote pilotée"
+  },
+  "he": {
+    "cmd.sketch_name_driven": "מתן שם למידה מונעת",
+    "parameters.driven_read_only": "מידה מונעת: הערך שלה הוא מה שהיא מודדת בסקיצה, ולכן אי אפשר לערוך אותו. ביטויים אחרים יכולים להשתמש בה.",
+    "sketch.driven_dimension_named": "{name} הוא שם המידה המונעת: ביטויים אחרים יכולים להשתמש במה שהיא מודדת",
+    "sketch.driven_name_hint": "width",
+    "sketch.driven_name_title": "תן שם למידה המונעת הזו"
+  },
+  "ja": {
+    "cmd.sketch_name_driven": "従動寸法に名前を付ける",
+    "parameters.driven_read_only": "従動寸法: 値はスケッチで測った値なので編集できません。ほかの式で使うことはできます。",
+    "sketch.driven_dimension_named": "{name} は従動寸法の名前です。ほかの式でその測定値を使えます",
+    "sketch.driven_name_hint": "width",
+    "sketch.driven_name_title": "この従動寸法に名前を付ける"
+  },
+  "ko": {
+    "cmd.sketch_name_driven": "종속 치수 이름 지정",
+    "parameters.driven_read_only": "종속 치수: 값은 스케치에서 측정한 값이므로 편집할 수 없습니다. 다른 식에서 사용할 수 있습니다.",
+    "sketch.driven_dimension_named": "{name}은(는) 종속 치수의 이름입니다. 다른 식에서 측정값을 사용할 수 있습니다",
+    "sketch.driven_name_hint": "width",
+    "sketch.driven_name_title": "이 종속 치수에 이름 지정"
+  },
+  "vi": {
+    "cmd.sketch_name_driven": "Đặt tên kích thước tham chiếu",
+    "parameters.driven_read_only": "Kích thước tham chiếu: giá trị của nó là số đo trong bản phác thảo nên không thể chỉnh sửa. Các biểu thức khác có thể dùng nó.",
+    "sketch.driven_dimension_named": "{name} là tên của kích thước tham chiếu: các biểu thức khác có thể dùng số đo của nó",
+    "sketch.driven_name_hint": "width",
+    "sketch.driven_name_title": "Đặt tên cho kích thước tham chiếu này"
+  },
+  "zh": {
+    "cmd.sketch_name_driven": "命名被驱动尺寸",
+    "parameters.driven_read_only": "被驱动尺寸：其值为它在草图中的测量值，因此无法编辑。其他表达式可以使用它。",
+    "sketch.driven_dimension_named": "{name} 是被驱动尺寸的名称：其他表达式可以使用它的测量值",
+    "sketch.driven_name_hint": "width",
+    "sketch.driven_name_title": "命名此被驱动尺寸"
+  }
+}

@@ -184,6 +184,81 @@ fn clicking_another_dimension_inserts_its_name_at_the_cursor() {
     assert_eq!(click_d1_and_apply(&mut h), "( d1) / 2");
 }
 
+/// A sketch with `d1` (20 mm) on `l1`, `d2` (12 mm) on `l2`, and a driven dimension that measures
+/// `l1`, which has no name yet (#5582): the driven dimension's constraint id.
+fn with_an_unnamed_driven_dimension(h: &mut Harness) -> String {
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,-10],[12,-10]],"infer":false})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l2"],"value":12,"text_at":[6,-16]})).unwrap();
+    let r = h.app.run("sketch.dimension", json!({"entities":["l1.start","l1.end"],"driven":true,"text_at":[10,20]})).unwrap();
+    assert!(r["param"].is_null(), "a driven dimension nobody named has no parameter: {r}");
+    h.settle();
+    r["created"]["dimensions"][0].as_str().expect("the driven dimension's id").to_owned()
+}
+
+/// #5582: double-clicking a driven dimension opens the name box, with what it measures shown
+/// read-only. The name typed (`span =` works too) becomes a read-only parameter.
+#[test]
+fn double_clicking_a_driven_dimension_names_it() {
+    let mut h = line([20., 0.]);
+    let driven = with_an_unnamed_driven_dimension(&mut h);
+    let params = h.app.session.doc.params.len();
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":driven},"double":true})).unwrap();
+    h.frames(3);
+    let (constraint, measured) = crate::dim_view::naming().expect("the name box is open");
+    assert_eq!((constraint.as_str(), measured.as_str()), (driven.as_str(), "20 mm"));
+    h.step(&json!({"text":"span ="})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    assert!(h.app.session.doc.is_driven_param("span"), "{:?}", h.app.session.doc.params);
+    assert_eq!(h.app.session.doc.params.len(), params + 1);
+    // Esc leaves it as it was.
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":driven},"double":true})).unwrap();
+    h.frames(3);
+    assert!(crate::dim_view::naming().is_some());
+    type_value(&mut h, "reach");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(!crate::dim_view::editing() && h.app.session.doc.is_driven_param("span"));
+    crate::dim_view::cancel();
+}
+
+/// #9913, #5582: clicking a driven dimension that has no name while another dimension's value is
+/// typed opens its name box; once named, the name goes into the value, which follows what the
+/// driven dimension measures (`l1`, 20 mm).
+#[test]
+fn clicking_an_unnamed_driven_dimension_names_it_then_inserts_the_name() {
+    let mut h = line([20., 0.]);
+    let driven = with_an_unnamed_driven_dimension(&mut h);
+    crate::dim_view::edit_param(&h.app, "d2");
+    h.frames(5);
+    type_value(&mut h, "10");
+    h.step(&json!({"click":{"dimension":driven}})).unwrap();
+    // The name box opens once the double-click window has passed.
+    h.frames(40);
+    assert_eq!(crate::dim_view::naming().map(|n| n.0), Some(driven.clone()), "{:?}", h.app.status);
+    h.step(&json!({"text":"gap"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    // Back in d2's value, the name in place of the plain number.
+    h.frames(3);
+    assert!(crate::dim_view::editing() && crate::dim_view::naming().is_none(), "{:?}", h.app.status);
+    h.step(&json!({"text":" / 5"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "gap / 5");
+    assert!((h.app.session.doc.eval("d2", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 4.).abs() < 1e-6);
+    // A named one goes straight in.
+    crate::dim_view::edit_param(&h.app, "d2");
+    h.frames(5);
+    type_value(&mut h, "10");
+    h.step(&json!({"click":{"dimension":driven}})).unwrap();
+    h.frames(40);
+    assert!(crate::dim_view::naming().is_none());
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "gap");
+    crate::dim_view::cancel();
+}
+
 #[test]
 fn clicking_another_dimension_replaces_the_selected_text() {
     let mut h = editing_d2("5 + 7");
@@ -1123,11 +1198,13 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
         h.step(&json!({"click":{"dimension":id},"double":true})).unwrap();
     };
 
-    // The Coincident still fixes the circle: the dimension only measures.
+    // The Coincident still fixes the circle: the dimension only measures, so it has no value to
+    // edit, only a name to give (#5582). Esc leaves it as it was.
     let fixed = h.app.session.doc.to_json();
     double_click(&mut h);
-    assert!(!crate::dim_view::editing(), "a dimension the sketch determines has no value to edit");
-    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("driven")), "{:?}", h.app.status);
+    assert_eq!(crate::dim_view::naming().map(|n| n.0), Some(id.clone()), "{:?}", h.app.status);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(!crate::dim_view::editing());
     assert_eq!(h.app.session.doc.to_json(), fixed);
 
     // Without it, the value opens at what the dimension measures, named as the parameter it gets.
@@ -2386,8 +2463,10 @@ fn a_parameter_driven_shown_dimension_edits_its_own_expression() {
     assert_eq!(h.app.session.active_sketch, None);
 }
 
+/// A finished sketch's driven dimension has no value to edit: double-clicked in the model view it
+/// opens its name box (#5582), and Esc leaves the design as it was.
 #[test]
-fn a_driven_shown_dimension_is_read_only() {
+fn a_driven_shown_dimension_opens_its_name_box() {
     let (mut h, sketch) = shown_dimensions();
     h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
     h.app.run("sketch.dimension", json!({"entities":["l3"],"driven":true,"text_at":[10,14]})).unwrap();
@@ -2397,8 +2476,10 @@ fn a_driven_shown_dimension_is_read_only() {
     let (_, _, p) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).unwrap();
     let doc = h.app.session.doc.to_json();
     h.step(&json!({"click":[p.x, p.y],"double":true})).unwrap();
+    h.frames(3);
+    assert_eq!(crate::dim_view::naming().map(|n| n.0), Some(id.clone()), "{:?}", h.app.status);
+    h.step(&json!({"key":"Escape"})).unwrap();
     assert!(!crate::dim_view::editing());
-    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("driven")), "{:?}", h.app.status);
     assert_eq!(h.app.session.doc.to_json(), doc);
 }
 
