@@ -28,10 +28,10 @@ fn required(entity: &Ent, code: i32) -> Result<f64> {
     Ok(value)
 }
 
-/// The fields each entity may hold. Anything else (a style 7, colour, linetype, extension data)
+/// The fields each entity may hold. Anything else (a colour, linetype, extension data)
 /// can't silently vanish, so it is refused.
 fn represented(mtext: bool, code: i32) -> bool {
-    let shared = matches!(code, 1 | 5 | 8 | 10 | 11 | 20 | 21 | 30 | 31 | 40 | 41 | 50 | 67 | 71 | 72 | 73 | 100 | 210 | 220 | 230 | 330 | 370);
+    let shared = matches!(code, 1 | 5 | 7 | 8 | 10 | 11 | 20 | 21 | 30 | 31 | 40 | 41 | 50 | 67 | 71 | 72 | 73 | 100 | 210 | 220 | 230 | 330 | 370);
     shared || if mtext { matches!(code, 3 | 42 | 43 | 44) } else { matches!(code, 39 | 51) }
 }
 
@@ -252,13 +252,19 @@ mod tests {
     }
 
     #[test]
+    fn a_named_style_is_admitted_here_and_resolved_by_the_file_reader() {
+        for style in ["STANDARD", "Custom"] {
+            assert!(read(&parsed(&format!("{FIELDS}7\n{style}\n"))).is_ok(), "{style}");
+            assert!(read(&mtext(&format!("{MTEXT}1\nA\n7\n{style}\n"))).is_ok(), "{style}");
+        }
+    }
+
+    #[test]
     fn unsupported_alignment_style_ocs_and_mtext_remain_explicit_errors() {
         for mode in ["-1", "3", "4", "5", "0.5"] {
             assert!(read(&parsed(&FIELDS.replacen("72\n1\n", &format!("72\n{mode}\n"), 1))).is_err());
         }
         for extra in [
-            "7\nSTANDARD\n",
-            "7\nCustom\n",
             "41\n2\n",
             "51\n15\n",
             "71\n2\n",
@@ -356,7 +362,6 @@ mod tests {
             "1\nA\n44\n2\n",
             "1\nA\n72\n5\n",
             "1\nA\n73\n2\n",
-            "1\nA\n7\nSTANDARD\n",
             "1\nA\n11\n1\n",
             "1\nA\n11\n0\n21\n0\n",
             "1\nA\n31\n1\n",
