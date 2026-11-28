@@ -32,11 +32,27 @@ const CARD_STRETCH: f32 = 1.25;
 /// Placeholder cards drawn while a folder is read.
 const PLACEHOLDERS: usize = 6;
 
+/// A List entry's width in a wide panel's row: enough for most names, several in view at once.
+const LIST_ENTRY_WIDTH: f32 = 180.0;
 /// How long the cards slide when the columns change (s).
 const SLIDE: f64 = 0.22;
+/// A body this many times wider than tall lays the cards out in one scrolling row, as when the
+/// panel is docked along the bottom: a grid there would show a sliver of one or two rows.
+const WIDE_RATIO: f32 = 1.5;
+
+/// Whether a body `width` by `height` is wide enough for the cards in one row.
+fn wide(width: f32, height: f32) -> bool {
+    width > WIDE_RATIO * height
+}
+
+/// The library's outer rect in its panel, last frame's layout; `None` before the host has one.
+fn panel_outer(app: &SolveApp) -> Option<egui::Rect> {
+    let frame = app.universal_panel_frame()?;
+    frame.layout.sections.iter().find(|s| s.instance.0 == "parts-library").map(|s| crate::panel_runtime::egui_rect(s.outer))
+}
 
 /// The cards' grid in a list `room` wide: the size's own card width, as many columns as fit,
-/// centred.
+/// centred. Or, when `single_row`, every card in one row at the size's own width, scrolled across.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Grid {
     size: PartCardSize,
@@ -46,6 +62,7 @@ struct Grid {
     left: f32,
     /// The gap between rows.
     rows_gap: f32,
+    single_row: bool,
 }
 
 impl Grid {
@@ -56,7 +73,17 @@ impl Grid {
         let fill = (room - PartCardSize::gap() * (columns - 1) as f32) / columns as f32;
         let width = fill.min(size.width() * CARD_STRETCH).max(Tokens::get().space_24.min(size.width()));
         let span = width * columns as f32 + PartCardSize::gap() * (columns - 1) as f32;
-        Grid { size, columns, width, left: ((room - span) / 2.0).max(0.0), rows_gap }
+        Grid { size, columns, width, left: ((room - span) / 2.0).max(0.0), rows_gap, single_row: false }
+    }
+
+    /// `count` cards across one row, at the size's own width.
+    fn one_row(size: PartCardSize, count: usize) -> Self {
+        Grid { size, columns: count, width: size.width(), left: 0.0, rows_gap: 0.0, single_row: true }
+    }
+
+    /// The row's width from its left card's left to its right card's right.
+    fn span(&self) -> f32 {
+        self.width * self.columns as f32 + PartCardSize::gap() * (self.columns - 1) as f32
     }
 
     fn row(&self) -> f32 {
@@ -149,6 +176,8 @@ pub struct LibraryState {
     queued: Vec<String>,
     /// The card grid drawn last frame, and the slide from the grid before it.
     grid: Option<Grid>,
+    /// Whether last frame drew the List size as entries side by side in a wide panel's row.
+    list_row: bool,
     slide: Option<(Grid, f64)>,
     #[cfg(not(target_arch = "wasm32"))]
     pictures: Option<std::sync::mpsc::Receiver<(String, Option<crate::ui_kit::PreviewImage>)>>,
@@ -640,19 +669,6 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts) -> f32 {
     let here = current(app).unwrap_or_else(|| root.clone());
     breadcrumb(app, ui, &root, &here, acts);
     search(app, ui, acts);
-    let mut size = LibrarySize::ALL.iter().position(|s| *s == app.preferences.library_size).unwrap_or(1);
-    let labels: Vec<&str> = LibrarySize::ALL.iter().map(|s| tr(s.label_id())).collect();
-    if crate::ui_kit::segmented(
-        ui,
-        &mut size,
-        &labels,
-        crate::ui_kit::Segments {
-            targets: &["library:size_small", "library:size_medium", "library:size_large", "library:size_list"],
-            ..Default::default()
-        },
-    ) {
-        app.preferences.library_size = LibrarySize::ALL[size];
-    }
     let room = ui.available_height() - crate::ui_kit::catalog_footer_height(ui) - t.space_8;
     let list = egui::ScrollArea::vertical().id_salt("library_list").max_height(room.max(0.0)).auto_shrink([false, true]);
     // How much taller the whole list is than the part of it that shows.
@@ -678,29 +694,84 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts) -> f32 {
             }
         } else {
             // Only the rows in sight are laid out, and only their pictures drawn.
-            let grid =
-                card_size(app.preferences.library_size).map(|size| Grid::new(size, ui.available_width() - SCROLL_BAR, ui.spacing().item_spacing.y));
+            // The panel's outer size decides, not the body's room left after the header rows.
+            let is_wide = app.preferences.parts_library_row
+                && match panel_outer(app) {
+                    Some(outer) => wide(outer.width(), outer.height()),
+                    None => wide(ui.available_width(), ui.available_height()),
+                };
+            let grid = card_size(app.preferences.library_size).map(|size| {
+                if is_wide {
+                    Grid::one_row(size, entries.len())
+                } else {
+                    Grid::new(size, ui.available_width() - SCROLL_BAR, ui.spacing().item_spacing.y)
+                }
+            });
+            // The List size has no grid: in a wide panel its entries run across the same row.
+            let list_row = is_wide && grid.is_none();
+            app.parts_library.list_row = list_row;
+            let row_layout = list_row || grid.is_some_and(|g| g.single_row);
             let now = ui.input(|i| i.time);
+            // The cards slide between grids of columns only; a switch to or from the row just jumps.
             if let (Some(was), Some(grid)) = (app.parts_library.grid, grid)
                 && !was.same_columns(&grid)
+                && !was.single_row
+                && !grid.single_row
             {
                 app.parts_library.slide = Some((was, now));
             }
             app.parts_library.grid = grid;
-            if app.parts_library.slide.is_some_and(|(_, at)| now - at >= SLIDE) || grid.is_none() {
+            if app.parts_library.slide.is_some_and(|(_, at)| now - at >= SLIDE) || grid.is_none() || row_layout {
                 app.parts_library.slide = None;
             }
-            let columns = grid.map_or(1, |g| g.columns);
-            let row = grid.map_or(t.control_height, |g| g.size.height());
-            let out = list.show_rows(ui, row, entries.len().div_ceil(columns), |ui, rows| list_view(app, ui, acts, &entries, rows));
-            hidden = (out.content_size.y - out.inner_rect.height()).max(0.0);
-            if hidden - out.state.clamped_offset().y > 1.0 {
-                fade_out_below(ui, out.inner_rect, t.panel);
+            if row_layout {
+                // The row takes a plain wheel sideways, as the ribbon's tabs do. Cards taller than the
+                // room left under the search also scroll up and down, so they are never clipped.
+                let tall = grid.map_or(t.control_height, |g| g.size.height()) > room;
+                let out = ui
+                    .scope(|ui| {
+                        ui.style_mut().always_scroll_the_only_direction = true;
+                        egui::ScrollArea::horizontal()
+                            .scroll([true, tall])
+                            .id_salt("library_row")
+                            .max_height(room.max(0.0))
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                if tall {
+                                    wheel_sideways(ui);
+                                }
+                                list_view(app, ui, acts, &entries, 0..1)
+                            })
+                    })
+                    .inner;
+                hidden = (out.content_size.y - out.inner_rect.height()).max(0.0);
+            } else {
+                let columns = grid.map_or(1, |g| g.columns);
+                let row = grid.map_or(t.control_height, |g| g.size.height());
+                let out = list.show_rows(ui, row, entries.len().div_ceil(columns), |ui, rows| list_view(app, ui, acts, &entries, rows));
+                hidden = (out.content_size.y - out.inner_rect.height()).max(0.0);
+                if hidden - out.state.clamped_offset().y > 1.0 {
+                    fade_out_below(ui, out.inner_rect, t.panel);
+                }
             }
         }
     }
     footer(ui);
     ui.cursor().top() - top + hidden
+}
+
+/// Over the row, on top of any popup, a plain wheel moves the row sideways. Shift and the scroll bar
+/// still scroll up and down, as does a wheel anywhere else.
+fn wheel_sideways(ui: &egui::Ui) {
+    let over_row =
+        ui.input(|i| i.pointer.hover_pos()).is_some_and(|pos| ui.clip_rect().contains(pos) && ui.ctx().layer_id_at(pos) == Some(ui.layer_id()));
+    if over_row {
+        ui.input_mut(|i| {
+            if !i.modifiers.shift && i.smooth_scroll_delta.x == 0.0 {
+                i.smooth_scroll_delta = egui::vec2(i.smooth_scroll_delta.y, 0.0);
+            }
+        });
+    }
 }
 
 /// The cards fade out at the list's foot while more of them lie below.
@@ -771,8 +842,9 @@ fn item_count(app: &SolveApp) -> String {
 }
 
 /// Up a level inside a subfolder, the folder button (another folder), the folder shown (cut short;
-/// an ellipsis stands for the levels between, named in its tooltip) and the item count on the right.
-fn breadcrumb(app: &SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts: &mut Acts) {
+/// an ellipsis stands for the levels between, named in its tooltip), the card size button and the item
+/// count on the right.
+fn breadcrumb(app: &mut SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts: &mut Acts) {
     let t = Tokens::get();
     let tr = solidcraft_ui_text::tr;
     let name = |p: &Path| p.file_name().map_or_else(|| p.to_string_lossy().to_string(), |n| n.to_string_lossy().to_string());
@@ -781,7 +853,8 @@ fn breadcrumb(app: &SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts:
         here.strip_prefix(root).map(|r| r.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect()).unwrap_or_default();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_4;
-        let counted = ui.painter().layout_no_wrap(count.clone(), egui::FontId::proportional(t.font_small), t.text_dim).size().x;
+        let counted =
+            ui.painter().layout_no_wrap(count.clone(), egui::FontId::proportional(t.font_small), t.text_dim).size().x + t.space_24 + t.space_4;
         if here != root {
             let up =
                 crate::ui_kit::compact_button(ui, crate::ui_kit::MOVE_UP, tr("parts_library.up"), true, false).on_hover_text(tr("parts_library.up"));
@@ -816,9 +889,37 @@ fn breadcrumb(app: &SolveApp, ui: &mut egui::Ui, root: &Path, here: &Path, acts:
             });
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let (at, _) = ui.allocate_exact_size(egui::vec2(t.space_24, t.space_24), egui::Sense::hover());
+            size_menu(app, ui, at);
             ui.label(dim(&count));
         });
     });
+}
+
+/// The card size (Small, Medium, Large or List), out of the way in a menu at the row's end.
+fn size_menu(app: &mut SolveApp, ui: &mut egui::Ui, at: egui::Rect) {
+    let tr = solidcraft_ui_text::tr;
+    // One icon for every size: the button's id includes its icon, so a size that changed the icon
+    // would close the open menu on the pick.
+    let menu = crate::ui_kit::filter_button_at(ui, at, "grid", tr("parts_library.card_size"), 0, |ui| {
+        ui.set_width(CARD_WIDTH * 0.75);
+        let mut size = LibrarySize::ALL.iter().position(|s| *s == app.preferences.library_size).unwrap_or(1);
+        let labels: Vec<&str> = LibrarySize::ALL.iter().map(|s| tr(s.label_id())).collect();
+        if crate::ui_kit::segmented(
+            ui,
+            &mut size,
+            &labels,
+            crate::ui_kit::Segments {
+                targets: &["library:size_small", "library:size_medium", "library:size_large", "library:size_list"],
+                compact: true,
+                intrinsic: true,
+                ..Default::default()
+            },
+        ) {
+            app.preferences.library_size = LibrarySize::ALL[size];
+        }
+    });
+    crate::scenario::publish_handle("library:size", menu.response.rect.center());
 }
 
 /// The search field. Esc clears it, then closes the panel; Ctrl+F or `/` over the panel focuses it;
@@ -886,11 +987,20 @@ fn placeholders(app: &SolveApp, ui: &mut egui::Ui) {
 
 /// The `rows` of `entries` in sight: cards in the size's columns, or names.
 fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[Entry], rows: std::ops::Range<usize>) {
+    if app.parts_library.list_row {
+        ui.horizontal(|ui| list_items(app, ui, acts, entries, rows));
+    } else {
+        list_items(app, ui, acts, entries, rows);
+    }
+}
+
+fn list_items(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[Entry], rows: std::ops::Range<usize>) {
     let t = Tokens::get();
     let tr = solidcraft_ui_text::tr;
     let grid = app.parts_library.grid;
+    let list_row = app.parts_library.list_row;
     let dragging = egui::DragAndDrop::payload::<Dragged>(ui.ctx()).map(|d| d.0.clone());
-    let columns = grid.map_or(1, |g| g.columns);
+    let columns = if list_row { entries.len().max(1) } else { grid.map_or(1, |g| g.columns) };
     let room = ui.available_width() - SCROLL_BAR;
     let accent = crate::workspace::tab_accent(&t, "MODEL");
     let slide = app.parts_library.slide.map(|(from, at)| (from, ((ui.input(|i| i.time) - at) / SLIDE) as f32));
@@ -903,11 +1013,23 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
         // A row of cards takes its full height in the list; each card is drawn at its place in
         // the centred grid, or on its way there while the columns change.
         let band = grid.map(|g| {
-            let (band, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), g.size.height()), egui::Sense::hover());
+            let width = if g.single_row { g.span() } else { ui.available_width() };
+            let (band, _) = ui.allocate_exact_size(egui::vec2(width, g.size.height()), egui::Sense::hover());
             egui::pos2(band.left(), band.top() - (first / g.columns) as f32 * g.row())
         });
         {
             for (k, e) in row.iter().enumerate() {
+                // Cards scrolled out of the row's view are neither drawn nor their pictures loaded.
+                if let (Some(g), Some(b)) = (grid, band)
+                    && g.single_row
+                    && dragging.as_ref() != Some(&e.path)
+                {
+                    let left = b.x + g.at(first + k).x;
+                    let view = ui.clip_rect();
+                    if left > view.right() || left + g.width < view.left() {
+                        continue;
+                    }
+                }
                 let badge = match e.kind {
                     Kind::Step => Some("STEP"),
                     Kind::Mesh => Some("MESH"),
@@ -937,13 +1059,21 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
                         crate::ui_kit::part_card(&mut card, PartCard { name: &e.name, face, size, width: grid.width, selected, dragging, accent })
                     }
                     None => {
-                        ui.set_width(room);
                         let icon = match e.kind {
                             Kind::Folder => "folder",
                             Kind::Mesh => "mesh_body",
                             _ => "body",
                         };
-                        crate::ui_kit::part_row(ui, &e.name, icon, badge, selected, accent)
+                        if list_row {
+                            // Each name gets its own cell, so one name's width does not cap the next.
+                            ui.allocate_ui(egui::vec2(LIST_ENTRY_WIDTH, t.control_height), |ui| {
+                                crate::ui_kit::part_row(ui, &e.name, icon, badge, selected, accent)
+                            })
+                            .inner
+                        } else {
+                            ui.set_width(room);
+                            crate::ui_kit::part_row(ui, &e.name, icon, badge, selected, accent)
+                        }
                     }
                 };
                 crate::scenario::publish_handle(&format!("library:{}", e.name), r.rect.center());
@@ -993,7 +1123,10 @@ fn list_view(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, entries: &[
 /// The kit's catalog footer: the hint's first sentence, the whole hint on hover.
 fn footer(ui: &mut egui::Ui) {
     let tr = solidcraft_ui_text::tr;
+    let top = ui.cursor().top();
     crate::ui_kit::catalog_footer_with_tip(ui, tr("parts_library.hint_short"), tr("parts_library.hint"));
+    let band = egui::Rect::from_min_max(egui::pos2(ui.min_rect().left(), top), egui::pos2(ui.min_rect().right(), ui.cursor().top()));
+    crate::scenario::publish_handle("library:footer", band.center());
 }
 
 /// Esc while the search has the focus is the search's own, whatever runs before the card this frame.
@@ -1195,6 +1328,12 @@ mod tests {
         h.frames(3);
         // Folders first: Fasteners, then adapter and bracket.
         let at = |h: &mut crate::scenario::Harness, size: LibrarySize| {
+            // The sizes sit in the card size menu: open it unless it is already open.
+            if crate::scenario::handle_at("library:size_small").is_none() {
+                let button = crate::scenario::handle_at("library:size").expect("the card size button");
+                h.step(&json!({"click": [button.x, button.y]})).unwrap();
+                h.frames(3);
+            }
             let segment = crate::scenario::handle_at(&format!("library:size_{}", size.id())).expect("the size's segment");
             h.step(&json!({"click": [segment.x, segment.y]})).unwrap();
             // Past the cards' slide to their new places.
@@ -1214,6 +1353,25 @@ mod tests {
         let (f, a, _) = at(&mut h, LibrarySize::List);
         let row = Tokens::get().control_height;
         assert!((f.x - a.x).abs() < 1.0 && (a.y - f.y - row).abs() < 9.0, "list: a short row each {f:?} {a:?}");
+    }
+
+    /// No size control sits in the body; a small button at the folder row's end opens the four
+    /// sizes, and picking one sets the size.
+    #[test]
+    fn the_card_size_is_a_menu_button_not_a_control_in_the_body() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        h.app.home.open = false;
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(30);
+        assert!(crate::scenario::handle_at("library:size_medium").is_none(), "no sizes in the body");
+        let button = crate::scenario::handle_at("library:size").expect("the card size button");
+        h.step(&json!({"click": [button.x, button.y]})).unwrap();
+        h.frames(3);
+        let large = crate::scenario::handle_at("library:size_large").expect("the menu shows the sizes");
+        h.step(&json!({"click": [large.x, large.y]})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.library_size, LibrarySize::Large);
     }
 
     #[test]
@@ -1283,6 +1441,9 @@ mod tests {
         };
         resize(&mut h, 700.0);
         h.frames(4);
+        // The premise: at 700 wide the column is a grid, so the parts sit in a grid.
+        let (_, outer) = placed(&h, "parts-library").expect("the library's section");
+        assert!(outer.width() / outer.height() <= WIDE_RATIO, "the premise: a grid at 700 wide, outer {outer:?}");
         // bracket moves to the new third column: it slides in from the right along its new row.
         let [_, _, mid] = cards();
         h.frames(30);
@@ -1304,6 +1465,398 @@ mod tests {
         h.frames(30);
         let [f3, a3, b3] = cards();
         assert!((f3.y - a3.y).abs() < 1.0 && b3.y > a3.y + PartCardSize::Medium.picture(), "back to two across {f3:?} {a3:?} {b3:?}");
+    }
+
+    /// Wider than 1.5 times its height is a row; exactly 1.5 times is still the grid.
+    #[test]
+    fn a_panel_much_wider_than_tall_is_one_row() {
+        assert!(wide(900.0, 200.0));
+        assert!(!wide(300.0, 700.0));
+        assert!(!wide(750.0, 500.0), "exactly 1.5 times stays a grid");
+        assert!(wide(751.0, 500.0));
+    }
+
+    /// The row draws its cards at the chosen size, the same card as the grid: the same picture and
+    /// height, and at least the same width (the grid may widen a card to fill its column).
+    #[test]
+    fn the_row_draws_cards_at_the_chosen_size() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Medium;
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(30);
+        let resize = |h: &mut crate::scenario::Harness, width: f32, height: f32| {
+            h.app
+                .run_panel_command(
+                    "panel.resize",
+                    &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": width, "height": height}}),
+                )
+                .unwrap();
+            h.frames(30);
+        };
+        resize(&mut h, 900.0, 200.0);
+        let row = h.app.parts_library.grid.expect("the row's grid");
+        assert!(row.single_row && row.size == PartCardSize::Medium, "{row:?}");
+        assert_eq!(row.width, PartCardSize::Medium.width());
+        resize(&mut h, 300.0, 700.0);
+        let tall = h.app.parts_library.grid.expect("the grid");
+        assert!(!tall.single_row && tall.size == PartCardSize::Medium, "{tall:?}");
+        assert!(tall.width >= row.width, "the grid card {tall:?} is no smaller than the row card {row:?}");
+    }
+
+    /// Docked low, the row's Large cards scroll up and down inside the panel rather than push the
+    /// footer out of it.
+    #[test]
+    fn a_low_row_keeps_its_footer_inside_the_panel() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Large;
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(30);
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": 340.0, "height": 200.0}}),
+            )
+            .unwrap();
+        h.frames(30);
+        let (_, outer) = placed(&h, "parts-library").expect("the library's section");
+        let footer = crate::scenario::handle_at("library:footer").expect("the footer");
+        assert!(footer.y <= outer.bottom() && footer.y >= outer.top(), "footer {footer:?} outside {outer:?}");
+    }
+
+    /// List in a wide panel runs its names across one line; tall again, they stack.
+    #[test]
+    fn list_in_a_wide_panel_runs_its_names_across() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::List;
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(30);
+        let names = || ["Fasteners", "adapter", "bracket"].map(|n| crate::scenario::handle_at(&format!("library:{n}")).expect(n));
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": 900.0, "height": 200.0}}),
+            )
+            .unwrap();
+        h.frames(30);
+        let [f, a, b] = names();
+        assert!((f.y - a.y).abs() < 1.0 && (a.y - b.y).abs() < 1.0 && f.x < a.x && a.x < b.x, "one line when wide {f:?} {a:?} {b:?}");
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": 300.0, "height": 700.0}}),
+            )
+            .unwrap();
+        h.frames(30);
+        let [f, a, b] = names();
+        assert!(f.y < a.y && a.y < b.y && (f.x - a.x).abs() < 1.0, "stacked when tall {f:?} {a:?} {b:?}");
+        // Back to a line: each name gets its own cell, and each one is clickable.
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": 900.0, "height": 200.0}}),
+            )
+            .unwrap();
+        h.frames(30);
+        let [f, a, b] = names();
+        assert!(a.x - f.x >= LIST_ENTRY_WIDTH - 1.0 && b.x - a.x >= LIST_ENTRY_WIDTH - 1.0, "each name has its own width {f:?} {a:?} {b:?}");
+        // bracket is a saved design (.solidcraft), adapter an export (.step): each click selects its own file.
+        for (name, file) in [("adapter", "adapter.step"), ("bracket", "bracket.solidcraft")] {
+            let at = crate::scenario::handle_at(&format!("library:{name}")).expect(name);
+            h.step(&json!({"click": [at.x, at.y]})).unwrap();
+            h.frames(3);
+            assert!(h.app.parts_library.selected.as_ref().is_some_and(|p| p.ends_with(file)), "{name} is clickable");
+        }
+    }
+
+    /// Every size picked from the card size menu takes, whichever size it is.
+    #[test]
+    fn every_card_size_pick_from_the_menu_takes() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        h.app.home.open = false;
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(30);
+        for size in [LibrarySize::Large, LibrarySize::List, LibrarySize::Medium] {
+            // The menu may have closed on the last pick: open it again only if its sizes are not shown.
+            if crate::scenario::handle_at("library:size_small").is_none() {
+                let button = crate::scenario::handle_at("library:size").expect("the card size button");
+                h.step(&json!({"click": [button.x, button.y]})).unwrap();
+                h.frames(3);
+            }
+            let segment = crate::scenario::handle_at(&format!("library:size_{}", size.id())).expect("the size's segment");
+            h.step(&json!({"click": [segment.x, segment.y]})).unwrap();
+            h.frames(3);
+            assert_eq!(h.app.preferences.library_size, size);
+        }
+    }
+
+    /// A folder of `parts` STEP files in a subfolder of the test directory.
+    fn folder_of(dir: &Path, name: &str, parts: usize) -> PathBuf {
+        let folder = dir.join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        for i in 0..parts {
+            std::fs::write(folder.join(format!("part-{i:02}.step")), "x").unwrap();
+        }
+        folder
+    }
+
+    /// A side dock `width` wide, its height left to the column.
+    fn side_dock(h: &mut crate::scenario::Harness, width: f32) {
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": width, "height": 400.0}, "thickness_only": true}),
+            )
+            .unwrap();
+        h.frames(30);
+    }
+
+    /// The library floated at a fixed size in the app.
+    fn float_library(h: &mut crate::scenario::Harness, width: f32, height: f32) {
+        h.app
+            .run_panel_command(
+                "panel.float",
+                &json!({
+                    "target": {"type": "instance", "id": "parts-library"},
+                    "destination": {"type": "new_section", "section": "parts-library-float", "index": 0,
+                        "location": {"type": "floating", "origin": {"x": 200.0, "y": 120.0}}, "size": {"width": width, "height": height}}
+                }),
+            )
+            .unwrap();
+        h.frames(30);
+    }
+
+    /// A host control clicked at its centre, as a person would click it.
+    fn host_click(h: &mut crate::scenario::Harness, target: crate::panel_runtime::HostControlTarget) {
+        let bounds = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .controls
+            .iter()
+            .find(|control| control.target == target)
+            .unwrap_or_else(|| panic!("missing host control {target:?}"))
+            .bounds;
+        let at = egui::pos2(bounds.origin.x + bounds.size.width / 2.0, bounds.origin.y + bounds.size.height / 2.0);
+        let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frame_with(vec![press(true)]);
+        h.frame_with(vec![press(false)]);
+        h.frames(2);
+    }
+
+    /// Reset height from the library's own menu.
+    fn reset_height(h: &mut crate::scenario::Harness) {
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget, HostSharedAction};
+        let instance = solidcraft_engine::panels::InstanceId::new("parts-library").unwrap();
+        host_click(h, HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() }));
+        host_click(h, HostControlTarget::Shared { instance, action: HostSharedAction::ResetHeight });
+        h.frames(30);
+    }
+
+    /// Docked at the side, the library fills the column's height. A folder of two parts and one of
+    /// forty both stay a grid at that height: the layout does not stick as the folder grows.
+    #[test]
+    fn a_side_dock_fills_the_column_and_stays_a_grid_as_the_folder_grows() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        let two = folder_of(&h.dir, "two", 2);
+        let forty = folder_of(&h.dir, "forty", 40);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Medium;
+        control(&mut h.app, &json!({"folder": two.to_string_lossy()})).unwrap();
+        h.frames(30);
+        side_dock(&mut h, 450.0);
+        let (_, short_folder) = placed(&h, "parts-library").expect("the library's section");
+        assert!(h.app.parts_library.grid.is_some_and(|g| !g.single_row), "a wide side dock is a grid");
+        control(&mut h.app, &json!({"folder": forty.to_string_lossy()})).unwrap();
+        h.frames(30);
+        let (_, long_folder) = placed(&h, "parts-library").expect("the library's section");
+        assert!(short_folder.height() > 300.0, "the side dock fills the column {short_folder:?}");
+        assert!((short_folder.height() - long_folder.height()).abs() < 1.0, "the height does not follow the folder {short_folder:?} {long_folder:?}");
+        assert!(h.app.parts_library.grid.is_some_and(|g| !g.single_row), "still a grid with forty parts");
+    }
+
+    /// Dragging the bottom edge up shortens the side dock, and a short wide dock is a row. Reset
+    /// height restores the full column, and the grid.
+    #[test]
+    fn dragging_the_bottom_edge_shortens_the_side_dock_into_a_row_and_reset_restores_the_column() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        let two = folder_of(&h.dir, "two", 2);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Medium;
+        control(&mut h.app, &json!({"folder": two.to_string_lossy()})).unwrap();
+        h.frames(30);
+        side_dock(&mut h, 450.0);
+        let (_, full) = placed(&h, "parts-library").expect("the library's section");
+        let x = full.center().x;
+        h.step(&json!({"drag": [[x, full.bottom() - 3.0], [x, full.top() + 200.0]], "steps": 12})).unwrap();
+        h.frames(30);
+        let (_, short) = placed(&h, "parts-library").expect("the library's section");
+        assert!(short.height() < 250.0, "the drag shortened the dock {full:?} -> {short:?}");
+        assert!(h.app.parts_library.grid.is_some_and(|g| g.single_row), "a short wide dock is a row");
+        reset_height(&mut h);
+        let (_, back) = placed(&h, "parts-library").expect("the library's section");
+        assert!((back.height() - full.height()).abs() < 2.0, "reset restores the column {full:?} -> {back:?}");
+        assert!(h.app.parts_library.grid.is_some_and(|g| !g.single_row), "the column is a grid again");
+    }
+
+    /// Widening the side dock across the threshold at one height changes the layout once, and it
+    /// holds across frames at each width.
+    #[test]
+    fn a_width_drag_near_the_threshold_keeps_the_layout_across_frames() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        let two = folder_of(&h.dir, "two", 2);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Medium;
+        control(&mut h.app, &json!({"folder": two.to_string_lossy()})).unwrap();
+        h.frames(30);
+        side_dock(&mut h, 450.0);
+        let (_, column) = placed(&h, "parts-library").expect("the library's section");
+        let limit = WIDE_RATIO * column.height();
+        let mut rows = Vec::new();
+        for step in 0..12 {
+            side_dock(&mut h, limit - 30.0 + step as f32 * 5.0);
+            let mut frames = Vec::new();
+            for _ in 0..3 {
+                h.frames(1);
+                frames.push(h.app.parts_library.grid.is_some_and(|g| g.single_row));
+            }
+            assert!(frames.iter().all(|f| *f == frames[0]), "stable at one width {frames:?}");
+            rows.push(frames[0]);
+        }
+        let changes = rows.windows(2).filter(|pair| pair[0] != pair[1]).count();
+        assert_eq!(changes, 1, "the layout switches once across the threshold {rows:?}");
+        assert!(!rows[0] && *rows.last().unwrap(), "grid first, row last {rows:?}");
+    }
+
+    /// A wide floating window is a row, as a wide panel is anywhere the library is not a side column.
+    #[test]
+    fn a_wide_floating_window_gives_the_row() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        let two = folder_of(&h.dir, "two", 2);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Medium;
+        control(&mut h.app, &json!({"folder": two.to_string_lossy()})).unwrap();
+        h.frames(30);
+        float_library(&mut h, 900.0, 200.0);
+        let (zone, _) = placed(&h, "parts-library").expect("the library's section");
+        assert_eq!(zone, solidcraft_engine::panels::Zone::Floating);
+        assert!(h.app.parts_library.grid.is_some_and(|g| g.single_row), "a wide floating window is a row");
+    }
+
+    /// Floating, the library keeps the size it was floated at, whatever its folder holds: the side fill
+    /// does not reach a floating window, and an in-app floating window does not size to its content.
+    #[test]
+    fn a_floating_library_window_keeps_its_size_whatever_its_folder() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        let two = folder_of(&h.dir, "two", 2);
+        let forty = folder_of(&h.dir, "forty", 40);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Medium;
+        control(&mut h.app, &json!({"folder": two.to_string_lossy()})).unwrap();
+        h.frames(30);
+        float_library(&mut h, 450.0, 900.0);
+        let (_, few) = placed(&h, "parts-library").expect("the library's section");
+        control(&mut h.app, &json!({"folder": forty.to_string_lossy()})).unwrap();
+        h.frames(30);
+        let (_, many) = placed(&h, "parts-library").expect("the library's section");
+        assert!((few.height() - many.height()).abs() < 1.0, "the floating window keeps its size {few:?} -> {many:?}");
+    }
+
+    /// A plain wheel over a low row of Medium cards moves the row sideways: cards taller than the room
+    /// left in a 200 px dock do not turn the wheel into a vertical scroll.
+    #[test]
+    fn a_wheel_over_a_low_row_of_medium_cards_moves_it_sideways() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        let forty = folder_of(&h.dir, "forty", 40);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Medium;
+        control(&mut h.app, &json!({"folder": forty.to_string_lossy()})).unwrap();
+        h.frames(30);
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": 900.0, "height": 200.0}}),
+            )
+            .unwrap();
+        h.frames(30);
+        let before = crate::scenario::handle_at("library:part-00").expect("the first card");
+        h.call("ui.scroll", json!({"x": before.x, "y": before.y, "unit": "point", "delta": -40.0}));
+        h.frames(30);
+        let after = crate::scenario::handle_at("library:part-00").expect("the first card still in view");
+        assert!(after.x < before.x - 1.0, "the row moved sideways {before:?} -> {after:?}");
+        assert!((after.y - before.y).abs() < 1.0, "no vertical scroll {before:?} -> {after:?}");
+    }
+
+    /// A wheel tick over the row scrolls it sideways and leaves its height alone.
+    #[test]
+    fn a_wheel_over_the_row_scrolls_it_sideways() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Large;
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(30);
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": 540.0, "height": 340.0}}),
+            )
+            .unwrap();
+        h.frames(30);
+        // Large cards overflow this row, and the panel is tall enough for them, so the row scrolls sideways.
+        let before = crate::scenario::handle_at("library:Fasteners").expect("the first card");
+        h.call("ui.scroll", json!({"x": before.x, "y": before.y, "unit": "point", "delta": -40.0}));
+        h.frames(30);
+        let after = crate::scenario::handle_at("library:Fasteners").expect("the first card still in view");
+        assert!(after.x < before.x - 1.0, "the row scrolled sideways {before:?} -> {after:?}");
+        assert!((after.y - before.y).abs() < 1.0, "the height stayed {before:?} -> {after:?}");
+    }
+
+    /// Docked wide, the parts sit in one row, and a row too long for the panel scrolls across;
+    /// tall again, they are the grid, and the switch goes both ways.
+    #[test]
+    fn a_wide_panel_lays_the_parts_out_in_one_row_and_a_tall_one_in_a_grid() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        h.app.home.open = false;
+        h.app.preferences.library_size = LibrarySize::Small;
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(30);
+        let resize = |h: &mut crate::scenario::Harness, width: f32, height: f32| {
+            h.app
+                .run_panel_command(
+                    "panel.resize",
+                    &json!({"target": {"type": "instance", "id": "parts-library"}, "size": {"width": width, "height": height}}),
+                )
+                .unwrap();
+            h.frames(30);
+        };
+        let cards = || ["Fasteners", "adapter", "bracket"].map(|n| crate::scenario::handle_at(&format!("library:{n}")).expect(n));
+        resize(&mut h, 900.0, 200.0);
+        let [f, a, b] = cards();
+        assert!((f.y - a.y).abs() < 1.0 && (a.y - b.y).abs() < 1.0 && f.x < a.x && a.x < b.x, "one row when wide {f:?} {a:?} {b:?}");
+        assert!(h.app.parts_library.grid.is_some_and(|g| g.single_row));
+        resize(&mut h, 300.0, 700.0);
+        let [f, a, b] = cards();
+        // Two Small columns fit in 300 px, so bracket wraps to a lower row: a grid, not a row.
+        assert!(b.y > f.y + 1.0, "a grid when tall {f:?} {a:?} {b:?}");
+        assert!(h.app.parts_library.grid.is_some_and(|g| !g.single_row));
+        resize(&mut h, 900.0, 200.0);
+        let [f, a, b] = cards();
+        assert!((f.y - a.y).abs() < 1.0 && (a.y - b.y).abs() < 1.0, "back to one row {f:?} {a:?} {b:?}");
     }
 
     /// Where the shared host placed `instance` this frame: its zone and outer rect.
@@ -1328,6 +1881,8 @@ mod tests {
         parts(&h.dir);
         h.app.home.open = false;
         h.app.ui.show_browser = true;
+        // The content-height side dock is the old behaviour, behind the row preference.
+        h.app.preferences.parts_library_row = false;
         control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
         h.frames(6);
         assert!(requested_open(&h), "the toggle opens the shared panel");
@@ -1346,6 +1901,12 @@ mod tests {
         let (_, card) = placed(&h, "parts-library").expect("the library's section");
         assert!(card.bottom() < bottom, "fewer parts, a shorter panel: {bottom} -> {}", card.bottom());
         assert!(crate::scenario::handle_at("library:up").is_some_and(|at| card.contains(at)), "Up inside the panel");
+        // With the row preference on, the side dock keeps the column's height whatever the folder holds.
+        let content = card;
+        h.app.preferences.parts_library_row = true;
+        h.frames(6);
+        let (_, full) = placed(&h, "parts-library").expect("the library's section");
+        assert!(full.height() > content.height() + 1.0, "with the row preference on, the column's height: {content:?} -> {full:?}");
     }
 
     /// `view.parts_library` opens and closes the panel; closing it from the shared host clears

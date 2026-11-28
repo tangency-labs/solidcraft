@@ -114,6 +114,10 @@ macro_rules! layout_preferences {
             /// The operations under way, with their progress and Cancel, in a panel in the view's
             /// bottom-right corner. Off: a "Computing" notice and the agent's chip, as before.
             operations_panel: bool = true, PAGE_LAYOUT;
+            /// Parts library: wider than 1.5 times its height, its parts sit in one scrolling row; docked at
+            /// the side it fills the column's height (drag its bottom edge up to shorten it; Reset height
+            /// restores it). Off: the grid always, at the content height, as before.
+            parts_library_row: bool = true, PAGE_LAYOUT;
             /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
             persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
             /// Constraints pinned to the sketch ribbon's Constrain panel are drawn as small cells in its

@@ -518,7 +518,7 @@ impl ProductionState {
             panels: Product::all_map(|product| PanelSnapshot {
                 product,
                 available: product.available(app),
-                fills: product == Product::Browser && crate::browser::holds_compact_history(app),
+                fills: panel_fills(app, product),
                 presentation: product.presentation(app),
                 extent: None,
             }),
@@ -668,7 +668,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     }
     for panel in &mut snapshot.panels {
         panel.available = panel.product.available(app);
-        panel.fills = panel.product == Product::Browser && crate::browser::holds_compact_history(app);
+        panel.fills = panel_fills(app, panel.product);
         panel.presentation = panel.product.presentation(app);
     }
     Ok(())
@@ -1536,6 +1536,24 @@ impl PanelController for ProductionController {
         snapshot.actions.push_back(QueuedAction { document, product: self.product, action: action.clone() });
         Ok(())
     }
+}
+
+/// Whether a product's panel fills its side column: the Browser while it holds compact history, the
+/// Parts library while its row preference is on and it is docked at the left or right. Floating or
+/// in a window, the library keeps sizing to its content.
+fn panel_fills(app: &crate::SolveApp, product: Product) -> bool {
+    match product {
+        Product::Browser => crate::browser::holds_compact_history(app),
+        Product::PartsLibrary => app.preferences.parts_library_row && parts_library_at_side(app),
+        _ => false,
+    }
+}
+
+/// Read from the runtime's committed layout, not the host frame being built, so a frame never depends on
+/// itself. A move into a side column fills it from the next frame: one frame of content height.
+fn parts_library_at_side(app: &crate::SolveApp) -> bool {
+    let Ok(instance) = solidcraft_engine::panels::InstanceId::new("parts-library") else { return false };
+    app.panel_runtime().is_some_and(|runtime| runtime.layout().layout().containing(&instance).is_ok_and(|section| section.location.zone().side()))
 }
 
 #[derive(Debug)]
