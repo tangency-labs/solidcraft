@@ -538,9 +538,42 @@ pub const GRAPHICS_STEPS: &[&str] = &[
 /// The start of a native crash's module name (lowercase, no folder) that is a graphics driver
 /// or graphics API runtime: Intel, NVIDIA, AMD, Apple, Mesa, and the APIs' loaders.
 const GRAPHICS_MODULES: &[&str] = &[
-    "igvk", "igd", "ig9icd", "ig7icd", "ig75icd", "igxelp", "igc", "nvogl", "nvwgf", "nvd3dum", "nvldumd", "nvvk", "nvcuda", "atio", "atig",
-    "atiumd", "aticfx", "amdvlk", "amdxc", "amdxx", "vulkan-1", "d3d12", "d3d11", "dxgi", "opengl32", "libgl", "libegl", "libvulkan", "libnvidia",
-    "libagx", "agxmetal", "libmetal", "radeonsi", "iris_dri", "swrast_dri", "libvk_swiftshader",
+    "igvk",
+    "igd",
+    "ig9icd",
+    "ig7icd",
+    "ig75icd",
+    "igxelp",
+    "igc",
+    "nvogl",
+    "nvwgf",
+    "nvd3dum",
+    "nvldumd",
+    "nvvk",
+    "nvcuda",
+    "atio",
+    "atig",
+    "atiumd",
+    "aticfx",
+    "amdvlk",
+    "amdxc",
+    "amdxx",
+    "vulkan-1",
+    "d3d12",
+    "d3d11",
+    "dxgi",
+    "opengl32",
+    "libgl",
+    "libegl",
+    "libvulkan",
+    "libnvidia",
+    "libagx",
+    "agxmetal",
+    "libmetal",
+    "radeonsi",
+    "iris_dri",
+    "swrast_dri",
+    "libvk_swiftshader",
 ];
 
 /// Whether a report (`report.json`) is a graphics failure: a lost device, a run that died in a
@@ -631,12 +664,7 @@ pub fn graphics(environment: &str) -> Option<Graphics> {
         },
         None => (None, None),
     };
-    Some(Graphics {
-        api: api.to_string(),
-        adapter: adapter.trim().to_string(),
-        device_type,
-        driver: driver.filter(|d| !d.is_empty()),
-    })
+    Some(Graphics { api: api.to_string(), adapter: adapter.trim().to_string(), device_type, driver: driver.filter(|d| !d.is_empty()) })
 }
 
 /// The panic hook. Returns true when the panic was recorded for a command or the kernel (which
@@ -1523,7 +1551,12 @@ pub fn list(dir: &Path) -> Vec<Summary> {
                 version: v.get("app").and_then(|a| a.get("version")).and_then(Value::as_str).unwrap_or_default().to_string(),
                 path: folder.to_string_lossy().into_owned(),
                 replayable: folder.join("replay.json").is_file(),
-                renderer: v.get("system").and_then(|s| s.get("environment")).and_then(Value::as_str).filter(|e| !e.is_empty()).map(|e| limited(e, 500)),
+                renderer: v
+                    .get("system")
+                    .and_then(|s| s.get("environment"))
+                    .and_then(Value::as_str)
+                    .filter(|e| !e.is_empty())
+                    .map(|e| limited(e, 500)),
                 graphics_failure: graphics_failure(&v),
                 id,
             })

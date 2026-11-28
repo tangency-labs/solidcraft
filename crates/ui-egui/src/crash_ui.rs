@@ -89,10 +89,7 @@ pub fn retry_api(fresh: &[Summary], choices: &[&'static str], running: Option<&s
     let failed = fresh.iter().find(|r| r.graphics_failure)?;
     let failed_api = failed.renderer.as_deref().and_then(crash::graphics).and_then(|g| g.api_id());
     let order: &[&str] = if choices.contains(&"dx12") { &["dx12", "vulkan", "gl"] } else { &["gl", "vulkan"] };
-    order
-        .iter()
-        .filter_map(|want| choices.iter().find(|c| *c == want).copied())
-        .find(|api| Some(*api) != failed_api && Some(*api) != running)
+    order.iter().filter_map(|want| choices.iter().find(|c| *c == want).copied()).find(|api| Some(*api) != failed_api && Some(*api) != running)
 }
 
 /// The note and button offering [`CrashUi::retry`]: saves the choice as Preferences › Graphics

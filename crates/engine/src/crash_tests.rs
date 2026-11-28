@@ -795,7 +795,10 @@ fn a_renderer_line_reads_back_as_api_adapter_and_driver() {
     assert_eq!(g.device_type.as_deref(), Some("IntegratedGpu"));
     assert_eq!(g.driver.as_deref(), Some("Intel Corporation 31.0.101.2111"));
     let g = graphics("Renderer: Dx12 Microsoft Basic Render Driver (Cpu, driver  ), MSAA 1x").unwrap();
-    assert_eq!((g.api_id(), g.adapter.as_str(), g.device_type.as_deref(), g.driver), (Some("dx12"), "Microsoft Basic Render Driver", Some("Cpu"), None));
+    assert_eq!(
+        (g.api_id(), g.adapter.as_str(), g.device_type.as_deref(), g.driver),
+        (Some("dx12"), "Microsoft Basic Render Driver", Some("Cpu"), None)
+    );
     // Earlier releases: the driver's name alone, then MSAA.
     let g = graphics("Renderer: Gl NVIDIA GeForce GT 220 (nvidia), MSAA 4x").unwrap();
     assert_eq!((g.api_id(), g.adapter.as_str(), g.device_type, g.driver.as_deref()), (Some("gl"), "NVIDIA GeForce GT 220", None, Some("nvidia")));
