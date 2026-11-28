@@ -1462,34 +1462,6 @@ fn software_samples(samples: u32, software: bool, chosen: bool) -> u32 {
     if software && !chosen { 1 } else { samples }
 }
 
-/// The MSAA sample counts `device` can draw `target` with `depth` (ascending, starting at 1), from
-/// wgpu's own format features. The window's device asks for no extra features, so only the
-/// counts WebGPU guarantees for a format (1 and 4) are allowed unless it has
-/// `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`; a multisampled target must also resolve.
-fn supported_msaa_samples(
-    adapter: &eframe::wgpu::Adapter,
-    device: &eframe::wgpu::Device,
-    target: eframe::wgpu::TextureFormat,
-    depth: Option<eframe::wgpu::TextureFormat>,
-) -> Vec<u32> {
-    use eframe::wgpu::{Features, TextureFormatFeatureFlags};
-    let features = device.features();
-    let flags = |format: eframe::wgpu::TextureFormat| {
-        if features.contains(Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
-            adapter.get_texture_format_features(format).flags
-        } else {
-            format.guaranteed_format_features(features).flags
-        }
-    };
-    let target = flags(target);
-    let depth = depth.map(flags);
-    let resolves = target.contains(TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE);
-    [1, 2, 4, 8, 16]
-        .into_iter()
-        .filter(|&n| n == 1 || (resolves && target.sample_count_supported(n) && depth.is_none_or(|d| d.sample_count_supported(n))))
-        .collect()
-}
-
 /// Keep the default until the installed renderer's startup check proves a fallback is needed.
 fn scene_msaa_request(saved: Option<u16>) -> u16 {
     saved.unwrap_or(MSAA)
@@ -1996,8 +1968,9 @@ fn main() -> eframe::Result {
                 // Read from the device itself: no second instance lists every adapter for it.
                 let float_depth = !safe && rs.device.features().contains(startup::FLOAT_DEPTH_STENCIL);
                 let depth_bits = if float_depth { FLOAT_DEPTH_BITS } else { DEPTH_BITS };
-                let supported =
-                    scene_sample_choices(depth_bits, STENCIL_BITS, |depth| supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth));
+                let supported = scene_sample_choices(depth_bits, STENCIL_BITS, |depth| {
+                    solidcraft_ui_egui::gpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)
+                });
                 // Safe graphics draws the scene without anti-aliasing; the saved choice is kept. The
                 // software renderer draws 1x unless a level was chosen (#3321).
                 let software = cpu_renderer || info.device_type == eframe::wgpu::DeviceType::Cpu;
@@ -2311,6 +2284,10 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);
+        // egui-wgpu's own request, lowered only for an adapter below its limits, and with the
+        // adapter's own sample counts (`window_device_request`).
+        let base = setup.device_descriptor.clone();
+        setup.device_descriptor = std::sync::Arc::new(move |adapter| solidcraft_viewport_gpu::window_device_request(adapter, base(adapter)));
     }
     options
 }
@@ -3102,8 +3079,9 @@ mod viewport_tests {
 
 #[cfg(test)]
 mod msaa_tests {
-    /// The window's setup is eframe's own: wgpu's backends, adapter choice, limits, features,
-    /// instance flags and present mode. Only the user's choice of API changes the backends.
+    /// The window's setup is eframe's own: wgpu's backends, adapter choice, instance flags and
+    /// present mode. Only the user's choice of API changes the backends. The device request is
+    /// egui-wgpu's with `window_device_request`'s two targeted changes (tested in viewport-gpu).
     #[test]
     fn the_window_uses_eframes_own_wgpu_setup() {
         let stock = eframe::egui_wgpu::WgpuConfiguration::default();
