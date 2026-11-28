@@ -78,6 +78,7 @@ use crate::nurbs::math::gamma;
 use crate::nurbs::srf_adv::p6::SweepTrace;
 use crate::surface::procedural_blend::{BlendRef, NetScope};
 
+pub(crate) mod cylinder_section;
 pub mod path;
 pub mod record;
 
@@ -625,6 +626,11 @@ impl ProceduralSweep {
     #[must_use]
     pub const fn is_label(&self) -> bool {
         self.label
+    }
+
+    /// Makes this definition the wall's label only ([`ProceduralSweep::is_label`]).
+    pub(crate) fn make_label(&mut self) {
+        self.label = true;
     }
 
     /// Whether the net answers an evaluation on `k`: the innermost [`NetScope`] asks for
