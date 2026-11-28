@@ -6088,6 +6088,13 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         vec![p.get("face").and_then(point).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on a cylindrical face"))?]
     };
+    // A single `face` that names its body names one that exists (the plural form checks below).
+    if !grouped && let Some(name) = p.get("face").and_then(|f| f.get("body")).filter(|b| !b.is_null()) {
+        let name = name.as_str().ok_or_else(|| bad(cmd, "`face.body` must be a body name"))?;
+        if !s.model.state().bodies.iter().any(|body| body.name == name) {
+            return Err(bad(cmd, format!("no body named `{name}` (the body of `face`)")));
+        }
+    }
     let (face, additional_faces) = faces.split_first().ok_or_else(|| bad(cmd, "pick a cylindrical face to thread"))?;
     if single_face_selection && (!grouped || !additional_faces.is_empty()) {
         return Err(bad(cmd, "`single_face_selection` requires exactly one body-qualified entry in `faces`"));
@@ -6199,10 +6206,20 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let up_to = match p.get("up_to") {
         None | Some(Value::Null) => None,
-        Some(v) => Some(match vec3(v) {
-            Some(q) => solidcraft_doc::ThreadLimit::Face(FacePick(q)),
-            None => solidcraft_doc::ThreadLimit::Plane(plane_param(s, Some(v), cmd)?),
-        }),
+        Some(v) => {
+            // A point is `[x, y, z]`, `{x, y, z}` or `{point}` (as a `face` is); a plane is a name,
+            // an id or an object holding an `origin`, a `normal`, `x_dir` or `y_dir`.
+            let point = vec3(v).or_else(|| v.get("point").and_then(vec3));
+            let plane_object = v.as_object().is_some_and(|o| ["face", "origin", "normal", "x_dir", "y_dir"].iter().any(|k| o.contains_key(*k)));
+            match point {
+                Some(q) => Some(solidcraft_doc::ThreadLimit::Face(FacePick(q))),
+                // An object that is neither a point nor a plane says what `up_to` takes.
+                None if v.is_object() && !plane_object => {
+                    return Err(bad(cmd, format!("`up_to` must be a point [x, y, z] or {{x, y, z}}, or a plane ({PLANE_FORMS})")));
+                }
+                None => Some(solidcraft_doc::ThreadLimit::Plane(plane_param(s, Some(v), cmd)?)),
+            }
+        }
     };
     match (str_(p, "extent"), &length, &up_to) {
         (None, Some(_), Some(_)) => return Err(bad(cmd, "give `length` or `up_to`, not both")),

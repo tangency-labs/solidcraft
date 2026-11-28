@@ -20303,6 +20303,7 @@ fn eval_feature_kind(
             }
             if !*copy {
                 move_constructions_with(doc, st, bodies, &base_motion, carry, leave);
+                move_threads(st, bodies, &base_motion);
             }
             Ok(())
         }
@@ -20769,6 +20770,23 @@ fn move_turn_line(
 fn lost_turn_line(origin: Vec3, axis: Vec3, why: String, warning: &mut Option<String>) -> Result<(Vec3, Vec3)> {
     append_warning(warning, format!("the edge this turn was picked on was not found ({why}): it turns about where that edge was"));
     Ok((origin, axis))
+}
+
+/// The thread record is the thread's place on the body. A plain move carries the body and would
+/// leave that place behind, so the record is carried by the same motion and stays the thread
+/// feature's. The body transform runs once per listing, so a name listed more than once takes
+/// the motion once for each; a step the motion cannot place leaves the record as it was.
+fn move_threads(st: &mut ModelState, bodies: &[crate::BodyName], m: &Mat) {
+    for t in &mut st.threads {
+        let n = bodies.iter().filter(|name| **name == t.body).count();
+        let mut moved = (n > 0).then(|| t.clone());
+        for _ in 0..n {
+            moved = moved.and_then(|cur| cur.moved(m));
+        }
+        if let Some(moved) = moved.filter(|_| n > 0) {
+            *t = moved;
+        }
+    }
 }
 
 /// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
