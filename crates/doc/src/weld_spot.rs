@@ -54,17 +54,21 @@
 //! zone is the solid between the outer face and its offset by the mark's thickness (the face's
 //! footprint thickened), cut by the cylinders of the zone's radii about the line, and a pin is a
 //! cylinder about the line cut by the two outer faces. A thickening the kernel refuses names the
-//! largest diameter whose marks build ([`SpotRefusal::OffsetFolds`]).
+//! largest diameter whose marks build ([`SpotRefusal::OffsetFolds`]). A dished top or a dished pin
+//! end is the flat look's own sphere, placed where the line crosses that outer face: a dished mark
+//! is the solid between the face and the sphere's cap (refused, with the largest diameter that
+//! clears, where the face reaches the sphere: [`SpotRefusal::DishUnderFace`]), and a dished pin
+//! end is cut by the sphere, so its rim follows the face's sag.
 //!
 //! # Not covered
 //!
 //! [`spot_weld`] and [`spot_site`] take flat sheets only: the marks are flat or revolved and the
 //! pins straight, so the outer faces must be planes square to `normal` at the spot (seam,
-//! projection and fusion welds build on [`spot_site`]). On curved sheets, dished tops and dished
-//! pin ends are not built yet, and only planes, cylinders, cones, spheres and ring tori are
-//! proved single-valued: a spot on a free-form face (B-spline, extrusion, revolution) is refused
-//! as not proved until the kernel's angle interval covers those surfaces. A ball only for two
-//! sheets: in a stack every faying face has its own nugget, which no look draws.
+//! projection and fusion welds build on [`spot_site`]). On curved sheets only planes, cylinders,
+//! cones, spheres and ring tori are proved single-valued: a spot on a free-form face (B-spline,
+//! extrusion, revolution) is refused as not proved until the kernel's angle interval covers those
+//! surfaces. A ball only for two sheets: in a stack every faying face has its own nugget, which no
+//! look draws.
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -73,8 +77,8 @@ use solidcraft_kernel::api::FaceHit;
 use solidcraft_kernel::curves as curve;
 use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
 use solidcraft_kernel::{
-    Body, BoolOp, KernelError, Members, PointClass, affine, boolean, cylinder, offset_surface, segment_closest, split_body_by_sheet_where_it_cuts,
-    thicken,
+    Body, BoolOp, KernelError, Members, PointClass, affine, boolean, cylinder, offset_surface, point_closest, segment_closest,
+    split_body_by_sheet_where_it_cuts, thicken,
 };
 
 /// Why a spot is refused.
@@ -131,6 +135,13 @@ pub enum SpotRefusal {
         "the marks of a spot of diameter {diameter} on face {face} of sheet {sheet} are thicker than the face curves, so its offset would fold; at most {fits} fits"
     )]
     OffsetFolds { sheet: usize, face: usize, diameter: f64, fits: f64 },
+    /// The dished marks of a spot of `diameter` on record face `face` of sheet `sheet` do not fit:
+    /// the face curves up into the dish's sphere (or comes within the zone tolerance of it), so the
+    /// marks would dip under the face. `fits` is the largest diameter at which the face stays
+    /// below the sphere by at least half the dish's middle height, if a search halving the
+    /// diameter found one.
+    #[error("the dished marks of a spot of diameter {diameter} on face {face} of sheet {sheet} would dip under the face{}", fit_words(.fits))]
+    DishUnderFace { sheet: usize, face: usize, diameter: f64, fits: Option<f64> },
     /// How far the edges of record face `face` of sheet `sheet` lie from the spot was not found,
     /// so the footprint cannot be checked.
     #[error("how far the edges of face {face} of sheet {sheet} lie from the spot was not found")]
@@ -916,23 +927,22 @@ fn single_valued(sheet: &Body, at: [f64; 3], u: [f64; 3], r: f64, reach: f64) ->
 /// The bodies of a spot of `diameter` and `style` on `site`, the site of its `sheets`
 /// ([`spot_site_curved`] or [`spot_site`]). Where every face the spot crosses is a plane square
 /// to its line, they are [`spot_weld`]'s; otherwise each mark zone is cut from the outer face's
-/// footprint thickened by the marks' thickness, the pin from a cylinder about the line cut by the
-/// two outer faces, and the ball is [`spot_weld`]'s, at the spot.
+/// footprint thickened by the marks' thickness (a dished top: the solid between the face and the
+/// flat look's sphere, placed where the line crosses the face), the pin from a cylinder about the
+/// line cut by the two outer faces (each dished end cut by its sphere, placed the same way), and
+/// the ball is [`spot_weld`]'s, at the spot.
 ///
 /// # Errors
 /// [`spot_weld`]'s. On curved sheets also [`SpotRefusal::OffsetFolds`] for marks the kernel does
 /// not thicken (with the largest diameter that builds; where none does, the kernel's refusal),
-/// and [`SpotRefusal::Invalid`] for a dished top or a dished pin end (not built yet on curved
-/// sheets) or a sheet of the site not in the list.
+/// [`SpotRefusal::DishUnderFace`] for dished marks the face curves up into, and
+/// [`SpotRefusal::Invalid`] for a sheet of the site not in the list.
 pub fn spot_weld_on(sheets: &[&Body], site: &SpotSite, diameter: f64, style: SpotStyle) -> Result<Vec<SpotPiece>> {
     let spot = SpotWeld { at: site.at, normal: site.normal, thicknesses: site.sheets.iter().map(|s| s.thickness).collect(), diameter, style };
     if flat_stack(sheets, site)? {
         return spot_weld(&spot);
     }
     let (layout, tol) = checked_layout(&spot)?;
-    if matches!(layout.top, Some(Top::Dish { .. })) || layout.pin.is_some_and(|(_, ends)| ends.iter().any(Option::is_some)) {
-        return bad("a dished top or dished pin end on a curved sheet (not built yet)");
-    }
     let (Some(lower), Some(upper)) = (site.sheets.first(), site.sheets.last()) else {
         return bad("fewer than two sheets");
     };
@@ -952,19 +962,44 @@ pub fn spot_weld_on(sheets: &[&Body], site: &SpotSite, diameter: f64, style: Spo
     if let Some(r) = layout.ball {
         pieces.push(inside(profiles::ball(at, r, None)?));
     }
-    if let Some((r, _)) = layout.pin {
-        pieces.push(inside(curved_pin(at, u, r, reach, [(&up_sheet, up_at), (&low_sheet, low_at)])?));
+    if let Some((r, [upper_end, lower_end])) = layout.pin {
+        let mut pin = curved_pin(at, u, r, reach, [(&up_sheet, up_at), (&low_sheet, low_at)])?;
+        // a dished end: the flat look's sphere through the end's rim and its middle, `c` in
+        for (c, p, out) in [(upper_end, up_at, u), (lower_end, low_at, down)] {
+            let Some(c) = c else {
+                continue;
+            };
+            let radius = (r * r + c * c) / (2.0 * c);
+            let Some(cut) = boolean(&pin, &profiles::ball(along(p, out, radius - c), radius, None)?, BoolOp::Cut)? else {
+                return bad("a spot pin that its dished ends took away");
+            };
+            pin = cut;
+        }
+        pieces.push(inside(pin));
     }
-    if let (Some(zones), Some(Top::Flat(h))) = (layout.zones, layout.top) {
+    if let (Some(zones), Some(top)) = (layout.zones, layout.top) {
         let outers =
             [(SpotSide::Upper, upper.sheet, upper.far, &up_sheet, up_at, u), (SpotSide::Lower, lower.sheet, lower.near, &low_sheet, low_at, down)];
         for ((side, sheet, face, face_sheet, p, out), on) in outers.into_iter().zip(layout.marks_on) {
             if !on {
                 continue;
             }
-            let slab = match mark_slab(face_sheet, p, out, zones[2] + h, h, reach)? {
-                Ok(slab) => slab,
-                Err(e) => return Err(fold_fit(e, face_sheet, p, out, diameter, zones[2], h, reach, sheet, face)?),
+            let slab = match top {
+                Top::Flat(h) => match mark_slab(face_sheet, p, out, zones[2] + h, h, reach)? {
+                    Ok(slab) => slab,
+                    Err(e) => return Err(fold_fit(e, face_sheet, p, out, diameter, zones[2], h, reach, sheet, face)?),
+                },
+                Top::Dish { rim, middle } => {
+                    let dish = DishSphere::of(zones[2], rim, middle);
+                    if !dish_clear(face_sheet, p, out, &dish, tol, reach)? {
+                        let fits = largest_that(diameter, |d| {
+                            let k = d / diameter;
+                            dish_clear(face_sheet, p, out, &dish.scaled(k), (0.5 * k * middle).max(tol), reach)
+                        })?;
+                        return Err(SpotRefusal::DishUnderFace { sheet, face, diameter, fits });
+                    }
+                    dish_solid(face_sheet, p, out, &dish, reach)?
+                }
             };
             let radii = [0.0, zones[0], zones[1], zones[2]];
             for (i, zone) in [SpotZone::Core, SpotZone::Band, SpotZone::Edge].into_iter().enumerate() {
@@ -1039,6 +1074,89 @@ fn fold_fit(
     })
 }
 
+/// The sphere of a dished top in the frame of one outer face, the face's point at height 0 and its
+/// outward direction up: its cap stands `middle` off on the axis and passes through the rim at
+/// radius `ro`, the flat look's sphere ([`Dish`]).
+#[derive(Debug, Clone, Copy)]
+struct DishSphere {
+    ro: f64,
+    middle: f64,
+    radius: f64,
+}
+
+impl DishSphere {
+    /// The sphere of a dish `rim` high at radius `ro` and `middle` high on the axis.
+    fn of(ro: f64, rim: f64, middle: f64) -> Self {
+        let c = rim - middle;
+        Self { ro, middle, radius: (ro * ro + c * c) / (2.0 * c) }
+    }
+
+    /// The same dish `k` times the size.
+    fn scaled(self, k: f64) -> Self {
+        Self { ro: k * self.ro, middle: k * self.middle, radius: k * self.radius }
+    }
+
+    /// The height of its centre.
+    fn centre(self) -> f64 {
+        self.middle + self.radius
+    }
+}
+
+/// Whether the face sheet `face_sheet`, within the dish's rim radius of the line through `p`
+/// along `out`, stays outside the dish's sphere (placed at `p`) by at least `gap`: the kernel's
+/// closest point of the footprint to the sphere's centre is at least the radius and `gap` away.
+fn dish_clear(face_sheet: &Body, p: [f64; 3], out: [f64; 3], dish: &DishSphere, gap: f64, reach: f64) -> Result<bool> {
+    let Some(patch) = footprint(face_sheet, p, out, dish.ro, reach)? else {
+        return Ok(false);
+    };
+    let faces: Vec<usize> = (0..patch.face_count()).collect();
+    let Some(c) = point_closest(v3(along(p, out, dish.centre())), &patch, Members::Faces(&faces))? else {
+        return Ok(false);
+    };
+    Ok(c.distance >= dish.radius + gap)
+}
+
+/// The solid of dished marks on the face sheet `face_sheet` at `p`, standing out along `out`: the
+/// part of a column about the line, a little wider than the dish, between the face and the height
+/// of the sphere's centre (where the sphere is wider than the dish), less the sphere. The caller
+/// cuts each zone from it by cylinders no wider than the dish, so the column's own wall is never
+/// a zone's.
+fn dish_solid(face_sheet: &Body, p: [f64; 3], out: [f64; 3], dish: &DishSphere, reach: f64) -> Result<Body> {
+    let top = dish.centre();
+    let col = cylinder(v3(along(p, out, -reach)), v3(out), 1.05 * dish.ro, reach + top)?;
+    let Some(cutter) = footprint(face_sheet, p, out, 1.1 * dish.ro, reach)? else {
+        return bad("a spot footprint that came out empty");
+    };
+    let above = piece_holding(split_by(vec![col], &cutter)?, along(p, out, 0.5 * dish.middle))?
+        .ok_or(SpotRefusal::Invalid("a dished spot mark whose piece above the face was not found"))?;
+    let Some(solid) = boolean(&above, &profiles::ball(along(p, out, top), dish.radius, None)?, BoolOp::Cut)? else {
+        return bad("a dished spot mark that came out empty");
+    };
+    Ok(solid)
+}
+
+/// Every piece of `pieces` split where the sheet `cutter` cuts it, the others as they are.
+fn split_by(pieces: Vec<Body>, cutter: &Body) -> Result<Vec<Body>> {
+    let mut next = Vec::new();
+    for b in pieces {
+        match split_body_by_sheet_where_it_cuts(&b, cutter, 0)? {
+            Some(parts) => next.extend(parts),
+            None => next.push(b),
+        }
+    }
+    Ok(next)
+}
+
+/// The first of `pieces` that holds `at` inside it.
+fn piece_holding(pieces: Vec<Body>, at: [f64; 3]) -> Result<Option<Body>> {
+    for b in pieces {
+        if b.classify_point(v3(at))? == PointClass::Inside {
+            return Ok(Some(b));
+        }
+    }
+    Ok(None)
+}
+
 /// A pin of radius `r` about the line through `at` along `u`: the cylinder about the line cut by
 /// each outer face (given as a face sheet and where the line crosses it), the piece that holds
 /// `at`.
@@ -1049,21 +1167,9 @@ fn curved_pin(at: [f64; 3], u: [f64; 3], r: f64, reach: f64, outers: [(&Body, [f
         let Some(cutter) = footprint(face_sheet, p, u, 1.05 * r, reach)? else {
             return bad("a spot footprint that came out empty");
         };
-        let mut next = Vec::new();
-        for b in pieces {
-            match split_body_by_sheet_where_it_cuts(&b, &cutter, 0)? {
-                Some(parts) => next.extend(parts),
-                None => next.push(b),
-            }
-        }
-        pieces = next;
+        pieces = split_by(pieces, &cutter)?;
     }
-    for b in pieces {
-        if b.classify_point(v3(at))? == PointClass::Inside {
-            return Ok(b);
-        }
-    }
-    bad("a spot pin whose piece between the outer faces was not found")
+    piece_holding(pieces, at)?.ok_or(SpotRefusal::Invalid("a spot pin whose piece between the outer faces was not found"))
 }
 
 /// The outward unit normal of flat record face `face` of sheet `sheet`.

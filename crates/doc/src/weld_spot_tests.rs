@@ -691,9 +691,104 @@ fn on_a_dome_each_mark_zone_and_the_pin_are_their_closed_form() {
     let inside: Vec<_> = ball.iter().filter(|x| x.zone == SpotZone::Inside).collect();
     assert_eq!(inside.len(), 1);
     close(volume(&inside[0].body), 4.0 / 3.0 * PI * (D / 2.0).powi(3), "dome ball");
-    // dished tops and pin ends are not built on curved sheets yet
-    for look in [SpotLook::Dent, SpotLook::MarksPinConcaveEnds] {
-        assert!(matches!(spot_weld_on(both, &site, D, look.style()), Err(SpotRefusal::Invalid(_))), "{look:?}");
+}
+
+/// `∫ 2πρ h dρ` from `a` to `b` of the height `h(ρ) = s (√(rf² - ρ²) - rf)` off its tangent plane
+/// at the axis of a sphere of radius `rf` crossed by the axis: `s = 1` for a convex face (seen
+/// from outside), `-1` for a concave one.
+fn sag_volume(rf: f64, s: f64, a: f64, b: f64) -> f64 {
+    s * (2.0 * PI / 3.0 * ((rf * rf - a * a).powf(1.5) - (rf * rf - b * b).powf(1.5)) - PI * rf * (b * b - a * a))
+}
+
+/// What a dished end of depth `c` takes off a pin of radius `r` whose end is a sphere of radius
+/// `rf` crossed by the axis (`s` as in [`sag_volume`]): the pin within the end's sphere, the
+/// sphere through the rim at height 0 and `c` in on the axis.
+fn dished_end(rf: f64, s: f64, r: f64, c: f64) -> f64 {
+    let rp = (r * r + c * c) / (2.0 * c);
+    // the end's face less the sphere's cap, as heights off the tangent plane
+    let gap = |rho: f64| s * ((rf * rf - rho * rho).sqrt() - rf) - (rp - c - (rp * rp - rho * rho).sqrt());
+    // on a convex end the sphere leaves the face inside the rim: where the two cross
+    let edge = if gap(r) >= 0.0 {
+        r
+    } else {
+        let (mut lo, mut hi) = (0.0, r);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if gap(mid) > 0.0 { lo = mid } else { hi = mid }
+        }
+        lo
+    };
+    // ∫ 2πρ (rp - c - √(rp² - ρ²)) dρ from 0 to edge, the cap's heights
+    let cap = PI * (rp - c) * edge * edge - 2.0 * PI / 3.0 * (rp.powi(3) - (rp * rp - edge * edge).powf(1.5));
+    sag_volume(rf, s, 0.0, edge) - cap
+}
+
+/// The dished looks on the pressed dome: [`SpotLook::Dent`]'s three zones on the convex top and
+/// on the concave underside are each the closed-form solid between the face and the flat look's
+/// sphere placed at the point, each outside its sheet; [`SpotLook::MarksPinConcaveEnds`]' pin is
+/// the solid between the outer spheres within its radius less what each end's sphere takes (on
+/// the convex top it leaves the face inside the rim, on the concave underside it cuts the pin's
+/// wall down to the rim).
+#[test]
+fn on_a_dome_the_dished_looks_are_their_closed_form() {
+    let lower = dome(50.0, 51.5, 0.5);
+    let upper = dome(51.5, 52.5, 0.5);
+    let both: &[&Body] = &[&lower, &upper];
+    let dir = radial(0.25, 1.0);
+    let (face, p) = first_hit(&upper, dir.map(|v| 60.0 * v), dir.map(|v| -v));
+    let site = spot_site_curved(both, 1, face, p, D).unwrap();
+    // the dent's dish: 0.04 d high at the rim, 0.004 d in the middle
+    let (rim, middle) = (0.04 * D, 0.004 * D);
+    let radii = [0.0, 0.55 * D / 2.0, D / 2.0, 1.05 * D / 2.0];
+    let dent = spot_weld_on(both, &site, D, SpotLook::Dent.style()).unwrap();
+    assert_eq!(dent.len(), 6);
+    for (i, piece) in dent.iter().enumerate() {
+        // the first sheet is the picked one: its outer face (`Lower`) is the convex top
+        let (rf, s, sheet) = match piece.side {
+            SpotSide::Lower => (52.5, 1.0, &upper),
+            SpotSide::Upper => (50.0, -1.0, &lower),
+            SpotSide::Through => panic!("no pin in this look"),
+        };
+        let z = i % 3;
+        let (a, b) = (radii[z], radii[z + 1]);
+        close(volume(&piece.body), dish_zone(a, b, rim, middle, radii[3]) - sag_volume(rf, s, a, b), "dome dished zone");
+        assert!(boolean(&piece.body, sheet, BoolOp::Intersect).unwrap().is_none(), "dished mark {i} inside its sheet");
+        check(&piece.body, "dome dished zone");
+    }
+    let pinned = spot_weld_on(both, &site, D, SpotLook::MarksPinConcaveEnds.style()).unwrap();
+    let pin: Vec<_> = pinned.iter().filter(|x| x.zone == SpotZone::Inside).collect();
+    assert_eq!((pinned.len(), pin.len()), (7, 1));
+    // the pin's ends: the convex top in the picked sheet (1.0 thick), the concave underside in the other (1.5)
+    let r = D / 2.0;
+    let want = sphere_disc(50.0, 52.5, r) - dished_end(52.5, 1.0, r, 0.3 * 1.0) - dished_end(50.0, -1.0, r, 0.3 * 1.5);
+    close(volume(&pin[0].body), want, "dome pin with dished ends");
+    check(&pin[0].body, "dome pin with dished ends");
+}
+
+/// Dished marks on the inside of a small pipe (R 2): the face curves up into the dish's sphere,
+/// so the marks would dip under it; the diameter named clears and builds.
+#[test]
+fn dished_marks_a_concave_face_curves_into_are_refused_with_a_diameter_that_builds() {
+    let lower = shell(2.0, 2.8, 2.5);
+    let upper = shell(2.8, 3.6, 2.5);
+    let both: &[&Body] = &[&lower, &upper];
+    let dir = [1.25_f64.cos(), 1.25_f64.sin(), 0.0];
+    let (face, p) = first_hit(&lower, [0.0; 3], dir);
+    let d = 1.2;
+    let site = spot_site_curved(both, 0, face, p, d).unwrap();
+    let got = spot_weld_on(both, &site, d, SpotLook::Dent.style());
+    let Err(SpotRefusal::DishUnderFace { sheet: 0, diameter, fits, .. }) = got else {
+        panic!("{got:?}");
+    };
+    assert_eq!(diameter, d);
+    let fits = fits.expect("a smaller dish clears the face");
+    assert!(fits < d, "fits {fits}");
+    let site = spot_site_curved(both, 0, face, p, fits).unwrap();
+    let marks = spot_weld_on(both, &site, fits, SpotLook::Dent.style()).unwrap();
+    assert_eq!(marks.len(), 6);
+    for piece in &marks {
+        let sheet = if piece.side == SpotSide::Lower { &lower } else { &upper };
+        assert!(boolean(&piece.body, sheet, BoolOp::Intersect).unwrap().is_none(), "dished mark inside its sheet");
     }
 }
 
