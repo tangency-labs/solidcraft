@@ -3282,7 +3282,7 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 /// What a button job is called in its picker. No job on a long press means the short press's job.
-fn button_job_label(app: &SolveApp, long: bool, job: Option<&crate::space_mouse::ButtonJob>) -> String {
+pub fn button_job_label(app: &SolveApp, long: bool, job: Option<&crate::space_mouse::ButtonJob>) -> String {
     use crate::space_mouse::{ButtonJob, ButtonKey};
     match job {
         None if long => solidcraft_ui_text::tr("ui.3d_mouse_button_as_short").to_string(),
