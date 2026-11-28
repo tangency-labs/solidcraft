@@ -77,7 +77,8 @@ pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error 
     match error {
         Ops::WallsTouch => Error::WallsTouch,
         Ops::WallFolds { largest } => Error::WallFolds { largest },
-        Ops::Unsupported(_) => Error::Unsupported,
+        // what the kernel cannot handle, in its words, as the draft's refusals keep it (#22792)
+        error @ Ops::Unsupported(_) => Error::Refused(error),
         error @ Ops::OffsetRefused {
             why:
                 solidcore_ops::OffsetRefusal::Phrase { .. }

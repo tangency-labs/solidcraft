@@ -153,4 +153,26 @@ mod tests {
             crate::blend::chamfer_sides_carrying_face(&b, &edges[..1], 2.0, side, true).unwrap().record()
         );
     }
+
+    /// The draft and split entry points are the adapter's calls: the same records as calling
+    /// solidcore's directly.
+    #[test]
+    fn routed_drafts_and_splits_are_the_adapters() {
+        use solidcore_record::Plane;
+        let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap();
+        let side = [Vec3::new(20.0, 5.0, 5.0)];
+        assert_eq!(
+            draft(&b, &side, &Plane::XY, Vec3::Z, 0.1).unwrap().record(),
+            crate::polyhedron::draft(&b, &side, &Plane::XY, Vec3::Z, 0.1).unwrap().record()
+        );
+        let tool = crate::SplitTool::Plane(Plane { origin: Vec3::new(7.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z });
+        let routed: Vec<_> = split_body(&b, &tool).unwrap();
+        let direct: Vec<_> = crate::splitface::split_body(&b, &tool).unwrap();
+        assert_eq!(routed.len(), 2);
+        assert_eq!(routed.iter().map(|p| p.record()).collect::<Vec<_>>(), direct.iter().map(|p| p.record()).collect::<Vec<_>>());
+        let top = b.face_at(Vec3::new(10.0, 5.0, 10.0), 1e-6).unwrap();
+        let (r, rm) = split_faces_with_map(&b, &[top], &tool).unwrap();
+        let (d, dm) = crate::splitface::split_faces_with_map(&b, &[top], &tool).unwrap();
+        assert_eq!((r.record(), rm), (d.record(), dm));
+    }
 }
