@@ -267,3 +267,77 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
     }
     solidcraft_theme::set_dark(previous);
 }
+
+/// A ghost button has no frame until the pointer is over it: its explicit fill and stroke used to
+/// override `frame(false)` and draw a bordered box at rest (#22395).
+#[test]
+fn a_ghost_button_has_no_frame_at_rest_and_highlights_on_hover() {
+    use egui::{Event, Pos2, RawInput, Rect, Shape, vec2};
+    let ctx = crate::test_support::context();
+    solidcraft_theme::apply(&ctx);
+    let rect = Rect::from_min_size(egui::pos2(40.0, 40.0), vec2(24.0, 24.0));
+    let frames = |events: Vec<Event>| {
+        let mut output =
+            ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(200.0, 120.0))), events, ..Default::default() }, |ui| {
+                button_at(ui, "ghost", rect, "…", Button::Ghost);
+            });
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter(|clipped| match &clipped.shape {
+                Shape::Rect(frame) => frame.rect.intersects(rect) && (frame.fill.a() > 0 || frame.stroke.width > 0.0 && frame.stroke.color.a() > 0),
+                _ => false,
+            })
+            .count()
+    };
+    for _ in 0..2 {
+        assert_eq!(frames(vec![Event::PointerMoved(egui::pos2(180.0, 100.0))]), 0, "a ghost button at rest draws no frame");
+    }
+    let mut hovered = 0;
+    for _ in 0..2 {
+        hovered = frames(vec![Event::PointerMoved(rect.center())]);
+    }
+    assert!(hovered > 0, "a hovered ghost button still highlights");
+}
+
+/// An automatically sized ghost button keeps its layout when its border becomes visible.
+#[test]
+fn a_native_sized_ghost_button_keeps_its_size_on_hover() {
+    use egui::{Event, Pos2, RawInput, Rect, pos2, vec2};
+
+    let ctx = crate::test_support::context();
+    solidcraft_theme::apply(&ctx);
+    let frame = |pointer| {
+        let mut button_rect = Rect::NOTHING;
+        let mut neighbor_rect = Rect::NOTHING;
+        let mut hovered = false;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(260.0, 120.0))),
+            events: vec![Event::PointerMoved(pointer)],
+            ..Default::default()
+        };
+        raw_frame(&ctx, input, |ui| {
+            let widgets = &mut ui.style_mut().visuals.widgets;
+            widgets.noninteractive.bg_stroke.width = 1.0;
+            widgets.inactive.bg_stroke.width = 1.0;
+            widgets.hovered.bg_stroke.width = 1.0;
+            ui.horizontal(|ui| {
+                let response = button(ui, "Secondary action", Button::Ghost);
+                button_rect = response.rect;
+                hovered = response.hovered();
+                neighbor_rect = ui.label("Neighbor").rect;
+            });
+        });
+        (button_rect, neighbor_rect, hovered)
+    };
+
+    frame(pos2(250.0, 110.0));
+    let (rest, neighbor_at_rest, hovered) = frame(pos2(250.0, 110.0));
+    assert!(!hovered);
+    frame(rest.center());
+    let (on_hover, neighbor_on_hover, hovered) = frame(rest.center());
+    assert!(hovered);
+    assert_eq!(rest.size(), on_hover.size());
+    assert_eq!(neighbor_at_rest, neighbor_on_hover);
+}

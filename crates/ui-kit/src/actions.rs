@@ -126,6 +126,12 @@ fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Bu
         let state = response.as_ref().map(Response::widget_state).unwrap_or_default();
         appearance.stroke.width = ui.style().visuals.widgets.state(state).bg_stroke.width;
     }
+    let resting = response.as_ref().is_none_or(|r| !(r.hovered() || r.is_pointer_button_down_on() || r.has_focus()));
+    if matches!(tone, ButtonTone::Ghost) && resting {
+        // Keep the stroke width in layout while the idle frame is invisible (#22395).
+        appearance.fill = egui::Color32::TRANSPARENT;
+        appearance.stroke.color = egui::Color32::TRANSPARENT;
+    }
     egui::Button::new(label.color(appearance.ink)).fill(appearance.fill).stroke(appearance.stroke)
 }
 
