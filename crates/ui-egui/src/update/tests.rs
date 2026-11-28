@@ -937,6 +937,20 @@ fn release_notes_read_as_markdown() {
         ))
     );
     assert_eq!(b.get(5), Some(&Block::Paragraph(vec![Span::Text("See https://example.com/x.".into())])));
+    assert_eq!(
+        parse_markdown("<details>\n<summary>Install</summary>\n\nText\n\n</details>"),
+        vec![Block::Heading(vec![Span::Text("Install".into())]), Block::Paragraph(vec![Span::Text("Text".into())])]
+    );
+    assert_eq!(
+        parse_markdown("Before\n<details>\n<summary> **Install** </summary>  \n- Text\n</details>\n## Changes\nAfter"),
+        vec![
+            Block::Paragraph(vec![Span::Text("Before".into())]),
+            Block::Heading(vec![Span::Strong("Install".into())]),
+            Block::Item(0, vec![Span::Text("Text".into())]),
+            Block::Heading(vec![Span::Text("Changes".into())]),
+            Block::Paragraph(vec![Span::Text("After".into())]),
+        ]
+    );
     // Unclosed markers and odd input show as written, without panicking.
     for s in ["**open", "`tick", "[a](b", "[a]", "#", "- ", "é**", "https://github.com/", "**[x](y)**"] {
         let _ = parse_markdown(s);

@@ -1339,7 +1339,8 @@ pub enum Block {
 
 /// The Markdown GitHub release notes use, enough to read them: headings, paragraphs (soft line
 /// breaks joined), `-`/`*` lists, `|` tables, `**strong**`, `` `code` ``, `[links](…)` and bare
-/// pull-request URLs (shown as `#123`, linking to them). Anything else shows as written.
+/// pull-request URLs (shown as `#123`, linking to them). Disclosure tags are displayed as
+/// an expanded section, with the summary as a heading. Other HTML shows as written.
 pub fn parse_markdown(src: &str) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut para = String::new();
@@ -1356,8 +1357,11 @@ pub fn parse_markdown(src: &str) -> Vec<Block> {
     for line in src.lines() {
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || matches!(trimmed.trim_end(), "<details>" | "</details>") {
             flush(&mut blocks, &mut para, &mut item);
+        } else if let Some(s) = trimmed.trim_end().strip_prefix("<summary>").and_then(|s| s.strip_suffix("</summary>")) {
+            flush(&mut blocks, &mut para, &mut item);
+            blocks.push(Block::Heading(inline(s.trim())));
         } else if let Some(row) = trimmed.strip_prefix('|') {
             flush(&mut blocks, &mut para, &mut item);
             let row = row.trim_end().strip_suffix('|').unwrap_or(row);
