@@ -590,12 +590,17 @@ pub fn picked_sides(ss: &SolvedSketch, picked: &[usize], skip: &[bool]) -> Vec<V
     if sides.iter().all(Vec::is_empty) { Vec::new() } else { sides }
 }
 
-/// The sides saved for loop `k` of a curve pick, when the pick saved one per loop.
+/// The sides saved for loop `k` of a curve pick, when the pick saved one per loop and they name
+/// exactly that loop's curves.
 fn saved_sides<'a>(loops: &[Vec<String>], sides: &'a [Vec<SidedCurve>], k: usize) -> Option<&'a [SidedCurve]> {
     if sides.len() != loops.len() {
         return None;
     }
-    sides.get(k).map(Vec::as_slice).filter(|sided| !sided.is_empty())
+    let curves: BTreeSet<&str> = loops.get(k)?.iter().map(String::as_str).collect();
+    sides
+        .get(k)
+        .map(Vec::as_slice)
+        .filter(|sided| !sided.is_empty() && sided.iter().map(|side| side.curve.as_str()).collect::<BTreeSet<_>>() == curves)
 }
 
 /// The one profile that lies on the same sides of the same curves as `sided`; none, or several,

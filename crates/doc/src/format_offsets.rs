@@ -98,7 +98,22 @@ fn validate_curve_sides(value: &Value, sides: &Value) -> Result<()> {
     if sided.is_empty() {
         return Ok(());
     }
-    validate_sided_reference(&serde_json::json!({"type": "sided_curves", "loops": sided}))
+    validate_sided_reference(&serde_json::json!({"type": "sided_curves", "loops": sided}))?;
+    // Each loop's sides name exactly the curves of that loop, so they can't pick a region the
+    // loop's curves don't bound.
+    for (curves, loop_sides) in loops.iter().zip(sides) {
+        let named = loop_sides.as_array().ok_or_else(invalid)?;
+        if named.is_empty() {
+            continue;
+        }
+        let curves =
+            curves.as_array().ok_or_else(invalid)?.iter().map(|curve| curve.as_str().ok_or_else(invalid)).collect::<Result<BTreeSet<_>>>()?;
+        let named = named.iter().map(|sided| sided.get("curve").and_then(Value::as_str).ok_or_else(invalid)).collect::<Result<BTreeSet<_>>>()?;
+        if curves != named {
+            return Err(invalid());
+        }
+    }
+    Ok(())
 }
 
 fn validate_whole_reference(value: &Value) -> Result<()> {
@@ -414,6 +429,9 @@ mod tests {
             json!([[{"curve":"c1","side":"inside"},{"curve":"c1","side":"outside"}],[]]),
             json!([[], 3]),
             json!("inside"),
+            // Sides that name curves the loop doesn't have, or miss one of its curves.
+            json!([[{"curve":"other","side":"inside"}],[]]),
+            json!([[{"curve":"c1","side":"inside"}],[{"curve":"l1","side":"left"}]]),
         ] {
             assert!(validate_raw(&pick(bad.clone())).is_err(), "accepted {bad}");
         }

@@ -4373,7 +4373,7 @@ fn freeze_offset_profiles(doc: &mut solidcraft_doc::Document, sketch: u64, bound
                     *selection = ProfileSel::Curves { loops, sides: Vec::new() };
                 }
                 ProfileSel::Curves { loops, sides } => {
-                    for ids in loops {
+                    for (k, ids) in loops.iter_mut().enumerate() {
                         work = work.saturating_add(ids.len());
                         if work > 1_000_000 {
                             return Err(bad(cmd, "too many downstream curve references to freeze safely"));
@@ -4383,10 +4383,15 @@ fn freeze_offset_profiles(doc: &mut solidcraft_doc::Document, sketch: u64, bound
                             sorted.sort();
                             if sorted == reserved_sorted {
                                 *ids = active.clone();
-                                // The saved sides name the old roles.
-                                sides.clear();
+                                // This loop's saved sides name the old roles; other loops keep theirs.
+                                if let Some(entry) = sides.get_mut(k) {
+                                    entry.clear();
+                                }
                             }
                         }
+                    }
+                    if sides.iter().all(Vec::is_empty) {
+                        sides.clear();
                     }
                 }
                 _ => {}

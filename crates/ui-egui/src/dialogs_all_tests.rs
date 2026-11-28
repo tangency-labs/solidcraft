@@ -57,6 +57,35 @@ fn profile_refill_of_sided_twins_follows_a_change_of_the_regions() {
     assert_eq!(refilled, at(&h, &picks[1..]), "the lens and the crescent's two halves");
 }
 
+/// A region picked by a point is saved by its curves and the sides it lies on (#23291). When a
+/// change makes a twin bounded by the same curves, the dialog refills with the region the feature
+/// builds: a circle of radius 10, a fixed line through it, and a circle of radius r2 at (3, 10)
+/// that crosses the line on r2 = 4 mm.
+#[test]
+fn profile_refill_of_a_curve_pick_follows_its_sides_when_a_change_makes_a_twin() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name": "r2", "expression": "2 mm"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "s"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "c1", "fixed": true})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, -15], [0, 15]]})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "l1", "fixed": true})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [3, 10], "radius": 2})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities": ["c2"], "type": "diameter", "value": "2*r2"})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity": "c2.center", "fixed": true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let made = h.app.run("solid.extrude", json!({"sketch": sketch, "profiles": [{"point": [5, 0]}], "distance": 2})).unwrap();
+    let feature = made["feature"].as_u64().unwrap();
+    h.app.run("parameters.change", json!({"name": "r2", "expression": "4 mm"})).unwrap();
+    let Some(FeatureKind::Extrude { profiles, .. }) = h.app.session.doc.feature(feature).map(|f| f.kind.clone()) else { panic!("an extrude") };
+    assert!(matches!(&profiles, ProfileSel::Curves { sides, .. } if !sides.is_empty()), "{profiles:?}");
+    let state = h.app.session.world_state().unwrap();
+    let ss = state.sketch(sketch).unwrap();
+    let here = solidcraft_engine::doc::sketch::profile_at_point(&ss.profiles, solidcore_record::Vec2::new(5.0, 0.0)).unwrap();
+    assert_eq!(profile_indices(ss, &profiles), vec![here]);
+}
+
 #[test]
 fn profile_refill_resolves_each_region_once_for_extrude_and_sweep() {
     for command in ["solid.extrude", "solid.sweep"] {
