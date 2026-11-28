@@ -230,6 +230,12 @@ impl Rigid {
             Surface::RationalSpline { homogeneous, .. } => homogeneous.iter().flatten().all(|h| self.stored_homogeneous_fits(*h)),
             Surface::PlacedRevolution { matrix, .. } => self.placement_fits(matrix),
             Surface::Blend { .. } => true,
+            // A sweep's profile and axis point move; its axis, law direction and numbers that
+            // are not coordinates stay within the ceiling.
+            Surface::Sweep { definition } => {
+                let SweepMotion::Screw { origin, .. } = &definition.motion;
+                self.curve_fits(&definition.profile) && self.stored_point_fits(*origin)
+            }
         }
     }
 
