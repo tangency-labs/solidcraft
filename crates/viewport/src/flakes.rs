@@ -159,7 +159,7 @@ fn flake_tangent(n: Vec3) -> Result<Vec3, SurfaceError> {
     let mut sum = Vec3::ZERO;
     for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
         let projected = axis - n * axis.dot(n);
-        sum = sum + projected * projected.len();
+        sum += projected * projected.len();
     }
     match sum.normalized() {
         Some(tangent) => Ok(tangent),

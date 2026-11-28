@@ -1152,7 +1152,15 @@ impl Task {
         let cache_key = scene::PreparedKey::from_scene(&scene, request.camera.target, options.nested_media, &cancel)?;
         let cached_scene = context.lookup_or_evict_prepared_scene(&cache_key);
         let (fresh_upload, active_glass_model, epsilon, root_node, photon_guide, photon_bounds, flakes) = if let Some(prepared) = &cached_scene {
-            (None, prepared.active_glass_model, prepared.epsilon, prepared.root_node, prepared.photon_guide, prepared.photon_bounds, prepared.flakes.clone())
+            (
+                None,
+                prepared.active_glass_model,
+                prepared.epsilon,
+                prepared.root_node,
+                prepared.photon_guide,
+                prepared.photon_bounds,
+                prepared.flakes.clone(),
+            )
         } else {
             let upload = scene::flatten_with_media(&scene, request.camera.target, &cancel, options.nested_media)?;
             let flakes = scene::flake_parameters(&upload.flakes, request.camera.target)?;
