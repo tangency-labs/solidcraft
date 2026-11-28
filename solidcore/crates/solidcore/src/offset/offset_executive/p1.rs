@@ -257,6 +257,14 @@ pub struct OffsetExecutive {
     /// edge uses ([`Self::keep_unmoved_edges`]).
     pub(super) kept_edges: BTreeSet<EdgeId>,
     pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the original face uses of a local operation whose face keeps its
+    /// surface and every edge and vertex unchanged ([`Self::keep_unmoved_edges`]).
+    pub(super) kept_faceuses: BTreeSet<FaceuseId>,
+    /// Not upstream (#22806): the kept offset faces of a local operation whose
+    /// `extend_result_faces_prefix` extension exceeded the extended domain and restored
+    /// the original surface (with UV trims removed), so `resolve_crossing_loops_of_face`
+    /// skips them until `restore_kept_edges` puts the original edges and trims back.
+    pub(super) kept_extension_restored: BTreeSet<FaceId>,
     /// Not upstream: the uses of the original edges of a local operation where the two new
     /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
     crossing_edgeuses: BTreeSet<EdgeuseId>,
@@ -351,6 +359,8 @@ impl OffsetExecutive {
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
+            kept_faceuses: BTreeSet::new(),
+            kept_extension_restored: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             collapsed_displacements: Vec::new(),
@@ -515,23 +525,50 @@ impl OffsetExecutive {
     pub(super) fn keep_unmoved_edges(&mut self, original: &Brep) -> Result<()> {
         self.kept_edges.clear();
         self.kept_edgeuses.clear();
+        self.kept_faceuses.clear();
+        self.kept_extension_restored.clear();
         if self.operation != OffsetOperation::LocalOperation {
             return Ok(());
         }
+        let local_faces = &self.local_faces;
+        let moved_faces = &self.moved_faces;
+        let keeps_surface = |f: &FaceId| local_faces.contains(f) && !moved_faces.contains(f);
         for e in bp1::edges(original, None)? {
             let mut faces = edge::faces(original, e, None)?;
             let (start, end) = vertex::edge_vertex_pair(original, e)?;
             for v in [start, end].into_iter().flatten() {
                 faces.extend(vertex::faces(original, v)?);
             }
-            let keeps_surface =
-                |f: &FaceId| self.local_faces.contains(f) && !self.moved_faces.contains(f);
             if faces.is_empty() || !faces.iter().all(keeps_surface) {
                 continue;
             }
             self.kept_edges.insert(e);
             self.kept_edgeuses
                 .extend(edge::edgeuses(original, e, None, None)?);
+        }
+        for f in bp1::faces(original, None)? {
+            if !keeps_surface(&f) {
+                continue;
+            }
+            if !face_edges(original, f)?
+                .iter()
+                .all(|e| self.kept_edges.contains(e))
+            {
+                continue;
+            }
+            let mut all_vertices_kept = true;
+            for v in face_vertices(original, f)? {
+                if !vertex::faces(original, v)?.iter().all(keeps_surface) {
+                    all_vertices_kept = false;
+                    break;
+                }
+            }
+            if !all_vertices_kept {
+                continue;
+            }
+            let (primary, mate) = face::faceuses(original, f)?;
+            self.kept_faceuses
+                .extend([primary, mate].into_iter().flatten());
         }
         Ok(())
     }
@@ -540,6 +577,25 @@ impl OffsetExecutive {
     /// own curves ([`Self::keep_unmoved_edges`]).
     pub(super) fn keeps_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
         self.kept_edgeuses.contains(&edgeuse)
+    }
+
+    /// Not upstream: whether offset face `face` came wholly from original faces that keep
+    /// their surfaces and every edge and vertex unchanged ([`Self::keep_unmoved_edges`]),
+    /// so its original surface and edges are restored if extension fails with
+    /// [`OffsetFailure::TrimPastExtension`].
+    pub(super) fn is_kept_offset_face(&self, face: FaceId) -> bool {
+        if self.operation != OffsetOperation::LocalOperation || self.inverted_faces.contains(&face)
+        {
+            return false;
+        }
+        let sources = self.faceuse_to_faces.firsts(face);
+        !sources.is_empty() && sources.iter().all(|fu| self.kept_faceuses.contains(fu))
+    }
+
+    /// Not upstream (#22806): whether `extend_result_faces_prefix` restored kept offset
+    /// face `face` to its original surface after [`OffsetFailure::TrimPastExtension`].
+    pub(super) fn is_kept_extension_restored(&self, face: FaceId) -> bool {
+        self.kept_extension_restored.contains(&face)
     }
 
     /// Not upstream: whether the new surfaces of a local operation cross along the edge of
@@ -737,6 +793,7 @@ impl OffsetExecutive {
         self.mated_edgeuses.clear();
         self.unreached_edgeuses.clear();
         self.wall_extensions.clear();
+        self.kept_extension_restored.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -1154,6 +1211,52 @@ impl OffsetExecutive {
             }
             forget_seconds(&mut self.edgeuse_to_edgeuses, &gone, Some(&live))?;
             self.forget_faces(&gone_faces)?;
+        }
+        Ok(())
+    }
+
+    /// A face of the offset replaced by `fragments` (a cancellation's remainders, a
+    /// repaired face): each place of `old` in the face maps, and its closing role, passes
+    /// to every fragment, and `old` goes from them. With no fragment the face is only
+    /// forgotten.
+    pub(super) fn replace_face_relations(
+        &mut self,
+        old: FaceId,
+        fragments: &[FaceId],
+    ) -> Result<()> {
+        for original in self.faceuse_to_faces.firsts(old) {
+            self.faceuse_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.faceuse_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for original in self.edge_to_faces.firsts(old) {
+            self.edge_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.edge_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for original in self.vertex_to_faces.firsts(old) {
+            self.vertex_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.vertex_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for blended in self.blend_to_faces.seconds(old) {
+            self.blend_to_faces.remove_pair(old, blended)?;
+            for &new in fragments {
+                self.blend_to_faces.relate_pair(new, blended)?;
+            }
+        }
+        for blend in self.blend_to_faces.firsts(old) {
+            self.blend_to_faces.remove_pair(blend, old)?;
+            for &new in fragments {
+                self.blend_to_faces.relate_pair(blend, new)?;
+            }
+        }
+        if self.closing_faces.contains(&old) {
+            self.closing_faces.retain(|&f| f != old);
+            self.closing_faces.extend_from_slice(fragments);
         }
         Ok(())
     }
@@ -4029,6 +4132,7 @@ mod tests {
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::geom::vector2d::Vec2;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::surface::extend::Continuity;
@@ -4859,6 +4963,7 @@ mod tests {
         executive.keep_unmoved_edges(&brep).unwrap();
         assert!(executive.kept_edges.is_empty());
         assert!(executive.kept_edgeuses.is_empty());
+        assert!(executive.kept_faceuses.is_empty());
 
         let surfaces = faces
             .iter()
@@ -4884,6 +4989,8 @@ mod tests {
         assert_eq!(executive.kept_edges, expected);
         // each edge has four uses: two per face, one on each of its face uses
         assert_eq!(executive.kept_edgeuses.len(), 16);
+        // only the single face opposite `moved` keeps all its edges and vertices: 2 face uses
+        assert_eq!(executive.kept_faceuses.len(), 2);
     }
 
     /// The reach's edge bounds ([`super::super::reach::EdgeBounds`]) live for one local
@@ -6920,12 +7027,12 @@ mod tests {
             panic!("a box's top is a plane");
         };
         let q = *plane.position();
-        let (s, c) = (deg * PI / 180.0).sin_cos();
+        let (s, c) = det::sin_cos(deg * PI / 180.0);
         let (x, y) = (
             q.x_axis() * c + q.y_axis() * s,
             q.y_axis() * c - q.x_axis() * s,
         );
-        let (ts, tc) = (2.0 * PI / 180.0).sin_cos();
+        let (ts, tc) = det::sin_cos(2.0 * PI / 180.0);
         let tilt = |v: Vec3| Vec3::new(v.x, tc * v.y - ts * v.z, ts * v.y + tc * v.z);
         let given = Surface::from(Plane::new(
             q.origin() + Vec3::Z,

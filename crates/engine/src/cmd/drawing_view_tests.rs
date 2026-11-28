@@ -3867,7 +3867,8 @@ fn section_of(
 
 /// A section view lists and inspects as a section of its parent, follows its parent's settings and
 /// keeps its own editable, copies alone as a section of the same parent, and its sheet draws it with
-/// its other views. A dimension on it inspects with no layout and isn't dragged.
+/// its other views. A dimension on a drawn full section view inspects with its layout and drags; on
+/// a section view not drawn yet (shaded, or a half section), it has no layout and isn't dragged.
 #[test]
 fn a_section_view_inspects_copies_and_draws() {
     let (mut s, [front, ..]) = three_views();
@@ -3893,7 +3894,10 @@ fn a_section_view_inspects_copies_and_draws() {
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
     let state = |id: u64| scene["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(id))).unwrap().clone();
     assert_eq!((&state(cut)["status"], &state(front)["status"]), (&json!("drawn"), &json!("drawn")), "{scene}");
-    // A dimension moved onto it by hand has no layout (dimensions don't read section views yet), and isn't dragged.
+    // On the drawn 1:1 full section at (150, 60) of the 100 x 50 x 10 cut block (span [100, 200] x
+    // [35, 85]), the y = 0 edge sits at paper y = 35: a dimension on it inspects with its layout
+    // (the offset -10 the add on the front view chose -> line at y = 25) and drags to put its 3.5 mm text centred on (150, 40) (lift
+    // 1 + 1.75 = 2.75 above the line -> line at y = 37.25, offset +2.25).
     let edge = json!({"point": [50, 0, 0], "path": []});
     let dimension = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"length": {"edge": edge}}}));
     let id = ids::decode(dimension["dimension"].as_str().unwrap()).unwrap();
@@ -3904,12 +3908,47 @@ fn a_section_view_inspects_copies_and_draws() {
     })
     .unwrap();
     let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension["dimension"]}));
-    assert_eq!((read.get("layout"), &read["layout_why"]), (None, &json!(crate::drawing_scene::NOT_DRAWN)), "{read}");
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-    let dragged = json!({"dimension": dimension["dimension"], "set": {"text_to_mm": [150, 40]}});
-    let e = s.execute("drawing.dimension.edit", &dragged).unwrap_err().to_string();
-    assert!(e.contains(crate::drawing_scene::NOT_DRAWN), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    assert!(read.get("layout").is_some() && read.get("layout_why").is_none(), "{read}");
+    let line = &read["layout"]["dimension_lines"][0];
+    assert!((point(&line[0]) - Vec2::new(100.0, 25.0)).len() < EPS && (point(&line[1]) - Vec2::new(200.0, 25.0)).len() < EPS, "{read}");
+    let edited = run(&mut s, "drawing.dimension.edit", json!({"dimension": dimension["dimension"], "set": {"text_to_mm": [150, 40]}}));
+    assert_eq!(edited["changed"], json!(["offset_mm", "text"]), "{edited}");
+    let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension["dimension"]}));
+    assert_eq!(
+        (&read["record"]["offset_mm"], &read["record"]["text"], read.get("layout_why")),
+        (&json!(2.25), &json!({"at": [0.0, -20.0]}), None),
+        "{read}"
+    );
+    let line = &read["layout"]["dimension_lines"][0];
+    assert!((point(&line[0]) - Vec2::new(100.0, 37.25)).len() < EPS && (point(&line[1]) - Vec2::new(200.0, 37.25)).len() < EPS, "{read}");
+    let text_box = &read["layout"]["text_boxes"][0];
+    let text_centre = (point(&text_box[0]) + point(&text_box[2])) * 0.5;
+    assert!((text_centre - Vec2::new(150.0, 40.0)).len() < EPS, "{read}");
+    assert!((point(&text_box[0]).y - 38.25).abs() < EPS && (point(&text_box[2]).y - 41.75).abs() < EPS, "{read}");
+    // On an undrawn section view (shaded, or a half section), it has no layout and isn't dragged.
+    let half = section_of(
+        &mut s,
+        front,
+        solidcraft_doc::drawing::cutting_line::SectionKind::Half,
+        &[[-40.0, 10.0], [50.0, 10.0], [50.0, 30.0]],
+        solidcraft_doc::drawing::cutting_line::ArrowSide::Right,
+    );
+    edit_view(&mut s, cut, json!({"visual_style": "shaded"}));
+    for undrawn in [cut, half] {
+        s.edit_drawing(EDIT, |d| {
+            let at = d.dimensions.iter().position(|r| r.id == id).unwrap();
+            Arc::make_mut(&mut d.dimensions[at]).view = undrawn;
+            Ok(())
+        })
+        .unwrap();
+        let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension["dimension"]}));
+        assert_eq!((read.get("layout"), &read["layout_why"]), (None, &json!(crate::drawing_scene::NOT_DRAWN)), "{read}");
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let dragged = json!({"dimension": dimension["dimension"], "set": {"text_to_mm": [150, 30]}});
+        let e = s.execute("drawing.dimension.edit", &dragged).unwrap_err().to_string();
+        assert!(e.contains(crate::drawing_scene::NOT_DRAWN), "{e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    }
 }
 
 /// Saved view `id` as its sheet draws it: what it shows, its extents and its lines at its scale,
@@ -5131,6 +5170,31 @@ fn a_shafts_thread_is_seen_from_the_side() {
     let limits: Vec<(Vec2, Vec2)> = thread_segs(&v, "limit", "visible").iter().map(top_first).collect();
     assert_eq!(limits.len(), 1, "{v}");
     assert!((limits[0].0.y - 148.5).abs() < 1e-6 && (limits[0].0.dist(limits[0].1) - 8.0).abs() < 1e-6, "{v}");
+}
+
+/// #23145: a thread offset from its end stops inside its face at both ends, so it has a limit line
+/// at each. The same shaft and view as above (paper y = 138.5 + z): M8, offset 4 and length 10
+/// from the top runs z 16 down to 6, its roots y 144.5 to 154.5 with a limit line, the major
+/// diameter long, at each.
+#[test]
+fn an_offset_shaft_thread_has_a_limit_line_at_each_end() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "length": 10, "offset": 4, "from": [4, 0, 20]}));
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    let minor = 4.0 - 5.0 * (1.25 * 3f64.sqrt() / 2.0) / 8.0;
+    let mut roots: Vec<(Vec2, Vec2)> = thread_segs(&v, "root", "visible").iter().map(top_first).collect();
+    roots.sort_by(|p, q| p.0.x.total_cmp(&q.0.x));
+    assert_eq!(roots.len(), 2, "{v}");
+    for ((top, bottom), x) in roots.iter().zip([210.0 - minor, 210.0 + minor]) {
+        assert!(top.dist(Vec2::new(x, 154.5)) < 1e-6 && bottom.dist(Vec2::new(x, 144.5)) < 1e-6, "{top:?} {bottom:?} {v}");
+    }
+    let mut limits: Vec<(Vec2, Vec2)> = thread_segs(&v, "limit", "visible").iter().map(top_first).collect();
+    limits.sort_by(|p, q| p.0.y.total_cmp(&q.0.y));
+    assert_eq!(limits.len(), 2, "{v}");
+    for ((a, b), y) in limits.iter().zip([144.5, 154.5]) {
+        assert!((a.y - y).abs() < 1e-6 && (b.y - y).abs() < 1e-6 && (a.dist(*b) - 8.0).abs() < 1e-6, "{a:?} {b:?} {v}");
+    }
 }
 
 /// `s`'s front view at 1:2 ([`three_views_of`]) and a full section of it along the line through

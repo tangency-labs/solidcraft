@@ -8508,3 +8508,143 @@ fn what_the_design_hides_leaves_an_open_sketch_alone() {
     let hidden = s.design_hidden();
     assert!(hidden.hides(&[placed], "Plate") && !hidden.hides(&[], "Plate"), "by its placement's path");
 }
+
+/// A vertical bore and a cross bore. Front and top SVG must contain no two-point path
+/// shorter than 1e-3 mm, and each view must still draw a straight edge longer than 5 mm. The
+/// sheet border is outside the view groups, so it does not count.
+#[test]
+fn odd_angle_cross_bores_export_no_sub_micron_stroke() {
+    let mut cases = Vec::new();
+    for degrees in [0.0_f64, 15.0, 30.0, 45.0, 60.0, 77.0, 89.5, 89.999] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 32, "base": [20, 15, -1], "operation": "cut", "targets": ["Block"]}));
+        let a = f64::to_radians(degrees);
+        let (cos_a, sin_a) = (a.cos(), a.sin());
+        let base = [20.0 - 40.0 * cos_a, 15.0 - 40.0 * sin_a, 10.0];
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"diameter": 4, "height": 80, "axis": [cos_a, sin_a, 0.0], "base": base, "operation": "cut", "targets": ["Block"]}),
+        );
+        cases.push((format!("a={degrees}"), cross_bore_sheet_strokes(s)));
+    }
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 12, "height": 10, "base": [20, 15, 20], "operation": "join", "targets": ["Block"]}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 32, "base": [20, 15, -1], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 42, "base": [-1, 15, 8], "axis": "X", "operation": "cut", "targets": ["Block"]}));
+    cases.push(("boss".to_string(), cross_bore_sheet_strokes(s)));
+
+    let report = cases
+        .iter()
+        .map(|(label, (short, edges))| format!("{label}: {short} two-point paths shorter than 1e-3 mm; both views keep an edge over 5 mm: {edges}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let clean = cases.iter().all(|(_, (short, edges))| *short == 0 && *edges);
+    assert!(
+        clean,
+        "a cross-drilled block's front and top SVG must have no two-point path shorter than 1e-3 mm, and each view must keep a straight edge longer than 5 mm:\n{report}"
+    );
+}
+
+/// Front and top SVG of `design`: how many two-point paths in the whole export are shorter than
+/// 1e-3 mm, and whether both view groups (not the sheet border) contain a straight run over 5 mm.
+fn cross_bore_sheet_strokes(design: Session) -> (usize, bool) {
+    let (mut s, sheet, views) = front_and_top_of(design);
+    let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet), "format": "svg"}));
+    let svg = export["svg"].as_str().unwrap();
+    let mut short = 0;
+    for piece in svg.split(" d=\"").skip(1) {
+        let Some((d, _)) = piece.split_once('"') else { continue };
+        if cross_bore_two_point_length(d).is_some_and(|len| len < 1e-3) {
+            short += 1;
+        }
+    }
+    let views_with_edge = views
+        .into_iter()
+        .filter(|view| {
+            let marker = format!("<g data-object=\"{view}\" data-kind=\"view\">\n");
+            let Some((_, rest)) = svg.split_once(&marker) else { return false };
+            let Some((group, _)) = rest.split_once("</g>") else { return false };
+            group.split(" d=\"").skip(1).any(|piece| piece.split_once('"').is_some_and(|(d, _)| cross_bore_straight_length(d) > 5.0))
+        })
+        .count();
+    (short, views_with_edge == 2)
+}
+
+/// `M<x> <y>L<x> <y>` and nothing else: its length in paper mm. Digits, an optional minus and an
+/// optional fraction, as the SVG writer emits them.
+fn cross_bore_two_point_length(d: &str) -> Option<f64> {
+    let rest = d.strip_prefix('M')?;
+    let (x0, y0, rest) = cross_bore_xy(rest)?;
+    let rest = rest.strip_prefix('L')?;
+    let (x1, y1, rest) = cross_bore_xy(rest)?;
+    rest.is_empty().then_some((x1 - x0).hypot(y1 - y0))
+}
+
+/// Length of the straight pieces of `d` (`L`, and `Z` back to the subpath start). An arc or curve
+/// stops the measure; the sheet border and the block edges are straight.
+fn cross_bore_straight_length(d: &str) -> f64 {
+    let mut rest = d;
+    let mut total = 0.0;
+    let mut pen: Option<(f64, f64)> = None;
+    let mut start: Option<(f64, f64)> = None;
+    while let Some(cmd) = rest.chars().next() {
+        match cmd {
+            'M' | 'L' => {
+                let Some((x, y, next)) = cross_bore_xy(&rest[cmd.len_utf8()..]) else { break };
+                if cmd == 'L' {
+                    if let Some((px, py)) = pen {
+                        total += (x - px).hypot(y - py);
+                    }
+                } else {
+                    start = Some((x, y));
+                }
+                pen = Some((x, y));
+                rest = next;
+            }
+            'Z' | 'z' => {
+                if let (Some((px, py)), Some((sx, sy))) = (pen, start) {
+                    total += (sx - px).hypot(sy - py);
+                }
+                pen = start;
+                rest = &rest[cmd.len_utf8()..];
+            }
+            _ => break,
+        }
+    }
+    total
+}
+
+/// One SVG point: `<x> <y>`.
+fn cross_bore_xy(s: &str) -> Option<(f64, f64, &str)> {
+    let (x, s) = cross_bore_svg_number(s)?;
+    let s = s.strip_prefix(' ')?;
+    let (y, s) = cross_bore_svg_number(s)?;
+    Some((x, y, s))
+}
+
+/// A number as the SVG writer emits it: an optional minus, digits, and an optional fraction.
+fn cross_bore_svg_number(s: &str) -> Option<(f64, &str)> {
+    let bytes = s.as_bytes();
+    let mut i = usize::from(bytes.first() == Some(&b'-'));
+    let whole = i;
+    while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+        i += 1;
+    }
+    if i == whole {
+        return None;
+    }
+    if bytes.get(i) == Some(&b'.') {
+        i += 1;
+        let frac = i;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i == frac {
+            return None;
+        }
+    }
+    s[..i].parse().ok().map(|n| (n, &s[i..]))
+}

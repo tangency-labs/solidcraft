@@ -65,8 +65,62 @@ pub enum ClassifiedPoint {
     },
 }
 
+/// What the centres of round items lie on, seen along their shared axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpacingPattern {
+    /// One straight line: a row.
+    Line,
+    /// One circle and not one line: a bolt circle.
+    Circle,
+    /// Neither.
+    None,
+}
+
+/// The circle a bolt circle's centres lie on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PitchCircle {
+    /// The pitch-circle diameter.
+    pub diameter: f64,
+    /// Its centre, in the plane of the first item's centre.
+    pub centre: [f64; 3],
+    /// The angle at the centre between neighbours, in degrees, one for each gap.
+    pub angles_deg: Vec<f64>,
+    /// Where the gaps are even: the angle between neighbouring items, in degrees.
+    pub angle_pitch_deg: Option<f64>,
+}
+
+/// The spacing of round items that share one axis direction ([`Points::hole_spacing`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoleSpacing {
+    /// What the centres lie on.
+    pub pattern: SpacingPattern,
+    /// The items' indices in order along the row or round the circle; the given order where
+    /// they lie on neither.
+    pub order: Vec<usize>,
+    /// The centre-to-centre distance of each neighbouring pair in `order`. A circle has one
+    /// more, from the last item back to the first.
+    pub gaps: Vec<f64>,
+    /// The two centres each gap lies between, in the plane of the first item's centre.
+    pub gap_points: Vec<[[f64; 3]; 2]>,
+    /// The distance from the first centre in `order` to the last.
+    pub span: f64,
+    /// Whether every gap is the same.
+    pub even: bool,
+    /// The gaps' mean where they are even; otherwise the gap most of the others equal, and
+    /// none where no two gaps are the same.
+    pub pitch: Option<f64>,
+    /// The gaps (indices into `gaps`) that differ from `pitch`.
+    pub odd_gaps: Vec<usize>,
+    /// The circle of a bolt circle.
+    pub circle: Option<PitchCircle>,
+}
+
 /// The points and picks of one kernel ([`crate::OpKind::Points`]).
 pub trait Points: Backend {
+    /// The spacing of round items, each its centre and its axis direction: holes along a row or
+    /// round a bolt circle, measured centre to centre in the plane square to the axis. Refused
+    /// for fewer than two items, axes that are not parallel and two items on one centre.
+    fn hole_spacing(&self, items: &[([f64; 3], [f64; 3])]) -> Result<HoleSpacing, PointsRefused>;
     /// The distance from `a` to `b`, with its proved rounding bound.
     fn point_distance(&self, a: [f64; 3], b: [f64; 3]) -> Result<Distance, PointsRefused>;
     /// Whether `a` and `b` meet: their rounded distance is not more than `tol`.

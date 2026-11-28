@@ -1674,6 +1674,7 @@ pub(crate) fn add_span_with_policy(
 mod tests {
     use super::*;
     use crate::geom::extent2d::Extent2d;
+    use crate::math::det;
     use crate::surface::plane::Plane;
 
     fn plane() -> Surface {
@@ -1742,7 +1743,7 @@ mod tests {
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         // The exact line v = 1 - 2^-20 u approaches the boundary obliquely.
         // Its whole polygon is inside, including the endpoint on v = 1.
-        let slope = 2.0_f64.powi(-20);
+        let slope = det::powi(2.0_f64, -20);
         let tangent = Vec2::new(1.0, -slope);
         let a = pt(0.0, Point2::new(0.0, 1.0), tangent);
         let b = pt(0.5, Point2::new(0.5, 1.0 - slope / 2.0), tangent);

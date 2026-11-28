@@ -18,6 +18,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::surface::face_pair::OutwardPlane;
 
 const MEET: &str = "surface::mid_joint::planes_meeting";
@@ -60,7 +61,7 @@ pub fn planes_meeting(
     let (ua, ub) = (a.outward.unitize()?, b.outward.unitize()?);
     let along = ua.cross(ub);
     let sine_squared = along.length_squared();
-    let tol = kernel.tolerances.ang_tol_rad().sin();
+    let tol = det::sin(kernel.tolerances.ang_tol_rad());
     // Parallel within the angular tolerance, or to working precision (no direction to unitize).
     if sine_squared <= tol * tol || sine_squared < crate::math::EFF_ZERO_SQ {
         return Ok(None);
@@ -95,7 +96,7 @@ fn crossing(
 ) -> Result<Option<Point3>> {
     let n = d.cross(e);
     let n2 = n.length_squared();
-    let sine = kernel.tolerances.ang_tol_rad().sin();
+    let sine = det::sin(kernel.tolerances.ang_tol_rad());
     if n2 <= sine * sine {
         return Ok(None);
     }
@@ -171,7 +172,7 @@ pub fn move_edge_onto_line(
     let (k, k1) = (edge, next(edge, n));
     let (a, b) = (corner(k)?, corner(k1)?);
     let along = line.direction.unitize()?;
-    let sine = kernel.tolerances.ang_tol_rad().sin();
+    let sine = det::sin(kernel.tolerances.ang_tol_rad());
     if (b - a).unitize()?.cross(along).length() > sine {
         return Ok(None);
     }
@@ -274,13 +275,13 @@ mod tests {
         // through (1, 0, 0) along z, which is its point nearest the origin. (1 - c^2 rounds to
         // 0 here, and the old form gave the origin, 1 off the first plane.)
         let a = plane(v(1.0, 0.0, 0.0), v(1.0, 0.0, 0.0));
-        let b = plane(v(1.0, 0.0, 0.0), v(1.0, 2.0_f64.powi(-27), 0.0));
+        let b = plane(v(1.0, 0.0, 0.0), v(1.0, det::powi(2.0_f64, -27), 0.0));
         let line = planes_meeting(&k, &a, &b).unwrap().unwrap();
         assert!((line.point - v(1.0, 0.0, 0.0)).length() < 1e-12, "{line:?}");
         assert!(line.direction.z.abs() > 1.0 - 1e-12, "{line:?}");
         // Whatever the tilt down to the last bits, a line given lies on both planes.
         for e in 20..=60 {
-            let t = 2.0_f64.powi(-e);
+            let t = det::powi(2.0_f64, -e);
             let c = plane(v(3.0, -7.0, 2.0), v(1.0, 1.0, 0.0));
             let d = plane(v(-5.0, 4.0, 9.0), v(1.0 + t, 1.0, 0.0));
             if let Some(l) = planes_meeting(&k, &c, &d).unwrap() {

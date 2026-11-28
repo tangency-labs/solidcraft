@@ -22,6 +22,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 
 const OP: &str = "surface::face_pair_cylinder::facing_cylinders";
 
@@ -85,7 +86,7 @@ pub fn facing_cylinders(
     let tol = kernel.tolerances;
     // One axis: parallel within the angular tolerance, and the second axis line through the first
     // axis's point (the shared axis reported), whichever point represents the second axis.
-    if ua.cross(ub).length() > tol.ang_tol_rad().sin() {
+    if ua.cross(ub).length() > det::sin(tol.ang_tol_rad()) {
         return Ok(None);
     }
     if (a.axis_point - b.axis_point).cross(ub).length() > tol.zone_tol_3d {

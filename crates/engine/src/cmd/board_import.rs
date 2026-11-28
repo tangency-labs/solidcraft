@@ -545,7 +545,7 @@ pub(super) fn run(s: &mut Session, id: &str, p: &Value) -> Result<Value> {
 }
 
 /// A length for a message: at most three decimals, without trailing zeros.
-fn mm(v: f64) -> String {
+pub(super) fn mm(v: f64) -> String {
     let t = format!("{v:.3}");
     let t = t.trim_end_matches('0').trim_end_matches('.');
     if t == "-0" { "0".to_string() } else { t.to_string() }

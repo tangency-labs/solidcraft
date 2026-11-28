@@ -2,6 +2,7 @@
 //!
 //! Deviations: no upstream counterpart. No recursion.
 
+use crate::math::det;
 use std::collections::BTreeMap;
 
 use crate::kernel::Kernel;
@@ -152,13 +153,13 @@ fn arc(points: &[Vec2], circle: Circle, tolerance: f64, epsilon: f64) -> Option<
     let mut sign = 0.;
     for (&a, &b) in points.iter().zip(points.iter().skip(1)) {
         let (a, b) = (a - center, b - center);
-        let angle = a.cross(b).atan2(a.dot(b));
+        let angle = det::atan2(a.cross(b), a.dot(b));
         if sign == 0. {
             sign = angle.signum();
         }
         if angle * sign <= 0.
             || angle.abs() > std::f64::consts::PI / 6. + 1e-8
-            || radius * (1. - (angle / 2.).cos()) + residual + epsilon * 10. > tolerance
+            || radius * (1. - det::cos(angle / 2.)) + residual + epsilon * 10. > tolerance
         {
             return None;
         }
@@ -168,7 +169,7 @@ fn arc(points: &[Vec2], circle: Circle, tolerance: f64, epsilon: f64) -> Option<
     Some(Seg2::Arc {
         center,
         radius,
-        start: p.y.atan2(p.x),
+        start: det::atan2(p.y, p.x),
         sweep,
     })
 }
@@ -308,8 +309,8 @@ fn fitted(points: &[Vec2], models: &[Circle], tolerance: f64, epsilon: f64) -> L
                 sweep,
                 ..
             } => {
-                let start = (a - *center).y.atan2((a - *center).x);
-                let end = (b - *center).y.atan2((b - *center).x);
+                let start = det::atan2((a - *center).y, (a - *center).x);
+                let end = det::atan2((b - *center).y, (b - *center).x);
                 let angle = if *sweep > 0. {
                     (end - start).rem_euclid(std::f64::consts::TAU)
                 } else {
@@ -403,8 +404,8 @@ fn certified(points: &[Vec2], curves: &[Seg2], tolerance: f64) -> bool {
             let mut angles = Vec::new();
             for p in points {
                 let d = *p - *center;
-                let mut angle =
-                    ((d.y.atan2(d.x) - start) * sweep.signum()).rem_euclid(std::f64::consts::TAU);
+                let mut angle = ((det::atan2(d.y, d.x) - start) * sweep.signum())
+                    .rem_euclid(std::f64::consts::TAU);
                 if angle > std::f64::consts::TAU - angular {
                     angle -= std::f64::consts::TAU;
                 }

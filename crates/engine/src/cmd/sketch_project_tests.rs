@@ -3904,7 +3904,7 @@ fn a_saved_traced_whole_body_profile_rebuilds_with_the_exact_projection() {
         let solidcraft_doc::FeatureKind::Extrude { profiles, .. } = &s.doc.find_feature("Pad").unwrap().kind else {
             panic!("Pad must remain an extrude");
         };
-        let solidcraft_doc::ProfileSel::Curves { loops } = profiles else { panic!("Pad must retain its saved curve IDs") };
+        let solidcraft_doc::ProfileSel::Curves { loops, .. } = profiles else { panic!("Pad must retain its saved curve IDs") };
         assert_eq!(loops.len(), 1);
         // The rebuilt sketch cannot resolve the saved IDs directly: the migrated reference
         // must identify the exact outline, rather than extruding the unchanged old trace.

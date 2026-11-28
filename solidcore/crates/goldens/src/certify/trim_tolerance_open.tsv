@@ -1,17 +1,10 @@
 # unit	case	body	edge	class	sampled gap (diagnostic, not a bound)	new tolerance
 topology.brep_local_operation	gen0031	0	39	face-bound-loose	-	-
 topology.brep_local_operation	fc0000	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0000	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	fc0006	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0006	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	fc0008	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0008	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	fc0025	0	89	line-trim	-	1e-5
-topology.brep_local_operation	fc0025	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	gen0014	0	2	loose-raise	-	8.901612908474592e-5
-topology.brep_mirror	mat0019	0	46	loose-raise	-	1.7091295435254202e-3
-topology.brep_mirror	mat0049	0	46	loose-raise	-	1.7004360860211109e-3
-topology.brep_mirror	mat0094	0	46	loose-raise	-	1.7004360860307453e-3
 primitive.api_primitives	gen0195	0	1	no-estimate	-	1e-05
 primitive.api_primitives	gen0195	0	3	no-estimate	-	1e-05
 primitive.api_primitives	gen0195	0	5	no-estimate	-	1e-05
