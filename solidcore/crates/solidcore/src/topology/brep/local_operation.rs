@@ -3782,8 +3782,8 @@ mod tests {
                 (b, round, Surface::from(s.unwrap()), round)
             }),
             // the split block's piece x < 30 turned 0.02 rad about the split line and raised
-            // 1, on its own plane so moved: the gap the bridge would join is in the loop of
-            // its twin, the top piece x > 30
+            // 1, on its own plane so moved: the planes meet on a line 50 away, so the body
+            // built there is refused; `twin` is the top piece x > 30
             ("turned piece", |k| {
                 use crate::geom::axis2_placement::Axis2Placement;
                 let (b, piece) = split_block_piece(k);
@@ -3844,15 +3844,30 @@ mod tests {
                 crate::error::ErrorKind::Unsupported,
                 "{name}: {e}"
             );
-            assert!(
-                matches!(
-                    e.failure().map(|f| &f.reason),
-                    Some(crate::error::Reason::Offset(
-                        OffsetFailure::LoopGapUncertified { face: refused }
-                    )) if *refused == Some(at)
-                ),
-                "{name}: {e}"
-            );
+            if name == "round" {
+                assert!(
+                    matches!(
+                        e.failure().map(|f| &f.reason),
+                        Some(crate::error::Reason::Offset(
+                            OffsetFailure::LoopGapUncertified { face: refused }
+                        )) if *refused == Some(at)
+                    ),
+                    "{name}: {e}"
+                );
+            } else {
+                // the turned piece's plane meets its twin's at a real line, 50 away, so the
+                // bridge is not what refuses it: the body built on that line fails its check
+                // where the input did not
+                assert!(
+                    matches!(
+                        e.failure().map(|f| &f.reason),
+                        Some(crate::error::Reason::Offset(OffsetFailure::Unsound {
+                            what: crate::error::offset::Unsoundness::Check { .. }
+                        }))
+                    ),
+                    "{name}: {e}"
+                );
+            }
             assert!(format!("{b:?}") == before, "{name}: the input changed");
             assert!(stores.0 .0 == stores.1 .0, "{name}: the records changed");
             assert!(stores.0 .1 == stores.1 .1, "{name}: the attributes changed");

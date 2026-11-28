@@ -4,8 +4,8 @@
 //! it and the round is dropped across the 1 mm gap between them. Upstream ignores that
 //! ("will be fixed later") and returns a body with an edge as loose as the gap; here the
 //! local operation is refused. A split block's top piece turned and raised off its
-//! coplanar twin reaches the refusal of the loose edge itself
-//! (`OffsetFailure::LooseTangentEdge`).
+//! coplanar twin meets its twin's plane in a real line off the piece, so that is refused
+//! as a vanishing edge (`OffsetFailure::EdgeVanishes`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -139,12 +139,13 @@ fn split_block(k: &mut Kernel) -> Brep {
 /// The split block's top piece x < 30 given its own plane turned by -0.02 rad about the
 /// split line (x = 30, z = 20) and raised 1: the piece's new plane is 1 above its twin
 /// along their tangent edge, and not parallel to it, so no step wall closes the gap
-/// (their normals differ by 0.02) and the planes, falling away from the edge, never meet
-/// over it. The edge, lifted onto the piece's plane and dropped onto its twin's, lands
-/// about 1 away: the local operation is refused by name
-/// ([`OffsetFailure::LooseTangentEdge`]), the input as it came in.
+/// (their normals differ by 0.02). The two planes cross in a real line 50 away, on the
+/// twin's side, since an angular tangency tolerance does not make intersecting planes
+/// parallel; lifting the edge onto the piece would move its ends past each other, so the
+/// local operation is refused as a vanishing edge
+/// ([`OffsetFailure::EdgeVanishes`]), the input as it came in.
 #[test]
-fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_loose() {
+fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_a_vanishing_edge() {
     use solidcore::error::offset::OffsetFailure;
     use solidcore::error::Reason;
     use solidcore::geom::axis2_placement::Axis2Placement;
@@ -186,48 +187,23 @@ fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_loose()
     )
     .unwrap_err();
     drop(notifications);
-    let Some(Reason::Offset(OffsetFailure::LooseTangentEdge {
-        edge: Some(edge),
-        max_drop_to_surf,
-        meet_tol,
-    })) = e.failure().map(|f| &f.reason)
-    else {
-        panic!("not the loose tangent edge, by name: {e}");
-    };
-    // the refusal carries the size it measured and the limit it was held to: the
-    // piece turned 0.02 rad and raised 1 lands well off its twin's plane
-    assert!(*meet_tol > 0.0 && *meet_tol < 1e-2, "{meet_tol}");
-    assert!(
-        *max_drop_to_surf > *meet_tol,
-        "{max_drop_to_surf} {meet_tol}"
-    );
-    let says = e.to_string();
-    assert!(says.contains(&format!("{max_drop_to_surf:e}")), "{says}");
-    assert!(says.contains(&format!("{meet_tol:e}")), "{says}");
-    // the refusal names the input's tangent edge between the piece and its twin, along
-    // the split line
-    let mut faces = solidcore::topology::edge::faces(&b, *edge, None).unwrap();
-    faces.sort();
-    assert_eq!(faces.len(), 2, "{faces:?}");
-    assert!(faces.contains(&piece), "{faces:?}");
-    for v in [
-        solidcore::topology::edge::start_vertex(&b, *edge)
-            .unwrap()
-            .unwrap(),
-        solidcore::topology::edge::end_vertex(&b, *edge)
-            .unwrap()
-            .unwrap(),
-    ] {
-        let p = b.vertex(v).unwrap().point;
-        assert!(
-            (p.x - 30.0).abs() < 1e-9 && (p.z - 20.0).abs() < 1e-9,
-            "{p:?}"
-        );
-    }
+    // the piece's plane and its twin's cross at a real line 50 away, on the twin's side, so
+    // lifting the edge onto the piece moves its ends past each other: the edge would vanish
     assert_eq!(
-        e.failure().and_then(|f| f.reason.entity()),
-        Some(solidcore::error::EntityRef::Edge(*edge))
+        e.kind(),
+        solidcore::error::ErrorKind::OffsetEdgeVanishes,
+        "{e}"
     );
-    assert_eq!(e.sm_status(), Some(SM_ERR));
+    assert!(
+        matches!(
+            e.failure().map(|f| &f.reason),
+            Some(Reason::Offset(OffsetFailure::EdgeVanishes { .. }))
+        ),
+        "{e}"
+    );
+    assert_eq!(
+        e.sm_status(),
+        Some(solidcore::error::SM_ERR_OFFSET_EDGE_VANISHES)
+    );
     assert_eq!(format!("{b:?}"), before, "refused, the input as it came in");
 }
