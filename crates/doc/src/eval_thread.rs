@@ -282,6 +282,13 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         })
         .ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
     let mb = st.bodies.get(bi).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+    // A bore that a cut across it split (a cross hole) is one cylinder in pieces: a Thread runs
+    // along all of them, as it does when it was made before the cut (#23507), and a pick on any
+    // piece is the same thread. A tapped hole lists its wall's pieces itself (#13505).
+    let cyl = match (ask.tapped, pieces_span(&mb.body, &cyl)) {
+        (false, Some((start, end))) => kernel::CylinderFace { start, end, ..cyl },
+        _ => cyl,
+    };
     let dia = cyl.radius * 2.0;
     let form = match (ask.form, ask.designation.and_then(ThreadForm::of_designation)) {
         // Saved Threads without a form predate Unified support and must keep their metric
@@ -571,6 +578,39 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         .filter(|g| !(g.root_r - cyl.radius >= g.basic_depth / 4.0))
         .map(|g| g.crest_r);
     Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side, narrow, shoulder_unchecked: unchecked })
+}
+
+/// The axial extent, in `cyl`'s coordinates, of every face of `body` on `cyl`'s cylinder, when it
+/// has more than one (a bore a cross hole cut into pieces); `None` for a single face. Each
+/// piece's extent is read from its exact outline and mapped onto `cyl`'s axis by the kernel.
+fn pieces_span(body: &kernel::Body, cyl: &kernel::CylinderFace) -> Option<(f64, f64)> {
+    use kernel::services::face_pair::{CylinderFace, axial_range_in};
+    if body.is_mesh() {
+        return None;
+    }
+    let region = body.exact_bounds().ok()?;
+    let tol = (body.size() * 1e-6).max(1e-6);
+    let picked = kernel::FaceSurface::Cylinder { origin: cyl.axis_point, axis: cyl.axis, radius: cyl.radius };
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let host = CylinderFace { axis_point: arr(cyl.axis_point), axis: arr(*cyl.axis), radius: cyl.radius, material_toward_axis: !cyl.internal };
+    let q = solidcraft_develop::Query::new(body.record());
+    let (mut count, mut lo, mut hi) = (0usize, f64::INFINITY, f64::NEG_INFINITY);
+    for f in 0..body.record().faces.len() {
+        let Some(s @ kernel::FaceSurface::Cylinder { origin, axis, radius }) = kernel::face_surface(body, f) else { continue };
+        if !kernel::same_surface(&picked, &s, tol * 100.0, &region) {
+            continue;
+        }
+        // The piece's extent along its own axis, from its outline in its own chart.
+        let chart = crate::sheet_surface_convert::cylinder_chart(body, &q, f, tol)?;
+        let (mut a, mut b) = (f64::INFINITY, f64::NEG_INFINITY);
+        for p in chart.outer.polyline(tol) {
+            (a, b) = (a.min(p.x), b.max(p.x));
+        }
+        let own = CylinderFace { axis_point: arr(origin), axis: arr(*axis), radius, material_toward_axis: !cyl.internal };
+        let [x0, x1] = axial_range_in(&host, &own, [a, b]).ok()?;
+        (count, lo, hi) = (count + 1, lo.min(x0), hi.max(x1));
+    }
+    (count > 1 && lo < hi).then_some((lo, hi))
 }
 
 /// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
