@@ -5554,6 +5554,7 @@ mod tests {
             ("ribbon_menus_skip_pinned", "prefs.layout_page.pinned_menus"),
             ("ribbon_menus_follow_hover", "prefs.layout_page.hover_panel_menus"),
             ("pinned_constraints_in_grid", "prefs.pinned_constraints_in_grid"),
+            ("browser_instances_list_contents", "prefs.browser_instances_list_contents"),
         ];
         // A fractional display scale (#16542) as well as whole points.
         for (width, scale) in [(1600, 1.0), (1500, 1.75), (1100, 1.0), (960, 1.25), (800, 1.0), (640, 1.5)] {
@@ -7665,6 +7666,7 @@ mod tests {
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
             ("browser_fold_other_components", json!(true), PAGE_LAYOUT),
+            ("browser_instances_list_contents", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("origin_plane_scale", json!(2.0), PAGE_DESIGN),

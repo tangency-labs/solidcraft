@@ -183,6 +183,7 @@ fn find_in_tree(app: &mut SolveApp, body: &str) {
     app.tree.reveal = Some(body.to_string());
     remember_reveal_source(app, body);
     let Some((component, source, path)) = body_placement(app, body) else { return };
+    app.tree.shown_instance = Some(path.clone());
     open_found_item_rows(app, component, &path, "bodies", &source);
     app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
 }
@@ -215,6 +216,8 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
             None => return,
         }
     };
+    // That placement lists its contents even when it is a further one (#21458).
+    app.tree.shown_instance = Some(path.clone());
     open_found_item_rows(app, component, &path, "construction", &id.to_string());
 }
 
@@ -243,6 +246,9 @@ fn find_occurrence_in_tree(app: &mut SolveApp, path: &[u64]) {
 pub(crate) fn forget_found(app: &mut SolveApp) {
     app.tree.found_rows.clear();
     app.tree.found = None;
+    // A Find in Timeline still to land in this design keeps its placement listing its Features,
+    // so the row it asks for is drawn and scrolled to.
+    app.tree.shown_instance = app.tree.reveal_feature.as_ref().map(|r| r.path.clone()).filter(|path| !path.is_empty());
 }
 
 /// The placement a body (by its world name) is in: its component, its name in that component and
@@ -326,6 +332,10 @@ pub struct TreeState {
     found_rows: Vec<(String, bool)>,
     /// What the last Find in Browser found, until the selection changes.
     found: Option<Found>,
+    /// The placement the last find (Find in Browser, a pick in the 3D view, Find in Timeline)
+    /// reached into: a further placement of a component lists its contents while it is this one,
+    /// so the find has a row to land on (#21458).
+    pub(crate) shown_instance: Option<Vec<u64>>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
     /// The search above the tree (#1413).
@@ -2239,6 +2249,18 @@ fn occurrence_rows_inner(
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
     let link = app.tree.links.get(placement.component).cloned();
+    // A further placement of a component lists its own placements and joints but not the
+    // component's contents, which its first placement lists (#21458), unless Preferences › Layout ›
+    // Every placement lists its contents. A search lists what it finds under every placement, and
+    // the active placement and the one the last find reached into list theirs. Render lists every
+    // placement's bodies, a further one's too, as each takes its own look.
+    let bare = placement.instance_of.is_some()
+        && !crate::render_workspace::active(app)
+        && !app.preferences.browser_instances_list_contents
+        && app.tree.search.hits().is_none()
+        && app.session.active_occurrence_path.as_deref() != Some(path)
+        && app.tree.shown_instance.as_deref() != Some(path);
+    let empty = bare && placement.children.is_empty() && crate::dialogs_assembly::placement_joints(&app.session.doc, path).is_empty();
     let badges: &[&str] = if placement.grounded { &["pin"] } else { &[] };
     let emphasis = app.tree.search.hits().filter(|_| matches).and_then(|h| h.span(&placement.label));
     app.tree.remember(key);
@@ -2250,7 +2272,7 @@ fn occurrence_rows_inner(
     };
     let row = Row {
         depth,
-        fold: folds.then_some(open),
+        fold: (folds && !empty).then_some(open),
         eye: Some(own_visible),
         icon: "component",
         label: &placement.label,
@@ -2265,6 +2287,7 @@ fn occurrence_rows_inner(
         radio: Some(active),
         badges,
         icon_badge: link.as_ref().map(|link| link.icon_badge()),
+        icon_badge_beside: placement.instance_of.as_ref().map(|_| instance_badge()),
         emphasis,
         mark: if selected { Mark::Here } else { acts.lit.placement(&app.session.doc, path, placement.component) },
         status: cache.defects.get(&placement.component).map(|_| Status::Warning),
@@ -2311,6 +2334,9 @@ fn occurrence_rows_inner(
         let inherited = if own_visible && !visible { "\nHidden by a parent placement. Show the parent to reveal this instance." } else { "" };
         resp.clone().backing_on_hover_ui(|ui| {
             ui.label(&placement.tooltip);
+            if let Some((component, first)) = &placement.instance_of {
+                ui.label(solidcraft_ui_text::format("ui.browser_instance_of", &[("component", component), ("placement", first)]));
+            }
             if let Some(link) = &link {
                 ui.label(link.tooltip());
             }
@@ -2390,22 +2416,24 @@ fn occurrence_rows_inner(
             ),
         }
     }
-    if !open || !folds {
+    if !open || !folds || empty {
         return;
     }
     let render = crate::render_workspace::active(app);
-    if !render {
+    if !render && !bare {
         origin_rows_at(app, rows, depth + 1, acts, path);
     }
     for (slot, folder) in placement.folders.iter_mut().zip(["bodies", "sketches", "construction"]) {
-        if render && folder != "bodies" {
+        if bare || (render && folder != "bodies") {
             continue;
         }
         let data = slot.get_or_insert_with(|| cache.folder(app, placement.component, Some(path), folder));
         folder_rows_at(app, rows, placement.component, Some(path), folder, depth + 1, acts, data);
     }
     if !render {
-        features::rows(app, rows, placement.component, path, depth + 1, acts);
+        if !bare {
+            features::rows(app, rows, placement.component, path, depth + 1, acts);
+        }
         // The joints that attach this placement, as the root's Joints folder lists them (#9130).
         if let Some(joint) = crate::dialogs_assembly::component_joints(app, rows, path, key, depth + 1) {
             acts.hover_joint = Some(joint);
@@ -2416,6 +2444,13 @@ fn occurrence_rows_inner(
             occurrence_rows(app, rows, child, depth + 1, acts, cache);
         }
     }
+}
+
+/// The badge on a further placement's icon (#21458): two squares, one behind the other, on a quiet
+/// disc, so a link badge beside it keeps the accent.
+pub(crate) fn instance_badge() -> crate::ui_kit::IconBadge<'static> {
+    let t = Tokens::get();
+    crate::ui_kit::IconBadge { glyph: "instance", fill: t.hover, ink: t.text, outlined: false }
 }
 
 /// The Document Settings group. A second click on an entry closes the window it opened, the way

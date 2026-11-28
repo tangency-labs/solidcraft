@@ -2233,19 +2233,96 @@ fn a_double_click_after_a_slow_click_edits_instead_of_renaming() {
     assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the second double-click edits too");
 }
 
-/// A component's body placed twice appears as two Browser rows.
+/// #21458: a component placed three times lists its contents once, under its first placement; the
+/// others carry an instance badge and say where the contents are. Preferences › Layout › Every
+/// placement lists its contents puts a body row under each placement again, as before.
 #[test]
-fn the_browser_lists_one_body_per_placement() {
-    let (mut h, _, _) = crate::test_support::component_box();
+fn a_components_further_placements_are_instances_that_list_its_contents_once() {
+    let (mut h, component, occurrence) = crate::test_support::component_box();
     h.app.preferences.browser_components_open = true;
     h.settle();
-    h.app.run("occurrence.copy", json!({"component": "Block", "translate": [0, 40, 0]})).unwrap();
+    for y in [40, 80] {
+        h.app.run("occurrence.copy", json!({"component": "Block", "translate": [0, y, 0]})).unwrap();
+    }
     h.settle();
-    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2);
-    // One body row under each placement's row, both labelled with the body's own name.
-    let rows = drawn_rows();
-    let body_rows = rows.iter().filter(|(label, ..)| label == "Body1").count();
-    assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
+    let body_rows = || drawn_rows().iter().filter(|(label, ..)| label == "Body1").count();
+    let placements = drawn_occurrences();
+    assert_eq!(placements.len(), 3, "{placements:?}");
+    assert_eq!(body_rows(), 1, "only the first placement lists the body: {:?}", drawn_rows());
+    assert_eq!(h.app.session.doc.first_path(component), vec![occurrence]);
+    let cache = h.app.tree.cache.as_ref().expect("the Browser's rows");
+    for (path, name, ..) in &placements {
+        let node = cache.occurrences.get(path).expect("a cached placement row");
+        if *path == [occurrence] {
+            assert_eq!(node.instance_of, None, "{name} is the component's own placement");
+        } else {
+            assert_eq!(node.instance_of, Some(("Block".to_string(), "Block:1".to_string())), "{name} copies Block:1");
+        }
+    }
+    let tip = solidcraft_ui_text::format("ui.browser_instance_of", &[("component", "Block"), ("placement", "Block:1")]);
+    assert_eq!(tip, "Instance of Block. Its contents are listed under Block:1.");
+    assert_eq!(instance_badge().glyph, "instance");
+
+    // Find in Browser on a further placement's body lists that placement's contents, so the find
+    // lands on the body's row.
+    let last = placements.iter().map(|(path, ..)| path.clone()).find(|path| *path != [occurrence]).expect("a further placement");
+    let body = h.app.session.occurrence_bodies(&last, false).unwrap()[0].clone();
+    reveal_body(&mut h.app, &body);
+    h.frames(3);
+    assert!(h.app.tree.reveal.is_none(), "the found body's row was drawn and scrolled to");
+    assert_eq!(body_rows(), 2, "the first placement's and the found one's: {:?}", drawn_rows());
+
+    // Find in Timeline on that body, with another design shown and this one back before its row
+    // is drawn: forgetting the last find keeps the placement the request is for listing its
+    // contents, so the Features row it asks for is drawn.
+    let state = h.app.session.world_state().unwrap();
+    let face = solidcraft_engine::doc::naming::face_names(state.body(&body).unwrap()).first().cloned().expect("a named face");
+    let feature: u64 = face.trim_start_matches('F').split(':').next().and_then(|id| id.parse().ok()).expect("the face's feature");
+    crate::browser::reveal_feature(&mut h.app, feature, &body);
+    crate::browser::forget_found(&mut h.app);
+    assert_eq!(h.app.tree.shown_instance.as_deref(), Some(&last[..]), "the request's placement still lists its contents");
+    h.frames(3);
+    assert!(h.app.tree.reveal_feature.is_none(), "the feature's row was drawn and scrolled to");
+
+    // The old listing: one body row per placement, the badge kept.
+    assert_eq!(h.call("ui.prefs", json!({"browser_instances_list_contents": true}))["ok"], true);
+    h.settle();
+    assert_eq!(body_rows(), 3, "a body row per placement: {:?}", drawn_rows());
+    assert_eq!(h.call("ui.prefs", json!({"browser_instances_list_contents": false}))["ok"], true);
+    h.settle();
+    assert_eq!(body_rows(), 2, "the placement the find reached into still lists its body");
+
+    // Render lists every placement's bodies, each taking its own look.
+    h.app.tree.shown_instance = None;
+    crate::render_workspace::enter(&mut h.app, true).expect("the Render workspace");
+    // Tall enough for the Render folders and every placement's rows.
+    h.call("ui.resize", json!({"width": 1400, "height": 1400}));
+    h.settle();
+    assert_eq!(body_rows(), 3, "a body row per placement in Render: {:?}", drawn_rows());
+}
+
+/// #21458: every placement of a linked component is a copy of the other file and none is its
+/// original, so a further placement keeps its link badge alone and lists its contents.
+#[test]
+fn a_linked_components_further_placements_carry_no_instance_badge() {
+    let mut h = Harness::new();
+    let part = h.dir.join("part.solidcraft");
+    let mut source = solidcraft_engine::Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    let inserted = h.app.run("component.insert_design", json!({"path": part})).unwrap();
+    let component = inserted["component"].as_u64().unwrap();
+    h.app.run("occurrence.copy", json!({"component": component, "translate": [0, 40, 0]})).unwrap();
+    h.app.preferences.browser_components_open = true;
+    h.settle();
+    assert!(h.app.session.doc.links.contains_key(&component), "the component is linked");
+    let placements = drawn_occurrences();
+    assert_eq!(placements.len(), 2, "{placements:?}");
+    let cache = h.app.tree.cache.as_ref().expect("the Browser's rows");
+    for (path, name, ..) in &placements {
+        assert_eq!(cache.occurrences.get(path).expect("a cached placement row").instance_of, None, "{name} is a linked copy, no instance");
+    }
 }
 
 /// Frames until the link badges' answer is back.

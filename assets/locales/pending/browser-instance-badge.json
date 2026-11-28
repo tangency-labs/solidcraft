@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.browser_instances_list_contents": "Every placement lists its contents",
+    "prefs.browser_instances_list_contents_note": "Each placement of a component lists the component's bodies, sketches and features in the Browser, as before, instead of only its first placement.",
+    "ui.browser_instance_of": "Instance of {component}. Its contents are listed under {placement}."
+  },
+  "de": {
+    "prefs.browser_instances_list_contents": "Jede Platzierung listet ihren Inhalt",
+    "prefs.browser_instances_list_contents_note": "Jede Platzierung einer Komponente listet im Browser deren Körper, Skizzen und Features wie bisher, statt nur ihre erste Platzierung.",
+    "ui.browser_instance_of": "Instanz von {component}. Der Inhalt steht unter {placement}."
+  },
+  "ko": {
+    "prefs.browser_instances_list_contents": "모든 배치에 내용 나열",
+    "prefs.browser_instances_list_contents_note": "컴포넌트의 첫 번째 배치만이 아니라 모든 배치가 이전처럼 브라우저에 컴포넌트의 바디, 스케치, 피처를 나열합니다.",
+    "ui.browser_instance_of": "{component}의 인스턴스입니다. 내용은 {placement} 아래에 나열됩니다."
+  },
+  "ar": {
+    "prefs.browser_instances_list_contents": "كل موضع يسرد محتوياته",
+    "prefs.browser_instances_list_contents_note": "يسرد كل موضع للمكوّن أجسامه ورسوماته التخطيطية وميزاته في المستعرض كما كان من قبل، بدلًا من موضعه الأول فقط.",
+    "ui.browser_instance_of": "نسخة من {component}. محتوياته مدرجة تحت {placement}."
+  },
+  "he": {
+    "prefs.browser_instances_list_contents": "כל מיקום מציג את התוכן שלו",
+    "prefs.browser_instances_list_contents_note": "כל מיקום של רכיב מציג בדפדפן את הגופים, הסקיצות והתכונות של הרכיב, כמו בעבר, במקום רק המיקום הראשון שלו.",
+    "ui.browser_instance_of": "מופע של {component}. התוכן שלו מופיע תחת {placement}."
+  },
+  "ja": {
+    "prefs.browser_instances_list_contents": "すべての配置に内容を表示",
+    "prefs.browser_instances_list_contents_note": "コンポーネントの最初の配置だけでなく、すべての配置が以前と同様にブラウザーでコンポーネントのボディ、スケッチ、フィーチャーを表示します。",
+    "ui.browser_instance_of": "{component} のインスタンスです。内容は {placement} の下に表示されます。"
+  },
+  "vi": {
+    "prefs.browser_instances_list_contents": "Mọi vị trí đặt đều liệt kê nội dung",
+    "prefs.browser_instances_list_contents_note": "Mỗi vị trí đặt của một thành phần liệt kê các khối, bản phác thảo và tính năng của thành phần trong Trình duyệt như trước đây, thay vì chỉ vị trí đặt đầu tiên.",
+    "ui.browser_instance_of": "Phiên bản của {component}. Nội dung của nó được liệt kê dưới {placement}."
+  },
+  "zh": {
+    "prefs.browser_instances_list_contents": "每个放置都列出其内容",
+    "prefs.browser_instances_list_contents_note": "组件的每个放置都像以前一样在浏览器中列出组件的实体、草图和特征，而不是只有第一个放置列出。",
+    "ui.browser_instance_of": "{component} 的实例。其内容列在 {placement} 下。"
+  }
+}

@@ -688,6 +688,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         key: "browser_body_features",
                         value: |p| &mut p.browser_body_features,
                     },
+                    // Whether a component's further placements list its contents again (#21458).
+                    Check {
+                        label: "prefs.browser_instances_list_contents",
+                        help: "prefs.browser_instances_list_contents_note",
+                        key: "browser_instances_list_contents",
+                        value: |p| &mut p.browser_instances_list_contents,
+                    },
                 ],
             );
         });
