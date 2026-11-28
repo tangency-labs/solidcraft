@@ -636,7 +636,7 @@ fn app_bar_displacement_changes_paint_only_and_skips_resizing_and_appearing_item
     assert_eq!(render(0.35, 510.0, 900.0, true).0.min, previous.min, "retargeting starts where the last frame was painted");
     assert_eq!(render(0.55, 510.0, 900.0, true).0.left(), 510.0);
     let key = motion_key(&ctx);
-    assert!(!ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().active));
+    assert!(!ctx.data(|data| { data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().active }));
 }
 
 #[test]
@@ -1087,6 +1087,7 @@ static VIEW_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::n
         crate::Item::sep(),
         crate::Item::action("vothers", "Close other views", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
         crate::Item::action("vright", "Close views to the right", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
+        crate::Item::action("view.compass", "Compass", ""),
     ]
 });
 static PLUS_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
@@ -1173,6 +1174,8 @@ struct TabsRig {
     ctx: egui::Context,
     time: std::cell::Cell<f64>,
     screen_height: f32,
+    compass: [Option<bool>; 3],
+    layout_details: bool,
     /// The first design has the three [`VIEWS`], shown as sub-tabs (`Some(true)`) or behind a
     /// switcher (`Some(false)`); the strip then has more room.
     views: Option<bool>,
@@ -1210,6 +1213,8 @@ impl TabsRig {
             ctx: crate::test_support::context(),
             time: std::cell::Cell::new(0.0),
             screen_height: 400.0,
+            compass: [None; 3],
+            layout_details: false,
             views,
             room: None,
             single_view: false,
@@ -1246,6 +1251,9 @@ impl TabsRig {
         let tab =
             |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[], collapsed: false };
         let mut views = VIEWS;
+        for (view, compass) in views.iter_mut().zip(self.compass) {
+            view.compass = compass;
+        }
         if self.detached {
             views[1].to_window = Some(1);
             views[1].window_name = Some("Window 2");
@@ -1259,7 +1267,22 @@ impl TabsRig {
             &[]
         };
         let first = DocTab { views, collapsed: self.collapsed.get(), ..tab(self.name) };
-        let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
+        let mut layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
+        if self.layout_details
+            && let Some(data) = &mut layout
+        {
+            data.link = "both".into();
+            data.can_link = false;
+            data.text.this_window = "This window".into();
+            data.text.link = "Link cameras".into();
+            data.text.off = "Off".into();
+            data.text.orientation = "Orientation".into();
+            data.text.zoom = "Zoom".into();
+            data.text.both = "Both".into();
+            for window in &mut data.windows {
+                window.display = Some(format!("Display {}", window.id + 1));
+            }
+        }
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
             tabs: if self.pop_out { vec![first] } else { vec![first, tab("Two"), tab("Three")] },
@@ -1298,7 +1321,7 @@ impl TabsRig {
             layout_current: "layout.single",
             layout_tip: "Layout",
             layout_fill: "fill.angle",
-            layout_fill_heading: "",
+            layout_fill_heading: "Empty cells show",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
         };
@@ -1899,6 +1922,57 @@ fn a_view_menu_opens_under_its_view_and_turns_off_rows_that_do_not_apply() {
 }
 
 #[test]
+fn switcher_context_actions_use_the_target_views_availability_and_compass() {
+    for (index, compass) in [(2, None), (1, Some(false)), (0, Some(true))] {
+        let mut rig = TabsRig::with(Some(false));
+        rig.ctx.enable_accesskit();
+        rig.compass[index] = compass;
+        rig.frame(Vec::new());
+        rig.press(rig.at("t:switcher"), egui::PointerButton::Primary);
+        rig.frame(Vec::new());
+        rig.frame(Vec::new());
+        rig.press(rig.at(&format!("t:switcher:row:{index}")), egui::PointerButton::Secondary);
+        rig.frame(Vec::new());
+        let (_, output) = rig.frame_output(Vec::new());
+        let nodes = &output.platform_output.accesskit_update.as_ref().unwrap().nodes;
+        let right = nodes.iter().find(|(_, node)| node.label() == Some("Close views to the right")).unwrap();
+        assert_eq!(right.1.is_disabled(), index == 2);
+        if let Some(on) = compass {
+            let row = nodes.iter().find(|(_, node)| node.label() == Some("Compass")).unwrap();
+            assert_eq!(row.1.toggled(), Some(if on { egui::accesskit::Toggled::True } else { egui::accesskit::Toggled::False }));
+            assert_eq!(
+                rig.press(rig.at("t:menu:view.compass"), egui::PointerButton::Primary),
+                vec![TabAction::ViewMenu { view: index, id: "view.compass".into() }]
+            );
+        } else {
+            assert!(solidcraft_ui_registry::rect_of("t:menu:view.compass").is_none());
+            assert!(rig.press(rig.at("t:menu:vright"), egui::PointerButton::Primary).is_empty());
+        }
+    }
+}
+
+#[test]
+fn legacy_layout_rows_keep_their_grid_glyph_and_fill_heading() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.screen_height = 800.0;
+    rig.layout = Some((2, 1));
+    rig.frame(Vec::new());
+    rig.press(rig.at("view:layout"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    let (_, output) = rig.frame_output(Vec::new());
+    let row = solidcraft_ui_registry::rect_of("t:menu:layout.grid").unwrap();
+    fn cells(shape: &egui::Shape, row: Rect) -> usize {
+        match shape {
+            egui::Shape::Rect(rect) => usize::from(row.contains_rect(rect.rect) && rect.rect.right() <= row.left() + Tokens::get().control_height),
+            egui::Shape::Vec(shapes) => shapes.iter().map(|shape| cells(shape, row)).sum(),
+            _ => 0,
+        }
+    }
+    assert!(output.shapes.iter().map(|shape| cells(&shape.shape, row)).sum::<usize>() >= 4, "the grid choice retains its four miniature cells");
+    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "EMPTY CELLS SHOW")));
+}
+
+#[test]
 fn shift_f10_opens_the_menu_of_the_focused_view_tab() {
     let mut rig = TabsRig::with(Some(true));
     rig.clear = true;
@@ -2012,7 +2086,8 @@ fn renaming_a_view_remains_editable_in_the_switcher_fallback() {
 
 #[test]
 fn changing_the_design_discards_its_open_view_popup() {
-    let rig = TabsRig::with(Some(true));
+    let rig = TabsRig::build(Some(true), true, None);
+    rig.press(rig.at("t:view:1"), egui::PointerButton::Primary);
     rig.press(rig.at("t:view:1"), egui::PointerButton::Secondary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
@@ -2020,6 +2095,10 @@ fn changing_the_design_discards_its_open_view_popup() {
     clear_view_popup(&rig.ctx, egui::Id::unique("test_tabs"));
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_none());
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    let opener = rig.ctx.memory(|memory| memory.focused());
+    rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
+    assert_eq!(rig.ctx.memory(|memory| memory.focused()), opener, "closing Plus cannot restore a previous design's view focus");
 }
 
 // The layout engine: pure arithmetic over a spec, no egui.
@@ -2039,7 +2118,9 @@ fn index_of(spec: &Spec, id: &str) -> usize {
 /// Every placement lies in the bar's room, none has a negative or non-finite width, and no two
 /// overlap (the overflow button and the centre item included).
 fn assert_sound(spec: &Spec, placed: &Placed) {
-    let clamp = |v: f32| if v.is_nan() { 0.0 } else { v.clamp(0.0, crate::app_bar_layout::MAX_WIDTH) };
+    let clamp = |v: f32| {
+        if v.is_nan() { 0.0 } else { v.clamp(0.0, crate::app_bar_layout::MAX_WIDTH) }
+    };
     let (left, right) = (clamp(spec.captions_left), clamp(spec.width) - clamp(spec.captions_right));
     assert_eq!(placed.placements.len(), spec.items.len());
     let mut spans: Vec<(f32, f32, String)> = Vec::new();
@@ -2626,13 +2707,13 @@ fn app_bar_more_menu_returns_the_original_action_and_closes() {
     let report = rows.iter().find(|r| r.id == "report").expect("report overflowed");
     assert_eq!(report.action, BarAction::Report);
     assert_eq!(rig.click("menu:appbar:overflow:report"), [BarAction::Report]);
-    assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(!rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
     rig.click("appbar:overflow");
     rig.frame(Vec::new());
     assert!(rig.click("menu:appbar:overflow:action:1").is_empty(), "disabled undo cannot run");
-    assert!(rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
     rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
-    assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(!rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
     rig.click("appbar:overflow");
     rig.frame(Vec::new());
     // The uniform layout may put more rows in this menu, including at its bottom edge.
@@ -2644,7 +2725,7 @@ fn app_bar_more_menu_returns_the_original_action_and_closes() {
             egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
         ]);
     }
-    assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(!rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
 }
 
 mod app_bar_items {
@@ -3087,4 +3168,26 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+}
+
+#[test]
+fn layout_menu_retains_window_details_and_unavailable_link_mode() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.screen_height = 800.0;
+    rig.clear = true;
+    rig.layout = Some((2, 2));
+    rig.layout_details = true;
+    rig.frame(Vec::new());
+    rig.press(rig.at("view:layout"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    let (_, output) = rig.frame_output(Vec::new());
+    let text = |value: &str| output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == value));
+    assert!(text("This window — Window 1 · Display 1"));
+    assert!(text("Window 2 · Display 2"));
+    assert!(text("Both"), "the disabled camera-link mode remains visible before opening its choices");
+    rig.press(rig.at("menu:layout.link"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("layout.link.off").is_some(), "disabled choices remain inspectable");
+    assert!(rig.press(rig.at("layout.link.off"), egui::PointerButton::Primary).is_empty(), "inspection cannot change a disabled mode");
 }

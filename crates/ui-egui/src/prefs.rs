@@ -11358,6 +11358,40 @@ mod tests {
     }
 
     #[test]
+    fn a_keyboard_opened_saved_layout_menu_owns_keys_and_returns_focus() {
+        let mut h = layout_page_with_a_saved_layout();
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Bench setup"}})).unwrap();
+        h.frames(2);
+        let before = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let list_focus = h.ctx.memory(|memory| memory.focused()).expect("clicking the saved tile focuses its list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some());
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Delete").is_some(), "Down/Enter choose Delete within the menu");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "cancelling the confirmation keeps Preferences open");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "cancelling the confirmation restores the actual saved-layout list");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_some(), "the restored list accepts Shift+F10");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.shell.open, "closing the menu keeps Preferences open");
+        assert!(crate::scenario::rect_of("prefs:panel_layout:menu_replace").is_none(), "Escape closes only the tile menu");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(list_focus), "menu Escape restores the same list focus");
+        h.step(&json!({"key":"F10","shift":true})).unwrap();
+        let replace = crate::scenario::rect_of("prefs:panel_layout:menu_replace").expect("the next keyboard visit opens the menu");
+        let focused = h.ctx.memory(|memory| memory.focused()).and_then(|id| h.ctx.read_response(id)).expect("the reopened menu has a focused row");
+        assert!(replace.contains(focused.rect.center()), "the reopened menu focuses Replace rather than stale Delete: {:?}", focused.rect);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(crate::scenario::handle_at("dialog:Replace").is_some(), "closing the menu restores the list for the next keyboard visit");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().layout(), &before);
+    }
+
+    #[test]
     fn deleting_a_saved_layout_from_its_menu_asks_first_and_keeps_the_panels() {
         let mut h = layout_page_with_a_saved_layout();
         let layout = h.app.panel_runtime().unwrap().layout().layout().clone();

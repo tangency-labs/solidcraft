@@ -534,6 +534,8 @@ pub struct Out {
     pub buttons: Vec<Drawn>,
     /// Picks from the shared overflow menu, including secondary and context actions.
     pub menu_picked: Vec<crate::Item>,
+    /// Shared overflow responses retained for host drag payloads and action anchors.
+    pub menu_rows: Vec<(crate::Item, egui::Response)>,
 }
 
 /// The dropdown chevron every ribbon menu shares.
@@ -629,7 +631,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_items: &mut dyn FnMut
         h.trimmed_count,
         plans.iter().zip(&sizes).filter(|(p, s)| p.fit == Fit::Buttons && p.shown < s.buttons.len()).count() as f64,
     );
-    let mut out = Out { actions: Vec::new(), groups: Vec::new(), buttons: Vec::new(), menu_picked: Vec::new() };
+    let mut out = Out { actions: Vec::new(), groups: Vec::new(), buttons: Vec::new(), menu_picked: Vec::new(), menu_rows: Vec::new() };
     let mut overflow = Vec::new();
     let accent = row.accent;
     for (gi, (group, plan)) in row.groups.iter().zip(plans).enumerate() {
@@ -933,13 +935,16 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_items: &mut dyn FnMut
                         Some(crate::Item::submenu(&format!("ribbon:overflow:{gi}"), group.name, "", items))
                     })
                     .collect::<Vec<_>>();
-                if let Some(picked) = crate::Menu::button_items(&response, &entries) {
+                let output = crate::Menu::button_items_output(&response, &entries);
+                if let Some(picked) = output.picked {
                     if picked.params.as_ref().and_then(|p| p.get("ribbon_fallback")).and_then(serde_json::Value::as_bool) == Some(true) {
-                        out.actions.push(Action::Run { id: picked.id.clone(), rect: response.rect, place: Place::More });
+                        let rect = output.rows.iter().find(|(item, _)| item == &picked).map_or(response.rect, |(_, row)| row.rect);
+                        out.actions.push(Action::Run { id: picked.id.clone(), rect, place: Place::More });
                     } else {
                         out.menu_picked.push(picked);
                     }
                 }
+                out.menu_rows.extend(output.rows);
             }
             response.backing_on_hover_text(row.more_tip);
         });

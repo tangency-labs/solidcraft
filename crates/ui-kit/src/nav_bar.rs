@@ -176,12 +176,23 @@ pub fn paint_slots(
 /// Draw the live bar, its More button, its context menu and the open menu (`menu` gives a menu
 /// slot's rows by its id); what the user chose, for the app to run.
 pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, mut menu: impl FnMut(&str) -> Menu) -> Option<NavAction> {
+    let menu_id = ui.scope_id().with("navigation_bar_menu");
+    let mut open = ui.data(|d| d.get_temp::<String>(menu_id)).unwrap_or_default();
+    let has_trigger = if open == "more" {
+        bar.more.is_positive() && !bar.overflow.is_empty()
+    } else {
+        bar.slots.iter().any(|slot| slot.id == open && slot.rect.is_positive())
+            || (bar.more.is_positive() && bar.overflow.iter().any(|slot| slot.id == open))
+    };
+    if !open.is_empty() && (!bar.rect.is_positive() || !has_trigger) {
+        crate::Menu::dismiss(ui.ctx(), menu_id.with(("popup", &open)));
+        open.clear();
+        ui.data_mut(|data| data.insert_temp(menu_id, open.clone()));
+    }
     if !bar.rect.is_positive() {
         return None;
     }
     solidcraft_ui_registry::publish_rect("nav:outer", bar.rect);
-    let menu_id = ui.scope_id().with("navigation_bar_menu");
-    let mut open = ui.data(|d| d.get_temp::<String>(menu_id)).unwrap_or_default();
     let previous_open = open.clone();
     let mut action = None;
     let active = bar.active || ui.rect_contains_pointer(bar.rect) || !open.is_empty();
@@ -265,6 +276,7 @@ pub fn show(ui: &mut egui::Ui, bar: &Bar<'_>, mut menu: impl FnMut(&str) -> Menu
                     if slot.kind == NavigationKind::Menu {
                         let contents = menu(slot.id);
                         item.children = menu_items(slot.id, &contents.entries, !contents.close_on_pick);
+                        item.enabled = !item.children.is_empty();
                     }
                     item.context = context_items((slot.index != usize::MAX).then_some(slot.index), Some((slot.id, &slot.context)), &bar.labels);
                     item

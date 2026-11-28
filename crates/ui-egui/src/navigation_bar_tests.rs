@@ -479,20 +479,31 @@ fn navigation_board_popup_width_includes_its_border_and_padding() {
 fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
     crate::navigation_slots::install();
     use crate::ui_kit::*;
-    let ctx = crate::ui_kit::test_support::context();
     for (label, selected, cut) in [
         ("Perspective while orbiting, ortho on faces", false, true),
         ("Perspective while orbiting, ortho on faces", true, true),
         ("Show tool at cursor", true, false),
     ] {
+        let ctx = crate::ui_kit::test_support::context();
         let mut row = Rect::NOTHING;
-        let output = crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
-            Menu::show(ui, NAV_POPUP_WIDTH, |ui| {
-                let mut item = Item::action("row", label, "select");
-                item.checked = selected.then_some(true);
-                row = Menu::items(ui, egui::Id::unique("navigation_label_fixture"), &[item], false).rows[0].1.rect;
-            });
-        });
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(crate::ui_kit::test_support::raw_frame(
+                &ctx,
+                egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 240.0))), ..Default::default() },
+                |ui| {
+                    Menu::show(ui, NAV_POPUP_WIDTH, |ui| {
+                        // Exercise the runtime definition adapter with literal captions, independent
+                        // of the active locale or synthetic command identity.
+                        let _labels = solidcraft_ui_text::resolved_labels();
+                        let mut item = Item::action("row", label, "select");
+                        item.checked = selected.then_some(true);
+                        row = MenuItem::from_item(&item, false).show(ui).rect;
+                    });
+                },
+            ));
+        }
+        let output = output.unwrap();
         let text = crate::ui_kit::test_support::text_shapes(&output).find(|t| t.galley.text() == label).unwrap_or_else(|| panic!("{label} is drawn"));
         assert_eq!(text.galley.elided, cut, "{label}");
         let end = row.right() - NAV_MENU_INSET - if selected { solidcraft_theme::Tokens::get().space_14 } else { 0.0 };

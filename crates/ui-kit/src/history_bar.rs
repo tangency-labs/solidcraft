@@ -399,7 +399,8 @@ impl Strip<'_, '_> {
             let (focused, popup) = *self.quiet.get_or_insert_with(|| {
                 #[cfg(test)]
                 QUIET_READS.with(|reads| reads.set(reads.get() + 1));
-                (ui.memory(|m| m.focused()), egui::Popup::is_any_open(ui.ctx()) || crate::Menu::any_open(ui.ctx()))
+                // Shared command menus own their rows independently of the source chip.
+                (ui.memory(|m| m.focused()), egui::Popup::is_any_open(ui.ctx()))
             });
             if !popup && focused.is_none_or(|focused| focused != ui.scope_id().with(("feat", step.id))) {
                 return br;

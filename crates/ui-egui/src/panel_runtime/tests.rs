@@ -4515,6 +4515,8 @@ enum MenuRoute {
     CurrentTabs,
     OtherMove,
     KeyboardMove,
+    KeyboardApply,
+    PeekOtherMove,
     OtherApply,
     CloseRefusal,
     LateWindow,
@@ -4530,6 +4532,8 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             MenuRoute::CurrentTabs,
             MenuRoute::OtherMove,
             MenuRoute::KeyboardMove,
+            MenuRoute::KeyboardApply,
+            MenuRoute::PeekOtherMove,
             MenuRoute::OtherApply,
             MenuRoute::CloseRefusal,
             MenuRoute::LateWindow,
@@ -4537,6 +4541,17 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             MenuRoute::OtherHeaderMenu,
         ] {
             let (mut raw, _) = raw_leaf_fixture(scale);
+            if matches!(route, MenuRoute::PeekOtherMove) {
+                raw.content
+                    .dispatch(vec![
+                        Mutation::Collapse { section: section("editor-section"), collapsed: true },
+                        Mutation::Peek { instance: id("editor") },
+                    ])
+                    .unwrap();
+                raw.frame(Vec::new(), false);
+                raw.frame(Vec::new(), false);
+                assert_eq!(raw.content.runtime.layout().interaction().peek, Some(id("editor")));
+            }
             if matches!(route, MenuRoute::LateModal) {
                 raw.prime_modal();
             }
@@ -4565,13 +4580,15 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
                 });
             }
             assert!(raw.host.frame().unwrap().menu_bounds.is_some());
-            if matches!(route, MenuRoute::CurrentPanelApply | MenuRoute::OtherApply | MenuRoute::CloseRefusal) {
+            if matches!(route, MenuRoute::CurrentPanelApply | MenuRoute::OtherApply | MenuRoute::KeyboardApply | MenuRoute::CloseRefusal) {
                 scroll_real_host_popup_to_end(&mut raw);
             }
             let target = match route {
                 MenuRoute::CurrentPanelApply => HostControlTarget::Content { instance: id("editor"), action: ControlId::new("apply").unwrap() },
                 MenuRoute::CurrentTabs => HostControlTarget::PanelMenu { instance: id("editor") },
-                MenuRoute::OtherApply => HostControlTarget::Content { instance: id("document-body"), action: ControlId::new("apply").unwrap() },
+                MenuRoute::OtherApply | MenuRoute::KeyboardApply => {
+                    HostControlTarget::Content { instance: id("document-body"), action: ControlId::new("apply").unwrap() }
+                }
                 MenuRoute::CloseRefusal => HostControlTarget::Shared { instance: id("document-body"), action: HostSharedAction::Close },
                 MenuRoute::OtherHeaderMenu => HostControlTarget::Shared { instance: id("next-header"), action: HostSharedAction::Collapse },
                 _ => HostControlTarget::Shared { instance: id("document-body"), action: HostSharedAction::Move(Zone::Bottom) },
@@ -4599,10 +4616,11 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             let before = raw.content.runtime.layout().inspect();
             let commits = raw.content.native.commits;
             let at = egui_rect(source.bounds).center();
-            let keyboard = matches!(route, MenuRoute::KeyboardMove);
+            let keyboard = matches!(route, MenuRoute::KeyboardMove | MenuRoute::KeyboardApply);
             if keyboard {
                 raw.ctx.memory_mut(|memory| memory.request_focus(source.id));
                 raw.frame(Vec::new(), false);
+                assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(source.id), "{route:?}: retain the deliberately focused menu action");
             } else {
                 raw.frame(vec![egui::Event::PointerMoved(at)], false);
                 raw.pointer(at, true, false);
@@ -4622,7 +4640,8 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
                 )
                 .0;
             let rejected = matches!(route, MenuRoute::CloseRefusal | MenuRoute::LateWindow | MenuRoute::LateModal);
-            let structural = !rejected && matches!(route, MenuRoute::OtherMove | MenuRoute::KeyboardMove | MenuRoute::OtherHeaderMenu);
+            let structural =
+                !rejected && matches!(route, MenuRoute::OtherMove | MenuRoute::KeyboardMove | MenuRoute::PeekOtherMove | MenuRoute::OtherHeaderMenu);
             assert_eq!(raw.content.runtime.layout().inspect().revision, before.revision + u64::from(structural));
             assert_eq!(raw.content.native.commits, commits + u64::from(structural));
             if structural {
@@ -4630,7 +4649,11 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
                 if matches!(route, MenuRoute::OtherHeaderMenu) {
                     assert!(!raw.content.runtime.layout().layout().containing(&id("next-header")).unwrap().collapsed);
                 } else {
-                    assert_eq!(raw.content.runtime.layout().layout().containing(&id("document-body")).unwrap().location.zone(), Zone::Bottom);
+                    assert_eq!(
+                        raw.content.runtime.layout().layout().containing(&id("document-body")).unwrap().location.zone(),
+                        Zone::Bottom,
+                        "{route:?} at {scale}x must execute its selected placement"
+                    );
                 }
             } else {
                 assert_eq!(raw.content.runtime.layout().inspect(), before);
@@ -4638,8 +4661,11 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             if matches!(route, MenuRoute::CloseRefusal) {
                 assert!(released.events.iter().any(|event| matches!(event, HostEvent::Rejected { error, .. } if error.rule == Rule::Lifecycle)));
             }
+            if matches!(route, MenuRoute::PeekOtherMove) {
+                assert!(raw.content.runtime.layout().interaction().peek.is_none(), "an unrelated menu placement dismisses Peek during admission");
+            }
             let apply_editor = matches!(route, MenuRoute::CurrentPanelApply);
-            let apply_other = matches!(route, MenuRoute::OtherApply);
+            let apply_other = matches!(route, MenuRoute::OtherApply | MenuRoute::KeyboardApply);
             assert_eq!(raw.content.commands.calls, u64::from(apply_editor || apply_other));
             assert_eq!(raw.content.probe.state(&editor).unwrap().applies, old_editor.applies + u64::from(apply_editor));
             assert_eq!(raw.content.probe.state(&other).unwrap().applies, old_other.applies + u64::from(apply_other));
@@ -9550,7 +9576,7 @@ fn host_key(key: egui::Key, pressed: bool) -> egui::Event {
 }
 
 fn assert_no_popup(frame: &HostFrame) {
-    assert!(frame.menu_bounds.is_none());
+    assert!(frame.menu_bounds.is_none(), "remaining menu bounds {:?}; events {:?}", frame.menu_bounds, frame.events);
     assert!(!frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::PanelMenu { .. } | HostControlTarget::Shared { .. })));
 }
 
@@ -13794,6 +13820,12 @@ fn shared_menu_keyboard_entry_end_and_escape_restore_actual_opener() {
         raw.frame(vec![host_key(egui::Key::Enter, false)], false);
         raw.frame(Vec::new(), false);
         assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(opener.id));
+        assert!(
+            raw.capacity.contains_rect(raw.host.frame().unwrap().menu_bounds.unwrap()),
+            "menu {:?} must fit host {:?} at {scale}x",
+            raw.host.frame().unwrap().menu_bounds,
+            raw.capacity
+        );
         // Settle the entry reveal, then prove a retained first-row focus does
         // not undo manual wheel scrolling on subsequent ordinary paints.
         raw.frame(Vec::new(), false);

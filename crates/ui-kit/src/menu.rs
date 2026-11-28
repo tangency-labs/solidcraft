@@ -434,6 +434,8 @@ impl Menu {
 
 /// Shared row states. Swatches are document colour data; chrome always uses Tokens.
 pub struct MenuItem<'a> {
+    pub show_label: bool,
+    pub publish_handle: bool,
     pub command_label: bool,
     pub id: &'a str,
     pub label: &'a str,
@@ -453,6 +455,8 @@ pub struct MenuItem<'a> {
 impl<'a> MenuItem<'a> {
     pub fn new(id: &'a str, label: &'a str, icon: impl Into<Icon<'a>>) -> Self {
         Self {
+            show_label: true,
+            publish_handle: true,
             command_label: true,
             id,
             label,
@@ -474,6 +478,8 @@ impl<'a> MenuItem<'a> {
     /// `current` shortcut marks the checked entry of a choice.
     pub fn from_item(item: &'a Item, lit: bool) -> Self {
         Self {
+            show_label: true,
+            publish_handle: true,
             command_label: false,
             id: &item.id,
             label: &item.label,
@@ -614,9 +620,18 @@ impl<'a> MenuItem<'a> {
         job.wrap.max_width = (right - left).max(0.0);
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
-        painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
-        solidcraft_ui_registry::publish_target(&format!("menu:{}", self.id), r);
+        if self.show_label {
+            painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
+        }
+        response.widget_info(|| match self.checked {
+            Some(checked) => {
+                egui::WidgetInfo::selected(if self.radio { egui::Role::RadioButton } else { egui::Role::CheckBox }, enabled, checked, label)
+            }
+            None => egui::WidgetInfo::labeled(egui::Role::Button, enabled, label),
+        });
+        if self.publish_handle {
+            solidcraft_ui_registry::publish_target(&format!("menu:{}", self.id), r);
+        }
         if enabled && response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
@@ -660,8 +675,10 @@ fn scroll_rows_reveal<R>(ui: &mut Ui, id: egui::Id, room: f32, estimate: f32, re
         ui.ctx().data_mut(|d| d.insert_temp(id, state));
         return rows.inner;
     }
-    let bar = t.control_height;
-    let view = (room - 2.0 * bar).max(bar);
+    // Preserve a complete action row before spending the remaining room on bars.
+    let row = t.control_height + t.space_2;
+    let bar = t.control_height.min(((room - row) / 2.0).max(0.0));
+    let view = (room - 2.0 * bar).max(0.0);
     let end = (state.content - view).max(0.0);
     let dt = ui.input(|i| i.stable_dt).clamp(0.0, 0.1);
     let mut offset = state.offset.clamp(0.0, end);
@@ -672,7 +689,7 @@ fn scroll_rows_reveal<R>(ui: &mut Ui, id: egui::Id, room: f32, estimate: f32, re
             offset = bottom - view;
         }
     }
-    let up = scroll_bar(ui, id.with("up"), true, offset > 0.5);
+    let up = scroll_bar(ui, id.with("up"), true, offset > 0.5, bar);
     if up.hovered() {
         offset -= SCROLL_BAR_SPEED * dt;
     }
@@ -688,7 +705,7 @@ fn scroll_rows_reveal<R>(ui: &mut Ui, id: egui::Id, room: f32, estimate: f32, re
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, add);
     let mut offset = out.state.clamped_offset().y;
-    let down = scroll_bar(ui, id.with("down"), false, offset < end - 0.5);
+    let down = scroll_bar(ui, id.with("down"), false, offset < end - 0.5, bar);
     if down.hovered() {
         offset += SCROLL_BAR_SPEED * dt;
     }
@@ -706,10 +723,13 @@ fn scroll_rows_reveal<R>(ui: &mut Ui, id: egui::Id, room: f32, estimate: f32, re
 
 /// One of [`scroll_rows`]' full-width bars: a chevron pointing `up` or down, inert and dimmed
 /// when the rows cannot scroll that way.
-fn scroll_bar(ui: &mut Ui, id: egui::Id, up: bool, active: bool) -> Response {
+fn scroll_bar(ui: &mut Ui, id: egui::Id, up: bool, active: bool, height: f32) -> Response {
     let t = Tokens::get();
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), Sense::hover());
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let response = ui.interact(r, id, if active { Sense::click() } else { Sense::hover() });
+    if height <= 0.0 {
+        return response;
+    }
     let hot = active && response.hovered();
     if hot {
         ui.painter().rect_filled(r, t.control_radius, t.accent_soft);
@@ -1034,6 +1054,112 @@ mod tests {
     }
 
     #[test]
+    fn shared_menu_rejects_changed_branch_actions_and_bounds_popups() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("menu-changing-branch");
+        let old = [Item::submenu("old", "Old", "", vec![Item::action("delete-old", "Delete old", "")])];
+        let new = [Item::submenu("new", "New", "", vec![Item::action("delete-new", "Delete new", "")])];
+        let frame = |items: &[Item], events| {
+            let mut result = MenuOutput::default();
+            let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                result = Menu::popup(ui.ctx(), id, MenuAnchor::Point(pos2(10.0, 10.0)), items, false);
+            });
+            output.textures_delta.clear();
+            result
+        };
+        frame(&old, vec![]);
+        frame(&old, vec![]);
+        frame(&old, key(egui::Key::ArrowRight));
+        frame(&old, vec![]);
+        frame(&old, vec![]);
+        let changed = frame(&new, key(egui::Key::Enter));
+        assert!(changed.picked.is_none() && changed.depth == 0, "Enter cannot activate an unseen replacement branch");
+        Menu::reveal(&ctx, id, &new, "delete-new");
+        assert_eq!(frame(&new, key(egui::Key::Enter)).picked.map(|item| item.id), Some("delete-new".into()));
+        let bounds = Rect::from_min_size(pos2(100.0, 100.0), vec2(280.0, 220.0));
+        let rows: Vec<_> = (0..40).map(|i| Item::action(&i.to_string(), "Long menu action", "")).collect();
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let popup = Menu::popup_with_bounds(ui.ctx(), id.with("bounded"), MenuAnchor::Point(pos2(120.0, 280.0)), &rows, false, bounds);
+                assert!(bounds.contains_rect(popup.rect.unwrap()));
+            });
+            output.textures_delta.clear();
+        }
+    }
+
+    #[test]
+    fn preview_does_not_open_an_interactive_menu_and_disabled_openers_stay_closed() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("menu-preview-isolation");
+        let items = [Item::action("action", "Action", "")];
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            Menu::reveal(ui.ctx(), id, &items, "action");
+            Menu::preview(ui.ctx(), id, MenuAnchor::Point(pos2(200.0, 30.0)), &items);
+            assert!(!Menu::is_open(ui.ctx(), id) && !Menu::any_open(ui.ctx()));
+            let disabled = ui.add_enabled(false, egui::Button::new("Disabled"));
+            Menu::open_button(&disabled);
+            assert!(!Menu::button_items_output(&disabled, &items).open);
+            assert!(!Menu::context_active(&disabled));
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn focused_more_button_never_activates_its_primary_remove_action() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("secondary-menu-focus");
+        let items = [Item::action("remove", "Remove", "delete").secondary(Item::submenu(
+            "more",
+            "More actions",
+            "more",
+            vec![Item::action("inspect", "Inspect", "")],
+        ))];
+        let frame = |events| {
+            let mut result = MenuOutput::default();
+            let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                result = Menu::popup(ui.ctx(), id, MenuAnchor::Point(pos2(20.0, 20.0)), &items, false);
+            });
+            output.textures_delta.clear();
+            result
+        };
+        frame(vec![]);
+        let painted = frame(vec![]);
+        let more = painted.rows.iter().find(|(item, _)| item.id == "more").unwrap().1.clone();
+        ctx.memory_mut(|memory| memory.request_focus(more.id));
+        let entered = frame(key(egui::Key::Enter));
+        assert!(entered.picked.is_none() && entered.open, "Enter on More cannot remove the primary item");
+        frame(vec![]);
+        let expanded = frame(vec![]);
+        assert!(expanded.rows.iter().any(|(item, _)| item.id == "inspect"));
+        assert!(frame(key(egui::Key::Escape)).open, "Escape closes only the auxiliary menu");
+        assert!(ctx.memory(|memory| memory.has_focus(more.id)));
+        let reopened = frame(key(egui::Key::Enter));
+        assert!(reopened.picked.is_none() && reopened.open);
+        frame(vec![]);
+        assert!(frame(vec![]).rows.iter().any(|(item, _)| item.id == "inspect"));
+    }
+
+    #[test]
+    fn popup_scrolling_fits_a_host_shorter_than_three_controls() {
+        let ctx = crate::test_support::context();
+        let bounds = Rect::from_min_size(pos2(100.0, 100.0), vec2(280.0, 64.0));
+        let rows: Vec<_> = (0..12).map(|index| Item::action(&index.to_string(), "Action", "")).collect();
+        let id = egui::Id::unique("tiny-menu-host");
+        Menu::set_cursor(&ctx, id, 0, Some(11));
+        for pass in 0..3 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let result = Menu::popup_with_bounds(ui.ctx(), id, MenuAnchor::Point(bounds.left_bottom()), &rows, false, bounds);
+                assert!(bounds.contains_rect(result.rect.unwrap()), "popup {:?} exceeds host {:?}", result.rect, bounds);
+                if pass == 2 {
+                    let focused = &result.rows.iter().find(|(item, _)| item.id == "11").unwrap().1;
+                    assert_eq!(focused.interact_rect, focused.rect, "the selected action remains fully interactable in a short host");
+                }
+            });
+            output.textures_delta.clear();
+        }
+    }
+
+    #[test]
     fn shared_menu_preserves_explicit_labels_and_scrolls_only_on_keyboard_requests() {
         let ctx = crate::test_support::context();
         let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(420.0, 260.0));
@@ -1060,7 +1186,8 @@ mod tests {
         assert!(visible.rect.unwrap().intersects(last), "End reveals the last enabled row");
         frame(key(egui::Key::ArrowUp));
         assert_eq!(Menu::cursor(&ctx, id, 0), Some(49));
-        frame(vec![]);
+        let (before_wheel, _) = frame(vec![]);
+        let original = before_wheel.rows.iter().find(|(item, _)| item.id == "row.48").unwrap().1.rect.top();
         let (wheel, _) = frame(vec![
             egui::Event::PointerMoved(pos2(100.0, 120.0)),
             egui::Event::MouseWheel {
@@ -1074,6 +1201,7 @@ mod tests {
         let before = wheel.rows.iter().find(|(item, _)| item.id == "row.48").unwrap().1.rect.top();
         let (still, _) = frame(vec![]);
         let after = still.rows.iter().find(|(item, _)| item.id == "row.48").unwrap().1.rect.top();
+        assert!(after > original + 1.0, "the wheel must actually move the list toward its earlier rows");
         assert!(after >= before - 1.0, "idle cursor must not undo wheel scrolling");
     }
 
@@ -1093,6 +1221,105 @@ mod tests {
         assert!(frame(vec![], true).open);
         assert!(frame(vec![], false).open, "automation may interact with a background window");
         assert!(frame(vec![egui::Event::WindowFocused(false)], false).close);
+    }
+
+    #[test]
+    fn shared_menu_keeps_parent_handles_and_walks_nested_keyboard_rows() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("nested-menu-identity");
+        let inner =
+            Item::submenu("appearance", "Appearance", "", vec![Item::action("appearance", "Appearance", ""), Item::action("swatch", "Blue", "")]);
+        let items = [Item::submenu("component", "Component", "", vec![Item::action("rename", "Rename", ""), inner])];
+        let frame = |events| {
+            solidcraft_ui_registry::clear_handles();
+            let mut result = MenuOutput::default();
+            let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                result = Menu::popup(ui.ctx(), id, MenuAnchor::Point(pos2(20.0, 20.0)), &items, false);
+            });
+            output.textures_delta.clear();
+            result
+        };
+        frame(vec![]);
+        frame(vec![]);
+        assert_eq!(frame(key(egui::Key::ArrowRight)).depth, 1);
+        frame(vec![]);
+        frame(vec![]);
+        frame(key(egui::Key::ArrowDown));
+        frame(vec![]);
+        assert_eq!(Menu::cursor(&ctx, id, 1), Some(1));
+        assert_eq!(frame(key(egui::Key::ArrowRight)).depth, 2);
+        frame(vec![]);
+        let output = frame(vec![]);
+        let parent = output.rows.iter().find(|(item, _)| item.id == "appearance").unwrap().1.rect;
+        assert_eq!(solidcraft_ui_registry::rect_of("menu:appearance"), Some(parent));
+        assert!(!Menu::level_rect(&ctx, id, 1).unwrap().intersects(Menu::level_rect(&ctx, id, 2).unwrap()));
+        frame(key(egui::Key::ArrowLeft));
+        assert!(Menu::level_rect(&ctx, id, 2).is_none());
+        assert_eq!(Menu::cursor(&ctx, id, 1), Some(1));
+    }
+
+    #[test]
+    fn overlapping_flyout_requires_a_separate_child_click() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("narrow-overlapping-flyout");
+        let items = [Item::submenu("create", "Create", "", vec![Item::action("extrude", "Extrude", "")])];
+        let frame = |events| {
+            let mut result = MenuOutput::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 400.0))), events, ..Default::default() },
+                |ui| {
+                    result = Menu::popup(ui.ctx(), id, MenuAnchor::Point(pos2(5.0, 10.0)), &items, false);
+                },
+            );
+            output.textures_delta.clear();
+            result
+        };
+        frame(vec![]);
+        let at = frame(vec![]).rows[0].1.rect.center();
+        frame(vec![egui::Event::PointerMoved(pos2(199.0, 399.0))]);
+        frame(vec![egui::Event::PointerMoved(at)]);
+        frame(vec![]);
+        let expanded = frame(vec![]);
+        assert!(
+            expanded.rows.iter().any(|(item, response)| item.id == "extrude" && response.rect.contains(at)),
+            "opener {at:?}, depth {}, rows {:?}",
+            expanded.depth,
+            expanded.rows.iter().map(|(item, response)| (&item.id, response.rect)).collect::<Vec<_>>()
+        );
+        let click = || {
+            [true, false]
+                .map(|pressed| egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .to_vec()
+        };
+        assert!(frame(click()).picked.is_none(), "the opening click cannot run the child under its opener");
+        assert_eq!(frame(click()).picked.map(|item| item.id), Some("extrude".into()));
+    }
+
+    #[test]
+    fn shared_menu_announces_checked_and_radio_state() {
+        let ctx = crate::test_support::context();
+        ctx.enable_accesskit();
+        let mut radio = Item::action("radio", "Radio", "").checked(true);
+        radio.radio = true;
+        let items = [Item::action("toggle", "Toggle", "").checked(false), radio];
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                Menu::items(ui, egui::Id::unique("checked-menu"), &items, false);
+            });
+            let nodes = &output.platform_output.accesskit_update.as_ref().unwrap().nodes;
+            assert!(nodes.iter().any(|(_, node)| node.label() == Some("Toggle")
+                && node.role() == egui::accesskit::Role::CheckBox
+                && node.toggled() == Some(egui::accesskit::Toggled::False)));
+            assert!(nodes.iter().any(|(_, node)| node.label() == Some("Radio")
+                && node.role() == egui::accesskit::Role::RadioButton
+                && node.toggled() == Some(egui::accesskit::Toggled::True)));
+            output.textures_delta.clear();
+        }
     }
 
     #[test]

@@ -983,7 +983,7 @@ fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, sou
     if editor.taken {
         return;
     }
-    let escape = focused && ui.input(|i| i.raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Escape, pressed: true, .. })));
+    let escape = focused && ui.input(|i| i.events.iter().any(|e| matches!(e, Event::Key { key: Key::Escape, pressed: true, .. })));
     if escape {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape));
         out.cancelled = Some((cell.key.to_owned(), cell.col));

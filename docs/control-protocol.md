@@ -1084,6 +1084,12 @@ A `ui.drag` from `measure:label` or one of the axis labels moves that label (scr
 while the measured items stay the same; a double-click puts it back). It picks nothing and starts
 no box selection.
 
+The Measure panel's **Spacing of several holes** option (handle `measure:spacing`, off by default)
+lets picks add up past two: three or more round edges or holes then measure as a row or a bolt
+circle (`inspect.measure`'s `spacing`). The view draws each gap between neighbouring centres with
+its length, handles `measure:gap:1`, `measure:gap:2`, … in order along the row (dragged as
+`measure:label` is), and numbers each centre as the panel lists the items (`measure:item:N`).
+
 ## UI
 
 | Method | Params | Notes |

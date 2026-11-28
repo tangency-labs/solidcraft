@@ -24,7 +24,10 @@ pub struct MenuOutput {
 
 #[derive(Clone, Default)]
 struct PopupState {
+    pointer_gate: Option<(usize, Rect)>,
     focus_rows: Vec<(Id, usize, usize)>,
+    auxiliary_rows: Vec<Id>,
+    last_focus: Option<Id>,
     path: Vec<usize>,
     open_ids: Vec<String>,
     cursor: Vec<Option<usize>>,
@@ -52,8 +55,10 @@ struct AdapterState {
 struct Seen {
     sizing: bool,
     ids: Vec<(Id, usize)>,
+    auxiliary: Vec<Id>,
     anchor: Option<Rect>,
     opens: Option<usize>,
+    opens_anchor: Option<Rect>,
     other_row: bool,
 }
 const MAX_DEPTH: usize = 32;
@@ -99,7 +104,7 @@ fn height(items: &[Item]) -> f32 {
             })
             .sum::<f32>()
 }
-fn width(ctx: &Context, items: &[Item]) -> f32 {
+fn width(ctx: &Context, items: &[Item], screen: Rect) -> f32 {
     let t = Tokens::get();
     let width = ctx.fonts_mut(|fonts| {
         items
@@ -127,7 +132,7 @@ fn width(ctx: &Context, items: &[Item]) -> f32 {
             })
             .fold(190.0, f32::max)
     });
-    let room = (ctx.content_rect().width() - Menu::frame().total_margin().sum().x * 2.0).max(1.0);
+    let room = (screen.width() - Menu::frame().total_margin().sum().x * 2.0).max(1.0);
     width.min(room.min(super::LIST_W * 1.5))
 }
 pub fn place(at: Pos2, gap: Vec2, size: Vec2, screen: Rect) -> Pos2 {
@@ -175,14 +180,11 @@ fn draw_level(
             Menu::heading(ui, &item.label);
             continue;
         }
-        let row = MenuItem::from_item(item, cursor == Some(index) || (open == Some(index) && !leaving));
-        let extra = if item.secondary.is_some() {
-            t.control_height
-        } else if item.number.is_some() {
-            t.control_height * 3.0
-        } else {
-            0.0
-        };
+        let mut row = MenuItem::from_item(item, cursor == Some(index) || (open == Some(index) && !leaving));
+        row.publish_handle = false;
+        let secondary_width = if item.secondary.is_some() { t.control_height } else { 0.0 };
+        let number_width = if item.number.is_some() { t.control_height * 3.0 } else { 0.0 };
+        let extra = secondary_width + number_width;
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height + t.space_2), Sense::hover());
         let primary = Rect::from_min_max(rect.min, pos2((rect.right() - extra).max(rect.left()), rect.bottom()));
         let response = ui.interact(
@@ -200,6 +202,9 @@ fn draw_level(
         );
         row.paint(ui, rect, &response, extra);
         seen.ids.push((response.id, index));
+        let first_id = !output.rows.iter().any(|(previous, _)| previous.id == item.id);
+        let first_label = !output.rows.iter().any(|(previous, _)| previous.label == item.label);
+        let first_pair = !output.rows.iter().any(|(previous, _)| previous.id == item.id && previous.label == item.label);
         output.rows.push((item.clone(), response.clone()));
         if ui.is_enabled() && !item.context.is_empty() {
             let context = Menu::context_items_output(&response, &item.context);
@@ -213,15 +218,20 @@ fn draw_level(
             }
         }
         // An id never depends on translated text; label aliases preserve existing scripts.
-        for handle in std::iter::once(format!("menu:{}", item.id))
-            .chain(std::iter::once(format!("menu:{}", item.label)))
-            .chain(std::iter::once(format!("menu:{}:{}", item.id, item.label)))
+        for handle in first_id
+            .then(|| format!("menu:{}", item.id))
+            .into_iter()
+            .chain(first_label.then(|| format!("menu:{}", item.label)))
+            .chain(first_pair.then(|| format!("menu:{}:{}", item.id, item.label)))
             .chain(item.aliases.iter().filter(|_| item.number.is_none()).cloned())
         {
             solidcraft_ui_registry::publish_target(&handle, primary);
         }
         if scroll_cursor && cursor == Some(index) && ui.is_enabled() {
-            response.request_focus();
+            Menu::focus_row(&response);
+        }
+        if response.has_focus() {
+            Menu::lock_row(&response);
         }
         if let Some(tip) = &item.tip {
             response.clone().backing_on_hover_text(tip);
@@ -230,10 +240,14 @@ fn draw_level(
             output.hovered = Some(item.clone());
         }
         if let Some(secondary) = &item.secondary {
-            let rect = Rect::from_min_max(pos2(rect.right() - extra, rect.top()), rect.max);
+            let rect = Rect::from_min_max(pos2(rect.right() - secondary_width, rect.top()), rect.max);
             let response = ui.interact(rect, response.id.with("secondary"), if secondary.enabled { Sense::click() } else { Sense::hover() });
+            seen.auxiliary.push(response.id);
+            if response.has_focus() {
+                Menu::lock_row(&response);
+            }
             let mut control = MenuItem::from_item(secondary, false);
-            control.label = "";
+            control.show_label = false;
             // The icon identifies this compact button; its popup does not add a row chevron.
             control.submenu = false;
             control.paint(ui, rect, &response, 0.0);
@@ -248,7 +262,11 @@ fn draw_level(
             }
             output.rows.push(((**secondary).clone(), response.clone()));
             if !secondary.children.is_empty() || secondary.lazy_children {
+                let keyboard_dismiss = ui.input(|input| input.key_pressed(egui::Key::Escape) || input.key_pressed(egui::Key::ArrowLeft));
                 let child = Menu::button_items_output(&response, &secondary.children);
+                if child.close && child.picked.is_none() && keyboard_dismiss {
+                    Menu::focus_row(&response);
+                }
                 output.inside |= child.inside;
                 output.rows.extend(child.rows);
                 if child.hovered.is_some() {
@@ -262,7 +280,8 @@ fn draw_level(
             }
         }
         if let Some(number) = &item.number {
-            let rect = Rect::from_min_max(pos2(rect.right() - extra, rect.top()), rect.max).shrink2(vec2(t.space_4, 0.0));
+            let rect = Rect::from_min_max(pos2(rect.right() - extra, rect.top()), pos2(rect.right() - secondary_width, rect.bottom()))
+                .shrink2(vec2(t.space_4, 0.0));
             let mut value = if number.value.is_finite() { number.value } else { 0.0 };
             let min = if number.min.is_finite() { number.min } else { 0.0 };
             let max = if number.max.is_finite() { number.max.max(min) } else { min.max(1.0) };
@@ -272,6 +291,7 @@ fn draw_level(
                     ui.put(rect, egui::DragValue::new(&mut value).range(min..=max).speed(speed).suffix(&number.suffix))
                 })
                 .inner;
+            seen.auxiliary.push(response.id);
             output.rows.push((item.clone(), response.clone()));
             solidcraft_ui_registry::publish_target(&format!("menu:{}:value", item.id), response.rect);
             for handle in &item.aliases {
@@ -291,6 +311,7 @@ fn draw_level(
             output.picked = Some(item.clone());
         } else if item.enabled && (!item.children.is_empty() || item.lazy_children) && (Menu::flyout_hover(&response) || response.clicked()) {
             seen.opens = Some(index);
+            seen.opens_anchor = Some(rect);
         }
         if item.children.is_empty() && !item.lazy_children {
             seen.other_row |= response.hovered();
@@ -306,6 +327,20 @@ fn draw_level(
 }
 
 impl Menu {
+    /// Land on a menu action without a second spatial move from egui.
+    pub fn focus_row(response: &Response) {
+        response.request_focus();
+        response.ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        Self::lock_row(response);
+    }
+    fn lock_row(response: &Response) {
+        response.ctx.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, escape: true, ..Default::default() },
+            )
+        });
+    }
     pub fn any_open(ctx: &Context) -> bool {
         let frame = ctx.cumulative_frame_nr();
         let key = Id::unique(("shared_menus", ctx.viewport_id()));
@@ -343,8 +378,9 @@ impl Menu {
     }
     pub fn marking_center(at: Pos2, screen: Rect) -> Pos2 {
         let radius = crate::RADIAL_RADIUS + Tokens::get().space_4;
-        let axis =
-            |value: f32, low: f32, high: f32| if high - low > radius * 2.0 { value.clamp(low + radius, high - radius) } else { (low + high) * 0.5 };
+        let axis = |value: f32, low: f32, high: f32| {
+            if high - low > radius * 2.0 { value.clamp(low + radius, high - radius) } else { (low + high) * 0.5 }
+        };
         pos2(axis(at.x, screen.left(), screen.right()), axis(at.y, screen.top(), screen.bottom()))
     }
     pub fn marking_sector(offset: Vec2) -> Option<usize> {
@@ -385,10 +421,15 @@ impl Menu {
             state.flick = true;
         }
         let mut picked = None;
-        Container::new(ctx, Surface::Popup).area(id.with("marking-ring")).fixed_pos(ring.min).order(egui::Order::Foreground).show(ctx, |ui| {
-            let _ = ui.allocate_exact_size(ring.size(), Sense::hover());
-            picked = crate::radial_menu(ui, center, slots, hot);
-        });
+        Container::new(ctx, Surface::Popup)
+            .area(id.with("marking-ring"))
+            .kind(egui::UiKind::Menu)
+            .fixed_pos(ring.min)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let _ = ui.allocate_exact_size(ring.size(), Sense::hover());
+                picked = crate::radial_menu(ui, center, slots, hot);
+            });
         if state.flick && ctx.input(|input| input.pointer.button_released(egui::PointerButton::Secondary)) {
             state.flick = false;
             if pointer.is_some_and(|point| point.distance(center) > 36.0) {
@@ -397,7 +438,8 @@ impl Menu {
         }
         ctx.data_mut(|data| data.insert_temp(key, state));
         let position = Self::marking_list_place(center, height(items), ctx.content_rect());
-        let mut output = Self::render(ctx, id, MenuAnchor::Point(position), items, just_opened, None, true, egui::Order::Foreground, Some(ring));
+        let mut output =
+            Self::render(ctx, id, MenuAnchor::Point(position), items, just_opened, None, true, egui::Order::Foreground, Some(ring), None);
         if let Some(item) = picked {
             output.close = !item.keep_open;
             output.open = !output.close;
@@ -413,6 +455,14 @@ impl Menu {
         let frame = ctx.cumulative_frame_nr();
         ctx.data(|data| data.get_temp::<PopupState>(key)).is_some_and(|state| state.open && state.frame.saturating_add(1) >= frame)
     }
+    /// Visible outer bounds of a popup level in this viewport (the root is level zero).
+    pub fn level_rect(ctx: &Context, id: Id, depth: usize) -> Option<Rect> {
+        if depth > MAX_DEPTH || !Self::is_open(ctx, id) || depth > Self::open_path(ctx, id).len() {
+            return None;
+        }
+        let area = state_id(ctx, id).with(("level", depth));
+        ctx.memory(|memory| memory.area_rect(area))
+    }
     pub fn response_is_open(response: &Response) -> bool {
         let id = response.id.with("shared_menu");
         let key = adapter_id(&response.ctx, id);
@@ -420,6 +470,9 @@ impl Menu {
         state.is_some_and(|state| state.open && (state.fresh || Self::is_open(&response.ctx, id)))
     }
     pub fn dismiss(ctx: &Context, id: Id) {
+        if Self::is_open(ctx, id) {
+            ctx.request_repaint();
+        }
         let key = state_id(ctx, id);
         let active = active_key(ctx);
         let adapter = adapter_id(ctx, id);
@@ -498,20 +551,43 @@ impl Menu {
         response.ctx.request_repaint();
     }
     pub fn context_active(response: &Response) -> bool {
-        Self::response_is_open(response) || Self::context_requested(response)
+        response.enabled() && (Self::response_is_open(response) || Self::context_requested(response))
     }
     fn context_requested(response: &Response) -> bool {
+        if !response.enabled() {
+            return false;
+        }
+        let ctx = &response.ctx;
+        let frame = ctx.cumulative_frame_nr();
+        let press_key = response.id.with(("shared_context_press", ctx.viewport_id()));
+        let (pressed, down, released, origin) = ctx.input(|input| {
+            (
+                input.pointer.button_pressed(egui::PointerButton::Secondary),
+                input.pointer.secondary_down(),
+                input.pointer.button_released(egui::PointerButton::Secondary),
+                input.pointer.press_origin().or_else(|| {
+                    input.events.iter().find_map(|event| match event {
+                        egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed: true, .. } => Some(*pos),
+                        _ => None,
+                    })
+                }),
+            )
+        });
+        let previous = ctx.data(|data| data.get_temp::<(u64, bool)>(press_key));
+        let started_here = if pressed {
+            response.contains_pointer() && origin.is_some_and(|origin| response.rect.contains(origin))
+        } else {
+            previous.is_some_and(|(seen, started)| seen.saturating_add(1) >= frame && started)
+        };
+        if pressed || down || released {
+            ctx.data_mut(|data| data.insert_temp(press_key, (frame, started_here)));
+        }
         let inside = response.contains_pointer()
-            && response
-                .ctx
-                .pointer_interact_pos()
-                .is_some_and(|point| response.rect.contains(point) && response.ctx.layer_id_at(point) == Some(response.layer_id));
+            && ctx.pointer_interact_pos().is_some_and(|point| response.rect.contains(point) && ctx.layer_id_at(point) == Some(response.layer_id));
         let focused = response.has_focus();
         response.secondary_clicked()
-            || response.ctx.input(|input| {
-                (inside && input.pointer.button_released(egui::PointerButton::Secondary))
-                    || (focused && input.modifiers.shift && input.key_pressed(egui::Key::F10))
-            })
+            || (inside && released && started_here)
+            || ctx.input(|input| focused && input.modifiers.shift && input.key_pressed(egui::Key::F10))
     }
     pub fn context_items(response: &Response, items: &[Item]) -> Option<Item> {
         Self::context_items_output(response, items).picked
@@ -528,7 +604,7 @@ impl Menu {
     fn adapter(response: &Response, items: &[Item], context: bool) -> MenuOutput {
         let ctx = &response.ctx;
         let id = response.id.with("shared_menu");
-        if items.is_empty() {
+        if items.is_empty() || !response.enabled() {
             Self::dismiss(ctx, id);
             return MenuOutput::default();
         }
@@ -550,7 +626,9 @@ impl Menu {
             state =
                 Some(AdapterState { anchor: MenuAnchor::Rect(response.rect), open: !state.as_ref().is_some_and(|state| state.open), fresh: true });
         }
-        let Some(mut state) = state else { return MenuOutput::default() };
+        let Some(mut state) = state else {
+            return MenuOutput::default();
+        };
         if !state.open {
             ctx.data_mut(|data| data.insert_temp(adapter, state));
             return MenuOutput::default();
@@ -562,18 +640,22 @@ impl Menu {
         output
     }
     pub fn popup(ctx: &Context, id: Id, anchor: MenuAnchor, items: &[Item], just_opened: bool) -> MenuOutput {
-        Self::render(ctx, id, anchor, items, just_opened, None, true, egui::Order::Foreground, None)
+        Self::render(ctx, id, anchor, items, just_opened, None, true, egui::Order::Foreground, None, None)
+    }
+    /// Show a popup constrained to the host's finite viewport capacity.
+    pub fn popup_with_bounds(ctx: &Context, id: Id, anchor: MenuAnchor, items: &[Item], just_opened: bool, bounds: Rect) -> MenuOutput {
+        Self::render(ctx, id, anchor, items, just_opened, None, true, egui::Order::Foreground, None, Some(bounds))
     }
     /// A search-result preview uses the same menu geometry below the search surface, without input.
     pub fn preview(ctx: &Context, id: Id, anchor: MenuAnchor, items: &[Item]) -> MenuOutput {
-        Self::render(ctx, id, anchor, items, false, None, false, egui::Order::Middle, None)
+        Self::render(ctx, id, anchor, items, false, None, false, egui::Order::Middle, None, None)
     }
     /// Shared menu rows embedded below a form's search field. The form owns outside dismissal.
     /// Pass `just_opened` when the form's opener was activated this frame, so its Enter
     /// does not also pick the first action.
     pub fn items(ui: &mut egui::Ui, id: Id, items: &[Item], just_opened: bool) -> MenuOutput {
         let ctx = ui.ctx().clone();
-        Self::render(&ctx, id, MenuAnchor::Point(ui.cursor().min), items, just_opened, Some(ui), true, egui::Order::Foreground, None)
+        Self::render(&ctx, id, MenuAnchor::Point(ui.cursor().min), items, just_opened, Some(ui), true, egui::Order::Foreground, None, None)
     }
     fn render(
         ctx: &Context,
@@ -585,19 +667,32 @@ impl Menu {
         interactive: bool,
         order: egui::Order,
         extra_inside: Option<Rect>,
+        bounds: Option<Rect>,
     ) -> MenuOutput {
         let embedded = inline.is_some();
-        let screen = ctx.content_rect();
+        let viewport = ctx.content_rect();
+        let screen = bounds
+            .filter(|bounds| bounds.is_finite())
+            .map(|bounds| bounds.intersect(viewport))
+            .filter(|bounds| bounds.is_positive())
+            .unwrap_or(viewport);
         let anchor = match anchor {
             MenuAnchor::Point(point) if point.is_finite() => MenuAnchor::Point(point),
             MenuAnchor::Rect(rect) if rect.is_finite() && rect.is_positive() => MenuAnchor::Rect(rect),
             _ => MenuAnchor::Point(screen.center()),
         };
-        let key = state_id(ctx, id);
+        let source_key = state_id(ctx, id);
+        let key = if interactive { source_key } else { source_key.with("preview") };
         let keyboard_key = active_key(ctx);
         let registry_key = Id::unique(("shared_menus", ctx.viewport_id()));
         let frame = ctx.cumulative_frame_nr();
         let mut state = ctx.data(|data| data.get_temp::<PopupState>(key)).unwrap_or_default();
+        if !interactive && let Some(seed) = ctx.data(|data| data.get_temp::<PopupState>(source_key)).filter(|state| state.seeded) {
+            state.path = seed.path;
+            state.cursor = seed.cursor;
+            state.scroll_cursor = seed.scroll_cursor;
+            state.seeded = true;
+        }
         if just_opened || state.frame.saturating_add(2) < frame {
             let seed = state.seeded.then(|| (state.path.clone(), state.cursor.clone(), state.scroll_cursor));
             state = PopupState::default();
@@ -607,18 +702,43 @@ impl Menu {
                 state.scroll_cursor = scroll;
             }
         }
+        let seeded = state.seeded;
         state.frame = frame;
         state.seeded = false;
-        state.open = true;
+        state.open = interactive;
+        let mut changed_branch = None;
+        if !seeded {
+            let mut current = items;
+            for (depth, index) in state.path.iter().copied().enumerate() {
+                let Some(item) = current.get(index) else {
+                    break;
+                };
+                if state.open_ids.get(depth).is_some_and(|id| *id != item.id) {
+                    changed_branch = Some(depth);
+                    break;
+                }
+                current = &item.children;
+            }
+        }
+        if let Some(depth) = changed_branch {
+            state.path.truncate(depth);
+            state.cursor.truncate(depth);
+            state.focus_rows.retain(|(_, level, _)| *level < depth);
+        }
         let depth = levels(items, &state.path).len().saturating_sub(1);
         state.path.truncate(depth);
         state.cursor.resize(depth + 1, None);
-        if let Some(focus) = ctx.memory(|memory| memory.focused())
+        let focused = ctx.memory(|memory| memory.focused());
+        if !seeded
+            && focused != state.last_focus
+            && let Some(focus) = focused
             && let Some((_, level, index)) = state.focus_rows.iter().find(|(row, _, _)| *row == focus)
             && let Some(cursor) = state.cursor.get_mut(*level)
         {
             *cursor = Some(*index);
         }
+        let auxiliary_focus = focused.is_some_and(|id| state.auxiliary_rows.contains(&id));
+        state.last_focus = focused;
         let mut output = MenuOutput { open: true, depth, ..Default::default() };
         // Inline actions can precede editors in the same form. The focused
         // editor owns navigation even when it is painted later this frame.
@@ -635,11 +755,17 @@ impl Menu {
             false
         };
         let mut keyboard_close = false;
+        if keyboard_owner && (just_opened || changed_branch.is_some()) {
+            ctx.input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
+            });
+        }
         let moved = ctx.input(|input| input.pointer.delta() != Vec2::ZERO);
         if moved || ctx.input(|input| input.pointer.any_pressed()) {
             state.keyboard = false;
         }
-        if keyboard_owner && !state.editing && !just_opened {
+        if keyboard_owner && !state.editing && !auxiliary_focus && !just_opened && changed_branch.is_none() {
             let left = ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
             if left && depth == 0 {
                 keyboard_close = true;
@@ -687,9 +813,8 @@ impl Menu {
         }
         let path = state.path.clone();
         let lists = levels(items, &path);
-        let screen = ctx.content_rect();
         let margin = Self::frame().total_margin().sum();
-        let root_width = width(ctx, items);
+        let root_width = width(ctx, items, screen);
         let root_height = height(items).min((screen.height() - Tokens::get().space_8).max(1.0));
         let at = match anchor {
             MenuAnchor::Point(point) => place(point, Vec2::ZERO, vec2(root_width + margin.x, root_height), screen),
@@ -699,6 +824,10 @@ impl Menu {
             }
         };
         let pointer = ctx.pointer_hover_pos();
+        if state.pointer_gate.is_some_and(|(_, anchor)| pointer.is_none_or(|point| !anchor.contains(point))) {
+            state.pointer_gate = None;
+        }
+        let released = ctx.input(|input| input.pointer.button_released(egui::PointerButton::Primary));
         output.inside = extra_inside.is_some_and(|rect| pointer.is_some_and(|point| rect.contains(point)))
             || match anchor {
                 MenuAnchor::Rect(rect) => pointer.is_some_and(|point| rect.contains(point)),
@@ -709,7 +838,8 @@ impl Menu {
         let mut leftward = false;
         let mut editing = false;
         for (depth, rows) in lists.iter().enumerate() {
-            let content_width = width(ctx, rows);
+            let picked_before = output.picked.clone();
+            let content_width = width(ctx, rows, screen);
             let estimated = vec2(content_width + margin.x, height(rows).min(screen.height()));
             let position = if depth == 0 {
                 at
@@ -717,7 +847,7 @@ impl Menu {
                 let Some(rect) = previous_anchor else { break };
                 Self::flyout_at(screen, rect, estimated, leftward)
             };
-            let area_id = state_id(ctx, id).with(("level", depth));
+            let area_id = key.with(("level", depth));
             let cursor = state.cursor.get(depth).copied().flatten();
             let mut body = |ui: &mut egui::Ui| {
                 if !interactive {
@@ -725,7 +855,7 @@ impl Menu {
                 }
                 ui.set_width(content_width);
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let room = (screen.bottom() - position.y - margin.y - Tokens::get().space_4).max(Tokens::get().control_height);
+                let room = (screen.bottom() - position.y - margin.y - Tokens::get().space_4).max(0.0);
                 let reveal = state.scroll_cursor.then_some(cursor).flatten().filter(|index| *index < rows.len()).map(|index| {
                     let top = height(&rows[..index]) - margin.y;
                     (top, top + height(&rows[index..=index]) - margin.y)
@@ -746,20 +876,26 @@ impl Menu {
                 })
             };
             let response = if depth == 0 && inline.is_some() {
-                let Some(ui) = inline.as_deref_mut() else { break };
+                let Some(ui) = inline.as_deref_mut() else {
+                    break;
+                };
                 let start = ui.cursor().min;
                 let inner = body(ui);
                 let rect = Rect::from_min_max(start, ui.min_rect().max);
                 let response = ui.interact(rect, area_id, Sense::hover());
                 egui::InnerResponse { inner, response }
             } else {
-                Container::new(ctx, Surface::Popup).area(area_id).fixed_pos(position).constrain(true).order(order).interactable(interactive).show(
-                    ctx,
-                    |ui| {
+                Container::new(ctx, Surface::Popup)
+                    .area(area_id)
+                    .kind(egui::UiKind::Menu)
+                    .fixed_pos(position)
+                    .constrain(true)
+                    .order(order)
+                    .interactable(interactive)
+                    .show(ctx, |ui| {
                         ui.set_width(content_width + margin.x);
                         Self::show_frame(ui, Self::frame(), body).inner
-                    },
-                )
+                    })
             };
             if depth == 0 {
                 output.rect = Some(response.response.rect);
@@ -769,9 +905,15 @@ impl Menu {
             }
             output.inside |= response.response.contains_pointer() || pointer.is_some_and(|point| response.response.rect.contains(point));
             previous_anchor = response.inner.anchor;
+            // On a narrow viewport the new flyout can cover its own opener.
+            // Finishing the opener click must not activate the child underneath.
+            if released && state.pointer_gate.is_some_and(|(level, anchor)| depth >= level && pointer.is_some_and(|point| anchor.contains(point))) {
+                output.picked = picked_before;
+            }
             seen.push(response.inner);
         }
         state.editing = editing;
+        state.auxiliary_rows = seen.iter().flat_map(|seen| seen.auxiliary.iter().copied()).collect();
         state.focus_rows = seen.iter().enumerate().flat_map(|(depth, seen)| seen.ids.iter().map(move |(id, index)| (*id, depth, *index))).collect();
         // New areas measure while disabled. Transfer focus and scroll once the
         // flyout is visible, rather than losing the request in its sizing pass.
@@ -783,6 +925,7 @@ impl Menu {
                     state.path.push(index);
                     state.cursor.truncate(depth + 1);
                     state.cursor.push(None);
+                    state.pointer_gate = seen.get(depth).and_then(|seen| seen.opens_anchor).map(|anchor| (depth + 1, anchor));
                     ctx.request_repaint();
                 }
                 state.leaving = None;
@@ -800,6 +943,9 @@ impl Menu {
                 state.leaving = None;
             }
         }
+        if released {
+            state.pointer_gate = None;
+        }
         let outside = interactive && !embedded && !just_opened && ctx.input(|input| input.pointer.any_pressed()) && !output.inside;
         let escape = keyboard_owner && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         // Control-channel windows may start in the background. Dismiss when an
@@ -813,11 +959,13 @@ impl Menu {
         output.close = keyboard_close || outside || escape || unfocused || output.picked.as_ref().is_some_and(|item| !item.keep_open);
         output.open = !output.close;
         output.depth = state.path.len();
-        state.open = output.open;
+        state.open = output.open && interactive;
         state.open_ids.clear();
         let mut current = items;
         for &index in &state.path {
-            let Some(item) = current.get(index) else { break };
+            let Some(item) = current.get(index) else {
+                break;
+            };
             state.open_ids.push(item.id.clone());
             current = &item.children;
         }
@@ -826,10 +974,16 @@ impl Menu {
             if output.close && data.get_temp::<(Id, u64)>(keyboard_key).is_some_and(|(active, _)| active == id) {
                 data.remove::<(Id, u64)>(keyboard_key);
             }
+            if !interactive {
+                return;
+            }
             let entries = data.get_temp_mut_or_default::<Vec<(Id, u64, bool)>>(registry_key);
             entries.retain(|(menu, seen, _)| *menu != id && seen.saturating_add(1) >= frame);
             entries.push((id, frame, output.open && interactive));
         });
+        if output.close {
+            ctx.request_repaint();
+        }
         output
     }
 }

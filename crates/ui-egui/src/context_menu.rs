@@ -5324,10 +5324,16 @@ mod workspace_menu_tests {
         let ctx = crate::fonts::test_context();
         let app = SolveApp::new(Default::default(), Default::default());
         let list = items(&app, &Target::Workspace);
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            Menu::popup(ui.ctx(), egui::Id::unique("workspace-test"), MenuAnchor::Point(pos2(0.0, 0.0)), &list, true);
-        });
-        output.textures_delta.clear();
+        let draw = |just_opened| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                Menu::popup(ui.ctx(), egui::Id::unique("workspace-test"), MenuAnchor::Point(pos2(0.0, 0.0)), &list, just_opened);
+            });
+            output.textures_delta.clear();
+            output
+        };
+        // The shared popup measures its first frame before painting visible rows.
+        draw(true);
+        let output = draw(false);
         let titles: Vec<_> = output
             .shapes
             .iter()
@@ -5353,7 +5359,9 @@ mod workspace_menu_tests {
         let rows: Vec<_> = ["design", "drawing", "render"].iter().map(|slug| rect_of(&format!("workspace:menu:{slug}")).unwrap()).collect();
         assert!(rows.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()));
         assert!(rows[0].top() > opener.bottom());
-        assert_eq!(rows[0].width(), 450.0);
+        let menu = Menu::level_rect(&h.ctx, egui::Id::unique("sc_context_menu"), 0).unwrap();
+        let width = menu.width() - Menu::frame().total_margin().sum().x;
+        assert!(rows.iter().all(|row| (row.width() - width).abs() <= 1.0), "workspace rows use the shared measured menu width");
         assert_eq!(items(&h.app, &Target::Workspace).len(), 3, "only the workspaces there are");
         assert!(rect_of("workspace:menu:animation").is_none(), "a planned workspace has no row");
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();

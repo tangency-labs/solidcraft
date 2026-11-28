@@ -1911,11 +1911,12 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
                                 if opening || button.clicked() || ui.is_sizing_pass() {
                                     response.request_focus();
                                 }
+                                let menu_was_open = crate::Menu::response_is_open(&response);
                                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
                                 let enter = ui.input(|i| i.raw.events.iter().any(|event| matches!(event,
                                     egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE
                                 )));
-                                if response.has_focus() && enter {
+                                if response.has_focus() && enter && !menu_was_open {
                                     response.surrender_focus();
                                 }
                                 publish(ui, &response, egui::Role::TextInput);
@@ -2131,7 +2132,9 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
         // rectangle would flatten translucent/blurred parents. Unexpected painting
         // (including an invisible or clipped widget) keeps the native shapes intact.
         ui.ctx().graphics_mut(|graphics| {
-            let Some(list) = graphics.get_mut(layer) else { return };
+            let Some(list) = graphics.get_mut(layer) else {
+                return;
+            };
             let paint_end = list.next_idx();
             if paint_end.0.saturating_sub(paint_start.0) < 2 {
                 return;

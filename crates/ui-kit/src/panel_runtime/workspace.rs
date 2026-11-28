@@ -255,12 +255,19 @@ enum HostCommand {
     OpenMenu { menu: HostMenu, anchor: LogicalRect, source: egui::Id, secondary: bool },
 }
 
+#[derive(Default)]
+struct MenuPick {
+    keyboard_source: Option<egui::Id>,
+    close: bool,
+}
+
 struct PendingHostCommands {
     scope: LocalScope,
     window: HostId,
     frame_number: u64,
     allow_actions: bool,
     commands: Vec<HostCommand>,
+    menu_pick: MenuPick,
     pointer_events: Vec<(egui::Id, HostPointerEvent)>,
     mount: PanelResult<()>,
     drag_cards: Vec<CardPaint>,
@@ -1410,9 +1417,19 @@ impl WorkspacePanelHost {
                 }
             }
         }
-        self.paint_menu(ui, runtime, native.capabilities(), &metadata, &owners, &mut frame, &mut commands, allow_actions, locale);
-        self.pending =
-            Some(PendingHostCommands { scope, window, frame_number, allow_actions, commands, pointer_events, mount: mount.clone(), drag_cards });
+        let mut menu_pick = MenuPick::default();
+        self.paint_menu(ui, runtime, native.capabilities(), &metadata, &owners, &mut frame, &mut commands, &mut menu_pick, allow_actions, locale);
+        self.pending = Some(PendingHostCommands {
+            scope,
+            window,
+            frame_number,
+            allow_actions,
+            commands,
+            menu_pick,
+            pointer_events,
+            mount: mount.clone(),
+            drag_cards,
+        });
         self.overlays = overlays;
         self.frame = Some(frame);
         mount
@@ -1443,7 +1460,7 @@ impl WorkspacePanelHost {
         }
         self.capture_metrics(runtime, services.models)?;
         self.capture_reservations(runtime, store)?;
-        let PendingHostCommands { scope, frame_number, allow_actions, mut commands, mut pointer_events, mount, drag_cards, .. } = pending;
+        let PendingHostCommands { scope, frame_number, allow_actions, mut commands, menu_pick, mut pointer_events, mount, drag_cards, .. } = pending;
         let Some(mut frame) = self.frame.take() else {
             ui.ctx().request_repaint();
             return Ok(());
@@ -1619,6 +1636,9 @@ impl WorkspacePanelHost {
         let mut overlays = std::mem::take(&mut self.overlays);
         let mut accepted = Vec::new();
         let mut dismiss_popup_peek = false;
+        // Only this frame's shared menu pick can use focus as keyboard proof.
+        // Mouse commands retain their click and pointer-layer admission.
+        let keyboard_menu_action = |source| menu_pick.keyboard_source == Some(source) && owns_focused_action(ui.ctx(), source);
         for command in commands {
             let (command, source) = match command {
                 HostCommand::Contextual(action, source) => {
@@ -1634,13 +1654,13 @@ impl WorkspacePanelHost {
                     }
                 }
                 HostCommand::WidgetLayout(action, source) => {
-                    if !owns_widget_action(ui.ctx(), source) {
+                    if !owns_widget_action(ui.ctx(), source) && !keyboard_menu_action(source) {
                         continue;
                     }
                     (HostCommand::Layout(action), Some(source))
                 }
                 HostCommand::Content(instance, action, source) => {
-                    if !owns_widget_action(ui.ctx(), source) {
+                    if !owns_widget_action(ui.ctx(), source) && !keyboard_menu_action(source) {
                         continue;
                     }
                     (HostCommand::Content(instance, action, source), Some(source))
@@ -1655,7 +1675,7 @@ impl WorkspacePanelHost {
                     (HostCommand::Scroll { horizontal, offset, source }, Some(source))
                 }
                 HostCommand::OpenMenu { menu, anchor, source, secondary } => {
-                    if !allow_actions || dismiss_menu || !owns_menu_action(ui.ctx(), source, secondary) {
+                    if !allow_actions || dismiss_menu || !(owns_menu_action(ui.ctx(), source, secondary) || keyboard_menu_action(source)) {
                         continue;
                     }
                     (HostCommand::OpenMenu { menu, anchor, source, secondary }, Some(source))
@@ -1664,6 +1684,10 @@ impl WorkspacePanelHost {
             };
             dismiss_popup_peek |= source.is_some_and(|source| self.popup_action_dismisses_peek(runtime, &frame, ui.ctx(), source));
             accepted.push(command);
+        }
+        // Peek admission above still needs the identity of the picked menu.
+        if menu_pick.close {
+            self.clear_menu();
         }
         if dismiss_popup_peek
             && !accepted.iter().any(|command| {
@@ -1788,7 +1812,7 @@ impl WorkspacePanelHost {
                     frame.events.push(HostEvent::ContentAction { instance, action, result });
                 }
                 HostCommand::OpenMenu { menu, anchor, source, secondary } => {
-                    if allow_actions && !dismiss_menu && owns_menu_action(ui.ctx(), source, secondary) {
+                    if allow_actions && !dismiss_menu && (owns_menu_action(ui.ctx(), source, secondary) || keyboard_menu_action(source)) {
                         // A submenu row replaces its parent menu, so retain the
                         // live root launcher for Escape while tracking the row
                         // separately for the next menu's keyboard entry.
@@ -3373,6 +3397,7 @@ impl WorkspacePanelHost {
         owners: &BTreeMap<InstanceId, ContentOwner>,
         frame: &mut HostFrame,
         commands: &mut Vec<HostCommand>,
+        menu_pick: &mut MenuPick,
         allow_actions: bool,
         locale: solidcraft_ui_text::Locale,
     ) {
@@ -3554,7 +3579,24 @@ impl WorkspacePanelHost {
             }
             return;
         }
-        let output = ui_kit::Menu::popup(ui.ctx(), id, ui_kit::MenuAnchor::Rect(egui_rect(anchor)), &items, entry.is_some());
+        let keyboard_requested = ui.input(|input| {
+            input.modifiers == egui::Modifiers::NONE
+                && input.key_pressed(egui::Key::Enter)
+                && !input.pointer.any_pressed()
+                && !input.pointer.any_released()
+        });
+        if keyboard_entry {
+            let first = items.iter().position(|item| item.enabled && !item.is_sep() && !item.is_heading());
+            ui_kit::Menu::set_cursor(ui.ctx(), id, 0, first);
+        }
+        let output = ui_kit::Menu::popup_with_bounds(
+            ui.ctx(),
+            id,
+            ui_kit::MenuAnchor::Rect(egui_rect(anchor)),
+            &items,
+            entry.is_some(),
+            egui_rect(frame.layout.capacity),
+        );
         frame.menu_bounds = output.rect.map(logical_rect);
         self.menu_items.clear();
         for (item, response) in &output.rows {
@@ -3569,17 +3611,21 @@ impl WorkspacePanelHost {
                 record_control(frame, response, target.clone(), &item.label, item.enabled, output.rect.unwrap_or(response.rect));
             }
         }
-        if keyboard_entry
-            && let Some((item, response)) = output.rows.iter().find(|(item, response)| item.enabled && response.enabled())
-            && let Some(index) = items.iter().position(|entry| entry.id == item.id)
-        {
-            ui_kit::Menu::set_cursor(ui.ctx(), id, 0, Some(index));
-            response.request_focus();
+        if keyboard_entry && let Some((_, response)) = output.rows.iter().find(|(item, response)| item.enabled && response.enabled()) {
+            ui_kit::Menu::focus_row(response);
+            ui.ctx().request_repaint();
+        } else if keyboard_entry && output.open && ui.is_enabled() && output.rows.iter().any(|(item, _)| item.enabled) {
+            // A new popup Area first measures its rows with disabled input.
+            // Keep the source until the visible pass can actually take focus.
+            self.menu_entry = entry;
             ui.ctx().request_repaint();
         }
         if let Some(picked) = output.picked {
             if allow_actions && let Some((_, _, mut command)) = bindings.into_iter().find(|(id, _, _)| *id == picked.id) {
                 if let Some((_, response)) = output.rows.iter().find(|(item, _)| item.id == picked.id) {
+                    if keyboard_requested && owns_focused_action(ui.ctx(), response.id) {
+                        menu_pick.keyboard_source = Some(response.id);
+                    }
                     match &mut command {
                         HostCommand::WidgetLayout(_, source) | HostCommand::Content(_, _, source) => *source = response.id,
                         HostCommand::OpenMenu { anchor, source, .. } => {
@@ -3591,13 +3637,14 @@ impl WorkspacePanelHost {
                 }
                 let opens_context = matches!(command, HostCommand::OpenMenu { .. });
                 commands.push(command);
-                if !opens_context {
-                    self.clear_menu();
-                }
+                menu_pick.close = !opens_context;
             }
         } else if output.close {
             let opener = self.menu_opener;
+            frame.controls.retain(|control| !self.menu_items.contains(&control.id));
+            frame.menu_bounds = None;
             self.clear_menu();
+            ui.ctx().request_repaint();
             if let Some(opener) = opener.filter(|opener| frame.controls.iter().any(|control| control.id == *opener && control.enabled)) {
                 ui.memory_mut(|memory| memory.request_focus(opener));
                 self.owned_focus = Some(opener);
@@ -3622,7 +3669,7 @@ fn panel_menu_id(runtime: &PanelRuntime, menu: &HostMenu) -> egui::Id {
 }
 
 fn panel_menu_item(widget: egui::Id, label: &str, enabled: bool) -> ui_kit::Item {
-    let mut item = ui_kit::Item::action(&format!("panel:{widget:?}"), label, "").on_if(enabled);
+    let mut item = ui_kit::Item::action(&format!("panel:{:016x}", widget.value()), label, "").on_if(enabled);
     item.widget_id = Some(widget);
     item.tip = Some(label.to_owned());
     item

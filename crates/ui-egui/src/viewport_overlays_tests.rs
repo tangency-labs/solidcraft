@@ -2753,9 +2753,9 @@ fn summary_native_menu_escape_is_close_only_then_newest_replacement_clears_and_u
     let mut previous = f32::NEG_INFINITY;
     for effect in h.app.session.status_items() {
         let item = crate::viewport_status::presentation(&h.app, &effect).unwrap();
-        let close = crate::scenario::rect_of(&format!("viewport_status:{}:close", item.id)).unwrap();
-        assert!(close.top() > previous, "menu order follows oldest slots rather than newest activation");
-        previous = close.top();
+        let row = crate::scenario::rect_of(&format!("viewport_status:{}:item", item.id)).unwrap();
+        assert!(row.top() > previous, "menu order follows oldest slots rather than newest activation");
+        previous = row.top();
     }
     analysis_escape_relayout_frame(&mut h, |app| {
         assert_eq!(app.session.status_items().len(), 3, "footer Esc hint is not a clear-all binding");
@@ -2842,6 +2842,7 @@ fn summary_menu_keeps_tool_owned_row_clear_available() {
     assert!(any_popup_open(&h.ctx), "a Tool is not a higher modal owner");
     let section = h.app.session.status_items().into_iter().find(|item| item.id == solidcraft_engine::status_items::StatusId::Section).unwrap();
     let section = crate::viewport_status::presentation(&h.app, &section).unwrap();
+    assert!(crate::scenario::rect_of(&format!("viewport_status:{}:close", section.id)).is_some(), "Summary exposes per-status Clear directly");
     h.step(&json!({"click":{"handle":format!("viewport_status:{}:close", section.id)}})).unwrap();
     assert!(h.app.session.section.is_empty());
     assert!(h.app.tool.is_some(), "row X retains the active Tool");

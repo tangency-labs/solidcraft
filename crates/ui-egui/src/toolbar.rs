@@ -338,7 +338,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             }
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left());
+                d.insert_temp(egui::Id::unique("sc_file_menu_anchor"), out.file);
+            });
             let editing = customizing;
             if editing {
                 out.actions.clear();
@@ -696,7 +699,11 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let rows = file_rows(app);
     let at = pos2(ctx.data(|d| d.get_temp::<f32>(egui::Id::unique("sc_file_menu_x"))).unwrap_or(100.0), APP_BAR_HEIGHT);
     let just_opened = ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_file_menu_opened"))) == Some(ctx.cumulative_pass_nr());
-    let out = crate::ui_kit::Menu::popup(ctx, egui::Id::unique("sc_file_area"), crate::ui_kit::MenuAnchor::Point(at), &rows, just_opened);
+    let anchor = ctx
+        .data(|data| data.get_temp::<Rect>(egui::Id::unique("sc_file_menu_anchor")))
+        .filter(|rect| rect.is_finite() && rect.is_positive())
+        .map_or(crate::ui_kit::MenuAnchor::Point(at), crate::ui_kit::MenuAnchor::Rect);
+    let out = crate::ui_kit::Menu::popup(ctx, egui::Id::unique("sc_file_area"), anchor, &rows, just_opened);
     if let Some(chosen) = out.picked {
         run_file_row(app, &chosen.id);
     }
@@ -2091,8 +2098,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             };
             ribbon::show(ui, &row, Rect::from_min_max(pos2(ribbon_left, top), r.max), &mut more_items)
         };
+        record_command_menu_rows(app, ui, &out.menu_rows);
         for picked in std::mem::take(&mut out.menu_picked) {
-            dispatch_command_menu(app, &picked, None);
+            let rect = out.menu_rows.iter().find(|(item, _)| item == &picked).map(|(_, response)| response.rect);
+            dispatch_command_menu(app, &picked, rect);
         }
         crate::plugin_slots::restore_group_indices(&mut out, builtin_groups, plugin_groups.len(), panels.exit);
         // The app's part of each button: its hover text, drags, the search's preview, deferred
@@ -2141,7 +2150,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 let variants = f.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect::<Vec<_>>();
                 let items = command_items(app, &variants);
                 let output = ui_kit::Menu::button_items_output(arrow, &items);
-                record_command_menu_rows(app, ui, &output);
+                record_command_menu_rows(app, ui, &output.rows);
                 if let Some(picked) = output.picked {
                     let rect = output.rows.iter().find(|(item, _)| item.id == picked.id).map(|(_, row)| row.rect);
                     dispatch_command_menu(app, &picked, rect);
@@ -2279,7 +2288,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     }
                     crate::scenario::publish_rect("toolbar_dropdown", rect);
                 }
-                let mut placed = record_command_menu_rows(app, ui, &output);
+                let mut placed = record_command_menu_rows(app, ui, &output.rows);
                 if !sketch_create {
                     placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
                     if let Some(layer) = output.rows.first().map(|(_, response)| response.layer_id)
@@ -2559,9 +2568,9 @@ fn command_menu_items(app: &SolveApp, tab: &str, panel: &str, commands: &[&'stat
     items
 }
 
-fn record_command_menu_rows(app: &SolveApp, ui: &egui::Ui, output: &ui_kit::MenuOutput) -> Vec<(&'static str, Rect)> {
+fn record_command_menu_rows(app: &SolveApp, ui: &egui::Ui, rows: &[(ui_kit::Item, egui::Response)]) -> Vec<(&'static str, Rect)> {
     let mut placed = Vec::new();
-    for (item, response) in &output.rows {
+    for (item, response) in rows {
         let Some(command) = solidcraft_engine::find_command(&item.id) else { continue };
         if response.drag_started() {
             response.dnd_set_drag_payload(ui_kit::ReorderPayload { id: command.id.to_string(), from_menu: true });
@@ -2881,6 +2890,43 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
 
 fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if ui_kit::Menu::any_open(ctx) {
+        // Contextual keys still act on the menu's target; other global commands stay blocked.
+        if app.viewport.context_menu.is_some() && !ctx.text_edit_focused() {
+            let presses = ctx.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let mut ran = Vec::new();
+            for (index, (key, modifiers)) in presses.into_iter().enumerate() {
+                let chord = crate::keymap::key_name(key, modifiers);
+                // Availability comes from the contextual row, not the unrelated selection.
+                let visibility =
+                    crate::keymap::commands_for(app, &chord).iter().any(|id| matches!(*id, "ui.toggle_visibility" | "browser.visibility"))
+                        || (matches!(chord.as_str(), "Shift+V" | "Alt+V" | "Alt+Shift+V")
+                            && crate::keymap::effective(app, "ui.toggle_visibility").as_deref() == Some("V")
+                            && crate::keymap::commands_for(app, &chord).is_empty());
+                let tag = if key == egui::Key::F2 && modifiers == egui::Modifiers::NONE {
+                    Some("F2")
+                } else if visibility {
+                    Some("V")
+                } else {
+                    None
+                };
+                if let Some(tag) = tag
+                    && crate::context_menu::press_shortcut(app, tag)
+                {
+                    ctx.input_mut(|input| input.consume_key(modifiers, key));
+                    ran.push(index);
+                }
+            }
+            drop_shortcut_text(ctx, &ran);
+        }
         app.last_escape = None;
         app.viewport.key_hold = None;
         return;
@@ -3435,7 +3481,7 @@ mod header_report_tests {
             h.step(&json!({"click":{"handle":"appbar:redo"}})).unwrap();
             assert_eq!(h.app.session.undo.len(), depth);
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
-            assert!(h.widget("Save As JSON…").is_some(), "the in-window File menu still opens");
+            assert!(h.widget("Save As…").is_some(), "the in-window File menu still opens");
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
             assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false)));
             h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
@@ -4596,6 +4642,50 @@ mod dropdown_tests {
         }
     }
 
+    #[test]
+    fn sketch_create_overflow_drag_pins_without_starting_the_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let width = [600, 500, 400, 300, 220].into_iter().find(|width| {
+            h.call("ui.resize", json!({"width":width,"height":1000}));
+            h.frames(3);
+            crate::scenario::rect_of("panel:SKETCH:CREATE").is_none() && crate::scenario::rect_of("toolbar:overflow").is_some()
+        });
+        assert!(width.is_some(), "the regression exercises Create folded into overflow");
+        let before = h.app.session.doc.to_json();
+        h.step(&json!({"click":{"handle":"toolbar:overflow"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"menu:CREATE"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"move":{"handle":"dropdown:sketch.point"}})).unwrap();
+        h.frames(2);
+        let from = crate::scenario::handle_at("dropdown:sketch.point").unwrap();
+        let to = crate::scenario::handle_at("panel:SKETCH:FINISH SKETCH").unwrap();
+        h.frame_with(crate::test_support::pointer(from, true));
+        let start = from + vec2(0.0, -12.0);
+        h.frame_with(vec![egui::Event::PointerMoved(start)]);
+        let payload = egui::DragAndDrop::payload::<ui_kit::ReorderPayload<String>>(&h.ctx)
+            .expect("dragging the shared overflow row starts its command payload");
+        assert_eq!((payload.id.as_str(), payload.from_menu), ("sketch.point", true));
+        for step in 1..=30 {
+            h.frame_with(vec![egui::Event::PointerMoved(start + (to - start) * (step as f32 / 30.0))]);
+        }
+        h.frames(3);
+        assert!(ribbon::dragging(&h.ctx), "the overflow payload survives reaching the toolbar");
+        let layer = h.ctx.layer_id_at(to);
+        h.frame_with(crate::test_support::pointer(to, false));
+        h.frames(3);
+        assert!(
+            crate::toolbar_custom::pinned_on(&h.app, "SKETCH", "sketch.point").is_some(),
+            "from={from:?}, to={to:?}, target_layer={layer:?}, panels={:?}, status={:?}",
+            h.app.toolbar_custom.panels,
+            h.app.status
+        );
+        assert_eq!(h.app.session.doc.to_json(), before, "dragging does not execute the command");
+        assert!(h.app.tool.is_none());
+    }
+
     /// #5080: a command dragged to another place in its drop-down (list or grid) goes there,
     /// a marker showing where while dragging; the order stays after a restart, and dropped on
     /// itself nothing changes. It is not pinned.
@@ -5050,13 +5140,20 @@ mod dropdown_tests {
                         }
                     });
                 }
-                assert_eq!(rules.len(), 1, "{theme} {panel}: expected only the footer separator, got {rules:?}");
+                let panel_name = panel.rsplit(':').next().unwrap();
+                let (commands, _) = crate::workspace::layout("MODEL", panel_name, &solidcraft_engine::command_specs()).unwrap();
+                let definitions = command_menu_items(&h.app, "MODEL", panel_name, &commands);
+                assert_eq!(
+                    rules.len(),
+                    definitions.iter().filter(|item| item.is_sep()).count(),
+                    "{theme} {panel}: each definition separator is rendered once"
+                );
                 let expected = crate::ui_kit::Menu::separator_stroke(&Tokens::get());
-                assert_eq!(rules[0], expected, "{theme} {panel}: expected shared menu separator stroke");
+                assert!(rules.iter().all(|stroke| *stroke == expected), "{theme} {panel}: expected shared menu separator stroke");
                 assert!(
-                    solidcraft_theme::contrast_ratio(rules[0].color, Tokens::get().dialog_body) >= crate::ui_kit::Menu::SEPARATOR_MIN_CONTRAST,
+                    solidcraft_theme::contrast_ratio(expected.color, Tokens::get().dialog_body) >= crate::ui_kit::Menu::SEPARATOR_MIN_CONTRAST,
                     "{theme} {panel}: separator {:?} blends into {:?}",
-                    rules[0],
+                    expected,
                     Tokens::get().dialog_body
                 );
                 h.step(&json!({"key":"Escape"})).unwrap();
@@ -7540,7 +7637,12 @@ mod persistent_ribbon_tests {
         let items = command_items(&h.app, &[command]);
         assert_eq!(items[0].checked == Some(true), selected, "{id} checked state follows the effect and presentation preferences");
         assert_eq!(items[0].checked, toggled.map(|state| state == egui::accesskit::Toggled::True), "{id} retains the expected check semantics");
-        assert_eq!(items[0].tip.as_deref(), RowData::new(&h.app, command).tip.as_deref());
+        let data = RowData::new(&h.app, command);
+        let expected_tip = match (data.tip, data.help.filter(|_| !data.hint)) {
+            (Some(tip), Some(help)) => Some(format!("{tip}\n\n{help}")),
+            (tip, help) => tip.or(help),
+        };
+        assert_eq!(items[0].tip, expected_tip);
     }
 
     #[test]
@@ -7590,7 +7692,7 @@ mod persistent_ribbon_tests {
         let mut h = harness();
         h.app.session.execute("inspect.section", &json!({"plane":"XY","at":4})).unwrap();
         open_status_menu(&mut h, "SECTION");
-        h.step(&json!({"key":"ArrowDown"})).unwrap();
+        h.step(&json!({"key":"Home"})).unwrap();
         h.frames(3);
         assert!(h.ctx.memory(|memory| memory.has_focus(egui::Id::unique("dropdown_row").with("inspect.section"))));
         assert_status_menu(&h, "inspect.section", true, Some(egui::accesskit::Toggled::True));

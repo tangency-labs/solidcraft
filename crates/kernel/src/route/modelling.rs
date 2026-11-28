@@ -158,6 +158,46 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     }
 }
 
+/// [`fillet`], its rounds turning at side edges as `turn` says, with the picks whose edges are
+/// gone: where some rounds overflow their faces those are built first, and a picked edge one of
+/// them removes whole is not rounded; a single concave round running off the flat face it rolls
+/// on carries that face on.
+pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+    match which(OpKind::Fillet) {
+        Which::Solidcore => Solidcore.fillet_removing(body, edges, radius, turn),
+    }
+}
+
+/// The fillet of each edge at its own radius (`radii` in `edges`' order), in one blend.
+pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
+    match which(OpKind::Fillet) {
+        Which::Solidcore => Solidcore.fillet_each(body, edges, radii, turn),
+    }
+}
+
+/// Constant-radius rounds set back from the corners at the vertices nearest each point by its
+/// distance, with a patch between the rounds there.
+pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
+    match which(OpKind::Fillet) {
+        Which::Solidcore => Solidcore.fillet_setback(body, edges, radius, setbacks),
+    }
+}
+
+/// [`chamfer`], and where a single concave chamfer runs off the flat face it rolls on, that face
+/// carried on.
+pub fn chamfer_carrying_face(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    match which(OpKind::Chamfer) {
+        Which::Solidcore => Solidcore.chamfer_carrying_face(body, edges, distance),
+    }
+}
+
+/// [`chamfer_sides`], carrying a flat face on as [`chamfer_carrying_face`].
+pub fn chamfer_sides_carrying_face(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+    match which(OpKind::Chamfer) {
+        Which::Solidcore => Solidcore.chamfer_sides_carrying_face(body, edges, d1, side, flip),
+    }
+}
+
 /// An equal chamfer of the edges nearest to the given points.
 pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     match which(OpKind::Chamfer) {

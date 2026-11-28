@@ -121,7 +121,9 @@ fn motion_offset(ctx: &egui::Context, id: &str, rect: Rect) -> egui::Vec2 {
         item.seen = frame;
         Some((item, snap, retarget, reused))
     });
-    let Some((mut item, snap, retarget, reused)) = selection else { return egui::Vec2::ZERO };
+    let Some((mut item, snap, retarget, reused)) = selection else {
+        return egui::Vec2::ZERO;
+    };
     if reused {
         return item.drawn - item.target;
     }
@@ -2175,6 +2177,26 @@ fn tab_menu_items(rows: &[crate::Item], keys: bool, others: bool, off: &str, pre
         .collect()
 }
 
+fn view_menu_items(strip: &TabStrip, views: &[ViewTab], index: usize) -> Vec<crate::Item> {
+    let Some(view) = views.get(index) else {
+        return Vec::new();
+    };
+    let local = view.to_window.is_none();
+    let off = if local && views.iter().skip(index + 1).any(|view| view.to_window.is_none()) { "" } else { strip.view_right_row };
+    let mut items =
+        tab_menu_items(strip.view_menu, true, views.iter().filter(|view| view.to_window.is_none()).count() > 1, off, strip.handles.menu_row, local);
+    if let Some(compass) = view.compass {
+        for item in &mut items {
+            if item.id == "view.compass" {
+                item.checked = Some(compass);
+            }
+        }
+    } else {
+        items.retain(|item| item.id != "view.compass");
+    }
+    items
+}
+
 fn view_items(strip: &TabStrip, views: &[ViewTab], prefix: &str, modern: bool) -> Vec<crate::Item> {
     views
         .iter()
@@ -2193,14 +2215,7 @@ fn view_items(strip: &TabStrip, views: &[ViewTab], prefix: &str, modern: bool) -
             if modern && view_look(view) != ViewLook::Hidden {
                 item.shortcut = view_status(view).to_string();
             }
-            item.context = tab_menu_items(
-                strip.view_menu,
-                true,
-                views.iter().filter(|view| view.to_window.is_none()).count() > 1,
-                "",
-                strip.handles.menu_row,
-                view.to_window.is_none(),
-            );
+            item.context = view_menu_items(strip, views, index);
             fn tag_view(items: &mut [crate::Item], index: usize) {
                 for action in items {
                     let mut params = action.params.clone().filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
@@ -2297,7 +2312,9 @@ fn start_view_drag(ui: &egui::Ui, response: &egui::Response, tab: Rect, from: us
         if !input.pointer.primary_down() || input.key_pressed(egui::Key::Escape) {
             return (None, None);
         }
-        let Some(origin) = input.pointer.press_origin() else { return (None, None) };
+        let Some(origin) = input.pointer.press_origin() else {
+            return (None, None);
+        };
         if input.any_touches() {
             let elapsed = input.pointer.press_start_time().map_or(0.0, |started| input.time - started);
             return if elapsed >= TOUCH_HOLD { (Some(origin), None) } else { (None, Some(TOUCH_HOLD - elapsed)) };
@@ -2857,6 +2874,7 @@ fn layout_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, pen: &mut Pen)
     let t = Tokens::get();
     let resp = ui.interact(rect, ui.scope_id().with("view_layout"), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, strip.layout_tip));
+    solidcraft_ui_registry::publish_target("view:layout", rect);
     let open = pen.popup.is_some_and(|(which, ..)| which == Popup::Layout);
     let hot = resp.hovered() || resp.has_focus() || open;
     if hot {
@@ -2932,11 +2950,32 @@ pub(crate) fn paint_layout_glyph(p: &Painter, rect: Rect, layout: &str, ink: egu
 }
 
 fn layout_items(strip: &TabStrip) -> Vec<crate::Item> {
-    let mut items = strip.layout_menu.to_vec();
-    for item in &mut items {
-        item.checked = Some(item.id == if item.id.starts_with("fill.") { strip.layout_fill } else { strip.layout_current });
+    let mut items = Vec::new();
+    let mut fill_heading = false;
+    for source in strip.layout_menu {
+        let mut item = source.clone();
+        if item.is_sep() || item.is_heading() {
+            items.push(item);
+            continue;
+        }
+        let fill = item.id.starts_with("fill.");
+        if fill && !fill_heading {
+            if !items.is_empty() && !items.last().is_some_and(crate::Item::is_sep) {
+                items.push(crate::Item::sep());
+            }
+            items.push(crate::Item::heading(strip.layout_fill_heading));
+            fill_heading = true;
+        }
+        item.checked = Some(item.id == if fill { strip.layout_fill } else { strip.layout_current });
         item.radio = true;
+        if !fill {
+            let layout = item.id.clone();
+            item.icon = crate::ItemIcon::paint(move |painter, rect, opacity| {
+                paint_layout_glyph(painter, rect, &layout, Tokens::get().form_ink.gamma_multiply(opacity));
+            });
+        }
         item.aliases.push(format!("{}{}", strip.handles.menu_row, item.id));
+        items.push(item);
     }
     items
 }
@@ -3010,7 +3049,9 @@ pub fn open_card_view_menu(ctx: &egui::Context, strip: egui::Id, view: usize, an
 /// list): draws it and returns what was chosen through `pen`. It closes when a row is chosen, on
 /// Escape and on a press elsewhere.
 fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
-    let Some((which, _at, opener, opened)) = pen.popup else { return };
+    let Some((which, _at, opener, opened)) = pen.popup else {
+        return;
+    };
     if which == Popup::Layout
         && let Some(data) = clear_layout_data(strip)
     {
@@ -3024,23 +3065,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
     }
     let h = strip.handles;
     let items = match which {
-        Popup::View(index) => {
-            let local = views.get(index).is_none_or(|view| view.to_window.is_none());
-            let off =
-                if local && views.iter().enumerate().skip(index + 1).any(|(_, view)| view.to_window.is_none()) { "" } else { strip.view_right_row };
-            let mut items =
-                tab_menu_items(strip.view_menu, true, views.iter().filter(|view| view.to_window.is_none()).count() > 1, off, h.menu_row, local);
-            if let Some(compass) = views.get(index).and_then(|view| view.compass) {
-                for item in &mut items {
-                    if item.id == "view.compass" {
-                        item.checked = Some(compass);
-                    }
-                }
-            } else {
-                items.retain(|item| item.id != "view.compass");
-            }
-            items
-        }
+        Popup::View(index) => view_menu_items(strip, views, index),
         Popup::Plus => tab_menu_items(strip.plus_menu, true, true, "", h.menu_row, true),
         Popup::Layout => layout_items(strip),
         Popup::More => {
@@ -3066,14 +3091,16 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         && matches!(which, Popup::View(_))
         && let Some(focus) = ui.memory(|memory| memory.focused())
     {
-        ui.ctx().data_mut(|data| data.insert_temp(focus_key, (opened, focus)));
+        ui.ctx().data_mut(|data| data.insert_temp(focus_key, (opened, which, focus)));
     }
     let output = crate::Menu::popup(ui.ctx(), strip.id.with("view_popup_area"), crate::MenuAnchor::Rect(opener), &items, fresh);
     if output.close {
         pen.popup = None;
-        if let Some((_, focus)) = ui.ctx().data(|data| data.get_temp::<(u64, egui::Id)>(focus_key)) {
-            ui.ctx().data_mut(|data| data.remove::<(u64, egui::Id)>(focus_key));
-            ui.memory_mut(|memory| memory.request_focus(focus));
+        if let Some((generation, owner, focus)) = ui.ctx().data(|data| data.get_temp::<(u64, Popup, egui::Id)>(focus_key)) {
+            ui.ctx().data_mut(|data| data.remove::<(u64, Popup, egui::Id)>(focus_key));
+            if generation == opened && owner == which {
+                ui.memory_mut(|memory| memory.request_focus(focus));
+            }
         }
     }
     if let Some(item) = output.picked {
@@ -3101,6 +3128,7 @@ pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
     crate::Menu::dismiss(ctx, strip.with("clear_view_layout_popup"));
     ctx.data_mut(|data| {
         data.remove::<PopupState>(strip.with("view_popup"));
+        data.remove::<(u64, Popup, egui::Id)>(strip.with("view_menu_focus"));
         data.remove::<ViewDrag>(strip.with("view_drag"));
     });
 }

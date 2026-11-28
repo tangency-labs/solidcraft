@@ -128,9 +128,18 @@ pub(crate) fn definition(strip: &TabStrip<'_>, data: &LayoutMenu) -> Vec<crate::
                 children.push(item(&format!("win.bring.{}", window.id), &data.text.bring, "").on_if(window.id != 0));
             }
             children.extend(window.views.iter().map(|view| crate::Item::heading(&view.name)));
-            let name = if window.id == data.window { &data.text.this_window } else { &window.name };
+            let mut name = if window.id == data.window && !data.text.this_window.is_empty() {
+                format!("{} — {}", data.text.this_window, window.name)
+            } else {
+                window.name.clone()
+            };
+            if let Some(display) = window.display.as_ref().filter(|display| !display.is_empty()) {
+                name.push_str(" · ");
+                name.push_str(display);
+            }
             let mut window_menu =
-                crate::Item::submenu(&format!("layout.window.{}", window.id), name, crate::icons::window_icon(window.id == data.window), children);
+                crate::Item::submenu(&format!("layout.window.{}", window.id), &name, crate::icons::window_icon(window.id == data.window), children);
+            window_menu.tip = Some(name);
             // A current window's child list is informative, but still opens for reading its views.
             window_menu.enabled = !window_menu.children.is_empty();
             rows.push(window_menu);
@@ -142,7 +151,16 @@ pub(crate) fn definition(strip: &TabStrip<'_>, data: &LayoutMenu) -> Vec<crate::
             .into_iter()
             .map(|(mode, label)| radio(&format!("layout.link.{mode}"), label, "", data.link == mode).on_if(data.can_link))
             .collect();
-        rows.push(crate::Item::submenu("layout.link", &data.text.link, "", children));
+        let current = match data.link.as_str() {
+            "orientation" => &data.text.orientation,
+            "zoom" => &data.text.zoom,
+            "both" => &data.text.both,
+            _ => &data.text.off,
+        };
+        let mut link = crate::Item::submenu("layout.link", &data.text.link, "", children).key(current);
+        // The choices remain inspectable when linking cannot currently be changed.
+        link.enabled = true;
+        rows.push(link);
     }
     rows.push(crate::Item::sep());
     if flags.detach {

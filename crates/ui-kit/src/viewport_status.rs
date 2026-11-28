@@ -449,8 +449,8 @@ pub fn viewport_status_summary(
                         clear.tip = Some(clear_hint(item));
                         clear.params = Some(serde_json::json!({"status":item.id,"kind":"clear"}));
                         clear.aliases.push(target(item, "close"));
-                        children.push(clear);
                         let mut row = super::Item::submenu(&target(item, "item"), &item.name, item.kind.icon(), children);
+                        row.secondary = Some(Box::new(clear));
                         row.shortcut = item.setting.clone();
                         row.aliases.extend([target(item, "item"), target(item, "name"), target(item, "icon")]);
                         entries.push(row);

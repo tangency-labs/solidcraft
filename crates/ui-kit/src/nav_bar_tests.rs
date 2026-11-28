@@ -149,3 +149,28 @@ fn the_context_menus_return_customise_hide_reset_and_remove_with_the_slot_index(
     rig.click_with(folded, PointerButton::Secondary);
     assert_eq!(rig.click_target("nav:context:remove"), Some(NavAction::Context(ContextItem::Remove(3))), "a folded slot too");
 }
+
+#[test]
+fn removing_a_menu_trigger_discards_its_open_state() {
+    let mut rig = Rig::new();
+    rig.click_target("nav:slot:styles");
+    assert!(rig.drawn("test:wire"));
+    rig.bar.slots.retain(|slot| slot.id != "styles");
+    rig.bar.more = Rect::NOTHING;
+    rig.bar.overflow.clear();
+    rig.frame(Vec::new());
+    assert!(!rig.drawn("test:wire"));
+    rig.bar.slots.push(SlotView { alias: Some("test:styles"), ..slot(1, "styles", NavigationKind::Menu, 134.0) });
+    rig.frame(Vec::new());
+    rig.click_target("nav:slot:styles");
+    assert!(rig.drawn("test:wire"), "the returning trigger opens on its first click");
+}
+
+#[test]
+fn an_empty_folded_menu_never_dispatches_as_an_action_slot() {
+    let mut rig = Rig::new();
+    rig.bar.overflow.push(slot(4, "empty", NavigationKind::Menu, 0.0));
+    rig.click_target("nav:more");
+    assert_eq!(rig.click_target("nav:slot:empty"), None);
+    assert!(rig.drawn("nav:slot:zoom"), "an empty menu leaves More open");
+}

@@ -327,9 +327,11 @@ fn a_group_that_does_not_fit_is_in_the_more_menu() {
         }
     };
     open_b();
+    let picked_rect = solidcraft_ui_registry::rect_of("t:more_row:b.on").unwrap();
     let actions = rig.click(rig.at("t:more_row:b.on"));
-    let [Action::Run { id, place, .. }] = actions.as_slice() else { panic!("{actions:?}") };
+    let [Action::Run { id, rect, place }] = actions.as_slice() else { panic!("{actions:?}") };
     assert_eq!((id.as_str(), *place), ("b.on", Place::More));
+    assert_eq!(*rect, picked_rect, "overflow actions anchor to the selected row");
     open_b();
     assert_eq!(rig.click(rig.at("t:more_row:b.off")), Vec::new(), "a disabled row runs nothing");
 }
