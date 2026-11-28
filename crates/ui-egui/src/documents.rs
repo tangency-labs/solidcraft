@@ -3065,12 +3065,15 @@ const TAB_HANDLES: crate::app_bar::TabHandles<'static> = crate::app_bar::TabHand
 const TEAR_OFF_BELOW: f32 = 40.0;
 
 /// The footer of a design's view switcher (option B), under the list of its views.
-const SWITCHER_MENU: [crate::app_bar::TabMenuRow<'static>; 4] = [
-    crate::app_bar::TabMenuRow::new(crate::design_view_ui::SWITCHER_OPEN, "Open another view", "Ctrl+T"),
-    crate::design_view_ui::MOVE_TO_WINDOW_MENU,
-    crate::app_bar::TabMenuRow::new(crate::design_view_ui::SWITCHER_REOPEN, "Reopen closed view", "Ctrl+Shift+T"),
-    crate::app_bar::TabMenuRow::new(crate::design_view_ui::SWITCHER_AS_TABS, "Show views as tabs", ""),
-];
+fn switcher_menu_definition() -> Vec<crate::ui_kit::Item> {
+    use crate::design_view_ui::{self, tab_menu_item};
+    vec![
+        tab_menu_item(design_view_ui::SWITCHER_OPEN, "Open another view", "Ctrl+T", ""),
+        design_view_ui::move_to_window_menu(),
+        tab_menu_item(design_view_ui::SWITCHER_REOPEN, "Reopen closed view", "Ctrl+Shift+T", ""),
+        tab_menu_item(design_view_ui::SWITCHER_AS_TABS, "Show views as tabs", "", ""),
+    ]
+}
 
 /// A view's name for [`crate::workspace::view_icon_colour`] and [`crate::workspace::view_accent_tab`].
 pub(crate) fn kind_word(kind: ViewKind) -> &'static str {
@@ -3137,15 +3140,16 @@ struct TabMenuText {
 /// A tab's menu: rename its design, open a copy of it, save it, save it under another name, close
 /// it, the others, or all of them. Save and Save As show their shortcuts on the shown design's tab,
 /// where they apply.
-fn tab_menu(text: &TabMenuText) -> [crate::app_bar::TabMenuRow<'_>; 7] {
-    [
-        crate::app_bar::TabMenuRow::new("ui.renameTab", &text.rename, ""),
-        crate::app_bar::TabMenuRow::new("ui.duplicateTab", &text.duplicate, ""),
-        crate::app_bar::TabMenuRow::new("ui.saveTab", &text.save, "Ctrl+S"),
-        crate::app_bar::TabMenuRow::new("ui.saveTabAs", &text.save_as, &text.save_as_key),
-        crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
-        crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
-        crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
+fn tab_menu(text: &TabMenuText) -> Vec<crate::ui_kit::Item> {
+    use crate::design_view_ui::{tab_menu_item, tab_menu_rules};
+    vec![
+        tab_menu_item("ui.renameTab", &text.rename, "", ""),
+        tab_menu_item("ui.duplicateTab", &text.duplicate, "", ""),
+        tab_menu_item("ui.saveTab", &text.save, "Ctrl+S", ""),
+        tab_menu_item("ui.saveTabAs", &text.save_as, &text.save_as_key, ""),
+        tab_menu_item("ui.closeTab", "Close", "Ctrl+W", ""),
+        tab_menu_rules(tab_menu_item("ui.closeOtherTabs", "Close Other Tabs", "", ""), &["needs_others"]),
+        tab_menu_item("ui.closeAllTabs", "Close All Tabs", "", ""),
     ]
 }
 
@@ -3273,20 +3277,30 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let sheet_entries = crate::sheet_views::menu_entries(app);
-    let mut sheet_rows: Vec<_> = sheet_entries.iter().map(|(id, label)| crate::app_bar::TabMenuRow::new(id, label, "")).collect();
-    sheet_rows.push(crate::app_bar::TabMenuRow::new("sheet.new", app.tr("sheet_views.new"), "").with_icon("plus", None).separated());
+    let mut sheet_rows: Vec<_> = sheet_entries.iter().map(|(id, label)| crate::ui_kit::Item::action(id, label, "")).collect();
+    sheet_rows.push(crate::ui_kit::Item::sep());
+    sheet_rows.push(crate::ui_kit::Item::action("sheet.new", app.tr("sheet_views.new"), "plus"));
     let plus_menu: Vec<_> = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark())
         .into_iter()
-        .map(|row| if row.id == "plus.sheet" { row.with_children(&sheet_rows) } else { row })
+        .map(|mut row| {
+            if row.id == "plus.sheet" {
+                row.children = sheet_rows.clone();
+            }
+            row
+        })
         .collect();
     let window_entries = crate::design_view_ui::window_menu_entries(app);
     let window_rows = crate::design_view_ui::window_menu_rows(app, &window_entries);
     let view_menu = crate::design_view_ui::view_menu_rows(app, &window_rows);
-    let switcher_menu: Vec<_> = SWITCHER_MENU
-        .iter()
-        .copied()
-        .filter(|row| row.id != crate::design_view_ui::MOVE_TO_WINDOW_MENU.id || crate::view_windows::supports_pop_out(app))
-        .map(|row| if row.id == crate::design_view_ui::MOVE_TO_WINDOW_MENU.id { row.with_children(&window_rows) } else { row })
+    let switcher_menu: Vec<_> = switcher_menu_definition()
+        .into_iter()
+        .filter(|row| row.id != crate::design_view_ui::VIEW_MOVE_TO_WINDOW || crate::view_windows::supports_pop_out(app))
+        .map(|mut row| {
+            if row.id == crate::design_view_ui::VIEW_MOVE_TO_WINDOW {
+                row.children = window_rows.clone();
+            }
+            row
+        })
         .collect();
     let layout_menu = crate::design_view_ui::layout_menu();
     let view_layout = app.preferences.clear_view_tabs.then(|| crate::design_view_ui::window_layout(app));

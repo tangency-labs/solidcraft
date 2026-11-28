@@ -107,6 +107,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("viewport-gpu", Class::Shared),
     // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
     ("viewport-egui", Class::Shared),
+    // SolidCraft's own window painter and runner on a stock egui-wgpu and egui-winit (no eframe)
+    ("window-gpu", Class::Shared),
     // the views of a design as plain data: kinds, the set a design keeps open, the saved form (no UI toolkit)
     ("views", Class::Shared),
     // apps and tooling
