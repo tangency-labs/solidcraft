@@ -7173,3 +7173,24 @@ fn offset_negative_user_param_symmetric_ladder_and_refusal() {
     assert_eq!(s.doc.to_json(), before);
     assert!(s.world_state().unwrap().sketch(1).is_some());
 }
+
+#[test]
+fn break_refuses_drawn_3d_curves_with_a_specific_message() {
+    let mut s = new_sketch();
+    let made = run(&mut s, "sketch.line", json!({"points": [[0, 0], [200, 0]]}));
+    let line = ids(&made["curves"])[0].clone();
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.move", json!({"entities": [format!("{line}.start")], "z": 60}));
+    let wire = sketch(&s).wires[0].id.clone();
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    for p in [json!({"curve": wire, "at": [150, 0]}), json!({"curve": wire, "points": [[150, 0]]})] {
+        let error = s.execute("sketch.break", &p).unwrap_err().to_string();
+        assert!(error.contains("Break supports curves in the sketch plane") && error.contains(&wire), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+    let planar = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 20], [200, 20]], "infer": false}))["curves"])[0].clone();
+    let result = run(&mut s, "sketch.break", json!({"curve": planar, "points": [[150, 20]]}));
+    assert_eq!(ids(&result["curves"]).len(), 2);
+}
