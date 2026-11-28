@@ -285,13 +285,14 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
         if body.opacity != 1.0 || body.faces.iter().any(|f| f.opacity != 1.0) {
             return Err(JobError::new(ErrorCode::InvalidScene, format!("raytrace requires opaque body and face appearances: {}", body.name)));
         }
-        let has_coat = body.surface.is_some_and(|surface| surface.clear_coat().is_some())
-            || body.faces.iter().any(|face| face.surface.is_some_and(|surface| surface.clear_coat().is_some()));
+        // The selected transports shade a single layer about the shading normal.
+        let layered = |surface: OpaqueSurface| surface.clear_coat().is_some() || surface.has_flakes();
+        let has_coat = body.surface.is_some_and(layered) || body.faces.iter().any(|face| face.surface.is_some_and(layered));
         let selected_transport = options.reflections.as_ref().is_some_and(|r| r.bodies.iter().any(|entry| entry.body == body.name))
             || options.anisotropic_faces.iter().flatten().any(|entry| entry.body_index == index)
             || options.dielectrics.iter().any(|entry| entry.body_index == index);
         if has_coat && selected_transport {
-            return Err(invalid("CPU reflection, anisotropy and dielectric overrides do not support clear-coat transport"));
+            return Err(invalid("CPU reflection, anisotropy and dielectric overrides do not support clear-coat transport or paint flakes"));
         }
     }
     if let Some(reflections) = &options.reflections {
@@ -1593,7 +1594,7 @@ fn resolved_surface_hit<'a>(
         shared.surface = changed.surface;
         shared.shading_normal = changed.shading_normal;
     }
-    Ok(shared)
+    shared.on_flake().map_err(error)
 }
 fn unaged_surface_hit<'a>(
     scene: &PreparedScene<'a>,

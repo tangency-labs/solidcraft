@@ -19,6 +19,17 @@ pub struct OpaqueSurface {
     dielectric_ior: f64,
     clear_coat: Option<crate::clear_coat::ClearCoat>,
     metal_energy_compensation: bool,
+    flakes: Flakes,
+}
+
+/// A paint's flakes: authored, or, once a hit has put the point on one, that flake's normal.
+/// One slot holds either, so a surface grows by 24 bytes at most.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Flakes {
+    None,
+    Layer(crate::flakes::FlakeLayer),
+    /// Single precision like the GPU; renormalized when read.
+    On([f32; 3]),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +41,9 @@ pub enum SurfaceError {
     DielectricIor,
     Direction,
     Radiance,
+    FlakeFraction,
+    FlakeSize,
+    Position,
 }
 
 impl std::fmt::Display for SurfaceError {
@@ -42,6 +56,9 @@ impl std::fmt::Display for SurfaceError {
             Self::DielectricIor => "dielectric IOR must be finite and in [1, 3]",
             Self::Direction => "surface directions must be finite and nonzero",
             Self::Radiance => "radiance must be finite and nonnegative",
+            Self::FlakeFraction => "flake coverage, spread and depth must be finite and in [0, 1]",
+            Self::FlakeSize => "flake size must be finite and in [0.005, 10] mm",
+            Self::Position => "surface position must be finite and within the flake pattern's reach",
         })
     }
 }
@@ -63,7 +80,74 @@ impl OpaqueSurface {
         if !dielectric_ior.is_finite() || !(1.0..=3.0).contains(&dielectric_ior) {
             return Err(SurfaceError::DielectricIor);
         }
-        Ok(Self { base_color, metallic, roughness, dielectric_ior, clear_coat: None, metal_energy_compensation: false })
+        Ok(Self { base_color, metallic, roughness, dielectric_ior, clear_coat: None, metal_energy_compensation: false, flakes: Flakes::None })
+    }
+
+    /// Runtime metallic flakes under the clear coat; never serialized into a document appearance.
+    /// The paint shades as its base until [`Self::at`] or [`Self::on_flake`] puts a point on a flake.
+    pub fn with_flakes(mut self, flakes: crate::flakes::FlakeLayer) -> Self {
+        self.flakes = if flakes.coverage() == 0.0 { Flakes::None } else { Flakes::Layer(flakes) };
+        self
+    }
+    /// The authored flakes. `None` without flakes and once a point is on a flake.
+    pub fn flakes(self) -> Option<crate::flakes::FlakeLayer> {
+        match self.flakes {
+            Flakes::Layer(flakes) => Some(flakes),
+            Flakes::None | Flakes::On(_) => None,
+        }
+    }
+
+    /// Whether the paint has flakes, authored or already resolved to the flake under a point.
+    pub fn has_flakes(self) -> bool {
+        !matches!(self.flakes, Flakes::None)
+    }
+
+    /// This surface at one hit: on a flake it takes the flake's metal and normal, between
+    /// flakes and without flakes it is unchanged. `normal` is the shading normal at the hit.
+    pub fn at(self, position_mm: Vec3, normal: Vec3) -> Result<Self, SurfaceError> {
+        match self.flakes() {
+            None => Ok(self),
+            Some(flakes) => flakes.at(position_mm, normal)?.map_or(Ok(self), |flake| self.on_flake(flake)),
+        }
+    }
+
+    /// This surface on the given flake. The base paint covers a deep flake: at depth 1 only
+    /// the flake's normal is left. An error for a surface without authored flakes.
+    pub fn on_flake(mut self, flake: crate::flakes::Flake) -> Result<Self, SurfaceError> {
+        let flakes = self.flakes().ok_or(SurfaceError::FlakeFraction)?;
+        if !flake.depth.is_finite() || !(0.0..=1.0).contains(&flake.depth) {
+            return Err(SurfaceError::FlakeFraction);
+        }
+        // Exact at both ends, so a flake on top is the authored metal and a buried one the base.
+        let mix = |flake_value: f64, base: f64| {
+            if flake.depth == 0.0 {
+                flake_value
+            } else if flake.depth == 1.0 {
+                base
+            } else {
+                flake_value + (base - flake_value) * flake.depth
+            }
+        };
+        let color = flakes.color();
+        self.base_color = Vec3::new(mix(color.x, self.base_color.x), mix(color.y, self.base_color.y), mix(color.z, self.base_color.z));
+        self.metallic = mix(flakes.metallic(), self.metallic);
+        self.roughness = mix(flakes.roughness(), self.roughness);
+        let m = unit_direction(flake.normal)?;
+        self.flakes = Flakes::On([m.x as f32, m.y as f32, m.z as f32]);
+        Ok(self)
+    }
+
+    /// The normal the base lobes turn about: the flake's on a flake, else `normal`.
+    /// The clear coat always keeps `normal`.
+    pub fn base_normal(self, normal: Vec3) -> Vec3 {
+        self.flake_normal().unwrap_or(normal)
+    }
+
+    fn flake_normal(self) -> Option<Vec3> {
+        match self.flakes {
+            Flakes::On([x, y, z]) => unit_direction(Vec3::new(f64::from(x), f64::from(y), f64::from(z))).ok(),
+            Flakes::None | Flakes::Layer(_) => None,
+        }
     }
 
     /// Bounded runtime optical finish, matching authored aging's 0.02..1 domain.
@@ -147,6 +231,26 @@ impl OpaqueSurface {
         let h = unit_direction(v + l)?;
         let nh = n.dot(h).clamp(0.0, 1.0);
         let vh = v.dot(h).clamp(0.0, 1.0);
+        let base = match self.flake_normal() {
+            None => self.base_lobes(nv, nl, nh, vh),
+            Some(m) => {
+                // The base lobes turn about the flake's normal. A flake seen or lit from
+                // behind returns nothing. The two factors are the flake's foreshortening:
+                // with them the flake reflects at most what its own cosine admits, in
+                // either direction, so a tilted flake never returns more than it receives.
+                let (mv, ml) = (m.dot(v).min(1.0), m.dot(l).min(1.0));
+                if mv <= 0.0 || ml <= 0.0 {
+                    Vec3::ZERO
+                } else {
+                    self.base_lobes(mv, ml, m.dot(h).clamp(0.0, 1.0), vh) * ((mv / nv).min(1.0) * (ml / nl).min(1.0))
+                }
+            }
+        };
+        Ok(self.clear_coat.map_or(base, |coat| coat.layer(base, nv, nl, nh, vh)))
+    }
+
+    /// The diffuse and specular lobes under the coat, from the cosines about their normal.
+    fn base_lobes(self, nv: f64, nl: f64, nh: f64, vh: f64) -> Vec3 {
         let alpha = self.roughness * self.roughness;
         let a2 = alpha * alpha;
         // This form avoids subtracting two nearly equal values at nh = 1.
@@ -170,7 +274,7 @@ impl OpaqueSurface {
         if self.metal_energy_compensation && self.metallic > 0.0 && self.roughness > 0.35 {
             base += metal_multiple_scattering(self.base_color, self.metallic, self.roughness, nv, nl);
         }
-        Ok(self.clear_coat.map_or(base, |coat| coat.layer(base, nv, nl, nh, vh)))
+        base
     }
 }
 

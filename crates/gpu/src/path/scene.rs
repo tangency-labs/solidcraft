@@ -21,6 +21,8 @@ pub(super) struct Triangle {
     pub transmission: Option<Transmission>,
     pub medium: u32,
     pub scalar_face: bool,
+    /// The paint flake layer's table entry + 1, zero without flakes.
+    pub flakes: u32,
 }
 type MediumEdge = (usize, usize, i32);
 // The material header word reserves the high two bits for model lanes and wavelength sampling.
@@ -66,6 +68,40 @@ struct Node {
     hi: [f32; 3],
     first: u32,
     count: u32,
+}
+
+/// Distinct paint flake layers one job can shade; the shader's parameter table holds this many.
+pub(super) const MAX_FLAKE_LAYERS: usize = 64;
+
+/// Bytes of the shader's paint flake table: four vec4s per layer.
+pub(super) const FLAKE_PARAMETER_BYTES: usize = MAX_FLAKE_LAYERS * 64;
+
+/// The shader's paint flake table. Positions reach the shader relative to `origin`, so each
+/// layer also carries `origin` in its own cells: the whole cells modulo the pattern period
+/// and the fraction, so the GPU finds the same world cells as the CPU.
+pub(super) fn flake_parameters(layers: &[solidcraft_viewport::flakes::FlakeLayer], origin: Vec3) -> Result<Vec<u8>> {
+    use solidcraft_viewport::flakes::FLAKE_PERIOD;
+    if layers.len() > MAX_FLAKE_LAYERS {
+        return Err(invalid("at most 64 distinct paint flake layers are supported"));
+    }
+    let mut bytes = reserved(FLAKE_PARAMETER_BYTES)?;
+    for layer in layers {
+        let q = origin / layer.size_mm();
+        if !q.is_finite() || q.x.abs().max(q.y.abs()).max(q.z.abs()) > 1.0e12 {
+            return Err(invalid("the camera target is beyond the paint flake pattern's reach"));
+        }
+        let whole = Vec3::new(q.x.floor(), q.y.floor(), q.z.floor());
+        let fraction = q - whole;
+        vector(&mut bytes, Vec3::new(layer.coverage(), 1.0 / layer.size_mm(), layer.spread()), layer.depth() as f32);
+        vector(&mut bytes, layer.color(), layer.metallic() as f32);
+        vector(&mut bytes, Vec3::new(layer.roughness(), fraction.x, fraction.y), fraction.z as f32);
+        for value in [whole.x, whole.y, whole.z] {
+            bytes.extend_from_slice(&((value as i64).rem_euclid(FLAKE_PERIOD) as u32).to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+    }
+    bytes.resize(FLAKE_PARAMETER_BYTES, 0);
+    Ok(bytes)
 }
 
 const HASH_CHUNK_ITEMS: usize = 8192;
@@ -115,6 +151,16 @@ fn hash_option_surface(hasher: &mut Sha256, surface: Option<OpaqueSurface>) {
                     hasher.update(coat.weight().to_bits().to_le_bytes());
                     hasher.update(coat.roughness().to_bits().to_le_bytes());
                     hasher.update(coat.ior().to_bits().to_le_bytes());
+                }
+            }
+            match s.flakes() {
+                None => hasher.update([0u8]),
+                Some(flake) => {
+                    hasher.update([1u8]);
+                    hash_vec3(hasher, flake.color());
+                    for value in [flake.coverage(), flake.size_mm(), flake.spread(), flake.depth(), flake.metallic(), flake.roughness()] {
+                        hasher.update(value.to_bits().to_le_bytes());
+                    }
                 }
             }
         }
@@ -316,6 +362,8 @@ impl<T> PreparedSceneCache<T> {
 
 pub(super) struct Upload {
     pub geometry: Vec<u8>,
+    /// Distinct paint flake layers, indexed by each triangle's `flakes` entry - 1.
+    pub flakes: Vec<solidcraft_viewport::flakes::FlakeLayer>,
     pub nodes: Vec<u8>,
     pub epsilon: f32,
     pub active_glass_model: bool,
@@ -358,6 +406,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
     let mut media_bounds = reserved::<super::media_hierarchy::Region>(solidcraft_render::job::MAX_GPU_DIELECTRICS)?;
     let mut optical_lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let mut optical_hi = -optical_lo;
+    let mut flake_layers = Vec::new();
     for (body_index, body) in scene.meshes.iter().enumerate() {
         cancel.check()?;
         let body_start = triangles.len();
@@ -449,6 +498,23 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             if transmission.is_some() && surface.metallic() != 0.0 {
                 return Err(invalid("transmission requires a nonmetallic surface"));
             }
+            if transmission.is_some() && surface.has_flakes() {
+                return Err(invalid("paint flakes and transmission cannot share a surface"));
+            }
+            let flakes = match surface.flakes() {
+                None => 0,
+                Some(layer) => {
+                    let index = match flake_layers.iter().position(|known| *known == layer) {
+                        Some(index) => index,
+                        None if flake_layers.len() < MAX_FLAKE_LAYERS => {
+                            flake_layers.push(layer);
+                            flake_layers.len() - 1
+                        }
+                        None => return Err(invalid("at most 64 distinct paint flake layers are supported")),
+                    };
+                    index as u32 + 1
+                }
+            };
             triangles.push(Triangle {
                 p,
                 indices: global_indices,
@@ -456,6 +522,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 transmission,
                 medium: body_index as u32 + 1,
                 scalar_face: look.is_some(),
+                flakes,
             });
         }
         if authored_optical && !triangles[body_start..].iter().any(|t| t.transmission.is_some()) {
@@ -558,7 +625,8 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 scatter.map_or(0.0, |s| s.scattering_per_mm),
                 scatter.map_or(0.0, |s| s.anisotropy),
                 (u32::from(scene.meshes.get(t.medium.saturating_sub(1) as usize).is_some_and(|body| body.name.starts_with("__render_stage__/")))
-                    | (u32::from(t.scalar_face) << 1)) as f64,
+                    | (u32::from(t.scalar_face) << 1)
+                    | (t.flakes << 2)) as f64,
             ),
             parent_triangle as f32,
         );
@@ -625,7 +693,15 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
     } else {
         None
     };
-    Ok(Upload { geometry, nodes: node_bytes, epsilon: (extent * 1e-7).max(1e-5), active_glass_model, photon_guide, photon_bounds })
+    Ok(Upload {
+        geometry,
+        flakes: flake_layers,
+        nodes: node_bytes,
+        epsilon: (extent * 1e-7).max(1e-5),
+        active_glass_model,
+        photon_guide,
+        photon_bounds,
+    })
 }
 
 fn uploaded_optical_positions(source: [Vec3; 3]) -> Result<[Vec3; 3]> {
