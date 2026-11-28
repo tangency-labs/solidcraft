@@ -286,7 +286,7 @@ fn transverse_start(
     let curved = quad_term.abs() > EFF_ZERO_SQRT * f_a_len * d_alpha.abs();
     if order == 1 {
         let c1 = f_sigma.dot(n) * d_sigma;
-        if !c1.is_finite() || !(linear_term * c1 < 0.0 && h_aa * c1 <= 0.0) {
+        if !(c1.is_finite() && linear_term * c1 < 0.0 && h_aa * c1 <= 0.0) {
             return Ok(TransverseStart::NONE);
         }
         let a = h_a.abs();
@@ -305,7 +305,7 @@ fn transverse_start(
         })
     } else {
         let c2 = 0.5 * f_ss.dot(n) * d_sigma * d_sigma;
-        if !c2.is_finite() || !(curved && linear_term * c2 < 0.0 && h_aa * c2 < 0.0) {
+        if !(c2.is_finite() && curved && linear_term * c2 < 0.0 && h_aa * c2 < 0.0) {
             return Ok(TransverseStart::NONE);
         }
         Ok(TransverseStart {
