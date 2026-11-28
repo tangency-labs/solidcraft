@@ -539,6 +539,12 @@ pub struct Extent {
     /// From Object as a reference, as `to_ref`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_ref: Option<ObjectRef>,
+    /// To Object on a curved face: end every part of the profile on the face's surface carried
+    /// on past its edges (a cylinder, cone or torus continued along its surface, a plane
+    /// without end) instead of refusing a profile that reaches past the face. Off in a
+    /// design saved before it: they keep the refusal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub extend_to_face: bool,
 }
 
 /// A To / From Object that is a construction plane or point, not a body face: see
@@ -3409,6 +3415,8 @@ pub enum FilletStyle {
     Curvature,
     /// `radius` at the end of each edge nearest `start`, `radius2` at the other; `mid` radii at
     /// positions between (0 to 1 from the start end); straight between them, or `smooth`.
+    /// With the fillet's `tangent_chain`, "each edge" is each picked edge's tangent chain when
+    /// it has two ends: the radius runs along the whole chain in one round.
     Variable {
         #[walk(length = "End radius")]
         radius2: Expr,
@@ -3421,7 +3429,8 @@ pub enum FilletStyle {
     },
     /// The radius along each edge as a clamped B-spline of the position from the end nearest
     /// `start` (0) to the other (1): `radius` is its first control radius and `radii` the rest,
-    /// its degree what `knots` leave (knots = control radii + degree + 1).
+    /// its degree what `knots` leave (knots = control radii + degree + 1). With the fillet's
+    /// `tangent_chain`, "each edge" is each picked edge's tangent chain, as for `Variable`.
     Spline {
         start: Position,
         knots: Vec<f64>,

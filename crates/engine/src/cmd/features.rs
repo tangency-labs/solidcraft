@@ -86,7 +86,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "to2?: [x,y,z] (Two Sides: the second side ends at that face, vertex or point, instead of distance2) with to_offset2?: expr (past it); ",
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
-            "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it), or a plane or construction point the extrude follows when it moves: {plane: XY|name} or a plane's name (parallel to the sketch: ends on it; at a slant: the end is cut along it; along the extrusion: refused), {construct_point: name} (ends on the plane through it, parallel to the sketch); ",
+            "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it; extend_to_face?: bool, default false: carry the To face's surface on past its edges (a plane without end; a cylinder, cone, sphere or torus along its surface) so a profile wider than the face, or over a bore in it, ends on it instead of being refused; refused where that surface never crosses the extrusion's path over part of the profile, and not with a taper), or a plane or construction point the extrude follows when it moves: {plane: XY|name} or a plane's name (parallel to the sketch: ends on it; at a slant: the end is cut along it; along the extrusion: refused), {construct_point: name} (ends on the plane through it, parallel to the sketch); ",
             "to_body_apart?: bool (Join To Object: keep the body the To Object pick is on apart, so the join changes only the bodies in `targets`; a call that names its targets keeps that body apart, and `false` takes it too); ",
             "from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion), or a plane or construction point, as for `to`; ",
             "operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); ",
@@ -196,7 +196,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "radius: expr; ",
             "tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); ",
             "body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them); ",
-            "type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); ",
+            "type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); a variable or spline radius runs along each picked edge's whole tangent chain when tangent_chain is on and the chain has two ends (a chain that closes on itself takes the picked edge alone); ",
             "radius2?; ",
             "start?: [x,y,z]; ",
             "radii?: [expr, …]; ",
@@ -1945,6 +1945,14 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         None => solidcraft_doc::ExtrudeConvention::TotalDistance,
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be total_distance or legacy_per_side"))?,
     };
+    let extend = match p.get("extend_to_face") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`extend_to_face` must be true or false")),
+    };
+    if extend && !to_object {
+        return Err(bad(cmd, "`extend_to_face` needs `to` (the face to extend)"));
+    }
     Ok(Extent {
         distance,
         convention,
@@ -1968,6 +1976,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         one_sided_direction: None,
         to_ref,
         from_ref,
+        extend_to_face: extend,
     })
 }
 
