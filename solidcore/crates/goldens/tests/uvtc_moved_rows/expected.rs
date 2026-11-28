@@ -1,5 +1,5 @@
 // Every moved entry of `ROWS` with its class against the certified enclosure.
-static EXPECTED: [(&str, usize, Side); 93] = [
+static EXPECTED: [(&str, usize, Side); 105] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 0, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 1, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 2, Side::Equal),
@@ -22,10 +22,14 @@ static EXPECTED: [(&str, usize, Side); 93] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 11, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 0, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 0, Side::Closer),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 1, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 2, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 3, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 4, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 5, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 6, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 7, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 8, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 10, Side::Equal),
@@ -52,18 +56,26 @@ static EXPECTED: [(&str, usize, Side); 93] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 11, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 0, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 0, Side::Closer),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 1, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 2, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 3, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 4, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 5, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 6, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 7, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 8, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 10, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 11, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 0, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 0, Side::Closer),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 1, Side::Closer),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 2, Side::Closer),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 3, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 4, Side::Equal),
-    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 5, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 4, Side::Closer),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 5, Side::Closer),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 6, Side::Equal),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 7, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 8, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 9, Side::Equal),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 10, Side::Equal),
@@ -97,4 +109,8 @@ static EXPECTED: [(&str, usize, Side); 93] = [
 
 // The entries whose enclosure is too wide for EQUAL to bound the new value's error
 // within the rows' accuracy.
-static WIDE: [(&str, usize); 0] = [];
+static WIDE: [(&str, usize); 3] = [
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1", 0),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1", 0),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5", 0),
+];
