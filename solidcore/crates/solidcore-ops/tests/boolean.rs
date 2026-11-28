@@ -16,7 +16,7 @@ use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Contract,
-    Corners, Error, PointClass, PointLocation,
+    Corners, Error, PointClass,
 };
 use solidcore_record::brep::{Brep as Record, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -3234,7 +3234,7 @@ fn a_point_in_a_cylinder_cap_plane_whose_ray_grazes_the_rim_is_outside() {
             let seam = f64::from(tenth) / 10.0;
             let c = cylinder_with_seam([cx, cy, z0], r, h, seam);
             for (p, l) in points.iter().zip(c.locate_points(&points).unwrap()) {
-                if l != Ok(PointLocation::Outside) {
+                if l != Ok(solidcore_ops::PointLocation::Outside) {
                     wrong.push((scale, seam, *p, l));
                 }
             }
