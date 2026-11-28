@@ -277,6 +277,10 @@ fn g91_switches_to_incremental_coordinates_and_g90_back() {
     // reached incrementally), not at the last raw X (2 mm).
     let o = read("%FSLAX46Y46*%%MOMM*%G75*G01*X10000000Y0D02*G91*X2000000Y0D01*G90*G03I-1000000J0D01*M02*");
     assert_eq!(o.geom, vec![Geom2::Line(p(10.0, 0.0), p(12.0, 0.0)), Geom2::Circle(p(11.0, 0.0), 1.0)]);
+    // A block of offsets alone that is skipped (D04 selects nothing) leaves the next operation's
+    // own X as it is: from (1, 0) the line goes to (2, 1).
+    let o = read("%FSLAX46Y46*%%MOMM*%G01*X1000000Y0D02*I1000000D04*X2000000Y1000000D01*M02*");
+    assert_eq!(o.geom, vec![Geom2::Line(p(1.0, 0.0), p(2.0, 1.0))]);
 }
 
 #[test]

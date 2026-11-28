@@ -412,11 +412,10 @@ impl Reader {
         // The parser reads an operation only when it starts with X or Y: an arc given by its
         // offsets alone gets an X that moves nowhere. Incremental, that is 0; absolute, the
         // reader is told to keep its current X (the last X written here can be a raw
-        // incremental value after G91 → G90).
-        if words.x.is_none() && words.y.is_none() && (words.i.is_some() || words.j.is_some()) {
-            if !self.prep_incremental {
-                lines.push(format!("G04 {SAY_SAME_X}*"));
-            }
+        // incremental value after G91 → G90). The reader is told right before the operation, so
+        // a block skipped below leaves nothing for the next one.
+        let offsets_only = words.x.is_none() && words.y.is_none() && (words.i.is_some() || words.j.is_some());
+        if offsets_only {
             op.push_str("X0");
         }
         for (letter, (negative, digits)) in words.coordinates() {
@@ -445,6 +444,9 @@ impl Reader {
             None => {}
         }
         if !op.is_empty() {
+            if offsets_only && !self.prep_incremental {
+                lines.push(format!("G04 {SAY_SAME_X}*"));
+            }
             op.push('*');
             lines.push(op);
         }
