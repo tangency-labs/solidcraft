@@ -556,7 +556,7 @@ fn sheets_overlapping_build_as_found_with_the_overlap_named() {
     for piece in spot_weld_fitted(&spot, &found.fit).unwrap() {
         let (lo, _) = extent(&piece.body);
         if piece.side == SpotSide::Upper {
-            assert!(lo >= 2.0 - 1e-9 && lo <= 2.0 + 1e-6, "{lo}");
+            assert!((2.0 - 1e-9..=2.0 + 1e-6).contains(&lo), "{lo}");
         }
     }
     let wrong = SpotFit { gaps: vec![0.0, 0.0], upper: None };
