@@ -2849,6 +2849,8 @@ mod tests {
 
     /// A Delete Drawing the engine refuses (a sheet sketch started while the Confirm is up, as over
     /// the control channel) keeps the drawing and its open panels, and the status line says why.
+    /// Both kinds are open: the Drawing Settings window, and the sheet's settings in the right
+    /// panel, which a delete that goes through closes (`close_panel`).
     #[test]
     fn a_refused_delete_drawing_keeps_the_drawing_and_its_panels() {
         use serde_json::json;
@@ -2856,18 +2858,21 @@ mod tests {
         let mut h = drawing_open(json!({"name":"Bracket"}));
         let drawing = the_drawing(&h);
         assert!(start(&mut h.app, "drawing.set"));
+        assert!(start(&mut h.app, "drawing.sheet.set"));
         h.frames(2);
         ask_to_delete_the_drawing(&mut h, drawing.id);
         let sheet = solidcraft_engine::doc::ids::encode(drawing.sheets[0].id);
         h.app.run("drawing.sketch.create", json!({"owner": sheet})).unwrap();
         let open = Some((h.app.session.uid, drawing.id));
         assert_eq!(open_drawing_settings(&h), open, "Drawing Settings is open when the delete is confirmed");
+        assert!(h.app.drawing_workspace.settings_open, "and so is the sheet's settings panel");
 
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.session.doc.drawings.len(), 1, "the engine refused the delete");
         assert_eq!(h.app.session.open_drawing, Some(drawing.id));
         assert_eq!(open_drawing_settings(&h), open, "a refused delete closes none of the drawing's panels");
+        assert!(h.app.drawing_workspace.settings_open, "the sheet's settings panel stays open too");
         let (text, _, error) = h.app.status.clone().unwrap();
         assert!(error && text.contains("sheet sketch"), "{text}");
     }
