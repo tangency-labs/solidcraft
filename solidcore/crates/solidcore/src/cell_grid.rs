@@ -60,6 +60,7 @@ mod vec;
 #[cfg(test)]
 mod tests;
 
+use crate::math::det;
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Region2, Seg2, MAX_BEZIER_DEGREE};
 
@@ -918,10 +919,7 @@ fn flatten_conic(a: Vec2, apex: Vec2, b: Vec2, w: f64, tol: f64) -> Option<Vec<V
         let h = if d.x * d.x + d.y * d.y < f64::MIN_POSITIVE / f64::EPSILON {
             // The chord's squared length is too small to be a normal number, so `to_segment`'s
             // division is not within the bound of (c): the nearer end's distance stands in.
-            (p1 - p0)
-                .x
-                .hypot((p1 - p0).y)
-                .min((p1 - p2).x.hypot((p1 - p2).y))
+            det::hypot((p1 - p0).x, (p1 - p0).y).min(det::hypot((p1 - p2).x, (p1 - p2).y))
         } else {
             exact::to_segment(p1, p0, p2)
         };

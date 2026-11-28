@@ -8,7 +8,7 @@
 //! into [`BackendError`] for anything that compares kernels.
 
 use solidcore_record::brep::Brep;
-use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, Support};
+use solidcraft_kernel_api::{Backend, BackendError, BackendId, ExactBody, ExactExported, Exported, OpKind, Support};
 
 mod affine;
 mod cell_grid;
@@ -69,6 +69,16 @@ impl Backend for Solidcore {
         }
         Ok(Exported { record: form.record().clone(), history: form.history().cloned() })
     }
+
+    /// An exact body assembled by solidcore's assembly stage, with no history (it has no
+    /// operation's operands to be over).
+    fn import_exact(&self, body: &ExactBody) -> Option<Result<Body>> {
+        Some(crate::exact::body_from_exact(ExactExported { body: body.clone(), history: None }, &[]))
+    }
+
+    fn export_exact(&self, form: &Body) -> Option<Result<ExactExported>> {
+        Some(crate::exact::exact_exported(form))
+    }
 }
 
 /// The application's error, sorted into the interface's kinds. A message keeps its words.
@@ -76,6 +86,8 @@ impl From<KernelError> for BackendError {
     fn from(e: KernelError) -> BackendError {
         match e {
             KernelError::Invalid(m) => BackendError::Invalid(m),
+            // The same words the record check gave before this had its own variant.
+            KernelError::CoordinateCeiling => BackendError::Invalid(solidcore_record::brep::Invalid(crate::BREP_COORDINATE_CEILING).to_string()),
             KernelError::TooLarge(why) => {
                 let largest = crate::blend::named_fit(&why);
                 BackendError::TooLarge { why, largest }

@@ -134,6 +134,7 @@ use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, INFINITE_PARAMETER, PI,
 };
@@ -1746,7 +1747,7 @@ impl<'s> SurfaceIntersector<'s> {
                     } else {
                         min2(1.0 / curvature, 100.0 * self.this_approx_tol_3d)
                     };
-                    let ang_tol_rad = 0.01 + self.this_approx_tol_3d.atan2(c_radius);
+                    let ang_tol_rad = 0.01 + det::atan2(self.this_approx_tol_3d, c_radius);
 
                     // status ignored upstream (a zero tangent gives an angle of 0); fork
                     // bcc6f01: an angle that cannot be computed does not meet the test.
@@ -2408,7 +2409,7 @@ pub fn is_point_on_tsect_curve(
 
     // when the angle is not exactly zero (tangent xSectCurve Segment)
     if ang > 0.0 {
-        let mut tan = (ang / 2.0).tan();
+        let mut tan = det::tan(ang / 2.0);
         if tan < 0.001 {
             tan = 0.001;
         }

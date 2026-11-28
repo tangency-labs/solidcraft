@@ -39,6 +39,28 @@ impl Param {
     }
 }
 
+/// How points of the target body are projected onto the base surface in `surface.morph`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MorphProjection {
+    /// Closest-point (normal) projection onto the base surface.
+    #[default]
+    Normal,
+    /// Parallel projection along a fixed direction vector.
+    Direction { dir: [f64; 3] },
+}
+
+/// How offsets from the base surface are carried onto the target surface in `surface.morph`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MorphMapMode {
+    /// Preserve signed normal distance along the target surface's unit normal.
+    #[default]
+    NormalToNormal,
+    /// Preserve the 3D offset vector directly (`P + (S_target - S_base)`).
+    Translate,
+}
+
 /// Where a sketch lies.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -2227,8 +2249,10 @@ pub enum FeatureKind {
         #[walk(angle = "Entry chamfer angle")]
         entry_chamfer_angle: Option<Expr>,
     },
-    /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
-    /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
+    /// A helical coil: a circular, square or triangular section swept `turns` times about `axis`,
+    /// rising `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or
+    /// outside). A picked circular edge, round face or flat end face (`axis_ref`) can give the
+    /// diameter when `diameter` is absent.
     Coil {
         #[serde(with = "point_expr")]
         #[walk(placement)]
@@ -3105,6 +3129,36 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
+    /// Morph a solid or sheet body (or selected `faces` of it) by mapping a base reference surface
+    /// (`base`, optional `base_face` pick) onto a target reference surface (`control`, optional
+    /// `control_face` pick) (`surface.morph`).
+    SurfaceMorph {
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        base: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_face: Option<Position>,
+        control: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control_face: Option<Position>,
+        #[serde(default)]
+        projection: MorphProjection,
+        #[serde(default)]
+        map_mode: MorphMapMode,
+        #[walk(unitless = "Scale factor")]
+        scale: Expr,
+        #[walk(length = "Tolerance")]
+        tolerance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_u: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip_v: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        swap_uv: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_original: bool,
+    },
     /// A surface body trimmed by a plane, a complete bounded sheet (`tool_body`), a face of a
     /// body (`tool`, its surface extended), or sketch curves swept onto it (`curves`). A sheet
     /// keeps the connected region of `keep`; a plane or face keeps its side. With `keep_more`,
@@ -3889,6 +3943,9 @@ pub enum CoilSection {
     #[default]
     Circular,
     Square,
+    /// An equilateral triangle of side `section_size`, its point toward the axis: a thread-like
+    /// groove when cut, or a thread when joined.
+    Triangle,
 }
 
 /// Where a coil's wire ends: in a plane through the axis, or square to the wire.
@@ -4396,6 +4453,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "BoundaryFeature",
             FeatureKind::SurfaceMatch { .. } => "MatchFeature",
             FeatureKind::SurfaceFair { .. } => "FairFeature",
+            FeatureKind::SurfaceMorph { .. } => "MorphFeature",
             FeatureKind::Stitch { .. } => "StitchFeature",
             FeatureKind::Thicken { .. } => "ThickenFeature",
             FeatureKind::SurfaceTrim { .. } => "TrimFeature",
@@ -4503,6 +4561,7 @@ impl FeatureKind {
             FeatureKind::SurfaceNetwork { .. } => "surface_network",
             FeatureKind::SurfaceMatch { .. } => "surface_match",
             FeatureKind::SurfaceFair { .. } => "surface_fair",
+            FeatureKind::SurfaceMorph { .. } => "surface_morph",
             FeatureKind::SurfaceTrim { .. } => "surface_trim",
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
@@ -4597,6 +4656,7 @@ impl FeatureKind {
             "BoundaryFeature" => "surface_boundary",
             "MatchFeature" => "surface_match",
             "FairFeature" => "surface_fair",
+            "MorphFeature" => "surface_morph",
             "StitchFeature" => "stitch",
             "ThickenFeature" => "thicken",
             "TrimFeature" => "surface_trim",
@@ -4701,6 +4761,7 @@ impl FeatureKind {
             FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. } => "Boundary",
             FeatureKind::SurfaceMatch { .. } => "Match",
             FeatureKind::SurfaceFair { .. } => "Fair",
+            FeatureKind::SurfaceMorph { .. } => "Morph",
             FeatureKind::Stitch { .. } => "Stitch",
             FeatureKind::Thicken { .. } => "Thicken",
             FeatureKind::SurfaceTrim { .. } => "Trim",

@@ -152,7 +152,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, mut d: Dialog) {
     let top = crate::shell::panel_top(app, placement, placement.bottom(), side);
     let drag_bounds = crate::shell::tool_drag_rect(app, vp);
     let docked = egui::pos2(side.anchor_x(placement), top);
-    let moved = crate::frame::dock_offset(ctx, side.dialog_offset_key());
+    let moved = crate::frame::dock_offset_of(ctx, side.dialog_offset_key(), d.opened);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     let panel = crate::ui_kit::Panel::new(app.tr("ui.weld.title"), egui::Id::unique("weld_create_panel"), anchor, drag_bounds, side, frame)

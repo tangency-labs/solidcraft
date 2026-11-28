@@ -40,6 +40,7 @@
 //! refused: it moves field edges onto the cell's own chords, which a sketched cell does not have.
 //! The nearness of a spline edge is measured as for the built-in cells (see [`super::exact`]).
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::math::Vec2;
@@ -231,10 +232,10 @@ fn centroid(prims: &[Prim]) -> Vec2 {
                 continue;
             }
             let s = 0.5 * r * r * flat * sweep.signum();
-            let dist = 4.0 * r * (theta / 2.0).sin().powi(3) / (3.0 * flat);
+            let dist = 4.0 * r * det::powi(det::sin(theta / 2.0), 3) / (3.0 * flat);
             let mid = a0 + sweep / 2.0;
             area += s;
-            moment += (c + Vec2::new(mid.cos(), mid.sin()) * dist) * s;
+            moment += (c + Vec2::new(det::cos(mid), det::sin(mid)) * dist) * s;
         }
     }
     if area.abs() > 1e-300 {
@@ -252,7 +253,7 @@ fn theta_minus_sin(theta: f64) -> f64 {
         let t2 = theta * theta;
         theta * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0)))
     } else {
-        theta - theta.sin()
+        theta - det::sin(theta)
     }
 }
 
@@ -263,7 +264,7 @@ fn reach_of(prims: &[Prim]) -> f64 {
     for p in prims {
         m = m.max(p.start().length()).max(p.end().length());
         if let Prim::Arc { c, r, .. } = *p {
-            if p.contains_angle(c.y.atan2(c.x), 0.0) {
+            if p.contains_angle(det::atan2(c.y, c.x), 0.0) {
                 m = m.max(c.length() + r);
             }
         }

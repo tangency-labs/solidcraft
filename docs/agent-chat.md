@@ -394,7 +394,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
-  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, OpenRouter
+  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, LLMTR
+  `https://llmtr.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
   in the agent's settings. This routes requests to `/responses` and lets the model continue

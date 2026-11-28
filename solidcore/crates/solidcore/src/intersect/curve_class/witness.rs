@@ -56,6 +56,7 @@ use crate::geom::vector3d::Vec3;
 use crate::intersect::curve_class::p9::BoundaryEdge;
 use crate::intersect::point_class::{ClassGeometry, ClassObject};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::EFF_ZERO;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::{Brep, FaceId, VertexId};
@@ -420,7 +421,7 @@ fn on_stretch(e: Carrier, [a, m, b]: [Point3; 3], p: Point3, tol: f64) -> bool {
         } => {
             let angle = |q: Point3| {
                 let v = q - origin;
-                v.dot(y).atan2(v.dot(x))
+                det::atan2(v.dot(y), v.dot(x))
             };
             let full = 2.0 * crate::math::PI;
             let (ta, tm, tb, tp) = (angle(a), angle(m), angle(b), angle(p));
@@ -678,7 +679,7 @@ pub(crate) fn tangency_point<O: ClassObject>(
         target.evaluate_point(k, 0.5 * (first.1 + last.1))?,
         target.evaluate_point(k, last.1)?,
     ];
-    let sin_ang = k.tolerances.ang_tol_rad().sin();
+    let sin_ang = det::sin(k.tolerances.ang_tol_rad());
     let mut contact: Option<&RangeEnd> = None;
     for z in zs {
         // a Z that is G itself gives K = G and decides nothing
@@ -923,13 +924,13 @@ mod tests {
         };
         let stretch = [
             Point3::new(1.0, 0.0, 0.0),
-            Point3::new(0.01f64.cos(), 0.01f64.sin(), 0.0),
+            Point3::new(det::cos(0.01f64), det::sin(0.01f64), 0.0),
         ];
         let t = 4e-3f64;
-        let k = line([1.0, 0.0, 0.0], [t.cos() - 1.0, t.sin(), 8e-7]);
+        let k = line([1.0, 0.0, 0.0], [det::cos(t) - 1.0, det::sin(t), 8e-7]);
         assert!(matches!(meet(e, k, stretch, TOL, SIN), Meet::Undecided));
         // steeper (dn about 0.24), the same chord is far outside the window: the crossing
-        let k = line([1.0, 0.0, 0.0], [t.cos() - 1.0, t.sin(), 1e-3]);
+        let k = line([1.0, 0.0, 0.0], [det::cos(t) - 1.0, det::sin(t), 1e-3]);
         let Meet::Points(ps) = meet(e, k, stretch, TOL, SIN) else {
             panic!("decided");
         };
@@ -1122,8 +1123,13 @@ mod tests {
             )
             .unwrap(),
         )];
-        let at =
-            |angle: f64| Point3::new(4.0 + 1.15 * angle.cos(), 248.0 + 1.15 * angle.sin(), 7.0);
+        let at = |angle: f64| {
+            Point3::new(
+                4.0 + 1.15 * det::cos(angle),
+                248.0 + 1.15 * det::sin(angle),
+                7.0,
+            )
+        };
         let s = 0.01 / 1.15;
         assert!(stretch_points(round(), &k, [at(s), at(s / 2.0), at(0.0)], TOL, SIN).is_none());
     }
@@ -1187,8 +1193,13 @@ mod tests {
                 Point3::new(1.0, 0.0, 0.0),
             ),
         ))];
-        let at =
-            |angle: f64| Point3::new(4.0 + 1.15 * angle.cos(), 248.0 + 1.15 * angle.sin(), 7.0);
+        let at = |angle: f64| {
+            Point3::new(
+                4.0 + 1.15 * det::cos(angle),
+                248.0 + 1.15 * det::sin(angle),
+                7.0,
+            )
+        };
         let top = core::f64::consts::FRAC_PI_2;
         let short = band / 1.15 * 0.9;
         assert!(stretch_points(
