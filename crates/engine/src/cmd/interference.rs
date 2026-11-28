@@ -8,7 +8,7 @@
 //! part is measured as `solidcraft_kernel::measure` measures it (its mass properties alone).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 use solidcraft_geom::Aabb3;
@@ -31,9 +31,15 @@ pub(super) const MESH_NOT_CHECKED: &str = "mesh body: not checked";
 /// Most pairs listed under `slowest`.
 const SLOWEST: usize = 8;
 
+/// Per-body cached `(volume, bbox)` from [`solidcraft_kernel::measure_mass`], indexed by body
+/// index so bodies participating in multiple overlapping pairs are measured at most once.
+pub(crate) type MassSlot = OnceLock<Option<(f64, Aabb3)>>;
+
 /// One pair to intersect exactly: the bodies (cheap clones sharing the solids) and their names.
 struct Job {
     pair: usize,
+    a_idx: usize,
+    b_idx: usize,
     a: Body,
     b: Body,
     names: (String, String),
@@ -90,8 +96,13 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
 
     // Prune by bounding boxes first (sort and sweep), so the cost follows the pairs that can
     // touch rather than the square of the body count.
-    let boxes: Vec<Aabb3> =
-        bodies.iter().map(|b| b.body.exact_bounds().map(|bb| bb.inflated(2.0 * b.body.record().tolerance)).unwrap_or(Aabb3::EMPTY)).collect();
+    let body_box =
+        |b: &&solidcraft_doc::ModelBody| b.body.exact_bounds().map(|bb| bb.inflated(2.0 * b.body.record().tolerance)).unwrap_or(Aabb3::EMPTY);
+    let boxes: Vec<Aabb3> = if bodies.len() > 1 {
+        solidcraft_kernel::map_on_threads(&bodies, 16, body_box).into_iter().map(|r| r.unwrap_or(Aabb3::EMPTY)).collect()
+    } else {
+        bodies.iter().map(body_box).collect()
+    };
     let (pairs, skipped) = super::joints::overlapping_pairs(&boxes, MAX_INTERFERENCE_PAIRS);
     // Where each body sits (#5963): its occurrence path, for `exclude_pairs` and the reply.
     let paths: HashMap<String, Vec<u64>> = s.doc.body_frames(&s.model.state()).into_iter().map(|(name, _, path, _)| (name, path)).collect();
@@ -136,6 +147,8 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         let envelope = envelopes.is_envelope(&a.name) || envelopes.is_envelope(&b.name);
         jobs.push(Job {
             pair: k,
+            a_idx: i,
+            b_idx: j,
             a: a.body.clone(),
             b: b.body.clone(),
             names: (a.name.clone(), b.name.clone()),
@@ -147,9 +160,10 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let intersected = jobs.len();
     jobs.sort_by(|x, y| y.cost.cmp(&x.cost).then(x.pair.cmp(&y.pair)));
 
+    let masses: Arc<[MassSlot]> = (0..bodies.len()).map(|_| OnceLock::new()).collect();
     let left = budget.saturating_sub(started.elapsed());
     let waited = web_time::Instant::now();
-    let (done, threads) = run_jobs(jobs, left);
+    let (done, threads) = run_jobs(jobs, masses, left);
     let waited_ms = waited.elapsed().as_secs_f64() * 1000.0;
 
     // Mesh bodies are not intersected: say so, rather than let `count: 0` read as "no overlap".
@@ -225,21 +239,31 @@ fn round_ms(ms: f64) -> f64 {
 }
 
 /// The exact check of one pair: the bodies' intersection, measured.
-fn check(job: &Job, should_stop: impl Fn() -> bool) -> Done {
+fn check(job: &Job, masses: &[MassSlot], should_stop: impl Fn() -> bool) -> Done {
     let started = web_time::Instant::now();
-    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size, job.envelope, should_stop));
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| {
+        check_pair((job.a_idx, &job.a), (job.b_idx, &job.b), &job.names, job.size, job.envelope, masses, should_stop)
+    });
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool, should_stop: impl Fn() -> bool) -> Outcome {
+fn check_pair(
+    (a_idx, a): (usize, &Body),
+    (b_idx, b): (usize, &Body),
+    (na, nb): &(String, String),
+    size: f64,
+    envelope: bool,
+    masses: &[MassSlot],
+    should_stop: impl Fn() -> bool,
+) -> Outcome {
     let threshold = 1e-9 * size.max(1.0).powi(3);
     let m = match measure_overlap(
         a,
         b,
         solidcraft_kernel::measure_mass,
-        |m| (m.volume > threshold).then(|| impossible_overlap(m.volume, &m.bbox, a, b)).flatten(),
+        |m| (m.volume > threshold).then(|| impossible_overlap_cached(m, (a_idx, a), (b_idx, b), masses)).flatten(),
         |v| v > threshold,
-        false,
+        true,
         should_stop,
     ) {
         OverlapOutcome::Empty => return Outcome::Clear,
@@ -308,7 +332,10 @@ struct OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBoun
 /// 2. When both checked orders fail and `check_disjoint` is `true`, certifies whether the bodies'
 ///    interiors are disjoint (`solidcraft_kernel::interiors_disjoint`), returning
 ///    [`OverlapOutcome::Empty`] when certified.
-/// 3. When a checked order failed solely because SMLib's `CheckLevel::All` rejected the temporary
+/// 3. When both checked orders still fail, retries the checked intersection in recentered and
+///    rigidly rotated local frames ([`super::clearance::retry_reframed_intersect`]) to resolve
+///    pose-dependent radial-sector or seam failures.
+/// 4. When a checked order failed solely because SMLib's `CheckLevel::All` rejected the temporary
 ///    overlap solid while both operands passed SMLib's check
 ///    ([`solidcraft_kernel::is_result_only_check_refusal`]), retries that order under
 ///    `Validation::Off` and accepts the temporary measurement only when `accept_unchecked_volume`
@@ -331,18 +358,30 @@ pub(crate) fn measure_overlap(
         let (first, second) = if swapped { (b, a) } else { (a, b) };
         solidcraft_kernel::validating(mode, || solidcraft_kernel::boolean(first, second, solidcraft_kernel::BoolOp::Intersect)).0
     };
-    resolve_overlap_with(OverlapOps {
-        run_checked: |swapped| intersect(solidcraft_kernel::Validation::EachStep, swapped),
-        run_unchecked: |swapped| intersect(solidcraft_kernel::Validation::Off, swapped),
-        measure,
-        check_checked_bounds,
-        check_unchecked_bounds: |m: &solidcraft_kernel::MassMeasure| unchecked_overlap_invalid(m, a, b),
-        accept_unchecked_volume,
-        is_disjoint: || check_disjoint && solidcraft_kernel::interiors_disjoint(a, b) == Some(true),
-        is_cancelled: || should_stop() || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()),
-    })
+    let at = match (a.exact_bounds(), b.exact_bounds()) {
+        (Ok(ea), Ok(eb)) => {
+            let exact = ea.intersection(&eb);
+            if exact.is_empty() { solidcore_record::Vec3::ZERO } else { exact.center() }
+        }
+        _ => solidcore_record::Vec3::ZERO,
+    };
+    let is_cancelled = || should_stop() || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
+    resolve_overlap_with_reframed(
+        OverlapOps {
+            run_checked: |swapped| intersect(solidcraft_kernel::Validation::EachStep, swapped),
+            run_unchecked: |swapped| intersect(solidcraft_kernel::Validation::Off, swapped),
+            measure,
+            check_checked_bounds,
+            check_unchecked_bounds: |m: &solidcraft_kernel::MassMeasure| unchecked_overlap_invalid(m, a, b),
+            accept_unchecked_volume,
+            is_disjoint: || check_disjoint && solidcraft_kernel::interiors_disjoint(a, b) == Some(true),
+            is_cancelled: &is_cancelled,
+        },
+        || super::clearance::retry_reframed_intersect(a, b, at, &is_cancelled),
+    )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn resolve_overlap_with<T, FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>(
     ops: OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>,
 ) -> OverlapOutcome
@@ -355,6 +394,24 @@ where
     FAcceptVol: Fn(f64) -> bool,
     FDisjoint: Fn() -> bool,
     FCancelled: Fn() -> bool,
+{
+    resolve_overlap_with_reframed(ops, || super::clearance::ReframedIntersect::Failed)
+}
+
+fn resolve_overlap_with_reframed<T, FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled, FReframed>(
+    ops: OverlapOps<FChecked, FUnchecked, FMeasure, FCheckedBounds, FUncheckedBounds, FAcceptVol, FDisjoint, FCancelled>,
+    retry_reframed: FReframed,
+) -> OverlapOutcome
+where
+    FChecked: Fn(bool) -> solidcraft_kernel::Result<Option<T>>,
+    FUnchecked: Fn(bool) -> solidcraft_kernel::Result<Option<T>>,
+    FMeasure: Fn(&T) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>,
+    FCheckedBounds: Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    FUncheckedBounds: Fn(&solidcraft_kernel::MassMeasure) -> Option<String>,
+    FAcceptVol: Fn(f64) -> bool,
+    FDisjoint: Fn() -> bool,
+    FCancelled: Fn() -> bool,
+    FReframed: FnOnce() -> super::clearance::ReframedIntersect,
 {
     if (ops.is_cancelled)() {
         return OverlapOutcome::Unchecked { reason: "cancelled".into(), measure_distance: false };
@@ -387,6 +444,20 @@ where
     }
     if (ops.is_disjoint)() {
         return OverlapOutcome::Empty;
+    }
+    match retry_reframed() {
+        super::clearance::ReframedIntersect::Empty => return OverlapOutcome::Empty,
+        super::clearance::ReframedIntersect::Overlap(m) => {
+            return if let Some(why) = (ops.check_checked_bounds)(&m) {
+                OverlapOutcome::Unchecked { reason: why, measure_distance: false }
+            } else {
+                OverlapOutcome::Measured(m)
+            };
+        }
+        super::clearance::ReframedIntersect::Cancelled => {
+            return OverlapOutcome::Unchecked { reason: first_err.to_string(), measure_distance: false };
+        }
+        super::clearance::ReframedIntersect::Failed => {}
     }
     match try_unchecked_fallback(
         (&first_err, &second_err),
@@ -474,14 +545,38 @@ fn try_unchecked_fallback<T>(
     UncheckedFallback::NotRecovered
 }
 
-/// Why a shared part of `a` and `b` measured as `volume` within `bbox` can't be theirs: a part
-/// shared by two bodies is no bigger than the smaller one and lies inside both of their boxes.
-/// A boolean that misreads a pin seated in its bore can hand back the whole larger body (#21553);
-/// that is reported as not checked, never as an overlap. `None`: the part fits (or a body can't
-/// be measured, and the overlap stands as measured).
-pub(crate) fn impossible_overlap(volume: f64, bbox: &Aabb3, a: &Body, b: &Body) -> Option<String> {
+fn cached_mass(cache: &[MassSlot], idx: usize, body: &Body) -> Option<(f64, Aabb3)> {
+    match cache.get(idx) {
+        Some(slot) => *slot.get_or_init(|| solidcraft_kernel::measure_mass(body).ok().map(|m| (m.volume, m.bbox))),
+        None => solidcraft_kernel::measure_mass(body).ok().map(|m| (m.volume, m.bbox)),
+    }
+}
+
+/// [`impossible_overlap`] reusing per-body [`solidcraft_kernel::measure_mass`] results in `masses`.
+pub(crate) fn impossible_overlap_cached(
+    m: &solidcraft_kernel::MassMeasure,
+    (a_idx, a): (usize, &Body),
+    (b_idx, b): (usize, &Body),
+    masses: &[MassSlot],
+) -> Option<String> {
+    let (va, ba) = cached_mass(masses, a_idx, a)?;
+    let (vb, bb) = cached_mass(masses, b_idx, b)?;
+    overlap_out_of_bounds(m.volume, &m.bbox, (va, &ba), (vb, &bb))
+        .or_else(|| whole_body_overlap_contradicted(m.volume, &m.bbox, m.centroid, (va, vb), a, b))
+}
+
+/// Why a shared part of `a` and `b` measured as `m` can't be theirs: a part shared by two bodies
+/// is no bigger than the smaller one, lies inside both of their boxes, and — when it claims to
+/// equal the entire smaller body — cannot have every sampled interior point of that body classify
+/// strictly outside the other body. A boolean that misreads a pin seated in its bore or a disk
+/// seated in a pocket can hand back a whole body (#21553); that is reported as not checked, never
+/// as an overlap. `None`: the part fits (or a body can't be measured, and the overlap stands as
+/// measured).
+#[allow(dead_code)]
+pub(crate) fn impossible_overlap(m: &solidcraft_kernel::MassMeasure, a: &Body, b: &Body) -> Option<String> {
     let (ma, mb) = (solidcraft_kernel::measure_mass(a).ok()?, solidcraft_kernel::measure_mass(b).ok()?);
-    overlap_out_of_bounds(volume, bbox, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+    overlap_out_of_bounds(m.volume, &m.bbox, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+        .or_else(|| whole_body_overlap_contradicted(m.volume, &m.bbox, m.centroid, (ma.volume, mb.volume), a, b))
 }
 
 /// Strict sanity check for a temporary overlap measured without SMLib's `CheckLevel::All` gate.
@@ -493,6 +588,95 @@ fn unchecked_overlap_invalid(m: &solidcraft_kernel::MassMeasure, a: &Body, b: &B
         return Some("could not measure operands to verify unchecked overlap".into());
     };
     unchecked_overlap_out_of_bounds(m, (ma.volume, &ma.bbox), (mb.volume, &mb.bbox))
+        .or_else(|| whole_body_overlap_contradicted(m.volume, &m.bbox, m.centroid, (ma.volume, mb.volume), a, b))
+}
+
+/// Verifies a claimed whole-body overlap (`volume >= 0.999 * min(va, vb)`) via exact point
+/// classification: if the boolean claims that essentially all of the smaller body sits inside the
+/// other body, at least one sampled interior point of the smaller body must not classify strictly
+/// [`solidcraft_kernel::PointClass::Outside`] the enclosing body.
+///
+/// Catches false whole-body containment when a body sits inside a pocket or hole of another body
+/// while leaving genuine whole-body embeddings (including 99.9%+ partial embeddings and non-convex
+/// bodies whose centroid lies outside themselves) untouched.
+fn whole_body_overlap_contradicted(
+    volume: f64,
+    bbox: &Aabb3,
+    centroid: solidcore_record::Vec3,
+    (va, vb): (f64, f64),
+    a: &Body,
+    b: &Body,
+) -> Option<String> {
+    let smaller_vol = va.abs().min(vb.abs());
+    if !smaller_vol.is_finite() || smaller_vol <= 0.0 || volume < smaller_vol * (1.0 - 1e-3) {
+        return None;
+    }
+    let (inner, outer) = if va.abs() <= vb.abs() { (a, b) } else { (b, a) };
+    if inner.is_mesh() || outer.is_mesh() || inner.is_surface() || outer.is_surface() {
+        return None;
+    }
+    let candidates = whole_body_sample_points(bbox, centroid);
+    if candidates.is_empty() {
+        return None;
+    }
+    let inner_classes = inner.classify_points(&candidates).ok()?;
+    let interior: Vec<solidcore_record::Vec3> =
+        candidates.into_iter().zip(inner_classes).filter_map(|(p, c)| (c == solidcraft_kernel::PointClass::Inside).then_some(p)).collect();
+    if interior.is_empty() {
+        return None;
+    }
+    let outer_classes = outer.classify_points(&interior).ok()?;
+    let all_outside = outer_classes.iter().all(|&c| c == solidcraft_kernel::PointClass::Outside);
+    let exact_whole_with_outside_interior = volume >= smaller_vol * (1.0 - 1e-4) && outer_classes.contains(&solidcraft_kernel::PointClass::Outside);
+    if all_outside || exact_whole_with_outside_interior {
+        return Some(
+            "not checked: the shared part equals the whole smaller body, yet its interior points classify outside the other body; the boolean misread this pair"
+                .into(),
+        );
+    }
+    None
+}
+
+/// Candidate interior probe points for [`whole_body_overlap_contradicted`]: the overlap centroid,
+/// the bounding-box center, and axial/diagonal quarter-offsets inside `bbox`.
+fn whole_body_sample_points(bbox: &Aabb3, centroid: solidcore_record::Vec3) -> Vec<solidcore_record::Vec3> {
+    let mut out = Vec::with_capacity(16);
+    let push = |out: &mut Vec<solidcore_record::Vec3>, p: solidcore_record::Vec3| {
+        if p.is_finite()
+            && !out.iter().any(|q| {
+                let d = *q - p;
+                d.x * d.x + d.y * d.y + d.z * d.z <= 1e-18
+            })
+        {
+            out.push(p);
+        }
+    };
+    if centroid.is_finite() {
+        push(&mut out, centroid);
+    }
+    if !bbox.is_empty() && bbox.min.is_finite() && bbox.max.is_finite() {
+        let center = bbox.center();
+        let q = bbox.size() * 0.25;
+        push(&mut out, center);
+        for d in [
+            solidcore_record::Vec3::new(q.x, 0.0, 0.0),
+            solidcore_record::Vec3::new(-q.x, 0.0, 0.0),
+            solidcore_record::Vec3::new(0.0, q.y, 0.0),
+            solidcore_record::Vec3::new(0.0, -q.y, 0.0),
+            solidcore_record::Vec3::new(0.0, 0.0, q.z),
+            solidcore_record::Vec3::new(0.0, 0.0, -q.z),
+        ] {
+            push(&mut out, center + d);
+        }
+        for sx in [-1.0, 1.0] {
+            for sy in [-1.0, 1.0] {
+                for sz in [-1.0, 1.0] {
+                    push(&mut out, solidcore_record::Vec3::new(center.x + sx * q.x, center.y + sy * q.y, center.z + sz * q.z));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// [`unchecked_overlap_invalid`] on the measured numbers.
@@ -567,10 +751,10 @@ fn overlap_out_of_bounds(volume: f64, bbox: &Aabb3, (va, ba): (f64, &Aabb3), (vb
 
 /// Each job's answer (in pair order, with the pair's names; `None`: not finished within
 /// `budget`) and how many worker threads ran them (0: this thread did).
-fn run_jobs(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<((String, String), Option<Done>)>, usize) {
+fn run_jobs(jobs: Vec<Job>, masses: Arc<[MassSlot]>, budget: std::time::Duration) -> (Vec<((String, String), Option<Done>)>, usize) {
     let mut order: Vec<(usize, usize, (String, String))> = jobs.iter().enumerate().map(|(k, j)| (j.pair, k, j.names.clone())).collect();
     order.sort_unstable_by_key(|o| o.0);
-    let (mut results, threads) = run_ordered(jobs, budget);
+    let (mut results, threads) = run_ordered(jobs, masses, budget);
     let out = order.into_iter().map(|(_, k, names)| (names, results.get_mut(k).and_then(Option::take))).collect();
     (out, threads)
 }
@@ -580,7 +764,7 @@ fn run_jobs(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<((String, Strin
 /// running then finishes in the background and is dropped (a kernel boolean can't be stopped
 /// part way).
 #[cfg(not(target_arch = "wasm32"))]
-fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>>, usize) {
+fn run_ordered(jobs: Vec<Job>, masses: Arc<[MassSlot]>, budget: std::time::Duration) -> (Vec<Option<Done>>, usize) {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
 
@@ -598,13 +782,13 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
     let want = std::thread::available_parallelism().map(usize::from).unwrap_or(1).min(n).max(1);
     let mut threads = 0;
     for _ in 0..want {
-        let (jobs, next, stop, tx) = (jobs.clone(), next.clone(), stop.clone(), tx.clone());
+        let (jobs, masses, next, stop, tx) = (jobs.clone(), masses.clone(), next.clone(), stop.clone(), tx.clone());
         let spawned = solidcraft_kernel::kernel_thread("solidcraft-interference").spawn(move || {
             let should_stop = || stop.load(Ordering::Relaxed) || web_time::Instant::now() >= deadline;
             while !should_stop() {
                 let k = next.fetch_add(1, Ordering::Relaxed);
                 let Some(job) = jobs.get(k) else { break };
-                let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(job, should_stop))).unwrap_or_else(|_| Done {
+                let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(job, &masses, should_stop))).unwrap_or_else(|_| Done {
                     outcome: Outcome::Unchecked("internal error while checking this pair".into()),
                     ms: 0.0,
                     kernel: KernelTimes::default(),
@@ -621,7 +805,7 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
     drop(tx);
     if threads == 0 {
         // No thread could be started: one pair after another here.
-        return (run_here(&jobs, deadline), 0);
+        return (run_here(&jobs, &masses, deadline), 0);
     }
     let mut received = 0;
     while received < n {
@@ -643,14 +827,14 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
 
 /// The browser has no threads: one pair after another, none started once the budget is spent.
 #[cfg(target_arch = "wasm32")]
-fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>>, usize) {
-    (run_here(&jobs, web_time::Instant::now() + budget), 0)
+fn run_ordered(jobs: Vec<Job>, masses: Arc<[MassSlot]>, budget: std::time::Duration) -> (Vec<Option<Done>>, usize) {
+    (run_here(&jobs, &masses, web_time::Instant::now() + budget), 0)
 }
 
 /// The jobs one after another on this thread, none started past `deadline`.
-fn run_here(jobs: &[Job], deadline: web_time::Instant) -> Vec<Option<Done>> {
+fn run_here(jobs: &[Job], masses: &[MassSlot], deadline: web_time::Instant) -> Vec<Option<Done>> {
     let expired = || web_time::Instant::now() >= deadline;
-    jobs.iter().map(|job| (!expired()).then(|| check(job, expired))).collect()
+    jobs.iter().map(|job| (!expired()).then(|| check(job, masses, expired))).collect()
 }
 
 #[cfg(test)]

@@ -1255,3 +1255,591 @@ fn low_host_memory_returns_error_and_preserves_session() {
     assert_eq!(near.len(), 1, "{ok}");
     assert!((f(&near[0]["distance_mm"]) - 1.0).abs() < 1e-6, "{ok}");
 }
+
+/// Algebraic `count_allowed_pairs` matches the brute-force `O(N^2)` loop identically across
+/// `SkipWithin`, `against` (disjoint and overlapping with `subjects`), nested/root/same-path
+/// component envelopes, and overlapping exclusions where both `skip` and `envelopes` exclude a pair.
+#[test]
+fn algebraic_allowed_pair_count_matches_brute_force() {
+    use super::{SkipWithin, count_allowed_pairs};
+
+    let brute_force = |n: usize,
+                       in_subjects: &[bool],
+                       in_against: &[bool],
+                       has_against: bool,
+                       path_by_body: &[&[u64]],
+                       is_envelope: &[bool],
+                       skip: SkipWithin|
+     -> usize {
+        let flag = |v: &[bool], i: usize| v.get(i).copied().unwrap_or(false);
+        let path_of = |i: usize| path_by_body.get(i).copied().unwrap_or(&[]);
+        let env_of = |i: usize| is_envelope.get(i).copied().unwrap_or(false);
+        let allowed = |i: usize, j: usize| -> bool {
+            if i == j {
+                return false;
+            }
+            let paired = if !has_against {
+                flag(in_subjects, i) && flag(in_subjects, j)
+            } else {
+                (flag(in_subjects, i) && flag(in_against, j)) || (flag(in_subjects, j) && flag(in_against, i))
+            };
+            if !paired {
+                return false;
+            }
+            let (a, b) = (path_of(i), path_of(j));
+            let encloses = (env_of(i) && b.starts_with(a)) || (env_of(j) && a.starts_with(b));
+            if encloses {
+                return false;
+            }
+            match skip {
+                SkipWithin::Nothing => true,
+                SkipWithin::Occurrence => a.is_empty() || a != b,
+                SkipWithin::Component => a.is_empty() || a.first() != b.first(),
+            }
+        };
+        let mut total = 0usize;
+        for i in 0..n {
+            for j in i + 1..n {
+                if allowed(i, j) {
+                    total += 1;
+                }
+            }
+        }
+        total
+    };
+
+    // Rich fixture exercising root, shallow, deep, same-path, nested, and inactive envelopes plus
+    // overlapping subject/against roles.
+    let paths: Vec<&[u64]> = vec![
+        &[],        // 0: root envelope (both)
+        &[],        // 1: root body (subject)
+        &[],        // 2: root body (against)
+        &[1],       // 3: comp 1 envelope A (against)
+        &[1],       // 4: comp 1 envelope B (both) — same path as 3 & 5
+        &[1],       // 5: comp 1 body (subject)
+        &[1, 2],    // 6: nested envelope under comp 1 (subject)
+        &[1, 2],    // 7: nested body under comp 1 (against)
+        &[1, 2, 3], // 8: deep body enclosed by 0, 3, 4, 6 (both)
+        &[2],       // 9: comp 2 body (subject)
+        &[2, 5],    // 10: comp 2 child body (against)
+        &[1],       // 11: inactive envelope (neither subject nor against)
+    ];
+    let in_subjects = [true, true, false, false, true, true, true, false, true, true, false, false];
+    let in_against = [true, false, true, true, true, false, false, true, true, false, true, false];
+    let is_env_all = [true, false, false, true, true, false, true, false, false, false, false, true];
+    let no_env: &[bool] = &[];
+
+    for skip in [SkipWithin::Nothing, SkipWithin::Occurrence, SkipWithin::Component] {
+        for has_against in [false, true] {
+            for is_env in [&is_env_all[..], no_env] {
+                let got = count_allowed_pairs(paths.len(), &in_subjects, &in_against, has_against, &paths, is_env, skip);
+                let want = brute_force(paths.len(), &in_subjects, &in_against, has_against, &paths, is_env, skip);
+                assert_eq!(got, want, "has_against={has_against}, envs={}", !is_env.is_empty());
+            }
+        }
+    }
+
+    // Degenerate sizes (0 and 1 bodies) and deterministic pseudo-random stress sweep.
+    for n in [0usize, 1] {
+        let s = vec![true; n];
+        let a = vec![true; n];
+        let p: Vec<&[u64]> = vec![&[]; n];
+        let e = vec![false; n];
+        for skip in [SkipWithin::Nothing, SkipWithin::Occurrence, SkipWithin::Component] {
+            for has_against in [false, true] {
+                assert_eq!(count_allowed_pairs(n, &s, &a, has_against, &p, &e, skip), 0);
+            }
+        }
+    }
+
+    let palette: [&[u64]; 8] = [&[], &[1], &[2], &[1, 10], &[1, 11], &[1, 10, 20], &[2, 30], &[3]];
+    let mut seed: u64 = 0x5EED_CAFE_1234_5678;
+    let mut next_u64 = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed
+    };
+    for case in 0..100 {
+        let n = (next_u64() % 16) as usize + 1;
+        let has_against = (next_u64() & 1) == 1;
+        let skip = match next_u64() % 3 {
+            0 => SkipWithin::Nothing,
+            1 => SkipWithin::Occurrence,
+            _ => SkipWithin::Component,
+        };
+        let mut s = Vec::with_capacity(n);
+        let mut a = Vec::with_capacity(n);
+        let mut p = Vec::with_capacity(n);
+        let mut e = Vec::with_capacity(n);
+        let allow_env = (next_u64() & 3) != 0;
+        for _ in 0..n {
+            let r = next_u64();
+            s.push((r & 1) != 0);
+            a.push((r & 2) != 0);
+            p.push(palette[((r >> 2) % palette.len() as u64) as usize]);
+            e.push(allow_env && ((r >> 6) & 3) == 0);
+        }
+        let got = count_allowed_pairs(n, &s, &a, has_against, &p, &e, skip);
+        let want = brute_force(n, &s, &a, has_against, &p, &e, skip);
+        assert_eq!(got, want, "case {case} failed (n={n}, has_against={has_against})");
+    }
+}
+
+/// `nearest_lists` deduplicates shared candidate pairs across subjects in `O(1)` via `todo_set`
+/// so each pair is sent to `measure` at most once per round.
+#[test]
+fn nearest_lists_deduplicates_shared_candidates_in_each_round() {
+    use std::cell::RefCell;
+    use std::collections::{HashMap, HashSet};
+
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+
+    use super::nearest_lists;
+
+    let bx = |x: f64| Aabb3 { min: Vec3::new(x, 0.0, 0.0), max: Vec3::new(x + 1.0, 1.0, 1.0) };
+    let boxes = [bx(0.0), bx(2.0), bx(5.0), bx(9.0)];
+    let subjects = [0, 1, 2, 3];
+    let allowed = |i: usize, j: usize| i != j;
+    let mut known = HashMap::new();
+    let batches = RefCell::new(Vec::<Vec<(usize, usize)>>::new());
+
+    let lists = nearest_lists(&subjects, boxes.len(), 2, &boxes, &allowed, &mut known, |pairs| {
+        batches.borrow_mut().push(pairs.to_vec());
+        let unique: HashSet<(usize, usize)> = pairs.iter().copied().collect();
+        assert_eq!(unique.len(), pairs.len(), "duplicate pairs in round: {pairs:?}");
+        pairs.iter().map(|&(i, j)| Ok(Some(solidcraft_geom::mesh_distance::box_gap(&boxes[i], &boxes[j])))).collect()
+    });
+
+    assert!(!batches.borrow().is_empty());
+    assert_eq!(lists[&0], vec![(1, 1.0), (2, 4.0)]);
+    assert_eq!(lists[&1], vec![(0, 1.0), (2, 2.0)]);
+    assert_eq!(lists[&2], vec![(1, 2.0), (3, 3.0)]);
+    assert_eq!(lists[&3], vec![(2, 3.0), (1, 6.0)]);
+}
+
+/// Four identical countersunk nuts (Ø7 shank, 90° countersunk head Ø10×1.5, total length 13.5 mm)
+/// seated flush (0 mm contact, zero overlap) in countersunk bores of two mirrored side rails placed
+/// at 0° and 180° Z rotations far from the origin (`x = ±800 mm`). All four mirror-identical pairs
+/// must resolve symmetrically to `near` at 0.0 mm with `unchecked_count == 0`, while a nut seated
+/// 0.2 mm too deep must report its exact interference volume (~7.39 mm³).
+#[test]
+fn mirrored_countersunk_nuts_in_rails_are_contact_and_penetration_is_overlap() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-mirrored-nuts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let rail_path = dir.join("rail.sc");
+    let nuts_path = dir.join("nuts.sc");
+
+    let hole_ys = [2.5_f64, -32.5_f64];
+    let hole_z = -43.5_f64;
+
+    // Rail side wall at x = 800..806 with two through 90° countersunk bores (Ø7 shank, Ø10×1.5 head).
+    let mut rail = Session::default();
+    run(&mut rail, "solid.box", json!({"length": 6, "width": 120, "height": 80, "corner": [800, -60, -80], "operation": "new", "body_name": "Rail"}));
+    for cy in hole_ys {
+        run(
+            &mut rail,
+            "solid.hole",
+            json!({
+                "position": [806, cy, hole_z],
+                "direction": [-1, 0, 0],
+                "diameter": 7,
+                "type": "countersink",
+                "cs_diameter": 10,
+                "cs_angle": 90,
+                "targets": ["Rail"],
+            }),
+        );
+    }
+    run(&mut rail, "file.save", json!({"path": rail_path.to_string_lossy()}));
+
+    // Pair of identical flush countersunk nuts (90° Ø10×1.5 head + Ø7×12 shank, length 13.5 mm).
+    let mut nuts = Session::default();
+    for (idx, cy) in hole_ys.iter().enumerate() {
+        let name = format!("Nut{}", idx + 1);
+        run(
+            &mut nuts,
+            "solid.cone",
+            json!({"base": [806, cy, hole_z], "axis": [-1, 0, 0], "radius": 5.0, "top_radius": 3.5, "height": 1.5, "operation": "new", "body_name": name}),
+        );
+        run(
+            &mut nuts,
+            "solid.cylinder",
+            json!({"base": [804.5, cy, hole_z], "axis": [-1, 0, 0], "radius": 3.5, "height": 12.0, "operation": "join", "targets": [name]}),
+        );
+    }
+    run(&mut nuts, "file.save", json!({"path": nuts_path.to_string_lossy()}));
+
+    // Place both sides in exact 0° and 180° Z symmetry at x = ±800..±806 mm.
+    let identity = json!([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]);
+    let rot_z_180 = json!([-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0]);
+    let mut asm = Session::default();
+    let rail_pos = run(&mut asm, "component.insert_design", json!({"path": rail_path.to_string_lossy(), "name": "RailPos", "matrix": identity}));
+    let rail_neg = run(&mut asm, "component.insert_design", json!({"path": rail_path.to_string_lossy(), "name": "RailNeg", "matrix": rot_z_180}));
+    let nuts_pos = run(&mut asm, "component.insert_design", json!({"path": nuts_path.to_string_lossy(), "name": "NutsPos", "matrix": identity}));
+    let nuts_neg = run(&mut asm, "component.insert_design", json!({"path": nuts_path.to_string_lossy(), "name": "NutsNeg", "matrix": rot_z_180}));
+    let rebuilt = run(&mut asm, "timeline.compute_all", json!({}));
+    assert_eq!(rebuilt["errors"], 0, "{rebuilt}");
+
+    let mut rail_bodies: Vec<String> = Vec::new();
+    for ins in [&rail_pos, &rail_neg] {
+        rail_bodies.extend(ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)));
+    }
+    let mut nut_bodies: Vec<String> = Vec::new();
+    for ins in [&nuts_pos, &nuts_neg] {
+        nut_bodies.extend(ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)));
+    }
+    assert_eq!((rail_bodies.len(), nut_bodies.len()), (2, 4));
+
+    let r = run(&mut asm, "inspect.clearance", json!({"bodies": nut_bodies, "against": rail_bodies, "clearance": 0.5, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["unchecked_count"], 0, "{r}");
+    assert_eq!(r["overlaps"], json!([]), "{r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 4, "all 4 mirror-identical nut/rail contact pairs must be near at 0 mm: {r}");
+    for entry in &near {
+        assert_eq!(f(&entry["distance_mm"]), 0.0, "{entry}");
+        assert!(entry.get("exact").is_none(), "distance must be exact on analytic cone/cylinder faces: {entry}");
+    }
+
+    let inter = run(&mut asm, "inspect.interference", json!({}));
+    assert_eq!(inter["count"], 0, "{inter}");
+    assert_eq!(inter["unchecked"], json!([]), "{inter}");
+
+    // Soundness check: a nut seated 0.2 mm too deep penetrates the countersink wall (~7.391 mm³)
+    // and must be reported as an overlap, never cleared as contact.
+    let mut deep = Session::default();
+    run(&mut deep, "solid.box", json!({"length": 6, "width": 120, "height": 80, "corner": [800, -60, -80], "operation": "new", "body_name": "Rail"}));
+    run(
+        &mut deep,
+        "solid.hole",
+        json!({
+            "position": [806, hole_ys[0], hole_z],
+            "direction": [-1, 0, 0],
+            "diameter": 7,
+            "type": "countersink",
+            "cs_diameter": 10,
+            "cs_angle": 90,
+            "targets": ["Rail"],
+        }),
+    );
+    run(
+        &mut deep,
+        "solid.cone",
+        json!({"base": [805.8, hole_ys[0], hole_z], "axis": [-1, 0, 0], "radius": 5.0, "top_radius": 3.5, "height": 1.5, "operation": "new", "body_name": "Bushing"}),
+    );
+    run(
+        &mut deep,
+        "solid.cylinder",
+        json!({"base": [804.3, hole_ys[0], hole_z], "axis": [-1, 0, 0], "radius": 3.5, "height": 12.0, "operation": "join", "targets": ["Bushing"]}),
+    );
+    let r = run(&mut deep, "inspect.clearance", json!({"bodies": ["Bushing"], "against": ["Rail"], "clearance": 0.5, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["unchecked_count"], 0, "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let want_vol = 7.391_120_316;
+    let got_vol = f(&overlaps[0]["volume_mm3"]);
+    assert!((got_vol - want_vol).abs() < 0.05 * want_vol, "got {got_vol} vs expected {want_vol}: {r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `retry_reframed_intersect` recovers both empty flush contact and world-mapped overlap volumes
+/// in recentered and rotated SO(3) local frames, respects cancellation, and `inspect.clearance`
+/// surfaces `unchecked_count` matching `unchecked.len()`.
+#[test]
+fn reframed_intersect_recovers_empty_and_overlap_and_tracks_unchecked_count() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
+
+    use super::{ReframedIntersect, retry_reframed_intersect};
+
+    // Far from origin: exercises translation recentering for both flush contact (Empty) and overlap.
+    let far_a = solidcraft_kernel::box_solid(Vec3::new(800.0, -40.0, -40.0), Vec3::new(810.0, -30.0, -30.0)).unwrap();
+    let far_flush = solidcraft_kernel::box_solid(Vec3::new(810.0, -40.0, -40.0), Vec3::new(820.0, -30.0, -30.0)).unwrap();
+    let far_overlap = solidcraft_kernel::box_solid(Vec3::new(808.0, -40.0, -40.0), Vec3::new(818.0, -30.0, -30.0)).unwrap();
+
+    assert!(matches!(retry_reframed_intersect(&far_a, &far_flush, Vec3::new(810.0, -35.0, -35.0), &|| false), ReframedIntersect::Empty));
+    match retry_reframed_intersect(&far_a, &far_overlap, Vec3::new(809.0, -35.0, -35.0), &|| false) {
+        ReframedIntersect::Overlap(m) => {
+            assert!((m.volume - 200.0).abs() < 1e-6, "{m:?}");
+            assert!((m.centroid - Vec3::new(809.0, -35.0, -35.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.min - Vec3::new(808.0, -40.0, -40.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.max - Vec3::new(810.0, -30.0, -30.0)).len() < 1e-6, "{m:?}");
+        }
+        other => panic!("expected far-from-origin overlap, got {other:?}"),
+    }
+    assert!(matches!(retry_reframed_intersect(&far_a, &far_overlap, Vec3::new(809.0, -35.0, -35.0), &|| true), ReframedIntersect::Cancelled));
+
+    // Near origin (`at = ZERO`): exercises SO(3) rotation + inverse rotation back to world space.
+    let near_a = solidcraft_kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let near_flush = solidcraft_kernel::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0)).unwrap();
+    let near_overlap = solidcraft_kernel::box_solid(Vec3::new(8.0, 0.0, 0.0), Vec3::new(18.0, 10.0, 10.0)).unwrap();
+
+    assert!(matches!(retry_reframed_intersect(&near_a, &near_flush, Vec3::ZERO, &|| false), ReframedIntersect::Empty));
+    match retry_reframed_intersect(&near_a, &near_overlap, Vec3::ZERO, &|| false) {
+        ReframedIntersect::Overlap(m) => {
+            assert!((m.volume - 200.0).abs() < 1e-6, "{m:?}");
+            assert!((m.centroid - Vec3::new(9.0, 5.0, 5.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.min - Vec3::new(8.0, 0.0, 0.0)).len() < 1e-6, "{m:?}");
+            assert!((m.bbox.max - Vec3::new(10.0, 10.0, 10.0)).len() < 1e-6, "{m:?}");
+        }
+        other => panic!("expected rotated near-origin overlap, got {other:?}"),
+    }
+
+    // `unchecked_count` tracks `unchecked.len()` at the top level of the `inspect.clearance` reply.
+    let mut s = Session::default();
+    let meshes = insert_two_mesh_cubes(&mut s, "unchecked-count");
+    assert_eq!(meshes.len(), 2);
+    let r = run(&mut s, "inspect.clearance", json!({"clearance": 1}));
+    assert_eq!(r["unchecked_count"], 2, "{r}");
+    assert_eq!(r["unchecked"].as_array().map(Vec::len), Some(2), "{r}");
+}
+
+/// A Ø12 x 2 disk nested two sub-assembly levels deep, seated inside a Ø12.4 x 4.2 pocket of a
+/// housing (0.2 mm radial clearance, bottom at z = 3.0 above pocket floor z = 0.8, top coplanar
+/// with the housing top at z = 5.0) far from the origin at (688.2, 656.8), must report zero
+/// overlaps and exact 0.2 mm clearance against both an identity instance and a 180°-rotated
+/// instance of the housing — while a genuinely embedded disk inside a solid block reports its
+/// full volume (π * 6² * 2 mm³).
+#[test]
+fn nested_disk_in_pocket_far_from_origin_has_no_overlap_at_identity_or_180_deg() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-clearance-pocket-disk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let housing_path = dir.join("housing.sc");
+    let disk_path = dir.join("disk.sc");
+    let inner_sa_path = dir.join("inner_subasm.sc");
+    let outer_sa_path = dir.join("outer_subasm.sc");
+
+    let (cx, cy) = (688.2, 656.8);
+
+    // 1. Save Housing part: 450 x 50 x 5 block with Ø12.4 x 4.2 pocket at (cx, cy), z = 0.8..5.0.
+    {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 450, "width": 50, "height": 5, "corner": [cx - 25.0, cy - 25.0, 0.0], "operation": "new", "body_name": "Housing"}),
+        );
+        run(&mut s, "solid.cylinder", json!({"radius": 6.2, "height": 5.2, "base": [cx, cy, 0.8], "operation": "cut", "targets": ["Housing"]}));
+        run(&mut s, "file.save", json!({"path": housing_path.to_string_lossy()}));
+    }
+
+    // 2. Save Disk part: Ø12 x 2 at origin, rotated so its seam lies on the lower half.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 6.0, "height": 2.0, "base": [0, 0, 0], "operation": "new", "body_name": "Disk"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Disk"], "axis": [0, 0, 1], "angle": "180 deg"}));
+        run(&mut s, "file.save", json!({"path": disk_path.to_string_lossy()}));
+    }
+
+    // 3. Build 2-level nested sub-assembly: OuterSubAsm -> InnerSubAsm -> two Disk instances
+    //    (one seated at (cx, cy, 3.0) for the identity housing, one at (-cx, -cy, 3.0) for the
+    //    180°-rotated housing).
+    {
+        let mut inner = Session::default();
+        run(&mut inner, "component.insert_design", json!({"path": disk_path.to_string_lossy(), "name": "DiskPos", "translate": [cx, cy, 3.0]}));
+        run(&mut inner, "component.insert_design", json!({"path": disk_path.to_string_lossy(), "name": "DiskNeg", "translate": [-cx, -cy, 3.0]}));
+        run(&mut inner, "file.save", json!({"path": inner_sa_path.to_string_lossy()}));
+    }
+    {
+        let mut outer = Session::default();
+        run(&mut outer, "component.insert_design", json!({"path": inner_sa_path.to_string_lossy(), "name": "InnerSubAsm"}));
+        run(&mut outer, "file.save", json!({"path": outer_sa_path.to_string_lossy()}));
+    }
+
+    // 4. Assemble OuterSubAsm at identity + Housing twice (identity and rotated 180° about Z).
+    let mut asm = Session::default();
+    let sa_ins = run(&mut asm, "component.insert_design", json!({"path": outer_sa_path.to_string_lossy(), "name": "OuterSubAsm"}));
+    let h_id_ins = run(&mut asm, "component.insert_design", json!({"path": housing_path.to_string_lossy(), "name": "HousingId"}));
+    let rot180 = json!([-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0]);
+    let h_rot_ins = run(&mut asm, "component.insert_design", json!({"path": housing_path.to_string_lossy(), "name": "HousingRot", "matrix": rot180}));
+    let sa_bodies: Vec<String> = sa_ins["bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    let housing_bodies = vec![h_id_ins["bodies"][0].as_str().unwrap().to_string(), h_rot_ins["bodies"][0].as_str().unwrap().to_string()];
+    assert_eq!(sa_bodies.len(), 2, "{sa_ins}");
+    let rebuilt = run(&mut asm, "timeline.compute_all", json!({}));
+    assert_eq!(rebuilt["errors"], 0, "{rebuilt}");
+
+    let r = run(&mut asm, "inspect.clearance", json!({"bodies": sa_bodies, "against": housing_bodies, "clearance": 1.0, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    assert_eq!(r["overlaps"], json!([]), "pocket-seated disks must not report false whole-body overlap: {r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 2, "both identity and 180°-rotated housings should report 0.2 mm radial clearance: {r}");
+    for entry in &near {
+        assert!((f(&entry["distance_mm"]) - 0.2).abs() < 1e-4, "expected 0.2 mm radial clearance: {r}");
+    }
+
+    // 5. Contrast: a Ø12 x 2 disk truly embedded in a solid block (no pocket) reports its full
+    //    volume π * 6² * 2.
+    let mut embedded = Session::default();
+    run(
+        &mut embedded,
+        "solid.box",
+        json!({"length": 60, "width": 60, "height": 5, "corner": [cx - 30.0, cy - 30.0, 0.0], "operation": "new", "body_name": "SolidBlock"}),
+    );
+    run(
+        &mut embedded,
+        "solid.cylinder",
+        json!({"radius": 6.0, "height": 2.0, "base": [cx, cy, 3.0], "operation": "new", "body_name": "EmbeddedDisk"}),
+    );
+    let r = run(&mut embedded, "inspect.clearance", json!({"clearance": 1.0, "min_volume": 0.001}));
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    let want_vol = std::f64::consts::PI * 36.0 * 2.0;
+    assert!((f(&overlaps[0]["volume_mm3"]) - want_vol).abs() < 1e-2, "expected full disk volume {want_vol}: {r}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An 18 mm tenon seated flush inside a matching 18 mm square window of a plate that also has
+/// circular bolt holes is verified cleanly as 0 mm contact (not `unchecked`), reports ~0.08 mm
+/// when given a 0.08 mm clearance gap, and still reports a genuine 0.05 mm penetration as an
+/// overlap (zero false negatives).
+#[test]
+fn tenon_in_window_with_bolt_holes_flush_gap_and_penetration() {
+    let make_plate = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 100, "width": 100, "height": 12, "corner": [-40, -40, 0], "body_name": "Plate"}));
+        run(s, "solid.box", json!({"length": 18, "width": 18, "height": 16, "corner": [0, 0, -2], "operation": "new", "body_name": "WindowCut"}));
+        run(s, "solid.combine", json!({"operation": "cut", "target": "Plate", "tools": ["WindowCut"]}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 16, "base": [-20, 9, -2], "operation": "cut", "targets": ["Plate"]}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 16, "base": [38, 9, -2], "operation": "cut", "targets": ["Plate"]}));
+    };
+
+    // 1. Flush contact (exact flush and 3e-5 mm axial shift): verified as 0 mm contact, not unchecked.
+    for (label, z_shift) in [("exact_flush", 0.0), ("shifted_3e5", 3e-5)] {
+        let mut s = Session::default();
+        make_plate(&mut s);
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 18, "width": 18, "height": 12, "corner": [0, 0, z_shift], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{label}: {r}");
+        assert_eq!(r["overlaps"], json!([]), "{label}: {r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        assert_eq!(near.len(), 1, "{label}: {r}");
+        assert_eq!(f(&near[0]["distance_mm"]), 0.0, "{label}: {r}");
+        assert_eq!(f(&r["nearest"]["Tenon"][0]["distance_mm"]), 0.0, "{label}: {r}");
+
+        let inter = run(&mut s, "inspect.interference", json!({}));
+        assert_eq!(inter["count"], 0, "{label}: {inter}");
+        assert_eq!(inter["unchecked"], json!([]), "{label}: {inter}");
+    }
+
+    // 2. Small 0.08 mm clearance gap all round: verified cleanly with distance_mm ≈ 0.08.
+    {
+        let mut s = Session::default();
+        make_plate(&mut s);
+        let gap = 0.08;
+        let size = 18.0 - 2.0 * gap;
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": size, "width": size, "height": 12, "corner": [gap, gap, 0], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        assert_eq!(r["overlaps"], json!([]), "{r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        assert_eq!(near.len(), 1, "{r}");
+        assert!((f(&near[0]["distance_mm"]) - gap).abs() < 1e-6, "{r}");
+        assert!((f(&r["nearest"]["Tenon"][0]["distance_mm"]) - gap).abs() < 1e-6, "{r}");
+    }
+
+    // 3. Genuine 0.05 mm penetration into one window wall: still detected as overlap.
+    {
+        let mut s = Session::default();
+        make_plate(&mut s);
+        let depth = 0.05;
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 18, "width": 18, "height": 12, "corner": [-depth, 0, 3e-5], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        assert_eq!(overlaps.len(), 1, "{r}");
+        let want = depth * 18.0 * (12.0 - 3e-5);
+        assert!((f(&overlaps[0]["volume_mm3"]) - want).abs() < 1e-2 * want, "{r}");
+    }
+}
+
+/// A shim/spacer rotated 180 degrees sitting flush against two side plates (with through bores)
+/// and a dowel pin seated flush inside the matching bore: every pair is verified as 0 mm contact
+/// (not `unchecked`), while a 0.05 mm penetration of either the spacer or the dowel pin is still
+/// reported as an overlap.
+#[test]
+fn rotated_spacer_flush_against_side_plates_and_dowel_pin() {
+    let build_assembly = |s: &mut Session, spacer_pen: f64, pin_pen: f64| {
+        // Side plate A: z in [0, 10], with a Ø6 dowel bore at (0, 0) and a Ø4 hole at (12, 0).
+        run(s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "SideA"}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 14, "base": [0, 0, -2], "operation": "cut", "targets": ["SideA"]}));
+        run(s, "solid.cylinder", json!({"radius": 2, "height": 14, "base": [12, 0, -2], "operation": "cut", "targets": ["SideA"]}));
+
+        // Spacer: z in [10 - spacer_pen, 16 - spacer_pen], rotated 180° around Z, with matching Ø6 bore.
+        run(
+            s,
+            "solid.box",
+            json!({"length": 40, "width": 40, "height": 6, "corner": [-20, -20, 10.0 - spacer_pen], "operation": "new", "body_name": "Spacer"}),
+        );
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 10, "base": [0, 0, 8.0 - spacer_pen], "operation": "cut", "targets": ["Spacer"]}));
+        run(s, "solid.move", json!({"bodies": ["Spacer"], "axis": [0, 0, 1], "angle": "180 deg"}));
+
+        // Side plate B: z in [16, 26], flush with the opposite side of the spacer, with matching Ø6 bore.
+        run(s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 16], "operation": "new", "body_name": "SideB"}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 14, "base": [0, 0, 14], "operation": "cut", "targets": ["SideB"]}));
+
+        // Dowel pin: Ø6 (or Ø6 + 2*pin_pen) passing through all three bores.
+        run(s, "solid.cylinder", json!({"radius": 3.0 + pin_pen, "height": 30, "base": [0, 0, -2], "operation": "new", "body_name": "Dowel"}));
+    };
+
+    // 1. All flush contact: zero overlaps, zero unchecked, all touching pairs at 0.0 mm.
+    {
+        let mut s = Session::default();
+        build_assembly(&mut s, 0.0, 0.0);
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        assert_eq!(r["overlaps"], json!([]), "{r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        let pairs: Vec<[String; 2]> = near.iter().map(pair).collect();
+        for expected in [
+            ["SideA".to_string(), "Spacer".to_string()],
+            ["SideB".to_string(), "Spacer".to_string()],
+            ["Dowel".to_string(), "SideA".to_string()],
+            ["Dowel".to_string(), "Spacer".to_string()],
+            ["Dowel".to_string(), "SideB".to_string()],
+        ] {
+            assert!(pairs.contains(&expected), "missing flush contact {expected:?}: {r}");
+        }
+        assert!(near.iter().all(|n| f(&n["distance_mm"]) == 0.0), "{r}");
+    }
+
+    // 2. Genuine 0.05 mm spacer penetration into SideA: detected as overlap.
+    {
+        let mut s = Session::default();
+        build_assembly(&mut s, 0.05, 0.0);
+        let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Spacer"], "against": ["SideA"], "clearance": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        assert_eq!(overlaps.len(), 1, "{r}");
+        assert!(f(&overlaps[0]["volume_mm3"]) > 50.0, "{r}");
+    }
+
+    // 3. Genuine 0.05 mm radial penetration of Dowel into Spacer bore: detected as overlap.
+    {
+        let mut s = Session::default();
+        build_assembly(&mut s, 0.0, 0.05);
+        let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Dowel"], "against": ["Spacer"], "clearance": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        assert_eq!(overlaps.len(), 1, "{r}");
+        let want = std::f64::consts::PI * (3.05_f64.powi(2) - 3.0_f64.powi(2)) * 6.0;
+        assert!((f(&overlaps[0]["volume_mm3"]) - want).abs() < 0.02 * want, "want {want}: {r}");
+    }
+}
