@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.browser_hide_construction_folder": "Hide the Construction folder",
+    "prefs.browser_hide_sketches_folder": "Hide the Sketches folder"
+  },
+  "de": {
+    "prefs.browser_hide_construction_folder": "Ordner Konstruktionsgeometrie ausblenden",
+    "prefs.browser_hide_sketches_folder": "Ordner Skizzen ausblenden"
+  },
+  "ja": {
+    "prefs.browser_hide_construction_folder": "構築ジオメトリフォルダーを非表示",
+    "prefs.browser_hide_sketches_folder": "スケッチフォルダーを非表示"
+  },
+  "zh": {
+    "prefs.browser_hide_construction_folder": "隐藏构造几何文件夹",
+    "prefs.browser_hide_sketches_folder": "隐藏草图文件夹"
+  },
+  "ko": {
+    "prefs.browser_hide_construction_folder": "구성 형상 폴더 숨기기",
+    "prefs.browser_hide_sketches_folder": "스케치 폴더 숨기기"
+  },
+  "vi": {
+    "prefs.browser_hide_construction_folder": "Ẩn thư mục Hình học dựng",
+    "prefs.browser_hide_sketches_folder": "Ẩn thư mục Các phác thảo"
+  },
+  "ar": {
+    "prefs.browser_hide_construction_folder": "إخفاء مجلد الهندسة المساعدة",
+    "prefs.browser_hide_sketches_folder": "إخفاء مجلد الرسومات"
+  },
+  "he": {
+    "prefs.browser_hide_construction_folder": "הסתרת תיקיית גאומטריית העזר",
+    "prefs.browser_hide_sketches_folder": "הסתרת תיקיית הסקיצות"
+  }
+}
