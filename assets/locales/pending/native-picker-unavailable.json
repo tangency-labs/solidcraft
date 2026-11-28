@@ -1,0 +1,26 @@
+{
+  "en": {
+    "file.picker_unavailable": "The system could not open the file dialog. Your design is still open. Try again."
+  },
+  "ar": {
+    "file.picker_unavailable": "تعذّر على النظام فتح مربع حوار الملفات. لا يزال تصميمك مفتوحًا. حاول مرة أخرى."
+  },
+  "de": {
+    "file.picker_unavailable": "Das System konnte den Dateidialog nicht öffnen. Ihr Entwurf ist weiterhin geöffnet. Versuchen Sie es erneut."
+  },
+  "he": {
+    "file.picker_unavailable": "המערכת לא הצליחה לפתוח את תיבת הדו-שיח של הקבצים. העיצוב שלך עדיין פתוח. יש לנסות שוב."
+  },
+  "ja": {
+    "file.picker_unavailable": "システムがファイルダイアログを開けませんでした。設計は開いたままです。もう一度お試しください。"
+  },
+  "ko": {
+    "file.picker_unavailable": "시스템이 파일 대화 상자를 열지 못했습니다. 설계는 여전히 열려 있습니다. 다시 시도하세요."
+  },
+  "vi": {
+    "file.picker_unavailable": "Hệ thống không thể mở hộp thoại tệp. Thiết kế của bạn vẫn đang mở. Hãy thử lại."
+  },
+  "zh": {
+    "file.picker_unavailable": "系统无法打开文件对话框。您的设计仍处于打开状态。请重试。"
+  }
+}
