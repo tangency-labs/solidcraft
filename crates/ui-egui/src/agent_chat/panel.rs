@@ -82,8 +82,14 @@ pub enum PanelAction {
         at: Option<usize>,
     },
     AttachDropped(Vec<std::path::PathBuf>),
-    /// Choose a file to attach.
+    /// Choose files to attach, one or several: for an endpoint, those the chat can send or import;
+    /// for a coding agent, any type.
     ChooseAttachment,
+    /// Choose folders to attach, one or several, for a coding agent: it is told where each is.
+    ChooseFolder,
+    /// Choose files and folders in one dialog, for a coding agent, where the host's dialog can
+    /// (macOS).
+    ChooseAny,
     /// Attach the clipboard's picture (desktop only, as the clipboard reader is).
     #[cfg(not(target_arch = "wasm32"))]
     PastePicture,
@@ -151,13 +157,13 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
         PanelAction::StartPick { at } => start_pick(app, at),
         PanelAction::AttachDropped(paths) => attach_dropped(app, paths.into_iter()),
-        PanelAction::ChooseAttachment => app.pick_file(tr("ui.agent_chat_attachable"), &attach::extensions(), |app, path| {
-            if let Some(path) = path
-                && let Err(e) = attach_path(app, &path)
-            {
-                app.agent_chat.notice(e, true);
-            }
-        }),
+        PanelAction::ChooseAttachment => {
+            // A coding agent reads any file itself; an endpoint gets what the chat can send or import.
+            let exts = if takes_paths(app) { Vec::new() } else { attach::extensions() };
+            app.pick_files(tr("ui.agent_chat_attachable"), &exts, |app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from)))
+        }
+        PanelAction::ChooseFolder => app.pick_folders(|app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from))),
+        PanelAction::ChooseAny => app.pick_files_or_folders(|app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from))),
         #[cfg(not(target_arch = "wasm32"))]
         PanelAction::PastePicture => {
             if let Err(e) = paste_picture(app) {
@@ -253,6 +259,9 @@ pub struct PanelView {
     pub shared: bool,
     /// The composer's height the shared host measured last time, if it has.
     pub composer_height: Option<f32>,
+    /// The host's file dialog chooses files and folders together (macOS): the + menu offers a
+    /// coding agent one Choose files or folders… instead of Choose files… and Choose folders….
+    pub mixed_picker: bool,
 }
 
 impl PanelView {
@@ -285,6 +294,7 @@ impl PanelView {
             rtl: crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl,
             shared: crate::panel_runtime::shared_content_measurement(ctx),
             composer_height: crate::panel_runtime::shared_content_composer_height(ctx),
+            mixed_picker: app.services.pick_files_or_folders.is_some(),
         }
     }
 }
@@ -1331,7 +1341,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_min_height(Tokens::get().control_height + Tokens::get().space_2);
-                        add_menu(chat, ui);
+                        add_menu(chat, view, ui);
                         let mode = view.permission;
                         let permissions = ui
                             .allocate_ui(vec2(Tokens::get().space_24 * 4.0, Tokens::get().control_height), |ui| {
@@ -2793,6 +2803,10 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
+/// The tallest the file chips get past eight files, about three and a half rows: more scroll, and
+/// the half row shows that there are more. A message to a coding agent holds up to 200 files,
+/// which would otherwise push the conversation out of the panel; eight or fewer show whole.
+pub(super) const CHIPS_MAX_HEIGHT: f32 = 112.0;
 
 /// The items of a message that are not pills in its text (those of Attach selection, or all of them
 /// when the message has no pills), with their "gone" flags and each one's place among all of the
@@ -2960,6 +2974,7 @@ fn pill_input(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, focused
 /// The files for the next message, as chips in rows that fit the chat: a picture's thumbnail (or
 /// a file mark), the name cut to fit, and a × that takes the file off. Laid out by hand: egui
 /// wraps plain widgets, not framed groups, and one row wider than the chat widens all below it.
+/// Past eight files and [`CHIPS_MAX_HEIGHT`], the rows scroll.
 #[cfg(not(target_arch = "wasm32"))]
 fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     // Thumbnails of files no longer on the message are let go.
@@ -2968,29 +2983,32 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     if chat.files() == 0 {
         return;
     }
-    let gap = ui.spacing().item_spacing.x;
-    let avail = ui.available_width().max(1.0);
-    let w = CHIP_W.min(avail);
-    let per_row = (((avail + gap) / (w + gap)).floor() as usize).max(1);
     let (mut remove, mut stop) = (None, None);
     // The files read, then those still being read (each takes its place once it is done).
     let read = chat.attachments.len();
     let indices: Vec<usize> = (0..chat.files()).collect();
-    for row in indices.chunks(per_row) {
-        ui.horizontal(|ui| {
-            for &i in row {
-                if let Some(f) = chat.attachments.get(i) {
-                    if chip(ui, &mut chat.thumbs, f, i, w) {
-                        remove = Some(i);
+    let most = if chat.files() > attach::MAX_FILES { CHIPS_MAX_HEIGHT } else { f32::INFINITY };
+    egui::ScrollArea::vertical().id_salt("sc_agent_chat_chips").max_height(most).auto_shrink([false, true]).show(ui, |ui| {
+        let gap = ui.spacing().item_spacing.x;
+        let avail = ui.available_width().max(1.0);
+        let w = CHIP_W.min(avail);
+        let per_row = (((avail + gap) / (w + gap)).floor() as usize).max(1);
+        for row in indices.chunks(per_row) {
+            ui.horizontal(|ui| {
+                for &i in row {
+                    if let Some(f) = chat.attachments.get(i) {
+                        if chip(ui, &mut chat.thumbs, f, i, w) {
+                            remove = Some(i);
+                        }
+                    } else if let Some(l) = chat.loading.get(i - read)
+                        && loading_chip(ui, &l.name, l.importing(), i - read, w)
+                    {
+                        stop = Some(i - read);
                     }
-                } else if let Some(l) = chat.loading.get(i - read)
-                    && loading_chip(ui, &l.name, l.importing(), i - read, w)
-                {
-                    stop = Some(i - read);
                 }
-            }
-        });
-    }
+            });
+        }
+    });
     if let Some(i) = remove
         && i < chat.attachments.len()
     {
@@ -3001,6 +3019,17 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
         && i < chat.loading.len()
     {
         chat.loading.remove(i);
+    }
+}
+
+/// What a chip says when the pointer rests on it: the file's name; for one that goes by its path,
+/// that place (and for a folder, what the agent does with it).
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn chip_tip(f: &attach::Attachment) -> String {
+    match &f.content {
+        attach::Content::Reference { path, .. } => path.display().to_string(),
+        attach::Content::Folder { path, .. } => format!("{}\n{}", path.display(), tr("ui.agent_chat_folder_tip")),
+        _ => f.name.clone(),
     }
 }
 
@@ -3077,6 +3106,16 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                         let size = tex.size_vec2();
                         ui.image((tex.id(), size * (22.0 / size.x.max(size.y).max(1.0)))).rect.width()
                     }
+                    None if matches!(f.content, attach::Content::Folder { .. }) => {
+                        // A folder: a body with a tab on its top left.
+                        let (r, _) = ui.allocate_exact_size(vec2(28.0, 20.0), Sense::hover());
+                        let s = Stroke::new(1.2, t.text_dim);
+                        let body = Rect::from_min_max(pos2(r.left() + 3.0, r.top() + 5.0), pos2(r.right() - 3.0, r.bottom() - 2.0));
+                        let tab = Rect::from_min_max(pos2(body.left(), r.top() + 2.0), pos2(body.left() + 9.0, body.top()));
+                        ui.painter().rect_stroke(body, 1.5, s, egui::StrokeKind::Inside);
+                        ui.painter().rect_filled(tab, 1.0, t.text_dim);
+                        r.width()
+                    }
                     None => {
                         // A page marked with the file's type.
                         let (r, _) = ui.allocate_exact_size(vec2(28.0, 20.0), Sense::hover());
@@ -3098,7 +3137,7 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                     ui.add(egui::Label::new(RichText::new(&f.name).size(t.font_small)).truncate())
                 })
                 .inner
-                .backing_on_hover_text(&f.name);
+                .backing_on_hover_text(chip_tip(f));
                 let (r, x) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
                 let c = r.center();
                 let s = Stroke::new(1.3, if x.hovered() { t.text } else { t.text_dim });
@@ -3113,32 +3152,41 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
     clicked
 }
 
-/// The + button: choose a file with the app's picker (pictures, text and CAD files), or paste
-/// the clipboard's picture.
+/// The + button: choose files, several at once, or paste the clipboard's picture. For a coding
+/// agent, folders too, and files of any type (in one dialog where the host's dialog mixes them;
+/// else one item for each).
 #[cfg(not(target_arch = "wasm32"))]
-fn add_menu(chat: &mut AgentChat, ui: &mut egui::Ui) {
-    let (mut choose, mut paste) = (false, false);
+fn add_menu(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
+    let takes_paths = view.current.as_ref().is_some_and(|e| !e.kind.is_api());
+    let mut picked = None;
     let r = ui_kit::action_menu(ui, "+", |ui| {
-        let a = ui_kit::button(ui, tr("ui.agent_chat_add_file"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:add_file", a.rect.center());
-        let b = ui_kit::button(ui, tr("ui.agent_chat_paste_picture"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:paste_picture", b.rect.center());
-        if a.clicked() {
-            choose = true;
-            ui.close();
-        }
-        if b.clicked() {
-            paste = true;
-            ui.close();
+        let mut items = if !takes_paths {
+            vec![("ui.agent_chat_add_file", "agent_chat:add_file", None, PanelAction::ChooseAttachment)]
+        } else if view.mixed_picker {
+            vec![("ui.agent_chat_add_any", "agent_chat:add_any", Some("ui.agent_chat_add_folder_tip"), PanelAction::ChooseAny)]
+        } else {
+            vec![
+                ("ui.agent_chat_add_file", "agent_chat:add_file", None, PanelAction::ChooseAttachment),
+                ("ui.agent_chat_add_folder", "agent_chat:add_folder", Some("ui.agent_chat_add_folder_tip"), PanelAction::ChooseFolder),
+            ]
+        };
+        items.push(("ui.agent_chat_paste_picture", "agent_chat:paste_picture", None, PanelAction::PastePicture));
+        for (label, handle, tip, action) in items {
+            let mut b = ui_kit::button(ui, tr(label), ui_kit::Button::Normal);
+            solidcraft_ui_registry::publish_handle(handle, b.rect.center());
+            if let Some(tip) = tip {
+                b = b.backing_on_hover_text(tr(tip));
+            }
+            if b.clicked() {
+                picked = Some(action);
+                ui.close();
+            }
         }
     });
     solidcraft_ui_registry::publish_handle("agent_chat:add", r.response.rect.center());
     r.response.backing_on_hover_text(tr("ui.agent_chat_add"));
-    if choose {
-        chat.actions.push(PanelAction::ChooseAttachment);
-    }
-    if paste {
-        chat.actions.push(PanelAction::PastePicture);
+    if let Some(action) = picked {
+        chat.actions.push(action);
     }
 }
 
@@ -3518,6 +3566,7 @@ mod tests {
             rtl: false,
             shared,
             composer_height: None,
+            mixed_picker: false,
         }
     }
 
