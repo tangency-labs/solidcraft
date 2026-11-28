@@ -1674,6 +1674,9 @@ impl Dialog {
                 }
                 _ => None,
             });
+            if *cmd == "solid.coil" && d.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. })) {
+                *at = None;
+            }
         }
         // With nothing pre-selected, a single profile in the sketch being used is taken (#684:
         // not one a feature already builds from).
@@ -2359,6 +2362,9 @@ impl Dialog {
         // A new placement plane replaces the saved direction; the Direction field can override it afterward.
         if self.active == 0 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }) && matches!(sel, Sel::Plane { .. }) {
             self.extra.remove("axis");
+            if let Kind::Primitive { at, .. } = &mut self.kind {
+                *at = None;
+            }
         }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
@@ -2546,6 +2552,9 @@ impl Dialog {
             && self.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. }))
         {
             self.extra.remove("axis");
+            if let Kind::Primitive { at, .. } = &mut self.kind {
+                *at = None;
+            }
         }
         self.sync_thread(s);
         self.sync_material(s);
@@ -6756,7 +6765,9 @@ fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
 
 /// The world plane of an origin plane or a construction plane by name, where it is shown.
 pub(crate) fn plane_by_name(s: &Session, name: &str) -> Option<solidcore_record::Plane> {
-    if let Some(p) = solidcore_record::Plane::named(name) {
+    // A legacy construction plane can share an origin alias such as Top. The selected
+    // feature keeps its own plane; aliases are only a fallback when no feature has the name.
+    if let Some(p) = solidcore_record::Plane::named(name).filter(|_| s.doc.find_feature(name).is_none()) {
         return Some(p);
     }
     let st = crate::open_meshing::session_world(s);
