@@ -270,15 +270,9 @@ impl WgpuSetupCreateNew {
                     required_limits: wgpu::Limits {
                         // When using a depth buffer, we have to be able to create a texture
                         // large enough for the entire surface, and we want to support 4k+ displays.
-                        // SolidCraft: ask for all the adapter offers (16384 on most desktop GPUs),
-                        // never less than 8192, so a window spanning large monitors still fits.
-                        max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.max(8192),
+                        max_texture_dimension_2d: 8192,
                         ..base_limits
                     },
-                    // SolidCraft: without it only the sample counts WebGPU guarantees (1x, 4x)
-                    // are allowed, even where the adapter supports 2x and 8x.
-                    required_features: adapter.features()
-                        & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                     ..Default::default()
                 }
             }),

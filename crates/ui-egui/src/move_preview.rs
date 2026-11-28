@@ -326,6 +326,7 @@ impl MovePreview {
         let motions: Vec<Mat> = cache.frames.iter().map(motion).collect::<Option<_>>()?;
         let replaced = if copy { Vec::new() } else { bodies };
         let built = |scene: GpuScene, bounds: Aabb3, layer: Option<Layer>| Built {
+            interaction: None,
             scene,
             sketches: Vec::new(),
             applied: None,
@@ -335,9 +336,12 @@ impl MovePreview {
             placed: None,
             centrelines: Vec::new(),
             tapered: Vec::new(),
+            flange_corners: Vec::new(),
+            flange_faces: Vec::new(),
             replaced,
             outlines: Vec::new(),
             error: None,
+            warning: None,
             bounds,
             layer,
             joints: Vec::new(),

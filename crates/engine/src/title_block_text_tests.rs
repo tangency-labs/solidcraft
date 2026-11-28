@@ -102,7 +102,7 @@ fn labels_and_values_sit_by_the_cell_text_rule() {
         assert_eq!(lines.join(" "), cell["text"], "{}", cell["name"]);
         values += lines.len();
     }
-    assert_eq!(drawn.len(), 12 + values, "{:?}", drawn.iter().map(|r| &r.text).collect::<Vec<_>>());
+    assert_eq!(drawn.len(), 18 + values, "{:?}", drawn.iter().map(|r| &r.text).collect::<Vec<_>>());
     let d = s.drawing("test").unwrap().clone();
     let scene = build(&s, &d, sheet).unwrap().scene;
     let group = scene.groups.last().unwrap();
@@ -127,6 +127,48 @@ fn text_typed_over_a_cell_replaces_its_value_and_a_field_with_none_shows_nothing
     assert_eq!(shown(&s), []);
     typed(&mut s, json!({"identification_number": "DRW-7"}));
     assert_eq!(shown(&s), [("DRW-7".to_string(), at)]);
+}
+
+/// The built-in block's Material and Finish cells read the part's own properties with no text typed
+/// over them: a part's, and a single-part design's own (a design has no component to hold them); text
+/// typed over a cell still wins, and a part with only a free `finish` property shows that.
+#[test]
+fn the_material_and_finish_cells_read_the_part_and_a_single_part_designs_own() {
+    let text = |s: &mut Session, name: &str| cells(s).into_iter().find(|c| c["name"] == name).unwrap()["text"].clone();
+    let document = |s: &mut Session, component: u64| {
+        let source = solidcraft_doc::ids::encode(s.drawing("test").unwrap().sources[0].id);
+        run(s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source, "component": component}}));
+    };
+    // A single-part design.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "document.metadata.set", json!({"values": {"material": "5052-H32, 0.090 in", "finish": "Powder coat, RAL 9005, matt"}}));
+    run(&mut s, "drawing.create", json!({}));
+    document(&mut s, 0);
+    assert_eq!(text(&mut s, "material"), json!("5052-H32, 0.090 in"));
+    assert_eq!(text(&mut s, "finish"), json!("Powder coat, RAL 9005, matt"));
+    typed(&mut s, json!({"finish": "See note 3"}));
+    assert_eq!((text(&mut s, "finish"), text(&mut s, "material")), (json!("See note 3"), json!("5052-H32, 0.090 in")), "an override wins");
+    // A part of an assembly: its finish property, and the free property when it has none.
+    let mut s = Session::default();
+    for (name, extra) in [
+        ("Plate", json!({"finish": "Passiv\u{e9}, #4 brushed", "material": "304, 2 mm"})),
+        ("Cover", json!({"properties": {"finish": "Zinc plate"}})),
+    ] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let mut p = json!({"component": name});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        run(&mut s, "component.metadata.set", p);
+    }
+    run(&mut s, "drawing.create", json!({}));
+    let id = |s: &Session, name: &str| s.doc.components.iter().find(|c| c.name == name).unwrap().id;
+    let (plate, cover) = (id(&s, "Plate"), id(&s, "Cover"));
+    document(&mut s, plate);
+    assert_eq!((text(&mut s, "finish"), text(&mut s, "material")), (json!("Passiv\u{e9}, #4 brushed"), json!("304, 2 mm")));
+    document(&mut s, cover);
+    assert_eq!(text(&mut s, "finish"), json!("Zinc plate"), "the free property still shows");
 }
 
 /// A cell that shows a logo shows it in place of its value: its label stays, nothing typed over the

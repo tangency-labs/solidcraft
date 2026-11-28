@@ -13,6 +13,7 @@
 //! | [`MatchedSection`]         | (none; SolidCraft's `NumberedLoop` after matching) |
 //! | `correspond` (private)     | (none; SolidCraft's `loft_pairing::correspond`) |
 //! | `circle_breaks` (private)  | (none; SolidCraft's `numbered::circle_breaks`) |
+//! | [`one_curve_runs`]         | (none) |
 //!
 //! **Winding.** Each section winds the way the section before it does about the normal they
 //! share (its plane's normal, turned over where it faces back from the one before, as
@@ -41,6 +42,18 @@
 //! with the most segments when every section is a circle) and started where its vertices line up
 //! best with that section's.
 //!
+//! **Runs of one curve.** The skin gives each curve of a section one unit of a wall's parameter,
+//! whatever its length. Where two free-form segments of a section meet tangentially at different
+//! speeds (two spans of one spline of different lengths), the wall's first derivative along the
+//! section jumps on that knot line, although the wall is smooth, and a curve drawn across the
+//! wall (the edge of a cut) has to turn a corner in the wall's parameters there.
+//! [`one_curve_runs`] says which segments one parameter can take that jump from: those that in
+//! every section carry on the segment before them with one first derivative on the spans that
+//! keep the first section's speed. The skin's caller hands each such run over as one curve on
+//! those spans. Which sections agree is a matter of their speeds alone: sections of one outline
+//! at different sizes always do, and sections of different shapes do where their segments
+//! divide their curves alike.
+//!
 //! Deviations: the divide and conquer over the starts recurses at most [`MAX_DEPTH`] (64) deep,
 //! well above the log2 of any grid within [`MAX_CELLS`] (about 22).
 
@@ -50,7 +63,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{sweep::SweepFailure, Result, SolidError};
-use crate::math::{Point2, Vec2, Vec3};
+use crate::math::{Point2, Vec2, Vec3, EFF_ZERO_SQRT};
 use crate::prism::profile::{casteljau, Seg2, H2};
 
 /// The weight of the tangent terms against the distance between the points.
@@ -85,6 +98,16 @@ const MIN_SWEEP: f64 = 1e-9;
 /// The least step between two cuts of one segment, and between a cut and the segment's ends,
 /// when lone vertices land on the same point of it.
 const CUT_GAP: f64 = 1e-9;
+/// A first derivative is one across a joint where its two sides differ by no more than this
+/// fraction of the longer one ([`one_curve_runs`]). It is the measure the drop's knot-line rule
+/// reads a surface as `C1` by ([`EFF_ZERO_SQRT`], the `JUMP` of
+/// `intersect::surface_drop_lib::knot_lines`): below it a curve's trim turns no corner on the
+/// line.
+const ONE_DERIVATIVE: f64 = EFF_ZERO_SQRT;
+/// How near a segment starts to the end of the one before it to carry it on, against the size
+/// of its coordinates. A loop's segments run end to end; this tells the last segment of one
+/// loop from the first of the next where a region's loops are given one after another.
+const END_TO_END: f64 = 1e-9;
 
 /// How far a point of a section may move in space for its plane's axes being off (not quite
 /// perpendicular or not quite of unit length): the kernel's zone tolerance, as [`MIN_EDGE`]. A
@@ -120,6 +143,14 @@ pub struct LoftSection {
     pub y: Vec3,
     /// The loop, in the plane's coordinates.
     pub segs: Vec<Seg2>,
+}
+
+/// Whether the last segment closes an already ordered chain at its first segment,
+/// in sketch coordinates. This does not check the interior joins.
+#[must_use]
+pub fn section_ends_meet(first: &Seg2, last: &Seg2, tol: f64) -> bool {
+    let gap = last.end() - first.start();
+    gap.x.hypot(gap.y) <= tol
 }
 
 /// A section as the walls are built through it: its segments, and for each the segments of the
@@ -473,14 +504,14 @@ fn split_at(s: &Seg2, t: f64) -> Option<(Seg2, Seg2)> {
 }
 
 /// A loop's signed area (counter-clockwise positive).
-fn signed_area(segs: &[Seg2]) -> f64 {
+pub(super) fn signed_area(segs: &[Seg2]) -> f64 {
     segs.iter()
         .map(|s| s.area_term().map_or(f64::NAN, |(a, _)| a))
         .sum()
 }
 
 /// A loop's centroid by area; with no area, the mean of its vertices.
-fn centroid(segs: &[Seg2]) -> Point2 {
+pub(super) fn centroid(segs: &[Seg2]) -> Point2 {
     let area = signed_area(segs);
     let (mut sx, mut sy) = (0.0, 0.0);
     for s in segs {
@@ -1949,6 +1980,103 @@ fn axes_fit(s: &LoftSection) -> bool {
     skew < 1.0 && skew * extent(&s.segs) <= AXES_ZONE
 }
 
+/// The one homogeneous Bézier span of a free-form segment (a cubic, a conic or a Bézier): none
+/// for a line or an arc, which the skin takes as they are.
+fn free_form(s: &Seg2) -> Option<Vec<H2>> {
+    match s {
+        Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => span(s),
+        Seg2::Line { .. } | Seg2::Arc { .. } => None,
+    }
+}
+
+/// Whether the free-form segment `this` carries on the free-form segment `prev` with one first
+/// derivative ([`ONE_DERIVATIVE`]) when its span of a parameter is `ratio` times `prev`'s: both
+/// are one Bézier span of `degree`, `this` starts where `prev` ends ([`END_TO_END`]), and on
+/// those spans it leaves with the derivative `prev` arrives with, in direction and in length. A
+/// segment that arrives or leaves with no derivative (a control point on its own end) carries
+/// nothing on.
+fn carries_on(prev: &Seg2, this: &Seg2, degree: usize, ratio: f64) -> bool {
+    let (Some(a), Some(b)) = (free_form(prev), free_form(this)) else {
+        return false;
+    };
+    let (Some(end), Some(start)) = (a.last().copied(), b.first().copied()) else {
+        return false;
+    };
+    let (end, start) = (point_of(end), point_of(start));
+    // On spans h and ratio h the derivatives are reaches / h and leaves / (ratio h).
+    let (reaches, leaves) = (derivative(prev, 1.0) * ratio, derivative(this, 0.0));
+    a.len() == degree + 1
+        && b.len() == degree + 1
+        && dist(end, start) <= END_TO_END * (1.0 + len(start))
+        && len(leaves) > 0.0
+        && len(reaches) > 0.0
+        && len(leaves - reaches) <= ONE_DERIVATIVE * len(leaves).max(len(reaches))
+}
+
+/// For a loft's sections as its walls are built through them (each with the same number of
+/// segments, in the order the skin takes them; a region's loops one after another), which
+/// segments the skin should take joined to the segment before them, as one curve: `true` at `i`
+/// for segment `i` of every section, never at 0 (see the module notes, "Runs of one curve").
+///
+/// A segment is joined where in every section it carries on the segment before it with one
+/// first derivative ([`ONE_DERIVATIVE`]) on the spans that keep the first section's speed
+/// through their joint: both are free-form segments of one degree (cubics, conics, Béziers),
+/// the one starts where the other ends, and the first section's ratio of the speeds either side
+/// of the joint is every section's. A run of such segments joined on spans in those ratios, with
+/// every section on the first section's knots, is a curve whose first derivative does not jump
+/// in any section, and the wall through it is the surface the segments alone give, each segment
+/// still paired with its partner on its own parameter.
+///
+/// Only a run with a joint where the speeds differ is given: a run whose segments all meet at
+/// one speed already has one first derivative on a unit each. Sections that do not all have the
+/// same number of segments are given no run.
+#[must_use]
+pub fn one_curve_runs(sections: &[Vec<Seg2>]) -> Vec<bool> {
+    let Some(lead) = sections.first() else {
+        return Vec::new();
+    };
+    let none = vec![false; lead.len()];
+    if sections.iter().any(|s| s.len() != lead.len()) {
+        return none;
+    }
+    // The span of each segment against the one before it that keeps the first section's speed
+    // through their joint, where the segment is joined.
+    let ratios: Vec<Option<f64>> = (0..lead.len())
+        .map(|i| {
+            let before = i.checked_sub(1)?;
+            let (prev, this) = (lead.get(before)?, lead.get(i)?);
+            let degree = free_form(prev)?.len().checked_sub(1)?;
+            let ratio = len(derivative(this, 0.0)) / len(derivative(prev, 1.0));
+            let agreed = ratio.is_finite()
+                && ratio > 0.0
+                && sections.iter().all(|s| {
+                    matches!((s.get(before), s.get(i)), (Some(p), Some(t)) if carries_on(p, t, degree, ratio))
+                });
+            agreed.then_some(ratio)
+        })
+        .collect();
+    let mut joins: Vec<bool> = ratios.iter().map(Option::is_some).collect();
+    // A run at one speed throughout is left as it is.
+    let mut i = 0;
+    while i < joins.len() {
+        let j = i + 1 + joins.iter().skip(i + 1).take_while(|x| **x).count();
+        let differs = ratios.get(i + 1..j).is_some_and(|run| {
+            run.iter()
+                .flatten()
+                .any(|r| (r - 1.0).abs() > ONE_DERIVATIVE)
+        });
+        if !differs {
+            joins
+                .iter_mut()
+                .take(j)
+                .skip(i + 1)
+                .for_each(|x| *x = false);
+        }
+        i = j;
+    }
+    joins
+}
+
 /// The loft's closed sections, given in loft order, matched as its walls are built through them:
 /// each wound the way the one before it is, cut to the vertices it shares with the others, and
 /// started at the segment that joins the first segment of the section before it (see the module
@@ -2202,6 +2330,15 @@ mod tests {
             a: p(a.0, a.1),
             b: p(b.0, b.1),
         }
+    }
+
+    #[test]
+    fn ordered_section_ends_respect_the_sketch_join_tolerance() {
+        let first = line((0.0, 0.0), (1.0, 0.0));
+        let last = |dy| line((1.0, 0.0), (6e-7, dy));
+        assert!(section_ends_meet(&first, &last(7e-7), 1e-6));
+        assert!(!section_ends_meet(&first, &last(9e-7), 1e-6));
+        assert!(!section_ends_meet(&first, &last(f64::NAN), 1e-6));
     }
 
     /// The closed polygon through `pts`.
@@ -3535,5 +3672,108 @@ mod tests {
             &[at(0.0, gon(4, 1e-9)), parallel],
             100
         )));
+    }
+
+    /// The cubic through the control points `c`, cut where `cuts` say (each the share of what is
+    /// left of its parameter), and the line back to its start: a closed section whose curved
+    /// segments are one curve.
+    fn arch(c: [(f64, f64); 4], cuts: &[f64]) -> Vec<Seg2> {
+        let mut rest = Seg2::Cubic {
+            p0: p(c[0].0, c[0].1),
+            p1: p(c[1].0, c[1].1),
+            p2: p(c[2].0, c[2].1),
+            p3: p(c[3].0, c[3].1),
+        };
+        let mut segs = Vec::new();
+        for &t in cuts {
+            let (head, tail) = split_at(&rest, t).unwrap();
+            segs.push(head);
+            rest = tail;
+        }
+        segs.push(rest);
+        segs.push(line(c[3], c[0]));
+        segs
+    }
+
+    /// An arch, the same arch at 0.6 of its size, and an arch of another shape.
+    const ARCH: [(f64, f64); 4] = [(20.0, 0.0), (20.0, 30.0), (-20.0, 30.0), (-20.0, 0.0)];
+    const SMALL: [(f64, f64); 4] = [(12.0, 0.0), (12.0, 18.0), (-12.0, 18.0), (-12.0, 0.0)];
+    const OTHER: [(f64, f64); 4] = [(12.0, 0.0), (15.0, 14.0), (-9.0, 20.0), (-12.0, 0.0)];
+
+    /// A curve cut at the share `t` of its parameter leaves the cut `(1 - t) / t` times as fast
+    /// as it arrives, on a unit each. Spans cut so in every section are one run, whether the
+    /// sections are one outline at two sizes or two shapes cut alike: their speeds change by one
+    /// ratio at the joint, which is all one parameter needs. The run is the whole of the spans
+    /// that carry on, a joint of equal speeds within it too; the line is never of it.
+    #[test]
+    fn spans_whose_speeds_change_alike_in_every_section_are_one_run() {
+        let quarter = [0.25];
+        assert_eq!(
+            one_curve_runs(&[arch(ARCH, &quarter), arch(SMALL, &quarter)]),
+            [false, true, false]
+        );
+        assert_eq!(
+            one_curve_runs(&[arch(ARCH, &quarter), arch(OTHER, &quarter)]),
+            [false, true, false]
+        );
+        // Spans of 1/2, 1/4, 1/8 and 1/8 of the parameter: the last two meet at one speed.
+        let halved = [0.5, 0.5, 0.5];
+        assert_eq!(
+            one_curve_runs(&[
+                arch(ARCH, &halved),
+                arch(SMALL, &halved),
+                arch(OTHER, &halved)
+            ]),
+            [false, true, true, true, false]
+        );
+    }
+
+    /// Spans that already meet at one speed are left as they are, and so are spans the sections
+    /// do not agree on: cut at different shares, meeting at a corner, or with a control point on
+    /// the joint in one section. Lines and arcs are never joined, and sections of different
+    /// numbers of segments have no run.
+    #[test]
+    fn spans_at_one_speed_or_that_the_sections_disagree_on_are_left() {
+        let none = [false, false, false];
+        // Halves: one speed either side of the cut.
+        assert_eq!(
+            one_curve_runs(&[arch(ARCH, &[0.5]), arch(SMALL, &[0.5])]),
+            none
+        );
+        // Cut at a quarter in one section and at two fifths in the other.
+        assert_eq!(
+            one_curve_runs(&[arch(ARCH, &[0.25]), arch(SMALL, &[0.4])]),
+            none
+        );
+        // A corner at the joint of the second section: its second span leaves along +y.
+        let mut cornered = arch(SMALL, &[0.25]);
+        if let Some(Seg2::Cubic { p0, p1, .. }) = cornered.get_mut(1) {
+            *p1 = Vec2::new(p0.x, p0.y + 3.0);
+        }
+        assert_eq!(one_curve_runs(&[arch(ARCH, &[0.25]), cornered]), none);
+        // A control point on the joint in the second section: no derivative to carry on.
+        let mut stalled = arch(SMALL, &[0.25]);
+        if let Some(Seg2::Cubic { p0, p1, .. }) = stalled.get_mut(1) {
+            *p1 = *p0;
+        }
+        assert_eq!(one_curve_runs(&[arch(ARCH, &[0.25]), stalled]), none);
+        // Lines, and arcs that meet tangentially at different speeds.
+        let square = poly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]);
+        assert_eq!(
+            one_curve_runs(&[square.clone(), square]),
+            [false, false, false, false]
+        );
+        let arcs = vec![
+            arc((0.0, 0.0), (5.0, 0.0), (0.0, 5.0)),
+            arc((0.0, 0.0), (0.0, 5.0), (-5.0, 0.0)),
+            arc((0.0, 0.0), (-5.0, 0.0), (5.0, 0.0)),
+        ];
+        assert_eq!(one_curve_runs(&[arcs.clone(), arcs]), none);
+        // Sections that do not have the same number of segments.
+        assert_eq!(
+            one_curve_runs(&[arch(ARCH, &[0.25]), arch(SMALL, &[0.25, 0.5])]),
+            none
+        );
+        assert!(one_curve_runs(&[]).is_empty());
     }
 }

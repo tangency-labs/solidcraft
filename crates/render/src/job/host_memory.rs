@@ -185,7 +185,7 @@ mod native {
         state: Mutex<State>,
     }
     impl NativeMemoryPool {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self {
                 state: Mutex::new(State {
                     snapshot: MemorySnapshot::from_probe(0, 0, None),

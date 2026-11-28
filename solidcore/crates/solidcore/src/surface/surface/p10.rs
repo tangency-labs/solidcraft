@@ -6,6 +6,7 @@
 //! | Rust                                             | Upstream                                    |
 //! |--------------------------------------------------|---------------------------------------------|
 //! | [`LsiGlobalSolver::local_solve_branch`]          | `SmLSIGlobalSolver::LocalSolve`             |
+//! | [`CertifiedLsi`], [`CertifiedLsi::certified_pass`] | (not upstream)                            |
 //! | [`global_curve_intersect_combine_solutions`], [`CombineContext`] | `sm_GlobalCurveIntersectCombineSolutions` (static) |
 //!
 //! Deviations:
@@ -41,12 +42,42 @@
 //!   the second span), so a point with valid nodes never culls; it resets a cull flag
 //!   when the outer loop reaches that solution; the obsolete `while (!bDone2)` loop
 //!   runs once (nothing clears the flag) and is a single pass here.
+//! - **Contact (not upstream).** Where the combination keeps one of two point
+//!   solutions close together, the point kept takes the
+//!   [`crate::geom::solution_array::Contact::merged`] of both.
 //! - **Debug only code** (`SM_DEBUG_CODE` drawing and dumps) and the assertions are not
 //!   ported.
 //! - **Bounds.** The leaf solve takes at most six guesses (upstream's fixed arrays). No
 //!   recursion.
+//! - **The certified pass (not upstream).** `LocalSolve` solves its guesses and decides
+//!   from the patch's normal map whether another crossing can exist; a second crossing of
+//!   the same leaf is lost where that map allows none (it is no proof) or the near-tangent
+//!   prediction falls outside the leaf (a ray entering and leaving a torus near its crown
+//!   within one leaf was given its exit as the first hit). The guesses run as upstream's,
+//!   and their answers keep their numbers. For a surface whose net is the surface
+//!   ([`Surface::certified_net`]) the solve runs through [`CertifiedLsi`], which keeps each
+//!   leaf whose guesses ran; after the traversal each is searched by
+//!   [`super::certified_line::isolate`] ([`CertifiedLsi::certified_pass`]), and every
+//!   certified crossing that no solution of the whole solve already stands for is added (of
+//!   a leaf whose pass stopped at its limit, those before every box it left:
+//!   [`super::certified_line::publishable_roots`], the bound taken over every leaf of the
+//!   solve at its limit).
+//!   Nothing is removed, and no solution a guess found is solved again. The traversal also
+//!   keeps the domain of each leaf and subtree it culls by the line's distance or
+//!   parameter, which [`super::certified_line::enclose_strip`] encloses, and the pass
+//!   returns the solve's side record ([`crate::geom::solution_array::SideRecord`]) from the
+//!   components of what the leaves' passes and the strips kept, after the solve's drop
+//!   ([`super::certified_line::drop_fenced`], [`super::certified_line::components`]);
+//!   nothing reads it yet. A solve whose context keeps its operation's searches
+//!   ([`super::p1::SurfaceSolveContext::line_passes`]) takes the one made on the same
+//!   inputs instead of searching again ([`super::certified_line::LinePasses`]); its
+//!   solutions are read as before.
 
-use super::p1::{is_node_valid, is_surface_cache_owner, surface_to_evaluate};
+use core::cell::RefCell;
+use std::sync::Arc;
+
+use super::certified_line;
+use super::p1::{is_node_inside, is_node_valid, is_surface_cache_owner, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
 use super::p4;
 use super::p6::{CurveIntersection, RangeTangentPoint};
@@ -63,7 +94,8 @@ use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{Branch, GlobalSolve, SolverOperation};
 use crate::geom::pseudo_box::LineHit as PseudoHit;
 use crate::geom::solution_array::{
-    Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
+    Contact, SideRecord, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
+    SortKey,
 };
 use crate::geom::tol::{are_same, scaled_zero2};
 use crate::geom::tree::{AuxDataType, NodeId, Tree};
@@ -293,6 +325,65 @@ fn pseudo_hit(hit: &Result<PseudoHit>) -> Option<(u32, f64, f64)> {
 
 // ---- SmLSIGlobalSolver::LocalSolve -------------------------------------------------------------
 
+/// A leaf whose guesses ran, kept for [`CertifiedLsi::certified_pass`]: what
+/// [`LsiGlobalSolver::local_solve_branch`] had made of the leaf when it started its
+/// guesses (not upstream).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CertifiedLeaf<O> {
+    owner: Option<crate::geom::tree::TreeOwner>,
+    parent: O,
+    domain: Extent2d,
+    interval: Extent1d,
+    conts: [[ContinuityType; 2]; 3],
+    nodes: [Option<NodeId>; 2],
+    /// Whether the leaf lies wholly inside the face
+    /// ([`super::p1::is_node_inside`]).
+    inside: bool,
+}
+
+/// What the traversal of a solve with the certified pass keeps (not upstream): the leaves
+/// whose guesses ran, and the strips of the leaves and subtrees it culled by the line's
+/// distance or parameter (a slab or sphere test of boxes, no proof), each the culled
+/// domain met with the solve's, for [`certified_line::enclose_strip`]. A leaf outside the
+/// face or the solve's domain is no cull here: no hit there counts.
+#[derive(Debug, Clone, PartialEq)]
+struct Kept<O> {
+    leaves: Vec<CertifiedLeaf<O>>,
+    /// The culled strips.
+    strips: Vec<Extent2d>,
+    /// Culls whose domain could not be placed (a subtree's node with no domain in the
+    /// cache): nothing encloses them, and the whole line is undecided.
+    unplaced: usize,
+}
+
+impl<O> Default for Kept<O> {
+    fn default() -> Self {
+        Self {
+            leaves: Vec::new(),
+            strips: Vec::new(),
+            unplaced: 0,
+        }
+    }
+}
+
+/// Keeps the culled leaf `domain` (already met with the solve's) as a strip of `keep`
+/// (when kept).
+fn keep_strip<O>(keep: &mut Option<&mut Kept<O>>, domain: Extent2d) {
+    if let Some(kept) = keep.as_deref_mut() {
+        kept.strips.push(domain);
+    }
+}
+
+/// Where a culled subtree's strip lies (not upstream).
+enum CullStrip {
+    /// Its node's domain met with the solve's.
+    At(Extent2d),
+    /// Outside the solve's domain, or a sliver of it, as a leaf there is: no cull.
+    Outside,
+    /// Its node has no domain in the cache.
+    Unplaced,
+}
+
 /// Read-only state of one leaf solve.
 struct LsiLeaf<'s, O> {
     cache: &'s SurfaceCache<O>,
@@ -403,8 +494,20 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     /// coincidence checks); `InvalidInput` when the node is not a patch node of that
     /// cache or the cache does not hold the tree's surface; those of the evaluations
     /// and solves; [`SolidError::Unported`] from the calls into units not ported yet.
-    #[allow(clippy::too_many_lines)]
     pub fn local_solve_branch(&mut self, k: &Kernel, branch: &Branch) -> Result<bool> {
+        self.local_solve_branch_keeping(k, branch, None)
+    }
+
+    /// [`LsiGlobalSolver::local_solve_branch`], the leaf pushed to `keep` (when given)
+    /// as its guesses start: the leaves [`CertifiedLsi::certified_pass`] searches; and the
+    /// domain of a leaf culled by the line's distance or parameter kept there as a strip.
+    #[allow(clippy::too_many_lines)]
+    fn local_solve_branch_keeping(
+        &mut self,
+        k: &Kernel,
+        branch: &Branch,
+        mut keep: Option<&mut Kept<O>>,
+    ) -> Result<bool> {
         // locals - apBranch[0] is SurfaceNode
         let (surface_id, surface_node) = self.base.branch_entry(branch, 0)?;
         let surface_node = *surface_node;
@@ -446,6 +549,14 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         )? {
             return Ok(false);
         }
+        // (not upstream) whether a component in it can straddle the face's border
+        let inside = keep.is_some()
+            && is_node_inside(
+                tree.owner(),
+                cache,
+                SolveModes::of(cache, self.modes),
+                &surface_node,
+            )?;
 
         // no work - surfaceLeafDomain disjoint from intersectionDomain
         if uv_domain.are_disjoint(&self.uv_domain, 0.0) {
@@ -504,6 +615,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             box_hit(&Ok(bbox.intersect_line(self.line_point, self.line_vector)?))
         else {
             // no work - no BBox intersection
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         };
 
@@ -512,11 +624,13 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             pseudo_box.intersect_line(self.line_point, self.line_vector)?
         )) else {
             // no work - no Pseudo intersection
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         };
 
         // no work - BBox/Pseudo intersection segments don't overlap
         if max2(bbox_enter, pseudo_enter) > min2(bbox_exit, pseudo_exit) {
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         }
 
@@ -531,7 +645,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if let Some(line_ivl) = &self.line_interval {
             bound_ivl = match bound_ivl.intersect(line_ivl) {
                 Ok(i) => i,
-                Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
+                Err(e) if !e.is_unported_or_cancelled() => {
+                    keep_strip(&mut keep, uv_domain);
+                    return Ok(false);
+                }
                 Err(_) => Extent1d::new(),
             };
         }
@@ -539,6 +656,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // when firing rays only look at positive line parameters
         if self.ray_fire && bound_ivl.max() <= 0.0 {
             // no work - ray casting and no positive intersection segment
+            keep_strip(&mut keep, uv_domain);
             return Ok(false);
         }
 
@@ -580,6 +698,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // no work - if given, m_cpLineInterval doesn't overlap sBoxIvl
         if let Some(line_ivl) = &self.line_interval {
             if line_ivl.are_disjoint(&bound_ivl, 0.0) {
+                keep_strip(&mut keep, uv_domain);
                 return Ok(false);
             }
         }
@@ -666,6 +785,19 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 branch.get(1).copied().flatten(),
             ],
         };
+
+        // (not upstream) the certified pass searches this leaf after the traversal
+        if let Some(keep) = keep {
+            keep.leaves.push(CertifiedLeaf {
+                owner: leaf.owner,
+                parent: leaf.parent,
+                domain: leaf.domain,
+                interval: leaf.interval,
+                conts: leaf.conts,
+                nodes: leaf.nodes,
+                inside,
+            });
+        }
 
         // for every Guess (more than 1 when LineGuess does not drop to SurfaceDomain)
         let mut i = 0;
@@ -809,6 +941,281 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         Ok(false)
     }
 
+    /// Where the strip of the subtree `branch` lies, pruned by its sphere bound (not
+    /// upstream): its surface node's domain trimmed to the solve's as a leaf's is (kept whole
+    /// within a rounding of it), outside it where a leaf there would have no work.
+    fn branch_strip(&self, branch: &Branch) -> CullStrip {
+        let (Some(cache), Some(id)) = (self.surface_cache, branch.first().copied().flatten())
+        else {
+            return CullStrip::Unplaced;
+        };
+        let Ok(aux) = cache.aux(id) else {
+            return CullStrip::Unplaced;
+        };
+        let domain = aux.uv_domain;
+        if domain.are_disjoint(&self.uv_domain, 0.0) {
+            return CullStrip::Outside;
+        }
+        if domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
+            return CullStrip::At(domain);
+        }
+        match domain.intersect(&self.uv_domain) {
+            Ok(d) if !are_same(d.max().x, d.min().x) && !are_same(d.max().y, d.min().y) => {
+                CullStrip::At(d)
+            }
+            _ => CullStrip::Outside,
+        }
+    }
+
+    /// Whether a solution of the solve so far stands for the certified `root`, whose
+    /// line parameter is `t`: a point solution within `reach` (the tolerance) of it along
+    /// the line, or in the `(u, v)` box the root is the only one in (a regular box holds
+    /// one contact), or a range that holds it. The certified pass adds no second solution
+    /// for one contact.
+    fn stands_for(&self, root: &certified_line::CertifiedRoot, t: f64, reach: f64) -> Result<bool> {
+        let [unique_u, unique_v] = root.unique;
+        for solution in self.base.solutions.as_slice() {
+            let start = p(&solution.start, 0)?;
+            let held = if solution.solution_type == SolutionType::RangeOfValues {
+                let end = p(&solution.end, 0)?;
+                t >= min2(start, end) - reach && t <= max2(start, end) + reach
+            } else {
+                let (u, v) = (p(&solution.start, 1)?, p(&solution.start, 2)?);
+                (t - start).abs() <= reach
+                    || (u >= unique_u.lo
+                        && u <= unique_u.hi
+                        && v >= unique_v.lo
+                        && v <= unique_v.hi)
+            };
+            if held {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// The crossings [`certified_line::isolate`] certifies on each leaf `kept` holds, added
+    /// ([`CertifiedLsi::certified_pass`]), and the solve's side record built from the
+    /// components of what the passes kept ([`certified_line::components`]). The search
+    /// ([`certified_line::search`]) is taken from `passes` when the operation kept one on
+    /// the same inputs, and kept there otherwise.
+    fn add_certified_roots(
+        &mut self,
+        k: &Kernel,
+        net: &certified_line::LineNet,
+        kept: &Kept<O>,
+        passes: Option<&RefCell<certified_line::LinePasses>>,
+    ) -> Result<SideRecord> {
+        // (without the cache no leaf was solved, and none is kept)
+        let Some(cache) = self.surface_cache else {
+            return Ok(SideRecord::NotRun);
+        };
+        let tol = self.base.tolerance_3d;
+        let speed = self.line_vector.length();
+        // (a line of no length has no parameter to tell two hits apart by)
+        let moving = speed > 0.0;
+        if !moving {
+            return Ok(SideRecord::NotRun);
+        }
+        // the line's own interval, as `add_certified_root` bounds it: the solve's line
+        // interval, and a ray's hits from just behind its start
+        let behind = if self.ray_fire {
+            -EFF_ZERO * (1.0 + self.line_point.max_dimension())
+        } else {
+            f64::NEG_INFINITY
+        };
+        let span = match &self.line_interval {
+            Some(ivl) => [max2(ivl.min(), behind), ivl.max()],
+            None => [behind, f64::INFINITY],
+        };
+        let line = certified_line::PassLine {
+            point: self.line_point,
+            vector: self.line_vector,
+            span,
+            solve_domain: self.uv_domain,
+            tol,
+        };
+        // the search reads the net, the line, the leaves and the strips alone: one the
+        // operation made on the same inputs is this one's (a borrow refused is no search
+        // kept: this solve searches)
+        let jobs: Vec<certified_line::SolvedLeaf> = kept
+            .leaves
+            .iter()
+            .map(|job| certified_line::SolvedLeaf {
+                domain: job.domain,
+                interval: job.interval,
+                inside: job.inside,
+            })
+            .collect();
+        let key = passes.map(|_| certified_line::PassKey::of(net, &line, &jobs, &kept.strips));
+        let found = match (passes, &key) {
+            (Some(passes), Some(key)) => passes.try_borrow().ok().and_then(|p| p.found(key)),
+            _ => None,
+        };
+        let search = if let Some(search) = found {
+            k.work_counters.add_line_search_reused();
+            search
+        } else {
+            let search = Arc::new(certified_line::search(
+                net,
+                &line,
+                &jobs,
+                &kept.strips,
+                self.base.cancel.as_ref(),
+                &k.work_counters,
+            )?);
+            if let (Some(passes), Some(key)) = (passes, key) {
+                if let Ok(mut passes) = passes.try_borrow_mut() {
+                    passes.keep(key, &search);
+                }
+            }
+            search
+        };
+        // A leaf adds the crossings its pass decided: all of them where it finished; where it
+        // stopped at the limit, the ones before every box any leaf of the solve at its limit
+        // left (`publishable_roots`), which are all the solve's crossings in its searched
+        // leaves up to there. Past them its answer stays the guesses'. (The solved leaves come
+        // first in the search, in the order of `kept`.)
+        let publish = certified_line::publishable_roots(&search.leaves);
+        for ((job, found), roots) in kept.leaves.iter().zip(&search.leaves).zip(publish) {
+            if roots.is_empty() {
+                continue;
+            }
+            // (a crossing of a leaf at its limit may be one of two whose other lies past the
+            // boxes it left: a count over the solve's solutions reads it as undecided)
+            let at_limit = found.stop == certified_line::Stop::AtLimit;
+            let leaf = LsiLeaf {
+                cache,
+                owner: job.owner,
+                parent: job.parent,
+                eval: cache.surface(),
+                domain: job.domain,
+                line: Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false)),
+                interval: job.interval,
+                conts: job.conts,
+                nodes: job.nodes,
+            };
+            for root in &roots {
+                // a root whose evaluation, filter or point test fails is not added: the
+                // solve's answer without it is the guesses', as it was
+                ignored(self.add_certified_root(k, &leaf, root, tol / speed, at_limit))?;
+            }
+        }
+        // (a record not run leaves the solutions the guesses' alone, unclassified)
+        if certified_line::leaves_not_run(&search.leaves) {
+            return Ok(SideRecord::NotRun);
+        }
+        let stood_for = self.type_solutions(net, &line, &search.components, kept.unplaced > 0)?;
+        Ok(certified_line::side_record(
+            &search.leaves,
+            &search.components,
+            &stood_for,
+            kept.unplaced > 0,
+            span,
+        ))
+    }
+
+    /// Types every point and range solution of the solve from the typed `components`
+    /// ([`certified_line::type_solutions`]; `unplaced`, a cull whose strip could not be
+    /// placed). Returns, for each component, whether the solutions stand for it.
+    fn type_solutions(
+        &mut self,
+        net: &certified_line::LineNet,
+        line: &certified_line::PassLine,
+        components: &certified_line::Components,
+        unplaced: bool,
+    ) -> Result<Vec<bool>> {
+        use certified_line::SolutionAt;
+        let mut at: Vec<SolutionAt> = Vec::new();
+        for sol in self.base.solutions.as_slice() {
+            at.push(match sol.solution_type {
+                SolutionType::SingleValue => SolutionAt::Point([
+                    sol.start.param(0)?,
+                    sol.start.param(1)?,
+                    sol.start.param(2)?,
+                ]),
+                SolutionType::RangeOfValues => SolutionAt::Range,
+                _ => SolutionAt::Other,
+            });
+        }
+        let (typed, stood) = certified_line::type_solutions(net, line, components, &at, unplaced);
+        for (i, t) in typed.into_iter().enumerate() {
+            let (Some((contact, unique, shared)), Some(sol)) = (t, self.base.solutions.get_mut(i))
+            else {
+                continue;
+            };
+            sol.contact = contact;
+            sol.unique = unique.map(|[u, v]| [[u.lo, u.hi], [v.lo, v.hi]]);
+            sol.shared_contact = shared;
+        }
+        Ok(stood)
+    }
+
+    /// One certified root of `leaf`, added as a guess's hit is, unless a solution of the
+    /// solve already stands for it; `reach` is the tolerance as a stretch of the line's
+    /// parameter. Of a leaf whose pass stopped at its limit (`at_limit`) it is added as a
+    /// limit root ([`Solution::limit_root`]: a count of the solve's crossings is not shown by
+    /// it), and [`Contact::Undecided`], as the typing after finds it where it places it (its
+    /// component holds a leaf at its limit) and stays where it places it nowhere.
+    fn add_certified_root(
+        &mut self,
+        k: &Kernel,
+        leaf: &LsiLeaf<'s, O>,
+        root: &certified_line::CertifiedRoot,
+        reach: f64,
+        at_limit: bool,
+    ) -> Result<()> {
+        let [u, v, t] = root.point;
+        // a contact is one solution: the guesses' where they found it
+        if self.stands_for(root, t, reach)? {
+            return Ok(());
+        }
+        // a root certified on the leaf's border may lie a rounding outside it; one
+        // farther out is the next leaf's
+        let uv = Point2::new(u, v);
+        let uv_eps = EFF_ZERO * (1.0 + leaf.domain.size().max_dimension());
+        if !leaf.domain.contains_point(uv, uv_eps) {
+            return Ok(());
+        }
+        let uv = leaf.domain.clamp_point(uv);
+        let on_line = self.line_point + t * self.line_vector;
+        let deviation = leaf.eval.evaluate_point(k, uv)?.distance(on_line);
+        let within_tolerance = deviation < self.base.tolerance_3d;
+        if !within_tolerance {
+            return Ok(());
+        }
+        let mut solution = leaf.solution(t, uv, deviation)?;
+        if at_limit {
+            solution.contact = Contact::Undecided;
+            solution.limit_root = true;
+        }
+
+        // skip negative parameter ray/surface intersections
+        if self.ray_fire {
+            let scaled_zero = EFF_ZERO * (1.0 + self.line_point.max_dimension());
+            if t < -scaled_zero {
+                return Ok(());
+            }
+        }
+        if !filter_solution(
+            k,
+            leaf.eval,
+            &leaf.domain,
+            &leaf.line,
+            &leaf.interval,
+            leaf.conts,
+            &solution,
+        )? {
+            return Ok(());
+        }
+        // for points within the surface's trim boundary
+        if self.is_point_valid(k, leaf.owner, leaf.cache, uv)? {
+            self.add_sorted_solution(&solution, SortKey::ByAllParameters, true)?;
+            k.work_counters.add_line_root();
+        }
+        Ok(())
+    }
+
     /// The patch boundary of `leaf` at its `dir` minimum (`side == 0`) or maximum
     /// when its continuity there is at most C0: coincident ranges of the line along
     /// the boundary iso curve, else its crossings. True when upstream returns (a
@@ -924,6 +1331,103 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 }
 
 // ---- sm_GlobalCurveIntersectCombineSolutions ---------------------------------------------------
+
+// ---- the certified pass (not upstream) ---------------------------------------------------------
+
+/// The line/surface solver with the certified pass (module docs; not upstream): it
+/// traverses as [`LsiGlobalSolver`] does, keeps each leaf whose guesses ran, and after the
+/// traversal [`CertifiedLsi::certified_pass`] searches them. Without a net it is the
+/// solver alone.
+pub(crate) struct CertifiedLsi<'t, 's, O> {
+    /// The solver the traversal runs.
+    pub(crate) solver: LsiGlobalSolver<'t, 's, O>,
+    /// The surface's exact net ([`certified_line::LineNet::of`]), `None` for a surface
+    /// the pass does not run on.
+    net: Option<certified_line::LineNet>,
+    /// The leaves whose guesses ran, and the culls.
+    kept: Kept<O>,
+    /// The searches of the certified pass the operation keeps
+    /// ([`certified_line::LinePasses`]); `None`: every solve searches.
+    passes: Option<&'s RefCell<certified_line::LinePasses>>,
+}
+
+impl<'t, 's, O: SolutionObject + 't> CertifiedLsi<'t, 's, O> {
+    /// `solver` with the certified pass on `net`, reusing the searches `passes` keeps.
+    pub(crate) fn new(
+        solver: LsiGlobalSolver<'t, 's, O>,
+        net: Option<certified_line::LineNet>,
+        passes: Option<&'s RefCell<certified_line::LinePasses>>,
+    ) -> Self {
+        Self {
+            solver,
+            net,
+            kept: Kept::default(),
+            passes,
+        }
+    }
+
+    /// The certified pass (module docs): for every leaf whose guesses ran, the crossings
+    /// [`certified_line::isolate`] certifies, each added as the guesses' hits are (the
+    /// ray's negative parameters skipped, the filter, the trim boundary) unless a solution
+    /// of the solve already stands for it. Run by the caller after the traversal, with the
+    /// solve's solutions in the solver's `base.solutions`, so that a root some other
+    /// leaf's guess found is never solved a second time. Returns the solve's side record
+    /// (in the solver's scaled line parameter), [`SideRecord::NotRun`] without a net.
+    ///
+    /// # Errors
+    ///
+    /// A cancel, or an unported dependency of the evaluation, the filter or the point
+    /// test.
+    pub(crate) fn certified_pass(&mut self, k: &Kernel) -> Result<SideRecord> {
+        let Some(net) = self.net.take() else {
+            return Ok(SideRecord::NotRun);
+        };
+        let kept = std::mem::take(&mut self.kept);
+        let added = self.solver.add_certified_roots(k, &net, &kept, self.passes);
+        self.net = Some(net);
+        added
+    }
+}
+
+impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CertifiedLsi<'t, '_, O> {
+    fn solver(&self) -> &crate::geom::global_solver::GlobalSolver<'t, O> {
+        &self.solver.base
+    }
+
+    fn solver_mut(&mut self) -> &mut crate::geom::global_solver::GlobalSolver<'t, O> {
+        &mut self.solver.base
+    }
+
+    fn branch_may_contain_answers(&mut self, branch: &Branch) -> Result<bool> {
+        let may = self.solver.may_contain_answers(branch)?;
+        // (a subtree pruned by its sphere bound is a cull: no proof; its strip is enclosed)
+        if !may && self.net.is_some() {
+            match self.solver.branch_strip(branch) {
+                CullStrip::At(domain) => self.kept.strips.push(domain),
+                CullStrip::Outside => {}
+                CullStrip::Unplaced => self.kept.unplaced = self.kept.unplaced.saturating_add(1),
+            }
+        }
+        Ok(may)
+    }
+
+    fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
+        let k = self.solver.kernel;
+        let keep = self.net.is_some().then_some(&mut self.kept);
+        self.solver.local_solve_branch_keeping(k, branch, keep)
+    }
+
+    fn identical_solutions(
+        &self,
+        sol1: &Solution<O>,
+        sol2: &Solution<O>,
+    ) -> Result<(
+        crate::geom::global_solver::SolutionPairType,
+        Option<crate::geom::global_solver::PreferredSolution>,
+    )> {
+        self.solver.identical_solutions(sol1, sol2)
+    }
+}
 
 /// Where the combination finds the cache nodes and objects of the solutions (see the
 /// module deviations).
@@ -1084,6 +1588,115 @@ fn opening_drops(
         }
     }
     Ok(true)
+}
+
+/// (Not upstream) The curve parameter spans `[lo, hi]` of the solutions the combination
+/// replaces by the curve's drop onto the surface (those not `carried` over: a range, or a
+/// point tangent to the surface) that carry a limit root mark ([`Solution::limit_root`]):
+/// what they stood for may hold one of two crossings whose other is unreported.
+fn replaced_limit_spans<O>(solutions: &[Solution<O>], carried: &[bool]) -> Vec<[f64; 2]> {
+    solutions
+        .iter()
+        .zip(carried.iter().copied().chain(core::iter::repeat(false)))
+        .filter(|(s, kept)| s.limit_root && !kept)
+        .map(|(s, _)| {
+            let t0 = s.start.parameters.first().copied().unwrap_or(f64::NAN);
+            let t1 = if s.solution_type == SolutionType::RangeOfValues {
+                s.end.parameters.first().copied().unwrap_or(t0)
+            } else {
+                t0
+            };
+            [t0.min(t1), t0.max(t1)]
+        })
+        .collect()
+}
+
+/// (Not upstream) Whether a range of the drop over the curve parameters `[t0, t1]` takes the
+/// limit root mark of the replaced marked `spans`: with `widen` (the tolerance as a stretch
+/// of the curve's parameter, exact where the curve's speed is constant), where it meets one
+/// of them widened by it; without (a curve whose speed varies, where no single stretch of
+/// parameter holds the tolerance everywhere), wherever any span is marked. A span or a range
+/// that is not finite meets everything.
+fn drop_range_marked(spans: &[[f64; 2]], t0: f64, t1: f64, widen: Option<f64>) -> bool {
+    let Some(widen) = widen else {
+        return !spans.is_empty();
+    };
+    let (lo, hi) = (t0.min(t1), t0.max(t1));
+    spans.iter().any(|&[a, b]| {
+        let finite = [a, b, lo, hi, widen].iter().all(|x| x.is_finite());
+        !finite || (lo <= b + widen && a - widen <= hi)
+    })
+}
+
+/// (Not upstream) The curve's speed `|C'(t)|` where it is the same at every parameter: a line,
+/// or a polynomial B-spline of degree 1 with two control points (one straight piece, its
+/// derivative the difference of its points over its knot span); `None` for any other curve
+/// (its speed may vary, and nothing cheap shows it does not).
+fn constant_speed(k: &Kernel, curve: &Curve) -> Result<Option<f64>> {
+    use crate::curve::curve::CurveKind;
+    let straight = match curve.kind() {
+        CurveKind::Line(_) => true,
+        CurveKind::BSpline(b) => {
+            b.degree()? == 1 && b.control_points()?.len() == 2 && !b.is_rational()?
+        }
+        _ => false,
+    };
+    if !straight {
+        return Ok(None);
+    }
+    let ivl = curve.natural_interval();
+    let (p0, p1) = (
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    );
+    let span = ivl.length();
+    Ok((span > 0.0).then(|| p0.distance(p1) / span))
+}
+
+/// (Not upstream) The limit root marks ([`Solution::limit_root`]) of the solutions of the
+/// combination's second phase once its culls are made: `marks` before them, and each cull as
+/// `(culled, the solution it was culled for)`. The solutions the culls join (culled ones and
+/// what they were culled for, through chains) share one mark, the OR of theirs, so that a
+/// survivor carries every mark that reached it whatever order the culls were made in.
+fn absorbed_marks(marks: &[bool], absorbed: &[(usize, usize)]) -> Vec<bool> {
+    let n = marks.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    let root = |parent: &mut Vec<usize>, mut i: usize| {
+        while let Some(&up) = parent.get(i) {
+            if up == i {
+                break;
+            }
+            // (path halving)
+            let grand = parent.get(up).copied().unwrap_or(up);
+            if let Some(slot) = parent.get_mut(i) {
+                *slot = grand;
+            }
+            i = grand;
+        }
+        i
+    };
+    for &(a, b) in absorbed {
+        if a >= n || b >= n {
+            continue;
+        }
+        let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
+        if let Some(slot) = parent.get_mut(ra) {
+            *slot = rb;
+        }
+    }
+    let mut set_mark = vec![false; n];
+    for (i, &m) in marks.iter().enumerate() {
+        let r = root(&mut parent, i);
+        if let Some(slot) = set_mark.get_mut(r) {
+            *slot |= m;
+        }
+    }
+    (0..n)
+        .map(|i| {
+            let r = root(&mut parent, i);
+            set_mark.get(r).copied().unwrap_or(false)
+        })
+        .collect()
 }
 
 /// `sm_GlobalCurveIntersectCombineSolutions`: combines the curve/surface solutions
@@ -1351,9 +1964,28 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                     last_sol.end = curr.end;
                     solutions.set_at(last_slot, &last_sol)?;
                 }
-            } else if curr.start.solution_value < last_end.solution_value {
+                // (not upstream) a limit root the range held leaves its mark on the one
+                // that takes it in
+                if curr.limit_root && !last_sol.limit_root {
+                    last_sol.limit_root = true;
+                    solutions.set_at(last_slot, &last_sol)?;
+                }
+            } else {
                 // just use the better solution
-                solutions.set_at(last_slot, &curr)?;
+                let mut kept = if curr.start.solution_value < last_end.solution_value {
+                    curr
+                } else {
+                    last_sol
+                };
+                // (not upstream) the point kept stands for both, and keeps a unique box only
+                // as a crossing (the box is the certified root's it carries)
+                kept.contact = last_sol.contact.merged(curr.contact);
+                kept.limit_root = last_sol.limit_root || curr.limit_root;
+                kept.shared_contact = None;
+                if kept.contact != Contact::Crossing {
+                    kept.unique = None;
+                }
+                solutions.set_at(last_slot, &kept)?;
             }
         } else {
             // Keep the current solution, packed into the array
@@ -1401,6 +2033,9 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
     // intersections.
     let num = solutions.len();
     let mut cull = vec![false; num];
+    // (not upstream) each cull as (culled, the solution it is culled for): the limit root
+    // marks follow them once every cull is made (`absorbed_marks`)
+    let mut absorbed: Vec<(usize, usize)> = Vec::new();
     let mut compress = false;
     for ii in 0..num {
         let inv_sol = solutions.get_at(ii)?;
@@ -1465,6 +2100,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 if let Some(c) = cull.get_mut(ii) {
                     *c = true;
                 }
+                absorbed.push((ii, jj));
                 compress = true;
             } else {
                 // Range is long enough.  See about deleting the point solution.
@@ -1484,6 +2120,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                     if let Some(c) = cull.get_mut(jj) {
                         *c = true;
                     }
+                    absorbed.push((jj, ii));
                     compress = true;
                 }
             }
@@ -1498,6 +2135,15 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
             {
                 break;
             }
+        }
+    }
+
+    let marks: Vec<bool> = solutions.as_slice().iter().map(|s| s.limit_root).collect();
+    for (ii, m) in absorbed_marks(&marks, &absorbed).into_iter().enumerate() {
+        if m && !marks.get(ii).copied().unwrap_or(true) {
+            let mut s = solutions.get_at(ii)?;
+            s.limit_root = true;
+            solutions.set_at(ii, &s)?;
         }
     }
 
@@ -1600,7 +2246,9 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
     if found_coincidence {
         // keep every point solution not tangent with the surface
         let mut tmp = SolutionArray::new();
-        for sol in solutions.as_slice() {
+        // (not upstream) which solutions are carried over, for the limit root marks
+        let mut carried = vec![false; solutions.len()];
+        for (slot, sol) in carried.iter_mut().zip(solutions.as_slice()) {
             if sol.solution_type == SolutionType::SingleValue {
                 let pv = curve.evaluate(k, p(&sol.start, 0)?, 1, true, true)?;
                 let uv = Point2::new(p(&sol.start, 1)?, p(&sol.start, 2)?);
@@ -1616,6 +2264,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 })?;
                 if !tangent.is_perpendicular_to(normal, 2.0) {
                     tmp.add(sol);
+                    *slot = true;
                 }
             }
         }
@@ -1633,6 +2282,16 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         if dropped.dist_to_surface > tol {
             return Ok(());
         }
+        // a range of the drop takes the mark of a replaced solution it meets along the curve
+        // (the drop is parameterized as the curve is: its ends are the ranges' curve
+        // parameters), within the tolerance as a stretch of the curve's parameter: exact
+        // where the curve's speed is constant; elsewhere every range takes it
+        let spans = replaced_limit_spans(solutions.as_slice(), &carried);
+        let widen = match constant_speed(k, curve)? {
+            _ if spans.is_empty() => Some(0.0),
+            Some(speed) if speed > 0.0 && speed.is_finite() => Some(tol / speed),
+            _ => None,
+        };
         for uv_curve in &dropped.uv_curves {
             let ivl = uv_curve.natural_interval();
             let mut sol = Solution::new();
@@ -1651,6 +2310,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
             set_p(&mut sol.end, 0, ivl.max())?;
             set_p(&mut sol.end, 1, end.x)?;
             set_p(&mut sol.end, 2, end.y)?;
+            sol.limit_root = drop_range_marked(&spans, ivl.min(), ivl.max(), widen);
             tmp.add(&sol);
         }
         if !dropped.uv_curves.is_empty() {
@@ -1666,6 +2326,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
 mod tests {
     use super::*;
     use crate::geom::solution_array::ObjectKind;
+    use crate::math::Vec3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -1705,6 +2366,22 @@ mod tests {
         Curve::from(BSplineCurve::from_nurb(n, 3, false))
     }
 
+    /// The line `y = 0.5`, `z = 0` from `x = 0` to 1 as a B-spline of degree 2 whose middle
+    /// point is at `x = 0.1`: in the plane, but its speed is not constant.
+    fn uneven_line() -> Curve {
+        let n = NurbCurve::new(
+            vec![
+                CPoint::new(0.0, 0.5, 0.0, NOW),
+                CPoint::new(0.1, 0.5, 0.0, NOW),
+                CPoint::new(1.0, 0.5, 0.0, NOW),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Curve::from(BSplineCurve::from_nurb(n, 3, false))
+    }
+
     fn range(t0: f64, t1: f64) -> Solution<H> {
         let mut s = Solution::new();
         s.solution_type = SolutionType::RangeOfValues;
@@ -1716,6 +2393,184 @@ mod tests {
         s.end.parameters[1] = t1;
         s.end.parameters[2] = 0.5;
         s
+    }
+
+    /// A point of the line at `t` (on the plane `z = 0`, at `u = t`, `v = 0.5`).
+    fn point_at(t: f64) -> Solution<H> {
+        let mut s = Solution::new();
+        s.solution_type = SolutionType::SingleValue;
+        s.num_variables = 3;
+        s.start.parameters[0] = t;
+        s.start.parameters[1] = t;
+        s.start.parameters[2] = 0.5;
+        s
+    }
+
+    /// The combination of `sols` along the line lying in the plane, whose interval is
+    /// `[0, 1]`.
+    fn combined(mut sols: Vec<Solution<H>>) -> Vec<Solution<H>> {
+        let k = Kernel::default();
+        let mut array = SolutionArray::new();
+        for s in &mut sols {
+            array.add(s);
+        }
+        global_curve_intersect_combine_solutions(
+            &k,
+            &plane(),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            &line(),
+            &Extent1d::from_min_max(0.0, 1.0),
+            1e-6,
+            &CombineContext::default(),
+            &mut array,
+        )
+        .unwrap();
+        array.as_slice().to_vec()
+    }
+
+    /// The combination's second phase: a range A (1/100 of the line, long enough to keep,
+    /// short of a coincidence) culls a point P inside it, and a short range B (under 1/1000
+    /// of the line, across the seam so the first phase keeps it apart from A) is culled for
+    /// P. B goes; P stays (upstream clears a solution's cull flag when its outer loop reaches
+    /// it, and P comes after A), and A and P both carry B's limit root mark whichever of A
+    /// and B comes first along the line, and none where B carries none. (Handing marks on
+    /// inside the cull loop left A unmarked when A came first.)
+    #[test]
+    fn a_range_that_culls_a_point_takes_the_mark_culled_into_it() {
+        let short = |t0: f64, marked: bool| {
+            let mut b = range(t0, t0 + 5e-4);
+            b.start.parameters[2] = 1.5;
+            b.end.parameters[2] = 1.5;
+            b.limit_root = marked;
+            b
+        };
+        for marked in [true, false] {
+            // A before B, then B before A
+            for sols in [
+                vec![range(0.40, 0.41), short(0.404, marked), point_at(0.405)],
+                vec![short(0.2, marked), range(0.40, 0.41), point_at(0.405)],
+            ] {
+                let got: Vec<_> = combined(sols)
+                    .iter()
+                    .map(|s| (s.solution_type, s.start.parameters[0], s.limit_root))
+                    .collect();
+                assert_eq!(
+                    got,
+                    vec![
+                        (SolutionType::RangeOfValues, 0.40, marked),
+                        (SolutionType::SingleValue, 0.405, marked)
+                    ]
+                );
+            }
+        }
+    }
+
+    /// A coincidence (a range over more than 1/50 of the line, which lies in the plane)
+    /// replaces the solutions by the line's drop onto the plane: a range of the drop carries
+    /// the limit root mark of a range or a tangent point it replaces and meets along the line
+    /// (every point of this line is tangent to the plane; the drop here is one range over the
+    /// whole line), and none where nothing replaced carried one.
+    #[test]
+    fn the_drop_of_a_coincidence_keeps_a_replaced_limit_root_mark() {
+        for (range_marked, point_marked) in [(true, false), (false, true), (false, false)] {
+            let mut long = range(0.1, 0.5);
+            long.limit_root = range_marked;
+            let mut tangent = point_at(0.7);
+            tangent.limit_root = point_marked;
+            let got = combined(vec![long, tangent]);
+            assert!(!got.is_empty());
+            for s in &got {
+                assert_eq!(s.solution_type, SolutionType::RangeOfValues, "{got:?}");
+                assert_eq!(s.limit_root, range_marked || point_marked, "{got:?}");
+            }
+        }
+        // the spans a drop's range meets: those of the marked solutions not carried over
+        let (mut a, mut b) = (point_at(0.2), range(0.6, 0.3));
+        a.limit_root = true;
+        assert!(replaced_limit_spans(&[a, b], &[true, false]).is_empty());
+        assert_eq!(
+            replaced_limit_spans(&[a, b], &[false, false]),
+            vec![[0.2, 0.2]]
+        );
+        b.limit_root = true;
+        assert_eq!(
+            replaced_limit_spans(&[a, b], &[true, false]),
+            vec![[0.3, 0.6]]
+        );
+        assert_eq!(replaced_limit_spans(&[a, b], &[true]), vec![[0.3, 0.6]]);
+        // on a curve of constant speed a drop's range takes the mark where it meets a span
+        // widened by the tolerance as a stretch of parameter; on any other, wherever a span
+        // is marked, met or not
+        let spans = [[0.3, 0.6]];
+        let w = Some(1e-6);
+        assert!(drop_range_marked(&spans, 0.5, 0.9, w));
+        assert!(drop_range_marked(&spans, 0.6 + 5e-7, 0.9, w));
+        assert!(!drop_range_marked(&spans, 0.6 + 2e-6, 0.9, w));
+        assert!(!drop_range_marked(&spans, 0.0, 0.3 - 2e-6, w));
+        assert!(!drop_range_marked(&[], 0.0, 1.0, w));
+        assert!(drop_range_marked(&spans, 0.0, 0.1, Some(f64::INFINITY)));
+        assert!(drop_range_marked(&spans, 0.0, 0.1, None));
+        assert!(drop_range_marked(&spans, 0.9, 1.0, None));
+        assert!(!drop_range_marked(&[], 0.0, 1.0, None));
+        // the speed: constant on the line of degree 1 with two points (1 over [0, 1]); none
+        // claimed on a curve of degree 2 whose points are spaced unevenly
+        let k = Kernel::default();
+        assert_eq!(constant_speed(&k, &line()).unwrap(), Some(1.0));
+        assert_eq!(constant_speed(&k, &uneven_line()).unwrap(), None);
+    }
+
+    /// A curve of varying speed (a parabolic arch in the plane, leaving its square between
+    /// t ≈ 0.146 and 0.854) whose stretch over [0, 0.1] coincides with the plane, marked as
+    /// a limit root: the drop replaces it by two ranges with a gap between them, and both
+    /// take the mark, though only the first meets the replaced stretch (no stretch of
+    /// parameter holds the tolerance everywhere along such a curve).
+    #[test]
+    fn the_drop_along_a_curve_of_varying_speed_marks_every_range() {
+        let n = NurbCurve::new(
+            vec![
+                CPoint::new(0.1, 0.5, 0.0, NOW),
+                CPoint::new(0.5, 2.5, 0.0, NOW),
+                CPoint::new(0.9, 0.5, 0.0, NOW),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let arch = Curve::from(BSplineCurve::from_nurb(n, 3, false));
+        let k = Kernel::default();
+        let at = |t: f64| arch.evaluate_point(&k, t).unwrap();
+        let mut long = Solution::<H>::new();
+        long.solution_type = SolutionType::RangeOfValues;
+        long.num_variables = 3;
+        let (a, b) = (at(0.0), at(0.1));
+        long.start.parameters[..3].copy_from_slice(&[0.0, a.x, a.y]);
+        long.end.parameters[..3].copy_from_slice(&[0.1, b.x, b.y]);
+        long.limit_root = true;
+        let mut array = SolutionArray::new();
+        array.add(&long);
+        let r = global_curve_intersect_combine_solutions(
+            &k,
+            &plane(),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            &arch,
+            &Extent1d::from_min_max(0.0, 1.0),
+            1e-6,
+            &CombineContext::default(),
+            &mut array,
+        );
+        r.unwrap();
+        let got: Vec<_> = array
+            .as_slice()
+            .iter()
+            .map(|s| (s.solution_type, s.start.parameters[0], s.limit_root))
+            .collect();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[1].1 > 0.5, "{got:?}");
+        assert!(
+            got.iter()
+                .all(|&(kind, _, marked)| kind == SolutionType::RangeOfValues && marked),
+            "{got:?}"
+        );
     }
 
     #[test]
@@ -1744,6 +2599,69 @@ mod tests {
         let first = sols.get_at(0).unwrap();
         assert_eq!(first.end.parameters[0], 0.110);
         assert_eq!(sols.get_at(1).unwrap().start.parameters[0], 0.500);
+    }
+
+    /// Two points of one contact (the same line parameter, a line through the plane square
+    /// to it) combine into the better one, which takes the merged contact of both: a boxed
+    /// crossing and a touching point, or two boxed crossings, give an undecided point with
+    /// no unique box (it carries no certified root any more), whichever of the two is kept.
+    #[test]
+    fn points_combined_into_one_keep_no_box_unless_a_crossing() {
+        let k = Kernel::default();
+        let n = NurbCurve::new(
+            vec![
+                CPoint::new(0.3, 0.5, -1.0, NOW),
+                CPoint::new(0.3, 0.5, 1.0, NOW),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let across = Curve::from(BSplineCurve::from_nurb(n, 3, false));
+        let point = |value: f64, contact: Contact, unique: Option<[[f64; 2]; 2]>| {
+            let mut s: Solution<H> = Solution::new();
+            s.solution_type = SolutionType::SingleValue;
+            s.num_variables = 3;
+            s.start.solution_value = value;
+            s.start.parameters[..3].copy_from_slice(&[0.5, 0.3, 0.5]);
+            s.contact = contact;
+            s.unique = unique;
+            s
+        };
+        let boxed = Some([[0.25, 0.35], [0.45, 0.55]]);
+        for (first, second) in [
+            (
+                (1e-9, Contact::Crossing, boxed),
+                (2e-9, Contact::Touching, None),
+            ),
+            (
+                (2e-9, Contact::Crossing, boxed),
+                (1e-9, Contact::Touching, None),
+            ),
+            (
+                (1e-9, Contact::Crossing, boxed),
+                (2e-9, Contact::Crossing, boxed),
+            ),
+        ] {
+            let mut sols = SolutionArray::new();
+            sols.add(&point(first.0, first.1, first.2));
+            sols.add(&point(second.0, second.1, second.2));
+            global_curve_intersect_combine_solutions(
+                &k,
+                &plane(),
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                &across,
+                &Extent1d::from_min_max(0.0, 1.0),
+                1e-6,
+                &CombineContext::default(),
+                &mut sols,
+            )
+            .unwrap();
+            assert_eq!(sols.len(), 1, "{:?}", sols.as_slice());
+            let kept = sols.get_at(0).unwrap();
+            assert_eq!(kept.solution_type, SolutionType::SingleValue);
+            assert_eq!((kept.contact, kept.unique), (Contact::Undecided, None));
+        }
     }
 
     #[test]
@@ -1832,5 +2750,567 @@ mod tests {
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// The torus of radii 30 and 5 about z.
+    fn torus(k: &Kernel) -> Surface {
+        let mut torus = crate::surface::torus::Torus::new(
+            k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+            30.0,
+            5.0,
+            crate::surface::torus::TorusOptions::default(),
+        )
+        .unwrap();
+        torus.make_nurb(k).unwrap();
+        Surface::from(torus)
+    }
+
+    /// The parameters at which the line `p + t d` meets the torus of radii `major` and
+    /// `minor` about z, from its implicit equation
+    /// `(|X|² + R² − r²)² − 4 R² (x² + y²) = 0`: every sign change over `[0, 200]` in
+    /// steps of 1e-3, closed in by bisection.
+    fn torus_line_roots(p: Vec3, d: Vec3, major: f64, minor: f64) -> Vec<f64> {
+        let f = |t: f64| {
+            let x = p + t * d;
+            let s = x.dot(x) + major * major - minor * minor;
+            s * s - 4.0 * major * major * (x.x * x.x + x.y * x.y)
+        };
+        let mut roots = Vec::new();
+        let step = 1.0e-3;
+        let mut a = 0.0;
+        while a < 200.0 {
+            let b = a + step;
+            if f(a) == 0.0 || f(a) * f(b) < 0.0 {
+                let (mut lo, mut hi) = (a, b);
+                for _ in 0..80 {
+                    let mid = 0.5 * (lo + hi);
+                    if f(lo) * f(mid) <= 0.0 {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                roots.push(0.5 * (lo + hi));
+            }
+            a = b;
+        }
+        roots
+    }
+
+    /// A ray that enters and leaves a torus near its crown, 2.5° and 2° off the surface
+    /// and 2.75 apart, as the search for the infinite region of a two-sided revolve of
+    /// 130° / 40° fires it: every crossing is found, the entry before the exit (the
+    /// guesses alone gave the exit as the first hit, tangency-labs/solidcraft#20499).
+    #[test]
+    fn a_line_through_a_torus_near_its_crown_gets_every_crossing() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let p = Vec3::new(82.388_988_497_226_59, 82.388_988_497_226_59, 10.000_04);
+        let d = Vec3::new(
+            -0.850_300_871_283_819_5,
+            -0.523_935_376_527_776_1,
+            -0.049_801_099_552_871_67,
+        );
+        let expected = torus_line_roots(p, d, 30.0, 5.0);
+        // the entry and the exit near the crown, and the two crossings of the tube beyond
+        assert_eq!(expected.len(), 4, "{expected:?}");
+        assert!((expected[0] - 100.409_930_8).abs() < 1.0e-6, "{expected:?}");
+        assert!((expected[1] - 103.163_922_1).abs() < 1.0e-6, "{expected:?}");
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let sols = s
+            .base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, false, 2.0e-5)
+            .unwrap();
+        let found: Vec<f64> = sols
+            .as_slice()
+            .iter()
+            .map(|sol| {
+                assert_eq!(sol.solution_type, SolutionType::SingleValue);
+                sol.start.parameters[0]
+            })
+            .collect();
+        assert_eq!(
+            found.len(),
+            expected.len(),
+            "{found:?} against {expected:?}"
+        );
+        for (t, e) in found.iter().zip(&expected) {
+            assert!((t - e).abs() < 1.0e-9, "{found:?} against {expected:?}");
+        }
+        for sol in sols.as_slice() {
+            let [t, u, v] = [0, 1, 2].map(|i| sol.start.parameters[i]);
+            let on_surface = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+            assert!(on_surface.distance(p + t * d) < 1.0e-9);
+            // each a transversal crossing, typed by its certified root
+            assert_eq!(sol.contact, Contact::Crossing, "{t}");
+        }
+    }
+
+    /// The limit root marks after the combination's culls (`absorbed_marks`): a survivor
+    /// carries every mark that reached it, whatever order the culls were made in. A range A
+    /// before a short marked range B, with a point P inside both: A culls P, then B is culled
+    /// for P; A carries B's mark. The same with B before A, and through a chain (a marked
+    /// point culled by a long range L, a short range culled for a point L culls too). A
+    /// solution no cull reaches keeps its own mark.
+    #[test]
+    fn a_culled_limit_root_marks_its_survivor_in_any_order() {
+        let (a, b, p) = (0, 1, 2);
+        let got = absorbed_marks(&[false, true, false], &[(p, a), (b, p)]);
+        assert!(got[a], "{got:?}");
+        let (b, a, p) = (0, 1, 2);
+        let got = absorbed_marks(&[true, false, false], &[(b, p), (p, a)]);
+        assert!(got[a], "{got:?}");
+        // the chain: P0 (marked) culled by L1; S2 culled for P3; P3 culled by L1; 4 apart
+        let got = absorbed_marks(
+            &[true, false, false, false, false],
+            &[(2, 3), (0, 1), (3, 1)],
+        );
+        assert_eq!(got, vec![true, true, true, true, false]);
+        let got = absorbed_marks(&[false, false, false, false], &[(3, 2), (2, 1), (1, 0)]);
+        assert_eq!(got, vec![false; 4]);
+        assert_eq!(absorbed_marks(&[true, false], &[]), vec![true, false]);
+    }
+
+    /// A line dipping 2e-6 below the torus's crown where the crown meets the seam crosses it
+    /// twice, at 0.5 ± 0.0259 (the gap along the crown's tangent is s⁴/(8R²r), so the dip is
+    /// met at s = ±(8R²r·2e-6)^¼ ≈ ±0.518 on a line of length 20), one crossing in a leaf on
+    /// each side of the seam. The guesses miss both, and the pass stops at its box limit on
+    /// both leaves. A leaf at its limit adds a crossing only below every box any leaf of the
+    /// solve at its limit left (`certified_line::publishable_roots`). Here the least line
+    /// parameter of those boxes lies between the two crossings: every box before the first,
+    /// at 0.4741, is decided, and a box left starts before the second, at 0.5259 (a crossing
+    /// in it could come before the second). So the first crossing is published (the work
+    /// counter of roots added at the leaf-to-solution boundary), at the implicit equation's
+    /// root, and the second is withheld. Which boxes a leaf has decided
+    /// within its limit is a property of the budget on this input, not of the geometry. The
+    /// one crossing published is a limit root (`Solution::limit_root`), which a ray's parity
+    /// count reads (`topology_traverser::is_inner_shell` abandons a ray with one); the leaves
+    /// there stop at their limit, so the contact of every solution is undecided.
+    #[test]
+    fn a_leaf_the_pass_does_not_finish_adds_the_crossings_before_the_boxes_it_left() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let p = Vec3::new(30.0, -10.0, 5.0 - 2.0e-6);
+        let d = Vec3::new(0.0, 20.0, 0.0);
+        let expected = torus_line_roots(p, d, 30.0, 5.0);
+        assert_eq!(expected.len(), 2, "{expected:?}");
+        assert!((expected[0] - 0.474_10).abs() < 1.0e-4, "{expected:?}");
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        k.work_counters.reset();
+        let sols = s
+            .base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, false, 1.0e-6)
+            .unwrap();
+        assert!(k.work_counters.line_leaves_at_limit() > 0);
+        assert_eq!(k.work_counters.line_roots_added(), 1);
+        for (e, want) in expected.iter().zip([1, 0]) {
+            let at = sols
+                .as_slice()
+                .iter()
+                .filter(|sol| {
+                    sol.solution_type == SolutionType::SingleValue
+                        && (sol.start.parameters[0] - e).abs() < 1.0e-9
+                })
+                .count();
+            assert_eq!(at, want, "{e}: {:?}", sols.as_slice());
+        }
+        // the crossing published is a limit root, and nothing else is
+        assert_eq!(
+            sols.as_slice().iter().filter(|sol| sol.limit_root).count(),
+            1,
+            "{:?}",
+            sols.as_slice()
+        );
+        // the leaves there stop at their limit: every contact is undecided
+        assert!(
+            sols.as_slice()
+                .iter()
+                .all(|sol| sol.contact == Contact::Undecided),
+            "{:?}",
+            sols.as_slice()
+        );
+        // and so is the line dipping 5e-7 below the crown at 45° (tolerance 1e-6), the
+        // guesses' range or points about its two crossings
+        let c = 30.0 / 2.0_f64.sqrt();
+        let along = Vec3::new(-1.0, 1.0, 0.0) * (1.0 / 2.0_f64.sqrt());
+        let p = Vec3::new(c, c, 5.0 - 5.0e-7) - 10.0 * along;
+        let sols = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                p,
+                20.0 * along,
+                None,
+                false,
+                1.0e-6,
+            )
+            .unwrap();
+        assert!(!sols.is_empty());
+        assert!(
+            sols.as_slice()
+                .iter()
+                .all(|sol| sol.contact == Contact::Undecided),
+            "{:?}",
+            sols.as_slice()
+        );
+    }
+
+    /// A shallow secant of the unit cylinder, 9.09e-5 deep at tolerance 1.0001e-3 (upstream's
+    /// tangency test at its step 10): the certified pass types its two crossings, a hair
+    /// apart, each a crossing by its certified root, and the line solve's join across the
+    /// coincident stretch then makes upstream's range over both (its golden), which takes
+    /// two typed solutions in: undecided, its ends' unique boxes dropped.
+    #[test]
+    fn a_shallow_secant_s_crossings_are_typed_crossings() {
+        let k = Kernel::default();
+        let mut c = crate::surface::cone::Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            1.0,
+            0.0,
+            360.0,
+            1.0,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let y: f64 = 1.0 - 2.0e-3 / 22.0;
+        let half = (1.0 - y * y).sqrt() / 2.0;
+        let sols = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                Vec3::new(-1.0, y, 0.5),
+                Vec3::new(2.0, 0.0, 0.0),
+                Some(&Extent1d::from_min_max(0.0, 1.0)),
+                false,
+                1.0001e-3,
+            )
+            .unwrap();
+        assert_eq!(sols.len(), 1, "{:?}", sols.as_slice());
+        let range = sols.as_slice()[0];
+        assert_eq!(range.solution_type, SolutionType::RangeOfValues);
+        assert!((range.start.parameters[0] - (0.5 - half)).abs() < 1.0e-9);
+        assert!((range.end.parameters[0] - (0.5 + half)).abs() < 1.0e-9);
+        assert_eq!((range.contact, range.unique), (Contact::Undecided, None));
+    }
+
+    /// A line crossing the unit cylinder exactly on its seam's meridian (along x at y = 0,
+    /// z = ½; the seam toward +x) is reported there twice, at `u ≈ 0` and at `u ≈ 2π`, one
+    /// point of the net on the two ends of the range (p8's dedupe measures u natively and
+    /// never merges them). The two are one contact (answer11, Q1): both crossings, sharing
+    /// one id no other solution has, so that the line's two contacts, the entry at
+    /// `x = −1` (a certified root) and the seam exit, count twice, not three times. The id
+    /// survives the line's rescale (a line vector of length 7), and a ray keeps only its
+    /// first hit, the entry, with no id. Before the seam pair the two were undecided (an odd
+    /// rest with two points).
+    #[test]
+    fn a_crossing_on_the_seam_reported_twice_is_one_contact() {
+        let k = Kernel::default();
+        let mut c = crate::surface::cone::Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            1.0,
+            0.0,
+            360.0,
+            1.0,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let p = Vec3::new(-2.0, 0.0, 0.5);
+        for len in [4.0, 7.0] {
+            let sols = s
+                .base_global_line_intersect::<H>(
+                    &k,
+                    H(0),
+                    &domain,
+                    p,
+                    Vec3::new(len, 0.0, 0.0),
+                    None,
+                    false,
+                    1.0e-5,
+                )
+                .unwrap();
+            let all = sols.as_slice();
+            assert_eq!(all.len(), 3, "{all:?}");
+            let entry = 1.0 / len;
+            assert!((all[0].start.parameters[0] - entry).abs() < 1.0e-12);
+            assert_eq!(
+                (all[0].contact, all[0].shared_contact),
+                (Contact::Crossing, None)
+            );
+            let id = all[1].shared_contact;
+            assert!(id.is_some(), "{all:?}");
+            for sol in &all[1..] {
+                assert!(
+                    (sol.start.parameters[0] - 3.0 / len).abs() < 1.0e-12,
+                    "{all:?}"
+                );
+                assert_eq!((sol.contact, sol.shared_contact), (Contact::Crossing, id));
+            }
+            let (u1, u2) = (all[1].start.parameters[1], all[2].start.parameters[1]);
+            assert!(
+                u1.min(u2) < 1.0e-9 && u1.max(u2) > domain.max().x - 1.0e-9,
+                "{all:?}"
+            );
+        }
+        let ray = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                p,
+                Vec3::new(4.0, 0.0, 0.0),
+                None,
+                true,
+                1.0e-5,
+            )
+            .unwrap();
+        assert_eq!(ray.len(), 1, "{:?}", ray.as_slice());
+        let first = ray.as_slice()[0];
+        assert_eq!(
+            (first.contact, first.shared_contact),
+            (Contact::Crossing, None)
+        );
+        assert!((first.start.parameters[0] - 0.25).abs() < 1.0e-12);
+    }
+
+    /// The solve's leaves are counted by how their pass ended: on the line dipping below
+    /// the crown where it meets the seam, some stop at the limit, the others finish, and
+    /// none is counted as not run (every leaf's line and domain can be searched).
+    #[test]
+    fn the_leaves_are_counted_by_how_their_pass_ended() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let p = Vec3::new(30.0, -10.0, 5.0 - 2.0e-6);
+        let d = Vec3::new(0.0, 20.0, 0.0);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        k.work_counters.reset();
+        s.base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, false, 1.0e-6)
+            .unwrap();
+        assert!(k.work_counters.line_leaves_at_limit() > 0);
+        assert!(k.work_counters.line_leaves_finished() > 0);
+        assert_eq!(k.work_counters.line_leaves_not_run(), 0);
+    }
+
+    /// A line along z inside the torus's hole, 24 from its axis (1 inside its inner
+    /// equator), passes no nearer than 1 to the surface. The traversal culls by the line's
+    /// distance every leaf and subtree whose box the line misses: a slab or sphere test,
+    /// which made the side record undecided over the whole line until the culled strips were
+    /// enclosed. Each strip is now excluded by distance, and the record is complete.
+    #[test]
+    fn a_solve_whose_culled_strips_are_excluded_is_complete() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        k.work_counters.reset();
+        let sols = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                Vec3::new(0.0, 24.0, -10.0),
+                Vec3::new(0.0, 0.0, 20.0),
+                None,
+                false,
+                1.0e-6,
+            )
+            .unwrap();
+        assert_eq!(sols.len(), 0);
+        assert!(k.work_counters.line_strips() > 0);
+        assert_eq!(k.work_counters.line_strips_at_limit(), 0);
+        assert_eq!(sols.side_record(), &SideRecord::Complete);
+    }
+
+    /// The side record a solve returns is in the line's own parameter: the solver runs on
+    /// the line scaled to length about 1 (here 20 times shorter), and the record is scaled
+    /// back with the solutions before a ray keeps its first. On a line of length 20 through
+    /// the torus near its crown, over the line interval [5, 5.2], both crossings (at
+    /// 100.409930808 / 20 and 103.163922132 / 20) are typed crossings and the record is
+    /// complete. Over [5, 5.0204966], which ends a hair past the first crossing, that
+    /// crossing's component reaches the interval's end and is undecided: every interval of
+    /// the record lies in the line interval, rounded outward, and holds the solution. The
+    /// same line fired as a ray keeps its first hit, and only what starts before it.
+    #[test]
+    fn the_side_record_is_scaled_back_before_a_ray_keeps_its_first_hit() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let p = Vec3::new(82.388_988_497_226_59, 82.388_988_497_226_59, 10.000_04);
+        let d = 20.0
+            * Vec3::new(
+                -0.850_300_871_283_819_5,
+                -0.523_935_376_527_776_1,
+                -0.049_801_099_552_871_67,
+            );
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let solve = |end: f64| {
+            let interval = Extent1d::from_min_max(5.0, end);
+            s.base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                p,
+                d,
+                Some(&interval),
+                false,
+                2.0e-5,
+            )
+            .unwrap()
+        };
+        let both = solve(5.2);
+        assert_eq!(both.len(), 2);
+        assert!(both
+            .as_slice()
+            .iter()
+            .all(|x| x.contact == Contact::Crossing));
+        assert_eq!(both.side_record(), &SideRecord::Complete);
+        let end = 5.020_496_6;
+        let sols = solve(end);
+        let t: Vec<f64> = sols
+            .as_slice()
+            .iter()
+            .map(|x| x.start.parameters[0])
+            .collect();
+        assert_eq!(t.len(), 1, "{t:?}");
+        assert!((t[0] - 100.409_930_808 / 20.0).abs() < 1.0e-9, "{t:?}");
+        let SideRecord::Undecided(spans) = sols.side_record() else {
+            panic!("{:?}", sols.side_record());
+        };
+        for &[lo, hi] in spans {
+            assert!(lo >= 5.0 - 1.0e-12 && hi <= end + 1.0e-12, "{spans:?}");
+        }
+        for x in &t {
+            assert!(
+                spans.iter().any(|&[lo, hi]| lo <= *x && *x <= hi),
+                "{x} {spans:?}"
+            );
+        }
+
+        let ray = s
+            .base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, true, 2.0e-5)
+            .unwrap();
+        assert_eq!(ray.len(), 1);
+        let first = ray.as_slice()[0].start.parameters[0];
+        assert!((first - t[0]).abs() < 1.0e-9, "{first} {t:?}");
+        match ray.side_record() {
+            SideRecord::Undecided(spans) => {
+                assert!(spans.iter().all(|&[lo, _]| lo <= first), "{spans:?}");
+            }
+            SideRecord::Complete => {}
+            SideRecord::NotRun => panic!("not run"),
+        }
+    }
+
+    /// A context with plain caches that keeps the certified pass's searches, or not.
+    struct KeepingSearches(Option<RefCell<certified_line::LinePasses>>);
+
+    impl crate::surface::surface::p1::SurfaceSolveContext<H> for KeepingSearches {
+        fn build_surface_cache(
+            &mut self,
+            k: &Kernel,
+            surface: &Surface,
+            handle: Option<H>,
+        ) -> Result<SurfaceCache<H>> {
+            super::super::p1::get_surface_cache(k, surface, handle)
+        }
+
+        fn face_queries(
+            &self,
+        ) -> Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<H>> {
+            None
+        }
+
+        fn line_passes(&self) -> Option<&RefCell<certified_line::LinePasses>> {
+            self.0.as_ref()
+        }
+    }
+
+    /// A solve whose context keeps its operation's searches (`certified_line`, "Reuse within
+    /// an operation") searches once and takes the kept search when the same solve comes
+    /// again; both answers, side records and contacts included, are the answer of a solve
+    /// whose context keeps none. The line is the torus's near its crown: four crossings.
+    #[test]
+    fn a_repeated_solve_takes_its_kept_search_and_the_same_answer() {
+        // (the memos on whatever the build's features: the reuse is what is tested)
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let s = torus(&k);
+        let p = Vec3::new(82.388_988_497_226_59, 82.388_988_497_226_59, 10.000_04);
+        let d = Vec3::new(
+            -0.850_300_871_283_819_5,
+            -0.523_935_376_527_776_1,
+            -0.049_801_099_552_871_67,
+        );
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let solve = |context: &mut KeepingSearches| {
+            s.global_line_intersect_with_context::<H>(
+                &k,
+                Some(H(0)),
+                None,
+                context,
+                &domain,
+                p,
+                d,
+                None,
+                false,
+                2.0e-5,
+            )
+            .unwrap()
+        };
+        let alone = solve(&mut KeepingSearches(None));
+        assert_eq!(alone.len(), 4, "{alone:?}");
+        assert_eq!(k.work_counters.line_searches_reused(), 0);
+        let mut keeping = KeepingSearches(Some(RefCell::default()));
+        let searches = k.work_counters.line_solves();
+        let first = solve(&mut keeping);
+        assert_eq!(k.work_counters.line_solves(), searches + 1);
+        assert_eq!(k.work_counters.line_searches_reused(), 0);
+        let again = solve(&mut keeping);
+        assert_eq!(
+            k.work_counters.line_solves(),
+            searches + 1,
+            "searched again"
+        );
+        assert_eq!(k.work_counters.line_searches_reused(), 1);
+        assert_eq!(first, alone);
+        assert_eq!(again, alone);
+        assert_eq!(again.side_record(), alone.side_record());
+        // a solve on other inputs (a tolerance one rounding wider) finds nothing kept: it
+        // searches, and answers as a solve whose context keeps nothing
+        let wider = f64::from_bits(2.0e-5_f64.to_bits() + 1);
+        let other = |context: &mut KeepingSearches| {
+            s.global_line_intersect_with_context::<H>(
+                &k,
+                Some(H(0)),
+                None,
+                context,
+                &domain,
+                p,
+                d,
+                None,
+                false,
+                wider,
+            )
+            .unwrap()
+        };
+        let other_alone = other(&mut KeepingSearches(None));
+        let other_kept = other(&mut keeping);
+        assert_eq!(k.work_counters.line_searches_reused(), 1);
+        assert_eq!(other_kept, other_alone);
     }
 }

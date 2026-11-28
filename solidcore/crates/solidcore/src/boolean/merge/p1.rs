@@ -42,13 +42,15 @@
 //! Not upstream (WR-304, #1120): after each edge removal `boolean_post_process` also
 //! checks the merged face's edges that have it on both sides (slits), skipping any a
 //! later removal deleted.
-//! Opt-in `Kernel::fixes.fillet_cleanup_keeps_target_faces` (WR-459, #423): the edges in
+//! WR-459 (#423; the default since its flag was retired, #17169): the edges in
 //! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
 //! With that keep (WR-602, the fork's tangency-labs/smlib@cac11ea, the default since its
 //! flag was retired): of those, an edge with one face on both sides (a slit) is checked
 //! all the same, and the kept-faces test needs two faces. Not the fork's (#15768): a face a
 //! merge makes of a kept face is kept, whichever of the two ids it keeps, and the fillet
-//! passes as kept edges only the input edges it left whole (`kept_edges`).
+//! passes as kept edges only the input edges it left whole (`kept_edges`), and as kept
+//! faces each face carrying its mark of a target face (#17169), whichever piece of a split
+//! face kept the id.
 //! Not upstream (#15418): `boolean_post_process` merges two faces on different surfaces only
 //! where no tolerance has to grow (`edge::is_topological_without_growth`: a plane covers
 //! within upstream's plane tolerance, anything else within a tenth of the smaller face
@@ -70,7 +72,7 @@
 //! vertices, each surviving edge on a line covers the certified gaps the join left
 //! (`topology::brep::p5::cover_joined_line_gaps`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::error::boolean::{BooleanFailure, BooleanStage};
@@ -575,10 +577,10 @@ pub struct CleanupRelations {
     pub vertices: Vec<VertexId>,
     /// Shared live mates; deleted entities must be removed by the intersector.
     pub mates: Relations,
-    /// WR-459 (`Kernel::fixes.fillet_cleanup_keeps_target_faces`): the edges and faces
-    /// the clean-up leaves alone (the fork's `m_sPostProcessKeptEdges`/`Faces`: a
-    /// fillet's target, the input edges it left whole), and any edge between two kept
-    /// faces, or faces merged from them. Empty otherwise.
+    /// WR-459: the edges and faces the clean-up leaves alone (the fork's
+    /// `m_sPostProcessKeptEdges`/`Faces`: a fillet's target, the input edges it left whole
+    /// and the faces that are its faces or pieces of them), and any edge between two kept
+    /// faces, or faces merged from them. Empty for the boolean's own clean-up.
     pub kept_edges: BTreeSet<EdgeId>,
     /// See [`CleanupRelations::kept_edges`].
     pub kept_faces: BTreeSet<FaceId>,
@@ -634,6 +636,7 @@ pub(crate) fn boolean_post_process_with_notifications(
         relations.edges.clone()
     };
     let mut endpoints = Vec::new();
+    let mut endpoint_seen = HashSet::new();
     // WR-304: the edges checked so far, and those the merging below left with one face
     // on both sides (checked too, though they are no intersection edges).
     let mut queued: BTreeSet<EdgeId> = edges.iter().copied().collect();
@@ -646,7 +649,7 @@ pub(crate) fn boolean_post_process_with_notifications(
         next += 1;
         if left_inside_face.contains(&e) {
             // A later removal may have deleted it
-            if !brep.edge_list().contains(&e) {
+            if brep.edge(e).is_err() {
                 continue;
             }
         } else if !check_all_edges && relations.mates.edges.other(e).is_none() {
@@ -728,7 +731,7 @@ pub(crate) fn boolean_post_process_with_notifications(
         let a = edge::vertex(brep, e)?;
         let b = edge::other_vertex(brep, e, a)?;
         for v in [a, b].into_iter().flatten() {
-            if !endpoints.contains(&v) {
+            if endpoint_seen.insert(v) {
                 endpoints.push(v);
             }
         }
@@ -776,8 +779,9 @@ pub(crate) fn boolean_post_process_with_notifications(
         }
     }
     let mut vertices = relations.vertices.clone();
+    let mut vertex_seen: HashSet<VertexId> = vertices.iter().copied().collect();
     for v in endpoints {
-        if !vertices.contains(&v) {
+        if vertex_seen.insert(v) {
             vertices.push(v);
         }
     }
@@ -830,7 +834,7 @@ pub(crate) fn boolean_post_process_with_notifications(
                 joined.push(survivor);
             }
             for (e, owner, proven) in owners {
-                if !brep.edge_list().contains(&e) {
+                if brep.edge(e).is_err() {
                     continue;
                 }
                 let restored = brep.edge_mut(e)?.curve.as_mut().is_some_and(|curve| {

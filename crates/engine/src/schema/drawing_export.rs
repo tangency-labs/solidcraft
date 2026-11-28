@@ -3,8 +3,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::drawing_check::Finding;
 use super::drawing_scene::{
-    SheetSceneBalloon, SheetSceneDimension, SheetSceneFill, SheetSceneNote, SheetSceneSketch, SheetSceneTable, SheetSceneView,
+    SheetAnnotationFailure, SheetSceneBalloon, SheetSceneDimension, SheetSceneFill, SheetSceneNote, SheetSceneSketch, SheetSceneTable, SheetSceneView,
 };
 use super::drawing_sheet::sheet_ref;
 
@@ -41,6 +42,10 @@ pub struct ExportParams {
     /// PNG is rgb.
     #[serde(default)]
     pub paper: ExportPaper,
+    /// PDF only: how its text is written (text when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExportText")]
+    pub text: Option<ExportText>,
 }
 
 /// Print the whole open drawing: its PDF, written to a file or returned.
@@ -125,6 +130,27 @@ impl From<ExportColour> for solidcraft_io::paper::PngColour {
     }
 }
 
+/// How a sheet PDF carries its text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportText {
+    /// Real text in an embedded font, with a map back to Unicode: it looks as outlines do, and a
+    /// viewer selects, searches and copies it.
+    #[default]
+    Text,
+    /// Glyph outlines only, as earlier versions wrote: the file holds no text.
+    Outlines,
+}
+
+impl From<ExportText> for solidcraft_io::paper::PdfText {
+    fn from(text: ExportText) -> Self {
+        match text {
+            ExportText::Text => Self::Text,
+            ExportText::Outlines => Self::Outlines,
+        }
+    }
+}
+
 /// The paper a sheet is exported on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -192,6 +218,13 @@ pub struct ExportResult {
     /// Each note on the sheet or its views, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
+    /// Centre annotations omitted and why, as `drawing.scene` reports them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotation_failures: Vec<SheetAnnotationFailure>,
+    /// What lies outside the sheets written, as `drawing.check` lists it (`outside_sheet`): the
+    /// file is written all the same. In page order, then by the record each names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside_sheet: Vec<Finding>,
     /// Each balloon of a view on the sheet, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub balloons: Vec<SheetSceneBalloon>,

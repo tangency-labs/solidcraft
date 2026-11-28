@@ -36,7 +36,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);
     assert_keys(input_schema_for::<CanvasStraightenParams>(), &["a", "angle", "b", "canvas"]);
     assert_keys(input_schema_for::<CanvasDeleteParams>(), &["canvas"]);
-    assert_keys(input_schema_for::<CanvasToSketchParams>(), &["canvas", "name"]);
+    assert_keys(input_schema_for::<CanvasToSketchParams>(), &["at", "canvas", "name", "tolerance"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `canvas`,

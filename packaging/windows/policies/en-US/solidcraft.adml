@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.4" schemaVersion="1.0">
+<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.7" schemaVersion="1.0">
   <displayName>SolidCraft</displayName>
   <description>Settings an organization sets for the people who use SolidCraft on its computers.</description>
   <resources>
@@ -7,6 +7,7 @@
       <string id="SolidCraft">SolidCraft</string>
       <string id="SUPPORTED_SolidCraft_0_44">SolidCraft 0.44 or later</string>
       <string id="SUPPORTED_SolidCraft_0_46">SolidCraft 0.46 or later</string>
+      <string id="SUPPORTED_SolidCraft_0_51">SolidCraft 0.51 or later</string>
       <string id="CheckForUpdates">Check for updates</string>
       <string id="CheckForUpdates_Explain">Controls whether SolidCraft asks GitHub for the latest release at start and once a day.
 
@@ -149,6 +150,178 @@ Disabled: SolidCraft adds itself to no AI app and takes out the entries it added
 Not configured: each person chooses in Preferences.
 
 In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="ThemeFile">Theme file</string>
+      <string id="ThemeFile_Explain">A SolidCraft theme file (.json) that sets the colours for everyone, for example your organization's colours (Preferences, Interface, Theme, Follow a theme file).
+
+Enabled: enter the full path of the file, for example C:\ProgramData\ACME\solidcraft-theme.json or a file on a network share. SolidCraft follows it: its colours replace the chosen theme, and a change to the file shows within a second, without a restart. People cannot stop following it or follow another file, not even with the --theme-file option. Keep the file where people cannot change it.
+
+If the file is missing or is not a theme file, the last theme that loaded stays on, and Preferences says why the file was not applied.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="AllowEasyPrint">Allow Open with EasyPrint</string>
+      <string id="AllowEasyPrint_Explain">Open with EasyPrint uploads the chosen bodies of a design, as a mesh, to Printables' servers and opens them there in the browser.
+
+Enabled or Not configured: people can use it, after agreeing once to the upload.
+
+Disabled: SolidCraft offers no EasyPrint and sends no model to Printables, whether a person, a script or an AI agent asks.
+
+The change applies the next time SolidCraft starts.</string>
+      <string id="AllowProblemReports">Allow problem reports</string>
+      <string id="AllowProblemReports_Explain">Report a problem sends a report to SolidCraft's ticket server (tickets.solidcraft.io), or opens a draft issue on GitHub, with the details the person chooses: a description, a screenshot, system information and, when they tick them, the design and a crash report.
+
+Enabled or Not configured: people can send reports.
+
+Disabled: no report opens or is sent, whether from the application bar, a failed operation, a crash or an AI agent. SolidCraft says that the organization turned reports off, and Help, About SolidCraft, Copy diagnostic information still copies the details for your IT team.
+
+The change applies the next time SolidCraft starts.</string>
+      <string id="DxfDashedHiddenLines">Export hidden edges as dashed lines</string>
+      <string id="DxfDashedHiddenLines_Explain">Whether File, Export Current View as DXF writes the edges hidden behind the model as dashed lines.
+
+Enabled: hidden edges are exported as dashed lines, and people cannot change it.
+
+Disabled: hidden edges are left out.
+
+Not configured: each person chooses in the export dialog.
+
+In the export dialog the choice shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="RibbonLabels">Show labels on the toolbar</string>
+      <string id="RibbonLabels_Explain">Whether the toolbar shows a label under each button or icons only (Preferences, Layout, Window, Toolbar).
+
+Enabled: the toolbar shows labels, and people cannot change it.
+
+Disabled: the toolbar shows icons only.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="StatusBar">Show the status bar</string>
+      <string id="StatusBar_Explain">Whether the status bar shows along the bottom of the window (Preferences, Layout, Window, Status bar).
+
+Enabled: the status bar shows, and people cannot hide it.
+
+Disabled: the status bar is hidden.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="MeshExportFormat">Mesh export format</string>
+      <string id="MeshExportFormat_Explain">The format File, Save As Mesh writes, and the format a design is sent to a slicer in.
+
+Enabled: every mesh is saved in the format chosen here, and people cannot change it. Export STL and Export 3MF open the dialog with this format too.
+
+Disabled or Not configured: each person chooses in the Save As Mesh dialog.
+
+In the Save As Mesh dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="MeshExportFormat_stl">STL</string>
+      <string id="MeshExportFormat_3mf">3MF</string>
+      <string id="MeshExportFormat_3mf_tagged">3MF with face tags</string>
+      <string id="MeshExportQuality">Mesh export quality</string>
+      <string id="MeshExportQuality_Explain">How closely a mesh saved with File, Save As Mesh follows curved faces.
+
+Enabled: every mesh is saved at the quality chosen here, and people cannot change it.
+
+Disabled or Not configured: each person chooses in the Save As Mesh dialog.
+
+In the Save As Mesh dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="MeshExportQuality_standard">Standard</string>
+      <string id="MeshExportQuality_fine">Fine</string>
+      <string id="MeshExportQuality_finest">Finest</string>
+      <string id="DxfOrigin">Zero point of DXF view exports</string>
+      <string id="DxfOrigin_Explain">Where File, Export Current View as DXF puts the drawing's 0,0: the point the camera looks at, or the model's origin as seen from the camera.
+
+Enabled: every export uses the zero point chosen here, and people cannot change it.
+
+Disabled or Not configured: each person chooses in the export dialog.
+
+In the export dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="DxfOrigin_target">Camera target</string>
+      <string id="DxfOrigin_origin">Model origin</string>
+      <string id="Layout">Workspace layout</string>
+      <string id="Layout_Explain">Whether the panels float over the model or are docked around it (Preferences, Layout, Window, Panel style).
+
+Enabled: the workspace uses the layout chosen here, and people cannot change it.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="Layout_floating">Floating</string>
+      <string id="Layout_compact">Compact</string>
+      <string id="Slicer">Slicer</string>
+      <string id="Slicer_Explain">The slicer File, Send to Slicer sends a design to.
+
+Enabled: Send to Slicer uses the slicer chosen here, and people cannot choose another. When it is not installed, Send to Slicer says that no slicer was found; Open in EasyPrint also uses the slicer chosen here.
+
+Disabled or Not configured: each person chooses in the Send to Slicer dialog.
+
+In the Send to Slicer dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="Slicer_prusa">PrusaSlicer</string>
+      <string id="Slicer_bambu">Bambu Studio</string>
+      <string id="Slicer_orca">OrcaSlicer</string>
+      <string id="Slicer_cura">UltiMaker Cura</string>
+      <string id="Slicer_superslicer">SuperSlicer</string>
+      <string id="Slicer_creality">Creality Print</string>
+      <string id="Slicer_elegoo">ElegooSlicer</string>
+      <string id="Slicer_anycubic">AnycubicSlicerNext</string>
+      <string id="Slicer_ideamaker">ideaMaker</string>
+      <string id="Slicer_lychee">Lychee Slicer</string>
+      <string id="Slicer_qidi">QIDI Studio</string>
+      <string id="Slicer_chitubox">CHITUBOX</string>
+      <string id="Slicer_creatware">CreatWare</string>
+      <string id="Slicer_slic3r">Slic3r</string>
+      <string id="Slicer_easyprint">EasyPrint (Printables, in the browser)</string>
+      <string id="Theme">Theme</string>
+      <string id="Theme_Explain">The colour theme of the interface (Preferences, Appearance, Theme).
+
+Enabled: SolidCraft uses the theme chosen here, and people cannot choose, import or follow another. It does not switch between a day and a night theme.
+
+Disabled or Not configured: each person chooses.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="Theme_dark">Dark</string>
+      <string id="Theme_light">Light</string>
+      <string id="InterfaceFont">Interface font</string>
+      <string id="InterfaceFont_Explain">The font of SolidCraft's interface (Preferences, Appearance, Font).
+
+Enabled: SolidCraft draws its interface in this font family, and people cannot choose another or load a font file. Enter the name of a font family installed on the computer, for example Segoe UI. A family the computer does not have leaves the built-in font showing. A file path is not accepted and counts as not configured.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="DxfTolerance">Curve tolerance of DXF view exports</string>
+      <string id="DxfTolerance_Explain">How far, in millimetres, the straight segments File, Export Current View as DXF writes for a curve may stray from it. A smaller tolerance gives finer curves and takes more time and memory.
+
+Enabled: every export uses this tolerance, and people cannot change it. Enter a number from 0.001 to 1, for example 0.01. Any other value counts as not configured.
+
+Disabled or Not configured: each person chooses in the export dialog.
+
+In the export dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="Theme_1-bit-dark">1-bit Dark</string>
+      <string id="Theme_1-bit">1-bit</string>
+      <string id="Theme_akari">Akari</string>
+      <string id="Theme_amber-phosphor">Amber Phosphor</string>
+      <string id="Theme_blueprint">Blueprint</string>
+      <string id="Theme_catppuccin-mocha">Catppuccin Mocha</string>
+      <string id="Theme_cga">CGA</string>
+      <string id="Theme_clay-dark">Clay Dark</string>
+      <string id="Theme_clay">Clay</string>
+      <string id="Theme_cupertino">Cupertino</string>
+      <string id="Theme_graphite">Graphite</string>
+      <string id="Theme_green-phosphor">Green Phosphor</string>
+      <string id="Theme_gruvbox-dark">Gruvbox Dark</string>
+      <string id="Theme_gruvbox-light">Gruvbox Light</string>
+      <string id="Theme_high-contrast">High Contrast</string>
+      <string id="Theme_nord">Nord</string>
+      <string id="Theme_nosferatu">Nosferatu</string>
+      <string id="Theme_okibi">Okibi</string>
+      <string id="Theme_one-dark">One Dark</string>
+      <string id="Theme_onyx">Onyx</string>
+      <string id="Theme_platinum-9">Platinum 9</string>
+      <string id="Theme_solarized-dark">Solarized Dark</string>
+      <string id="Theme_solarized-light">Solarized Light</string>
+      <string id="Theme_solidcraft-95">SolidCraft 95</string>
+      <string id="Theme_tokyo-night">Tokyo Night</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -179,6 +352,44 @@ In Preferences the setting shows as set by the organization. The person's own ch
       </presentation>
       <presentation id="AiToolbarButton" />
       <presentation id="ConnectAiApps" />
+      <presentation id="ThemeFile">
+        <textBox refId="ThemeFile">
+          <label>Theme file path:</label>
+        </textBox>
+      </presentation>
+      <presentation id="AllowEasyPrint" />
+      <presentation id="AllowProblemReports" />
+      <presentation id="DxfDashedHiddenLines" />
+      <presentation id="RibbonLabels" />
+      <presentation id="StatusBar" />
+      <presentation id="MeshExportFormat">
+        <dropdownList refId="MeshExportFormat" noSort="true" defaultItem="0">Format:</dropdownList>
+      </presentation>
+      <presentation id="MeshExportQuality">
+        <dropdownList refId="MeshExportQuality" noSort="true" defaultItem="0">Quality:</dropdownList>
+      </presentation>
+      <presentation id="DxfOrigin">
+        <dropdownList refId="DxfOrigin" noSort="true" defaultItem="0">Zero point:</dropdownList>
+      </presentation>
+      <presentation id="Layout">
+        <dropdownList refId="Layout" noSort="true" defaultItem="0">Layout:</dropdownList>
+      </presentation>
+      <presentation id="Slicer">
+        <dropdownList refId="Slicer" noSort="true" defaultItem="0">Slicer:</dropdownList>
+      </presentation>
+      <presentation id="Theme">
+        <dropdownList refId="Theme" noSort="true" defaultItem="0">Theme:</dropdownList>
+      </presentation>
+      <presentation id="InterfaceFont">
+        <textBox refId="InterfaceFont">
+          <label>Font family name:</label>
+        </textBox>
+      </presentation>
+      <presentation id="DxfTolerance">
+        <textBox refId="DxfTolerance">
+          <label>Tolerance in mm (0.001 to 1):</label>
+        </textBox>
+      </presentation>
     </presentationTable>
   </resources>
 </policyDefinitionResources>

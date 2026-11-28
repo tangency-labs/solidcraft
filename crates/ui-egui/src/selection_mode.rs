@@ -106,7 +106,9 @@ pub(crate) fn allowed(app: &SolveApp, h: &Hit) -> bool {
     let mode = picks(app);
     match h {
         Hit::SketchCurve { .. } => !off("sketch") && !off("sketch_curves"),
-        Hit::SketchPoint { .. } | Hit::SketchPoint3d { .. } | Hit::SketchMidpoint { .. } => !off("sketch") && !off("sketch_points"),
+        Hit::SketchPoint { .. } | Hit::PlacedSketchPoint { .. } | Hit::SketchPoint3d { .. } | Hit::SketchMidpoint { .. } => {
+            !off("sketch") && !off("sketch_points")
+        }
         Hit::Profile { .. } => !off("sketch"),
         Hit::Vertex { .. } => mode == PickMode::Faces && !off("vertices"),
         Hit::Edge { .. } => mode == PickMode::Faces && !off("edges"),

@@ -6,6 +6,8 @@ use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Align, Align2, Color32, Id, Layout, Rect, RichText, Sense, Stroke, pos2, vec2};
 use solidcraft_engine::panels::Flow;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::export::export_dialog;
 use super::*;
 use crate::ui_kit;
 use solidcraft_theme::Tokens;
@@ -39,6 +41,11 @@ pub enum PanelAction {
     RequestNewChat,
     /// New chat, confirmed.
     NewChat,
+    /// Save a snapshot of the retained conversation.
+    #[cfg(not(target_arch = "wasm32"))]
+    ExportConversation {
+        include_tools: bool,
+    },
     /// Look for installed agents again (desktop only, as discovery and agents are).
     #[cfg(not(target_arch = "wasm32"))]
     Refresh,
@@ -58,9 +65,13 @@ pub enum PanelAction {
     RemovePending(usize),
     /// Undo the changes of the message at this index.
     UndoChanges(usize),
+    /// Toggle the model highlight for this message's changes.
+    ShowModelChanges(usize),
     SetMode(String),
     SetModel(String),
     SetCustomModel(String),
+    #[cfg(not(target_arch = "wasm32"))]
+    SetServiceTier(agents::ServiceTier),
     SetConfigOption {
         id: String,
         value: String,
@@ -96,6 +107,9 @@ pub enum PanelAction {
     /// Attach a picture pasted into the text box (desktop only).
     #[cfg(not(target_arch = "wasm32"))]
     AttachPicture(super::paste::Picture),
+    /// Continue the task the agent could not finish (the provider's usage limit, or any other
+    /// error): it goes again with a note that it was cut short (#16318).
+    Continue,
     /// The assistant's page in Preferences.
     OpenSettings,
     /// Preferences, adding an agent.
@@ -107,6 +121,8 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
     match action {
         PanelAction::RequestNewChat => request_new_chat(app),
         PanelAction::NewChat => new_chat(app),
+        #[cfg(not(target_arch = "wasm32"))]
+        PanelAction::ExportConversation { include_tools } => save_conversation(app, ctx, include_tools),
         #[cfg(not(target_arch = "wasm32"))]
         PanelAction::Refresh => refresh(app, ctx),
         #[cfg(not(target_arch = "wasm32"))]
@@ -123,14 +139,21 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
             }
         }
         PanelAction::SendNow => send_now(app, ctx),
+        PanelAction::Continue => super::continue_task(app),
         PanelAction::Cancel => cancel(app),
         PanelAction::RemovePending(n) => remove_pending(app, n),
         PanelAction::UndoChanges(n) => undo_changes(app, n),
+        PanelAction::ShowModelChanges(n) => {
+            super::toggle_model_changes(app, n);
+            ctx.request_repaint();
+        }
         PanelAction::SetMode(m) => set_mode(app, &m),
         PanelAction::SetModel(m) => set_model(app, &m),
         PanelAction::SetCustomModel(m) => {
             set_custom_model(app, &m);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        PanelAction::SetServiceTier(tier) => super::set_service_tier(app, tier),
         PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
         PanelAction::StartPick { at } => start_pick(app, at),
         PanelAction::AttachDropped(paths) => attach_dropped(app, paths.into_iter()),
@@ -202,6 +225,9 @@ pub struct PanelView {
     /// The undo history as a message's changes left it, while it still is: their Undo is offered
     /// only then, so it never takes a step made after them.
     pub undo_history: Option<super::Revision>,
+    /// Whether the current view can show a feature highlight, and which card is showing one.
+    model_view_visible: bool,
+    model_changes: Option<usize>,
     /// Length units and decimals for the summaries of what the agent did.
     pub units: String,
     pub decimals: u8,
@@ -250,6 +276,8 @@ impl PanelView {
             document: app.session.doc.name.clone(),
             revision: super::Revision::of(&app.session.doc),
             undo_history: super::UndoMark::current(&app.agent_chat.items, &app.session.undo),
+            model_view_visible: super::model_changes_view_visible(app),
+            model_changes: super::model_changes_index(app),
             units: app.session.doc.units.clone(),
             decimals: app.preferences.length_decimals,
             agents: agents::entries(app),
@@ -414,6 +442,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.drop_rect = None;
     app.agent_chat.hovered = None;
     app.agent_chat.hover.clear();
+    if !shown(app) || !app.agent_chat.open || !super::model_changes_view_visible(app) {
+        app.agent_chat.clear_model_changes();
+    }
     if !visible {
         app.agent_chat.panel_rect = None;
         app.agent_chat.window_placed = false;
@@ -458,9 +489,13 @@ pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Independent viewers and drop feedback keep their existing window policy.
 pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    if !super::model_changes_view_visible(app) {
+        app.agent_chat.clear_model_changes();
+    }
     if !shown(app) || !app.agent_chat.open {
         app.agent_chat.keyboard_owned = false;
         app.agent_chat.hover.clear();
+        app.agent_chat.model_changes_shown = None;
         return;
     }
     if app.agent_chat.panel_rect.is_none() {
@@ -471,6 +506,7 @@ pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     if !shared_section(app).is_some_and(|section| section.location.zone() == solidcraft_engine::panels::Zone::Window) {
         gallery_window(&mut app.agent_chat, ctx);
+        export_dialog(&mut app.agent_chat, ctx);
     }
     show_drop_hint(&app.agent_chat, ctx);
 }
@@ -501,6 +537,12 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
     }
     light_hovered(app);
     run_actions(app, &ctx);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn finish_native_window(app: &mut SolveApp, ctx: &egui::Context) {
+    export_dialog(&mut app.agent_chat, ctx);
+    run_actions(app, ctx);
 }
 
 /// The controls and conversation alone, filling `ui` (the shared host's body, which has its own
@@ -809,6 +851,56 @@ pub(crate) fn request_new_chat(app: &mut SolveApp) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl AgentChat {
+    pub(crate) fn can_export_conversation(&self) -> bool {
+        self.items.iter().any(|item| matches!(item, Item::User { .. } | Item::Agent { thought: false, .. }))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn request_export(chat: &mut AgentChat) {
+    if chat.can_export_conversation() {
+        chat.export_tools = Some(false);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_conversation(app: &mut SolveApp, ctx: &egui::Context, include_tools: bool) {
+    use crate::starting::{Poll, Worker};
+
+    if app.file_picker_busy() || !app.agent_chat.can_export_conversation() {
+        return;
+    }
+    // Capture before the picker opens so new reply text cannot change this export.
+    let markdown = super::export::markdown_snapshot(&app.agent_chat.items, include_tools);
+    let wake = ctx.clone();
+    app.pick_save("assistant-conversation.md", &["md"], move |app, path| {
+        let Some(path) = path else { return };
+        let worker = Worker::spawn("assistant-export", wake, move || {
+            solidcraft_engine::io::write_atomic(std::path::Path::new(&path), markdown.as_bytes(), false)
+        });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(error) => return report_conversation_save(app, Err(error)),
+        };
+        let result = std::future::poll_fn(move |_| match worker.poll() {
+            Poll::Running => std::task::Poll::Pending,
+            Poll::Done(result) => std::task::Poll::Ready(result),
+            Poll::Failed => std::task::Poll::Ready(Err(std::io::Error::other("the export ended without a result"))),
+        });
+        app.begin_file_task(result, report_conversation_save);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn report_conversation_save(app: &mut SolveApp, result: std::io::Result<()>) {
+    match result {
+        Ok(()) => app.set_status(tr("ui.agent_chat_export_saved"), false),
+        Err(error) => app.set_status(trf("ui.agent_chat_export_failed", &[("error", &error.to_string())]), true),
+    }
+}
+
 fn new_chat_shortcut(chat: &mut AgentChat, ctx: &egui::Context) {
     let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
         || ctx.pointer_hover_pos().is_some_and(|p| chat.panel_rect.is_some_and(|r| r.contains(p)));
@@ -832,9 +924,10 @@ pub fn window_place(saved: Option<[f32; 4]>) -> Option<([f32; 2], [f32; 2])> {
 /// The chat window's settings. The saved place and size go only to a window that is opening:
 /// egui turns a changed place into a move, and the system rounds what it is given, so giving it
 /// every frame made the window chase its own rounding (it shook a pixel up and down).
-pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> egui::ViewportBuilder {
+pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs, owner: egui::ViewportId) -> egui::ViewportBuilder {
     let title = format!("{document} — {}", tr("ui.agent_chat"));
-    let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
+    let builder =
+        crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), owner).with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
     if placed {
         return builder;
     }
@@ -849,7 +942,7 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
 fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
-    let builder = window_builder(&view.document, chat.window_placed, prefs);
+    let builder = window_builder(&view.document, chat.window_placed, prefs, ctx.viewport_id());
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;
@@ -1001,6 +1094,15 @@ fn header(chat: &mut AgentChat, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) 
                 if glyph_button(ui, "dock", tr("ui.agent_chat_dock")).clicked() {
                     prefs.popped = false;
                 }
+                let (rect, _) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), Sense::hover());
+                let enabled = chat.can_export_conversation();
+                let button = ui.add_enabled_ui(enabled, |ui| ui_kit::icon_button_at(ui, rect, "export", tr("ui.agent_chat_export"))).inner;
+                solidcraft_ui_registry::publish_target("agent_chat:export-chat", button.rect);
+                if button.clicked() {
+                    request_export(chat);
+                } else if !enabled {
+                    button.backing_on_disabled_hover_text(tr("ui.agent_chat_export_empty"));
+                }
             });
         });
     });
@@ -1010,6 +1112,7 @@ fn header(chat: &mut AgentChat, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) 
 fn body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
     header(chat, ui, prefs);
     content(chat, view, ui, Flow::Tall, prefs);
+    export_dialog(chat, ui.ctx());
 }
 
 fn content(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, flow: Flow, prefs: &AgentPanelPrefs) {
@@ -1314,6 +1417,18 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
     // Select All and Copy of the whole conversation, read before its labels see the keys.
     super::select_all::handle(chat, ui.ctx());
+    let top = ui.cursor().top();
+    if let Some(stage) = chat.current_stage() {
+        let t = Tokens::get();
+        let label = trf("ui.agent_chat_current_stage", &[("step", stage)]);
+        inset(ui, |ui| {
+            let line = ui
+                .add(egui::Label::new(RichText::new(&label).color(t.text_dim).size(t.font_small)).truncate().selectable(false))
+                .backing_on_hover_text(&label);
+            solidcraft_ui_registry::publish_rect("agent_chat:current_stage", line.rect);
+        });
+    }
+    let stage_height = ui.cursor().top() - top;
     let margin = Tokens::get().space_12 as i8;
     let height = ui.available_height();
     // The height inside the margins, less a point so rounding never shows a scroll bar.
@@ -1333,7 +1448,7 @@ fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) ->
             scroll_while_selecting(ui);
         });
     solidcraft_ui_registry::publish_rect("agent_chat:conversation", conversation.inner_rect);
-    conversation.content_size.y
+    stage_height + conversation.content_size.y
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1477,20 +1592,26 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     }
     if let Some(options) = chat.config_options.clone() {
         config_selects(chat, ui, &options);
+    } else if let Some(entry) = current.as_ref() {
+        service_tier_picker(chat, ui, entry);
     }
-    ui.horizontal(|ui| {
-        let b = if chat.state().running() {
-            ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
-        } else {
-            let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
-            ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
-        };
-        solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
-        if b.clicked() {
-            chat.actions.push(if chat.state().running() { PanelAction::Disconnect } else { PanelAction::Connect });
-        }
-    });
-    if let Some(a) = &chat.auth_status {
+    if chat.state().shows_stop() || !chat.state().running() {
+        ui.horizontal(|ui| {
+            let b = if chat.state().shows_stop() {
+                ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
+            } else {
+                let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
+                ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
+            };
+            solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
+            if b.clicked() {
+                chat.actions.push(if chat.state().shows_stop() { PanelAction::Disconnect } else { PanelAction::Connect });
+            }
+        });
+    }
+    if chat.state().shows_auth_status()
+        && let Some(a) = &chat.auth_status
+    {
         ui.label(RichText::new(a).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
     }
 }
@@ -1550,6 +1671,55 @@ fn picker_width(ui: &egui::Ui, label: &str) -> f32 {
     text.clamp(t.form_label_width, most)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn service_tier_picker(chat: &mut AgentChat, ui: &mut egui::Ui, entry: &agents::Entry) {
+    let tiers = entry.service_tiers();
+    if tiers.is_empty() {
+        return;
+    }
+    let current = chat.service_tier(entry);
+    let label = trf("ui.agent_chat_service_tier_value", &[("tier", current.label())]);
+    let width = picker_width(ui, &label).min(ui.available_width());
+    let response = ui_kit::bounded_dropdown_menu(ui, "sc_agent_service_tier", &label, width, |ui| {
+        for &tier in tiers {
+            let choice = ui_kit::list_picker(ui, tier.id(), tier.label(), tier == current);
+            solidcraft_ui_registry::publish_handle(&format!("agent_chat:service_tier:{}", tier.id()), choice.rect.center());
+            if choice.clicked() && tier != current {
+                chat.actions.push(PanelAction::SetServiceTier(tier));
+            }
+        }
+    });
+    solidcraft_ui_registry::publish_target("agent_chat:service_tier", response.rect);
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr("ui.agent_chat_service_tier"));
+        info.current_text_value = Some(current.label().to_owned());
+        info
+    });
+    response.backing_on_hover_text(format!("{label}\n{}", tr("ui.agent_chat_service_tier_tip")));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_service_tier_option(option: &acp::ConfigOption) -> bool {
+    matches!(option.category.as_str(), "speed" | "service_tier" | "service-tier")
+        || (option.category.is_empty() && matches!(option.id.as_str(), "service_tier" | "service-tier"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn config_choice_name<'a>(option: &acp::ConfigOption, choice: &'a acp::ConfigChoice) -> &'a str {
+    // Codex ACP's fast-mode select advertises On and Off but expects those choices by ID.
+    match (option.category.as_str(), option.id.as_str(), choice.value.as_str()) {
+        ("speed", "fast-mode", "off") => tr("ui.standard"),
+        ("speed", "fast-mode", "on") => agents::ServiceTier::Fast.label(),
+        _ => &choice.name,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn config_button_label<'a>(option: &'a acp::ConfigOption, current: Option<&'a acp::ConfigChoice>) -> std::borrow::Cow<'a, str> {
+    let selected = current.map_or(option.current_value.as_str(), |choice| config_choice_name(option, choice));
+    if is_service_tier_option(option) { trf("ui.agent_chat_service_tier_value", &[("tier", selected)]).into() } else { selected.into() }
+}
+
 /// An agent's select options are authoritative. Compact value pickers share a strip below the
 /// agent switcher; only a narrow chat wraps them, rather than spending two full rows per option.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1561,8 +1731,8 @@ fn config_selects(chat: &mut AgentChat, ui: &mut egui::Ui, options: &[acp::Confi
     let mut used = 0.0;
     for option in options {
         let current = option.options.iter().find(|choice| choice.value == option.current_value);
-        let selected = current.map_or(option.current_value.as_str(), |choice| choice.name.as_str());
-        let preview = compact_text(selected, 32);
+        let label = config_button_label(option, current);
+        let preview = compact_text(&label, 32);
         let preferred = ui.painter().layout_no_wrap(preview, egui::FontId::proportional(t.font_label), t.text).size().x + 34.0;
         let width = preferred.clamp(76.0, strip_width.clamp(76.0, 200.0));
         let spacing = if row.is_empty() { 0.0 } else { ui.spacing().item_spacing.x };
@@ -1590,20 +1760,22 @@ fn config_selects(chat: &mut AgentChat, ui: &mut egui::Ui, options: &[acp::Confi
 fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOption, width: f32, pending: bool) {
     let t = Tokens::get();
     let current = option.options.iter().find(|choice| choice.value == option.current_value);
-    let selected = current.map_or(option.current_value.as_str(), |choice| choice.name.as_str());
+    let label = config_button_label(option, current);
     // Bound both the measurement and the visible label: agent-provided text may be huge.
     // Width follows the current value, leaving short choices room to sit on one line.
     let font = egui::FontId::proportional(t.font_label);
     let mut chars = 32;
     let displayed = loop {
-        let text = compact_text(selected, chars);
+        let text = compact_text(&label, chars);
         if chars == 1 || ui.painter().layout_no_wrap(text.clone(), font.clone(), t.text).size().x <= width - 36.0 {
             break text;
         }
         chars -= 1;
     };
     let name = if option.name.is_empty() { &option.id } else { &option.name };
-    let tip = [name.as_str(), option.description.as_str(), current.map_or("", |choice| choice.description.as_str())]
+    let service_tier = is_service_tier_option(option);
+    let heading = if service_tier { label.as_ref() } else { name.as_str() };
+    let tip = [heading, option.description.as_str(), current.map_or("", |choice| choice.description.as_str())]
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -1666,13 +1838,10 @@ fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOp
                                 ui.label(RichText::new(compact_text(group, 32)).color(t.text_dim).size(t.font_small)).backing_on_hover_text(group);
                             }
                             previous_group = group;
-                            let row = ui_kit::list_picker(ui, &choice.value, &compact_text(&choice.name, 32), choice.value == option.current_value);
+                            let name = config_choice_name(option, choice);
+                            let row = ui_kit::list_picker(ui, &choice.value, &compact_text(name, 32), choice.value == option.current_value);
                             let row = row.backing_on_hover_text(
-                                [choice.name.as_str(), choice.description.as_str()]
-                                    .into_iter()
-                                    .filter(|part| !part.is_empty())
-                                    .collect::<Vec<_>>()
-                                    .join("\n"),
+                                [name, choice.description.as_str()].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n"),
                             );
                             solidcraft_ui_registry::publish_handle(&format!("{handles}:{}", choice.value), row.rect.center());
                             if row.clicked() {
@@ -1690,7 +1859,13 @@ fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOp
         }
         response
     };
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {selected}")));
+    response.widget_info(|| {
+        if service_tier {
+            egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, label.as_ref())
+        } else {
+            egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {label}"))
+        }
+    });
     response.backing_on_hover_text(tip);
     match picked {
         Some(ui_kit::Picked::Listed(value)) => chat.actions.push(PanelAction::SetConfigOption { id: option.id.clone(), value }),
@@ -1706,7 +1881,8 @@ fn compact_text(text: &str, max_chars: usize) -> String {
     if chars.next().is_some() { format!("{short}…") } else { short }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod config_ui_tests {
     use super::*;
 
@@ -1730,16 +1906,84 @@ mod config_ui_tests {
     }
 
     fn draw_switcher(app: &mut SolveApp, ctx: &egui::Context, width: f32) {
+        draw_switcher_with_events(app, ctx, width, vec![]);
+    }
+
+    fn draw_switcher_with_events(app: &mut SolveApp, ctx: &egui::Context, width: f32, events: Vec<egui::Event>) {
         solidcraft_ui_registry::clear_handles();
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 700.0));
         let view = PanelView::of(app, ctx);
-        ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
             ui.allocate_ui(vec2(width - 16.0, 600.0), |ui| {
                 ui_kit::scope(ui, |ui| switcher(&mut app.agent_chat, &view, ui));
             });
         })
         .textures_delta
         .clear();
+    }
+
+    fn click_switcher_control(app: &mut SolveApp, ctx: &egui::Context, width: f32, handle: &str) {
+        let pos = solidcraft_ui_registry::handle_at(handle).expect(handle);
+        for pressed in [true, false] {
+            let events = vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+            ];
+            draw_switcher_with_events(app, ctx, width, events);
+        }
+        draw_switcher(app, ctx, width);
+    }
+
+    #[test]
+    fn service_tier_picker_offers_endpoint_choices_and_dispatches_the_selection() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.agents.push(agents::AgentConfig {
+            id: "api".into(),
+            kind: agents::Kind::Api,
+            base_url: "https://api.openai.com/v1".into(),
+            openai_responses: true,
+            ..Default::default()
+        });
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            draw_switcher(&mut app, &ctx, 280.0);
+        }
+        let rect = solidcraft_ui_registry::rect_of("agent_chat:service_tier").expect("endpoint tier control");
+        assert!(rect.left() >= 0.0 && rect.right() <= 280.0);
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:service_tier");
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:default").is_some());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:fast").is_some());
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:service_tier:ultrafast");
+        let actions = std::mem::take(&mut app.agent_chat.actions);
+        assert_eq!(actions, [PanelAction::SetServiceTier(agents::ServiceTier::Ultrafast)]);
+        for action in actions {
+            run(&mut app, &ctx, action);
+        }
+        let entry = agents::current(&app).expect("configured API endpoint");
+        assert_eq!(app.agent_chat.service_tier(&entry), agents::ServiceTier::Ultrafast);
+
+        app.preferences.agents[0].openai_responses = false;
+        draw_switcher(&mut app, &ctx, 280.0);
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:service_tier");
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:fast").is_some());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier:ultrafast").is_none());
+    }
+
+    #[test]
+    fn acp_speed_picker_keeps_the_advertised_wire_ids() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let fast_mode = option("fast-mode", "speed", &[("off", "Off", None), ("on", "On", None)]);
+        assert_eq!(config_choice_name(&fast_mode, &fast_mode.options[0]), tr("ui.standard"));
+        assert_eq!(config_choice_name(&fast_mode, &fast_mode.options[1]), agents::ServiceTier::Fast.label());
+        app.agent_chat.config_options = Some(vec![fast_mode]);
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            draw_switcher(&mut app, &ctx, 280.0);
+        }
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:service_tier").is_none());
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:config:fast-mode");
+        click_switcher_control(&mut app, &ctx, 280.0, "agent_chat:config:fast-mode:on");
+        assert_eq!(app.agent_chat.actions, [PanelAction::SetConfigOption { id: "fast-mode".into(), value: "on".into() }]);
     }
 
     #[test]
@@ -1861,21 +2105,29 @@ fn agent_list(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     if sandbox_hint {
         no_agents(ui);
     }
-    let missing: Vec<discover::Missing> = if snap() { Vec::new() } else { chat.detection.as_ref().map(|d| d.missing.clone()).unwrap_or_default() };
-    if !missing.is_empty() {
-        let heading = if all.is_empty() && !sandbox_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
-        ui_kit::section(ui, "sc_agent_missing", heading, all.is_empty(), |ui| {
-            for m in missing {
-                ui.horizontal(|ui| {
-                    ui_kit::text(ui, m.name, ui_kit::Text::Inline);
-                    if ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(m.install).clicked() {
-                        ui.ctx().copy_text(m.install.to_string());
-                    }
-                });
-                ui_kit::text(ui, m.install, ui_kit::Text::Report(m.name, false));
-            }
-        });
+    let heading = if all.is_empty() && !sandbox_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
+    missing_agents(ui, "sc_agent_missing", heading, all.is_empty(), chat.detection.as_ref());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn missing_agents(ui: &mut egui::Ui, id: &str, heading: &str, default_open: bool, detection: Option<&discover::Detection>) {
+    let Some(detection) = detection else { return };
+    if snap() || detection.missing.is_empty() {
+        return;
     }
+    ui_kit::section(ui, id, heading, default_open, |ui| {
+        for agent in &detection.missing {
+            ui.horizontal(|ui| {
+                ui_kit::text(ui, agent.name, ui_kit::Text::Inline);
+                let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(agent.install);
+                solidcraft_ui_registry::publish_handle(&format!("{id}:copy:{}", agent.id), copy.rect.center());
+                if copy.clicked() {
+                    ui.ctx().copy_text(agent.install.to_string());
+                }
+            });
+            ui_kit::text(ui, agent.install, ui_kit::Text::Report(agent.name, false));
+        }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2031,6 +2283,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
     // Allow (true), Deny (false), Always allow (None).
     let mut approval: Option<(u64, Option<bool>)> = None;
     let mut undo: Option<usize> = None;
+    let mut toggle_model_changes: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
     // The pill or chip under the pointer, for the host to light.
     let mut hovered: Option<Hovered> = None;
@@ -2251,20 +2504,52 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     }
                 });
             }
-            Item::Changes { steps, revision, history, undone } => {
-                ui.horizontal(|ui| {
-                    let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
-                        let b =
-                            ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
-                        solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
-                        if b.clicked() {
-                            undo = Some(n);
-                        }
+            Item::Changes { steps, summary, features, revision, history, undone } => {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = t.space_6;
+                    if !summary.is_empty() {
+                        ui_kit::assistant_tool_detail(ui, |ui| {
+                            ui.set_min_width(ui.available_width().max(0.0));
+                            ui.spacing_mut().item_spacing.y = t.space_2;
+                            for line in summary {
+                                let mut text = RichText::new(line.as_str()).color(t.text_dim).size(t.font_small);
+                                if *undone {
+                                    text = text.strikethrough();
+                                }
+                                ui.add(egui::Label::new(text).truncate()).backing_on_hover_text(line.as_str());
+                            }
+                        });
                     }
+                    ui.horizontal_wrapped(|ui| {
+                        let text = if features.is_empty() {
+                            trf("ui.agent_chat_changes", &[("n", &steps.to_string())])
+                        } else {
+                            trf("ui.agent_chat_model_changes", &[("n", &features.len().to_string())])
+                        };
+                        ui.label(RichText::new(text).color(t.text_dim).size(t.font_caption));
+                        if *undone {
+                            ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(t.font_caption));
+                        } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
+                            if !features.is_empty() && view.model_view_visible {
+                                let label = tr(if view.model_changes == Some(n) {
+                                    "ui.agent_chat_hide_model_changes"
+                                } else {
+                                    "ui.agent_chat_show_model_changes"
+                                });
+                                let b = ui_kit::button(ui, label, ui_kit::Button::Normal);
+                                solidcraft_ui_registry::publish_handle("agent_chat:model_changes", b.rect.center());
+                                if b.clicked() {
+                                    toggle_model_changes = Some(n);
+                                }
+                            }
+                            let b = ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal)
+                                .backing_on_hover_text(tr("ui.ai_undo_tip"));
+                            solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
+                            if b.clicked() {
+                                undo = Some(n);
+                            }
+                        }
+                    });
                 });
             }
             Item::Notice { text, error } => {
@@ -2274,6 +2559,18 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
             }
         }
         took_line(ui, &stamp);
+    }
+    // A task the agent could not finish (the provider's usage limit, or any other error) waits
+    // to be continued (#16318).
+    if chat.unfinished.is_some() && chat.state() == State::Ready {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("ui.agent_chat_interrupted")).color(t.text_dim).size(t.font_small));
+            let b = ui_kit::button(ui, tr("ui.agent_chat_continue"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_continue_tip"));
+            solidcraft_ui_registry::publish_handle("agent_chat:continue", b.rect.center());
+            if b.clicked() {
+                chat.actions.push(PanelAction::Continue);
+            }
+        });
     }
     // While the agent works with no tool running, how long since it last said or did something
     // (a running tool's card counts for itself).
@@ -2419,6 +2716,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
     }
     if let Some(n) = undo {
         chat.actions.push(PanelAction::UndoChanges(n));
+    }
+    if let Some(n) = toggle_model_changes {
+        chat.actions.push(PanelAction::ShowModelChanges(n));
     }
 }
 
@@ -2931,21 +3231,31 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
             ui.indent(id.with("detail"), |ui| {
                 if let Some(input) = call.input {
                     let text = serde_json::to_string_pretty(input).unwrap_or_default();
-                    tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                    let copy = tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:tool:{n}:copy:arguments"), copy.rect.center());
                 }
                 if let Some(o) = call.output {
-                    tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                    let copy = tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:tool:{n}:copy:result"), copy.rect.center());
                 }
             });
         });
     });
 }
 
-/// One part of a card's Details: its heading and the raw text, cut short and scrolling.
+/// One part of a card's Details: a bounded, scrolling preview and a Copy action for the full text.
 #[cfg(not(target_arch = "wasm32"))]
-fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
+fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) -> egui::Response {
     let t = Tokens::get();
-    ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+    let copy = ui
+        .horizontal(|ui| {
+            ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small)).inner
+        })
+        .inner;
+    if copy.clicked() {
+        ui.ctx().copy_text(text.to_owned());
+    }
     let shown: String =
         if text.chars().count() > MAX_DETAIL { text.chars().take(MAX_DETAIL).chain(std::iter::once('…')).collect() } else { text.to_string() };
     ui_kit::assistant_tool_detail(ui, |ui| {
@@ -2954,6 +3264,7 @@ fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
             ui.add(egui::Label::new(RichText::new(shown).monospace().size(t.font_small)).selectable(true).wrap());
         });
     });
+    copy
 }
 
 /// A small status mark drawn as a shape (no glyph a system font might lack): filled when the
@@ -3100,6 +3411,35 @@ mod tests {
         assert!(app.agent_chat.items.is_empty(), "the panel itself sends nothing");
     }
 
+    /// The button that continues a task the agent could not finish asks the host to continue it
+    /// (#16318); the panel itself continues nothing.
+    #[test]
+    fn the_continue_button_records_the_task_to_continue() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.unfinished = Some(("make a gearbox".into(), false, None, Vec::new()));
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, 720.0));
+        let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+            solidcraft_ui_registry::clear_handles();
+            let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
+            let view = PanelView::of(app, &ctx);
+            // The conversation is drawn in the room it has before it scrolls (#17355).
+            let mut output = ctx.run_ui(input, |ui| {
+                let room = ui.available_height();
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, room))
+            });
+            output.textures_delta.clear();
+        };
+        frame(&mut app, Vec::new());
+        let at = solidcraft_ui_registry::handle_at("agent_chat:continue").expect("the continue button is drawn");
+        for pressed in [true, false] {
+            frame(&mut app, crate::test_support::pointer(at, pressed));
+        }
+        assert_eq!(app.agent_chat.actions, [PanelAction::Continue]);
+        assert!(app.agent_chat.unfinished.is_some(), "the panel itself continues nothing");
+    }
+
     /// The composer of `app` drawn once with `events`, as the host draws it, its actions left unrun.
     fn composer_frame(ctx: &egui::Context, app: &mut SolveApp, events: Vec<egui::Event>) {
         solidcraft_ui_registry::clear_handles();
@@ -3166,6 +3506,8 @@ mod tests {
             document: "Plate".into(),
             revision: Revision::of(&solidcraft_engine::Session::default().doc),
             undo_history: None,
+            model_view_visible: true,
+            model_changes: None,
             units: "mm".into(),
             decimals: 2,
             agents: Vec::new(),

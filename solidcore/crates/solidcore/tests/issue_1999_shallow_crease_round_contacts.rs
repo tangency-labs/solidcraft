@@ -143,7 +143,7 @@ fn shallow_crease_round_contact_profiles() {
             let result = fillet_edges(&mut k, &mut b, &edges, radius, 1, 1, 1.0);
             let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
             let manifold = is_manifold_solid(&b).unwrap();
-            println!("CASE profile={profile} turn={turn} radius={radius} multi={multi} result={result:?} faces={} manifold={manifold} valid={} pointers={} failures={:?}", b.face_list().len(), check.is_valid(), check.pointers_status, check.failures().collect::<Vec<_>>());
+            println!("CASE profile={profile} turn={turn} radius={radius} multi={multi} result={result:?} faces={} manifold={manifold} valid={} pointers={:?} failures={:?}", b.face_list().len(), check.is_valid(), check.pointers, check.failures().collect::<Vec<_>>());
             if result.is_ok()
                 && !check.is_valid()
                 && (profile == "new_blend" || profile == "all_fixes")

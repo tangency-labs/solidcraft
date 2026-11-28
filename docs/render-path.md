@@ -77,9 +77,17 @@ production input. Final PNG and raw EXR remain identical with preview work disab
 to the installed GPU host and validates the captured production representation
 under a temporary bounded work reservation. Check creates no job and releases the
 reservation afterward. Start validates the same conversions and certificates before
-assigning its session/serial/generation identity. Begin currently rebuilds immutable
-uploads and optical certificates; no preparation cache or cross-scene proof reuse
-is claimed. Progress
+assigning its session/serial/generation identity. Each path device retains at most
+one immutable prepared geometry/BVH upload in a single-entry cache keyed by the
+exact SHA-256 content fingerprint of the captured meshes, appearances and optical
+properties, the camera-target rebase origin, and `nested_media`. Re-rendering the
+same geometry around the same camera target (orbit/zoom, exposure, tone-mapping,
+lighting, environment, denoiser, resolution or sample changes) reuses the uploaded
+geometry and BVH storage buffers directly and skips CPU BVH construction; any
+mismatch evicts the previous entry before building or uploading the replacement,
+and allocation failure or device loss clears the cache immediately. Preflight
+validation peeks the cache read-only on a hit without allocating or retaining GPU
+state on a miss. Progress
 reports complete samples per pixel; a partially computed sample is not counted.
 Cancel, status, retained-image ownership and atomic PNG export use the same host
 protocol as CPU jobs. Defaults are 64 samples, depth 8 and seed 0; the bounds are
@@ -129,9 +137,17 @@ image mode, not an automatic quality preset or a convergence certificate. Option
 `texture_filtering: true` enables the production mip/footprint sampler; omission
 preserves the original LOD0 behavior.
 
-Each job builds a BVH over its immutable captured meshes with a sixteen-bin
-surface-area heuristic on triangle centres; there is no cross-document cache to
-confuse scene generations. A split is accepted only when a median split of its
+Each distinct captured scene builds a BVH over its immutable meshes with a
+sixteen-bin surface-area heuristic on triangle centres, parallelized across CPU
+cores with Rayon for upper subtrees (at least 4,096 triangles, with parallel
+binning at or above 16,384 triangles) while producing the exact bit-for-bit
+identical node array and triangle permutation as the sequential build. A
+single-entry per-device preparation cache keyed by the full content SHA-256 of
+geometry, appearances and optics, the exact camera-target rebase origin, and
+`nested_media` reuses the immutable VRAM geometry and BVH buffers across
+repeated jobs with identical prepared inputs; CPU upload byte vectors are dropped
+immediately after upload, and any mismatch, error or device loss evicts the
+cached entry. A split is accepted only when a median split of its
 larger side would still keep the tree within 30 levels, the shader's 32-entry
 traversal stack; otherwise that node falls back to the median split. Traversal
 tests both child boxes at their parent and visits the nearer first. On the
@@ -168,7 +184,14 @@ Validation lives in `gpu::path::tests` and engine render job tests. Set
 `SOLIDCRAFT_REQUIRE_GPU=1` to make absence of an adapter fail device tests rather
 than skip them. The shared viewport crates (`solidcraft-viewport`, `-gpu`, `-egui`) read none of SolidCraft's
 variables: its own GPU tests take `VIEWPORT_TEST_GPU` (the adapter policy, as `SOLIDCRAFT_GPU`)
-and `VIEWPORT_TEST_REQUIRE_GPU=1` (a missing adapter fails), and CI sets both beside the app's. BRDF parity is checked against the f64 oracle with 0.3% relative
+and `VIEWPORT_TEST_REQUIRE_GPU=1` (a missing adapter fails), and CI sets both beside the app's.
+
+On a Linux machine with a GPU, the `software` policy picks lavapipe, but the Vulkan loader still
+loads every installed driver, and NVIDIA's driver then holds GPU memory in every test process.
+To run the tests as a runner without a GPU does, also set
+`VK_LOADER_DRIVERS_SELECT='*lvp*'`: Vulkan then sees lavapipe alone (#10232).
+
+BRDF parity is checked against the f64 oracle with 0.3% relative
 plus 2e-5 absolute tolerance. The near-white furnace allows 0.07 absolute error:
 the existing single-scattering Schlick model is not a perfectly conserving pure
 Lambertian surface, even at IOR 1. Same-adapter determinism compares the actual

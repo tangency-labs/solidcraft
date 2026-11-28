@@ -384,12 +384,14 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
 | `linear_color_field` | Linear RGB swatch with precise channel fields; clips only the preview to display gamut and preserves HDR values until edited | `control_height`, `space_4`, shared colour popover |
 | `section`, `section_count`, `section_method`, `search_fold`, `divider` | Persisted small-caps disclosure with chevron, optional count or method tag and trailing hairline; `search_fold` is that row for shortcut matches during Preferences search, closed until opened; full-width rule | `control_height`, `dialog_rule`, `font_caption`, tracking, spacing |
+| `card_section` | Bordered disclosure for repeated form groups. Remembers open state and shows an optional palette-colored icon while closed. Publishes `dialog:card:{title}` and `dialog:card_header:{title}`. | `control_height`, `dialog_rule`, `control_radius`, `space_6/8`, `form_ink/dim` |
 | `icon_action` | Icon-only action with an accessible name, tooltip, enabled state and danger variant | Shared icon-label action geometry and ink tokens |
 | `list_row` | Picked item with a remove target | `control_height`, `font_label`, icon/spacing tokens |
 | `text`, `Text` | Hint, note, report, inline or cell text; see variants below | `font_small/label`, `text/dim/error`, `control_height`, `space_4` |
 | `text_lines` | Virtualized read-only licence/report lines, horizontal overflow | `font_small`, `text`, `control_height` |
 | fields: `field`, `hint_field`, `focused_field`, `checked_field` | Expression editors, optional empty hint or retained focus, or outlined in the warning colour when flagged; returns accepted Enter | `control_height/fill`, `form_inset`, `font_label`, `warning` |
 | `count_field`, `Count` | Expression editor for a whole-number count (a pattern's quantity) with up/down step arrows at its right edge. `Count` gives the limits and the evaluator (the design's parameters); an arrow steps the evaluated count by one within them, replacing a plain number or adjusting an expression's trailing `+ n`, and is dimmed when it can't step. Handles `dialog:<row> up` / `down`; returns accepted Enter | field tokens, `control_border`, `control_radius`, `selected_bg`, `form_ink/dim`, `space_4` |
+| `stepped_field`, `step_row` | Expression editor with up/down step arrows at its right edge for any value, and its labelled row form. `next` says what the field's own text steps to for each arrow (`1` up, `-1` down); returning None dims that arrow, so an expression can be left as typed, and `step` (such as "10 deg" or "1") names the amount in each arrow's accessible name. Handles `dialog:<row> up` / `down`; returns accepted Enter | field and row tokens, `control_border`, `control_radius`, `selected_bg`, `form_ink/dim` |
 | `text_field`, `focused_text_field` | Plain name editor, optionally retaining focus | field tokens |
 | `multiline_text_field` | Three-line plain-text row with stable focus ID | field/row tokens |
 | `password_field` | Stable secret editor; excludes the secret from scenario/accessibility metadata | field tokens |
@@ -401,8 +403,8 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `menu_filter` | The filter at the top of a long menu: search glyph, frameless editor and a rule under them, so it does not read as an entry; the caller filters and owns focus | `space_8/16`, `font_label`, `form_dim/ink`, `dialog_rule` |
 | `text_area` | Bounded multiline JSON/data editor | field tokens |
 | `dropdown`, `dropdown_menu`, `compact_dropdown_menu` | Indexed choices or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |
+| `searchable_dropdown`, `SearchOption` | Case-insensitive partial-name choices in a focused search box; Up/Down highlight and scroll to a result, Enter picks it (the current choice when unfiltered, else the first match before an arrow is used), Esc closes only the popup; optional custom-value action and pending message | dropdown tokens |
 | `swatch_picker`, `SwatchPicker` | Cached raster tiles beside option titles; complete artwork opens a searchable grid. Filtering preserves option indices, and artwork keeps its colours and aspect ratio. | `control_height`, `control_fill/border/radius`, `selected_bg/ink`, `hover`, `font_small`, spacing |
-| `searchable_dropdown`, `SearchOption` | Filtered choices, custom-value action and pending message | dropdown tokens |
 | `search_picker`, `SearchPicker`, `SearchChoice`, `Picked` | Dropdown whose popup opens on a focused search box over rows filtered by value, label and tip, with group headings (two or more groups fold under headers with a count, the current value's open), per-row tips, an optional "use what was typed" row and a dim note; Enter picks the exact or first match, Esc closes the popup only; only the rows in view are laid out, and the popup keeps the height it opened with, the list taking what the rest leaves. Handles `{handles}`, `{handles}:search`, `{handles}:custom`, `{handles}:{value}`; returns the pick and the control's response | dropdown and field tokens, `space_16/24`, `font_small`, `text_dim`, `form_card_width` |
 | `selection_field`, `Selection` | Selection chip with explicit `active` and `filled` state, in three looks: the active input (where the next pick goes) has a `form_primary` border and `selected_bg` tint; a filled inactive one a quiet neutral tint, a stronger neutral border and its count in `form_ink`; an empty inactive one the plain control with a dim prompt | `selected_bg/ink`, `form_primary/ink/dim`, `control_*`, `form_inset`, `space_2/8/24` |
 | `value_pair` | Paired captions/expressions; optional independent field names | row/field tokens, `space_8` |
@@ -414,6 +416,9 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `placement_field` | Stable focus ID; drawing tool owns Enter/Tab validation and completion | `control_fill`, `font_body`, `text`, `control_height`, spacing |
 | `color_field`, `color_field_with_opacity`, `mixed_color_field`, `color_popover` | Document RGB swatch and kit popover; global U8/F/Hex segments, active-format copy, gamma-byte or linear RGB fields or one Hex editor, painter-drawn HSV square/hue and current strip; outside click dismisses. The opacity-aware field edits the caller's separate `f64` opacity, never premultiplied RGB. Six Hex digits preserve exact opacity; eight set alpha to `aa / 255`. RGB-only callers reject non-FF alpha without applying RGB. Incomplete text remains editable without changing the last valid colour. The mixed-aware wrapper adds a non-editable label and reports accepting the first colour as an edit, so the caller can set all selected targets. | `control_*`, `form_*`, `border`, `on_accent`, `space_*` |
 | choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `enabled` keeps unsupported choices faded and inert, `disabled_reasons` also disables choices and supplies hover explanations, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment, `glyphs` draws a symbol per segment in place of its label (the label stays the hover text and accessible name) | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
+| `PageSwitch` | Counted page navigation using `segmented`; sliding pill snaps with reduced motion or zero host animation duration. | Segment tokens, `pref_well/nav_hover`, `radius_lg`, `dialog_rule/border`, `font_small` |
+| `SelectionBar`, `SelectionAction`, `SelectionBarResponse` | Selection count, labelled actions and clear control inside the owning card. | `selected_bg`, `form_primary/ink`, `control_*`, `radius_lg`, `space_*` |
+| `Panel::feature_with_left` | Scrolling feature body and pinned bottom actions with a left footer slot, for forms that keep a live-apply control alongside Cancel/OK. | Shared feature and footer tokens |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
 | `checkbox`, `checkbox_indeterminate`, `checkbox_icon`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices; `checkbox_icon` adds a command icon between box and label (Customize Toolbar) | `space_14/3/2`, `space_16`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
@@ -436,13 +441,13 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `mirrored_icon_button_at` | Directional counterpart of an existing icon master, sharing icon-button presentation and accessible label | Shared icon-button tokens |
 | `icon_button_at` | Icon action inside a supplied rectangle | `form_icon_inset`, `text/dim`, icon palette |
 | `button_pair`, `PairButton` | Equal secondary actions, optional icons and selected state | `form_button_height`, control/selection/icon tokens |
-| `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
+| `footer`, `footer_with_left`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `footer_with_left` reserves a clipped left slot where `icon_label_button` truncates to fit beside the normal actions; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |
 | `action_menu`, `command_menu_button` | Nested dense action menu or ribbon overflow action retaining its icon, shortcut and enabled state | form control/font tokens, `space_16`, icon palette |
-| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim button line (normal fill, solid control border, body ink, plus icon, hover highlight) and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
+| table: `table_custom`, `Column`, `Table::headers`, `Table::group`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`; `group` adds a collapsing section band beneath that shared header (configuration previews group appearances, rule traces and effective parameters). `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim button line (normal fill, solid control border, body ink, plus icon, hover highlight) and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
 | `name_list`, `NameList::row`, `NameRow::name`, `NameRow::cell` | A list of named rows on the table grid (the web app's stored files): the name column takes the width the other columns leave; the other columns are as wide as their widest cell, measured as drawn (a changed measurement discards the frame). A name is cut with an ellipsis, and given its full text on hover, only when it does not fit; `dialog:name:NAME:cut` reports it | `form_label_width`, `font_label`, `form_ink`, `space_8`, `table_row_height` |
 | `removable_header`, `add_column_button`, `bin_button`, `active_pill` | Hover-only column removal, labelled "+ Add column" button above the table that opens the Add Column menu, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
-| `compact_button`, `summary_row` | Borderless stars and chevrons with enabled/selected states; named two-line rule summary beside an enable checkbox and compact actions. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
+| `compact_button` | Borderless stars and chevrons with enabled/selected states. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
 | `label_actions` | Clipped row name beside compact actions | `control_height`, form font/spacing tokens |
 | status: `status_header`, `StatusHeader` | Supplied icon/name/status and constraint meter | `font_label`, `text/dim`, `accent`, sketch/header tokens |
 | `progress` | Clamped determinate progress | `space_3/6`, `dialog_rule`, `accent` |
@@ -840,7 +845,7 @@ committed usable region or the render projection.
 ## File/start presentation
 
 `FileView` owns File surfaces and controls. It accepts translated strings, existing
-icon ids and cached thumbnail textures; callers retain commands, document state,
+icon ids and `PreviewArt` pictures; callers retain commands, document state,
 persistence, thumbnail jobs and recovery decisions.
 
 - `page`, `content` and `rail` own the page background, responsive insets and
@@ -867,6 +872,27 @@ persistence, thumbnail jobs and recovery decisions.
   at narrow widths. Discard is optional for summaries; the return value is
   `(recover_response, optional_discard_response)`. `recovery_review` uses the same
   geometry with per-design Discard. Callers provide truthful metadata.
+
+### File previews
+
+`file_preview(ui, id, rect, art, hovered, opacity)` is the only way the app pictures a
+file or a part. Recent rows, sample cards, parts library cards, the parts dialog and the
+loading card all use it, and any new browser, picker or panel that shows files must too.
+It draws:
+
+- a backdrop and an isometric ground grid in the theme's 3D view colours
+  (`viewport_top`, `viewport_bottom`, `grid`, `grid_major`);
+- the cut-out picture, and the shadow of its footprint, when `art` is there (without it,
+  the grid alone: the caller adds its placeholder icon);
+- the lift while `hovered`: the model springs off the grid, its shadow softens and the
+  grid lights up around it in the accent. It asks for frames only while it moves, and
+  stays still when egui's animation time is zero.
+
+`hovered` is the whole card's pointer or keyboard focus, not only the picture's. The host
+decodes pixels into a `PreviewImage` and keeps the `PreviewTextures` it loads; `art()`
+gives the handle to draw. Pictures come from `solidcraft_engine::thumbnail`, which draws
+every one from the same isometric orthographic view, so the grid fits them all. A host
+does not draw its own backdrop, scale the picture or animate it.
 
 The exported `file_*` colour tokens provide readable light/dark foreground and
 background pairs, including File-specific secondary text. Thumbnails retain the
