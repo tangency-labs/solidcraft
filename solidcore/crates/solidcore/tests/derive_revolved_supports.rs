@@ -945,3 +945,221 @@ fn a_reader_takes_a_torus_labels_own_numbers_only_where_the_form_is_off_the_toru
         }
     }
 }
+
+/// A rational quadratic surface of revolution of a circular arc (radius `minor`, centred at
+/// `major` from the tilted frame's axis through `origin`, generator angles `gen_start_deg` to
+/// `gen_end_deg`) swept through `spans`, each `(knot_start, knot_end, sweep_deg)` one Bezier
+/// span with its own knot interval and angle.
+fn revolved_arc_surface(
+    origin: Vec3,
+    major: f64,
+    minor: f64,
+    gen_start_deg: f64,
+    gen_end_deg: f64,
+    spans: &[(f64, f64, f64)],
+    swap_uv: bool,
+) -> BSplineSurface {
+    let (x, y, z) = tilted();
+    let a0 = gen_start_deg.to_radians();
+    let a1 = gen_end_deg.to_radians();
+    let am = 0.5 * (a0 + a1);
+    let wg = (0.5 * (a1 - a0)).cos();
+    let gen = [
+        (major + minor * a0.cos(), minor * a0.sin(), 1.0),
+        (major + minor * am.cos() / wg, minor * am.sin() / wg, wg),
+        (major + minor * a1.cos(), minor * a1.sin(), 1.0),
+    ];
+
+    let mut sweep_rows: Vec<(Vec3, f64)> = Vec::new();
+    let mut sweep_knots: Vec<f64> = Vec::new();
+    let mut angle = 0.0_f64;
+    for (idx, &(k0, k1, span_deg)) in spans.iter().enumerate() {
+        let th0 = angle.to_radians();
+        let th1 = (angle + span_deg).to_radians();
+        let thm = 0.5 * (th0 + th1);
+        let ws = (0.5 * span_deg.to_radians()).cos();
+        if idx == 0 {
+            sweep_rows.push((x * th0.cos() + y * th0.sin(), 1.0));
+            sweep_knots.extend([k0, k0, k0]);
+        }
+        sweep_rows.push(((x * thm.cos() + y * thm.sin()) * (1.0 / ws), ws));
+        sweep_rows.push((x * th1.cos() + y * th1.sin(), 1.0));
+        if idx + 1 == spans.len() {
+            sweep_knots.extend([k1, k1, k1]);
+        } else {
+            sweep_knots.extend([k1, k1]);
+        }
+        angle += span_deg;
+    }
+
+    let gen_knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let rows: Vec<Vec<CPoint>> = sweep_rows
+        .iter()
+        .map(|&(radial, ws)| {
+            gen.iter()
+                .map(|&(rho, h, wg)| {
+                    let p = origin + radial * rho + z * h;
+                    let w = ws * wg;
+                    CPoint::new(p.x * w, p.y * w, p.z * w, w)
+                })
+                .collect()
+        })
+        .collect();
+    let (rows, u_knots, v_knots) = if swap_uv {
+        let transposed = (0..gen.len())
+            .map(|j| rows.iter().map(|row| row[j]).collect())
+            .collect();
+        (transposed, gen_knots, sweep_knots)
+    } else {
+        (rows, sweep_knots, gen_knots)
+    };
+    let nurb = solidcore::nurbs::srf_basic::Surface::new(rows, 2, 2, u_knots, v_knots).unwrap();
+    BSplineSurface::from_nurb(nurb, true)
+}
+
+/// Trimmed and multi-span curved-channel fillet revolution nets:
+/// - two unequal spans (54° over [0.1, 0.25] and 36° over [0.25, 0.35], 90° total), where
+///   rebuilding the polar converter from `SurfOfRevolution::make_nurb` produced a 1-span 90°
+///   converter that disagreed with the 2-span form;
+/// - a tiny trimmed leading span (0.08° over [0.0, 0.002]) followed by a 45° span, where
+///   inspecting only the first sweep span picked the ill-conditioned sliver;
+/// - both orientations (`swap_uv` false and true).
+///
+/// Each derives cleanly, recovers the tilted axis and total sweep, and evaluates as the form
+/// within 64 ulps of its size across both spans and at the internal knot.
+#[test]
+fn trimmed_unequal_span_revolution_net_derives_with_its_own_parametrisation() {
+    use solidcore::surface::surface::SurfaceKind;
+    type SpanSpec = (f64, f64, f64);
+    let k = Kernel::default();
+    let (_, _, z) = tilted();
+    let origin = Vec3::new(15.0, -22.5, 40.0);
+    let cases: [(&str, &[SpanSpec], f64); 2] = [
+        (
+            "unequal 54+36 deg spans",
+            &[(0.1, 0.25, 54.0), (0.25, 0.35, 36.0)],
+            90.0,
+        ),
+        (
+            "tiny leading 0.08+45 deg spans",
+            &[(0.0, 0.002, 0.08), (0.002, 1.0, 45.0)],
+            45.08,
+        ),
+    ];
+    for (label, spans, want_sweep) in cases {
+        for swap_uv in [false, true] {
+            let form = revolved_arc_surface(origin, 60.0, 1.5, 0.0, 90.0, spans, swap_uv);
+            let derived = AnalyticSupport::derive_revolution(&k, &form)
+                .unwrap_or_else(|e| panic!("{label} (swap_uv={swap_uv}): {e}"));
+            let SurfaceKind::SurfOfRevolution(rev) = derived.kind() else {
+                panic!("{label}: not a surface of revolution: {:?}", derived.kind());
+            };
+            let pos = rev.position();
+            let axis = pos.x_axis().cross(pos.y_axis());
+            assert!(
+                axis.cross(z).length() < 1e-9,
+                "{label} (swap_uv={swap_uv}): axis {axis:?} vs {z:?}"
+            );
+            let dom = rev.step_uv_domain();
+            let got_sweep = dom.max().x - dom.min().x;
+            assert!(
+                (got_sweep - want_sweep).abs() < 1e-8,
+                "{label} (swap_uv={swap_uv}): sweep {got_sweep} vs {want_sweep}"
+            );
+            let size = origin.length() + 61.5;
+            let d = form.natural_uv_domain();
+            for (a, b) in [(0.0, 0.5), (0.25, 0.2), (0.5, 0.5), (0.6, 0.8), (1.0, 0.3)] {
+                let uv = Point2::new(
+                    d.min().x + (d.max().x - d.min().x) * a,
+                    d.min().y + (d.max().y - d.min().y) * b,
+                );
+                let step = derived.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                let off = (derived.evaluate_step_point(&k, step).unwrap()
+                    - form.evaluate_point(uv).unwrap())
+                .length();
+                assert!(
+                    off <= 64.0 * f64::EPSILON * size,
+                    "{label} (swap_uv={swap_uv}): {off:e} off at {uv:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A small fillet arc (r 0.5 mm, 10° generator) revolved briefly (0.15° and 0.05°) at a large
+/// channel radius (R 120 mm) derives directly from its control weights and evaluates as the
+/// form within 64 ulps; perturbing a control point off the revolution is still refused.
+#[test]
+fn shallow_small_arc_revolution_net_at_large_radius_derives() {
+    use solidcore::error::SolidError;
+    use solidcore::surface::surface::SurfaceKind;
+    let k = Kernel::default();
+    let (_, _, z) = tilted();
+    let origin = Vec3::new(-30.0, 45.0, 10.0);
+    for sweep in [0.15_f64, 0.05] {
+        for swap_uv in [false, true] {
+            let form = revolved_arc_surface(
+                origin,
+                120.0,
+                0.5,
+                20.0,
+                30.0,
+                &[(0.0, 1.0, sweep)],
+                swap_uv,
+            );
+            let derived = AnalyticSupport::derive_revolution(&k, &form)
+                .unwrap_or_else(|e| panic!("sweep={sweep} swap_uv={swap_uv}: {e}"));
+            let SurfaceKind::SurfOfRevolution(rev) = derived.kind() else {
+                panic!("not a surface of revolution: {:?}", derived.kind());
+            };
+            let pos = rev.position();
+            let axis = pos.x_axis().cross(pos.y_axis());
+            assert!(
+                axis.cross(z).length() < 1e-7,
+                "sweep={sweep} swap_uv={swap_uv}: axis {axis:?} vs {z:?}"
+            );
+            let dom = rev.step_uv_domain();
+            let got_sweep = dom.max().x - dom.min().x;
+            assert!(
+                (got_sweep - sweep).abs() < 1e-7,
+                "sweep={sweep} swap_uv={swap_uv}: got {got_sweep}"
+            );
+            let size = origin.length() + 120.5;
+            let d = form.natural_uv_domain();
+            for (a, b) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.8)] {
+                let uv = Point2::new(
+                    d.min().x + (d.max().x - d.min().x) * a,
+                    d.min().y + (d.max().y - d.min().y) * b,
+                );
+                let step = derived.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                let off = (derived.evaluate_step_point(&k, step).unwrap()
+                    - form.evaluate_point(uv).unwrap())
+                .length();
+                assert!(
+                    off <= 64.0 * f64::EPSILON * size,
+                    "sweep={sweep} swap_uv={swap_uv}: {off:e} off at {uv:?}"
+                );
+            }
+        }
+    }
+
+    // Perturbing a control point off the surface of revolution must still be refused.
+    let good = revolved_arc_surface(origin, 60.0, 1.5, 0.0, 90.0, &[(0.0, 1.0, 45.0)], false);
+    let nurb = good.gw_nurb().unwrap();
+    let mut rows: Vec<Vec<CPoint>> = nurb.rows().map(<[CPoint]>::to_vec).collect();
+    rows[1][1].x += 1e-3 * rows[1][1].w;
+    let bad = BSplineSurface::from_nurb(
+        solidcore::nurbs::srf_basic::Surface::new(
+            rows,
+            nurb.p(),
+            nurb.q(),
+            nurb.u_knots().to_vec(),
+            nurb.v_knots().to_vec(),
+        )
+        .unwrap(),
+        true,
+    );
+    let err = AnalyticSupport::derive_revolution(&k, &bad)
+        .expect_err("a perturbed net is not a surface of revolution");
+    assert!(matches!(err, SolidError::InvalidInput { .. }), "{err}");
+}

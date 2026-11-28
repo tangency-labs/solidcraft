@@ -169,6 +169,153 @@ fn first_derivs(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(Vec3, Vec3
     Ok((at(0, 0)?, at(1, 0)?, at(0, 1)?))
 }
 
+/// First and second partial derivatives `(S_u, S_v, S_uu, S_uv, S_vv)` of `surface` at `uv`,
+/// or `None` when the evaluation does not return them.
+fn second_derivs(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Option<[Vec3; 5]>> {
+    let flags = EvaluateFlags {
+        u_side: Side::Left,
+        v_side: Side::Left,
+        only_upper_half: true,
+        non_zero_tangents: false,
+    };
+    let d = match surface.evaluate(k, uv, 2, 2, flags) {
+        Ok(d) => d,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let at = |i: usize, j: usize| d.get(i).and_then(|row| row.get(j)).copied();
+    Ok(match (at(1, 0), at(0, 1), at(2, 0), at(1, 1), at(0, 2)) {
+        (Some(su), Some(sv), Some(suu), Some(suv), Some(svv)) => Some([su, sv, suu, suv, svv]),
+        _ => None,
+    })
+}
+
+/// Local geometry at `tangent_end` when the rail meets the end surface transversely at a small
+/// acute angle (`f_alpha · n_end != 0`) instead of at an exact `0°` tangency.
+///
+/// With signed normal separation `h(sigma, alpha) = (S(sigma, alpha) - E) · n_end`:
+/// `h ≈ c * s^k + h_a * da + 0.5 * h_aa * da^2 = 0` (`s` normalised to `[0, 1]`).
+/// When `h_a != 0` and `h_aa != 0` bend the same way against `c`, `da(t)` has a hyperbolic knee
+/// at `t0 = |h_a| / sqrt(-2 * h_aa * c)`:
+/// - for contact order `1` (chamfer), taking `s(t) = lin * t + (1 - lin) * t^2` with
+///   `lin = 2 * |h_a| / (sqrt(h_a^2 - 2 * h_aa * c) + |h_a|)` turns the discriminant into a
+///   perfect square `(1 + q t)^2`, removing the knee altogether (and reducing to `t^2` as
+///   `h_a -> 0`);
+/// - for contact order `2` (round), `s(t) = t` keeps the knee at `t0`, which adaptive span
+///   halving resolves locally instead of exhausting uniform doubling;
+/// - because `f_alpha · n_end != 0`, the rib Jacobian is regular at `t = 0`, so span `0` can be
+///   certified directly by `span_bound` (falling back to `first_span_bound` if unenclosed).
+#[derive(Debug, Clone, Copy)]
+struct TransverseStart {
+    sigma_lin: f64,
+    regular_at_start: bool,
+    adaptive: bool,
+}
+
+impl TransverseStart {
+    const NONE: Self = Self {
+        sigma_lin: 0.0,
+        regular_at_start: false,
+        adaptive: false,
+    };
+}
+
+/// Detect whether the rib starts at a smooth transverse crossing (`f_alpha · n_end != 0`) and
+/// compute the section-parameter linear term and refinement strategy for `order` 1 or 2.
+#[allow(clippy::too_many_arguments)]
+fn transverse_start(
+    k: &Kernel,
+    fillet: &Surface,
+    end: &Surface,
+    section: usize,
+    order: u32,
+    fil0: Point2,
+    end0: Point2,
+    d_sigma: f64,
+    d_alpha: f64,
+) -> Result<TransverseStart> {
+    if order != 1 && order != 2 {
+        return Ok(TransverseStart::NONE);
+    }
+    let (Some([fu, fv, fuu, _, fvv]), Some([eu, ev, euu, euv, evv])) = (
+        second_derivs(k, fillet, fil0)?,
+        second_derivs(k, end, end0)?,
+    ) else {
+        return Ok(TransverseStart::NONE);
+    };
+    let (f_sigma, f_alpha, f_ss, f_aa) = if section == 0 {
+        (fu, fv, fuu, fvv)
+    } else {
+        (fv, fu, fvv, fuu)
+    };
+    let normal = eu.cross(ev);
+    let n_len = normal.length();
+    if !n_len.is_finite() || n_len <= EFF_ZERO * eu.length() * ev.length() || n_len <= 0.0 {
+        return Ok(TransverseStart::NONE);
+    }
+    let n = normal / n_len;
+    let f_a_len = f_alpha.length();
+    if !f_a_len.is_finite() || f_a_len <= EFF_ZERO {
+        return Ok(TransverseStart::NONE);
+    }
+    let h_a = f_alpha.dot(n);
+    if !h_a.is_finite() || h_a.abs() <= EFF_ZERO_SQRT * f_a_len {
+        return Ok(TransverseStart::NONE);
+    }
+    // Relative second derivative along the rail: (S_aa - E''(u_a, v_a)) · n, where
+    // E_u u_a + E_v v_a is the tangential projection of S_alpha onto T_P E.
+    let g00 = eu.dot(eu);
+    let g01 = eu.dot(ev);
+    let g11 = ev.dot(ev);
+    let g_det = g00 * g11 - g01 * g01;
+    if !g_det.is_finite() || g_det <= EFF_ZERO * g00 * g11 {
+        return Ok(TransverseStart::NONE);
+    }
+    let f_a_tan = f_alpha - n * h_a;
+    let ru = eu.dot(f_a_tan);
+    let rv = ev.dot(f_a_tan);
+    let u_a = (g11 * ru - g01 * rv) / g_det;
+    let v_a = (g00 * rv - g01 * ru) / g_det;
+    let e_aa = euu * (u_a * u_a) + euv * (2.0 * u_a * v_a) + evv * (v_a * v_a);
+    let h_aa = (f_aa - e_aa).dot(n);
+    if !h_aa.is_finite() {
+        return Ok(TransverseStart::NONE);
+    }
+    let linear_term = h_a * d_alpha;
+    let quad_term = 0.5 * h_aa * d_alpha * d_alpha;
+    let curved = quad_term.abs() > EFF_ZERO_SQRT * f_a_len * d_alpha.abs();
+    if order == 1 {
+        let c1 = f_sigma.dot(n) * d_sigma;
+        if !(c1.is_finite() && linear_term * c1 < 0.0 && h_aa * c1 <= 0.0) {
+            return Ok(TransverseStart::NONE);
+        }
+        let a = h_a.abs();
+        let prod = -2.0 * h_aa * c1;
+        let b = if prod > 0.0 { prod.sqrt() } else { 0.0 };
+        let denom = (a * a + b * b).sqrt() + a;
+        let sigma_lin = if denom.is_finite() && denom > 0.0 {
+            (2.0 * a / denom).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        Ok(TransverseStart {
+            sigma_lin,
+            regular_at_start: true,
+            adaptive: curved,
+        })
+    } else {
+        let c2 = 0.5 * f_ss.dot(n) * d_sigma * d_sigma;
+        if !(c2.is_finite() && curved && linear_term * c2 < 0.0 && h_aa * c2 < 0.0) {
+            return Ok(TransverseStart::NONE);
+        }
+        Ok(TransverseStart {
+            sigma_lin: 0.0,
+            regular_at_start: true,
+            adaptive: true,
+        })
+    }
+}
+
 /// `sm_TangentEndRibPoint`: the end rib's point at one fillet section, the point of the
 /// fillet surface at section parameter `sigma` on the end surface, by Newton on
 /// (`alpha`, the end surface's uv) from the guesses. `section` is the fillet surface's
@@ -678,7 +825,6 @@ fn tangent_end_rib_with(
         return Err(defect(OP_RIB, ENDS_ON_ONE_SECTION));
     }
     let odd = order % 2 == 1;
-    let sigma_at = |t: f64| sigma0 + (sigma1 - sigma0) * (if odd { t * t } else { t });
     // The curves' parameter is t. For an odd order past 1 the rib leaves the tangent end
     // with zero speed in t (a ~ t^k with s ~ t^2): the curves' end conditions there, the
     // first derivative zero and the second 2 (s1 - s0) times the fillet surface's
@@ -686,6 +832,48 @@ fn tangent_end_rib_with(
     // on the end surface's: the uv derivative that maps to it, in its tangent plane)
     // (the fork's tangency-labs/smlib@cd47efd).
     let zero_speed = odd && order > 1;
+
+    // the faces as the certificate encloses them (#17744): the surfaces the kernel
+    // evaluates; where one is not enclosed, the rib is built as upstream builds it, its
+    // spans' midpoints against the exact points there, with no bound
+    let faces = match (
+        certificate::Face::of(k, fillet)?,
+        certificate::Face::of(k, end)?,
+    ) {
+        (Some(f), Some(e)) => Some((f, e)),
+        _ => None,
+    };
+    let certified = faces.is_some();
+
+    let transverse = if certified && standoff.is_none() && !zero_speed {
+        transverse_start(
+            k,
+            fillet,
+            end,
+            section,
+            order,
+            fil0,
+            end0,
+            sigma1 - sigma0,
+            alpha1 - alpha0,
+        )?
+    } else {
+        TransverseStart::NONE
+    };
+    let sigma_lin = transverse.sigma_lin;
+    let sigma_at = |t: f64| {
+        let s = if odd {
+            if sigma_lin > 0.0 {
+                t * (sigma_lin + (1.0 - sigma_lin) * t)
+            } else {
+                t * t
+            }
+        } else {
+            t
+        };
+        sigma0 + (sigma1 - sigma0) * s
+    };
+    let adaptive = zero_speed || transverse.adaptive;
     let (d2_x, d2_fil, d2_end) = if zero_speed {
         let (_, f_u, f_v) = first_derivs(k, fillet, fil0)?;
         let (_, e_u, e_v) = first_derivs(k, end, end0)?;
@@ -757,18 +945,6 @@ fn tangent_end_rib_with(
         }
         BSplineCurve::interpolate_points(pts, Some(ts), 3, None, None, false, ParamMethod::Uniform)
     };
-
-    // the faces as the certificate encloses them (#17744): the surfaces the kernel
-    // evaluates; where one is not enclosed, the rib is built as upstream builds it, its
-    // spans' midpoints against the exact points there, with no bound
-    let faces = match (
-        certificate::Face::of(k, fillet)?,
-        certificate::Face::of(k, end)?,
-    ) {
-        (Some(f), Some(e)) => Some((f, e)),
-        _ => None,
-    };
-    let certified = faces.is_some();
 
     // the exact rib point at t, from a guess; on the other end's side of the tangent end;
     // settled where both faces are enclosed (#17744, [`settled_point`]), upstream's point
@@ -912,6 +1088,7 @@ fn tangent_end_rib_with(
                 section,
                 sigma0,
                 d_sigma: sigma1 - sigma0,
+                sigma_lin,
                 odd,
                 order,
                 curves: [
@@ -929,7 +1106,7 @@ fn tangent_end_rib_with(
         // the tangent end's span certified down to t* only: [0, t*] carries no claim
         let mut open = false;
         for jj in 0..spans {
-            if !(zero_speed || off.is_empty()) {
+            if !(adaptive || off.is_empty()) {
                 break;
             }
             let (Some(&t0), Some(&t1), Some(&a0), Some(&a1), Some(&e0), Some(&e1)) = (
@@ -949,8 +1126,18 @@ fn tangent_end_rib_with(
             if let Some(rib) = &rib {
                 let ends = ((t0, [a0, e0.x, e0.y]), (t1, [a1, e1.x, e1.y]));
                 let within = if jj == 0 {
-                    // the span at the tangent end, on pieces graded toward it
-                    rib.first_span_bound(&rib_newton, ends.0 .1, ends.1, approx_tol)?
+                    let direct = if transverse.regular_at_start {
+                        rib.span_bound(&rib_newton, ends.0, ends.1, approx_tol)?
+                    } else {
+                        certificate::Bound::Unenclosed
+                    };
+                    match direct {
+                        certificate::Bound::Unenclosed => {
+                            // the span at the tangent end, on pieces graded toward it
+                            rib.first_span_bound(&rib_newton, ends.0 .1, ends.1, approx_tol)?
+                        }
+                        other => other,
+                    }
                 } else {
                     rib.span_bound(&rib_newton, ends.0, ends.1, approx_tol)?
                 };
@@ -1013,7 +1200,7 @@ fn tangent_end_rib_with(
             });
         }
 
-        if !zero_speed {
+        if !adaptive {
             // a midpoint whose solve stopped leaves this count's fit unmeasured; the next
             // count retries, and past the cap it is reported as the stopped solve
             stations_stopped = !solved;
@@ -1026,9 +1213,23 @@ fn tangent_end_rib_with(
             continue;
         }
 
-        // the zero-speed rib: each span off the rib halved at its exact midpoint
+        // adaptive refinement (zero-speed ribs and transverse curved crossings): each span off
+        // the rib halved at its exact midpoint
         if !solved {
-            unsolved = true;
+            if zero_speed {
+                unsolved = true;
+            } else {
+                stations_stopped = true;
+            }
+            break;
+        }
+        let can_split = off.iter().all(|&(jj, ..)| {
+            matches!(
+                (ts.get(jj), ts.get(jj + 1)),
+                (Some(&t0), Some(&t1)) if t0 < 0.5 * (t0 + t1) && 0.5 * (t0 + t1) < t1
+            )
+        });
+        if !can_split {
             break;
         }
         for &(jj, alpha, uv, exact) in off.iter().rev() {
@@ -2128,6 +2329,209 @@ mod tests {
                 r.is_err_and(|e| e.is_cancelled()),
                 "cancelled at poll {n} of {all}"
             );
+        }
+    }
+
+    /// A rational 45-degree chamfer surface (`u_degree = 1`, `v_degree = 2`) on a vertical
+    /// cylinder of radius `r`, spanning `[-10 deg, 80 deg]` in azimuth (`u = 0` on the cylinder
+    /// at `z = -width`, `u = 1` at radius `r + width` on `z = 0`), together with the vertical
+    /// end plane `y = r * cos(angle_deg)` that crosses the cylinder transversely at `angle_deg`
+    /// (tangent at `0 deg`, extending `r * (1 - cos(angle_deg))` past the plane when positive).
+    fn transverse_chamfer_surfaces(
+        r: f64,
+        width: f64,
+        angle_deg: f64,
+    ) -> (Surface, Surface, Point3, Point3) {
+        let p = Point3::new;
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let a0 = -10.0_f64.to_radians();
+        let (s0, c0) = a0.sin_cos();
+        let mut pts = Vec::new();
+        for (rho, z) in [(r, -width), (r + width, 0.0)] {
+            let (p0x, p0y) = (rho * s0, rho * c0);
+            let (p2x, p2y) = (rho * c0, -rho * s0);
+            pts.push(p(p0x, p0y, z));
+            pts.push(p(p0x + p2x, p0y + p2y, z));
+            pts.push(p(p2x, p2y, z));
+        }
+        let fillet = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 2,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[3, 3],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, w, 1.0, 1.0, w, 1.0]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let theta = angle_deg.to_radians();
+        let y_plane = r * theta.cos();
+        let (x0, x1) = (-0.5 * r, r + width + 0.5 * r);
+        let (z0, z1) = (-width - 0.5 * r, 0.5 * r);
+        let end = BSplineSurface::create_bilinear_surface(
+            p(x0, y_plane, z0),
+            p(x0, y_plane, z1),
+            p(x1, y_plane, z0),
+            p(x1, y_plane, z1),
+        )
+        .unwrap();
+        let start = p(r * theta.sin(), y_plane, -width);
+        let other = p(
+            ((r + width) * (r + width) - y_plane * y_plane).sqrt(),
+            y_plane,
+            0.0,
+        );
+        (Surface::from(fillet), Surface::from(end), start, other)
+    }
+
+    /// A rational circular round surface (`u_degree = 2`, `v_degree = 2`, torus patch of minor
+    /// radius `round_r`) tangent to a vertical cylinder of radius `r` at `u = 0, z = -round_r`
+    /// and to `z = 0` at `u = 1`, together with the end plane `y = r * cos(angle_deg)`.
+    fn transverse_round_surfaces(
+        r: f64,
+        round_r: f64,
+        angle_deg: f64,
+    ) -> (Surface, Surface, Point3, Point3) {
+        let p = Point3::new;
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let a0 = -10.0_f64.to_radians();
+        let (s0, c0) = a0.sin_cos();
+        let mut pts = Vec::new();
+        let mut weights = Vec::new();
+        for (rho, z, wu) in [(r, -round_r, 1.0), (r, 0.0, w), (r + round_r, 0.0, 1.0)] {
+            let (p0x, p0y) = (rho * s0, rho * c0);
+            let (p2x, p2y) = (rho * c0, -rho * s0);
+            pts.push(p(p0x, p0y, z));
+            pts.push(p(p0x + p2x, p0y + p2y, z));
+            pts.push(p(p2x, p2y, z));
+            weights.extend_from_slice(&[wu, wu * w, wu]);
+        }
+        let fillet = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 2,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[3, 3],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&weights),
+            uv_domain: None,
+        })
+        .unwrap();
+        let theta = angle_deg.to_radians();
+        let y_plane = r * theta.cos();
+        let (x0, x1) = (-0.5 * r, r + round_r + 0.5 * r);
+        let (z0, z1) = (-round_r - 0.5 * r, 0.5 * r);
+        let end = BSplineSurface::create_bilinear_surface(
+            p(x0, y_plane, z0),
+            p(x0, y_plane, z1),
+            p(x1, y_plane, z0),
+            p(x1, y_plane, z1),
+        )
+        .unwrap();
+        let start = p(r * theta.sin(), y_plane, -round_r);
+        let other = p(
+            ((r + round_r) * (r + round_r) - y_plane * y_plane).sqrt(),
+            y_plane,
+            0.0,
+        );
+        (Surface::from(fillet), Surface::from(end), start, other)
+    }
+
+    /// A chamfer (`order = 1`) on a cylinder of radius 0.45 mm meeting an end plane transversely
+    /// at a shallow acute angle (including 0.64 deg, where the cylinder extends ~28 nm past the
+    /// plane with zero standoff) and at an exact 0 deg tangency: the quadratic section
+    /// reparameterisation removes the hyperbolic knee so the rib certifies cleanly with a small
+    /// station count instead of exhausting the 1024-span budget.
+    #[test]
+    fn a_chamfer_rib_at_a_shallow_transverse_crossing_certifies_cleanly() {
+        let k = Kernel::default();
+        let r = 0.45;
+        let protrusion = r * (1.0 - 0.64_f64.to_radians().cos());
+        assert!(
+            (protrusion - 2.8e-5).abs() < 1e-6,
+            "expected ~28 nm protrusion, got {protrusion:e}"
+        );
+        for (width, tol) in [(0.25, 1e-5), (1.0, 1e-6)] {
+            for angle_deg in [0.0, 0.01, 0.05, 0.64, 2.0, 5.0] {
+                let (fillet, end, start, other) = transverse_chamfer_surfaces(r, width, angle_deg);
+                let rib =
+                    tangent_end_rib(&k, &fillet, &end, 1, start, other, None, false, tol, 0.0)
+                        .unwrap_or_else(|e| panic!("w={width} angle={angle_deg}: {e:?}"));
+                assert_eq!(rib.standoff, None, "w={width} angle={angle_deg}");
+                let bound = rib.bound.unwrap();
+                assert!(bound <= tol, "w={width} angle={angle_deg}: {bound:e}");
+                let cpts = rib.curve_3d.number_control_points().unwrap();
+                assert!(cpts <= 64, "w={width} angle={angle_deg}: {cpts} cpts");
+                let y_plane = r * angle_deg.to_radians().cos();
+                let exact = |t: f64| {
+                    let u = rib.fillet_uv.evaluate_point(t).unwrap().x;
+                    let rho = r + width * u;
+                    let x = (rho * rho - y_plane * y_plane).max(0.0).sqrt();
+                    Point3::new(x, y_plane, -width * (1.0 - u))
+                };
+                let same = same_parameter_off(&k, &rib, &fillet, &end, &exact);
+                assert!(
+                    same <= bound + 1e-12,
+                    "w={width} angle={angle_deg}: {same:e} > {bound:e}"
+                );
+                let near = near_end_off(&k, &rib, &fillet, &end, &exact);
+                assert!(
+                    near <= bound + 1e-12,
+                    "w={width} angle={angle_deg}: near {near:e} > {bound:e}"
+                );
+                let worst = farthest_off(&k, &rib, &fillet, &end);
+                assert!(
+                    worst <= bound + 1e-12,
+                    "w={width} angle={angle_deg}: worst {worst:e} > {bound:e}"
+                );
+            }
+        }
+    }
+
+    /// A circular round (`order = 2`) on a cylinder meeting an end plane transversely at a small
+    /// acute angle (with zero standoff) certifies cleanly via adaptive span refinement across
+    /// the hyperbolic knee, while preserving exact 0 deg tangent ends.
+    #[test]
+    fn a_round_rib_at_a_shallow_transverse_crossing_certifies_cleanly() {
+        let k = Kernel::default();
+        for (r, round_r, tol) in [(0.45, 0.2, 1e-6), (12.5, 2.0, 1e-5)] {
+            for angle_deg in [0.0, 0.05, 0.64, 2.0] {
+                let (fillet, end, start, other) = transverse_round_surfaces(r, round_r, angle_deg);
+                let rib =
+                    tangent_end_rib(&k, &fillet, &end, 2, start, other, None, false, tol, 0.0)
+                        .unwrap_or_else(|e| {
+                            panic!("r={r} round={round_r} angle={angle_deg}: {e:?}")
+                        });
+                assert_eq!(rib.standoff, None, "r={r} angle={angle_deg}");
+                let bound = rib.bound.unwrap();
+                assert!(bound <= tol, "r={r} angle={angle_deg}: {bound:e}");
+                let cpts = rib.curve_3d.number_control_points().unwrap();
+                assert!(cpts <= 128, "r={r} angle={angle_deg}: {cpts} cpts");
+                let y_plane = r * angle_deg.to_radians().cos();
+                let exact = |t: f64| {
+                    let q = fillet.evaluate_point(&k, Point2::new(t, 0.0)).unwrap();
+                    let rho = q.x.hypot(q.y);
+                    let x = (rho * rho - y_plane * y_plane).max(0.0).sqrt();
+                    Point3::new(x, y_plane, q.z)
+                };
+                let same = same_parameter_off(&k, &rib, &fillet, &end, &exact);
+                assert!(
+                    same <= bound + 1e-12,
+                    "r={r} angle={angle_deg}: {same:e} > {bound:e}"
+                );
+                let near = near_end_off(&k, &rib, &fillet, &end, &exact);
+                assert!(
+                    near <= bound + 1e-12,
+                    "r={r} angle={angle_deg}: near {near:e} > {bound:e}"
+                );
+            }
         }
     }
 }

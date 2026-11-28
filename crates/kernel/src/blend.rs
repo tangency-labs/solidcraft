@@ -1857,7 +1857,7 @@ pub(crate) fn with_continuation(e: KernelError, next: Option<Vec3>) -> KernelErr
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
     /// The plate with its r16 corner, boss and cut (SolidCraft's filletfile.sc).
     fn boss_on_rounded_plate() -> Body {
@@ -3890,6 +3890,206 @@ mod tests {
             let after = crate::measure(&out).unwrap().volume;
             let removed = 10.0 * 0.5 * 1.5 * 1.5;
             assert!(((before - after) - removed).abs() < 1e-5, "len={side_edge_len}: {} vs {removed}", before - after);
+        }
+    }
+
+    /// Stepped 3 mm plate (`z` in `63.5..66.5`) with a closed profile of 8 lines and 6 R3 arcs:
+    /// main body `x` in `x_step..1027`, `y` in `-48..48` (right corners R3), neck `x` in
+    /// `955..x_step`, `|y| <= 32` (sharp 90° corners at `x = 955, y = ±32`), each step
+    /// transitioning between `|y| = 32` and `|y| = 48` via concave and convex R3 arcs, plus two
+    /// countersunk M4 clearance holes at `(964.5, ±20)`.
+    ///
+    /// When `kink_rad > 0`, the `+y` step's concave arc passes through the exact same endpoints
+    /// `(x_top, 35)` and `(x_top - 3, 32)` with a slightly larger radius so both joints form a
+    /// concave kink of `kink_rad` radians (forcing a mitred `Turn` corner when above the
+    /// intersection-tolerance join bound).
+    fn stepped_plate_with_csk_holes(x_top: f64, x_bot: f64, kink_rad: f64) -> (Body, Vec<Vec3>, f64) {
+        use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+
+        let r = 3.0;
+        let p = Vec2::new;
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+
+        // Top step concave arc between (x_top, 35) and (x_top - 3, 32).
+        let (top_concave_arc, top_concave_len, top_concave_mid) = if kink_rad > 0.0 {
+            let half_chord = 1.5 * std::f64::consts::SQRT_2;
+            let alpha = FRAC_PI_4 - kink_rad;
+            let rk = half_chord / alpha.sin();
+            let dist = (rk * rk - half_chord * half_chord).sqrt();
+            let mid_chord = p(x_top - 1.5, 33.5);
+            let n = p(-std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2);
+            let center = p(mid_chord.x + dist * n.x, mid_chord.y + dist * n.y);
+            let start = -kink_rad;
+            let sweep = -2.0 * alpha;
+            let mid_ang = start + 0.5 * sweep;
+            let mid = p(center.x + rk * mid_ang.cos(), center.y + rk * mid_ang.sin());
+            (Seg2::Arc { center, radius: rk, start, sweep }, rk * 2.0 * alpha, mid)
+        } else {
+            let center = p(x_top - r, 35.0);
+            let mid_ang = -FRAC_PI_4;
+            let mid = p(center.x + r * mid_ang.cos(), center.y + r * mid_ang.sin());
+            (Seg2::Arc { center, radius: r, start: 0.0, sweep: -FRAC_PI_2 }, r * FRAC_PI_2, mid)
+        };
+
+        let segs = vec![
+            line(p(955.0, 32.0), p(955.0, -32.0)),
+            line(p(955.0, -32.0), p(x_bot - r, -32.0)),
+            Seg2::Arc { center: p(x_bot - r, -35.0), radius: r, start: FRAC_PI_2, sweep: -FRAC_PI_2 },
+            line(p(x_bot, -35.0), p(x_bot, -45.0)),
+            Seg2::Arc { center: p(x_bot + r, -45.0), radius: r, start: PI, sweep: FRAC_PI_2 },
+            line(p(x_bot + r, -48.0), p(1024.0, -48.0)),
+            Seg2::Arc { center: p(1024.0, -45.0), radius: r, start: -FRAC_PI_2, sweep: FRAC_PI_2 },
+            line(p(1027.0, -45.0), p(1027.0, 45.0)),
+            Seg2::Arc { center: p(1024.0, 45.0), radius: r, start: 0.0, sweep: FRAC_PI_2 },
+            line(p(1024.0, 48.0), p(x_top + r, 48.0)),
+            Seg2::Arc { center: p(x_top + r, 45.0), radius: r, start: FRAC_PI_2, sweep: FRAC_PI_2 },
+            line(p(x_top, 45.0), p(x_top, 35.0)),
+            top_concave_arc,
+            line(p(x_top - r, 32.0), p(955.0, 32.0)),
+        ];
+
+        let r_bore = 2.25;
+        let csk = 1.95;
+        let region = Region2 { outer: Loop2 { segs }, holes: vec![Loop2::circle(p(964.5, 20.0), r_bore), Loop2::circle(p(964.5, -20.0), r_bore)] };
+        let plate = crate::build::extrude(&Plane::XY, &[region], 63.5, 66.5).unwrap().remove(0);
+        // 90° countersinks on the top face (`z = 66.5`) at `(964.5, ±20)`.
+        let hole_rims = [Vec3::new(964.5 + r_bore, 20.0, 66.5), Vec3::new(964.5 + r_bore, -20.0, 66.5)];
+        let body = chamfer(&plate, &hole_rims, csk).unwrap();
+
+        let s45 = std::f64::consts::FRAC_1_SQRT_2;
+        let outline_xy = vec![
+            p(955.0, 0.0),
+            p(0.5 * (955.0 + x_bot - r), -32.0),
+            p(x_bot - r + r * s45, -35.0 + r * s45),
+            p(x_bot, -40.0),
+            p(x_bot + r - r * s45, -45.0 - r * s45),
+            p(0.5 * (x_bot + r + 1024.0), -48.0),
+            p(1024.0 + r * s45, -45.0 - r * s45),
+            p(1027.0, 0.0),
+            p(1024.0 + r * s45, 45.0 + r * s45),
+            p(0.5 * (1024.0 + x_top + r), 48.0),
+            p(x_top + r - r * s45, 45.0 + r * s45),
+            p(x_top, 40.0),
+            top_concave_mid,
+            p(0.5 * (x_top - r + 955.0), 32.0),
+        ];
+        let mut all_picks = Vec::with_capacity(28);
+        for z in [66.5, 63.5] {
+            for &q in &outline_xy {
+                all_picks.push(Vec3::new(q.x, q.y, z));
+            }
+        }
+        let perim = 64.0
+            + (x_bot - 958.0)
+            + 10.0
+            + (1021.0 - x_bot)
+            + 90.0
+            + (1021.0 - x_top)
+            + 10.0
+            + (x_top - 958.0)
+            + 5.0 * (r * FRAC_PI_2)
+            + top_concave_len;
+        (body, all_picks, perim)
+    }
+
+    #[test]
+    fn stepped_plate_outline_chamfers_after_step_moves_and_near_tangent_turns() {
+        use std::f64::consts::PI;
+
+        let d = 0.5;
+        // Exact tangent stepped plate across original, +13 both, +y alone +13, -y alone +13,
+        // and -1 both — tested with both default tangent propagation from `(996, 48, 66.5)`
+        // (plus bottom `(996, 48, 63.5)`) and explicit 14-edge selection (`tangent_chain: false`).
+        for (x_top, x_bot) in [(965.0, 965.0), (978.0, 978.0), (978.0, 965.0), (965.0, 978.0), (964.0, 964.0)] {
+            let (body, all_picks, perim) = stepped_plate_with_csk_holes(x_top, x_bot, 0.0);
+            let before = crate::measure(&body).unwrap().volume;
+
+            // Tangent chain from one pick on top +y `(996, 48, 66.5)` and bottom `(996, 48, 63.5)`:
+            // propagates through all 13 tangent edges per face (stopping at the sharp 90° neck
+            // corners `x = 955, y = ±32`).
+            let chain_picks = tangent_chain(&body, &[Vec3::new(996.0, 48.0, 66.5), Vec3::new(996.0, 48.0, 63.5)]).unwrap();
+            assert_eq!(chain_picks.len(), 26, "({x_top}, {x_bot})");
+            let chained = chamfer(&body, &chain_picks, d).unwrap_or_else(|e| panic!("chained ({x_top}, {x_bot}): {e}"));
+            assert!(chained.validity().is_empty(), "chained ({x_top}, {x_bot}): {:?}", chained.validity());
+            let removed_chain = 2.0 * (0.5 * d * d * (perim - 64.0) - (PI / 6.0) * d * d * d);
+            let actual_chain = before - crate::measure(&chained).unwrap().volume;
+            assert!((actual_chain - removed_chain).abs() < 1e-3, "chained ({x_top}, {x_bot}): {actual_chain} vs {removed_chain}");
+
+            // Explicit all 14 outline edges on top and bottom (`tangent_chain: false`).
+            let explicit = chamfer(&body, &all_picks, d).unwrap_or_else(|e| panic!("explicit ({x_top}, {x_bot}): {e}"));
+            assert!(explicit.validity().is_empty(), "explicit ({x_top}, {x_bot}): {:?}", explicit.validity());
+            let removed_all = 2.0 * (0.5 * d * d * perim - (PI / 6.0 + 2.0 / 3.0) * d * d * d);
+            let actual_all = before - crate::measure(&explicit).unwrap().volume;
+            assert!((actual_all - removed_all).abs() < 1e-3, "explicit ({x_top}, {x_bot}): {actual_all} vs {removed_all}");
+        }
+
+        // Shallow concave kink (`1e-4 rad` > `behind_deg = 4e-5 rad`, well inside `TANGENT_CHAIN`)
+        // on the moved `+y` step (`x_top = 978`): forces mitred `Turn` (`FilletXFillet`) between
+        // planar and curved chamfers where the crossing endpoint lies just behind `u_min`.
+        let (kinked, all_picks, perim) = stepped_plate_with_csk_holes(978.0, 978.0, 1.0e-4);
+        let before = crate::measure(&kinked).unwrap().volume;
+        let chain_picks = tangent_chain(&kinked, &[Vec3::new(996.0, 48.0, 66.5), Vec3::new(996.0, 48.0, 63.5)]).unwrap();
+        assert_eq!(chain_picks.len(), 26);
+        let chained = chamfer(&kinked, &chain_picks, d).unwrap_or_else(|e| panic!("kinked chained: {e}"));
+        assert!(chained.validity().is_empty(), "kinked chained: {:?}", chained.validity());
+        let removed_chain = 2.0 * (0.5 * d * d * (perim - 64.0) - (PI / 6.0) * d * d * d);
+        let actual_chain = before - crate::measure(&chained).unwrap().volume;
+        assert!((actual_chain - removed_chain).abs() < 2e-3, "kinked chained: {actual_chain} vs {removed_chain}");
+
+        let explicit = chamfer(&kinked, &all_picks, d).unwrap_or_else(|e| panic!("kinked explicit: {e}"));
+        assert!(explicit.validity().is_empty(), "kinked explicit: {:?}", explicit.validity());
+        let removed_all = 2.0 * (0.5 * d * d * perim - (PI / 6.0 + 2.0 / 3.0) * d * d * d);
+        let actual_all = before - crate::measure(&explicit).unwrap().volume;
+        assert!((actual_all - removed_all).abs() < 2e-3, "kinked explicit: {actual_all} vs {removed_all}");
+    }
+
+    /// Chamfering both rims of a through-hole cut in a 3 mm bent plate far from the origin must
+    /// not depend on the hole's `(x, y)` coordinates or fail `SmFace::Test #36` ("Face Near
+    /// missing Seam") when straight seam edges are canonical unbounded lines over finite edge
+    /// intervals.
+    #[test]
+    fn off_origin_through_hole_rim_chamfers_succeed_across_positions() {
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+        // 3 mm bent L-bracket extruded along X from a (Y, Z) profile far from the origin:
+        // horizontal flange in z in [160, 163], vertical leg rising to z = 180.
+        let profile = [
+            Vec2::new(-220.0, 160.0),
+            Vec2::new(-180.0, 160.0),
+            Vec2::new(-180.0, 180.0),
+            Vec2::new(-183.0, 180.0),
+            Vec2::new(-183.0, 163.0),
+            Vec2::new(-220.0, 163.0),
+        ];
+        let plate = crate::extrude(&Plane::YZ, &[Region2 { outer: Loop2::polygon(&profile), holes: vec![] }], -90.0, -30.0).unwrap().remove(0);
+
+        // Sketch plane flush with the horizontal flange's bottom face (z = 160, normal -Z).
+        let bottom_plane = Plane { origin: Vec3::new(0.0, 0.0, 160.0), x: Vec3::X, y: Vec3::new(0.0, -1.0, 0.0) };
+        let r = 2.25;
+        let d = 0.5;
+        let both_chamfers_removed = 2.0 * std::f64::consts::PI * d * d * (r + d / 3.0);
+
+        for (cx, cy) in [(-74.0, -200.0), (-64.0, -202.0), (-61.5, -201.3), (-58.2, -199.7), (-52.7, -204.1)] {
+            let hole = crate::extrude(&bottom_plane, &[Region2 { outer: Loop2::circle(Vec2::new(cx, -cy), r), holes: vec![] }], -4.0, 0.0)
+                .unwrap()
+                .remove(0);
+            let with_hole = crate::boolean(&plate, &hole, crate::BoolOp::Cut).unwrap().unwrap();
+            let vol_before = crate::measure(&with_hole).unwrap().volume;
+
+            let bot_done =
+                chamfer(&with_hole, &[Vec3::new(cx + r, cy, 160.0)], d).unwrap_or_else(|e| panic!("bottom chamfer at ({cx}, {cy}) failed: {e}"));
+            assert!(bot_done.validity().is_empty(), "bottom at ({cx}, {cy}): {:?}", bot_done.validity());
+            let vb = crate::validity(&bot_done);
+            assert!(matches!(vb.smlib, Some(crate::SmlibCheck::Valid)), "bottom at ({cx}, {cy}): {:?}", vb.smlib);
+
+            let both_done =
+                chamfer(&bot_done, &[Vec3::new(cx + r, cy, 163.0)], d).unwrap_or_else(|e| panic!("top chamfer at ({cx}, {cy}) failed: {e}"));
+            assert!(both_done.validity().is_empty(), "both at ({cx}, {cy}): {:?}", both_done.validity());
+            let vt = crate::validity(&both_done);
+            assert!(matches!(vt.smlib, Some(crate::SmlibCheck::Valid)), "both at ({cx}, {cy}): {:?}", vt.smlib);
+
+            let removed = vol_before - crate::measure(&both_done).unwrap().volume;
+            assert!((removed - both_chamfers_removed).abs() < 1e-4, "at ({cx}, {cy}): {removed} vs {both_chamfers_removed}");
         }
     }
 }

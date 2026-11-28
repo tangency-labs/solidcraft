@@ -2385,8 +2385,14 @@ fn blend_on_body(
         }
     }
     // constant rounds between planes, built in closed form ([`exact_round`]); anything it does
-    // not cover, or a result that does not finish, goes to the fillet sessions as before
-    if kind == Blend::Round && turn == Turn::Mitre && back.is_empty() && corners == Corners::Filled
+    // not cover, or a result that does not finish, goes to the fillet sessions as before.
+    // `exact_round::endings` only covers valence-3 vertices with 1 or 3 rounded edges (never a
+    // 2-round sharp-side-edge turn where `Turn::Auto` differs from `Turn::Mitre`), so `Turn::Auto`
+    // is semantically identical here.
+    if kind == Blend::Round
+        && matches!(turn, Turn::Mitre | Turn::Auto)
+        && back.is_empty()
+        && corners == Corners::Filled
     {
         if let Some((rounded, made)) = exact_round::round_on(k, b, &picked, each)? {
             if let Ok((r, _)) = finish_under(k, rounded, expect, contract)? {

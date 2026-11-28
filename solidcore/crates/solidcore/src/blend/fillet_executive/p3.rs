@@ -2446,6 +2446,16 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         radius: Option<f64>,
     ) -> Result<Option<crate::blend::fillet_exact::CollapsedOffset>>;
 
+    /// Whether a constant ball whose offset collapses along an open edge closes at both ends
+    /// onto a single fixed point ball (`#2403` corner ball). Defaults to `false` for adapters
+    /// without solvers.
+    ///
+    /// # Errors
+    /// The judging's own errors.
+    fn creation_ball_zone_closed_point(&mut self, _k: &mut Kernel, _solver: O) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Not the fork's (#14846): for a constant ball (of `radius`, `None`: the solver's own),
     /// the end of its edge that every ball on the edge's faces lies past, so that the round
     /// has no section between the edge's ends, and the largest radius that has one
@@ -4290,11 +4300,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             let (mut first, const_radius) = access.creation_ball_is_regular(k, solver)?;
             // (#16768) a collapsed offset whose ball zone is open at an end of the edge is the
             // collapsed-offset refusal's (#2401, `refuse_collapsed_offsets`), which names the
-            // size that builds: left to it
+            // size that builds: left to it; one whose zone closes at both ends onto a single
+            // fixed point ball (`#2403`) is built as that corner ball
             if matches!(
                 first.check,
                 BallCheck::Collapsed | BallCheck::CollapsedUnjudged
-            ) && access.creation_ball_zone_open(k, solver, None)?.is_some()
+            ) && (access.creation_ball_zone_open(k, solver, None)?.is_some()
+                || access.creation_ball_zone_closed_point(k, solver)?)
             {
                 first.check = BallCheck::Regular;
             }

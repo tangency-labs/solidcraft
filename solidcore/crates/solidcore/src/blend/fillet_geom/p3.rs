@@ -886,6 +886,10 @@ impl FilletBrep {
                         .set_status(FilStatus::SurfIntFailure);
                     let c = corners
                         .corner(corner.ok_or_else(|| broken_link(OP_FIF, CORNER_NOT_PASSED))?)?;
+                    let location = c
+                        .filleted_vertex()
+                        .and_then(|v| target.vertex(v).ok().map(|rec| rec.point))
+                        .or_else(|| Some(start_pnt + (end_pnt - start_pnt) * 0.5));
                     record_fillet_error(
                         c,
                         error_info,
@@ -893,6 +897,7 @@ impl FilletBrep {
                         fillet_geom2,
                         start_fv,
                         end_fv,
+                        location,
                     );
                     // the intersection's error is kept as the cause; an intersection that
                     // found no curve is the empty search
@@ -1951,6 +1956,7 @@ fn record_fillet_error(
     fillet_geom2: FilletGeomId,
     start_fv: VertexId,
     end_fv: VertexId,
+    location: Option<Point3>,
 ) {
     // m_pExecutive->NoteFilletError: a caller without an executive record (a
     // standalone entry point) notes into a scratch record it does not keep.
@@ -1958,6 +1964,14 @@ fn record_fillet_error(
     let error_info = match error_info {
         Some(error_info) => error_info,
         None => &mut scratch,
+    };
+    let finite = location.filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+    let comment = match finite {
+        Some(p) => format!(
+            "SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two fillet surfaces at ({:.3}, {:.3}, {:.3})",
+            p.x, p.y, p.z
+        ),
+        None => "SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two fillet surfaces".to_owned(),
     };
     corner.record_fillet_error_in(
         error_info,
@@ -1973,10 +1987,11 @@ fn record_fillet_error(
             Some(ExecutiveErrorObject::FilletVertex(start_fv)),
             Some(ExecutiveErrorObject::FilletVertex(end_fv)),
         ],
-        Some(
-            "SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two fillet surfaces",
-        ),
+        Some(&comment),
     );
+    if finite.is_some() {
+        error_info.location = finite;
+    }
 }
 
 /// Whether `e` is the mate-nesting bound of [`FilletBrep::calc_mate_geom`].
@@ -2594,7 +2609,7 @@ mod tests {
         let corner = FilletCorner::new(FilletCornerKind::FourByThree, None, None, None, 1e-6, 0.01);
 
         // without the executive's record the note goes to a scratch record
-        record_fillet_error(&corner, None, FilletGeomId(0), FilletGeomId(1), a, b);
+        record_fillet_error(&corner, None, FilletGeomId(0), FilletGeomId(1), a, b, None);
 
         let mut error_info = ErrorInfo::default();
         record_fillet_error(
@@ -2604,6 +2619,7 @@ mod tests {
             FilletGeomId(1),
             a,
             b,
+            None,
         );
         assert_eq!(error_info.code, FilletErrorType::BadInt as i32);
         assert_eq!(
@@ -2621,6 +2637,30 @@ mod tests {
             ]
         );
         assert_eq!(error_info.entity_name, "SmFillet4x3Corner");
+        assert!(error_info.location.is_none());
+        assert!(error_info.comment.contains(
+            "SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two fillet surfaces"
+        ));
+
+        let site = Point3::new(978.0, 45.0, 66.5);
+        let mut located = ErrorInfo::default();
+        record_fillet_error(
+            &corner,
+            Some(&mut located),
+            FilletGeomId(0),
+            FilletGeomId(1),
+            a,
+            b,
+            Some(site),
+        );
+        assert_eq!(located.location, Some(site));
+        assert!(
+            located.comment.contains(
+                "SmFilletEdge::CalcFilletIntFillet(): failure to calculate intersection of two fillet surfaces at (978.000, 45.000, 66.500)"
+            ),
+            "{}",
+            located.comment
+        );
     }
 
     /// A non-rational curve of dimension `dim` (`NOW` weights; `NOZ` z for 2D).

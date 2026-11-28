@@ -192,9 +192,9 @@ pub fn measure_mass_many(bodies: &[&Body]) -> Vec<Result<MassMeasure>> {
 /// its exact box read there), so the span is the body's own, not the shadow of its world box.
 /// A mesh body has no solidcore form and is refused.
 pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2]> {
-    let Some(form) = b.ops_body() else {
-        return Err(crate::KernelError::Failed("the body's reach along the plane's normal: the body has no solidcore form".into()));
-    };
+    let form = b.ops_body_result("the body's reach along the plane's normal", || {
+        crate::KernelError::Failed("the body's reach along the plane's normal: the body has no solidcore form".into())
+    })?;
     let (ops, _) = &*form;
     let (o, x, y) = (plane.origin, plane.x, plane.y);
     ops.levels_along([o.x, o.y, o.z], [x.x, x.y, x.z], [y.x, y.y, y.z])
@@ -250,7 +250,8 @@ mod tests {
         let exact = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
         let mut unavailable = exact.clone();
         // A cached refusal is how ops_body represents a B-rep it could not convert.
-        unavailable.ops = std::sync::Arc::new(crate::form_cell::FormCell::refused_for(()));
+        unavailable.ops =
+            std::sync::Arc::new(crate::form_cell::FormCell::refused_for(crate::body::OpsRefusal { why: "test refusal".into(), internal: false }));
         assert!(mesh.is_mesh() && !unavailable.is_mesh());
         for (a, b) in [(&mesh, &unavailable), (&unavailable, &mesh)] {
             assert_eq!(crate::faces_closest(a, &[0], b, &[0]).unwrap(), None);

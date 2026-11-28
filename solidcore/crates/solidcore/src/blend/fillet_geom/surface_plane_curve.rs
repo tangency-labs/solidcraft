@@ -404,16 +404,25 @@ pub fn surface_plane_curve(
     }
     let [start_uv, stop_uv] = end_uv;
     let [start_x, stop_x] = end_x;
-    // the curve stays on the surface: within its domain, but across a seam it is closed over
+    // the curve stays on the surface: within its domain (widened to the accepted end
+    // parameters, which `onto_plane_nearest` may place within `tol` of an open side), but
+    // across a seam it is closed over
     let closed =
         |param| -> Result<bool> { Ok(surf.is_closed(k, &dom, param, Some(tol), false)?.0) };
     let (closed_u, closed_v) = (closed(SurfParamType::U)?, closed(SurfParamType::V)?);
+    let trace_lo = Point2::new(
+        dom.min().x.min(start_uv.x).min(stop_uv.x),
+        dom.min().y.min(start_uv.y).min(stop_uv.y),
+    );
+    let trace_hi = Point2::new(
+        dom.max().x.max(start_uv.x).max(stop_uv.x),
+        dom.max().y.max(start_uv.y).max(stop_uv.y),
+    );
+    let pad = |a: f64, b: f64| 1.0e-12 * (1.0 + a.abs() + b.abs());
+    let (pu, pv) = (pad(trace_lo.x, trace_hi.x), pad(trace_lo.y, trace_hi.y));
     let on_domain = |uv: Point2| {
-        let (lo, hi) = (dom.min(), dom.max());
-        let pad = |a: f64, b: f64| 1.0e-12 * (1.0 + a.abs() + b.abs());
-        let (pu, pv) = (pad(lo.x, hi.x), pad(lo.y, hi.y));
-        (closed_u || (uv.x >= lo.x - pu && uv.x <= hi.x + pu))
-            && (closed_v || (uv.y >= lo.y - pv && uv.y <= hi.y + pv))
+        (closed_u || (uv.x >= trace_lo.x - pu && uv.x <= trace_hi.x + pu))
+            && (closed_v || (uv.y >= trace_lo.y - pv && uv.y <= trace_hi.y + pv))
     };
 
     // the stations: from the start, along the level line, to the end
@@ -425,15 +434,12 @@ pub fn surface_plane_curve(
     // the domain. The chord heads the wrong way where the curve turns through more than a
     // half turn, as a round's end rib does where the round nearly fills the end face.
     let leaves = |rate: Point2| {
-        let (lo, hi) = (dom.min(), dom.max());
-        let pad = |a: f64, b: f64| 1.0e-12 * (1.0 + a.abs() + b.abs());
-        let (pu, pv) = (pad(lo.x, hi.x), pad(lo.y, hi.y));
         let out = |at: f64, lo: f64, hi: f64, pad: f64, rate: f64| {
             (at <= lo + pad && rate < 0.0) || (at >= hi - pad && rate > 0.0)
         };
         (
-            !closed_u && out(start_uv.x, lo.x, hi.x, pu, rate.x),
-            !closed_v && out(start_uv.y, lo.y, hi.y, pv, rate.y),
+            !closed_u && out(start_uv.x, trace_lo.x, trace_hi.x, pu, rate.x),
+            !closed_v && out(start_uv.y, trace_lo.y, trace_hi.y, pv, rate.y),
         )
     };
     let (_, su0, sv0, _) = tr.eval(start_uv)?;
@@ -1014,5 +1020,52 @@ mod tests {
         ));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// When an accepted endpoint lands slightly past an open side of the surface's natural
+    /// domain (within `tol`, as `onto_plane_nearest` produces at a shallow concave mitre
+    /// between a planar chamfer and a curved chamfer), the march keeps that endpoint inside
+    /// its allowed parameter range instead of reversing away from it or failing with
+    /// `PlaneCurveLeavesDomain`.
+    #[test]
+    fn an_endpoint_slightly_past_an_open_boundary_traces_without_leaving_domain() {
+        let k = Kernel::new(&KernelOptions::default());
+        // Curved patch (u, v, 0.1 u^2) over [0, 1] x [0, 1] with out-of-bounds evaluation
+        // enabled, matching a ProceduralBlend's certified net.
+        let mut surf = graph(2, 1, [0.0, 1.0, 0.0, 1.0], &[(0.1, 2, 0)]);
+        crate::surface::surface::p3::set_out_of_bounds_enabled(&mut surf, true);
+
+        // Cutting plane x + 1e-5 y = 0: crosses the patch along u = -1e-5 v, starting on the
+        // open boundary at (0, 0, 0) and ending slightly behind u_min = 0 at (-1e-5, 1, 1e-11),
+        // well within tol = 4e-5 of the domain boundary (0, 1, 0).
+        let domain = Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0);
+        let pu = Vec3::new(-1.0e-5, 1.0, 0.0).unitize().unwrap();
+        let pv = Vec3::new(0.0, 0.0, 1.0);
+        let cutter = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            pu,
+            pv,
+            Vec2::new(1.0, 1.0),
+            &domain,
+        ));
+        let start = Point3::new(0.0, 0.0, 0.0);
+        let end = Point3::new(-1.0e-5, 1.0, 1.0e-11);
+        let tol = 4.0e-5;
+        let c = surface_plane_curve(&k, &surf, &cutter, start, end, None, tol, 0.1).unwrap();
+        let ivl = c.curve_3d.natural_interval();
+        let p0 = c.curve_3d.evaluate_point(&k, ivl.min()).unwrap();
+        let p1 = c.curve_3d.evaluate_point(&k, ivl.max()).unwrap();
+        assert!(p0.distance(start) <= 1.0e-10, "{p0:?}");
+        // `onto_plane_nearest` projects the boundary drop `(0, 1, 0)` orthogonally onto
+        // `x + 1e-5 y = 0`, shifting `v` by `-1e-10 / (1 + 1e-10)` (which rounds slightly
+        // above `1e-10` in f64 at `y = 1`).
+        assert!(p1.distance(end) <= 1.0e-9, "{p1:?}");
+        assert!((p1.x + 1.0e-5 * p1.y).abs() <= 1.0e-12, "{p1:?}");
+        for i in 0..=20 {
+            let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 20.0;
+            let p = c.curve_3d.evaluate_point(&k, t).unwrap();
+            assert!((p.x + 1.0e-5 * p.y).abs() <= 0.1 * tol, "{i}: {p:?}");
+            assert!((p.z - 0.1 * p.x * p.x).abs() <= 0.1 * tol, "{i}: {p:?}");
+        }
     }
 }

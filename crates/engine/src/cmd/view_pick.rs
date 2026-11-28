@@ -587,7 +587,7 @@ mod tests {
     }
 
     /// Build a body at `[0..10, 0..10, 15..25]` whose portable B-rep record is structurally valid
-    /// but refused by `solidcore-ops`, so `Body::fire_ray` fails with "no solidcore form".
+    /// but refused by `solidcore-ops`, so `Body::fire_ray` surfaces that conversion refusal.
     fn body_without_solidcore_form() -> solidcraft_kernel::Body {
         use solidcore_record::Vec3;
 
@@ -600,7 +600,7 @@ mod tests {
         let edited = solidcore_record::native::encode(&saved).unwrap();
         let body = solidcraft_kernel::decode_native_body(&edited).unwrap();
         let err = body.fire_ray(Vec3::new(5.0, 5.0, 45.0), Vec3::new(0.0, 0.0, -1.0)).unwrap_err().to_string();
-        assert!(err.contains("no solidcore form"), "expected no solidcore form error, got: {err}");
+        assert!(err.contains("edge tolerance over the kernel's limit"), "expected solidcore conversion refusal, got: {err}");
         body
     }
 
@@ -633,7 +633,7 @@ mod tests {
         let parsed: ViewPickResult = serde_json::from_value(r.clone()).expect("result matches schema");
         assert_eq!(parsed.warnings.len(), 1, "{r}");
         assert!(parsed.warnings[0].contains("BrokenBox"), "{r}");
-        assert!(parsed.warnings[0].contains("no solidcore form"), "{r}");
+        assert!(parsed.warnings[0].contains("edge tolerance over the kernel's limit"), "{r}");
 
         // Multiple rays passing through BrokenBox do not duplicate its warning, and a ray
         // missing every body returns `null`.

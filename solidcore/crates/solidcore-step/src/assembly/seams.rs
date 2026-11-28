@@ -1999,7 +1999,12 @@ impl Assembly<'_> {
         if let Some((i, j)) = pair {
             if ax.kind == Kind::Ruled {
                 let (va, vb) = (self.start(*a_es.get(i).ok_or("loop reference")?)?, self.start(*b_es.get(j).ok_or("loop reference")?)?);
-                self.seat_on_ruling(va, vb, d, eval)?;
+                let off_quarter = |u: f64| (u - (u / FRAC_PI_2).round() * FRAC_PI_2).abs();
+                if off_quarter(angle(self, vb)?) < off_quarter(angle(self, va)?) {
+                    self.seat_on_ruling(vb, va, d, eval)?;
+                } else {
+                    self.seat_on_ruling(va, vb, d, eval)?;
+                }
             }
             return self.join_by_seam(fi, la, lb, i, j, ax, eval);
         }

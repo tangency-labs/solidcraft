@@ -393,3 +393,21 @@ fn a_bodys_solidcore_ops_form_runs_with_the_kernels_fixes() {
     assert!(body.ops_body().is_some());
     assert_eq!(solidcore_ops::session::fixes(), crate::smlib_trace::fixes());
 }
+
+/// When `solidcore-ops` refuses to import a B-rep body's record, exact queries surface that
+/// refusal reason instead of claiming the exact body is not an exact body (which is reserved
+/// for mesh bodies).
+#[test]
+fn ops_refusal_on_exact_body_surfaces_reason_not_mesh_error() {
+    let p = [Vec3::ZERO, Vec3::X * 10.0, Vec3::Y * 10.0, Vec3::Z * 10.0];
+    let mesh = crate::mesh_body(&p, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+    let mesh_err = mesh.classify_points_with_normals(&[Vec3::ZERO], None).unwrap_err();
+    assert!(matches!(&mesh_err, KernelError::Invalid(msg) if msg == "point classification needs an exact body"), "{mesh_err:?}");
+
+    let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    body.ops.refuse(OpsRefusal { why: "surface derive failed".into(), internal: false });
+    let err = body.classify_points_with_normals(&[Vec3::new(5.0, 5.0, 5.0)], None).unwrap_err();
+    assert!(matches!(&err, KernelError::Failed(msg) if msg.contains("surface derive failed") && !msg.contains("needs an exact body")), "{err:?}");
+    let ray_err = body.fire_ray(Vec3::new(-5.0, 5.0, 5.0), Vec3::X).unwrap_err();
+    assert!(matches!(&ray_err, KernelError::Failed(msg) if msg.contains("surface derive failed")), "{ray_err:?}");
+}

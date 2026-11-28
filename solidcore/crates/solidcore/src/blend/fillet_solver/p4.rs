@@ -2394,6 +2394,65 @@ fn c3_make_intersector<'s>(
     Ok(fi)
 }
 
+/// Whether `tip` is an `OnVertex` contact where a linear fillet/chamfer trace should start
+/// from the regular end rather than out of the tangent point:
+/// - the target vertex is shared by more than one edge between the solver's two faces (e.g. a
+///   figure-8 tangent seam where tracing out of the vertex admits competing branches), or
+/// - both base surfaces are non-planar (curved), where starting out of a tangent vertex can
+///   mis-orient or drop the trace along the curved offsets.
+///
+/// A single-branch degenerate cusp where at least one base surface is planar keeps upstream's
+/// rule of tracing out of the tangent point toward the regular end.
+fn on_vertex_starts_from_regular(
+    solver: &FilletSolver,
+    cx: &Cx<'_>,
+    bases: &[Surface; 2],
+    tol_3d: f64,
+    tip: TsRef,
+) -> Result<bool> {
+    use crate::blend::fillet_geom::p1::FilletVertexType;
+    use crate::error::EntityRef;
+    use crate::topology::{edge as topo_edge, edgeuse::p1 as topo_eu, vertex as topo_vertex};
+
+    let TsRef::Vertexuse(vu) = tip else {
+        return Ok(false);
+    };
+    let Some(vertex) = cx.fillets.brep().vertexuse(vu)?.vertex else {
+        return Ok(false);
+    };
+    let fv = cx.fillets.fillet_vertex(vertex)?;
+    if fv.fillet_vertex_type() != FilletVertexType::OnVertex {
+        return Ok(false);
+    }
+    let Some(EntityRef::Vertex(target_vertex)) = fv.point_class_object() else {
+        return Ok(false);
+    };
+    let (Some(eu0), Some(eu1)) = (solver.edgeuse(0)?, solver.edgeuse(1)?) else {
+        return Ok(false);
+    };
+    let (Some(f0), Some(f1)) = (
+        topo_eu::face(cx.target, eu0)?,
+        topo_eu::face(cx.target, eu1)?,
+    ) else {
+        return Ok(false);
+    };
+    if f0 == f1 {
+        return Ok(false);
+    }
+    let mut shared_edges = 0_usize;
+    for edge in topo_vertex::edges(cx.target, target_vertex, None)? {
+        let faces = topo_edge::faces(cx.target, edge, None)?;
+        if faces.contains(&f0) && faces.contains(&f1) {
+            shared_edges += 1;
+            if shared_edges > 1 {
+                return Ok(true);
+            }
+        }
+    }
+    let [base0, base1] = bases;
+    Ok(!base0.is_planar(cx.k, tol_3d)?.is_planar && !base1.is_planar(cx.k, tol_3d)?.is_planar)
+}
+
 /// :2054-2090: the trace locals (tolerances, `sDir = sPVSt[1]`); a TANGENT last point
 /// reverses `st.tsect_pnts`, sets `sDir = -sPVEn[1]` and `bReverseTracing`; the local
 /// extension flags from the solver's. Not upstream (WR-603): a TANGENT first point starts
@@ -2423,18 +2482,17 @@ fn c3_trace_start(
             let first_tangent = tangent(*first)?;
             if first_tangent != tangent(*last)? {
                 let tip = if first_tangent { first } else { last };
-                if let TsRef::Vertexuse(vu) = tip {
-                    let vertex = cx.fillets.brep().vertexuse(*vu)?.vertex;
-                    if let Some(vertex) = vertex {
-                        if cx.fillets.fillet_vertex(vertex)?.fillet_vertex_type()
-                            == crate::blend::fillet_geom::p1::FilletVertexType::OnVertex
-                        {
-                            // The rails meet at the original vertex. At this contact the
-                            // offsets admit multiple intersection directions. The regular
-                            // end and its edge tangent identify the intended branch.
-                            start_from = Some(first);
-                        }
-                    }
+                if on_vertex_starts_from_regular(
+                    solver,
+                    cx,
+                    &st.base_surfaces,
+                    st.trace.approx_tol_3d,
+                    *tip,
+                )? {
+                    // Start from the regular end rather than out of the degenerate tangent
+                    // vertex when multiple shared edges compete at the vertex or both base
+                    // surfaces are non-planar.
+                    start_from = Some(first);
                 }
             }
         }
@@ -2829,6 +2887,181 @@ mod tests_c3 {
         assert!(st.tsect_pnts.is_empty());
         assert!(!st.trace.reverse_tracing);
         assert_eq!(st.trace.dir, st.pv_start[1]);
+    }
+
+    fn linear_on_vertex_starts_from_regular_case(
+        k: &Kernel,
+        branches: usize,
+        bases: [Surface; 2],
+        tip_first: bool,
+    ) -> bool {
+        use crate::blend::fillet_geom::p1::{FilletVertex, FilletVertexType, FilletVertexuse};
+        use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
+        use crate::error::EntityRef;
+        use crate::intersect::point_class::PointClassType;
+        use crate::intersect::surface_intersector::p1::SrfIndex;
+        use crate::topology::{
+            Edgeuse, EdgeuseOwner, Face, Faceuse, Loopuse, ShellId, Vertexuse, VertexuseOwner,
+        };
+
+        let mut target = Brep::new();
+        let f0 = target
+            .add_face_record(Face::new(ShellId::from_index(0)))
+            .unwrap();
+        let f1 = target
+            .add_face_record(Face::new(ShellId::from_index(0)))
+            .unwrap();
+        let v_cusp = target.add_vertex(Point3::ZERO).unwrap();
+        let mut solver_eus = None;
+        for branch in 0..branches {
+            let y = if branch == 0 { 1.0 } else { 2.0 };
+            let v_end = target.add_vertex(Vec3::new(0.0, y, 0.0)).unwrap();
+            let edge = target.add_edge(v_cusp, v_end).unwrap();
+            let mut pair = Vec::new();
+            for face in [f0, f1] {
+                let fu = target
+                    .add_faceuse_record(Faceuse {
+                        face: Some(face),
+                        ..Faceuse::default()
+                    })
+                    .unwrap();
+                let lu = target
+                    .add_loopuse_record(Loopuse {
+                        faceuse: Some(fu),
+                        ..Loopuse::default()
+                    })
+                    .unwrap();
+                let eu = target
+                    .add_edgeuse_record(Edgeuse {
+                        edge: Some(edge),
+                        owner: EdgeuseOwner::Loopuse(Some(lu)),
+                        ..Edgeuse::default()
+                    })
+                    .unwrap();
+                let vu = target
+                    .add_vertexuse_record(Vertexuse {
+                        vertex: Some(v_cusp),
+                        owner: VertexuseOwner::Edgeuse(Some(eu)),
+                        ..Vertexuse::default()
+                    })
+                    .unwrap();
+                target.vertex_mut(v_cusp).unwrap().vertexuses.push(vu);
+                target.edge_mut(edge).unwrap().edgeuses.push(eu);
+                pair.push(eu);
+            }
+            if solver_eus.is_none() {
+                solver_eus = Some([pair[0], pair[1]]);
+            }
+        }
+
+        let mut fillets = FilletBrep::new();
+        let fv_id = fillets.brep_mut().add_vertex(Point3::ZERO).unwrap();
+        let vu_tip = fillets
+            .brep_mut()
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(fv_id),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        let mut fv = FilletVertex::new(k, None);
+        fv.set_fillet_vertex_type(FilletVertexType::OnVertex);
+        fv.set_point_class(PointClassType::Vertex, Some(EntityRef::Vertex(v_cusp)));
+        fillets.insert_fillet_vertex(fv_id, fv);
+        let mut fvu = FilletVertexuse::new();
+        fvu.tsect_pnt_mut().point_type = IntersectionPointType::TangentPoint;
+        *fvu.tsect_pnt_mut().uv_pos_mut(SrfIndex::First) = Point2::new(0.2, 0.3);
+        fillets.insert_fillet_vertexuse(vu_tip, fvu);
+
+        let [a, b] = bases;
+        let mut fs = solver(k, &a, &b);
+        fs.solver.fsg = Some(FilletSurfaceGenerator::Linear);
+        let [eu0, eu1] = solver_eus.unwrap();
+        fs.solver.edgeuses = [Some(eu0), Some(eu1)];
+
+        let mut st = state(line(), [a, b]);
+        let mut regular = TsectPnt::new();
+        regular.point_type = IntersectionPointType::Crossing;
+        *regular.uv_pos_mut(SrfIndex::First) = Point2::new(0.6, 0.7);
+        let reg_ref = st.store.alloc(regular);
+        let tip_ref = TsRef::Vertexuse(vu_tip);
+        st.tsect_pnts = if tip_first {
+            vec![tip_ref, reg_ref]
+        } else {
+            vec![reg_ref, tip_ref]
+        };
+
+        let mut cx = Cx {
+            k,
+            target: &mut target,
+            fillets: &mut fillets,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        c3_trace_start(&mut fs, &mut cx, &mut st).unwrap();
+        st.tsect_pnts[0] == reg_ref
+    }
+
+    #[test]
+    fn linear_on_vertex_tangent_point_starts_from_regular_end_only_for_multiple_branches() {
+        let k = Kernel::default();
+        for (branches, expect_regular_first) in [(1_usize, false), (2, true)] {
+            for tip_first in [true, false] {
+                let (a, b) = planes();
+                let regular_first =
+                    linear_on_vertex_starts_from_regular_case(&k, branches, [a, b], tip_first);
+                assert_eq!(
+                    regular_first, expect_regular_first,
+                    "branches={branches}, tip_first={tip_first}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn linear_on_vertex_tangent_point_starts_from_regular_end_for_two_curved_bases() {
+        let k = Kernel::default();
+        let curved_a = || {
+            bilinear([
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.5],
+            ])
+        };
+        let curved_b = || {
+            bilinear([
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.5, 1.0, 1.0],
+            ])
+        };
+        assert!(!curved_a().is_planar(&k, 0.001).unwrap().is_planar);
+        assert!(!curved_b().is_planar(&k, 0.001).unwrap().is_planar);
+
+        for tip_first in [true, false] {
+            // Single shared edge between two non-planar (curved) surfaces starts from the
+            // regular end (`fillets/14283-chamfer-tangent-bore-edges`).
+            assert!(
+                linear_on_vertex_starts_from_regular_case(
+                    &k,
+                    1,
+                    [curved_a(), curved_b()],
+                    tip_first,
+                ),
+                "curved + curved, tip_first={tip_first}"
+            );
+            // Single shared edge with one planar and one curved surface keeps cusp tracing.
+            let (plane_a, plane_b) = planes();
+            assert!(
+                !linear_on_vertex_starts_from_regular_case(&k, 1, [plane_a, curved_b()], tip_first),
+                "planar + curved, tip_first={tip_first}"
+            );
+            assert!(
+                !linear_on_vertex_starts_from_regular_case(&k, 1, [curved_a(), plane_b], tip_first),
+                "curved + planar, tip_first={tip_first}"
+            );
+        }
     }
 }
 

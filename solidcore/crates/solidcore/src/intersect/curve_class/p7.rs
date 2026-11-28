@@ -864,7 +864,9 @@ impl<O: ClassObject> CurveClassification<O> {
         ) else {
             return Ok(None);
         };
-        let other = if let Some((b, EntityRef::Edge(e))) = geometry.topology_entity(object) {
+        let (other, domain) = if let Some((b, EntityRef::Edge(e))) =
+            geometry.topology_entity(object)
+        {
             let edge = b.edge(e)?;
             let Some(other) = edge.curve.as_ref() else {
                 return Ok(None);
@@ -901,12 +903,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
                 _ => {}
             }
-            other
+            (other, edge.interval)
         } else {
             let Some(other) = geometry.curve(object) else {
                 return Ok(None);
             };
-            other
+            (other, other.natural_interval())
         };
         if surface.procedural_definition().is_some() {
             return Ok(None);
@@ -935,7 +937,9 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             _ => return Ok(None),
         };
-        Ok(native_curve_in_strip(other, origin, across, threshold))
+        Ok(native_curve_in_strip(
+            other, domain, origin, across, threshold,
+        ))
     }
 
     /// Whether an edge at the vertex end `pc` other than the curve's own edges runs beside
@@ -3807,18 +3811,23 @@ fn interval_dot(a: [Ivl; 3], b: [Ivl; 3]) -> Ivl {
         .fold(Ivl::from(0.0), |sum, (a, b)| sum + a * b)
 }
 
-/// Whether `uv_seam` is, exactly, a line of constant angle `u` on the cone or
-/// cylinder: a native line whose direction has no `u` component. Read from the line's
-/// stored point and vector, as [`same_iso_support`] reads a constant coordinate; no
-/// station is sampled.
-fn constant_angle_uv_line(uv_seam: &Curve) -> bool {
+/// Whether `uv_seam` is, exactly, a line of constant sweep angle on the cone or
+/// cylinder: a native line whose direction has no component in the sweep parameter
+/// (`u` normally, `v` when `swap_uv` is set). Read from the line's stored point and
+/// vector, as [`same_iso_support`] reads a constant coordinate; no station is sampled.
+fn constant_angle_uv_line(uv_seam: &Curve, swap_uv: bool) -> bool {
     let CurveKind::Line(line) = uv_seam.kind() else {
         return false;
     };
     let (point, vector) = (line.line_point(), line.line_vector());
-    vector.x == 0.0
-        && vector.y != 0.0
-        && vector.y.is_finite()
+    let (const_dir, run_dir) = if swap_uv {
+        (vector.y, vector.x)
+    } else {
+        (vector.x, vector.y)
+    };
+    const_dir == 0.0
+        && run_dir != 0.0
+        && run_dir.is_finite()
         && point.x.is_finite()
         && point.y.is_finite()
 }
@@ -3843,7 +3852,8 @@ fn ruling_frame(
     domain: Extent1d,
 ) -> Result<Option<([Ivl; 3], [Ivl; 3])>> {
     const MARGIN: f64 = 1e-12;
-    if !(matches!(seam.kind(), CurveKind::Line(_)) || constant_angle_uv_line(uv_seam)) {
+    let swap_uv = matches!(surface.kind(), SurfaceKind::Cone(cone) if cone.rev.swap_uv());
+    if !(matches!(seam.kind(), CurveKind::Line(_)) || constant_angle_uv_line(uv_seam, swap_uv)) {
         return Ok(None);
     }
     let stations = [domain.min(), domain.mid(), domain.max()];
@@ -3905,6 +3915,7 @@ fn ruling_frame(
 /// and the direction's length. Only native polynomial/rational definitions qualify.
 fn native_curve_in_strip(
     curve: &Curve,
+    domain: Extent1d,
     origin: [Ivl; 3],
     across: [Ivl; 3],
     threshold: f64,
@@ -3929,10 +3940,13 @@ fn native_curve_in_strip(
     };
     match curve.kind() {
         CurveKind::Line(_) => {
-            let line = of_line(curve, curve.natural_interval())?;
+            if !(domain.min().is_finite() && domain.max().is_finite()) {
+                return None;
+            }
+            let line = of_line(curve, domain)?;
             let ends = [
-                in_strip(line.jet_over(Ivl::from(curve.natural_interval().min())).0),
-                in_strip(line.jet_over(Ivl::from(curve.natural_interval().max())).0),
+                in_strip(line.jet_over(Ivl::from(domain.min())).0),
+                in_strip(line.jet_over(Ivl::from(domain.max())).0),
             ];
             if ends.contains(&Some(false)) {
                 Some(false)
@@ -4636,5 +4650,157 @@ mod tests {
                 .set_class_object(PointClassType::Unknown, None);
             assert!(cc.has_near_misses(&k, &geo, false).unwrap());
         }
+    }
+
+    #[test]
+    fn canonical_line_seam_edge_on_cylinder_proves_coincidence_over_edge_interval() {
+        use crate::nurbs::b_spline_surface::p1::SurfParamType;
+        use crate::surface::cone::Cone;
+        use crate::topology::Edge;
+
+        struct CylSeamGeo {
+            curves: Vec<Curve>,
+            surface: Surface,
+            brep: Brep,
+            edge: EdgeId,
+            vertex: Point3,
+        }
+
+        impl ClassGeometry<H> for CylSeamGeo {
+            fn curve(&self, o: H) -> Option<&Curve> {
+                self.curves.get(o.0)
+            }
+            fn surface(&self, o: H) -> Option<&Surface> {
+                (o.0 == 0).then_some(&self.surface)
+            }
+            fn volume(&self, _o: H) -> Option<&Volume> {
+                None
+            }
+            fn point(&self, _o: H) -> Option<Point3> {
+                None
+            }
+            fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+                (o == H(0, K::Edge)).then_some((&self.brep, EntityRef::Edge(self.edge)))
+            }
+            fn classification_vertex_point(&self, _vertex: H) -> Option<Point3> {
+                Some(self.vertex)
+            }
+            fn topology_zone_tol_3d(&self, _object: H) -> Option<f64> {
+                Some(1e-5)
+            }
+        }
+
+        let k = Kernel::default();
+        let origin = Point3::new(-60.0, -200.0, 160.0);
+        let mut cyl = Cone::new_cylinder_bounded(
+            origin,
+            Vec3::X,
+            Vec3::Y,
+            2.25,
+            0.0,
+            360.0,
+            3.0,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let surface = Surface::from(cyl);
+        let seam = surface
+            .create_seam_curve(&k, SurfParamType::U, true)
+            .unwrap()
+            .unwrap();
+        let seam_uv = seam.uv_curve().clone();
+        let seam_curve = Curve::from(seam);
+
+        // An unbounded canonical line (natural interval +-1_234_567) used over the
+        // finite trimmed seam edge interval [0.5, 3.0], as imported from a flat record.
+        let seam_origin = Point3::new(-57.75, -200.0, 160.0);
+        let edge_curve = Curve::from(Line::create_canonical(seam_origin, Vec3::Z));
+        let mut brep = Brep::new();
+        let edge = brep
+            .add_edge_record(Edge {
+                vertices: [VertexId::from_index(0), VertexId::from_index(0)],
+                edgeuses: Vec::new(),
+                interval: Extent1d::from_min_max(0.5, 3.0),
+                tolerance: 1e-5,
+                curve: Some(edge_curve),
+            })
+            .unwrap();
+
+        let split = 0.5 / 3.0;
+        let mut geo = CylSeamGeo {
+            curves: vec![seam_curve, seam_uv],
+            surface,
+            brep,
+            edge,
+            vertex: Point3::new(-57.75, -200.0 + 1e-8, 160.5),
+        };
+        let mut cc = classification(&k, &[0.0, split, 1.0]);
+        cc.set_uv_curve1(Some(H(1, K::Curve)));
+        cc.set_surface1(Some(H(0, K::Surface)));
+        for (i, end) in [(0, true), (1, false)] {
+            let ivl = cc.at_mut(i).unwrap();
+            let pc = if end { &mut ivl.end } else { &mut ivl.start };
+            pc.set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+            pc.set_t_param(split, false);
+            pc.set_gap_3d(1e-8);
+        }
+        cc.at_mut(1)
+            .unwrap()
+            .mid
+            .set_class_object(PointClassType::Edge, Some(H(0, K::Edge)));
+
+        // The adjacent Out/Unknown interval [0, split] ends at the trimmed seam edge's
+        // vertex. Evaluating the canonical line over edge.interval ([0.5, 3.0]) proves
+        // coincidence and grants the 1e-5 vertex-zone tolerance.
+        assert!(!cc.has_near_misses(&k, &geo, false).unwrap());
+
+        // Past the vertex zone, the vertex is still a near miss.
+        geo.vertex.y = -200.0 + 2e-5;
+        cc.at_mut(0).unwrap().end.set_gap_3d(2e-5);
+        cc.at_mut(1).unwrap().start.set_gap_3d(2e-5);
+        assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+
+        // A canonical line slanted out of the 1e-9 strip within edge.interval gets no relief.
+        geo.vertex.y = -200.0 + 1e-8;
+        cc.at_mut(0).unwrap().end.set_gap_3d(1e-8);
+        cc.at_mut(1).unwrap().start.set_gap_3d(1e-8);
+        geo.brep.edge_mut(edge).unwrap().curve = Some(Curve::from(Line::create_canonical(
+            seam_origin,
+            Vec3::new(0.0, 1e-7, 1.0),
+        )));
+        assert!(cc.has_near_misses(&k, &geo, false).unwrap());
+    }
+
+    #[test]
+    fn swapped_uv_cylinder_seam_gets_a_ruling_frame() {
+        use crate::nurbs::b_spline_surface::p1::SurfParamType;
+        use crate::surface::cone::Cone;
+
+        let k = Kernel::default();
+        let mut cyl = Cone::new_cylinder_bounded(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            2.25,
+            0.0,
+            360.0,
+            3.0,
+            true,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let surface = Surface::from(cyl);
+        let seam = surface
+            .create_seam_curve(&k, SurfParamType::V, true)
+            .unwrap()
+            .unwrap();
+        let uv = seam.uv_curve().clone();
+        let domain = seam.natural_interval();
+        assert!(ruling_frame(&k, &Curve::from(seam), &uv, &surface, domain)
+            .unwrap()
+            .is_some());
     }
 }

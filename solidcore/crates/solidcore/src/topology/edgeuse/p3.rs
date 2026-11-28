@@ -3398,7 +3398,7 @@ pub(crate) fn trim_deviation_bound(
     // (below a thousandth of the fit tolerance a tighter bound changes nothing)
     let floor = TRIM_BOUND_FLOOR * fit;
     k.work_counters.add_trim_deviation_bound();
-    crate::query::curve_surface_gap::trim_image_gap_bound_within(
+    crate::query::curve_surface_gap::trim_image_gap_bound_within_any(
         k,
         &surface,
         curve,

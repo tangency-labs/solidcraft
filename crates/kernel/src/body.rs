@@ -206,7 +206,7 @@ pub struct Body {
     pub(crate) smlib: std::sync::Arc<FormCell<solidcraft_smlib::Brep, Refusal>>,
     /// The record as solidcore-ops' body, for the kernel's answers about its faces
     /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is.
-    pub(crate) ops: std::sync::Arc<FormCell<(solidcore_ops::Body, solidcore_ops::Order), ()>>,
+    pub(crate) ops: std::sync::Arc<FormCell<(solidcore_ops::Body, solidcore_ops::Order), OpsRefusal>>,
     /// The record prepared for its outline ([`Body::outline_prepared`]): made on first use,
     /// shared by clones as `smlib` is.
     pub(crate) outline: std::sync::Arc<OutlinePrep>,
@@ -268,12 +268,33 @@ pub struct KernelFormMask {
     ops: bool,
 }
 
+/// Why `solidcore_ops::Body::from_record` refused a B-rep body's record.
+#[derive(Clone, Debug)]
+pub(crate) struct OpsRefusal {
+    pub(crate) why: String,
+    pub(crate) internal: bool,
+}
+
+impl OpsRefusal {
+    fn of(e: &solidcore_ops::Error) -> Self {
+        Self { why: e.to_string(), internal: matches!(e, solidcore_ops::Error::Internal(_)) }
+    }
+
+    fn error(&self, what: &str) -> KernelError {
+        if self.internal {
+            KernelError::Internal(format!("{what}: solidcore: {}", self.why))
+        } else {
+            KernelError::Failed(format!("{what}: solidcore: {}", self.why))
+        }
+    }
+}
+
 /// A body's kernel forms ([`Body::kernel_forms`]) without the body: what lets them go once the
 /// body is only kept somewhere to find its result again. It keeps neither the body nor its forms.
 #[derive(Clone, Debug)]
 pub struct KernelForms {
     smlib: std::sync::Weak<FormCell<solidcraft_smlib::Brep, Refusal>>,
-    ops: std::sync::Weak<FormCell<(solidcore_ops::Body, solidcore_ops::Order), ()>>,
+    ops: std::sync::Weak<FormCell<(solidcore_ops::Body, solidcore_ops::Order), OpsRefusal>>,
 }
 
 impl KernelForms {
@@ -1227,11 +1248,21 @@ impl Body {
     /// callback ([`solidcore_ops::Error::Reentered`]), a cancelled one, or one that ran out of
     /// the fuel its caller gave it. None for a mesh body.
     pub(crate) fn ops_body(&self) -> Option<OpsForm> {
-        if self.is_mesh() || self.ops.refusal().is_some() {
-            return None;
+        self.ops_body_result("", || KernelError::Invalid(String::new())).ok()
+    }
+
+    /// [`Body::ops_body`], keeping the kernel's refusal reason when a B-rep body's record cannot
+    /// be converted into `solidcore-ops`, instead of conflating a conversion failure with a mesh
+    /// body.
+    pub(crate) fn ops_body_result(&self, what: &str, mesh_err: impl FnOnce() -> KernelError) -> Result<OpsForm> {
+        if self.is_mesh() {
+            return Err(mesh_err());
+        }
+        if let Some(refused) = self.ops.refusal() {
+            return Err(refused.error(what));
         }
         if let Some(form) = self.ops.get() {
-            return Some(form);
+            return Ok(form);
         }
         let releases = self.ops.releases();
         // solidcore-ops' calls on this body run with the kernel's fix set.
@@ -1239,12 +1270,15 @@ impl Body {
         // Converted outside the cell, and without taking the turn to make it: a failure callback
         // that asked about this body again would otherwise wait for the form it is part of making.
         match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
-            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled | solidcore_ops::Error::OutOfFuel { .. }) => None,
-            Err(_) => {
-                self.ops.refuse(());
-                None
+            Err(e @ (solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled | solidcore_ops::Error::OutOfFuel { .. })) => {
+                Err(ops_failure(what, e))
             }
-            Ok(made) => Some(self.ops.keep(made, releases)),
+            Err(e) => {
+                let refused = OpsRefusal::of(&e);
+                self.ops.refuse(refused.clone());
+                Err(refused.error(what))
+            }
+            Ok(made) => Ok(self.ops.keep(made, releases)),
         }
     }
 
@@ -1350,7 +1384,7 @@ impl Body {
     /// across the rim ([`solidcore_ops::Body::outline_cuts`]). `Err` for a mesh body and for each
     /// refusal, by its cause.
     pub fn outline_cuts(&self, faces: &[usize], outline: &Curve, interval: [f64; 2], point: Vec3, normal: Vec3) -> Result<Vec<f64>> {
-        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("outline cuts need an exact body".into()))?;
+        let form = self.ops_body_result("outline cuts", || KernelError::Invalid("outline cuts need an exact body".into()))?;
         let (body, order) = &*form;
         body.outline_cuts(order, faces, outline, interval, point.into(), normal.into()).map_err(|e| match e {
             solidcore_ops::Error::Argument => KernelError::Invalid(
@@ -2467,7 +2501,7 @@ impl Body {
         face: Option<crate::points::PointNormalFace>,
     ) -> Result<Vec<crate::points::ClassifiedPoint>> {
         use crate::points::{ClassifiedPoint, PointNormalFace, UnitNormal};
-        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("point classification needs an exact body".into()))?;
+        let form = self.ops_body_result("point classification", || KernelError::Invalid("point classification needs an exact body".into()))?;
         let (body, order) = &*form;
         let points: Vec<[f64; 3]> = points.iter().copied().map(Into::into).collect();
         let face = face.map(|f| match f {
@@ -2546,9 +2580,7 @@ impl Body {
         if face_index >= self.record.faces.len() {
             return Ok(None);
         }
-        let Some(form) = self.ops_body() else {
-            return Err(KernelError::Failed("line meets face: exact face form unavailable".into()));
-        };
+        let form = self.ops_body_result("line meets face", || KernelError::Failed("line meets face: exact face form unavailable".into()))?;
         let (body, order) = &*form;
         let tie = (self.size() * 1e-9).max(1e-9);
         match body.face_line_nearest(order, face_index, through_a, direction_a, tie) {
@@ -2585,7 +2617,7 @@ impl Body {
     /// The body's exact form for `what`, which a mesh body and a record the kernel refuses have
     /// none of.
     fn exact_form(&self, what: &str) -> Result<OpsForm> {
-        self.ops_body().ok_or_else(|| KernelError::Failed(format!("{what}: exact face form unavailable")))
+        self.ops_body_result(what, || KernelError::Failed(format!("{what}: exact face form unavailable")))
     }
 
     /// Every point where the ray from `origin` along `direction` meets a face, nearest first, a
@@ -2765,7 +2797,7 @@ impl Body {
                 depth: t,
             }));
         }
-        let form = self.ops_body().ok_or_else(|| KernelError::Failed("ray: the body has no solidcore form".into()))?;
+        let form = self.ops_body_result("ray", || KernelError::Failed("ray: the body has no solidcore form".into()))?;
         let (ops, order) = &*form;
         let hit = ops.fire_ray(order, [origin.x, origin.y, origin.z], [d.x, d.y, d.z]).map_err(|e| KernelError::Failed(format!("ray: {e}")))?;
         let Some(hit) = hit else { return Ok(None) };

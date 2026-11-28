@@ -2,20 +2,68 @@
 //! its partial derivatives up to second order over a UV box of its base NURBS net, in
 //! outward-rounded [`Ivl`] arithmetic.
 //!
-//! Not upstream. Built on [`nurbs_partials_over_piece`] and [`partials_hull`] so UV-lift
+//! Not upstream. Built on [`partials_over_piece`] and [`partials_hull`] so UV-lift
 //! certification ([`crate::surface::surface::exact_pieces::certified_lift`]) shares the G^n
 //! certificate's interval and rational B-spline machinery with zero duplicate interval type
 //! or heuristic rounding slack.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use super::certificate::{nurbs_partials_over_piece, partials_hull};
+use super::certificate::partials_hull;
 use super::interval::Ivl;
 use super::series::{v_add, v_hull, v_scale, v_sub, V3, VZ};
 use super::station::{Nurbs, Partials};
 use crate::error::{Result, SolidError};
+use crate::geom::nurbs_enclosure::{partials_over_piece, Shift};
 
 const OP: &str = "blend::fillet_section::offset_box";
+
+/// Whether a homogeneous control-point array `pw` (`(x w, y w, z w, w)` per point) is rational
+/// (non-constant positive weights) and lies far enough from the origin along at least one
+/// coordinate axis that uncentred rational enclosures lose significant accuracy:
+/// `|mid_c| >= 512` and `|mid_c| > 4 * max(span_c, 1)` for some axis `c`.
+///
+/// Checking per-axis prevents an unbounded ruling extent (such as a canonical cylinder's
+/// `±INFINITE_PARAMETER` axis) from masking a far-origin cross-section, while non-rational arrays
+/// (`w_min == w_max`, where `w' = 0`) and near-origin geometry stay bit-exact with uncentred
+/// (`Shift::None`) enclosures.
+pub(crate) fn pw_is_far_from_origin(pw: &[f64]) -> bool {
+    let (mut min_x, mut min_y, mut min_z) = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let (mut max_x, mut max_y, mut max_z) =
+        (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let (mut min_w, mut max_w) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut any = false;
+    for p in pw.chunks_exact(4) {
+        let &[x, y, z, w] = p else {
+            return false;
+        };
+        if !(w.is_finite() && w > 0.0) {
+            return false;
+        }
+        let (px, py, pz) = (x / w, y / w, z / w);
+        if !(px.is_finite() && py.is_finite() && pz.is_finite()) {
+            return false;
+        }
+        min_x = min_x.min(px);
+        min_y = min_y.min(py);
+        min_z = min_z.min(pz);
+        max_x = max_x.max(px);
+        max_y = max_y.max(py);
+        max_z = max_z.max(pz);
+        min_w = min_w.min(w);
+        max_w = max_w.max(w);
+        any = true;
+    }
+    if !any || min_w >= max_w {
+        return false;
+    }
+    let axis_far = |lo: f64, hi: f64| {
+        let span = hi - lo;
+        let mid = 0.5 * (lo + hi);
+        span.is_finite() && mid.is_finite() && mid.abs() >= 512.0 && mid.abs() > 4.0 * span.max(1.0)
+    };
+    axis_far(min_x, max_x) || axis_far(min_y, max_y) || axis_far(min_z, max_z)
+}
 
 #[inline]
 fn v_dot(a: V3<Ivl>, b: V3<Ivl>) -> Ivl {
@@ -44,7 +92,7 @@ fn v_cross(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
 ///
 /// # Errors
 ///
-/// [`SolidError::PortInvariant`] when `lk > 2`; those of [`nurbs_partials_over_piece`].
+/// [`SolidError::PortInvariant`] when `lk > 2`; those of [`partials_over_piece`].
 #[allow(clippy::too_many_arguments)]
 pub fn offset_partials_over_piece(
     net: &Nurbs,
@@ -84,12 +132,17 @@ pub fn offset_and_base_partials_over_piece(
             "offset partials requested past second order",
         ));
     }
+    let shift = if pw_is_far_from_origin(&net.pw) && !(ua == ub && va == vb) {
+        Shift::Middle
+    } else {
+        Shift::None
+    };
     // Exact-zero offset identity (Q = S), not a tolerance.
     if d.lo == 0.0 && d.hi == 0.0 {
-        let s = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, lk)?;
+        let s = partials_over_piece(net, ku, kv, ua, ub, va, vb, lk, None, shift)?;
         return Ok((s.clone(), s));
     }
-    let b = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, lk + 1)?;
+    let b = partials_over_piece(net, ku, kv, ua, ub, va, vb, lk + 1, None, shift)?;
     let s = b.at(0, 0);
     let bu = b.at(1, 0);
     let bv = b.at(0, 1);
@@ -213,9 +266,15 @@ fn unit_normal_over_parts(
     pv: &[(f64, f64, usize)],
 ) -> Result<V3<Ivl>> {
     let mut out: Option<V3<Ivl>> = None;
+    let far = pw_is_far_from_origin(&net.pw);
     for &(ua, ub, ku) in pu {
         for &(va, vb, kv) in pv {
-            let b = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, 1)?;
+            let shift = if far && !(ua == ub && va == vb) {
+                Shift::Middle
+            } else {
+                Shift::None
+            };
+            let b = partials_over_piece(net, ku, kv, ua, ub, va, vb, 1, None, shift)?;
             let m = v_cross(b.at(1, 0), b.at(0, 1));
             let inv_l = Ivl::from(1.0) / v_dot(m, m).sqrt();
             let n = v_scale(m, inv_l);
@@ -244,7 +303,7 @@ fn unit_normal_over_parts(
 ///
 /// # Errors
 ///
-/// Those of [`nurbs_partials_over_piece`].
+/// Those of [`partials_over_piece`].
 pub fn offset_crossed_knot_jumps(
     net: &Nurbs,
     d: Ivl,

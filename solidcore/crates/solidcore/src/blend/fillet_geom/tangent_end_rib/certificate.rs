@@ -345,10 +345,14 @@ pub(super) struct Rib<'a, 'f> {
     pub end: &'a Face<'f>,
     /// The fillet surface's section parameter: 0 u, 1 v.
     pub section: usize,
-    /// `sigma(t) = sigma0 + d_sigma t^m`, `m` 2 for an odd contact order, else 1.
+    /// `sigma(t) = sigma0 + d_sigma * s(t)`, where `s(t)` is `t` for an even contact order,
+    /// `t^2` for an odd order at a tangent end, or `sigma_lin * t + (1 - sigma_lin) * t^2`
+    /// for an odd order at a transverse crossing.
     pub sigma0: f64,
     /// See `sigma0`.
     pub d_sigma: f64,
+    /// Linear coefficient of `s(t)` for an odd contact order (`0.0` for pure `t^2`).
+    pub sigma_lin: f64,
     /// Whether the contact order is odd.
     pub odd: bool,
     /// The contact order.
@@ -446,7 +450,17 @@ impl Rib<'_, '_> {
         let d = Ivl::from(self.d_sigma);
         if self.odd {
             let two = Ivl::from(2.0);
-            (Ivl::from(self.sigma0) + d * (t * t), two * d * t, two * d)
+            if self.sigma_lin > 0.0 {
+                let lin = Ivl::from(self.sigma_lin);
+                let quad = Ivl::from(1.0 - self.sigma_lin);
+                (
+                    Ivl::from(self.sigma0) + d * (t * (lin + quad * t)),
+                    d * (lin + two * quad * t),
+                    two * d * quad,
+                )
+            } else {
+                (Ivl::from(self.sigma0) + d * (t * t), two * d * t, two * d)
+            }
         } else {
             (Ivl::from(self.sigma0) + d * t, d, ZERO)
         }

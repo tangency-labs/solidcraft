@@ -2087,6 +2087,7 @@ pub fn srf_srf_intersection_with_context(
     // analytic intersector gives exactly. Points off a surface, and an end where the surface
     // touches the plane, are met by the intersectors below. A round of touch circles needs it
     // (#2704): its end section leaves the end face's plane, so its side curve is this one.
+    let mut plane_curve_fallback = false;
     if curves_3d.is_empty() {
         let plane_first = matches!(surf1.kind(), SurfaceKind::Plane(_));
         if let (Some(start_pnt), Some(end_pnt), true) = (
@@ -2104,7 +2105,7 @@ pub fn srf_srf_intersection_with_context(
                 && !surface.is_planar(k, approx_tol)?.is_planar
                 && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
             {
-                let c = surface_plane_curve(
+                match surface_plane_curve(
                     k,
                     surface,
                     plane,
@@ -2113,24 +2114,45 @@ pub fn srf_srf_intersection_with_context(
                     opt_dir.as_deref().copied(),
                     approx_tol,
                     angle_tol,
-                )?;
-                // Not upstream: with `closed_by_start_direction`, a curve that does not leave
-                // the start along its heading is passed over (the intersectors below go on)
-                let headed = match wanted_heading {
-                    Some(h) => leaves_along(k, &c.curve_3d, h)?,
-                    None => true,
-                };
-                if headed {
-                    let (uv1, uv2) = if plane_first {
-                        (c.uv_plane, c.uv_surface)
-                    } else {
-                        (c.uv_surface, c.uv_plane)
-                    };
-                    return Ok(SrfSrfCurves {
-                        curve_3d: Some(c.curve_3d),
-                        uv_curve1: Some(uv1),
-                        uv_curve2: Some(uv2),
-                    });
+                ) {
+                    Ok(c) => {
+                        // Not upstream: with `closed_by_start_direction`, a curve that does not
+                        // leave the start along its heading is passed over (the intersectors below
+                        // go on)
+                        let headed = match wanted_heading {
+                            Some(h) => leaves_along(k, &c.curve_3d, h)?,
+                            None => true,
+                        };
+                        if headed {
+                            let (uv1, uv2) = if plane_first {
+                                (c.uv_plane, c.uv_surface)
+                            } else {
+                                (c.uv_surface, c.uv_plane)
+                            };
+                            return Ok(SrfSrfCurves {
+                                curve_3d: Some(c.curve_3d),
+                                uv_curve1: Some(uv1),
+                                uv_curve2: Some(uv2),
+                            });
+                        }
+                    }
+                    // Recoverable plane-curve failures fall back to the intersectors below;
+                    // `PlaneCurveLeavesDomain` and non-recoverable errors propagate immediately
+                    // so `opt_dir` is never perturbed by a failing fallback.
+                    Err(err)
+                        if matches!(
+                            err.blend_failure(),
+                            Some(
+                                BlendFailure::PlaneCurveTouches { .. }
+                                    | BlendFailure::PlaneCurveEndOff { .. }
+                                    | BlendFailure::PlaneCurveStepVanished { .. }
+                                    | BlendFailure::PlaneCurveFitCap { .. }
+                            )
+                        ) =>
+                    {
+                        plane_curve_fallback = true;
+                    }
+                    Err(err) => return Err(err),
                 }
             }
         }
@@ -2143,11 +2165,16 @@ pub fn srf_srf_intersection_with_context(
             // `None`, not an error. Upstream also ignores the call's other statuses (an
             // error here just means that it couldn't find a solution), so the intersector's
             // own failures still mean "no curve" and the search goes on below.
+            let mut fallback_dir = *dir;
             let r = ignore_status(two_pnts_intersection(
                 k,
                 start_pnt,
                 end,
-                dir,
+                if plane_curve_fallback {
+                    &mut fallback_dir
+                } else {
+                    dir
+                },
                 opt_end_dir,
                 surf1,
                 surf2,
@@ -2155,6 +2182,9 @@ pub fn srf_srf_intersection_with_context(
             ))?
             .flatten();
             if let Some(pi) = r {
+                if plane_curve_fallback {
+                    *dir = fallback_dir;
+                }
                 // Not upstream: with `closed_by_start_direction`, a curve that does not leave
                 // the start along its heading is passed over
                 let mut traced = pi.curve_3d;
@@ -2934,9 +2964,15 @@ impl FilletBrep {
         // the fillet radius along each filleted edge from the common vertex.
         let mut uv = [Point3::new(0.0, 0.0, 0.0); 2];
         let mut ends: [Option<(EdgeId, f64, bool)>; 2] = [None, None];
+        let mut leavings: [Option<Vec3>; 2] = [None, None];
         let mut past_end = false;
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
-        for ((slot, end), (fs, index)) in uv.iter_mut().zip(ends.iter_mut()).zip(pairs) {
+        for (((slot, end), leaving), (fs, index)) in uv
+            .iter_mut()
+            .zip(ends.iter_mut())
+            .zip(leavings.iter_mut())
+            .zip(pairs)
+        {
             let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))?;
@@ -2950,6 +2986,7 @@ impl FilletBrep {
             let orient = eu1::orientation(target, eu)?;
             let from_min = (pv == cp_vertex && orient == OrientType::Same)
                 || (pv != cp_vertex && orient == OrientType::Opposite);
+            let vertex_param = if from_min { ivl.min() } else { ivl.max() };
             let offset_param = if from_min {
                 arc_length_param(
                     k,
@@ -2971,7 +3008,13 @@ impl FilletBrep {
             };
             // Not upstream (#17511): whether twice the radius runs past the edge's far end
             past_end |= offset_param < ivl.min() || offset_param > ivl.max();
-            *end = Some((e, if from_min { ivl.min() } else { ivl.max() }, from_min));
+            *end = Some((e, vertex_param, from_min));
+            if let Some(d1) = ignore_status(curve.evaluate(k, vertex_param, 1, from_min, true))?
+                .and_then(|pv| pv.get(1).copied())
+                .and_then(|d| d.unitize().ok())
+            {
+                *leaving = Some(if from_min { d1 } else { -d1 });
+            }
             let fetch = get_or_create_uv_trim_curve(k, target, eu, false, false, true)?;
             fetch.status?;
             let trim_curve = eu1::uv_trim_curve(target, eu)?
@@ -2986,7 +3029,16 @@ impl FilletBrep {
         // (a round of 8 on a quarter circle of radius 10: the midpoint lay by the arc's far
         // end and the solve found the rails' other crossing, a ball past the arc's end);
         // there the guess is where the rails cross to second order at the vertex
-        // ([`rails_crossing`]).
+        // ([`rails_crossing`]). Likewise where the two edges meet nearly tangentially (within
+        // ~5 degrees of straight): the two 2*offset steps nearly cancel, leaving curvature
+        // asymmetry to bias the midpoint onto the spurious second branch of a line-circle
+        // rail crossing rather than the true corner branch.
+        let near_tangent = matches!(leavings, [Some(a), Some(b)] if a.dot(b) <= -0.996);
+        let mid_guess = || {
+            let [uv0, uv1] = uv;
+            let mid_uv = (uv0 + uv1) * 0.5;
+            Point2::new(mid_uv.x, mid_uv.y)
+        };
         let uv_guess = if past_end {
             second_order_rail_guess(
                 k,
@@ -2995,10 +3047,17 @@ impl FilletBrep {
                 [(fs1, rail_index1), (fs2, rail_index2)],
                 ends,
             )?
+        } else if near_tangent {
+            ignore_status(second_order_rail_guess(
+                k,
+                target,
+                face,
+                [(fs1, rail_index1), (fs2, rail_index2)],
+                ends,
+            ))?
+            .unwrap_or_else(mid_guess)
         } else {
-            let [uv0, uv1] = uv;
-            let mid_uv = (uv0 + uv1) * 0.5;
-            Point2::new(mid_uv.x, mid_uv.y)
+            mid_guess()
         };
 
         // Get the TsectPnts and call the solver.

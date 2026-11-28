@@ -1713,6 +1713,9 @@ fn replay_corner_error(
         }
     }
     error.fillet_vertices = note.fillet_vertices.map(map);
+    if note.location.is_some() {
+        error.location = note.location;
+    }
     error.comment.clone_from(&note.comment);
     error.entity_name.clone_from(&note.entity_name);
 }
@@ -4876,6 +4879,33 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             radius,
             &joined,
         )
+    }
+
+    fn creation_ball_zone_closed_point(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+    ) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let joined = self.other_blends_edges(id)?;
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let (rolls, law) = ball_regular::rolls_a_ball(current);
+        if !rolls || law {
+            return Ok(false);
+        }
+        Ok(crate::blend::fillet_exact::ball_zone_state(
+            ball_regular::ops_of(current),
+            k,
+            self.target,
+            None,
+            &joined,
+        )? == crate::blend::fillet_exact::CollapsedBallZone::ClosedPointBall)
     }
 
     fn creation_ball_past_an_end(

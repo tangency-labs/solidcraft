@@ -4259,3 +4259,102 @@ fn a_round_whose_roll_over_crosses_the_end_face_stays_refused_naming_the_radius_
         assert!(report.is_valid(), "({a}, {cut_b}): {report}");
     }
 }
+
+/// Tangent-chain round rolling wholly over a 0.1 mm narrow face onto the smooth round beyond,
+/// with trimmed rails terminating on the chain's end faces and Join seams.
+#[test]
+fn a_tangent_chain_round_rolls_over_a_narrow_face_onto_the_smooth_face_beyond() {
+    fixes();
+    let b = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 6.0]).unwrap();
+    let corner = edge_at(&b, [20.0, 0.0, 3.0]);
+    blend(&b, Blend::Round, &[corner], &[8.0], &[], Corners::Filled).unwrap();
+
+    let d = 8.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let bottom_chain = [
+        edge_at(&b, [6.0, 0.0, 0.0]),
+        edge_at(&b, [12.0 + d, 8.0 - d, 0.0]),
+        edge_at(&b, [20.0, 14.0, 0.0]),
+    ];
+    // Leaves a 0.1 mm vertical strip (z = 5.9..6.0) smoothly tangent to the R 5.9 round.
+    blend(
+        &b,
+        Blend::Round,
+        &bottom_chain,
+        &[5.9],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let before = b.volume(1e-9).unwrap();
+
+    let top_chain = [
+        edge_at(&b, [6.0, 0.0, 6.0]),
+        edge_at(&b, [12.0 + d, 8.0 - d, 6.0]),
+        edge_at(&b, [20.0, 14.0, 6.0]),
+    ];
+    blend(&b, Blend::Round, &top_chain, &[1.0], &[], Corners::Filled)
+        .unwrap_or_else(|err| panic!("tangent-chain rollover failed: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let after = b.volume(1e-9).unwrap();
+    assert!(
+        after < before,
+        "expected material removal: {after} < {before}"
+    );
+}
+
+/// Lone curved-edge round (R = 3 mm) rolling wholly over a 1.5 mm narrow cylindrical band onto
+/// the smooth R 8.5 torus beyond, with trimmed rail ends terminating on planar end faces.
+#[test]
+fn a_lone_curved_round_rolls_over_a_narrow_face_onto_the_smooth_face_beyond() {
+    use solidcore_ops::prism::extrude_planar_regions;
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+    fixes();
+    let v = Vec2::new;
+    let sector = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: v(0.0, 0.0),
+                    b: v(12.0, 0.0),
+                },
+                Seg2::Arc {
+                    center: v(0.0, 0.0),
+                    radius: 12.0,
+                    start: 0.0,
+                    sweep: PI / 2.0,
+                },
+                Seg2::Line {
+                    a: v(0.0, 12.0),
+                    b: v(0.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let b = extrude_planar_regions(&Plane::XY, &[sector], 0.0, 10.0).unwrap();
+    let mid = 12.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let bottom_arc = edge_at(&b, [mid, mid, 0.0]);
+    // Leaves a 1.5 mm cylindrical strip (z = 8.5..10.0) smoothly tangent to the R 8.5 torus.
+    blend(
+        &b,
+        Blend::Round,
+        &[bottom_arc],
+        &[8.5],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let before = b.volume(1e-9).unwrap();
+
+    let top_arc = edge_at(&b, [mid, mid, 10.0]);
+    blend(&b, Blend::Round, &[top_arc], &[3.0], &[], Corners::Filled)
+        .unwrap_or_else(|err| panic!("lone curved-edge rollover failed: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let after = b.volume(1e-9).unwrap();
+    assert!(
+        after < before,
+        "expected material removal: {after} < {before}"
+    );
+}

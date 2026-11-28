@@ -483,32 +483,66 @@ fn rolled_sides(
         return Ok(out);
     }
     for ((slot, own), between) in out.iter_mut().zip(side).zip(between.iter_mut()) {
-        let [only] = between.as_slice() else {
+        if between.is_empty() || between.len() > 2 {
             continue;
-        };
-        let edge = eu1::edge(target, *only)?
-            .ok_or_else(|| invalid("edge use between the blends without edge"))?;
-        let bounds = crate::topology::edge::faces(target, edge, None)?;
+        }
+        let mut rolled = [None, None];
+        let mut effective = [None, None];
         for bb in 0..2 {
-            let (Some(&Some(face)), Some(&other), Some(&id)) =
-                (own.get(bb), own.get(1 - bb), ids.get(bb))
-            else {
+            let (Some(&Some(face)), Some(&id)) = (own.get(bb), ids.get(bb)) else {
                 continue;
             };
             let solver = live(solvers, id)?;
-            if solver.rolled_faces.iter().all(Option::is_none) {
-                continue;
-            }
-            let rail = solver.find_index_of_rail_on_face(target, Some(face))?;
-            let Some(onto) = solver.rolled_faces.get(rail).copied().flatten() else {
-                continue;
+            let onto = if solver.rolled_faces.iter().any(Option::is_some) {
+                let rail = solver.find_index_of_rail_on_face(target, Some(face))?;
+                solver.rolled_faces.get(rail).copied().flatten()
+            } else {
+                None
             };
-            if other == Some(onto) && bounds.contains(&face) && bounds.contains(&onto) {
-                *slot = Some(onto);
-                break;
+            if let Some(r) = rolled.get_mut(bb) {
+                *r = onto;
+            }
+            if let Some(e) = effective.get_mut(bb) {
+                *e = Some(onto.unwrap_or(face));
             }
         }
-        if slot.is_some() {
+        let ([Some(e0), Some(e1)], [Some(f0), Some(f1)]) = (effective, *own) else {
+            continue;
+        };
+        let [r0, r1] = rolled;
+        if e0 != e1 || (r0.is_none() && r1.is_none()) {
+            continue;
+        }
+        let onto = e0;
+        let matches = match between.as_slice() {
+            [only] => {
+                let edge = eu1::edge(target, *only)?
+                    .ok_or_else(|| invalid("edge use between the blends without edge"))?;
+                let bounds = crate::topology::edge::faces(target, edge, None)?;
+                (r0.is_some() && bounds.contains(&f0) && bounds.contains(&onto))
+                    || (r1.is_some() && bounds.contains(&f1) && bounds.contains(&onto))
+                    || (r0.is_some()
+                        && r1.is_some()
+                        && bounds.contains(&f0)
+                        && bounds.contains(&f1))
+            }
+            [first, second] if r0.is_some() && r1.is_some() => {
+                let e_first = eu1::edge(target, *first)?
+                    .ok_or_else(|| invalid("edge use between the blends without edge"))?;
+                let e_second = eu1::edge(target, *second)?
+                    .ok_or_else(|| invalid("edge use between the blends without edge"))?;
+                let b0 = crate::topology::edge::faces(target, e_first, None)?;
+                let b1 = crate::topology::edge::faces(target, e_second, None)?;
+                (b0.contains(&f0) && b0.contains(&onto) && b1.contains(&f1) && b1.contains(&onto))
+                    || (b0.contains(&f1)
+                        && b0.contains(&onto)
+                        && b1.contains(&f0)
+                        && b1.contains(&onto))
+            }
+            _ => false,
+        };
+        if matches {
+            *slot = Some(onto);
             between.clear();
         }
     }
