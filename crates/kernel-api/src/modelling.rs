@@ -2,9 +2,10 @@
 //! ([`Modelling`]), with their inputs.
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::Backend;
+use crate::sweep::{Helix, PathSpan, PointPath, RailFit, SweepOptions};
 
 /// Which boolean: the names are saved in designs, so they never change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,4 +328,18 @@ pub trait Modelling: Backend {
     fn split_body_by_sheet_where_it_cuts(&self, body: &Self::Form, sheet: &Self::Form, face: usize) -> Result<Option<Vec<Self::Form>>, Self::Error>;
     /// A surface body cut where `tool` meets it, keeping what `keep` says.
     fn trim_keep(&self, body: &Self::Form, tool: &SplitTool<'_, Self::Form>, keep: TrimKeep<'_>) -> Result<Self::Form, Self::Error>;
+    /// A planar region on `plane` swept along `path` (segments end to end), as `options` say.
+    fn sweep(&self, plane: &Plane, region: &Region2, path: &[PathSpan], options: &SweepOptions) -> Result<Self::Form, Self::Error>;
+    /// A planar region swept along a path through 3D sketch curves, as `options` say.
+    fn sweep_points(&self, plane: &Plane, region: &Region2, path: &PointPath, options: &SweepOptions) -> Result<Self::Form, Self::Error>;
+    /// A planar region's outer loop swept along a helix.
+    fn sweep_helix(&self, plane: &Plane, region: &Region2, helix: &Helix<'_>) -> Result<Self::Form, Self::Error>;
+    /// A solid through closed planar sections in order, following 0 to 16 guide `rails`
+    /// (polylines from the first section to the last), `fit` saying how they reshape the
+    /// sections between.
+    fn loft(&self, sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Self::Form, Self::Error>;
+    /// A loft through regions with matching hole counts: the hole walls share the end caps.
+    fn loft_regions(&self, sections: &[(Plane, Region2)]) -> Result<Self::Form, Self::Error>;
+    /// A solid from a planar loop to an apex off its plane, following 0 to 2 guide `rails`.
+    fn loft_to_point(&self, plane: &Plane, section: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: RailFit) -> Result<Self::Form, Self::Error>;
 }
