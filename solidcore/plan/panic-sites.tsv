@@ -999,6 +999,13 @@ crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits
 crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	with_capacity	1	proven	Vec::with_capacity(base_nodes.len())	base_nodes.len(), an in-memory Vec
 crates/solidcore/src/surface/surface_cache/p2.rs	create_approximate_bezier_patch_block	with_capacity	1	proven	Vec::with_capacity(num_u_spans * num_v_spans)	limit_splits keeps at most 6 splits a side, so at most 5 x 5 spans
 crates/solidcore/src/surface/surface_cache/p3.rs	SurfaceCache::build_tree_base_nodes	with_capacity	1	open	Vec::with_capacity(u_count.saturating_mul(v_count))	
+crates/solidcore/src/surface/surface_point_solve/cell_index.rs	CellIndex::build	int-div	1	proven	div_ceil(CELLS_PER_BLOCK)	CELLS_PER_BLOCK is the nonzero constant 16.
+crates/solidcore/src/surface/surface_point_solve/cell_index.rs	CellIndex::build	int-div	2	proven	cell / (net.v - 1)	build returns before forming any cells if net.v < 2; net.v - 1 is at least 1.
+crates/solidcore/src/surface/surface_point_solve/cell_index.rs	CellIndex::build	int-rem	1	proven	cell % (net.v - 1)	build returns before forming any cells if net.v < 2; net.v - 1 is at least 1.
+crates/solidcore/src/surface/surface_point_solve/cell_index.rs	CellIndex::build	step_by	1	proven	step_by(CELLS_PER_BLOCK)	CELLS_PER_BLOCK is the nonzero constant 16.
+crates/solidcore/src/surface/surface_point_solve/cell_index.rs	CellIndex::build	with_capacity	1	proven	Vec::with_capacity(cells.div_ceil(CELLS_PER_BLOCK))	build checks u*v == points.len() and u,v >= 2. cells = (u-1)*(v-1) < len, so ceil(cells/16) <= len/2; 48 bytes per Extent3d fit within the live slice of len 32-byte CPoints (at most isize::MAX bytes).
+crates/solidcore/src/surface/surface_point_solve/cell_index.rs	CellIndex::search	int-div	1	proven	cell / (v - 1)	nearest passes the dimensions of the same immutable NURB used by build, which requires v >= 2. Mutable access clears the index before it can be used with an edited net.
+crates/solidcore/src/surface/surface_point_solve/cell_index.rs	CellIndex::search	int-rem	1	proven	cell % (v - 1)	nearest passes the dimensions of the same immutable NURB used by build, which requires v >= 2. Mutable access clears the index before it can be used with an edited net.
 crates/solidcore/src/surface/surface_point_solve/p1.rs	SurfPtGlobalSolver::refine_guess_polygon_leg	f64::clamp	1	proven	clamp(0.0, 0.5)	constant bounds, min <= max
 crates/solidcore/src/surface/trim_srf_cache.rs	TrimSrfCache::implant_poly_edge	Vec::insert	1	proven	insert(0, input.poly_edge)	index 0 is never past the end
 crates/solidcore/src/surface/trim_srf_cache.rs	TrimSrfCache::implant_retained_edgeuse	Vec::insert	1	proven	insert(0, edgeuse)	index 0 is never past the end

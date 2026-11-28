@@ -794,6 +794,16 @@ pub struct Dialog {
     pub(crate) new_sketch: bool,
     /// Its handle drags, for Undo and Redo while it is open (#22838).
     pub(crate) drag_undo: crate::dialog_drag_undo::DragUndo,
+    /// Which opening of a dialog this is, new each time one opens: where it and its value box
+    /// were dragged belongs to this opening only, so the next opens docked even on the very
+    /// next frame (#22388).
+    pub(crate) opened: u64,
+}
+
+/// A new [`Dialog::opened`].
+fn next_opened() -> u64 {
+    static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Clone, Debug)]
@@ -1126,6 +1136,7 @@ impl Dialog {
             auto: None,
             new_sketch: false,
             drag_undo: Default::default(),
+            opened: next_opened(),
         }
     }
 
@@ -2173,7 +2184,10 @@ impl Dialog {
         if inp.rejects(&sel) {
             return None;
         }
-        (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel).filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel))
+        let coil = matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        (inp.accept != AXIS_PICKS || if coil { coil_takes_as_axis(s, &sel) } else { takes_as_axis(s, &sel) })
+            .then_some(sel)
+            .filter(|sel| crate::dialogs_assembly::alignment_accepts(s, self, sel))
     }
 
     /// A round edge where a 3D point is wanted stands for its centre: a construction point's
@@ -2361,6 +2375,7 @@ impl Dialog {
         }
         // A new placement plane replaces the saved direction; the Direction field can override it afterward.
         if self.active == 0 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }) && matches!(sel, Sel::Plane { .. }) {
+            self.extra.remove("base");
             self.extra.remove("axis");
             if let Kind::Primitive { at, .. } = &mut self.kind {
                 *at = None;
@@ -2368,6 +2383,9 @@ impl Dialog {
         }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
+        }
+        if self.active == 1 {
+            coil_diameter_from_pick(s, &mut self.kind, &sel);
         }
         crate::dialogs_cell_grid::input_touched(&self.kind, &mut self.extra, self.active);
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
@@ -2551,6 +2569,7 @@ impl Dialog {
             && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. })
             && self.inputs.first().and_then(|input| input.items.first()).is_some_and(|sel| matches!(sel, Sel::Plane { .. }))
         {
+            self.extra.remove("base");
             self.extra.remove("axis");
             if let Kind::Primitive { at, .. } = &mut self.kind {
                 *at = None;
@@ -5480,7 +5499,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let drag_key = side.dialog_offset_key();
-    let moved = crate::frame::dock_offset(ctx, drag_key);
+    let moved = crate::frame::dock_offset_of(ctx, drag_key, d.opened);
     let docked = egui::pos2(side.anchor_x(placement), top);
     let drag_bounds = crate::shell::tool_drag_rect(app, vp);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -9151,6 +9170,49 @@ pub(crate) fn takes_as_axis(s: &Session, sel: &Sel) -> bool {
     }
 }
 
+/// What the Coil's Axis takes: any axis, and a flat end face, which starts the coil at the face's
+/// centre along its outward normal (`construct::coil_end_face`).
+pub(crate) fn coil_takes_as_axis(s: &Session, sel: &Sel) -> bool {
+    takes_as_axis(s, sel) || coil_end_face(s, sel).is_some()
+}
+
+/// A flat face picked as a Coil's start: its centre, outward normal and the diameter of its round
+/// outline when it has one. `None` for any other pick.
+fn coil_end_face(s: &Session, sel: &Sel) -> Option<(Vec3, Vec3, Option<f64>)> {
+    let Sel::Face { body, index, point } = sel else { return None };
+    planar_face(s, body, *index)?;
+    let st = crate::open_meshing::session_world(s);
+    solidcraft_engine::kernel::guard("coil end face", || Ok(solidcraft_engine::doc::construct::coil_end_face(&st, *point, &None).ok().flatten()))
+        .ok()
+        .flatten()
+}
+
+/// A circular edge, a cylinder face or a round end face picked as a Coil's axis sets its Diameter
+/// field to the circle's, which can be typed over afterwards.
+fn coil_diameter_from_pick(s: &Session, kind: &mut Kind, sel: &Sel) {
+    let Kind::Primitive { cmd: "solid.coil", fields, .. } = kind else { return };
+    let diameter = match sel {
+        Sel::Edge { body, index, .. } => edge_circle(s, body, *index).map(|(_, _, r)| 2.0 * r),
+        Sel::Face { body, index, .. } => coil_end_face(s, sel).and_then(|(_, _, d)| d).or_else(|| {
+            let st = crate::open_meshing::session_world(s);
+            let b = st.body(body)?;
+            match solidcraft_engine::kernel::guard("coil face diameter", || Ok(solidcraft_engine::kernel::face_surface(&b.body, *index)))
+                .ok()
+                .flatten()?
+            {
+                solidcraft_engine::kernel::FaceSurface::Cylinder { radius, .. } => Some(2.0 * radius),
+                _ => None,
+            }
+        }),
+        _ => None,
+    };
+    if let Some(d) = diameter.filter(|d| d.is_finite() && *d > 0.0)
+        && let Some(field) = fields.iter_mut().find(|(key, _)| *key == "diameter")
+    {
+        field.1 = crate::length_input::model(&s.doc, d);
+    }
+}
+
 /// A sketch curve picked as a revolve axis.
 ///
 /// The highlight and the angle handle follow [`axis_of`] (the sketch the pick names, or the
@@ -9205,6 +9267,9 @@ fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Re
             let at = solidcraft_kernel::affine::apply_point(&inverse, (*point).into());
             Ok(json!({"type":"placed_edge", "body":source, "path":path, "at":at, "name":name}))
         }
+        Sel::Face { body, index, point } if round_axis(&app.session, sel).is_none() && coil_end_face(&app.session, sel).is_some() => {
+            Ok(clicked_face_ref(app, body, *index, *point))
+        }
         Sel::SketchCurve { id, .. } => {
             let owner = picks_sketch(app, std::slice::from_ref(sel), None);
             let state = crate::open_meshing::session_world(&app.session);
@@ -9221,6 +9286,9 @@ fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Re
 
 /// Preview a picked Coil model edge with the same world direction as evaluation.
 pub(crate) fn coil_axis_preview(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
+    if let Some((centre, normal, _)) = coil_end_face(&app.session, sel) {
+        return Some((centre, normal));
+    }
     let (origin, dir) = axis_of(app, sel)?;
     let dir = match sel {
         Sel::Edge { body, .. } if !is_mesh_body(&app.session, body) => solidcraft_engine::doc::construct::canonical_dir(dir),
@@ -10469,8 +10537,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if *reversed {
                 d.extra.insert("reversed".into(), json!(true));
             }
-            if *section == solidcraft_engine::doc::CoilSection::Square {
-                d.extra.insert("section".into(), json!("square"));
+            match section {
+                solidcraft_engine::doc::CoilSection::Square => {
+                    d.extra.insert("section".into(), json!("square"));
+                }
+                solidcraft_engine::doc::CoilSection::Triangle => {
+                    d.extra.insert("section".into(), json!("triangle"));
+                }
+                solidcraft_engine::doc::CoilSection::Circular => {}
             }
             match position {
                 ..0 => d.extra.insert("section_position".into(), json!("inside")),

@@ -500,6 +500,13 @@ An explicit origin must contain three finite numeric coordinates in millimetres
 construction-axis references are not supported. Invalid origins are rejected rather than
 silently replaced with zero.
 
+Linear, rectangular, and circular body patterns require the stored coordinates of
+each copy to be finite and at most 10¹² in absolute value. This includes surface
+origins and curve control points. A cylinder's cap plane origin can cross the
+limit while all of its vertices still fit. Reduce the spacing or the number of
+copies in a linear or rectangular pattern, or adjust the axis origin, angle, or
+number of copies in a circular pattern.
+
 ## Axes and points on round edges and faces
 
 Wherever a 3D command takes an axis (Revolve, Surface Revolve, Circular Pattern, Plane at

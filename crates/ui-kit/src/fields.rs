@@ -1344,6 +1344,11 @@ pub fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: i
     dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// Whether the dropdown with this salt currently has its value popup open.
+pub fn dropdown_is_open(ui: &Ui, id: impl egui::AsIdSalt) -> bool {
+    egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new(&id)))
+}
+
 /// A width-bounded toolbar picker. Long selected values and popup rows truncate;
 /// callers can retain their complete labels in hover text.
 pub fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, width: f32, add: impl FnOnce(&mut Ui)) -> Response {
@@ -1911,11 +1916,12 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
                                 if opening || button.clicked() || ui.is_sizing_pass() {
                                     response.request_focus();
                                 }
+                                let menu_was_open = crate::Menu::response_is_open(&response);
                                 super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
                                 let enter = ui.input(|i| i.raw.events.iter().any(|event| matches!(event,
                                     egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE
                                 )));
-                                if response.has_focus() && enter {
+                                if response.has_focus() && enter && !menu_was_open {
                                     response.surrender_focus();
                                 }
                                 publish(ui, &response, egui::Role::TextInput);
@@ -1927,6 +1933,7 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             });
         response = shown.inner.with_new_rect(shown.response.rect);
         if egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response))
+            || crate::Menu::response_is_open(&response)
             || (response.lost_focus() && shown.response.contains_pointer() && ui.input(|i| i.pointer.any_down()))
         {
             response.request_focus();
@@ -2130,7 +2137,9 @@ pub fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::o
         // rectangle would flatten translucent/blurred parents. Unexpected painting
         // (including an invisible or clipped widget) keeps the native shapes intact.
         ui.ctx().graphics_mut(|graphics| {
-            let Some(list) = graphics.get_mut(layer) else { return };
+            let Some(list) = graphics.get_mut(layer) else {
+                return;
+            };
             let paint_end = list.next_idx();
             if paint_end.0.saturating_sub(paint_start.0) < 2 {
                 return;
