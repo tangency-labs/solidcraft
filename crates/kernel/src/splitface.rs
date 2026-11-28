@@ -851,7 +851,7 @@ pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, 
 /// the sphere the way the tool comes (where it goes in) or on ahead (where it leaves). A line
 /// along the travel meets that sheet once at most, where the whole sphere's surface meets it
 /// twice, so a tool that starts inside the sphere is not ended by the sphere's far side, which
-/// the pick is not on (#1305). The sheet and its sphere face; `None` when the pick lies on the
+/// the pick is not on. The sheet and its sphere face; `None` when the pick lies on the
 /// sphere's rim as seen along the travel (the sphere then splits whole).
 fn facing_cup(tool: &Body, center: Vec3, radius: f64, near: Vec3, travel: Vec3) -> Result<Option<(Body, usize)>> {
     let Some(t) = travel.normalized() else { return Ok(None) };

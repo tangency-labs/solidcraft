@@ -1197,7 +1197,7 @@ fn two_sides_to_a_slanted_construction_plane_are_refused() {
     assert!(e.contains("two sides with a plane at a slant"), "{e}");
 }
 
-/// #1305: a cut To a sphere, from a profile on the plane tangent to it, ends on the sphere
+/// A cut To a sphere, from a profile on the plane tangent to it, ends on the sphere
 /// offset by To offset (radius R - d for an offset d past the face, R + |d| short of it), or is
 /// refused with its reason where that end cannot be reached: it never runs through the ball.
 /// With the profile a circle of radius a on x = R, the ball loses what lies in the cylinder
