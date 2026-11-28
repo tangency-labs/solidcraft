@@ -42,6 +42,8 @@ pub enum FindingKind {
     /// A view outside its sheet's drawing space or over its title block, or another object off the
     /// paper.
     OutsideSheet,
+    /// A view whose boundary shares paper area with another view on its sheet.
+    OverlappingViews,
 }
 
 impl FindingKind {
@@ -58,6 +60,7 @@ impl FindingKind {
         FindingKind::EmptyField,
         FindingKind::NotBallooned,
         FindingKind::OutsideSheet,
+        FindingKind::OverlappingViews,
     ];
 }
 
