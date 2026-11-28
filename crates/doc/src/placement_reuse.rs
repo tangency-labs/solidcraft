@@ -114,6 +114,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 through_all,
                 second_follows_first: _,
                 taper: _,
+                taper2: _,
                 to,
                 to_offset: _,
                 through_all2,
@@ -127,6 +128,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 one_sided_direction: _,
                 to_ref: _,
                 from_ref: _,
+                extend_to_face: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && !through_all2 && to2.is_none() && components.get(&sketch.0) == Some(&f.component)
         }
@@ -187,6 +189,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         point_clouds,
         // Display only: a plane's drawn size shapes nothing.
         plane_extents: _,
+        // Display only: the design's own view frame shapes nothing.
+        view_frame: _,
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,

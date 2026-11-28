@@ -1,6 +1,7 @@
 //! Snapping a field to the lattice: each straight edge moves onto the nearest lattice line of
 //! its direction on the solid side, so fields shrink and keep-outs grow, never the other way.
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::math::Vec2;
@@ -23,7 +24,7 @@ struct Line {
 }
 
 fn direction(a: Vec2, b: Vec2) -> f64 {
-    (b.y - a.y).atan2(b.x - a.x)
+    det::atan2(b.y - a.y, b.x - a.x)
 }
 
 /// Whether the shared vertex of two consecutive segments can go: the second runs on the same way
@@ -190,7 +191,7 @@ fn on_arc(arc: &Prim, x: Vec2) -> bool {
     match *arc {
         Prim::Arc { c, r, .. } => {
             let v = x - c;
-            v.length() > EPS && arc.contains_angle(v.y.atan2(v.x), EPS / r.max(EPS))
+            v.length() > EPS && arc.contains_angle(det::atan2(v.y, v.x), EPS / r.max(EPS))
         }
         Prim::Line { .. } => false,
     }
@@ -374,7 +375,10 @@ fn refit(prim: &Prim, a: Vec2, b: Vec2) -> Option<Prim> {
             if a.distance(p0) <= EPS && b.distance(p1) <= EPS {
                 return Some(*prim);
             }
-            let (s, e) = ((a - c).y.atan2((a - c).x), (b - c).y.atan2((b - c).x));
+            let (s, e) = (
+                det::atan2((a - c).y, (a - c).x),
+                det::atan2((b - c).y, (b - c).x),
+            );
             let turn = if sweep >= 0.0 {
                 (e - s).rem_euclid(TAU)
             } else {

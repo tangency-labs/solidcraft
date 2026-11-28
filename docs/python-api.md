@@ -54,14 +54,42 @@ skill.
 ### Install
 
 ```sh
-pip install solidcraft          # the client, with solidcraft-cli for your platform
+pip install solidcraft          # the client (pure Python, small)
 uvx solidcraft mcp              # the MCP server over stdio, nothing installed first
 ```
 
 The package's `solidcraft` command is `solidcraft-cli` with the same arguments, stdin, stdout and
 exit code (`uvx solidcraft --version`, `uvx solidcraft run replay.json --in part.sc`); with no
-arguments it prints the CLI's help. It runs the binary the client finds: `SOLIDCRAFT_CLI`, the one
-in the wheel, then `PATH`. An MCP client takes it as command `uvx`, args `["solidcraft", "mcp"]`.
+arguments it prints the CLI's help. An MCP client takes it as command `uvx`, args
+`["solidcraft", "mcp"]`.
+
+The package carries no binary. The client (the `solidcraft` command and `sc.session()` alike) runs,
+in this order:
+
+1. `SOLIDCRAFT_CLI`, when it is set;
+2. the `solidcraft-cli` it downloaded earlier for its own version;
+3. a `solidcraft-cli` on `PATH` (an installed SolidCraft), when it is the same minor version or newer;
+4. otherwise it downloads its own version's `solidcraft-cli` once: this platform's CLI archive from
+   the GitHub release `v<version>` (about 100 MB; about 200 MB for the universal macOS one), checked
+   against that release's `SHA256SUMS.txt` before anything runs (a mismatch is refused and
+   deleted). It prints one line to stderr while it does, and keeps the binary in the user cache:
+   `~/.cache/solidcraft/cli/<version>/` (or `$XDG_CACHE_HOME`), `~/Library/Caches/solidcraft/cli/<version>/`
+   on macOS, `%LOCALAPPDATA%\solidcraft\cli\<version>\` on Windows.
+
+There are archives for Linux x86_64 and aarch64 (glibc), macOS (universal, notarized as released),
+Windows x64, x86 and arm64, and FreeBSD x86_64. `SOLIDCRAFT_NO_DOWNLOAD=1` turns the download off;
+with nothing else found, the command says what to do instead. `SOLIDCRAFT_DOWNLOAD_URL` names
+another folder holding the release's files (a mirror, or `file://`).
+
+**Offline or behind a proxy:** set `SOLIDCRAFT_CLI` to an installed `solidcraft-cli`, or download the
+archive (`solidcraft-cli-<version>-<platform>.tar.gz` or `.zip`, with `SHA256SUMS.txt` beside it to
+have it checked) and run `solidcraft install-cli --from <file>`: it puts the CLI in the cache, so
+later runs need no network.
+
+`solidcraft install-cli [--from FILE] [--force]` also copies the CLI to a user bin folder
+(`~/.local/bin`, or `$XDG_BIN_HOME`; `%LOCALAPPDATA%\Programs\solidcraft` on Windows) so shells and
+MCP clients find `solidcraft-cli` by name. It never edits `PATH`; it prints how to add the folder
+when it is not on it, and it replaces a different file there only with `--force`.
 
 ### The API
 
@@ -182,35 +210,33 @@ At 0.51.0 this gives 898 commands and 27 tools.
 - `apps/solidcraft-cli/tests/commands_output.rs` and `crates/mcp/src/tests.rs`: `--schemas` and
   `--structured`.
 
-### Packaging: wheels on every release, uploaded when it is published
+### Packaging: one wheel and the CLI archives on every release
 
 The release workflow already builds `solidcraft-cli` for every platform and signs it on macOS and
-Windows. Its `python` job repackages those exact binaries into wheels rather than rebuilding them,
-so a wheel carries the bytes `SHA256SUMS.txt` lists, signed where the app is
-([releasing.md](releasing.md#python-packages)):
+Windows. Its `python` job ([releasing.md](releasing.md#python-packages)) makes:
 
-- **Platform wheels** carry `solidcraft-cli` under `solidcraft/bin/`, which the client finds before
-  `PATH`. There are wheels for manylinux x86_64 and aarch64 (tagged with the newest glibc the binary
-  needs), macOS universal2, and Windows x64, x86 and arm64.
-- **A `py3-none-any` wheel** has no binary. It finds `solidcraft-cli` on `PATH` or through
-  `SOLIDCRAFT_CLI`, which covers FreeBSD and the platforms without a wheel.
-- **`cargo xtask python wheel`** writes each wheel: the package with its generated bindings, the
+- **One `py3-none-any` wheel**, with no binary: the package with its generated bindings, the
   `.dist-info` with `METADATA`, `WHEEL`, `RECORD` (SHA-256 of each file) and the `solidcraft` and
-  `solidcraft-session` entry points, and the licences (`THIRD-PARTY-LICENSES.txt` too when the binary is inside). The
+  `solidcraft-session` entry points, and the licences, written by `cargo xtask python wheel`. The
   packaging scripts gain no Python dependency. There is no sdist, since building one would mean
   building the whole workspace.
+- **The CLI archives the client downloads**: each platform's released `solidcraft-cli` alone, taken
+  from its package rather than rebuilt (the same, signed bytes), with the licence files:
+  `solidcraft-cli-<version>-linux-<arch>.tar.gz`, `-freebsd-x86_64.tar.gz`,
+  `-windows-<arch>.zip`. macOS has its notarized `solidcraft-cli-<version>-macos-universal.zip`
+  already. They are release assets, so `SHA256SUMS.txt` lists them.
 - **Versions** follow PEP 440: `0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a
-  nightly.
-- **Checks:** the release job installs the Linux x86_64 wheel into a clean environment and runs the
-  client's tests with the binary inside it. Locally, a macOS wheel installed with `uv pip` passed
-  the same tests with `SOLIDCRAFT_CLI` unset.
-- **Upload:** `pypi.yml` uploads a release's wheels with PyPI trusted publishing (no stored
+  nightly. The bindings keep the release's own version, which names the tag to download from.
+- **Checks:** the release job installs the wheel into a clean environment with no `SOLIDCRAFT_CLI`
+  and nothing on `PATH`, lets it download the Linux x86_64 archive from a `file://` copy of the
+  release's files, checks that the cached binary is the released one, and runs the client's tests
+  against it. `python/tests/test_download.py` covers a match, a mismatch, an offline server, the
+  cache, an older `PATH` CLI and `install-cli` with a fake release folder.
+- **Upload:** `pypi.yml` uploads a release's wheel with PyPI trusted publishing (no stored
   token). A pre-release goes to TestPyPI when it is published, and to PyPI when it is flipped to a
   full release; it never goes to PyPI while it is a pre-release. It stays off until
-  the owner registers the publishers and sets `PYTHON_PUBLISH`.
-- **Size:** a platform wheel holds the whole `solidcraft-cli`. PyPI's default limit is 100 MB per
-  file, and the universal macOS wheel may come close to it; PyPI raises the limit for a project on
-  request.
+  the owner registers the publishers and sets `PYTHON_PUBLISH`. The wheel is small, so PyPI's
+  100 MB file limit does not apply to it.
 
 ## Planned, not built
 

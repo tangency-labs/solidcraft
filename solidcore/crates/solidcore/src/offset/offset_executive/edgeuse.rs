@@ -1564,6 +1564,7 @@ pub(super) fn mate(
 mod tests {
     use super::*;
     use crate::geom::attribute::ObjectKey;
+    use crate::math::det;
     use crate::primitive::api_primitives::create_box;
     use crate::topology::topology::NotifyRecords;
 
@@ -1831,7 +1832,7 @@ mod tests {
         let circle = edge::curve(&original, rim)?.unwrap().clone();
         let seam = circle.evaluate_point(&k, rim_ivl.min())?;
         // the parameter `chord` along the rim (radius 5) from the seam
-        let step = 2.0 * (chord / 10.0).asin() / (2.0 * std::f64::consts::PI) * rim_ivl.length();
+        let step = 2.0 * det::asin(chord / 10.0) / (2.0 * std::f64::consts::PI) * rim_ivl.length();
         let at = if after {
             rim_ivl.min() + step
         } else {

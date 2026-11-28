@@ -238,7 +238,11 @@ pub fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, field: 
         super::keyboard_focus::note_focused_text(ui.ctx(), id, len);
     }
     let range = keep_selection(ui, response, len);
-    if response.secondary_clicked() {
+    if !super::Menu::context_active(response) {
+        return;
+    }
+    let keyboard_open = response.has_focus() && ui.input(|input| input.modifiers.shift && input.key_pressed(egui::Key::F10));
+    if !super::Menu::response_is_open(response) || response.secondary_clicked() || keyboard_open {
         let clip = clipboard_text();
         ui.ctx().data_mut(|d| d.insert_temp(id.with(CLIP), clip));
     }
@@ -250,23 +254,20 @@ pub fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, field: 
         pastable: clip().is_some_and(|c| !c.is_empty()),
         text: len > 0,
     };
-    let mut picked = None;
-    let open = super::Menu::context(response, |ui| {
-        super::Menu::show(ui, super::LIST_W, |ui| {
-            for edit in Edit::ALL {
-                let (row, message, icon, key) = edit.row();
-                let shortcut = super::chord_label(key);
-                let mut item = super::MenuItem::new(row, solidcraft_ui_text::tr(message), icon);
-                item.shortcut = &shortcut;
-                item.enabled = enabled(edit, state);
-                if item.show(ui).clicked() && item.enabled {
-                    picked = Some(edit);
-                    ui.close();
-                }
-            }
-        });
-    })
-    .is_some();
+    let entries = Edit::ALL
+        .into_iter()
+        .map(|edit| {
+            let (row, message, icon, key) = edit.row();
+            super::Item::action(row, solidcraft_ui_text::tr(message), icon).key(&super::chord_label(key)).on_if(enabled(edit, state))
+        })
+        .collect::<Vec<_>>();
+    let escape = super::Menu::response_is_open(response) && ui.ctx().input(|input| input.key_pressed(egui::Key::Escape));
+    let output = super::Menu::context_items_output(response, &entries);
+    if escape {
+        ui.ctx().memory_mut(|memory| memory.request_focus(id));
+    }
+    let open = output.open;
+    let picked = output.picked.and_then(|item| Edit::ALL.into_iter().find(|edit| edit.row().0 == item.id));
     if open {
         let pass = ui.ctx().cumulative_pass_nr();
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(OPEN), (id, pass)));
