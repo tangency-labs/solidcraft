@@ -6228,9 +6228,10 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-esc"
-version = "0.51.0"
+version = "0.51.2"
 dependencies = [
  "rowan",
+ "rustix 1.1.6",
  "serde",
  "serde_json",
 ]

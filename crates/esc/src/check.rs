@@ -10,7 +10,7 @@ use rowan::TextRange;
 use crate::diagnostic::{Code, Diagnostic};
 use crate::fmt::layout;
 use crate::model::{Arg, Child, Document, Entry, Expr, ExprKind, Note, Spanned};
-use crate::project::{Loaded, Project, import_path, imported_file, normalize, resolve};
+use crate::project::{Loaded, Project, identity, import_path, imported_file, instance_file, normalize, resolve};
 use crate::units::{Quantity, UNITS, unit};
 use crate::vocabulary::{self, AXES, FileKind, MATH, NOTE_KINDS, ORIGIN, Op, PLANES, Place, find, is_reserved, points_of};
 
@@ -67,20 +67,40 @@ pub struct Checked {
 
 /// Checks the file at `path` and, once each, the files it imports. `Err` when it can't be read.
 pub fn check(project: &mut Project, path: &Path) -> Result<Rc<Checked>, String> {
+    enum Step {
+        Load(PathBuf),
+        Check(Rc<Loaded>),
+    }
     let path = normalize(path);
     if let Some(done) = project.checks.get(&path) {
         return Ok(done.clone());
     }
     // Reached again through a member of a file on an import cycle, which E0703 reports.
-    if project.in_progress.contains(&path) {
+    if project.in_progress.contains(&identity(&path)) {
         return Ok(Rc::new(Checked::default()));
     }
-    let file = project.load(&path)?;
-    project.in_progress.insert(path.clone());
-    let checked = Rc::new(check_loaded(project, &file));
-    project.in_progress.remove(&path);
-    project.checks.insert(path, checked.clone());
-    Ok(checked)
+    project.load(&path)?;
+    let mut pending = vec![Step::Load(path.clone())];
+    while let Some(step) = pending.pop() {
+        match step {
+            Step::Load(next) => {
+                if project.checks.contains_key(&next) {
+                    continue;
+                }
+                let Ok(file) = project.load(&next) else { continue };
+                if project.in_progress.insert(identity(&next)) {
+                    pending.push(Step::Check(file.clone()));
+                    pending.extend(imports_of(&file).into_iter().rev().map(Step::Load));
+                }
+            }
+            Step::Check(file) => {
+                let checked = Rc::new(check_loaded(project, &file));
+                project.in_progress.remove(&identity(&file.path));
+                project.checks.insert(file.path.clone(), checked);
+            }
+        }
+    }
+    project.checks.get(&path).cloned().ok_or_else(|| format!("could not check {}", path.display()))
 }
 
 /// The files a file's `import` entries name.
@@ -91,13 +111,15 @@ fn imports_of(file: &Loaded) -> Vec<PathBuf> {
 
 /// Does importing `from` lead back to `goal`?
 fn reaches(project: &mut Project, from: &Path, goal: &Path) -> bool {
+    let goal = identity(goal);
     let mut seen = HashSet::new();
     let mut pending = vec![from.to_path_buf()];
     while let Some(path) = pending.pop() {
-        if path == goal {
+        let key = identity(&path);
+        if key == goal {
             return true;
         }
-        if seen.insert(path.clone())
+        if seen.insert(key)
             && let Ok(file) = project.load(&path)
         {
             pending.extend(imports_of(&file));
@@ -389,7 +411,10 @@ impl Checker<'_> {
                         file.doc.as_ref().and_then(|d| d.entries.get(index)).and_then(Entry::call_name) == Some("import")
                     }
                     Some(_) => false,
-                    None => return self.value(e, scope.inner()),
+                    None => {
+                        self.value(e, scope.inner());
+                        false
+                    }
                 };
                 if !imported {
                     self.error(Code::WrongKind, e.range, "`instance` takes the name of an import");
@@ -405,7 +430,7 @@ impl Checker<'_> {
 
     /// `Some` when `e` is a dotted name, with what it reaches (`None` after an error).
     fn path_target(&mut self, e: &Expr, scope: Scope) -> Option<Option<Target>> {
-        let ExprKind::Path(segs) = &e.kind else { return None };
+        let ExprKind::Path(segs) = &e.unparenthesized().kind else { return None };
         Some(self.resolve(segs, scope))
     }
 
@@ -580,7 +605,8 @@ impl Checker<'_> {
         };
         for (kind, range) in &kinds {
             if *kind != expected || !kind.numeric() {
-                self.error(Code::WrongKind, *range, format!("`{name}` takes {}, found {}", expected.described(), kind.described()));
+                let wanted = if expected.numeric() { expected.described() } else { "a number or quantity" };
+                self.error(Code::WrongKind, *range, format!("`{name}` takes {wanted}, found {}", kind.described()));
                 return Kind::Any;
             }
         }
@@ -666,10 +692,14 @@ impl Checker<'_> {
                         self.entry_in(imported, &owner, seg)
                     }
                     Some("instance") => {
-                        let import = entry.value.args().first().and_then(|a| a.value.single_name())?;
-                        let doc = file.doc.as_ref()?;
-                        let import = doc.entries.iter().take(index).find(|e| e.name.text == import)?;
-                        let imported = self.imported(&file, import)?;
+                        let imported = match instance_file(self.project, &file, index) {
+                            Ok(Some(imported)) => imported,
+                            result => {
+                                let message = result.err().unwrap_or_else(|| format!("instance `{owner}` does not refer to an import"));
+                                self.error(Code::NoMember, seg.range, message);
+                                return None;
+                            }
+                        };
                         self.entry_in(imported, &owner, seg)
                     }
                     _ => {

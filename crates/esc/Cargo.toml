@@ -12,5 +12,8 @@ workspace = true
 rowan = { workspace = true }
 serde = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
 [dev-dependencies]
 serde_json = { workspace = true }

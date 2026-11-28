@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
 use crate::check::Checked;
-use crate::model::{Document, Entry, lower};
+use crate::model::{Document, Entry, ExprKind, lower};
 use crate::parse::{Parse, parse};
 
 pub const EXTENSION: &str = "esc";
@@ -51,7 +51,16 @@ fn loaded(path: PathBuf, text: String) -> Loaded {
 }
 
 fn read(path: &Path) -> Result<String, String> {
+    #[cfg(unix)]
+    let file =
+        rustix::fs::open(path, rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK | rustix::fs::OFlags::CLOEXEC, rustix::fs::Mode::empty())
+            .map(std::fs::File::from)
+            .map_err(|e| format!("can't open {}: {e}", path.display()))?;
+    #[cfg(not(unix))]
     let file = std::fs::File::open(path).map_err(|e| format!("can't open {}: {e}", path.display()))?;
+    if !file.metadata().map_err(|e| format!("can't inspect {}: {e}", path.display()))?.is_file() {
+        return Err(format!("{} isn't a regular file", path.display()));
+    }
     let mut bytes = Vec::new();
     file.take(MAX_FILE + 1).read_to_end(&mut bytes).map_err(|e| format!("can't read {}: {e}", path.display()))?;
     if bytes.len() as u64 > MAX_FILE {
@@ -79,6 +88,10 @@ pub fn normalize(path: &Path) -> PathBuf {
     out
 }
 
+pub fn identity(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| normalize(path))
+}
+
 /// Where a path written in `from` points. Absolute paths are refused, so a design folder moves
 /// as a whole.
 pub fn resolve(from: &Path, written: &str) -> Option<PathBuf> {
@@ -100,6 +113,60 @@ pub fn imported_file(from: &Path, e: &Entry) -> Option<PathBuf> {
         return None;
     }
     import_path(from, &e.written_path()?.0)
+}
+
+pub(crate) fn instance_file(project: &mut Project, file: &Rc<Loaded>, index: usize) -> Result<Option<Rc<Loaded>>, String> {
+    enum Step {
+        Instance,
+        Member(String),
+        Finish((PathBuf, usize)),
+    }
+    let mut target = (file.clone(), index);
+    let mut pending = vec![Step::Instance];
+    let mut active = HashSet::new();
+    while let Some(step) = pending.pop() {
+        match step {
+            Step::Instance => {
+                let (file, index) = &target;
+                let Some(entry) = file.doc.as_ref().and_then(|d| d.entries.get(*index)) else { return Ok(None) };
+                let Some(argument) = entry.value.args().first() else { return Ok(None) };
+                let ExprKind::Path(names) = &argument.value.unparenthesized().kind else { return Ok(None) };
+                let Some((head, rest)) = names.split_first() else { return Ok(None) };
+                let Some(next) = file.doc.as_ref().and_then(|d| d.entries.iter().take(*index).position(|e| e.name.text == head.text)) else {
+                    return Ok(None);
+                };
+                let key = (identity(&file.path), *index);
+                if !active.insert(key.clone()) {
+                    return Err("instance references form an import cycle".to_owned());
+                }
+                pending.push(Step::Finish(key));
+                pending.extend(rest.iter().rev().map(|name| Step::Member(name.text.clone())));
+                target = (file.clone(), next);
+            }
+            Step::Member(name) => {
+                let (file, index) = &target;
+                let Some(entry) = file.doc.as_ref().and_then(|d| d.entries.get(*index)) else { return Ok(None) };
+                if entry.call_name() == Some("instance") {
+                    pending.push(Step::Member(name));
+                    pending.push(Step::Instance);
+                    continue;
+                }
+                let Some(path) = imported_file(&file.path, entry) else { return Ok(None) };
+                let imported = project.load(&path)?;
+                let Some(index) = imported.doc.as_ref().and_then(|d| d.entries.iter().position(|e| e.name.text == name)) else { return Ok(None) };
+                target = (imported, index);
+            }
+            Step::Finish(key) => {
+                if target.0.doc.as_ref().and_then(|d| d.entries.get(target.1)).and_then(Entry::call_name) != Some("import") {
+                    return Ok(None);
+                }
+                active.remove(&key);
+            }
+        }
+    }
+    let (file, index) = target;
+    let Some(path) = file.doc.as_ref().and_then(|d| d.entries.get(index)).and_then(|e| imported_file(&file.path, e)) else { return Ok(None) };
+    project.load(&path).map(Some)
 }
 
 /// Every `.esc` file under `dir`, sorted, skipping hidden folders and build output.

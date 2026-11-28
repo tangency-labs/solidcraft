@@ -51,6 +51,102 @@ fn the_corpus_checks_clean() {
 }
 
 #[test]
+fn numeric_functions_describe_the_numeric_requirement() {
+    let path = Path::new("numeric_functions.esc");
+    let mut project = Project::default();
+    project.replace(path, "esc 1\npart\n\nx = param(abs(\"x\"))\n".to_owned());
+    let checked = check(&mut project, path).unwrap();
+    let diagnostic = checked.diagnostics.iter().find(|d| d.code == Code::WrongKind).unwrap();
+    assert_eq!(diagnostic.message, "`abs` takes a number or quantity, found text");
+}
+
+#[test]
+fn instances_require_an_import_reference() {
+    let path = Path::new("instance_argument.esc");
+    for argument in ["42", "\"wheel\"", "[42]"] {
+        let mut project = Project::default();
+        project.replace(path, format!("esc 1\nassembly\n\ncopy = instance({argument})\n"));
+        let checked = check(&mut project, path).unwrap();
+        assert!(checked.diagnostics.iter().any(|d| d.code == Code::WrongKind && d.message == "`instance` takes the name of an import"));
+    }
+}
+
+#[test]
+fn instances_follow_dotted_imports_and_check_their_members() {
+    let path = tests_dir().join("corpus/dotted_instance.esc");
+    for (argument, member, valid) in [("parts.wheel", "hub", true), ("((parts.wheel))", "hub", true), ("parts.wheel", "missing_connector", false)] {
+        let mut project = Project::default();
+        project.replace(
+            &path,
+            format!("esc 1\nassembly\n\nparts = import(\"robot\")\n\ncopy = instance({argument})\n\njoint = rigid(copy.{member}, copy.hub)\n"),
+        );
+        let checked = check(&mut project, &path).unwrap();
+        if valid {
+            assert_eq!(checked.diagnostics, []);
+        } else {
+            assert_eq!(checked.diagnostics.len(), 1, "{:?}", checked.diagnostics);
+            assert_eq!(checked.diagnostics[0].code, Code::NoMember);
+            assert_eq!(checked.diagnostics[0].message, "`copy` has no entry `missing_connector`");
+        }
+    }
+}
+
+#[test]
+fn parenthesized_import_paths_are_checked() {
+    for (operation, file) in [("import", "missing"), ("import_step", "missing.step")] {
+        let path = tests_dir().join("parenthesized_import.esc");
+        let mut project = Project::default();
+        project.replace(&path, format!("esc 1\npart\n\nexternal = {operation}(((\"{file}\")))\n"));
+        let checked = check(&mut project, &path).unwrap();
+        assert!(checked.diagnostics.iter().any(|d| d.code == Code::FileNotFound), "{:?}", checked.diagnostics);
+    }
+}
+
+#[test]
+fn import_chains_are_checked_without_recursive_calls() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-esc-import-chain-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut project = Project::default();
+    let count = 600;
+    for index in 0..count {
+        let text = if index + 1 == count {
+            "esc 1\npart\n\nwidth = param(1 mm)\n".to_owned()
+        } else {
+            format!("esc 1\npart\n\nnext = import(\"{}\")\n", index + 1)
+        };
+        std::fs::write(dir.join(format!("{index}.esc")), text).unwrap();
+    }
+    let checked = check(&mut project, &dir.join("0.esc")).unwrap();
+    assert_eq!(checked.diagnostics, []);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn the_loader_rejects_a_fifo_without_waiting_for_a_writer() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-esc-fifo-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("pipe.esc");
+    rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR).unwrap();
+    let error = Project::default().load(&fifo).unwrap_err();
+    assert!(error.contains("isn't a regular file"), "{error}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn import_cycles_through_symlinked_directories_are_reported() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-esc-symlink-cycle-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::os::unix::fs::symlink(".", dir.join("nested")).unwrap();
+    let path = dir.join("source.esc");
+    std::fs::write(&path, "esc 1\npart\n\nother = import(\"nested/source\")\n").unwrap();
+    let checked = check(&mut Project::default(), &path).unwrap();
+    assert!(checked.diagnostics.iter().any(|d| d.code == Code::ImportCycle));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn each_diagnostic_code_gives_its_expected_output() {
     for code in Code::ALL {
         let dir = tests_dir().join("diagnostics").join(code.as_str());

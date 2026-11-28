@@ -71,9 +71,13 @@ fn located(path: &Path, text: &str, diagnostics: &[Diagnostic]) -> Vec<Located> 
     diagnostics.iter().map(|d| Located::new(&file, text, d)).collect()
 }
 
-fn write_formatted(path: &Path, formatted: &str) -> Result<(), String> {
+fn write_formatted(path: &Path, formatted: &str, json: bool) -> Result<(), String> {
     write(path, formatted)?;
-    println!("formatted {}", shown(path));
+    if json {
+        solidcraft_engine::note!("formatted {}", shown(path));
+    } else {
+        println!("formatted {}", shown(path));
+    }
     Ok(())
 }
 
@@ -91,7 +95,7 @@ fn check(args: &[String]) -> Result<(), String> {
             if let Ok(formatted) = format(&file.text)
                 && formatted != file.text
             {
-                write_formatted(path, &formatted)?;
+                write_formatted(path, &formatted, json)?;
             }
         }
     }
@@ -136,7 +140,7 @@ fn fmt(args: &[String]) -> Result<(), String> {
                 println!("{} is not in canonical layout", shown(path));
                 problems += 1;
             }
-            Ok(formatted) => write_formatted(path, &formatted)?,
+            Ok(formatted) => write_formatted(path, &formatted, false)?,
         }
     }
     match problems {
@@ -151,9 +155,30 @@ fn apply_and_write(args: &[String], path: &str, intent: &Intent) -> Result<(), S
     let root = absolute(crate::flag(args, "--root").unwrap_or("."))?;
     let all = list(&root).map_err(|e| format!("{}: {e}", shown(&root)))?;
     let mut project = Project::default();
-    for (changed, text) in apply(&mut project, &all, &absolute(path)?, intent)? {
-        write(&changed, &text)?;
-        println!("wrote {}", shown(&changed));
+    let changes = apply(&mut project, &all, &absolute(path)?, intent)?;
+    write_changes(&mut project, &changes, write)?;
+    for (changed, _) in &changes {
+        println!("wrote {}", shown(changed));
+    }
+    Ok(())
+}
+
+// Rollback covers write errors, not process crashes.
+fn write_changes(
+    project: &mut Project,
+    changes: &[(PathBuf, String)],
+    mut write_file: impl FnMut(&Path, &str) -> Result<(), String>,
+) -> Result<(), String> {
+    let originals = changes.iter().map(|(path, _)| project.load(path)).collect::<Result<Vec<_>, _>>()?;
+    for (i, (path, text)) in changes.iter().enumerate() {
+        if let Err(mut error) = write_file(path, text) {
+            for original in originals.iter().take(i).rev() {
+                if let Err(restore_error) = write_file(&original.path, &original.text) {
+                    error.push_str(&format!("\nrollback failed: {restore_error}"));
+                }
+            }
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -169,4 +194,104 @@ fn rename(args: &[String]) -> Result<(), String> {
     crate::known_args("esc rename", args, &["--root"], &[], true)?;
     let [path, from, to] = words(args, &["--root"])[..] else { return Err(crate::command_usage("esc", &[])) };
     apply_and_write(args, path, &Intent::Rename { from: from.to_owned(), to: to.to_owned() })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let root = std::env::temp_dir().join(format!("solidcraft-esc-cli-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            std::fs::create_dir(&root).unwrap();
+            std::fs::write(root.join("a.esc"), "esc 1\npart\n\nwidth = param(2 mm)\n").unwrap();
+            for name in ["b.esc", "c.esc"] {
+                std::fs::write(root.join(name), "esc 1\nassembly\n\npart = import(\"a\", width: 3 mm)\n").unwrap();
+            }
+            Self(root)
+        }
+
+        fn changes(&self, project: &mut Project) -> Vec<(PathBuf, String)> {
+            apply(project, &list(&self.0).unwrap(), &self.0.join("a.esc"), &Intent::Rename { from: "width".into(), to: "plate_width".into() })
+                .unwrap()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn edit_and_rename_write_all_changed_files() {
+        for action in ["edit", "rename"] {
+            let dir = Scratch::new();
+            let mut args = vec![action.to_owned(), dir.0.join("a.esc").to_string_lossy().into_owned()];
+            if action == "edit" {
+                args.push(r#"{"intent":"rename","from":"width","to":"plate_width"}"#.into());
+            } else {
+                args.extend(["width".into(), "plate_width".into()]);
+            }
+            args.extend(["--root".into(), dir.0.to_string_lossy().into_owned()]);
+            run(&args).unwrap();
+            for path in list(&dir.0).unwrap() {
+                let text = std::fs::read_to_string(path).unwrap();
+                assert!(text.contains("plate_width"), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn failed_write_restores_completed_files() {
+        for fail_at in 0..3 {
+            let dir = Scratch::new();
+            let mut project = Project::default();
+            let changes = dir.changes(&mut project);
+            assert_eq!(changes.len(), 3);
+            let originals: Vec<_> = changes.iter().map(|(path, _)| std::fs::read(path).unwrap()).collect();
+            let mut calls = 0;
+            let error = write_changes(&mut project, &changes, |path, text| {
+                let call = calls;
+                calls += 1;
+                if call == fail_at { Err(format!("{}: injected write failure", shown(path))) } else { write(path, text) }
+            })
+            .unwrap_err();
+            assert_eq!(error, format!("{}: injected write failure", shown(&changes[fail_at].0)));
+            assert_eq!(calls, fail_at * 2 + 1);
+            for ((path, _), original) in changes.iter().zip(originals) {
+                assert_eq!(std::fs::read(path).unwrap(), original);
+            }
+        }
+    }
+
+    #[test]
+    fn rollback_reports_failures_and_keeps_restoring_other_files() {
+        let dir = Scratch::new();
+        let mut project = Project::default();
+        let changes = dir.changes(&mut project);
+        let original = std::fs::read(&changes[0].0).unwrap();
+        let mut calls = 0;
+        let error = write_changes(&mut project, &changes, |path, text| {
+            calls += 1;
+            match calls {
+                3 => Err(format!("{}: injected write failure", shown(path))),
+                4 => Err(format!("{}: injected restore failure", shown(path))),
+                _ => write(path, text),
+            }
+        })
+        .unwrap_err();
+        assert_eq!(
+            error,
+            format!("{}: injected write failure\nrollback failed: {}: injected restore failure", shown(&changes[2].0), shown(&changes[1].0))
+        );
+        assert_eq!(calls, 5);
+        assert_eq!(std::fs::read(&changes[0].0).unwrap(), original);
+        assert_eq!(std::fs::read_to_string(&changes[1].0).unwrap(), changes[1].1);
+    }
 }

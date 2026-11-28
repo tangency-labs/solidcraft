@@ -344,13 +344,15 @@ impl<'t> Parser<'t> {
                 self.finish();
             }
             Some(Equals) if is_ident => {
-                self.start(Item);
-                while self.pos < first {
-                    self.bump();
-                }
                 if !items {
                     let range = self.range_at(first);
                     self.error(Code::StrayIndent, range, "only a sketch has indented `name = ...` lines, and they don't nest");
+                    self.error_line();
+                    return;
+                }
+                self.start(Item);
+                while self.pos < first {
+                    self.bump();
                 }
                 self.assignment(false);
                 self.children(level + 1, false);
@@ -397,8 +399,8 @@ impl<'t> Parser<'t> {
         self.finish();
     }
 
-    fn expr(&mut self) {
-        self.binary(1);
+    fn expr(&mut self) -> u32 {
+        self.binary(1)
     }
 
     fn enter(&mut self) -> bool {
@@ -411,13 +413,13 @@ impl<'t> Parser<'t> {
         true
     }
 
-    fn binary(&mut self, min: u8) {
+    fn binary(&mut self, min: u8) -> u32 {
         if !self.enter() {
-            return;
+            return 0;
         }
         self.trivia();
         let checkpoint = self.builder.checkpoint();
-        self.unary();
+        let mut height = self.unary();
         loop {
             let prec = match self.peek() {
                 Some(Plus | Minus) => 1,
@@ -427,34 +429,48 @@ impl<'t> Parser<'t> {
             if prec < min {
                 break;
             }
+            if height >= MAX_DEPTH {
+                self.check_height(height + 1);
+                break;
+            }
             self.builder.start_node_at(checkpoint, rowan::SyntaxKind(Binary as u16));
             self.trivia();
             self.bump();
-            self.binary(prec + 1);
+            height = height.max(self.binary(prec + 1)) + 1;
             self.finish();
+            self.check_height(height);
         }
         self.depth -= 1;
+        height
     }
 
-    fn unary(&mut self) {
+    fn check_height(&mut self, height: u32) {
+        if height > MAX_DEPTH {
+            self.error_here(Code::TooDeep, format!("expression tree is more than {MAX_DEPTH} deep"));
+        }
+    }
+
+    fn unary(&mut self) -> u32 {
         self.trivia();
         if matches!(self.current(), Some(Plus | Minus)) {
             if !self.enter() {
-                return;
+                return 0;
             }
             self.start(Unary);
             self.bump();
-            self.unary();
+            let height = self.unary() + 1;
             self.finish();
             self.depth -= 1;
+            self.check_height(height);
+            height
         } else {
-            self.primary();
+            self.primary()
         }
     }
 
-    fn primary(&mut self) {
+    fn primary(&mut self) -> u32 {
         self.trivia();
-        match self.current() {
+        let height = match self.current() {
             Some(Number) => {
                 self.start(Literal);
                 self.bump();
@@ -476,8 +492,12 @@ impl<'t> Parser<'t> {
                     self.finish();
                 }
                 self.finish();
+                1
             }
-            Some(String) => self.string(),
+            Some(String) => {
+                self.string();
+                1
+            }
             Some(Ident) => {
                 let checkpoint = self.builder.checkpoint();
                 self.start(Path);
@@ -501,30 +521,35 @@ impl<'t> Parser<'t> {
                 if self.peek() == Some(LParen) {
                     self.builder.start_node_at(checkpoint, rowan::SyntaxKind(Call as u16));
                     self.trivia();
-                    self.args();
+                    let height = self.args() + 1;
                     self.finish();
+                    height
+                } else {
+                    1
                 }
             }
             Some(LParen) => {
                 self.start(Paren);
                 self.bump();
                 self.brackets += 1;
-                self.expr();
+                let height = self.expr() + 1;
                 self.expect(RParen, "`)`");
                 self.brackets -= 1;
                 self.finish();
+                height
             }
             Some(LBracket) => {
                 self.start(List);
                 self.bump();
                 self.brackets += 1;
+                let mut height = 0;
                 loop {
                     self.trivia();
                     if matches!(self.current(), Some(RBracket | Newline) | None) {
                         break;
                     }
                     let before = self.pos;
-                    self.expr();
+                    height = height.max(self.expr());
                     self.progress(before);
                     if self.peek() == Some(Comma) {
                         self.trivia();
@@ -536,20 +561,28 @@ impl<'t> Parser<'t> {
                 self.expect(RBracket, "`]`");
                 self.brackets -= 1;
                 self.finish();
+                height + 1
             }
             Some(Tilde) => {
                 self.start(Seed);
                 self.bump();
                 self.trivia();
-                if self.current() == Some(LParen) {
-                    self.args();
+                let height = if self.current() == Some(LParen) {
+                    self.args() + 1
                 } else {
                     self.error_here(Code::Expected, "expected `(` after `~`");
-                }
+                    1
+                };
                 self.finish();
+                height
             }
-            _ => self.error_here(Code::Expected, "expected a value"),
-        }
+            _ => {
+                self.error_here(Code::Expected, "expected a value");
+                0
+            }
+        };
+        self.check_height(height);
+        height
     }
 
     /// Makes sure a loop moves on: a token nothing could parse becomes an error node.
@@ -561,10 +594,11 @@ impl<'t> Parser<'t> {
         }
     }
 
-    fn args(&mut self) {
+    fn args(&mut self) -> u32 {
         self.start(ArgList);
         self.bump();
         self.brackets += 1;
+        let mut height = 0;
         loop {
             self.trivia();
             if matches!(self.current(), Some(RParen | Newline) | None) {
@@ -580,7 +614,7 @@ impl<'t> Parser<'t> {
                 }
             }
             let before = self.pos;
-            self.expr();
+            height = height.max(self.expr());
             self.progress(before);
             self.finish();
             if self.peek() == Some(Comma) {
@@ -593,6 +627,7 @@ impl<'t> Parser<'t> {
         self.expect(RParen, "`)`");
         self.brackets -= 1;
         self.finish();
+        height
     }
 }
 
@@ -606,4 +641,59 @@ fn string_closed(text: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_binary_expressions_report_the_depth_limit_losslessly() {
+        for separator in ["+", " + "] {
+            let formula = vec!["1"; 10_000].join(separator);
+            let text = format!("esc 1\npart\n\nx = param({formula})\n");
+            let parsed = parse(&text);
+            assert_eq!(parsed.syntax().to_string(), text);
+            assert!(parsed.errors.iter().any(|error| error.code == Code::TooDeep));
+            assert!(crate::fmt::format(&text).is_err());
+        }
+    }
+
+    #[test]
+    fn ordinary_formulas_keep_precedence_and_left_associativity() {
+        let text = "esc 1\npart\n\nx = param(8 - 3 - 1 * 2)\n";
+        let parsed = parse(text);
+        assert_eq!(parsed.errors, []);
+        let doc = crate::model::lower(&parsed.syntax());
+        let argument = &doc.entries[0].value.args()[0].value;
+        let crate::model::ExprKind::Binary { op: '-', lhs, rhs } = &argument.kind else { panic!("expected subtraction") };
+        assert!(matches!(lhs.kind, crate::model::ExprKind::Binary { op: '-', .. }));
+        assert!(matches!(rhs.kind, crate::model::ExprKind::Binary { op: '*', .. }));
+        assert_eq!(crate::fmt::format(text).unwrap(), text);
+    }
+
+    #[test]
+    fn invalid_nested_items_recover_losslessly() {
+        let mut text = "esc 1\npart\n\nprofile = sketch()\n  first = line()\n".to_owned();
+        let invalid_levels = 2..2048;
+        for level in invalid_levels.clone() {
+            text.push_str(&"  ".repeat(level));
+            text.push_str("invalid = line()\n");
+        }
+        text.push_str("    why: \"still on first\"\n  second = line()\n\nafter = 1\n");
+
+        let parsed = parse(&text);
+        let root = parsed.syntax();
+        assert_eq!(root.to_string(), text);
+        assert_eq!(parsed.errors.len(), invalid_levels.len());
+        assert!(parsed.errors.iter().all(|error| error.code == Code::StrayIndent));
+
+        let entries: Vec<_> = root.children().filter(|node| node.kind() == Entry).collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].to_string(), "after = 1\n");
+        let items: Vec<_> = entries[0].children().filter(|node| node.kind() == Item).collect();
+        assert_eq!(items.len(), 2);
+        assert!(items[0].children().any(|node| node.kind() == Note));
+        assert_eq!(items[0].children().filter(|node| node.kind() == ErrorNode).count(), invalid_levels.len());
+    }
 }

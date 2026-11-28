@@ -103,13 +103,21 @@ impl Entry {
     /// The path an `import` or `import_step` entry writes as its first argument, unquoted, and
     /// where it is written.
     pub fn written_path(&self) -> Option<(String, TextRange)> {
-        let arg = self.value.args().first()?;
-        let ExprKind::Str(raw) = &arg.value.kind else { return None };
-        Some((unquote(raw), arg.value.range))
+        let value = self.value.args().first()?.value.unparenthesized();
+        let ExprKind::Str(raw) = &value.kind else { return None };
+        Some((unquote(raw), value.range))
     }
 }
 
 impl Expr {
+    pub(crate) fn unparenthesized(&self) -> &Self {
+        let mut value = self;
+        while let ExprKind::Paren(inner) = &value.kind {
+            value = inner;
+        }
+        value
+    }
+
     pub fn call_name(&self) -> Option<&str> {
         match &self.kind {
             ExprKind::Call { name, .. } if name.len() == 1 => name.first().map(|n| n.text.as_str()),

@@ -69,6 +69,23 @@ fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
 }
 
+#[test]
+fn esc_check_json_fix_keeps_stdout_parseable() {
+    let dir = Scratch::new();
+    let path = dir.0.join("part.esc");
+    for (call, success) in [("param", true), ("unknown", false)] {
+        let text = format!("esc 1\npart\nwidth={call}(2 mm)\n");
+        std::fs::write(&path, &text).unwrap();
+        let output = cli().args(["esc", "check", "--json", "--fix"]).arg(&path).output().unwrap();
+        assert_eq!(output.status.success(), success, "{}", String::from_utf8_lossy(&output.stderr));
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["files"], 1);
+        assert_eq!(result["diagnostics"].as_array().unwrap().is_empty(), success);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("formatted "));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("esc 1\npart\n\nwidth = {call}(2 mm)\n"));
+    }
+}
+
 fn stdout_of(output: Output) -> Vec<u8> {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     output.stdout
