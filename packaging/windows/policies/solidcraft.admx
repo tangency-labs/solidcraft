@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.7" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.8" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -565,6 +565,13 @@
       <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <text id="DxfTolerance" valueName="DxfTolerance" maxLength="16" required="true" />
+      </elements>
+    </policy>
+    <policy name="LogFolder" class="Both" displayName="$(string.LogFolder)" explainText="$(string.LogFolder_Explain)" presentation="$(presentation.LogFolder)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
+      <elements>
+        <text id="LogFolder" valueName="LogFolder" maxLength="4096" required="true" />
       </elements>
     </policy>
   </policies>
