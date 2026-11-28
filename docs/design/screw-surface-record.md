@@ -234,11 +234,13 @@ Stage 4 is dropped. The bulk is the trims, and they are fitted where the answer 
   is a rational quadratic per span: the profile point's path, as `sweep::screw`'s `path_curve`
   builds a profile vertex's edge today (those edges, 31 of them on the M20 flank, already have
   straight 2-point pcurves).
-- **The cylinder's side is exact too.** On the cylinder the same edge is a helix, a straight
-  line in the cylinder's (angle, height) only where the lift is linear in the angle. The net's
-  lift is the rational quadratic of the lift (the bound's `E_l`), so on the cylinder's NURBS
-  form the pcurve is the arc's own parameter map: a rational quadratic per span, exact, with no
-  fitting.
+- **The cylinder's side is exact too.** On the cylinder the same edge is a helix. It is a
+  straight line in the cylinder's (angle, height) only where the lift is linear in the angle,
+  and the net's lift is the rational quadratic of the lift (the bound's `E_l`). On the cylinder's
+  NURBS form, whose parameter is its own quarter arcs', the angle is a Möbius (rational linear)
+  function of the net's parameter on each piece where a net span and a cylinder arc overlap,
+  and the height is that span's rational quadratic. So the pcurve is exact as a rational of
+  degree at most three per piece, with no fitting.
 
 ### What changes
 
@@ -246,8 +248,8 @@ Stage 4 is dropped. The bulk is the trims, and they are fitted where the answer 
    screw-swept wall (live definition, no radial law over the face) with a cylinder whose axis is
    the screw's axis (within the record's tolerance, measured from the frames), the intersection
    is the set of iso curves `w = w₀` at the profile's crossings of the radius: their 3D curves
-   the net's iso curves, their pcurves a straight line on the wall and the arc map on the
-   cylinder. Anything else (a law that varies over the face, a tilted or offset cylinder, a
+   the net's iso curves, their pcurves a straight line on the wall and the exact rational
+   (degree at most three) on the cylinder. Anything else (a law that varies over the face, a tilted or offset cylinder, a
    tangent crossing where the profile touches R without crossing it) goes the general way, as
    today. This is one more exact case of the intersection, like the existing plane and cylinder
    ones: the general path stays as the fallback and nothing is refused.
@@ -277,8 +279,8 @@ valid case may refuse.
 
 6. The exact wall-cylinder intersection in solidcore, using the existing record kinds (the
    helix edges are rational splines, as a profile vertex's are today). This is where the time and
-   most of the size go: straight pcurves on the flanks and arc-map pcurves on the cylinders, in
-   place of 352-point fits.
+   most of the size go: straight pcurves on the flanks and exact low-degree pcurves on the
+   cylinders, in place of 352-point fits.
 7. The `ScrewPath` edge kind in the record, written and read like `sweep`, with its pending
    file.
 8. Trim proofs from the definition on sweep walls.
