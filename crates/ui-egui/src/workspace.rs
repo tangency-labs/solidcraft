@@ -633,7 +633,12 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch", "solid.split_body"],
     },
-    Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
+    Section {
+        tab: "SURFACE",
+        panel: "MESH",
+        promoted: 2,
+        ids: &["mesh.reduce", "mesh.convert", "mesh.section_stack", "file.insert_mesh", "file.save_mesh"],
+    },
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
@@ -852,7 +857,7 @@ pub const SECTIONS: &[Section] = &[
 const LEGACY_SURFACE_CREATE: Section =
     Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] };
 const LEGACY_SURFACE_CONVERT: Section =
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.reduce"] };
+    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.reduce", "mesh.section_stack"] };
 
 // Migration data only: Render commands remain registered, but have no live ribbon sections.
 const LEGACY_RENDER_SECTIONS: &[Section] = &[

@@ -126,6 +126,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sheet.perforate" | "sheet.tab" | "sheet.bead" => &[("body", Body)],
         "solid.cell_grid" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
+        // Its planes are sketched as `sketch.create`'s, and measured against the body first.
+        "mesh.section_stack" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.repair_link" => &[("refs", Here), ("ref", Here)],
@@ -925,7 +927,7 @@ fn map_local_with_input(
     }
     // Exact face capture retains the original world pick and occurrence identity; an explicit
     // plane with `frame: "component"` is already in the component's own coordinates (#6000).
-    if matches!(id, "sketch.create" | "sketch.redefine")
+    if matches!(id, "sketch.create" | "sketch.redefine" | "mesh.section_stack")
         && (params.get("plane").and_then(|plane| plane.get("face")).is_some() || params.get("frame").and_then(Value::as_str) == Some("component"))
     {
         return None;
