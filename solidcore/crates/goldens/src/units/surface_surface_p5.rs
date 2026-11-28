@@ -828,6 +828,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                         surface_cache: None,
                         modes: None,
                         face_queries: None,
+                        leaves_solved: 0,
                     }
                     .identical_solutions(&sa, &sb),
                     "identical_solutions",

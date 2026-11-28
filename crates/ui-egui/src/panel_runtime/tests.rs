@@ -14429,6 +14429,102 @@ fn plugin_panel_toolbar_button_receives_selected_table_row() {
 }
 
 #[test]
+fn plugin_panel_table_double_click_on_cell_text_runs_on_edit() {
+    use solidcraft_engine::plugin::ui::*;
+
+    let run_draw = |on_select: Option<String>, target_text: &str| -> Vec<(String, UiEvent)> {
+        let mut panel = plugin_table_snapshot();
+        if let Widget::Table(spec) = &mut panel.panel.layout.nodes[0].widget {
+            spec.on_select = on_select;
+        }
+        let ctx = crate::fonts::test_context();
+        let mut actions = Vec::new();
+        let mut frame = |time: f64, events: Vec<egui::Event>| {
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 220.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::plugin::draw(ui, &panel, 0, &mut actions, "in", 0);
+                },
+            )
+        };
+        frame(0.50, Vec::new());
+        let output = frame(0.52, Vec::new());
+        let row_rect = crate::scenario::rect_of("plugin-panel:machining:tools:row:tool-0").unwrap();
+        let text_shape = crate::test_support::text_shapes(&output).find(|s| s.galley.job.text == target_text).unwrap();
+        let at = egui::Rect::from_min_size(text_shape.pos, text_shape.galley.size()).center();
+        assert!(row_rect.contains(at), "cell text `{target_text}` center {at:?} must lie inside row {row_rect:?}");
+        // Timed double-click matching issue #23396: 40 ms press, 80 ms gap.
+        frame(1.00, crate::test_support::pointer(at, true));
+        frame(1.04, crate::test_support::pointer(at, false));
+        frame(1.12, crate::test_support::pointer(at, true));
+        frame(1.16, crate::test_support::pointer(at, false));
+        actions
+    };
+
+    let edit_event = UiEvent { panel: "tools".into(), event: EventKind::Edit, path: "/tools".into(), row: Some("tool-0".into()), value: None };
+    let select_event = UiEvent { panel: "tools".into(), event: EventKind::Select, path: "/tools".into(), row: Some("tool-0".into()), value: None };
+
+    assert_eq!(
+        run_draw(None, "Cutter 0"),
+        vec![("edit".into(), edit_event.clone())],
+        "double-clicking the first column's label text must fire on_edit when on_select is null (#23396)"
+    );
+    assert_eq!(
+        run_draw(None, "1.000 in"),
+        vec![("edit".into(), edit_event.clone())],
+        "double-clicking another column's label text must also fire on_edit (#23396)"
+    );
+    assert_eq!(
+        run_draw(Some("choose".into()), "Cutter 0"),
+        vec![("choose".into(), select_event), ("edit".into(), edit_event)],
+        "double-clicking cell text with on_select declared fires Select on click 1 and Edit on click 2"
+    );
+
+    // Also verify end-to-end inside the shared WorkspacePanelHost + PluginController with realistic
+    // multi-frame press and gap timing.
+    let mut h = plugin_panel_harness();
+    let mut panel = plugin_table_snapshot();
+    if let Widget::Table(spec) = &mut panel.panel.layout.nodes[0].widget {
+        spec.on_select = None;
+    }
+    install_plugin_panel(&mut h.app, panel);
+    h.frames(3);
+    let text_shape = h
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Text(t) => Some(t),
+            _ => None,
+        })
+        .find(|t| t.galley.job.text == "Cutter 0")
+        .unwrap();
+    let at = egui::Rect::from_min_size(text_shape.pos, text_shape.galley.size()).center();
+    h.frame_with(crate::test_support::pointer(at, true));
+    h.frames(2);
+    h.frame_with(crate::test_support::pointer(at, false));
+    assert_eq!(
+        h.ctx.data_mut(|d| d.get_temp::<Option<String>>(egui::Id::unique(("machining", "tools", "active-selection"))).flatten()),
+        Some("tool-0".into()),
+        "single-clicking cell text selects the row in the hosted plugin panel"
+    );
+    h.frames(4);
+    h.frame_with(crate::test_support::pointer(at, true));
+    h.frames(2);
+    h.frame_with(crate::test_support::pointer(at, false));
+    assert_eq!(
+        h.app.panel_runtime.as_ref().unwrap().plugins.queued_entries_for_test(),
+        vec![("edit".into(), EventKind::Edit, Some("tool-0".into()))],
+        "double-clicking cell text in a hosted plugin panel queues the on_edit action (#23396)"
+    );
+}
+
+#[test]
 fn plugin_panels_table_rows_support_optional_indent_level() {
     use solidcraft_engine::plugin::ui::*;
     let mut panel = plugin_table_snapshot();

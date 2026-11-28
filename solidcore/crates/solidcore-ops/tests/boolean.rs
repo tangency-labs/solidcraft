@@ -5157,6 +5157,27 @@ fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
     );
 }
 
+/// #23204: the part and the tool a 360° revolve cut is handed, after the profile's corner
+/// arc ends were rounded to 9 decimals (2.5e-10 mm off the arcs). The cut itself builds one
+/// body; SMLib's check used to refuse it at Face->Vertex, because the vertex's UV drop named
+/// the seam's far side, outside a face that stops short of it. The check must read that drop
+/// on the face's own chart, and the cut must stay one valid solid of the unrounded profile's
+/// volume, 15724.04351 mm3, with 18 faces, 43 edges and 27 vertices.
+#[test]
+fn a_revolve_cut_with_its_profiles_arc_ends_rounded_is_valid() {
+    all_fixes();
+    let body = traced_operands("issue_23204_rounded_revolve_cut");
+    let cut = boolean(body("part"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = cut.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    assert_eq!(cut.counts().unwrap(), [18, 43, 27]);
+    let v = cut.volume(1e-9).unwrap();
+    assert!((v - 15724.04351).abs() < 1e-3, "volume {v}");
+}
+
 /// #20422: two curved spline pockets meeting diagonally at the crossing (4, 5) leave a vertical
 /// self-touching pinch edge along (4, 5, 3)..(4, 5, 4) whose curve is a degree-1 `Record::Spline`.
 /// Through a record round trip, `split_touching` writes two copies of that edge; before the fix,

@@ -42,13 +42,13 @@ pub struct EquationFit {
 const RANGE_UNIT_REFUSED: &str =
     "with the variable in its range's unit, start and end must both be lengths, or one a length and the other a plain number";
 
-/// How bare numbers read in the formulas: lengths in the design's unit, and angles in degrees,
-/// as everywhere else in the expression language (#19630). A curve saved before that reads
+/// How bare numbers read in the formulas: lengths in the design's unit (areas and volumes in its
+/// square and cube), and angles in degrees, as everywhere else in the expression language (#19630). A curve saved before that reads
 /// radians still: its `radians_trig` mark, set as the design opens, keeps its angles as they
 /// were, so an older design keeps its curves.
 fn defaults(vals: &BTreeMap<String, Value>, radians_trig: bool) -> Defaults {
     let len = vals.get(crate::eval::DESIGN_LEN).map(|v| v.v).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
-    let mut d = Defaults { len, ..Defaults::default() };
+    let mut d = Defaults::for_unit("", len);
     if radians_trig {
         d.ang = 1.0;
     }
@@ -389,6 +389,19 @@ mod tests {
         let fit = fit(&vals, &eq(Some("t"), "2", "0", "1")).unwrap();
         let last = *fit.points.last().unwrap();
         assert!((last - Vec2::new(25.4, 50.8)).len() < 1e-9, "{last:?}");
+    }
+
+    /// A bare number beside an area or a volume is in the design's unit squared or cubed, as a
+    /// parameter's is (`Defaults::for_unit`): beside a square inch, 3 is 3 in², not 3 mm².
+    #[test]
+    fn a_design_in_inches_reads_bare_areas_and_volumes_in_square_and_cubic_inches() {
+        let vals = with_a(25.4, Some(25.4));
+        let area = fit(&vals, &eq(Some("t"), "sqrt(a * a + 3)", "0", "1")).unwrap();
+        let volume = fit(&vals, &eq(Some("t"), "(a * a * a + 7) / (a * a)", "0", "1")).unwrap();
+        for (fit, y) in [(area, 50.8), (volume, 203.2)] {
+            let last = *fit.points.last().unwrap();
+            assert!((last - Vec2::new(25.4, y)).len() < 1e-9, "{last:?}");
+        }
     }
 
     /// Plain numbers read degrees in the formulas' trig calls, constants as well as the variable
