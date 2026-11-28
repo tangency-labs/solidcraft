@@ -228,7 +228,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPLODE_CREATE_CONTRACT)
         .output(output_schema_for::<ExplodeCreated>)
         .params(
-            "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
+            "name?; scale? (automatic: occupied sibling groups pushed away from their mean centre by scale × their offset, default 1); \
              moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
         ),
     CommandSpec::new("explode.show", "Show Exploded View", crate::checked!("explode.show", explode_show))
@@ -1482,22 +1482,26 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     .ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
 }
 
-/// World centre of each top-level occurrence's bodies.
+/// World centres of the first occupied sibling groups, looking inside a single enclosing
+/// occurrence if all the bodies are in that occurrence.
 fn centres(s: &Session) -> Vec<(u64, Vec3)> {
-    let bodies = placed(s);
-    let mut out = Vec::new();
-    for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
-        let mut bounds = Aabb3::EMPTY;
-        for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(bb) = b.exact_bounds() {
-                bounds = bounds.union(&bb);
-            }
-        }
-        if !bounds.is_empty() {
-            out.push((o.id, bounds.center()));
+    let bodies: Vec<_> = placed(s)
+        .into_iter()
+        .filter_map(|(path, body)| {
+            let bounds = body.exact_bounds().ok()?;
+            (!path.is_empty() && !bounds.is_empty()).then_some((path, bounds))
+        })
+        .collect();
+    let Some((first, _)) = bodies.first() else { return Vec::new() };
+    let depth = first.iter().enumerate().take_while(|(i, id)| bodies.iter().all(|(path, _)| path.get(*i) == Some(*id))).count();
+    let mut groups = BTreeMap::<u64, Aabb3>::new();
+    for (path, bounds) in bodies {
+        if let Some(id) = path.get(depth) {
+            let group = groups.entry(*id).or_insert(Aabb3::EMPTY);
+            *group = group.union(&bounds);
         }
     }
-    out
+    s.doc.occurrences.iter().filter_map(|o| groups.get(&o.id).map(|bounds| (o.id, bounds.center()))).collect()
 }
 
 /// The unit moves for an automatic exploded view, prepared once for an interactive preview.
@@ -1514,8 +1518,7 @@ impl Session {
         let created = scratch.execute("explode.create", &json!({}))?;
         let index = view_index(&scratch, &created, "explode.show")?;
         let view = scratch.doc.assembly.exploded.get(index).ok_or_else(|| bad("explode.show", "view"))?;
-        let placed: BTreeMap<u64, Mat> = scratch.doc.occurrences.iter().filter(|o| o.parent == 0).map(|o| (o.id, o.transform)).collect();
-        let moves = view.moves.iter().filter_map(|(o, t)| Some((*o, *placed.get(o)?, *t))).collect();
+        let moves = explode_moves_with_limit(&scratch, view, f64::INFINITY);
         Ok(AutomaticExplode { moves })
     }
 }
@@ -1565,7 +1568,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
             };
             let c = centres(s);
             if c.len() < 2 {
-                return Err(bad(cmd, "an exploded view needs two or more occurrences"));
+                return Err(bad(cmd, "an automatic exploded view needs at least two occupied sibling groups to separate"));
             }
             let mid = c.iter().fold(Vec3::ZERO, |a, (_, p)| a + *p) * (1.0 / c.len() as f64);
             c.iter().map(|(o, p)| (*o, (*p - mid) * scale)).collect()
@@ -1621,10 +1624,14 @@ pub(crate) fn shows_exploded_view(s: &Session) -> bool {
 /// placed more than once shares its parts' placements, so there a part moves the way given in
 /// the component's first placement ([`solidcraft_doc::joints::occurrence_world`]).
 pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
+    explode_moves_with_limit(s, v, MAX_EXPLODE_TRANSLATION)
+}
+
+fn explode_moves_with_limit(s: &Session, v: &ExplodedView, limit: f64) -> Vec<(u64, Mat, Vec3)> {
     let placed: std::collections::BTreeMap<u64, (Mat, u64)> = s.doc.occurrences.iter().map(|o| (o.id, (o.transform, o.parent))).collect();
     v.moves
         .iter()
-        .filter(|(_, t)| t.len() < MAX_EXPLODE_TRANSLATION)
+        .filter(|(_, t)| t.len() < limit)
         .filter_map(|(o, t)| {
             let (transform, parent) = *placed.get(o)?;
             let Some(frame) = (parent != 0).then(|| s.doc.occurrence_of(parent)).flatten() else {

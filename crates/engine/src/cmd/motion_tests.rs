@@ -837,6 +837,81 @@ fn automatic_explode_preview_matches_saved_views_at_each_scale() {
 }
 
 #[test]
+fn automatic_explode_separates_nested_siblings_and_previews_the_saved_moves() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Frame"}));
+    for (name, x) in [("Left", 0), ("Right", 40)] {
+        run(&mut s, "component.create", json!({"name": name, "parent": "Frame"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let frame = occ(&s, "Frame");
+    run(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": frame, "space": "world", "axis": [0, 0, 1], "angle": "90 deg"}));
+    let before = s.doc.occurrences.clone();
+    let preview = s.prepare_automatic_explode().unwrap();
+    for scale in [0.0, 0.5, 1.0, 2.0] {
+        let saved = run(&mut s, "explode.create", json!({"scale": scale}));
+        let moves = saved["moves"].as_array().unwrap();
+        assert_eq!(moves.len(), 2, "{saved}");
+        for (name, y) in [("Left", -20.0 * scale), ("Right", 20.0 * scale)] {
+            let item = moves.iter().find(|item| item["occurrence"] == occ(&s, name)).unwrap();
+            let t = &item["translate"];
+            assert!(t[0].as_f64().unwrap().abs() < 1e-6, "{item}");
+            assert!((t[1].as_f64().unwrap() - y).abs() < 1e-6, "{item}");
+            assert!(t[2].as_f64().unwrap().abs() < 1e-6, "{item}");
+        }
+        run(&mut s, "explode.show", json!({"view": saved["view"]}));
+        assert_eq!(preview.placements(scale).unwrap(), s.pending_moves);
+        assert_eq!(s.doc.occurrences, before);
+        run(&mut s, "explode.show", json!({"view": null}));
+    }
+}
+
+/// A STEP round trip places both parts below the imported assembly's single wrapper.
+#[test]
+fn automatic_explode_separates_parts_in_an_imported_step_assembly() {
+    let dir = out_dir("explode-step-assembly");
+    let path = dir.join("demo-assembly.step").to_string_lossy().into_owned();
+    let mut source = Session::default();
+    for (name, x) in [("Left", 0), ("Right", 40)] {
+        run(&mut source, "component.activate", json!({"component": "root"}));
+        run(&mut source, "component.create", json!({"name": name}));
+        run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut source, "component.activate", json!({"component": "root"}));
+    run(&mut source, "file.export_step", json!({"path": path}));
+
+    let mut s = Session::default();
+    let imported = run(&mut s, "doc.open", json!({"path": path}));
+    assert_eq!(imported["subcomponents"], 2, "{imported}");
+    assert_eq!(s.doc.occurrences.iter().filter(|o| o.parent == 0).count(), 1);
+    assert_eq!(s.doc.occurrences.len(), 3);
+    let before = s.doc.occurrences.clone();
+    let spec = crate::cmd::find_command("explode.create").unwrap();
+    for component in [imported["component"].clone(), json!("root")] {
+        run(&mut s, "component.activate", json!({"component": component}));
+        assert!(spec.info(&s).enabled);
+        let preview = s.prepare_automatic_explode().unwrap();
+        let saved = run(&mut s, "explode.create", json!({}));
+        let moves = saved["moves"].as_array().unwrap();
+        assert_eq!(moves.len(), 2, "{saved}");
+        // The box centres are at x = 5 and 45 mm, with mean x = 25 mm.
+        for (name, x) in [("Left", -20.0), ("Right", 20.0)] {
+            let item = moves.iter().find(|item| item["occurrence"] == occ(&s, name)).unwrap();
+            let t = &item["translate"];
+            assert!((t[0].as_f64().unwrap() - x).abs() < 1e-6, "{item}");
+            assert!(t[1].as_f64().unwrap().abs() < 1e-6 && t[2].as_f64().unwrap().abs() < 1e-6, "{item}");
+        }
+        run(&mut s, "explode.show", json!({"view": saved["view"]}));
+        assert_eq!(preview.placements(1.0).unwrap(), s.pending_moves);
+        assert_eq!(s.doc.occurrences, before);
+        run(&mut s, "explode.show", json!({"view": null}));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn exploded_views_show_without_changing_the_design() {
     let mut s = rail();
     let before = s.doc.occurrences.clone();

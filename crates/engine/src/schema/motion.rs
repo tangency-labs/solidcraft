@@ -689,16 +689,17 @@ pub struct MotionStudyDeleted {
 // the handler's to check.
 
 /// Make an exploded view: occurrences moved apart, shown with `explode.show`. The design keeps
-/// its placements. One undo step. With `moves`, each occurrence moves as given; without, every
-/// top-level occurrence is pushed away from the assembly's centre by `scale` times its offset.
+/// its placements. One undo step. With `moves`, each occurrence moves as given; otherwise,
+/// occupied groups immediately below the common enclosing occurrence move away from their
+/// mean centre by `scale` times their offset.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExplodeCreateKeys {
     /// The view's name. Default: "Exploded View" and the first number no view's name has.
     #[serde(default)]
     pub name: Option<String>,
-    /// For the automatic view: how far each occurrence is pushed away from the assembly's
-    /// centre, as a multiple of its offset from it (a number from -100 to 100). Default: 1.
+    /// For the automatic view: how far each occupied sibling group moves away from their
+    /// mean centre, as a multiple of its offset (a number from -100 to 100). Default: 1.
     /// Not read, and so not checked, when `moves` is given.
     #[serde(default, deserialize_with = "explode_scale", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "explode_scale_schema")]
@@ -751,7 +752,7 @@ fn explode_scale<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Erro
 
 fn explode_scale_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "For the automatic view: how far each occurrence is pushed away from the assembly's centre, as a multiple of its offset from it (a number from -100 to 100). Default: 1. Not read, and so not checked, when `moves` is given.",
+        "description": "For the automatic view: how far each occupied sibling group moves away from their mean centre, as a multiple of its offset (a number from -100 to 100). Default: 1. Not read, and so not checked, when `moves` is given.",
         "type": "number",
         "minimum": -100,
         "maximum": 100
